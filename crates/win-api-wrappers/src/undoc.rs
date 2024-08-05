@@ -1,18 +1,14 @@
 //! Undocumented Windows API functions
 use std::ffi::c_void;
 
-use windows::{
-    core::PCWSTR,
-    Win32::{
-        Foundation::{BOOL, HANDLE, LUID, NTSTATUS, UNICODE_STRING},
-        Security::{
-            LOGON32_LOGON, LOGON32_PROVIDER, PSID, QUOTA_LIMITS, TOKEN_ACCESS_MASK, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
-            TOKEN_OWNER, TOKEN_PRIMARY_GROUP, TOKEN_PRIVILEGES, TOKEN_SOURCE, TOKEN_TYPE, TOKEN_USER,
-        },
-    },
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{BOOL, HANDLE, LUID, NTSTATUS, UNICODE_STRING};
+use windows::Win32::Security::{
+    LOGON32_LOGON, LOGON32_PROVIDER, PSID, QUOTA_LIMITS, TOKEN_ACCESS_MASK, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
+    TOKEN_OWNER, TOKEN_PRIMARY_GROUP, TOKEN_PRIVILEGES, TOKEN_SOURCE, TOKEN_TYPE, TOKEN_USER,
 };
 
-use crate::win::module_symbol;
+use crate::process::module_symbol;
 
 pub unsafe fn LogonUserExExW<P0, P1, P2>(
     lpszusername: P0,

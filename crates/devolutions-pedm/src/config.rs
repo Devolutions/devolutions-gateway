@@ -1,23 +1,22 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use camino::Utf8PathBuf;
-use win_api_wrappers::{raw::Win32::Foundation::LUID, win::Module};
+use win_api_wrappers::process::Module;
+use win_api_wrappers::raw::Win32::Foundation::LUID;
 
-pub static PEDM_DESKTOP_RELPATH: &'static str = r"desktop/DevolutionsPedmDesktop.exe"; // TODO change this
+pub(crate) static PEDM_DESKTOP_RELPATH: &'static str = r"desktop/DevolutionsPedmDesktop.exe";
 
-pub static PIPE_NAME: &'static str = r"\\.\pipe\DevolutionsPEDM";
+pub(crate) static PIPE_NAME: &'static str = r"\\.\pipe\DevolutionsPEDM";
 
-pub const LADM_SRC_NAME: &'static [u8; 8] = b"DevoPEDM";
-pub static LADM_SRC_LUID: LUID = LUID {
+pub(crate) const LADM_SRC_NAME: &'static [u8; 8] = b"DevoPEDM";
+pub(crate) static LADM_SRC_LUID: LUID = LUID {
     HighPart: 0,
     LowPart: 0x1337,
 };
 
-pub const VADM_RID: u32 = 99;
-pub static VADM_DOMAIN: &'static str = "_DEPM";
+pub(crate) const VADM_RID: u32 = 99;
+pub(crate) static VADM_DOMAIN: &'static str = "_DEPM";
 
 pub fn pedm_desktop_path() -> &'static Path {
     static PEDM_DESKTOP_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -35,7 +34,7 @@ pub fn install_directory() -> &'static Path {
                 p.pop();
                 p
             })
-            .unwrap()
+            .expect("invalid module file name")
     })
 }
 

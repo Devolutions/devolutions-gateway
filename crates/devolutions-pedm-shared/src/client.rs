@@ -1,25 +1,20 @@
 use anyhow::{bail, Result};
-use std::{
-    future::Future,
-    pin::{pin, Pin},
-    task::{Context, Poll},
-    thread,
-    time::Duration,
-};
+use std::future::Future;
+use std::pin::{pin, Pin};
+use std::task::{Context, Poll};
+use std::thread;
+use std::time::Duration;
 
 use devolutions_pedm_client_http::apis::client::APIClient;
-use hyper::{
-    body::HttpBody,
-    client::connect::{Connected, Connection},
-    Uri,
-};
+use hyper::body::HttpBody;
+use hyper::client::connect::{Connected, Connection};
+use hyper::Uri;
 use pin_project::pin_project;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::windows::named_pipe::{ClientOptions, NamedPipeClient},
-};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tower::Service;
-use win_api_wrappers::raw::Win32::{Foundation::ERROR_PIPE_BUSY, Storage::FileSystem::SECURITY_IMPERSONATION};
+use win_api_wrappers::raw::Win32::Foundation::ERROR_PIPE_BUSY;
+use win_api_wrappers::raw::Win32::Storage::FileSystem::SECURITY_IMPERSONATION;
 
 pub use devolutions_pedm_client_http::models;
 
@@ -73,15 +68,19 @@ impl Service<Uri> for NamedPipeConnector {
 
     fn call(&mut self, _req: Uri) -> Self::Future {
         Box::pin(async move {
+            let mut iter = 0;
             loop {
                 let client = ClientOptions::new()
                     .security_qos_flags(SECURITY_IMPERSONATION.0)
                     .open(r"\\.\pipe\DevolutionsPEDM");
 
-                if client
-                    .as_ref()
-                    .is_err_and(|e| e.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32))
+                if iter < 5
+                    && client
+                        .as_ref()
+                        .is_err_and(|e| e.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32))
                 {
+                    iter += 1;
+
                     thread::sleep(Duration::from_millis(50));
                     continue;
                 }

@@ -2,14 +2,14 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use chrono::Local;
 use devolutions_pedm_shared::policy::{ElevationResult, User};
-use std::{
-    fs::{self, OpenOptions},
-    io::{self, BufRead, Write},
-};
+use std::fs::{self, OpenOptions};
+use std::io::{self, BufRead, Write};
 use walkdir::WalkDir;
-use win_api_wrappers::{raw::Win32::Security::WinBuiltinUsersSid, win::Sid};
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::raw::Win32::Security::WinBuiltinUsersSid;
 
-use crate::{config, utils::ensure_protected_directory};
+use crate::config;
+use crate::utils::ensure_protected_directory;
 
 fn log_path() -> Utf8PathBuf {
     let mut dir = config::data_dir();

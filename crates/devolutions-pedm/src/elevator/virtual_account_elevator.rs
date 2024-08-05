@@ -2,18 +2,16 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
-use win_api_wrappers::{
-    raw::Win32::{
-        Foundation::ERROR_ACCOUNT_EXPIRED,
-        Security::{WinBuiltinAdministratorsSid, WinLocalSid, LOGON32_LOGON_INTERACTIVE},
-        System::SystemServices::{
-            SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_LOGON_ID, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
-        },
-    },
-    undoc::LOGON32_PROVIDER_VIRTUAL,
-    win::{create_virtual_account, Sid, SidAndAttributes, Token, TokenGroups},
-    Error,
+use win_api_wrappers::identity::account::create_virtual_account;
+use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
+use win_api_wrappers::raw::Win32::Foundation::ERROR_ACCOUNT_EXPIRED;
+use win_api_wrappers::raw::Win32::Security::{WinBuiltinAdministratorsSid, WinLocalSid, LOGON32_LOGON_INTERACTIVE};
+use win_api_wrappers::raw::Win32::System::SystemServices::{
+    SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_LOGON_ID, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
 };
+use win_api_wrappers::token::{Token, TokenGroups};
+use win_api_wrappers::undoc::LOGON32_PROVIDER_VIRTUAL;
+use win_api_wrappers::Error;
 
 use super::Elevator;
 

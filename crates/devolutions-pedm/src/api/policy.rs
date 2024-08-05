@@ -1,14 +1,14 @@
-use aide::axum::{
-    routing::{get, put},
-    ApiRouter,
-};
-use axum::{extract::Path, Extension, Json};
+use aide::axum::routing::{get, put};
+use aide::axum::ApiRouter;
+use axum::extract::Path;
+use axum::{Extension, Json};
 use devolutions_pedm_shared::policy::{Id, Profile, Rule, User};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::{error::Error, policy};
+use crate::error::Error;
+use crate::policy;
 
 use super::NamedPipeConnectInfo;
 

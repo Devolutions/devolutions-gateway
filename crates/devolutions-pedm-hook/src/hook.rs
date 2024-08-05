@@ -1,28 +1,26 @@
 use std::path::Path;
 
-use devolutions_pedm_shared::client::{
-    self,
-    models::{LaunchPayload, StartupInfoDto},
-};
+use devolutions_pedm_shared::client::models::{LaunchPayload, StartupInfoDto};
+use devolutions_pedm_shared::client::{self};
 use tracing::error;
-use win_api_wrappers::{
-    raw::{
-        core::{HRESULT, PCWSTR},
-        Win32::{
-            Foundation::{ERROR_INVALID_DATA, HWND},
-            System::{
-                Rpc::{RpcAsyncCompleteCall, RPC_ASYNC_STATE, RPC_S_OK},
-                Threading::{CREATE_SUSPENDED, PROCESS_ALL_ACCESS, PROCESS_CREATION_FLAGS, THREAD_ALL_ACCESS},
-            },
-        },
-    },
-    rpc::{RpcBindingHandle, RPC_BINDING_HANDLE},
-    win::{Process, SafeWindowsString, Thread},
+use win_api_wrappers::process::Process;
+use win_api_wrappers::raw::core::{HRESULT, PCWSTR};
+use win_api_wrappers::raw::Win32::Foundation::{ERROR_INVALID_DATA, HWND};
+use win_api_wrappers::raw::Win32::System::Rpc::{RpcAsyncCompleteCall, RPC_ASYNC_STATE, RPC_S_OK};
+use win_api_wrappers::raw::Win32::System::Threading::{
+    CREATE_SUSPENDED, PROCESS_ALL_ACCESS, PROCESS_CREATION_FLAGS, THREAD_ALL_ACCESS,
 };
+use win_api_wrappers::rpc::{RpcBindingHandle, RPC_BINDING_HANDLE};
+use win_api_wrappers::thread::Thread;
+use win_api_wrappers::utils::SafeWindowsString;
 
 use anyhow::Result;
 
 use crate::appinfo::{APP_PROCESS_INFORMATION, APP_STARTUP_INFO};
+
+/// In Appinfo.dll, RAiLaunchAdminProcess sets the elevation type to 6.
+/// The name is unofficial.
+const ELEVATION_TYPE_SUCCESS: u32 = 6;
 
 pub unsafe extern "system" fn rai_launch_admin_process(
     state: *mut RPC_ASYNC_STATE,                       // in, out
@@ -106,9 +104,8 @@ fn rai_launch_admin_process_handler(
         parent_pid: caller.client_pid,
     };
 
-    let mut proc_info = None;
-    binding.impersonate_client(|| {
-        proc_info = Some(client::block_req(
+    let proc_info = binding.impersonate_client(|| {
+        Ok(client::block_req(
             client::client().default_api().launch_post(LaunchPayload {
                 executable_path: executable_path.and_then(|x| x.as_os_str().to_str()).map(str::to_owned),
                 command_line: command_line.map(str::to_owned),
@@ -118,14 +115,11 @@ fn rai_launch_admin_process_handler(
                     .map(str::to_owned),
                 startup_info: Some(startup_info),
             }),
-        ));
-
-        Ok(())
+        ))
     })?;
 
-    let proc_info = proc_info
-        .unwrap()?
-        .map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error as _)))?;
+    let proc_info =
+        proc_info?.map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error as _)))?;
 
     let mut process = Process::try_get_by_pid(proc_info.process_id, PROCESS_ALL_ACCESS)?;
     let mut thread = Thread::try_get_by_id(proc_info.thread_id, THREAD_ALL_ACCESS)?;
@@ -140,7 +134,7 @@ fn rai_launch_admin_process_handler(
     process.handle.leak();
     thread.handle.leak();
 
-    *elevation_type = 6;
+    *elevation_type = ELEVATION_TYPE_SUCCESS;
 
     Ok(())
 }

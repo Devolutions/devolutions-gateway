@@ -1,10 +1,8 @@
 use devolutions_pedm_shared::policy::User;
 use parking_lot::RwLock;
-use std::{
-    collections::HashMap,
-    sync::OnceLock,
-    time::{Duration, Instant},
-};
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub enum Elevation {

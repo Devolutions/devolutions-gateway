@@ -1,32 +1,21 @@
-use std::{
-    ffi::c_void,
-    mem,
-    ptr::{self, NonNull},
-    slice,
+use std::ffi::c_void;
+use std::ptr::{self, NonNull};
+use std::{mem, slice};
+
+use windows::core::GUID;
+use windows::Win32::Foundation::{ERROR_MORE_DATA, E_INVALIDARG, E_POINTER};
+use windows::Win32::Security::{SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS};
+use windows::Win32::System::Memory::PAGE_READWRITE;
+use windows::Win32::System::Rpc::{
+    RpcBindingVectorFree, RpcImpersonateClient, RpcRevertToSelfEx, RpcServerInqBindings, RpcServerInqCallAttributesW,
+    MIDL_SERVER_INFO, RPC_BINDING_VECTOR, RPC_CALL_ATTRIBUTES_V2_W, RPC_CALL_ATTRIBUTES_VERSION, RPC_QUERY_CLIENT_PID,
+    RPC_QUERY_CLIENT_PRINCIPAL_NAME, RPC_QUERY_SERVER_PRINCIPAL_NAME, RPC_SERVER_INTERFACE, SERVER_ROUTINE,
 };
 
-use windows::{
-    core::GUID,
-    Win32::{
-        Foundation::{ERROR_MORE_DATA, E_INVALIDARG, E_POINTER},
-        Security::{SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS},
-        System::{
-            Memory::PAGE_READWRITE,
-            Rpc::{
-                RpcBindingVectorFree, RpcImpersonateClient, RpcRevertToSelfEx, RpcServerInqBindings,
-                RpcServerInqCallAttributesW, MIDL_SERVER_INFO, RPC_BINDING_VECTOR, RPC_CALL_ATTRIBUTES_V2_W,
-                RPC_CALL_ATTRIBUTES_VERSION, RPC_QUERY_CLIENT_PID, RPC_QUERY_CLIENT_PRINCIPAL_NAME,
-                RPC_QUERY_SERVER_PRINCIPAL_NAME, RPC_SERVER_INTERFACE, SERVER_ROUTINE,
-            },
-        },
-    },
-};
-
-use crate::win::set_memory_protection;
-use crate::{
-    error::Error,
-    win::{Thread, Token},
-};
+use crate::error::Error;
+use crate::thread::Thread;
+use crate::token::Token;
+use crate::utils::set_memory_protection;
 
 use anyhow::{bail, Result};
 
@@ -73,16 +62,14 @@ impl RpcBindingHandle {
 
         Ok(RpcCallAttributes {
             client_pid: attribs.ClientPID.0 as _,
-            client_principal_name: String::from_utf16(&client_principal_name)
-                .map_err(|e| windows::core::Error::from(e))?,
-            server_principal_name: String::from_utf16(&server_principal_name)
-                .map_err(|e| windows::core::Error::from(e))?,
+            client_principal_name: String::from_utf16(&client_principal_name).map_err(windows::core::Error::from)?,
+            server_principal_name: String::from_utf16(&server_principal_name).map_err(windows::core::Error::from)?,
         })
     }
 
-    pub fn impersonate_client<F>(&self, f: F) -> Result<()>
+    pub fn impersonate_client<F, R>(&self, f: F) -> Result<R>
     where
-        F: FnOnce() -> Result<()>,
+        F: FnOnce() -> Result<R>,
     {
         unsafe { RpcImpersonateClient(Some(self.0)) }.ok()?;
 
@@ -94,20 +81,14 @@ impl RpcBindingHandle {
     }
 
     pub fn client_primary_token(&self) -> Result<Token> {
-        let mut token = None;
-
         self.impersonate_client(|| {
-            token = Some(Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
+            Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
                 TOKEN_ACCESS_MASK(0),
                 None,
                 SecurityIdentification,
                 TokenPrimary,
-            )?);
-
-            Ok(())
-        })?;
-
-        Ok(token.unwrap())
+            )
+        })
     }
 }
 

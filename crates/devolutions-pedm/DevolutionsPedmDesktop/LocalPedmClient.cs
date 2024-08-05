@@ -1,5 +1,4 @@
 ﻿using System.IO.Pipes;
-using System.Text;
 using System.Net.Http;
 using Devolutions.Pedm.Client.Api;
 

@@ -1,27 +1,21 @@
 mod appinfo;
 mod hook;
 
-use std::{
-    collections::HashMap,
-    mem,
-    sync::{Mutex, OnceLock},
-    thread,
-};
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::{mem, thread};
 
 use anyhow::{bail, Result};
 
+use parking_lot::Mutex;
+
 use appinfo::dump_interfaces;
 use hook::rai_launch_admin_process;
-use win_api_wrappers::{
-    raw::{
-        core::GUID,
-        Win32::{
-            Foundation::*,
-            System::{Rpc::SERVER_ROUTINE, SystemServices::*},
-        },
-    },
-    win::is_module_loaded,
-};
+use win_api_wrappers::process::is_module_loaded;
+use win_api_wrappers::raw::core::GUID;
+use win_api_wrappers::raw::Win32::Foundation::*;
+use win_api_wrappers::raw::Win32::System::Rpc::SERVER_ROUTINE;
+use win_api_wrappers::raw::Win32::System::SystemServices::*;
 
 fn original_handlers() -> &'static Mutex<HashMap<GUID, Box<[SERVER_ROUTINE]>>> {
     static ORIGINAL_HANDLERS: OnceLock<Mutex<HashMap<GUID, Box<[SERVER_ROUTINE]>>>> = OnceLock::new();
@@ -44,14 +38,17 @@ fn hook() -> Result<()> {
 
     let mut interfaces = unsafe { dump_interfaces() }?;
 
-    let mut origs = original_handlers().lock().unwrap();
+    let mut origs = original_handlers().lock();
     for interface in interfaces.iter_mut() {
         let handlers = interface.handlers()?;
 
         origs.insert(interface.id(), handlers);
 
         if interface.id() == GUID::from("201ef99a-7fa0-444c-9399-19ba84f12a1a") {
-            let mut hooks = origs.get(&interface.id()).unwrap().to_owned();
+            let mut hooks = origs
+                .get(&interface.id())
+                .expect("interface hooks not found")
+                .to_owned();
             hooks[0] = unsafe { mem::transmute(rai_launch_admin_process as *const ()) };
 
             interface.set_handlers(&hooks)?;
@@ -68,7 +65,7 @@ fn unhook() -> Result<()> {
 
     let mut interfaces = unsafe { dump_interfaces() }?;
 
-    let mut origs = original_handlers().lock().unwrap();
+    let mut origs = original_handlers().lock();
     for interface in interfaces.iter_mut() {
         let handlers = interface.handlers()?;
 

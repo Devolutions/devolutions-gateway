@@ -1,7 +1,8 @@
 use axum::Extension;
 use tracing::info;
 
-use crate::{elevations, error::Error, policy};
+use crate::error::Error;
+use crate::{elevations, policy};
 
 use super::NamedPipeConnectInfo;
 

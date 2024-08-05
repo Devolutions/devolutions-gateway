@@ -6,17 +6,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tracing::info;
+use win_api_wrappers::identity::account::Account;
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::process::{create_process_as_user, ProcessInformation, StartupInfo};
 use win_api_wrappers::raw::Win32::Foundation::{GENERIC_ALL, GENERIC_READ};
 use win_api_wrappers::raw::Win32::Security::Authorization::SE_FILE_OBJECT;
 use win_api_wrappers::raw::Win32::Security::{WinLocalSystemSid, OBJECT_INHERIT_ACE};
-use win_api_wrappers::win::{
-    create_directory, set_named_security_info, Account, Ace, AceType, Acl, CommandLine, InheritableAcl,
-    InheritableAclKind, SecurityAttributes, SecurityDescriptor, Sid,
+use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
+use win_api_wrappers::security::acl::{
+    set_named_security_info, Ace, AceType, Acl, InheritableAcl, InheritableAclKind, SecurityAttributes,
+    SecurityDescriptor,
 };
-use win_api_wrappers::{
-    raw::Win32::System::Threading::PROCESS_CREATION_FLAGS,
-    win::{create_process_as_user, ProcessInformation, StartupInfo, Token},
-};
+use win_api_wrappers::token::Token;
+use win_api_wrappers::utils::{create_directory, CommandLine};
 
 use anyhow::Result;
 
@@ -58,7 +60,7 @@ pub fn start_process(
         Ok(())
     })?;
 
-    Ok(process_information.unwrap())
+    Ok(process_information.expect("BUG: impersonation succeeded without code block running"))
 }
 
 #[derive(Default)]

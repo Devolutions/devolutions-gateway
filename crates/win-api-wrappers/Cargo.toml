@@ -1,14 +1,16 @@
 [package]
 name = "win-api-wrappers"
-version = "0.0.0"
-authors = ["Devolutions Inc. <infos@devolutions.net>"]
-description = "Safer Windows API wrappers"
+version = "2024.8.2"
 edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Idiomatic and safe wrappers around the Windows API"
 publish = false
 
 [dependencies]
 base16ct = { version = "0.2.0", features = ["alloc"] }
 anyhow = "1.0.86"
+thiserror = "1.0.63"
 
 [dependencies.windows]
 version = "0.58.0"

@@ -1,7 +1,11 @@
 [package]
 name = "devolutions-pedm-contextmenu-shell"
-version = "0.1.0"
+version = "2024.8.2"
 edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Devolutions PEDM Windows shell extension"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]

@@ -1,0 +1,423 @@
+use std::ffi::c_void;
+use std::mem::{self};
+use std::{ptr, slice};
+
+use anyhow::{bail, Result};
+
+use crate::error::Error;
+use crate::identity::sid::{RawSid, Sid};
+use crate::utils::WideString;
+use windows::Win32::Foundation::{ERROR_INVALID_VARIANT, E_POINTER};
+use windows::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_OBJECT_TYPE};
+use windows::Win32::Security::{
+    AddAce, GetAce, InitializeAcl, ACE_FLAGS, ACE_HEADER, ACE_REVISION, ACL, ACL_REVISION, DACL_SECURITY_INFORMATION,
+    GROUP_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PROTECTED_SACL_SECURITY_INFORMATION, PSID, SACL_SECURITY_INFORMATION,
+    SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR_CONTROL, SE_DACL_AUTO_INHERITED, SE_DACL_DEFAULTED,
+    SE_DACL_PRESENT, SE_DACL_PROTECTED, SE_SACL_AUTO_INHERITED, SE_SACL_DEFAULTED, SE_SACL_PRESENT, SE_SACL_PROTECTED,
+    SID, UNPROTECTED_DACL_SECURITY_INFORMATION, UNPROTECTED_SACL_SECURITY_INFORMATION,
+};
+use windows::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION};
+
+pub enum AceType {
+    AccessAllowed(Sid),
+}
+
+impl AceType {
+    pub fn kind(&self) -> u8 {
+        match self {
+            AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as _,
+        }
+    }
+
+    pub fn to_raw(&self) -> Vec<u8> {
+        match self {
+            AceType::AccessAllowed(sid) => RawSid::from(sid).buf,
+        }
+    }
+
+    pub unsafe fn from_raw(kind: u8, buf: &[u8]) -> Result<Self> {
+        Ok(match kind as _ {
+            ACCESS_ALLOWED_ACE_TYPE => Self::AccessAllowed(Sid::try_from(PSID(buf.as_ptr().cast_mut().cast()))?),
+            _ => bail!(Error::from_win32(ERROR_INVALID_VARIANT)),
+        })
+    }
+}
+
+pub struct Ace {
+    pub flags: ACE_FLAGS,
+    pub access_mask: u32,
+    pub data: AceType,
+}
+
+impl Ace {
+    pub fn to_raw(&self) -> Vec<u8> {
+        let body = self.data.to_raw();
+
+        let size = mem::size_of::<ACE_HEADER>() + mem::size_of::<u32>() + body.len();
+
+        let header = ACE_HEADER {
+            AceType: self.data.kind(),
+            AceFlags: self.flags.0 as u8,
+            AceSize: size as _,
+        };
+
+        let mut buf = vec![0; size];
+
+        unsafe {
+            let mut ptr = buf.as_mut_ptr();
+
+            ptr.cast::<ACE_HEADER>().write(header);
+            ptr = ptr.byte_add(mem::size_of::<ACE_HEADER>());
+
+            ptr.cast::<u32>().write(self.access_mask);
+            ptr = ptr.byte_add(mem::size_of::<u32>());
+
+            ptr.copy_from(body.as_ptr(), body.len());
+        }
+
+        buf
+    }
+
+    pub unsafe fn from_ptr(mut ptr: *const c_void) -> Result<Self> {
+        let header = ptr.cast::<ACE_HEADER>().read();
+        ptr = ptr.byte_add(mem::size_of::<ACE_HEADER>());
+
+        let access_mask = ptr.cast::<u32>().read();
+        ptr = ptr.byte_add(mem::size_of::<u32>());
+
+        let body_size = header.AceSize as usize - mem::size_of::<ACE_HEADER>() - mem::size_of::<u32>();
+        let body = slice::from_raw_parts(ptr.cast::<u8>(), body_size);
+
+        Ok(Self {
+            flags: ACE_FLAGS(header.AceFlags as _),
+            access_mask,
+            data: AceType::from_raw(header.AceType, body)?,
+        })
+    }
+}
+
+pub struct Acl {
+    pub revision: ACE_REVISION,
+    pub aces: Vec<Ace>,
+}
+
+impl Acl {
+    pub fn new() -> Self {
+        Self {
+            revision: ACL_REVISION,
+            aces: vec![],
+        }
+    }
+
+    pub fn with_aces(aces: Vec<Ace>) -> Self {
+        Self {
+            revision: ACL_REVISION,
+            aces,
+        }
+    }
+
+    pub fn to_raw(&self) -> Result<Vec<u8>> {
+        let raw_aces = self.aces.iter().map(Ace::to_raw).collect::<Vec<_>>();
+        let size = mem::size_of::<ACL>() + raw_aces.iter().map(Vec::len).sum::<usize>();
+
+        // Align on u32 boundary
+        let size = (size + mem::size_of::<u32>() - 1) & !3;
+
+        let mut buf = vec![0; size];
+
+        unsafe {
+            InitializeAcl(buf.as_mut_ptr() as _, buf.len() as _, self.revision)?;
+
+            for raw_ace in raw_aces {
+                AddAce(
+                    buf.as_mut_ptr().cast(),
+                    self.revision,
+                    0,
+                    raw_ace.as_ptr().cast(),
+                    raw_ace.len() as _,
+                )?;
+            }
+        }
+
+        Ok(buf)
+    }
+}
+
+impl TryFrom<&ACL> for Acl {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &ACL) -> Result<Self, Self::Error> {
+        Ok(Self {
+            revision: ACE_REVISION(value.AclRevision as _),
+            aces: (0..value.AceCount as _)
+                .map(|i| unsafe {
+                    let mut ace = ptr::null_mut();
+                    GetAce(value, i, &mut ace)?;
+
+                    Ace::from_ptr(ace)
+                })
+                .collect::<Result<_>>()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InheritableAclKind {
+    Default,
+    Protected,
+    Inherit,
+}
+
+pub struct InheritableAcl {
+    pub kind: InheritableAclKind,
+    pub acl: Acl,
+}
+
+pub fn set_named_security_info(
+    target: &str,
+    object_type: SE_OBJECT_TYPE,
+    owner: Option<&Sid>,
+    group: Option<&Sid>,
+    dacl: Option<&InheritableAcl>,
+    sacl: Option<&InheritableAcl>,
+) -> Result<()> {
+    let target = WideString::from(target);
+
+    let mut security_info = OBJECT_SECURITY_INFORMATION(0);
+    if owner.is_some() {
+        security_info |= OWNER_SECURITY_INFORMATION;
+    }
+
+    if group.is_some() {
+        security_info |= GROUP_SECURITY_INFORMATION;
+    }
+
+    if let Some(dacl) = dacl {
+        security_info |= DACL_SECURITY_INFORMATION;
+        security_info |= match dacl.kind {
+            InheritableAclKind::Protected => PROTECTED_DACL_SECURITY_INFORMATION,
+            InheritableAclKind::Inherit | InheritableAclKind::Default => UNPROTECTED_DACL_SECURITY_INFORMATION,
+        };
+    }
+
+    if let Some(sacl) = sacl {
+        security_info |= SACL_SECURITY_INFORMATION;
+        security_info |= match sacl.kind {
+            InheritableAclKind::Protected => PROTECTED_SACL_SECURITY_INFORMATION,
+            InheritableAclKind::Inherit | InheritableAclKind::Default => UNPROTECTED_SACL_SECURITY_INFORMATION,
+        };
+    }
+
+    let owner = owner.map(RawSid::from);
+    let group = group.map(RawSid::from);
+    let dacl = dacl.map(|x| x.acl.to_raw()).transpose()?;
+    let sacl = sacl.map(|x| x.acl.to_raw()).transpose()?;
+
+    unsafe {
+        SetNamedSecurityInfoW(
+            target.as_pcwstr(),
+            object_type,
+            security_info,
+            owner
+                .as_ref()
+                .map(|x| PSID(x.as_raw() as *const _ as _))
+                .unwrap_or_default(),
+            group
+                .as_ref()
+                .map(|x| PSID(x.as_raw() as *const _ as _))
+                .unwrap_or_default(),
+            dacl.as_ref().map(|x| x.as_ptr().cast()),
+            sacl.as_ref().map(|x| x.as_ptr().cast()),
+        )
+        .ok()?
+    };
+
+    Ok(())
+}
+
+pub struct SecurityDescriptor {
+    pub revision: u8,
+    pub owner: Option<Sid>,
+    pub group: Option<Sid>,
+    pub sacl: Option<InheritableAcl>,
+    pub dacl: Option<InheritableAcl>,
+}
+
+impl Default for SecurityDescriptor {
+    fn default() -> Self {
+        Self {
+            revision: SECURITY_DESCRIPTOR_REVISION as _,
+            owner: None,
+            group: None,
+            sacl: None,
+            dacl: None,
+        }
+    }
+}
+
+pub struct RawSecurityDescriptor {
+    _owner: Option<RawSid>,
+    _group: Option<RawSid>,
+    _sacl: Option<Vec<u8>>,
+    _dacl: Option<Vec<u8>>,
+    raw: SECURITY_DESCRIPTOR,
+}
+
+impl RawSecurityDescriptor {
+    pub fn raw(&self) -> &SECURITY_DESCRIPTOR {
+        &self.raw
+    }
+}
+
+impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &SecurityDescriptor) -> std::result::Result<Self, Self::Error> {
+        let owner = value.owner.as_ref().map(RawSid::from);
+        let group = value.group.as_ref().map(RawSid::from);
+        let sacl = value
+            .sacl
+            .as_ref()
+            .map(|x| x.acl.to_raw().map(|y| (x.kind, y)))
+            .transpose()?;
+
+        let dacl = value
+            .dacl
+            .as_ref()
+            .map(|x| x.acl.to_raw().map(|y| (x.kind, y)))
+            .transpose()?;
+
+        let mut control = SECURITY_DESCRIPTOR_CONTROL(0);
+        if let Some((kind, _)) = sacl {
+            control |= SE_SACL_PRESENT;
+
+            control |= match kind {
+                InheritableAclKind::Protected => SE_SACL_PROTECTED,
+                InheritableAclKind::Inherit => SE_SACL_AUTO_INHERITED,
+                InheritableAclKind::Default => SE_SACL_DEFAULTED,
+            };
+        }
+
+        if let Some((kind, _)) = dacl {
+            control |= SE_DACL_PRESENT;
+
+            control |= match kind {
+                InheritableAclKind::Protected => SE_DACL_PROTECTED,
+                InheritableAclKind::Inherit => SE_DACL_AUTO_INHERITED,
+                InheritableAclKind::Default => SE_DACL_DEFAULTED,
+            };
+        }
+
+        let raw = SECURITY_DESCRIPTOR {
+            Revision: value.revision,
+            Sbz1: 0,
+            Control: control,
+            Owner: PSID(
+                owner
+                    .as_ref()
+                    .map_or_else(ptr::null_mut, |x| x.as_raw() as *const _ as _),
+            ),
+            Group: PSID(
+                group
+                    .as_ref()
+                    .map_or_else(ptr::null_mut, |x| x.as_raw() as *const _ as _),
+            ),
+            Sacl: sacl
+                .as_ref()
+                .map_or_else(ptr::null_mut, |x| x.1.as_ptr().cast_mut().cast()),
+            Dacl: dacl
+                .as_ref()
+                .map_or_else(ptr::null_mut, |x| x.1.as_ptr().cast_mut().cast()),
+        };
+
+        Ok(Self {
+            _owner: owner,
+            _group: group,
+            _sacl: sacl.map(|x| x.1),
+            _dacl: dacl.map(|x| x.1),
+            raw,
+        })
+    }
+}
+
+impl TryFrom<&SECURITY_DESCRIPTOR> for SecurityDescriptor {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &SECURITY_DESCRIPTOR) -> Result<Self, Self::Error> {
+        let acl_conv = |field: *mut ACL, present, prot, inherited| {
+            value
+                .Control
+                .contains(present)
+                .then(|| {
+                    Ok::<_, anyhow::Error>(InheritableAcl {
+                        kind: if value.Control.contains(prot) {
+                            InheritableAclKind::Protected
+                        } else if value.Control.contains(inherited) {
+                            InheritableAclKind::Inherit
+                        } else {
+                            InheritableAclKind::Default
+                        },
+                        acl: Acl::try_from(unsafe { field.as_ref() }.ok_or_else(|| Error::from_hresult(E_POINTER))?)?,
+                    })
+                })
+                .transpose()
+        };
+
+        let sacl = acl_conv(value.Sacl, SE_SACL_PRESENT, SE_SACL_PROTECTED, SE_SACL_AUTO_INHERITED)?;
+        let dacl = acl_conv(value.Dacl, SE_DACL_PRESENT, SE_DACL_PROTECTED, SE_DACL_AUTO_INHERITED)?;
+
+        Ok(Self {
+            revision: value.Revision,
+            owner: unsafe { value.Owner.0.cast::<SID>().as_ref() }
+                .map(Sid::try_from)
+                .transpose()?,
+            group: unsafe { value.Group.0.cast::<SID>().as_ref() }
+                .map(Sid::try_from)
+                .transpose()?,
+            sacl,
+            dacl,
+        })
+    }
+}
+
+pub struct SecurityAttributes {
+    pub security_descriptor: Option<SecurityDescriptor>,
+    pub inherit_handle: bool,
+}
+
+pub struct RawSecurityAttributes {
+    _security_descriptor: Option<RawSecurityDescriptor>,
+    raw: SECURITY_ATTRIBUTES,
+}
+
+impl RawSecurityAttributes {
+    pub fn raw(&self) -> &SECURITY_ATTRIBUTES {
+        &self.raw
+    }
+}
+
+impl TryFrom<&SecurityAttributes> for RawSecurityAttributes {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &SecurityAttributes) -> Result<Self, Self::Error> {
+        let security_descriptor = value
+            .security_descriptor
+            .as_ref()
+            .map(RawSecurityDescriptor::try_from)
+            .transpose()?;
+
+        let raw = SECURITY_ATTRIBUTES {
+            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as _,
+            lpSecurityDescriptor: security_descriptor
+                .as_ref()
+                .map_or_else(ptr::null_mut, |x| x.raw() as *const _ as _),
+            bInheritHandle: value.inherit_handle.into(),
+        };
+
+        Ok(Self {
+            _security_descriptor: security_descriptor,
+            raw,
+        })
+    }
+}

@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Runtime.InteropServices;
 
 namespace DevolutionsPedmDesktop
 {
@@ -18,7 +13,7 @@ namespace DevolutionsPedmDesktop
         public static extern IntPtr GetThreadDesktop(uint dwThreadId);
 
         [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool GetUserObjectInformationW(IntPtr hObj, int nIndex, [Out] byte[]? pvInfo, uint nLength, ref uint lpnLengthNeeded);
+        public static extern bool GetUserObjectInformationW(IntPtr hObj, int nIndex, [Out] byte[] pvInfo, uint nLength, ref uint lpnLengthNeeded);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool CloseDesktop(IntPtr hDesktop);

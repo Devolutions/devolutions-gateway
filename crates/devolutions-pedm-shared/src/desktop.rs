@@ -1,8 +1,12 @@
-use std::{error::Error, path::PathBuf, process::Command, str::FromStr};
-use win_api_wrappers::{raw::Win32::Security::TOKEN_QUERY, win::Process};
+use anyhow::Result;
+use std::path::PathBuf;
+use std::process::Command;
+use std::str::FromStr;
+use win_api_wrappers::process::Process;
+use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
 use windows_registry::LOCAL_MACHINE;
 
-pub fn install_dir() -> Result<PathBuf, Box<dyn Error>> {
+pub fn install_dir() -> Result<PathBuf> {
     Ok(PathBuf::from_str(
         &LOCAL_MACHINE
             .open(r"SOFTWARE\Devolutions\Agent")?
@@ -10,7 +14,7 @@ pub fn install_dir() -> Result<PathBuf, Box<dyn Error>> {
     )?)
 }
 
-pub fn desktop_exe() -> Result<PathBuf, Box<dyn Error>> {
+pub fn desktop_exe() -> Result<PathBuf> {
     let mut exe = install_dir()?;
 
     exe.push("desktop/DevolutionsPedmDesktop.exe");
@@ -22,7 +26,7 @@ pub enum DesktopMode {
     Error(win_api_wrappers::raw::core::Error),
 }
 
-pub fn launch(mode: &DesktopMode) -> Result<(), Box<dyn Error>> {
+pub fn launch(mode: &DesktopMode) -> Result<()> {
     let mut base_command = Command::new(desktop_exe()?);
     base_command.arg(
         Process::current_process()

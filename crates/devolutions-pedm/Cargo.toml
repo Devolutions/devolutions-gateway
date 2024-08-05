@@ -1,9 +1,12 @@
 [package]
 name = "devolutions-pedm"
-version = "0.1.0"
+version = "2024.8.2"
 edition = "2021"
-license = "MIT"
-authors = ["Devolutions <devolutions@devolutions.net>"]
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Devolutions Agent PEDM module"
+build = "build.rs"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

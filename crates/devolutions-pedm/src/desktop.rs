@@ -1,23 +1,22 @@
-use std::{io::Read, mem, path::Path};
+use std::io::Read;
+use std::path::Path;
 
 use anyhow::Result;
 
-use win_api_wrappers::{
-    raw::Win32::{
-        Foundation::ERROR_BAD_ARGUMENTS,
-        Security::{
-            SecurityAnonymous, TokenPrimary, SECURITY_ATTRIBUTES, TOKEN_ACCESS_MASK, TOKEN_ADJUST_DEFAULT,
-            TOKEN_ADJUST_PRIVILEGES, TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY,
-        },
-        System::Threading::CREATE_SUSPENDED,
-    },
-    win::{CommandLine, Pipe, Process, Sid, StartupInfo, ThreadAttributeList, ThreadAttributeType, WideString},
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::process::{Process, StartupInfo};
+use win_api_wrappers::raw::Win32::Foundation::ERROR_BAD_ARGUMENTS;
+use win_api_wrappers::raw::Win32::Security::{
+    SecurityAnonymous, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES,
+    TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY,
 };
+use win_api_wrappers::raw::Win32::System::Threading::CREATE_SUSPENDED;
+use win_api_wrappers::security::acl::SecurityAttributes;
+use win_api_wrappers::thread::{ThreadAttributeList, ThreadAttributeType};
+use win_api_wrappers::utils::{CommandLine, Pipe, WideString};
 
-use crate::{
-    config, policy,
-    utils::{start_process, AccountExt},
-};
+use crate::utils::{start_process, AccountExt};
+use crate::{config, policy};
 
 static SECURE_DESKTOP: &'static str = r"WinSta0\Winlogon";
 
@@ -42,10 +41,9 @@ fn launch_desktop(
     token.set_session_id(session_id)?;
 
     let (mut rx, tx) = Pipe::new_anonymous(
-        Some(&SECURITY_ATTRIBUTES {
-            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as _,
-            bInheritHandle: true.into(),
-            ..Default::default()
+        Some(&SecurityAttributes {
+            inherit_handle: true,
+            security_descriptor: None,
         }),
         256,
     )?;
@@ -77,7 +75,7 @@ fn launch_desktop(
         &token,
         Some(config::pedm_desktop_path()),
         Some(&command_line),
-        true,
+        true, // Safe to inherit, as startup info has inherit list
         CREATE_SUSPENDED,
         None,
         None,

@@ -1,20 +1,18 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+
+use parking_lot::Mutex;
 
 use anyhow::{bail, Result};
 use retour::GenericDetour;
-use win_api_wrappers::{
-    raw::{
-        core::{GUID, PCWSTR},
-        Win32::{
-            Foundation::{HANDLE, HWND},
-            System::Rpc::{RPC_ASYNC_STATE, RPC_IF_CALLBACK_FN, RPC_SERVER_INTERFACE, RPC_STATUS},
-        },
-    },
-    rpc::RpcServerInterfacePointer,
-    win::module_symbol,
+use win_api_wrappers::process::module_symbol;
+use win_api_wrappers::raw::core::{GUID, PCWSTR};
+use win_api_wrappers::raw::Win32::Foundation::{HANDLE, HWND};
+use win_api_wrappers::raw::Win32::System::Rpc::{
+    RPC_ASYNC_STATE, RPC_IF_CALLBACK_FN, RPC_SERVER_INTERFACE, RPC_STATUS,
 };
+use win_api_wrappers::rpc::RpcServerInterfacePointer;
 
 /// https://github.com/hfiref0x/UACME/blob/master/Source/Akagi/appinfo/appinfo.idl
 #[repr(C)]
@@ -81,7 +79,8 @@ pub fn rpc_server_register_if_ex_hook() -> &'static GenericDetour<RpcServerRegis
     static HOOK: OnceLock<GenericDetour<RpcServerRegisterIfExHook>> = OnceLock::new();
 
     HOOK.get_or_init(|| unsafe {
-        let orig = module_symbol::<RpcServerRegisterIfExHook>("rpcrt4.dll", "RpcServerRegisterIfEx").unwrap();
+        let orig = module_symbol::<RpcServerRegisterIfExHook>("rpcrt4.dll", "RpcServerRegisterIfEx")
+            .expect("failed to find RpcServerRegisterIfEx");
 
         GenericDetour::new(orig, rpc_server_register_if_ex as _).expect("RpcServerRegisterIfEx hook failed")
     })
@@ -96,7 +95,7 @@ extern "system" fn rpc_server_register_if_ex(
     ifcallback: RPC_IF_CALLBACK_FN,
 ) -> RPC_STATUS {
     {
-        let mut handles = INTERFACE_HANDLES.lock().unwrap();
+        let mut handles = INTERFACE_HANDLES.lock();
         handles.push(RpcServerInterfacePointer {
             raw: unsafe { NonNull::new_unchecked(ifspec.cast_mut()) },
         });
@@ -109,7 +108,10 @@ type FnAiEnableDesktopRpcInterface = unsafe extern "system" fn() -> RPC_STATUS;
 pub unsafe fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
     static FUN: OnceLock<FnAiEnableDesktopRpcInterface> = OnceLock::new();
 
-    let init = || module_symbol::<FnAiEnableDesktopRpcInterface>("appinfo.dll", "AiEnableDesktopRpcInterface").unwrap();
+    let init = || {
+        module_symbol::<FnAiEnableDesktopRpcInterface>("appinfo.dll", "AiEnableDesktopRpcInterface")
+            .expect("failed to find AiEnableDesktopRpcInterface")
+    };
 
     FUN.get_or_init(init)()
 }
@@ -118,8 +120,10 @@ type FnAiDisableDesktopRpcInterface = unsafe extern "system" fn();
 pub unsafe fn ai_disable_desktop_rpc_interface() {
     static FUN: OnceLock<FnAiDisableDesktopRpcInterface> = OnceLock::new();
 
-    let init =
-        || module_symbol::<FnAiDisableDesktopRpcInterface>("appinfo.dll", "AiDisableDesktopRpcInterface").unwrap();
+    let init = || {
+        module_symbol::<FnAiDisableDesktopRpcInterface>("appinfo.dll", "AiDisableDesktopRpcInterface")
+            .expect("failed to find AiDisableDesktopRpcInterface")
+    };
 
     FUN.get_or_init(init)()
 }
@@ -127,7 +131,7 @@ pub unsafe fn ai_disable_desktop_rpc_interface() {
 pub unsafe fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
     // TODO: This is not clean. Add another mutex to guard the actual handles
     {
-        let mut handles = INTERFACE_HANDLES.lock().unwrap();
+        let mut handles = INTERFACE_HANDLES.lock();
         handles.clear();
     }
 
@@ -142,7 +146,7 @@ pub unsafe fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
         bail!(err);
     }
 
-    let mut handles = INTERFACE_HANDLES.lock().unwrap();
+    let mut handles = INTERFACE_HANDLES.lock();
 
     let result = handles.to_vec().into_boxed_slice();
     handles.clear();

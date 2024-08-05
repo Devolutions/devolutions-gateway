@@ -7,20 +7,17 @@ use aide::axum::routing::{get, post};
 use aide::axum::ApiRouter;
 use aide::openapi::{Info, OpenApi};
 use anyhow::Result;
+use axum::extract::connect_info::Connected;
+use axum::extract::{ConnectInfo, Request};
+use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::Json;
-use axum::{
-    extract::{connect_info::Connected, ConnectInfo, Request},
-    middleware::{self, Next},
-};
 use devolutions_pedm_shared::policy::User;
 use elevate_session::post_elevate_session;
 use elevate_temporary::post_elevate_temporary;
 use hyper::body::Incoming;
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server,
-};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server;
 use launch::post_launch;
 use logs::get_logs;
 use revoke::post_revoke;
@@ -29,18 +26,15 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
 use tracing::error;
-use win_api_wrappers::raw::Win32::Security::PSID;
-use win_api_wrappers::{
-    raw::Win32::{
-        Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
-        Security::{
-            Authorization::{SetSecurityInfo, SE_KERNEL_OBJECT},
-            WinBuiltinUsersSid, ACE_FLAGS, DACL_SECURITY_INFORMATION,
-        },
-    },
-    undoc::PIPE_ACCESS_FULL_CONTROL,
-    win::{Ace, AceType, Acl, Handle, Pipe, Sid, Token},
-};
+use win_api_wrappers::handle::Handle;
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::raw::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
+use win_api_wrappers::raw::Win32::Security::Authorization::{SetSecurityInfo, SE_KERNEL_OBJECT};
+use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, ACE_FLAGS, DACL_SECURITY_INFORMATION, PSID};
+use win_api_wrappers::security::acl::{Ace, AceType, Acl};
+use win_api_wrappers::token::Token;
+use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
+use win_api_wrappers::utils::Pipe;
 
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
@@ -111,6 +105,9 @@ fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
     ])
     .to_raw()?;
 
+    // SAFETY: `SetSecurityInfo` needs a handle and four potential inputs. Since `securityinfo` only
+    // mentions `DACL_SECURITY_INFORMATION`, only the `pDacl` argument is used.
+    // We assume the `.to_raw()` function generated a correct ACL.
     unsafe {
         SetSecurityInfo(
             HANDLE(pipe.as_raw_handle() as _),

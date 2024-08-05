@@ -1,47 +1,49 @@
-use std::{
-    ffi::{c_void, OsString},
-    os::windows::ffi::OsStringExt,
-    path::{Path, PathBuf},
-    ptr, thread,
-    time::Duration,
-};
+use std::ffi::{c_void, OsString};
+use std::os::windows::ffi::OsStringExt;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
+use std::{ptr, thread};
 
-use devolutions_pedm_shared::{
-    client::{
-        self,
-        models::{LaunchPayload, StartupInfoDto},
-    },
-    desktop,
-};
-use parking_lot::RwLock;
+use devolutions_pedm_shared::client::models::{LaunchPayload, StartupInfoDto};
+use devolutions_pedm_shared::client::{self};
+use devolutions_pedm_shared::desktop;
+use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use win_api_wrappers::{
-    raw::{
-        core::{implement, interface, w, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR},
-        Win32::{
-            Foundation::{
-                BOOL, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_NOTIMPL,
-                E_UNEXPECTED, HINSTANCE,
-            },
-            Security::TOKEN_QUERY,
-            System::{
-                Com::{IBindCtx, IClassFactory, IClassFactory_Impl},
-                Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
-                Ole::{IObjectWithSite, IObjectWithSite_Impl},
-                SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-                Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
-            },
-            UI::Shell::{
-                IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray, SHStrDupW, ECF_DEFAULT,
-                ECS_ENABLED, SIGDN_FILESYSPATH,
-            },
-        },
-    },
-    win::{environment_block, expand_environment, expand_environment_path, Link, Process, Snapshot, Token},
+use win_api_wrappers::process::Process;
+use win_api_wrappers::raw::core::{
+    implement, interface, w, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
 };
+use win_api_wrappers::raw::Win32::Foundation::{
+    BOOL, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL,
+    E_POINTER, E_UNEXPECTED, HINSTANCE,
+};
+use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
+use win_api_wrappers::raw::Win32::System::Com::{CoTaskMemFree, IBindCtx, IClassFactory, IClassFactory_Impl};
+use win_api_wrappers::raw::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;
+use win_api_wrappers::raw::Win32::System::Ole::{IObjectWithSite, IObjectWithSite_Impl};
+use win_api_wrappers::raw::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
+use win_api_wrappers::raw::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use win_api_wrappers::raw::Win32::UI::Shell::{
+    IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray, SHStrDupW, ECF_DEFAULT,
+    ECS_ENABLED, SIGDN_FILESYSPATH,
+};
+use win_api_wrappers::token::Token;
+use win_api_wrappers::utils::{environment_block, expand_environment, expand_environment_path, Link, Snapshot};
 
-static mut MODULE_INSTANCE: HINSTANCE = HINSTANCE(ptr::null_mut());
-static mut TX_CHANNEL: Option<Sender<ChannelCommand>> = None;
+struct Channels {
+    pub tx: Sender<ChannelCommand>,
+    pub rx: Mutex<Receiver<ChannelCommand>>,
+}
+
+fn channels() -> &'static Channels {
+    static CHANNELS: OnceLock<Channels> = OnceLock::new();
+    CHANNELS.get_or_init(|| {
+        let (tx, rx) = mpsc::channel(10);
+
+        Channels { tx, rx: Mutex::new(rx) }
+    })
+}
 
 #[interface("0ba604fd-4a5a-4abb-92b1-09ac5c3bf356")]
 unsafe trait IElevationContextMenuCommand: IUnknown {}
@@ -65,6 +67,7 @@ impl IElevationContextMenuCommand_Impl for ElevationContextMenuCommand_Impl {}
 
 impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
     fn GetTitle(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
+        // SAFETY: The `w` macro creates a constant, so the argument is valid.
         unsafe { SHStrDupW(w!("Run as administrator with Devolutions PEDM")) }
     }
 
@@ -85,18 +88,35 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
     }
 
     fn Invoke(&self, item_array: Option<&IShellItemArray>, _bind_ctx: Option<&IBindCtx>) -> Result<()> {
+        // SAFETY: `item_array` is valid and `GetCount` has no preconditions.
         if item_array.is_none() || unsafe { item_array.unwrap().GetCount() }? < 1 {
             return Ok(());
         }
 
+        // SAFETY: `item_array` is valid and `GetItemAt` gets first item, which we know exists from the previous check.
         let selection = unsafe { item_array.unwrap().GetItemAt(0) }?;
-        let path = unsafe { selection.GetDisplayName(SIGDN_FILESYSPATH) }?;
-        let path = OsString::from_wide(unsafe { path.as_wide() });
 
-        match unsafe {
-            TX_CHANNEL
-                .as_ref()
-                .unwrap()
+        let path = {
+            // SAFETY: `GetDisplayName` has no preconditions. The string must be freed by `CoTaskMemFree`.
+            let raw_path = unsafe { selection.GetDisplayName(SIGDN_FILESYSPATH) }?;
+            if raw_path.is_null() {
+                return Err(E_POINTER.into());
+            }
+
+            // SAFETY: We assume the returned string is valid.
+            let path = OsString::from_wide(unsafe { raw_path.as_wide() });
+
+            // SAFETY: `raw_path` is valid.
+            unsafe {
+                CoTaskMemFree(Some(raw_path.as_ptr().cast()));
+            }
+
+            path
+        };
+
+        match {
+            channels()
+                .tx
                 .blocking_send(ChannelCommand::Elevate(PathBuf::from(path)))
         } {
             Ok(_) => Ok(()),
@@ -124,7 +144,12 @@ impl IObjectWithSite_Impl for ElevationContextMenuCommand_Impl {
     }
 
     fn GetSite(&self, iid: *const GUID, out_site: *mut *mut core::ffi::c_void) -> Result<()> {
+        if out_site.is_null() {
+            return Err(E_INVALIDARG.into());
+        }
+
         if let Some(site) = self.site.read().as_ref() {
+            // SAFETY: `query()` requires `out_site` to be non-null, and it is checked.
             unsafe { site.query(iid, out_site) }.ok()
         } else {
             Err(E_FAIL.into())
@@ -150,8 +175,9 @@ fn find_main_explorer(session: u32) -> Option<u32> {
                 .user_process_parameters()
                 .ok()?
                 .command_line
-                .to_command_line()
-                .eq_ignore_ascii_case("C:\\Windows\\Explorer.EXE"))
+                .args()
+                .len()
+                == 1)
         {
             return None;
         }
@@ -184,14 +210,14 @@ fn resolve_lnk(path: &Path) -> Option<LaunchPayload> {
     })
 }
 
-fn start_listener(mut rx: Receiver<ChannelCommand>) {
-    thread::spawn(move || {
+fn start_listener() {
+    thread::spawn(|| {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .unwrap()
+            .expect("failed to build Tokio runtime")
             .block_on(async {
-                while let Some(command) = rx.recv().await {
+                while let Some(command) = channels().rx.lock().recv().await {
                     match command {
                         ChannelCommand::Exit => break,
                         ChannelCommand::Elevate(path) => {
@@ -245,22 +271,17 @@ enum ChannelCommand {
 
 #[no_mangle]
 #[allow(non_snake_case)]
-extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
+extern "system" fn DllMain(_dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
     match call_reason {
         DLL_PROCESS_ATTACH => {
-            let (tx, rx) = mpsc::channel(10);
-
-            unsafe {
-                MODULE_INSTANCE = dll_module;
-                TX_CHANNEL = Some(tx);
-            }
-
-            start_listener(rx);
+            start_listener();
 
             true
         }
         DLL_PROCESS_DETACH => {
-            let _ = unsafe { TX_CHANNEL.as_ref().unwrap().blocking_send(ChannelCommand::Exit) };
+            let _ = channels().tx.blocking_send(ChannelCommand::Exit);
+
+            // Give it enough time to exit.
             thread::sleep(Duration::from_secs(3));
             true
         }
@@ -273,6 +294,11 @@ struct ElevationContextMenuCommandFactory;
 
 impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
     fn CreateInstance(&self, outer: Option<&IUnknown>, iid: *const GUID, object: *mut *mut c_void) -> Result<()> {
+        if object.is_null() {
+            return Err(E_INVALIDARG.into());
+        }
+
+        // SAFETY: We checked object is non null. We assume it points to a valid address.
         unsafe {
             *object = ptr::null_mut();
         }
@@ -283,6 +309,7 @@ impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
 
         let unk: IUnknown = ElevationContextMenuCommand::new().into();
 
+        // SAFETY: `query()` requires `object` to be non-null, which we check above.
         unsafe { unk.query(iid, object).ok() }
     }
 
@@ -293,17 +320,30 @@ impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
 
 #[no_mangle]
 #[allow(non_snake_case)]
-unsafe extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, out: *mut *mut c_void) -> HRESULT {
-    let class_id = &*class_id;
-    let iid = &*iid;
+extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, out: *mut *mut c_void) -> HRESULT {
+    // SAFETY: We assume the argument is the correct type according to the doc.
+    let class_id = unsafe { class_id.as_ref() };
 
-    if *iid != IClassFactory::IID || *class_id != IElevationContextMenuCommand::IID {
-        return CLASS_E_CLASSNOTAVAILABLE;
+    // SAFETY: We assume the argument is the correct type according to the doc.
+    let iid = unsafe { iid.as_ref() };
+
+    if out.is_null() {
+        return E_INVALIDARG;
     }
 
-    let factory: IUnknown = ElevationContextMenuCommandFactory.into();
+    match (iid, class_id) {
+        (Some(iid), Some(class_id)) => {
+            if *iid != IClassFactory::IID || *class_id != IElevationContextMenuCommand::IID {
+                return CLASS_E_CLASSNOTAVAILABLE;
+            }
 
-    factory.query(iid, out)
+            let factory: IUnknown = ElevationContextMenuCommandFactory.into();
+
+            // SAFETY: `iid` is checked before and is valid. `out` is checked for null in accordance to `.query()`'s safety doc.
+            unsafe { factory.query(iid, out) }
+        }
+        (_, _) => E_INVALIDARG,
+    }
 }
 
 // #[no_mangle]

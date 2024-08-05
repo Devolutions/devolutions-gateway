@@ -46,7 +46,7 @@ namespace DevolutionsPedmDesktop
 
             ScreenshotHelper.DimBitmap(wallpaper);
 
-            mainForm.Load += (object? sender, EventArgs args) =>
+            mainForm.Load += (object sender, EventArgs args) =>
             {
                 var currentProcess = Process.GetCurrentProcess();
                 int ouat = WinAPI.WmsgSendMessage(currentProcess.SessionId, 0x502, currentProcess.Id, out int status);
@@ -72,7 +72,7 @@ namespace DevolutionsPedmDesktop
                 ouat = WinAPI.WmsgSendMessage(currentProcess.SessionId, 0x500, currentProcess.Id, out status);
             };
 
-            mainForm.FormClosed += (object? sender, FormClosedEventArgs e) =>
+            mainForm.FormClosed += (object sender, FormClosedEventArgs e) =>
             {
                 foreach (var bg in _backgrounds)
                 {
@@ -80,7 +80,7 @@ namespace DevolutionsPedmDesktop
                 }
             };
             
-            Application.ApplicationExit += (object? sender, EventArgs e) =>
+            Application.ApplicationExit += (object sender, EventArgs e) =>
             {
                 var currentProcess = Process.GetCurrentProcess();
                 int ouat = WinAPI.WmsgSendMessage(currentProcess.SessionId, 0x501, currentProcess.Id, out int status);
@@ -113,7 +113,7 @@ namespace DevolutionsPedmDesktop
             var verb = args[1];
             var cmdArgs = args.Skip(2).ToArray();
 
-            Form? mainForm = null;
+            Form mainForm = null;
             switch (verb)
             {
                 case "consent" when cmdArgs.Length >= 2:

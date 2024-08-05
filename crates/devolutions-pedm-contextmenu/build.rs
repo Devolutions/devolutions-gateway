@@ -1,6 +1,8 @@
 use devolutions_pedm_shared::build::target_dir;
 use fs_extra::dir::CopyOptions;
-use std::{env, error::Error, fs, path::PathBuf};
+use std::error::Error;
+use std::path::PathBuf;
+use std::{env, fs};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let target = target_dir()?;

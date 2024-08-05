@@ -1,6 +1,4 @@
-use http;
-use hyper;
-use serde_json;
+use {http, hyper, serde_json};
 
 #[derive(Debug)]
 pub enum Error {
@@ -20,10 +18,7 @@ pub struct ApiError {
 
 impl From<(hyper::StatusCode, hyper::body::Body)> for Error {
     fn from(e: (hyper::StatusCode, hyper::body::Body)) -> Self {
-        Error::Api(ApiError {
-            code: e.0,
-            body: e.1,
-        })
+        Error::Api(ApiError { code: e.0, body: e.1 })
     }
 }
 
@@ -48,7 +43,7 @@ impl From<serde_json::Error> for Error {
 mod request;
 
 mod default_api;
-pub use self::default_api::{ DefaultApi, DefaultApiClient };
+pub use self::default_api::{DefaultApi, DefaultApiClient};
 
-pub mod configuration;
 pub mod client;
+pub mod configuration;

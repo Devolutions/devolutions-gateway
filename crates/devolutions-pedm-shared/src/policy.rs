@@ -1,15 +1,13 @@
-use std::{
-    collections::HashMap,
-    fmt, fs,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fmt, fs};
 
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub static ID_PATTERN: &'static str = r"^[a-z0-9_]{1,32}$";
+pub static ID_PATTERN: &str = r"^[a-z0-9_]{1,32}$";
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
@@ -156,7 +154,7 @@ where
         match (base, data) {
             (Ok(base), Ok(data)) => match &self.kind {
                 PathFilterKind::Equals => data == base,
-                PathFilterKind::FileName => data.file_name().as_deref() == base.file_name().as_deref(),
+                PathFilterKind::FileName => data.file_name() == base.file_name(),
                 PathFilterKind::Wildcard => data
                     .as_os_str()
                     .to_str()

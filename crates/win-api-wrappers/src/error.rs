@@ -1,23 +1,22 @@
-use std::{
-    ffi::NulError,
-    fmt::Debug,
-    string::{FromUtf16Error, FromUtf8Error},
-};
+use std::ffi::NulError;
+use std::fmt::Debug;
+use std::string::{FromUtf16Error, FromUtf8Error};
 
-use windows::{
-    core::HRESULT,
-    Win32::{
-        Foundation::{E_POINTER, WIN32_ERROR},
-        System::Rpc::RPC_STATUS,
-    },
-};
+use windows::core::HRESULT;
+use windows::Win32::Foundation::{E_POINTER, WIN32_ERROR};
+use windows::Win32::System::Rpc::RPC_STATUS;
+
+use thiserror::Error;
 
 use crate::undoc::LSA_SID_NAME_MAPPING_OPERATION_ERROR;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Error {
-    Win32(windows::core::Error),
+    #[error("Win32 error")]
+    Win32(#[from] windows::core::Error),
+    #[error("Lsa SID name mapping error: {}", _0.0)]
     Lsa(LSA_SID_NAME_MAPPING_OPERATION_ERROR),
+    #[error("null pointer: {0}")]
     NullPointer(&'static str),
 }
 
@@ -29,29 +28,7 @@ impl Error {
             Error::NullPointer(_) => E_POINTER.0,
         }
     }
-}
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Win32(err) => err.source(),
-            Error::Lsa(_) => None,
-            Error::NullPointer(_) => None,
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Win32(err) => Debug::fmt(err, f),
-            Error::Lsa(err) => err.fmt(f),
-            Error::NullPointer(mem) => write!(f, "{} is null", mem),
-        }
-    }
-}
-
-impl Error {
     pub fn last_error() -> Self {
         Self::Win32(windows::core::Error::from_win32())
     }
@@ -65,25 +42,9 @@ impl Error {
     }
 }
 
-impl From<windows::core::Error> for Error {
-    fn from(err: windows::core::Error) -> Self {
-        Self::Win32(err)
-    }
-}
-
 impl From<windows::core::HRESULT> for Error {
     fn from(err: windows::core::HRESULT) -> Self {
         Self::from_hresult(err)
-    }
-}
-
-impl From<Error> for windows::core::Error {
-    fn from(value: Error) -> Self {
-        match value {
-            Error::Win32(err) => err.clone(),
-            Error::Lsa(err) => windows::core::Error::new(HRESULT(err.0), format!("Lsa Err {:?}", err)),
-            Error::NullPointer(_) => Error::from_hresult(E_POINTER).into(),
-        }
     }
 }
 

@@ -1,4 +1,5 @@
-use devolutions_pedm_shared::{build::target_dir, policy::Configuration};
+use devolutions_pedm_shared::build::target_dir;
+use devolutions_pedm_shared::policy::Configuration;
 use schemars::schema_for;
 use std::fs;
 use std::io::Result;

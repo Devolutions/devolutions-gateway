@@ -7,15 +7,13 @@ use std::sync::OnceLock;
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
 use local_admin_elevator::LocalAdminElevator;
 use virtual_account_elevator::VirtualAccountElevator;
+use win_api_wrappers::process::{ProcessInformation, StartupInfo};
+use win_api_wrappers::raw::Win32::Foundation::ERROR_INVALID_PARAMETER;
+use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
+use win_api_wrappers::token::{Token, TokenElevationType, TokenSecurityAttribute, TokenSecurityAttributeValues};
 use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
-use win_api_wrappers::win::{
-    environment_block, CommandLine, TokenSecurityAttribute, TokenSecurityAttributeValues, WideString,
-};
-use win_api_wrappers::{
-    raw::Win32::{Foundation::ERROR_INVALID_PARAMETER, System::Threading::PROCESS_CREATION_FLAGS},
-    win::{ProcessInformation, StartupInfo, Token, TokenElevationType},
-    Error,
-};
+use win_api_wrappers::utils::{environment_block, CommandLine, WideString};
+use win_api_wrappers::Error;
 
 use anyhow::{anyhow, Result};
 

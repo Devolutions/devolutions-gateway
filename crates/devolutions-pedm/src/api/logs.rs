@@ -2,7 +2,8 @@ use axum::{Extension, Json};
 use devolutions_pedm_shared::policy::ElevationResult;
 use tracing::info;
 
-use crate::{error::Error, log};
+use crate::error::Error;
+use crate::log;
 
 use super::NamedPipeConnectInfo;
 

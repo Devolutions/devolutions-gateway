@@ -1,12 +1,14 @@
 use anyhow::Result;
-use win_api_wrappers::{
-    raw::Win32::{
-        Foundation::LUID,
-        Security::{WinBuiltinAdministratorsSid, WinHighLabelSid, WinLocalAccountAndAdministratorSid, TOKEN_SOURCE},
-        System::SystemServices::{SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_MANDATORY, SE_GROUP_OWNER},
-    },
-    win::{default_admin_privileges, Sid, SidAndAttributes, Token},
+use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
+use win_api_wrappers::raw::Win32::Foundation::LUID;
+use win_api_wrappers::raw::Win32::Security::{
+    WinBuiltinAdministratorsSid, WinHighLabelSid, WinLocalAccountAndAdministratorSid, TOKEN_SOURCE,
 };
+use win_api_wrappers::raw::Win32::System::SystemServices::{
+    SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
+};
+use win_api_wrappers::security::privilege::default_admin_privileges;
+use win_api_wrappers::token::Token;
 
 use super::Elevator;
 
@@ -44,11 +46,6 @@ impl Elevator for LocalAdminElevator {
             sid: owner_sid.clone(),
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY | SE_GROUP_OWNER) as _,
         });
-
-        // groups.0.push(SidAndAttributes {
-        //     sid: Sid::from_well_known(WinMediumLabelSid, None)?,
-        //     attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _,
-        // });
 
         groups.0.push(SidAndAttributes {
             sid: Sid::from_well_known(WinHighLabelSid, None)?,

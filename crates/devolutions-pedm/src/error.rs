@@ -1,10 +1,8 @@
 use std::fmt::Debug;
 
 use aide::OperationOutput;
-use axum::{
-    response::{IntoResponse, Response},
-    Json,
-};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use hyper::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

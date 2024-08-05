@@ -1,35 +1,32 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use camino::Utf8PathBuf;
 use devolutions_pedm_shared::policy::{
     Application, Certificate, Configuration, ElevationRequest, Filter, Id, Identifiable, Profile, Rule, Signature,
     Signer, User,
 };
 use parking_lot::RwLock;
-use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    collections::HashMap,
-    fs::{self, File, OpenOptions},
-    io::{BufReader, BufWriter},
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufReader, BufWriter};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing::{error, warn};
-use win_api_wrappers::{
-    raw::Win32::{
-        Security::{WinBuiltinUsersSid, TOKEN_QUERY},
-        System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
-    },
-    win::{authenticode_status, CommandLine, CryptProviderCertificate, Process, Sid, SignerInfo},
-};
+use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::process::Process;
+use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, TOKEN_QUERY};
+use win_api_wrappers::raw::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use win_api_wrappers::security::crypt::{authenticode_status, CryptProviderCertificate, SignerInfo};
+use win_api_wrappers::utils::CommandLine;
 
 use anyhow::{anyhow, bail, Result};
 
-use crate::{
-    config,
-    utils::{file_hash, AccountExt, MultiHasher},
-};
-use crate::{desktop::launch_consent, error::Error};
-use crate::{elevations, utils::ensure_protected_directory};
+use crate::desktop::launch_consent;
+use crate::error::Error;
+use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHasher};
+use crate::{config, elevations};
 use devolutions_pedm_shared::policy;
 
 pub struct IdList<T: Identifiable> {
@@ -526,39 +523,30 @@ pub fn application_from_process(pid: u32) -> Result<Application> {
 }
 
 pub fn authenticode_win_to_policy(
-    win_status: win_api_wrappers::win::AuthenticodeSignatureStatus,
+    win_status: win_api_wrappers::security::crypt::AuthenticodeSignatureStatus,
 ) -> policy::AuthenticodeSignatureStatus {
     match win_status {
-        win_api_wrappers::win::AuthenticodeSignatureStatus::Valid => policy::AuthenticodeSignatureStatus::Valid,
-        win_api_wrappers::win::AuthenticodeSignatureStatus::Incompatible => {
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid => {
+            policy::AuthenticodeSignatureStatus::Valid
+        }
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Incompatible => {
             policy::AuthenticodeSignatureStatus::Incompatible
         }
-        win_api_wrappers::win::AuthenticodeSignatureStatus::NotSigned => policy::AuthenticodeSignatureStatus::NotSigned,
-        win_api_wrappers::win::AuthenticodeSignatureStatus::HashMismatch => {
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotSigned => {
+            policy::AuthenticodeSignatureStatus::NotSigned
+        }
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::HashMismatch => {
             policy::AuthenticodeSignatureStatus::HashMismatch
         }
-        win_api_wrappers::win::AuthenticodeSignatureStatus::NotSupportedFileFormat => {
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotSupportedFileFormat => {
             policy::AuthenticodeSignatureStatus::NotSupportedFileFormat
         }
-        win_api_wrappers::win::AuthenticodeSignatureStatus::NotTrusted => {
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotTrusted => {
             policy::AuthenticodeSignatureStatus::NotTrusted
         }
     }
 }
 
-/*
-pub const ID_AZURE_EXT_KEY_USAGE: ObjectIdentifier =
-    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.97");
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AzureExtendedKeyUsage(pub Vec<ObjectIdentifier>);
-
-impl AssociatedOid for AzureExtendedKeyUsage {
-    const OID: ObjectIdentifier = ID_AZURE_EXT_KEY_USAGE;
-}
-
-impl_newtype!(AzureExtendedKeyUsage, Vec<ObjectIdentifier>);
-*/
 fn win_signer_to_policy_signer(value: SignerInfo) -> Signer {
     Signer { issuer: value.issuer }
 }

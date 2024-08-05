@@ -1,8 +1,6 @@
-use std::{
-    env,
-    io::{Error, ErrorKind, Result},
-    path::PathBuf,
-};
+use std::env;
+use std::io::{Error, ErrorKind, Result};
+use std::path::PathBuf;
 
 pub fn target_dir() -> Result<PathBuf> {
     let mut dir = PathBuf::from(env::var("OUT_DIR").unwrap());
