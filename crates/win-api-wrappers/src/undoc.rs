@@ -1,5 +1,6 @@
 //! Undocumented Windows API functions
 use std::ffi::c_void;
+use std::mem;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{BOOL, HANDLE, LUID, NTSTATUS, UNICODE_STRING};
@@ -8,7 +9,7 @@ use windows::Win32::Security::{
     TOKEN_OWNER, TOKEN_PRIMARY_GROUP, TOKEN_PRIVILEGES, TOKEN_SOURCE, TOKEN_TYPE, TOKEN_USER,
 };
 
-use crate::process::module_symbol;
+use crate::process::Module;
 
 pub unsafe fn LogonUserExExW<P0, P1, P2>(
     lpszusername: P0,
@@ -28,7 +29,8 @@ where
     P1: windows::core::Param<PCWSTR>,
     P2: windows::core::Param<PCWSTR>,
 {
-    let LogonUserExExW = module_symbol::<
+    let LogonUserExExW = mem::transmute::<
+        _,
         unsafe extern "system" fn(
             PCWSTR,
             PCWSTR,
@@ -42,7 +44,7 @@ where
             *mut u32,
             *mut QUOTA_LIMITS,
         ) -> BOOL,
-    >("advapi32.dll", "LogonUserExExW")?;
+    >(Module::from_name("advapi32.dll")?.resolve_symbol("LogonUserExExW")?);
     LogonUserExExW(
         lpszusername.param().abi(),
         lpszdomain.param().abi(),
@@ -123,13 +125,14 @@ pub unsafe fn LsaManageSidNameMapping(
     OpInput: *const LSA_SID_NAME_MAPPING_OPERATION_INPUT,
     OpOutput: *mut *mut LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
 ) -> windows::core::Result<()> {
-    let LsaManageSidNameMapping = module_symbol::<
+    let LsaManageSidNameMapping = mem::transmute::<
+        _,
         unsafe extern "system" fn(
             LSA_SID_NAME_MAPPING_OPERATION_TYPE,
             *const LSA_SID_NAME_MAPPING_OPERATION_INPUT,
             *mut *mut LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
         ) -> NTSTATUS,
-    >("advapi32.dll", "LsaManageSidNameMapping")?;
+    >(Module::from_name("advapi32.dll")?.resolve_symbol("LsaManageSidNameMapping")?);
 
     LsaManageSidNameMapping(OpType, OpInput, OpOutput).ok()
 }
@@ -141,9 +144,10 @@ pub unsafe fn RtlCreateVirtualAccountSid(
     Sid: PSID,
     SidLength: *mut u32,
 ) -> windows::core::Result<()> {
-    let RtlCreateVirtualAccountSid = module_symbol::<
-        unsafe extern "system" fn(*const UNICODE_STRING, u32, PSID, *mut u32) -> NTSTATUS,
-    >("ntdll.dll", "RtlCreateVirtualAccountSid")?;
+    let RtlCreateVirtualAccountSid =
+        mem::transmute::<_, unsafe extern "system" fn(*const UNICODE_STRING, u32, PSID, *mut u32) -> NTSTATUS>(
+            Module::from_name("ntdll.dll")?.resolve_symbol("RtlCreateVirtualAccountSid")?,
+        );
 
     RtlCreateVirtualAccountSid(Name, BaseSubAuthority, Sid, SidLength).ok()
 }
@@ -168,9 +172,10 @@ pub unsafe fn NtQueryInformationProcess(
     ProcessInformationLength: u32,
     ReturnLength: Option<*mut u32>,
 ) -> windows::core::Result<()> {
-    let NtQueryInformationProcess = module_symbol::<
+    let NtQueryInformationProcess = mem::transmute::<
+        _,
         unsafe extern "system" fn(HANDLE, PROCESSINFOCLASS, *mut c_void, u32, *mut u32) -> NTSTATUS,
-    >("ntdll.dll", "NtQueryInformationProcess")?;
+    >(Module::from_name("ntdll.dll")?.resolve_symbol("NtQueryInformationProcess")?);
 
     NtQueryInformationProcess(
         ProcessHandle,
@@ -195,9 +200,10 @@ pub unsafe fn NtSetInformationThread(
     ThreadInformation: *mut c_void,
     ThreadInformationLength: u32,
 ) -> windows::core::Result<()> {
-    let NtSetInformationThread = module_symbol::<
+    let NtSetInformationThread = mem::transmute::<
+        _,
         unsafe extern "system" fn(HANDLE, THREADINFOCLASS, *mut c_void, u32) -> NTSTATUS,
-    >("ntdll.dll", "NtSetInformationThread")?;
+    >(Module::from_name("ntdll.dll")?.resolve_symbol("NtSetInformationThread")?);
 
     NtSetInformationThread(
         ThreadHandle,
@@ -245,7 +251,8 @@ pub unsafe fn NtCreateToken(
     TokenDefaultDacl: *const TOKEN_DEFAULT_DACL,
     TokenSource: *const TOKEN_SOURCE,
 ) -> windows::core::Result<()> {
-    let NtCreateToken = module_symbol::<
+    let NtCreateToken = mem::transmute::<
+        _,
         unsafe extern "system" fn(
             *mut HANDLE,
             TOKEN_ACCESS_MASK,
@@ -261,7 +268,7 @@ pub unsafe fn NtCreateToken(
             *const TOKEN_DEFAULT_DACL,
             *const TOKEN_SOURCE,
         ) -> NTSTATUS,
-    >("ntdll.dll", "NtCreateToken")?;
+    >(Module::from_name("ntdll.dll")?.resolve_symbol("NtCreateToken")?);
 
     NtCreateToken(
         TokenHandle,

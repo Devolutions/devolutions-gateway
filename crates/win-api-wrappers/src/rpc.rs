@@ -67,28 +67,37 @@ impl RpcBindingHandle {
         })
     }
 
-    pub fn impersonate_client<F, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce() -> Result<R>,
-    {
-        unsafe { RpcImpersonateClient(Some(self.0)) }.ok()?;
-
-        let r = f();
-
-        unsafe { RpcRevertToSelfEx(Some(self.0)) }.ok()?;
-
-        r
+    pub fn impersonate_client(&self) -> Result<RpcBindingImpersonation> {
+        RpcBindingImpersonation::try_new(self)
     }
 
     pub fn client_primary_token(&self) -> Result<Token> {
-        self.impersonate_client(|| {
-            Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
-                TOKEN_ACCESS_MASK(0),
-                None,
-                SecurityIdentification,
-                TokenPrimary,
-            )
-        })
+        let _ctx = self.impersonate_client()?;
+
+        Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
+            TOKEN_ACCESS_MASK(0),
+            None,
+            SecurityIdentification,
+            TokenPrimary,
+        )
+    }
+}
+
+pub struct RpcBindingImpersonation<'a> {
+    handle: &'a RpcBindingHandle,
+}
+
+impl<'a> RpcBindingImpersonation<'a> {
+    fn try_new(handle: &'a RpcBindingHandle) -> Result<Self> {
+        unsafe { RpcImpersonateClient(Some(handle.0)) }.ok()?;
+
+        Ok(Self { handle })
+    }
+}
+
+impl Drop for RpcBindingImpersonation<'_> {
+    fn drop(&mut self) {
+        let _ = unsafe { RpcRevertToSelfEx(Some(self.handle.0)) };
     }
 }
 

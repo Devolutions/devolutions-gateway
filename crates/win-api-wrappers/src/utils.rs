@@ -625,32 +625,25 @@ impl Pipe {
         Ok(available)
     }
 
-    pub fn impersonate_client<F, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce() -> Result<R>,
-    {
-        unsafe { ImpersonateNamedPipeClient(self.handle.raw()) }?;
-
-        let r = f();
-
-        unsafe { RevertToSelf() }?;
-
-        r
+    pub fn impersonate_client(&self) -> Result<NamedPipeImpersonation<'_>> {
+        NamedPipeImpersonation::try_new(self)
     }
 
     pub fn client_primary_token(&self) -> Result<Token> {
-        self.impersonate_client(|| {
-            Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
-                TOKEN_ACCESS_MASK(0),
-                None,
-                SecurityIdentification,
-                TokenPrimary,
-            )
-        })
+        let _ctx = self.impersonate_client()?;
+
+        Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
+            TOKEN_ACCESS_MASK(0),
+            None,
+            SecurityIdentification,
+            TokenPrimary,
+        )
     }
 
     pub fn client_process_id(&self) -> Result<u32> {
         let mut pid = 0u32;
+
+        // SAFETY: Only precondition is for the handle to be created by `CreateNamedPipe`. Will fail otherwise.
         unsafe {
             GetNamedPipeClientProcessId(self.handle.raw(), &mut pid)?;
         }
@@ -662,6 +655,8 @@ impl Pipe {
 impl Read for Pipe {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let mut read_bytes = 0;
+
+        // SAFETY: No preconditions. Will only fail if handle does not have GENERIC_READ.
         unsafe {
             ReadFile(self.handle.raw(), Some(buf), Some(&mut read_bytes), None)?;
         }
@@ -673,6 +668,8 @@ impl Read for Pipe {
 impl Write for Pipe {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut written_bytes = 0;
+
+        // SAFETY: No preconditions. Will only fail if handle does not have GENERIC_WRITE.
         unsafe {
             WriteFile(self.handle.raw(), Some(buf), Some(&mut written_bytes), None)?;
         }
@@ -681,10 +678,35 @@ impl Write for Pipe {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
+        // SAFETY: No preconditions. Will only fail if handle does not have GENERIC_WRITE.
         unsafe {
             FlushFileBuffers(self.handle.raw())?;
         }
 
         Ok(())
+    }
+}
+
+impl HandleWrapper for Pipe {
+    fn handle(&self) -> &Handle {
+        &self.handle
+    }
+}
+
+pub struct NamedPipeImpersonation<'a> {
+    _pipe: &'a Pipe,
+}
+
+impl<'a> NamedPipeImpersonation<'a> {
+    fn try_new(pipe: &'a Pipe) -> Result<Self> {
+        unsafe { ImpersonateNamedPipeClient(pipe.handle().raw()) }?;
+
+        Ok(Self { _pipe: pipe })
+    }
+}
+
+impl Drop for NamedPipeImpersonation<'_> {
+    fn drop(&mut self) {
+        let _ = unsafe { RevertToSelf() };
     }
 }

@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 
 use appinfo::dump_interfaces;
 use hook::rai_launch_admin_process;
-use win_api_wrappers::process::is_module_loaded;
+use win_api_wrappers::process::Module;
 use win_api_wrappers::raw::core::GUID;
 use win_api_wrappers::raw::Win32::Foundation::*;
 use win_api_wrappers::raw::Win32::System::Rpc::SERVER_ROUTINE;
@@ -22,17 +22,16 @@ fn original_handlers() -> &'static Mutex<HashMap<GUID, Box<[SERVER_ROUTINE]>>> {
     ORIGINAL_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-// fn hooks() -> &'static HashMap<GUID, Box<[ServerRoutinePointer]>> {
-//     static HOOKS: OnceLock<HashMap<GUID, Box<[ServerRoutinePointer]>>> = OnceLock::new();
-//     HOOKS.get_or_init(|| {
-//         let hooks: HashMap<GUID, Box<[ServerRoutinePointer]>> = HashMap::new();
+/// GUID obtained from RpcView on the AppInfo service.
+/// Can also be obtained from [here](https://github.com/tyranid/WindowsRpcClients/blob/master/Win10_20H1/appinfo.dll/201ef99a-7fa0-444c-9399-19ba84f12a1a_1.0.cs).
+fn appinfo_guid() -> &'static GUID {
+    static APPINFO_GUID: OnceLock<GUID> = OnceLock::new();
 
-//         hooks
-//     })
-// }
+    APPINFO_GUID.get_or_init(|| GUID::from("201ef99a-7fa0-444c-9399-19ba84f12a1a"))
+}
 
 fn hook() -> Result<()> {
-    if !is_module_loaded("appinfo.dll") {
+    if Module::from_name("appinfo.dll").is_err() {
         bail!("appinfo.dll not loaded");
     }
 
@@ -44,7 +43,7 @@ fn hook() -> Result<()> {
 
         origs.insert(interface.id(), handlers);
 
-        if interface.id() == GUID::from("201ef99a-7fa0-444c-9399-19ba84f12a1a") {
+        if &interface.id() == appinfo_guid() {
             let mut hooks = origs
                 .get(&interface.id())
                 .expect("interface hooks not found")
@@ -59,7 +58,7 @@ fn hook() -> Result<()> {
 }
 
 fn unhook() -> Result<()> {
-    if !is_module_loaded("appinfo.dll") {
+    if Module::from_name("appinfo.dll").is_err() {
         bail!("appinfo.dll not loaded");
     }
 

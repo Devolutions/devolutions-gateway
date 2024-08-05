@@ -15,7 +15,7 @@ use crate::thread::Thread;
 use crate::token::Token;
 use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
 use crate::utils::{serialize_environment, Allocation, AnsiString, CommandLine, WideString};
-use windows::core::{PCSTR, PCWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
     FreeLibrary, ERROR_INCORRECT_SIZE, E_HANDLE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
 };
@@ -23,7 +23,7 @@ use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::LibraryLoader::{
-    GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+    GetModuleFileNameW, GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
 };
 use windows::Win32::System::Threading::{
     CreateProcessAsUserW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
@@ -94,8 +94,7 @@ impl Process {
 
         unsafe { self.write_memory(path_bytes, allocation.address) }?;
 
-        let load_library =
-            unsafe { module_symbol::<unsafe extern "system" fn(PCSTR) -> HMODULE>("kernel32.dll", "LoadLibraryA") }?;
+        let load_library = Module::from_name("kernel32.dll")?.resolve_symbol("LoadLibraryA")?;
 
         let thread = self.create_thread(
             Some(unsafe { mem::transmute::<_, unsafe extern "system" fn(*mut c_void) -> u32>(load_library) }),
@@ -399,8 +398,23 @@ pub struct Module {
 }
 
 impl Module {
+    pub fn from_name(name: &str) -> windows::core::Result<Self> {
+        let name = WideString::from(name);
+        let mut handle = HMODULE::default();
+
+        // SAFETY: No preconditions. Name is valid and null terminated.
+        unsafe {
+            GetModuleHandleExW(0, name.as_pcwstr(), &mut handle)?;
+        }
+
+        Ok(Self { handle })
+    }
+
     pub fn from_ref<T>(address: &T) -> Result<Self> {
         let mut handle = HMODULE::default();
+
+        // SAFETY: No preconditions.
+        // Address can be passed as char pointer because of `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` flag.
         unsafe {
             GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
@@ -419,41 +433,40 @@ impl Module {
 
     pub fn file_name(&self) -> Result<PathBuf> {
         let mut buf = vec![0; MAX_PATH as _];
+
+        // SAFETY: No preconditions. `buf` is large enough and handle is valid.
         let size = unsafe { GetModuleFileNameW(self.handle, &mut buf) } as _;
         if size == 0 {
             bail!(Error::last_error());
         }
 
+        // SAFETY: Return value is the number of characters (not bytes) copied without NUL terminator.
+        // TWe assume that this is less than or equal to the size of the passed in vector.
         unsafe {
             buf.set_len(size);
         }
 
         Ok(OsString::from_wide(&buf).into())
     }
+
+    pub fn resolve_symbol(&self, symbol: &str) -> windows::core::Result<*const c_void> {
+        let symbol = AnsiString::from(symbol);
+
+        // SAFETY: No preconditions. Both handle and symbol are valid.
+        match unsafe { GetProcAddress(self.handle, symbol.as_pcstr()) } {
+            Some(func) => Ok(func as *const c_void),
+            None => Err(windows::core::Error::from_win32()),
+        }
+    }
 }
 
 impl Drop for Module {
     fn drop(&mut self) {
+        // SAFETY: Only constructors are GetModuleHandleExW without the GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT flag.
+        // This means the reference count is incremented, making the handle valid for at least the lifetime of the object.
+        // This also means we must free it.
         let _ = unsafe { FreeLibrary(self.handle) };
     }
-}
-
-pub unsafe fn module_symbol<T>(module: &str, symbol: &str) -> windows::core::Result<T> {
-    let module = WideString::from(module);
-    let module_handle = GetModuleHandleW(module.as_pcwstr())?;
-
-    let symbol = AnsiString::from(symbol);
-
-    match GetProcAddress(module_handle, symbol.as_pcstr()) {
-        Some(func) => Ok(mem::transmute_copy(&func)),
-        None => Err(windows::core::Error::from_win32()),
-    }
-}
-
-pub fn is_module_loaded(module: &str) -> bool {
-    //todo wtf is this
-    let module = WideString::from(module);
-    unsafe { GetModuleHandleW(module.as_pcwstr()) }.is_ok()
 }
 
 #[derive(Debug)]

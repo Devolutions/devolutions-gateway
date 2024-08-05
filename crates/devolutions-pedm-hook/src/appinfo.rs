@@ -1,4 +1,5 @@
 use std::ffi::c_void;
+use std::mem;
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 
@@ -6,7 +7,7 @@ use parking_lot::Mutex;
 
 use anyhow::{bail, Result};
 use retour::GenericDetour;
-use win_api_wrappers::process::module_symbol;
+use win_api_wrappers::process::Module;
 use win_api_wrappers::raw::core::{GUID, PCWSTR};
 use win_api_wrappers::raw::Win32::Foundation::{HANDLE, HWND};
 use win_api_wrappers::raw::Win32::System::Rpc::{
@@ -78,11 +79,16 @@ type RpcServerRegisterIfExHook = unsafe extern "system" fn(
 pub fn rpc_server_register_if_ex_hook() -> &'static GenericDetour<RpcServerRegisterIfExHook> {
     static HOOK: OnceLock<GenericDetour<RpcServerRegisterIfExHook>> = OnceLock::new();
 
-    HOOK.get_or_init(|| unsafe {
-        let orig = module_symbol::<RpcServerRegisterIfExHook>("rpcrt4.dll", "RpcServerRegisterIfEx")
+    HOOK.get_or_init(|| {
+        let orig = Module::from_name("rpcrt4.dll")
+            .expect("failed to find rpcrt4.dll")
+            .resolve_symbol("RpcServerRegisterIfEx")
             .expect("failed to find RpcServerRegisterIfEx");
 
-        GenericDetour::new(orig, rpc_server_register_if_ex as _).expect("RpcServerRegisterIfEx hook failed")
+        // SAFETY: We assume rpcrt4.dll's RpcServerRegisterIfEx has correct signature.
+        let orig = unsafe { mem::transmute::<_, RpcServerRegisterIfExHook>(orig) };
+
+        unsafe { GenericDetour::new(orig, rpc_server_register_if_ex as _).expect("RpcServerRegisterIfEx hook failed") }
     })
 }
 
@@ -109,8 +115,13 @@ pub unsafe fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
     static FUN: OnceLock<FnAiEnableDesktopRpcInterface> = OnceLock::new();
 
     let init = || {
-        module_symbol::<FnAiEnableDesktopRpcInterface>("appinfo.dll", "AiEnableDesktopRpcInterface")
-            .expect("failed to find AiEnableDesktopRpcInterface")
+        let orig = Module::from_name("appinfo.dll")
+            .expect("failed to find appinfo.dll")
+            .resolve_symbol("AiEnableDesktopRpcInterface")
+            .expect("failed to find AiEnableDesktopRpcInterface");
+
+        // SAFETY: We assume appinfo.dll's AiEnableDesktopRpcInterface has decompiled signature.
+        unsafe { mem::transmute::<_, FnAiEnableDesktopRpcInterface>(orig) }
     };
 
     FUN.get_or_init(init)()
@@ -121,8 +132,13 @@ pub unsafe fn ai_disable_desktop_rpc_interface() {
     static FUN: OnceLock<FnAiDisableDesktopRpcInterface> = OnceLock::new();
 
     let init = || {
-        module_symbol::<FnAiDisableDesktopRpcInterface>("appinfo.dll", "AiDisableDesktopRpcInterface")
-            .expect("failed to find AiDisableDesktopRpcInterface")
+        let orig = Module::from_name("appinfo.dll")
+            .expect("failed to find appinfo.dll")
+            .resolve_symbol("AiDisableDesktopRpcInterface")
+            .expect("failed to find AiDisableDesktopRpcInterface");
+
+        // SAFETY: We assume appinfo.dll's AiDisableDesktopRpcInterface has decompiled signature.
+        unsafe { mem::transmute::<_, FnAiDisableDesktopRpcInterface>(orig) }
     };
 
     FUN.get_or_init(init)()

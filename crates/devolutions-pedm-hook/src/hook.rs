@@ -104,22 +104,24 @@ fn rai_launch_admin_process_handler(
         parent_pid: caller.client_pid,
     };
 
-    let proc_info = binding.impersonate_client(|| {
-        Ok(client::block_req(
-            client::client().default_api().launch_post(LaunchPayload {
-                executable_path: executable_path.and_then(|x| x.as_os_str().to_str()).map(str::to_owned),
-                command_line: command_line.map(str::to_owned),
-                creation_flags: (creation_flags | CREATE_SUSPENDED).0,
-                working_directory: working_directory
-                    .and_then(|x| x.as_os_str().to_str())
-                    .map(str::to_owned),
-                startup_info: Some(startup_info),
-            }),
-        ))
-    })?;
+    let ctx = binding.impersonate_client()?;
+
+    let proc_info = client::block_req(
+        client::client().default_api().launch_post(LaunchPayload {
+            executable_path: executable_path.and_then(|x| x.as_os_str().to_str()).map(str::to_owned),
+            command_line: command_line.map(str::to_owned),
+            creation_flags: (creation_flags | CREATE_SUSPENDED).0,
+            working_directory: working_directory
+                .and_then(|x| x.as_os_str().to_str())
+                .map(str::to_owned),
+            startup_info: Some(startup_info),
+        }),
+    )?;
+
+    drop(ctx);
 
     let proc_info =
-        proc_info?.map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error as _)))?;
+        proc_info.map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error as _)))?;
 
     let mut process = Process::try_get_by_pid(proc_info.process_id, PROCESS_ALL_ACCESS)?;
     let mut thread = Thread::try_get_by_id(proc_info.thread_id, THREAD_ALL_ACCESS)?;
