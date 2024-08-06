@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::{c_void, CString, OsString};
+use std::ffi::{c_void, OsString};
 use std::fmt::Debug;
 use std::mem::{self};
 use std::os::windows::ffi::OsStringExt;
@@ -8,19 +8,19 @@ use std::{ptr, slice};
 
 use anyhow::{bail, Result};
 
-use crate::error::Error;
 use crate::handle::{Handle, HandleWrapper};
 use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
 use crate::utils::{serialize_environment, Allocation, AnsiString, CommandLine, WideString};
+use crate::Error;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
     FreeLibrary, ERROR_INCORRECT_SIZE, E_HANDLE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
 };
 use windows::Win32::Security::TOKEN_ACCESS_MASK;
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::LibraryLoader::{
     GetModuleFileNameW, GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
@@ -35,6 +35,8 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
+use super::utils::ComContext;
+
 #[derive(Debug)]
 pub struct Process {
     pub handle: Handle,
@@ -42,6 +44,7 @@ pub struct Process {
 
 impl Process {
     pub fn try_get_by_pid(pid: u32, desired_access: PROCESS_ACCESS_RIGHTS) -> Result<Self> {
+        // SAFETY: No preconditions. Handle is closed with RAII wrapper.
         let handle = unsafe { OpenProcess(desired_access, false, pid) }?;
 
         Ok(Self { handle: handle.into() })
@@ -62,6 +65,8 @@ impl Process {
         let mut length;
         loop {
             length = path.capacity() as u32;
+
+            // SAFETY: `path` always has capacity of `length`.
             status = unsafe {
                 QueryFullProcessImageNameW(
                     self.handle.raw(),
@@ -71,37 +76,47 @@ impl Process {
                 )
             };
 
+            // Break if successful or if path is becoming too big.
             if status.is_ok() || path.capacity() > u16::MAX as _ {
                 break;
             }
 
+            // Double the capacity each time
             path.reserve(path.capacity());
         }
 
         status?;
 
-        path.shrink_to(length as _);
-        unsafe { path.set_len(path.capacity()) };
+        // SAFETY: We assume `QueryFullProcessImageNameW` will set `length` to be less than or equal to its input value.
+        // This guarantees the length will fit in the vec's capacity.
+        unsafe { path.set_len(length as _) };
 
         Ok(OsString::from_wide(&path).into())
     }
 
     pub fn inject_dll(&self, path: &Path) -> Result<()> {
-        let path = unsafe { CString::from_vec_unchecked(path.as_os_str().as_encoded_bytes().to_vec()) };
-        let path_bytes = path.to_bytes_with_nul();
+        let path = WideString::from(path).0.expect("WideString::from failed");
+
+        // SAFETY: Aligning a continuous `u16` vector to a continuous `u8` slice has no undefined data.
+        let path_bytes = unsafe { path.align_to::<u8>().1 };
 
         let allocation = self.allocate(path_bytes.len())?;
 
+        // SAFETY: Writing to a new allocation is safe, even in our process.
+        // The allocation is at least as big as the data provided.
         unsafe { self.write_memory(path_bytes, allocation.address) }?;
 
-        let load_library = Module::from_name("kernel32.dll")?.resolve_symbol("LoadLibraryA")?;
+        let load_library = Module::from_name("kernel32.dll")?.resolve_symbol("LoadLibraryW")?;
 
         let thread = self.create_thread(
-            Some(unsafe { mem::transmute::<_, unsafe extern "system" fn(*mut c_void) -> u32>(load_library) }),
+            // SAFETY: `LoadLibraryW` fits the type. It takes one argument that is the name of the library.
+            Some(unsafe {
+                mem::transmute::<*const c_void, unsafe extern "system" fn(*mut c_void) -> u32>(load_library)
+            }),
             Some(allocation.address),
         )?;
 
-        thread.join()?;
+        thread.join(None)?;
 
         Ok(())
     }
@@ -112,6 +127,9 @@ impl Process {
         parameter: Option<*const c_void>,
     ) -> Result<Thread> {
         let mut thread_id: u32 = 0;
+
+        // SAFETY: We assume `start_address` points to a valid and executable memory address.
+        // No preconditions.
         let handle = unsafe {
             CreateRemoteThread(
                 self.handle.raw(),
@@ -127,18 +145,25 @@ impl Process {
         Thread::try_with_handle(handle?)
     }
 
-    pub fn allocate(&self, size: usize) -> Result<Allocation> {
+    pub fn allocate(&self, size: usize) -> Result<Allocation<'_>> {
         Allocation::try_new(self, size)
     }
 
+    /// Writes a buffer to a process' memory.
+    ///
+    /// # Safety
+    ///
+    /// - [`address`, `address` + `data.len()`] should be accessible and writeable.
+    /// - `address` should not be the currently executing code.
     pub unsafe fn write_memory(&self, data: &[u8], address: *mut c_void) -> Result<()> {
-        unsafe { WriteProcessMemory(self.handle.raw(), address, data.as_ptr() as _, data.len(), None) }?;
+        WriteProcessMemory(self.handle.raw(), address, data.as_ptr() as _, data.len(), None)?;
 
         Ok(())
     }
 
     pub fn current_process() -> Self {
         Self {
+            // SAFETY: `GetCurrentProcess()` has no preconditions and always returns a valid handle.
             handle: Handle::new(unsafe { GetCurrentProcess() }, false),
         }
     }
@@ -146,12 +171,14 @@ impl Process {
     pub fn token(&self, desired_access: TOKEN_ACCESS_MASK) -> Result<Token> {
         let mut handle = Default::default();
 
+        // SAFETY: No preconditions. Returned handle will be closed with its RAII wrapper.
         unsafe { OpenProcessToken(self.handle.raw(), desired_access, &mut handle) }?;
 
         Token::try_with_handle(handle)
     }
 
     pub fn wait(&self, timeout_ms: Option<u32>) -> Result<WAIT_EVENT> {
+        // SAFETY: No preconditions.
         let status = unsafe { WaitForSingleObject(self.handle.raw(), timeout_ms.unwrap_or(INFINITE)) };
 
         match status {
@@ -162,6 +189,8 @@ impl Process {
 
     pub fn exit_code(&self) -> Result<u32> {
         let mut exit_code = 0u32;
+
+        // SAFETY: No preconditions.
         unsafe { GetExitCodeProcess(self.handle.raw(), &mut exit_code) }?;
 
         Ok(exit_code)
@@ -169,6 +198,8 @@ impl Process {
 
     pub fn query_basic_information(&self) -> Result<PROCESS_BASIC_INFORMATION> {
         let mut basic_info = PROCESS_BASIC_INFORMATION::default();
+
+        // SAFETY: No preconditions.
         unsafe {
             NtQueryInformationProcess(
                 self.handle.raw(),
@@ -176,37 +207,47 @@ impl Process {
                 &mut basic_info as *mut _ as _,
                 mem::size_of_val(&basic_info) as _,
                 None,
-            )?;
-        }
+            )
+        }?;
 
         Ok(basic_info)
     }
 
-    pub fn peb(&self) -> Result<Peb> {
+    pub fn peb(&self) -> Result<Peb<'_>> {
         let basic_info = self.query_basic_information()?;
 
         Ok(Peb {
             process: self,
-            address: basic_info.PebBaseAddress as _,
+            address: basic_info.PebBaseAddress,
         })
     }
 
-    pub fn read_memory(&self, address: usize, data: &mut [u8]) -> Result<usize> {
+    /// Reads process memory at a specified address.
+    /// Returns the number of bytes read.
+    ///
+    /// # Safety
+    ///
+    /// - [`address`, `address + data.len()`] must be valid and readable.
+    pub unsafe fn read_memory(&self, address: *const c_void, data: &mut [u8]) -> Result<usize> {
         let mut bytes_read = 0;
-        unsafe {
-            ReadProcessMemory(
-                self.handle.raw(),
-                address as _,
-                data.as_mut_ptr() as _,
-                data.len(),
-                Some(&mut bytes_read),
-            )?;
-        }
+
+        ReadProcessMemory(
+            self.handle.raw(),
+            address as _,
+            data.as_mut_ptr() as _,
+            data.len(),
+            Some(&mut bytes_read),
+        )?;
 
         Ok(bytes_read)
     }
 
-    pub unsafe fn read_struct<T: Sized>(&self, address: usize) -> Result<T> {
+    /// Reads a stucture from process memory at a specified address.
+    ///
+    /// # Safety
+    ///
+    /// - `address` must point to a valid and correctly sized instance of the structure.
+    pub unsafe fn read_struct<T: Sized>(&self, address: *const c_void) -> Result<T> {
         let mut buf = vec![0; mem::size_of::<T>()];
 
         let read = self.read_memory(address, buf.as_mut_slice())?;
@@ -218,16 +259,22 @@ impl Process {
         }
     }
 
-    pub unsafe fn read_array<T: Sized>(&self, count: usize, address: usize) -> Result<Vec<T>> {
+    /// Reads a continous array of a structure from process memory at a specified address.
+    ///
+    /// # Safety
+    ///
+    /// - `address` must point to a continuous array of valid and correctly sized instances of the structure.
+    pub unsafe fn read_array<T: Sized>(&self, address: *const T, count: usize) -> Result<Vec<T>> {
         let mut buf = Vec::with_capacity(count);
 
         let read_bytes = self.read_memory(
-            address,
+            address as _,
             slice::from_raw_parts_mut(buf.as_mut_ptr() as _, buf.capacity() * mem::size_of::<T>()),
         )?;
 
         if count * mem::size_of::<T>() == read_bytes {
-            buf.set_len(count);
+            // SAFETY: Buffer can hold `count` items and was filled up to that point.
+            unsafe { buf.set_len(count) };
 
             Ok(buf)
         } else {
@@ -265,58 +312,64 @@ pub fn shell_execute(
         ..Default::default()
     };
 
-    unsafe {
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).ok()?;
+    let _ctx = ComContext::try_new(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)?;
 
-        ShellExecuteExW(&mut exec_info)?;
-    }
+    // SAFETY: Must be called with COM context initialized.
+    unsafe { ShellExecuteExW(&mut exec_info) }?;
 
     Process::try_with_handle(exec_info.hProcess)
 }
 
 pub struct Peb<'a> {
-    pub process: &'a Process,
-    pub address: usize,
+    process: &'a Process,
+    /// Although it is a pointer, it might not be in our process.
+    address: *const PEB,
 }
 
 impl Peb<'_> {
-    pub unsafe fn raw(&self) -> Result<PEB> {
-        self.process.read_struct::<PEB>(self.address)
+    pub fn raw(&self) -> Result<PEB> {
+        // SAFETY: We assume `address` points to a valid `PEB` in the target process.
+        unsafe { self.process.read_struct::<PEB>(self.address.cast()) }
     }
 
     pub fn user_process_parameters(&self) -> Result<UserProcessParameters> {
-        let raw_peb = unsafe { self.raw()? };
+        let raw_peb = self.raw()?;
 
+        // SAFETY: We assume `raw_peb`'s `ProcessParameters` is valid.
         let raw_params = unsafe {
             self.process
                 .read_struct::<RTL_USER_PROCESS_PARAMETERS>(raw_peb.ProcessParameters as _)?
         };
 
+        // SAFETY: We assume `raw_params.ImagePathName` is truthful and valid.
         let image_path_name = unsafe {
-            self.process.read_array::<u16>(
+            self.process.read_array(
+                raw_params.ImagePathName.Buffer.as_ptr(),
                 raw_params.ImagePathName.Length as usize / mem::size_of::<u16>(),
-                raw_params.ImagePathName.Buffer.as_ptr() as _,
             )?
         };
 
+        // SAFETY: We assume `raw_params.CommandLine` is truthful and valid.
         let command_line = unsafe {
-            self.process.read_array::<u16>(
+            self.process.read_array(
+                raw_params.CommandLine.Buffer.as_ptr(),
                 raw_params.CommandLine.Length as usize / mem::size_of::<u16>(),
-                raw_params.CommandLine.Buffer.as_ptr() as _,
             )?
         };
 
+        // SAFETY: We assume `raw_params.DesktopInfo` is truthful and valid.
         let desktop = unsafe {
-            self.process.read_array::<u16>(
+            self.process.read_array(
+                raw_params.DesktopInfo.Buffer.as_ptr(),
                 raw_params.DesktopInfo.Length as usize / mem::size_of::<u16>(),
-                raw_params.DesktopInfo.Buffer.as_ptr() as _,
             )?
         };
 
+        // SAFETY: We assume `raw_params.CurrentDirectory` is truthful and valid.
         let working_directory = unsafe {
-            self.process.read_array::<u16>(
+            self.process.read_array(
+                raw_params.CurrentDirectory.DosPath.Buffer.as_ptr(),
                 raw_params.CurrentDirectory.DosPath.Length as usize / mem::size_of::<u16>(),
-                raw_params.CurrentDirectory.DosPath.Buffer.as_ptr() as _,
             )?
         };
 
@@ -358,7 +411,7 @@ pub struct StartupInfo {
 }
 
 impl StartupInfo {
-    pub unsafe fn as_raw(&mut self) -> STARTUPINFOEXW {
+    pub fn as_raw(&mut self) -> STARTUPINFOEXW {
         STARTUPINFOEXW {
             StartupInfo: STARTUPINFOW {
                 cb: if self.attribute_list.is_some() {
@@ -403,9 +456,7 @@ impl Module {
         let mut handle = HMODULE::default();
 
         // SAFETY: No preconditions. Name is valid and null terminated.
-        unsafe {
-            GetModuleHandleExW(0, name.as_pcwstr(), &mut handle)?;
-        }
+        unsafe { GetModuleHandleExW(0, name.as_pcwstr(), &mut handle) }?;
 
         Ok(Self { handle })
     }
@@ -420,8 +471,8 @@ impl Module {
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                 PCWSTR(address as *const _ as _),
                 &mut handle,
-            )?;
-        }
+            )
+        }?;
 
         Ok(Self { handle })
     }
@@ -440,11 +491,7 @@ impl Module {
             bail!(Error::last_error());
         }
 
-        // SAFETY: Return value is the number of characters (not bytes) copied without NUL terminator.
-        // TWe assume that this is less than or equal to the size of the passed in vector.
-        unsafe {
-            buf.set_len(size);
-        }
+        buf.truncate(size);
 
         Ok(OsString::from_wide(&buf).into())
     }

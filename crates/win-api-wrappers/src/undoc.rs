@@ -20,7 +20,7 @@ pub unsafe fn LogonUserExExW<P0, P1, P2>(
     ptokenGroups: Option<*const TOKEN_GROUPS>,
     phtoken: Option<*mut HANDLE>,
     pplogonsid: Option<*mut PSID>,
-    ppprofilebuffer: Option<*mut *mut core::ffi::c_void>,
+    ppprofilebuffer: Option<*mut *mut c_void>,
     pdwprofilelength: Option<*mut u32>,
     pquotalimits: Option<*mut QUOTA_LIMITS>,
 ) -> windows::core::Result<()>
@@ -30,7 +30,7 @@ where
     P2: windows::core::Param<PCWSTR>,
 {
     let LogonUserExExW = mem::transmute::<
-        _,
+        *const c_void,
         unsafe extern "system" fn(
             PCWSTR,
             PCWSTR,
@@ -40,7 +40,7 @@ where
             *const TOKEN_GROUPS,
             *mut HANDLE,
             *mut PSID,
-            *mut *mut core::ffi::c_void,
+            *mut *mut c_void,
             *mut u32,
             *mut QUOTA_LIMITS,
         ) -> BOOL,
@@ -52,11 +52,11 @@ where
         dwlogontype,
         dwlogonprovider,
         ptokenGroups.unwrap_or(std::ptr::null_mut()),
-        core::mem::transmute(phtoken.unwrap_or(std::ptr::null_mut())),
-        core::mem::transmute(pplogonsid.unwrap_or(std::ptr::null_mut())),
-        core::mem::transmute(ppprofilebuffer.unwrap_or(std::ptr::null_mut())),
-        core::mem::transmute(pdwprofilelength.unwrap_or(std::ptr::null_mut())),
-        core::mem::transmute(pquotalimits.unwrap_or(std::ptr::null_mut())),
+        phtoken.unwrap_or(std::ptr::null_mut()),
+        pplogonsid.unwrap_or(std::ptr::null_mut()),
+        ppprofilebuffer.unwrap_or(std::ptr::null_mut()),
+        pdwprofilelength.unwrap_or(std::ptr::null_mut()),
+        pquotalimits.unwrap_or(std::ptr::null_mut()),
     )
     .ok()
 }
@@ -126,7 +126,7 @@ pub unsafe fn LsaManageSidNameMapping(
     OpOutput: *mut *mut LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
 ) -> windows::core::Result<()> {
     let LsaManageSidNameMapping = mem::transmute::<
-        _,
+        *const c_void,
         unsafe extern "system" fn(
             LSA_SID_NAME_MAPPING_OPERATION_TYPE,
             *const LSA_SID_NAME_MAPPING_OPERATION_INPUT,
@@ -145,9 +145,10 @@ pub unsafe fn RtlCreateVirtualAccountSid(
     SidLength: *mut u32,
 ) -> windows::core::Result<()> {
     let RtlCreateVirtualAccountSid =
-        mem::transmute::<_, unsafe extern "system" fn(*const UNICODE_STRING, u32, PSID, *mut u32) -> NTSTATUS>(
-            Module::from_name("ntdll.dll")?.resolve_symbol("RtlCreateVirtualAccountSid")?,
-        );
+        mem::transmute::<
+            *const c_void,
+            unsafe extern "system" fn(*const UNICODE_STRING, u32, PSID, *mut u32) -> NTSTATUS,
+        >(Module::from_name("ntdll.dll")?.resolve_symbol("RtlCreateVirtualAccountSid")?);
 
     RtlCreateVirtualAccountSid(Name, BaseSubAuthority, Sid, SidLength).ok()
 }
@@ -173,7 +174,7 @@ pub unsafe fn NtQueryInformationProcess(
     ReturnLength: Option<*mut u32>,
 ) -> windows::core::Result<()> {
     let NtQueryInformationProcess = mem::transmute::<
-        _,
+        *const c_void,
         unsafe extern "system" fn(HANDLE, PROCESSINFOCLASS, *mut c_void, u32, *mut u32) -> NTSTATUS,
     >(Module::from_name("ntdll.dll")?.resolve_symbol("NtQueryInformationProcess")?);
 
@@ -201,7 +202,7 @@ pub unsafe fn NtSetInformationThread(
     ThreadInformationLength: u32,
 ) -> windows::core::Result<()> {
     let NtSetInformationThread = mem::transmute::<
-        _,
+        *const c_void,
         unsafe extern "system" fn(HANDLE, THREADINFOCLASS, *mut c_void, u32) -> NTSTATUS,
     >(Module::from_name("ntdll.dll")?.resolve_symbol("NtSetInformationThread")?);
 
@@ -227,7 +228,7 @@ pub struct OBJECT_ATTRIBUTES {
 
 impl Default for OBJECT_ATTRIBUTES {
     fn default() -> Self {
-        unsafe { core::mem::zeroed() }
+        unsafe { mem::zeroed() }
     }
 }
 
@@ -252,7 +253,7 @@ pub unsafe fn NtCreateToken(
     TokenSource: *const TOKEN_SOURCE,
 ) -> windows::core::Result<()> {
     let NtCreateToken = mem::transmute::<
-        _,
+        *const c_void,
         unsafe extern "system" fn(
             *mut HANDLE,
             TOKEN_ACCESS_MASK,

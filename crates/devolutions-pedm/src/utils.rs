@@ -42,25 +42,20 @@ pub fn start_process(
         "Starting process"
     );
 
-    let mut process_information = None;
-    token.impersonate(|| {
-        process_information = Some(create_process_as_user(
-            Some(&token),
-            executable_path,
-            command_line,
-            None,
-            None,
-            inherit_handles,
-            creation_flags,
-            environment,
-            current_directory,
-            startup_info,
-        )?);
+    let _ctx = token.impersonate()?;
 
-        Ok(())
-    })?;
-
-    Ok(process_information.expect("BUG: impersonation succeeded without code block running"))
+    create_process_as_user(
+        Some(&token),
+        executable_path,
+        command_line,
+        None,
+        None,
+        inherit_handles,
+        creation_flags,
+        environment,
+        current_directory,
+        startup_info,
+    )
 }
 
 #[derive(Default)]

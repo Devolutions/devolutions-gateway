@@ -18,7 +18,7 @@ use win_api_wrappers::utils::{CommandLine, Pipe, WideString};
 use crate::utils::{start_process, AccountExt};
 use crate::{config, policy};
 
-static SECURE_DESKTOP: &'static str = r"WinSta0\Winlogon";
+static SECURE_DESKTOP: &str = r"WinSta0\Winlogon";
 
 fn launch_desktop(
     session_id: u32,

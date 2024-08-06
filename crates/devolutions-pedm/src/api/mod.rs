@@ -61,9 +61,9 @@ struct RawNamedPipeConnectInfo {
 
 impl Connected<&NamedPipeServer> for RawNamedPipeConnectInfo {
     fn connect_info(target: &NamedPipeServer) -> Self {
-        return Self {
+        Self {
             handle: Handle::new(HANDLE(target.as_raw_handle() as _), false),
-        };
+        }
     }
 }
 
@@ -73,7 +73,7 @@ async fn named_pipe_middleware(
     next: Next,
 ) -> Result<Response, Error> {
     let pipe = Pipe {
-        handle: raw_named_pipe_info.handle,
+        handle: raw_named_pipe_info.handle.try_clone()?,
     };
 
     let token = Arc::new(pipe.client_primary_token()?);

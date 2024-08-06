@@ -1,3 +1,12 @@
+//! Module in charge of loading, saving and overall management of the PEDM policy.
+//!
+//! The policy works in 3 layers:
+//! - Rules: Each rule specifies what process can launch which other process in administrator mode with some more settings.
+//! - Profiles: Each profile specifies which type of elevation should be done as well as which rules are valid for that profile.
+//! - Assignments: A mapping between users on the machine and the profiles available to them.
+//!
+//! The policy is stored under `%ProgramData%\Devolutions\Agent\pedm\policy\`, and is only accessible by `NT AUTHORITY\SYSTEM`.
+//! It is possible to edit the policy via the named pipe API.
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use camino::Utf8PathBuf;
@@ -105,7 +114,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
             path.push(entry.id().to_string());
             path.set_extension("json");
 
-            let writer = BufWriter::new(OpenOptions::new().create(true).write(true).open(path)?);
+            let writer = BufWriter::new(OpenOptions::new().create(true).truncate(false).write(true).open(path)?);
             serde_json::to_writer(writer, &entry)?;
         }
 
@@ -196,7 +205,7 @@ impl Policy {
             .config
             .assignments
             .get(id)
-            .is_some_and(|users| users.contains(&user))
+            .is_some_and(|users| users.contains(user))
         {
             return None;
         }
@@ -232,14 +241,14 @@ impl Policy {
     }
 
     pub fn user_current_profile(&self, user: &User) -> Option<&Profile> {
-        let profile_id = self.current_profiles.get(&user)?;
+        let profile_id = self.current_profiles.get(user)?;
 
         // Make sure the user's assigned profile is actually allowed.
         if !self
             .config
             .assignments
             .get(profile_id)
-            .is_some_and(|users| users.contains(&user))
+            .is_some_and(|users| users.contains(user))
         {
             return None;
         }
@@ -380,7 +389,7 @@ impl Policy {
 
         let rule = 'r: loop {
             for rule_id in &profile.rules {
-                let rule = self.rules.get(&rule_id);
+                let rule = self.rules.get(rule_id);
                 if rule.is_none() {
                     warn!(%profile.id, %rule_id, "Profile assigned to non existent rule");
                     continue;
@@ -416,7 +425,7 @@ impl Policy {
                     bail!(Error::Cancelled);
                 }
 
-                return Ok(());
+                Ok(())
             }
             policy::ElevationKind::ReasonApproval => bail!(Error::InvalidParameter),
             policy::ElevationKind::Deny => bail!(Error::AccessDenied),
@@ -471,12 +480,12 @@ where
 }
 
 pub fn load_signature(path: &Path) -> Result<Signature> {
-    let wintrust_result = authenticode_status(&path)?;
+    let wintrust_result = authenticode_status(path)?;
 
     // Windows only supports one signer, so getting the first is ok.
     let (signer, cert_chain) = wintrust_result
         .provider
-        .and_then(|mut p| (0 < p.signers.len()).then(|| p.signers.remove(0)))
+        .and_then(|mut p| (!p.signers.is_empty()).then(|| p.signers.remove(0)))
         .map_or_else(|| (None, None), |x| (Some(x.signer), Some(x.cert_chain)));
 
     Ok(Signature {
@@ -558,8 +567,8 @@ fn win_cert_to_policy_cert(value: CryptProviderCertificate) -> Certificate {
         issuer: value.cert.info.issuer,
         subject: value.cert.info.subject,
         serial_number: base16ct::upper::encode_string(&value.cert.info.serial_number),
-        thumbprint: MultiHasher::default().chain_update(&der).finalize(),
-        base64: BASE64_STANDARD.encode(&der),
+        thumbprint: MultiHasher::default().chain_update(der).finalize(),
+        base64: BASE64_STANDARD.encode(der),
         eku: value.cert.eku,
     }
 }

@@ -5,18 +5,18 @@ use camino::Utf8PathBuf;
 use win_api_wrappers::process::Module;
 use win_api_wrappers::raw::Win32::Foundation::LUID;
 
-pub(crate) static PEDM_DESKTOP_RELPATH: &'static str = r"desktop/DevolutionsPedmDesktop.exe";
+pub(crate) static PEDM_DESKTOP_RELPATH: &str = r"desktop/DevolutionsPedmDesktop.exe";
 
-pub(crate) static PIPE_NAME: &'static str = r"\\.\pipe\DevolutionsPEDM";
+pub(crate) static PIPE_NAME: &str = r"\\.\pipe\DevolutionsPEDM";
 
-pub(crate) const LADM_SRC_NAME: &'static [u8; 8] = b"DevoPEDM";
+pub(crate) const LADM_SRC_NAME: &[u8; 8] = b"DevoPEDM";
 pub(crate) static LADM_SRC_LUID: LUID = LUID {
     HighPart: 0,
     LowPart: 0x1337,
 };
 
 pub(crate) const VADM_RID: u32 = 99;
-pub(crate) static VADM_DOMAIN: &'static str = "_DEPM";
+pub(crate) static VADM_DOMAIN: &str = "_DEPM";
 
 pub fn pedm_desktop_path() -> &'static Path {
     static PEDM_DESKTOP_PATH: OnceLock<PathBuf> = OnceLock::new();

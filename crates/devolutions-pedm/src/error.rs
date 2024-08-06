@@ -17,7 +17,7 @@ pub enum Error {
     AccessDenied,
     NotFound,
     InvalidParameter,
-    InternalError,
+    Internal,
     Cancelled,
 }
 
@@ -33,12 +33,13 @@ where
 {
     fn from(error: E) -> Self {
         let error = error.into();
+
         match error.downcast::<Error>() {
             Ok(error) => error,
             Err(error) => {
                 error!(%error, "Error handling request");
 
-                Error::InternalError
+                Error::Internal
             }
         }
     }
@@ -62,7 +63,7 @@ impl From<Error> for ErrorResponse {
         let win32_error = match kind {
             Error::AccessDenied => ERROR_ACCESS_DISABLED_BY_POLICY.0,
             Error::InvalidParameter | Error::NotFound => ERROR_INVALID_PARAMETER.0,
-            Error::InternalError => E_UNEXPECTED.0 as _,
+            Error::Internal => E_UNEXPECTED.0 as _,
             Error::Cancelled => ERROR_CANCELLED.0,
         };
 
@@ -81,7 +82,7 @@ impl IntoResponse for ErrorResponse {
                 Error::AccessDenied => StatusCode::FORBIDDEN,
                 Error::NotFound => StatusCode::NOT_FOUND,
                 Error::InvalidParameter => StatusCode::BAD_REQUEST,
-                Error::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
+                Error::Internal => StatusCode::INTERNAL_SERVER_ERROR,
                 Error::Cancelled => StatusCode::REQUEST_TIMEOUT,
             },
             Json(self),

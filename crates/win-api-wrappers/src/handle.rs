@@ -37,6 +37,7 @@ impl Handle {
         let current_process = unsafe { GetCurrentProcess() };
         let mut duplicated = HANDLE::default();
 
+        // SAFETY: `current_process` is valid. No preconditions. Returned handle is closed with its RAII wrapper.
         unsafe {
             DuplicateHandle(
                 current_process,
@@ -56,6 +57,7 @@ impl Handle {
 impl Drop for Handle {
     fn drop(&mut self) {
         if self.owned {
+            // SAFETY: No preconditions and handle is assumed to be valid if owned (we assume it is not a pseudohandle).
             let _ = unsafe { CloseHandle(self.raw) };
         }
     }
@@ -70,7 +72,7 @@ impl From<HANDLE> for Handle {
 impl TryFrom<&BorrowedHandle<'_>> for Handle {
     type Error = anyhow::Error;
 
-    fn try_from(value: &BorrowedHandle) -> Result<Self, Self::Error> {
+    fn try_from(value: &BorrowedHandle<'_>) -> Result<Self, Self::Error> {
         let handle = Handle {
             raw: HANDLE(value.as_raw_handle() as _),
             owned: false,
@@ -83,7 +85,7 @@ impl TryFrom<&BorrowedHandle<'_>> for Handle {
 impl TryFrom<BorrowedHandle<'_>> for Handle {
     type Error = anyhow::Error;
 
-    fn try_from(value: BorrowedHandle) -> Result<Self, Self::Error> {
+    fn try_from(value: BorrowedHandle<'_>) -> Result<Self, Self::Error> {
         Self::try_from(&value)
     }
 }

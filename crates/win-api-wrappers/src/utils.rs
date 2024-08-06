@@ -10,22 +10,20 @@ use std::{ptr, slice};
 
 use anyhow::{bail, Result};
 
-use crate::error::Error;
 use crate::handle::{Handle, HandleWrapper};
 use crate::process::Process;
 use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
 use crate::thread::Thread;
 use crate::token::Token;
+use crate::Error;
 use windows::core::{Interface, PCSTR, PCWSTR, PSTR, PWSTR};
-use windows::Win32::Foundation::{
-    CloseHandle, LocalFree, E_INVALIDARG, E_POINTER, HANDLE, HLOCAL, MAX_PATH, UNICODE_STRING,
-};
+use windows::Win32::Foundation::{LocalFree, E_INVALIDARG, E_POINTER, HANDLE, HLOCAL, MAX_PATH, UNICODE_STRING};
 use windows::Win32::Security::{
     RevertToSelf, SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
 };
 use windows::Win32::Storage::FileSystem::{CreateDirectoryW, FlushFileBuffers, ReadFile, WriteFile};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT, COINIT_MULTITHREADED,
     STGM_READ,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -55,6 +53,7 @@ macro_rules! impl_safe_win_string {
                 if self.is_null() {
                     bail!(Error::from_hresult(E_POINTER))
                 } else {
+                    // SAFETY: pointer is non null as requested by `to_string()`'s safety requirements.
                     unsafe { Ok(self.to_string()?) }
                 }
             }
@@ -94,11 +93,27 @@ impl AnsiString {
     }
 }
 
-impl From<&str> for AnsiString {
-    fn from(value: &str) -> Self {
-        let mut buf = value.as_bytes().to_vec();
+impl<T: ?Sized + AsRef<OsStr>> From<&T> for AnsiString {
+    fn from(value: &T) -> Self {
+        let mut buf = value.as_ref().as_encoded_bytes().to_vec();
         buf.push(0);
-        AnsiString(Some(buf))
+        Self(Some(buf))
+    }
+}
+
+impl FromStr for AnsiString {
+    type Err = core::convert::Infallible;
+
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        let mut buf = s.as_bytes().to_vec();
+        buf.push(0);
+        Ok(Self(Some(buf)))
+    }
+}
+
+impl From<String> for AnsiString {
+    fn from(value: String) -> Self {
+        Self::from(&value)
     }
 }
 
@@ -180,6 +195,7 @@ impl CommandLine {
         let command_line = WideString::from(command_line);
         let mut arg_cnt = 0;
 
+        // SAFETY: `command_line` is valid and NUL terminated. `raw_args` will point to memory allocated by `LocalAlloc`.
         let raw_args = unsafe { CommandLineToArgvW(command_line.as_pcwstr(), &mut arg_cnt) };
 
         // If we get an error, no args.
@@ -187,11 +203,13 @@ impl CommandLine {
             return Self(vec![]);
         }
 
+        // SAFETY: We assume that if the address is valid and the function did not have an error, arg_cnt will be valid.
         let args = unsafe { slice::from_raw_parts(raw_args, arg_cnt as _) }
             .iter()
             .filter_map(|x| x.to_string_safe().ok())
             .collect::<Vec<_>>();
 
+        // SAFETY: No preconditions. `raw_args` is valid and must be freed.
         let _ = unsafe { LocalFree(HLOCAL(raw_args.cast())) };
 
         Self(args)
@@ -273,6 +291,7 @@ pub struct Allocation<'a> {
 
 impl<'a> Allocation<'a> {
     pub fn try_new(process: &'a Process, size: usize) -> Result<Self> {
+        // SAFETY: No preconditions. We assume caller needs the allocation in RW only.
         let address = unsafe {
             VirtualAllocEx(
                 process.handle.raw(),
@@ -291,19 +310,26 @@ impl<'a> Allocation<'a> {
     }
 }
 
-impl<'a> Drop for Allocation<'a> {
+impl Drop for Allocation<'_> {
     fn drop(&mut self) {
+        // SAFETY: We assume the caller has removed any reference to data inside the buffer.
         let _ = unsafe { VirtualFreeEx(self.process.handle.raw(), self.address, 0, MEM_RELEASE) };
     }
 }
 
+/// Sets the memory protection of an address.
+/// # Safety:
+/// `addr` must not point to neighboring code, as if permissions are set incorrectly a crash or UB will occur.
 pub unsafe fn set_memory_protection(
-    addr: *const (),
+    addr: *const c_void,
     size: usize,
     prot: PAGE_PROTECTION_FLAGS,
 ) -> Result<PAGE_PROTECTION_FLAGS> {
     let mut old_prot = Default::default();
-    VirtualProtect(addr as _, size, prot, &mut old_prot)?;
+
+    // SAFETY: `addr` is valid by safety of function. No preconditions.
+    unsafe { VirtualProtect(addr as _, size, prot, &mut old_prot) }?;
+
     Ok(old_prot)
 }
 
@@ -329,35 +355,44 @@ pub fn serialize_environment(environment: &HashMap<String, String>) -> Result<Ve
 pub fn environment_block(token: Option<&Token>, inherit: bool) -> Result<HashMap<String, String>> {
     let mut blocks = Vec::new();
 
-    unsafe {
-        let mut raw_blocks: *mut u16 = ptr::null_mut();
+    let mut raw_blocks: *const u16 = ptr::null_mut();
 
+    // SAFETY: After a successful invocation, `raw_blocks` will be a pointer to a newly allocated buffer
+    // that contains a list of NUL terminated strings and ends with an extra NUL byte.
+    // We can safely cast a *const to a *mut as we have no intention of modifying the data under the pointer.
+    unsafe {
         CreateEnvironmentBlock(
             &mut raw_blocks as *mut _ as _,
             token.map(|x| x.handle().raw()).unwrap_or_default(),
             inherit,
         )?;
+    }
 
-        let mut i = 0;
-        while raw_blocks.add(i).read() != 0 {
-            let mut block = Vec::new();
+    let mut i = 0;
 
-            loop {
-                let cur_val = raw_blocks.add(i).read();
-                i += 1;
+    // SAFETY: `i` only increments by one. This means it will always be at maximum one byte beyond the last string.
+    // This means the address it points to will always be valid.
+    while unsafe { raw_blocks.add(i).read() } != 0 {
+        let mut block = Vec::new();
 
-                if cur_val == 0 {
-                    break;
-                }
+        loop {
+            // SAFETY: If `i` indexes to a zero value, we break out. This ensures the previous check will always be safe.
+            // This iteration will always stop on the first zero. This means on each string, or on the before to last zero byte.
+            let cur_val = unsafe { raw_blocks.add(i).read() };
+            i += 1;
 
-                block.push(cur_val);
+            if cur_val == 0 {
+                break;
             }
 
-            blocks.push(block);
+            block.push(cur_val);
         }
 
-        DestroyEnvironmentBlock(raw_blocks as *mut _ as _)?;
-    };
+        blocks.push(block);
+    }
+
+    // SAFETY: No preconditions. Here, `raw_blocks` is a valid allocation.
+    unsafe { DestroyEnvironmentBlock(raw_blocks.cast())? };
 
     let mut env_block = HashMap::new();
 
@@ -412,7 +447,7 @@ pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>
 }
 
 pub struct Snapshot {
-    handle: HANDLE,
+    handle: Handle,
 }
 
 pub struct ProcessIdIterator<'a> {
@@ -445,7 +480,8 @@ impl Iterator for ProcessIdIterator<'_> {
             Process32Next
         };
 
-        unsafe { iter_fn(self.snapshot.handle, &mut self.entry) }.ok()?;
+        // SAFETY: Only precondition is entry's `dwSize` being set correctly, which is done in `ProcessIdIterator::new`.
+        unsafe { iter_fn(self.snapshot.handle.raw(), &mut self.entry) }.ok()?;
 
         Some(self.entry.th32ProcessID)
     }
@@ -453,38 +489,35 @@ impl Iterator for ProcessIdIterator<'_> {
 
 impl Snapshot {
     pub fn new(flags: CREATE_TOOLHELP_SNAPSHOT_FLAGS, process_id: Option<u32>) -> Result<Self> {
+        // SAFETY: No preconditions. Flags or process ID cannot create scenarios where unsafe behavior happens.
+        let handle = unsafe { CreateToolhelp32Snapshot(flags, process_id.unwrap_or(0))? };
+
         Ok(Self {
-            handle: unsafe { CreateToolhelp32Snapshot(flags, process_id.unwrap_or(0))? },
+            handle: Handle::new(handle, true),
         })
     }
 
-    pub fn process_ids(&self) -> ProcessIdIterator {
+    pub fn process_ids(&self) -> ProcessIdIterator<'_> {
         ProcessIdIterator::new(self)
     }
 }
 
-impl Drop for Snapshot {
-    fn drop(&mut self) {
-        let _ = unsafe { CloseHandle(self.handle) };
-        self.handle = HANDLE::default();
+pub struct ComContext;
+
+impl ComContext {
+    pub fn try_new(coinit: COINIT) -> Result<Self> {
+        // SAFETY: Must not be called from `DllMain`. Can be called multiple times on a thread.
+        unsafe { CoInitializeEx(None, coinit) }.ok()?;
+
+        Ok(Self)
     }
 }
 
-pub fn com_call<F, T>(f: F) -> Result<T>
-where
-    F: FnOnce() -> Result<T>,
-{
-    unsafe {
-        CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+impl Drop for ComContext {
+    fn drop(&mut self) {
+        // SAFETY: Must be called once for each `CoInitializeEx`.
+        unsafe { CoUninitialize() };
     }
-
-    let r = f();
-
-    unsafe {
-        CoUninitialize();
-    }
-
-    r
 }
 
 pub struct Link {
@@ -500,77 +533,59 @@ impl Link {
     where
         F: FnOnce(&IShellLinkW) -> Result<T>,
     {
-        com_call(|| unsafe {
-            let inst: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
-            let mut persist_file = MaybeUninit::<IPersistFile>::zeroed();
+        let _ctx = ComContext::try_new(COINIT_MULTITHREADED)?;
 
-            inst.query(&IPersistFile::IID, persist_file.as_mut_ptr() as _).ok()?;
+        // SAFETY: Must be called within COM context.
+        let inst: IShellLinkW = unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }?;
+        let mut persist_file = MaybeUninit::<IPersistFile>::zeroed();
 
-            let persist_file = persist_file.assume_init();
+        // SAFETY: Must be called within COM context. `persist_file` is valid and correctly sized.
+        unsafe { inst.query(&IPersistFile::IID, persist_file.as_mut_ptr() as _) }.ok()?;
 
-            let raw_path = WideString::from(&self.path);
-            persist_file.Load(raw_path.as_pcwstr(), STGM_READ)?;
+        // SAFETY: We assume that `.query` initializes `persist_file`.
+        let persist_file = unsafe { persist_file.assume_init() };
 
-            inst.Resolve(None, SLR_NO_UI.0 as _)?;
+        let raw_path = WideString::from(&self.path);
 
-            f(&inst)
-        })
+        // SAFETY: Must be called within COM context. `raw_path` is valid and NUL terminated.
+        unsafe { persist_file.Load(raw_path.as_pcwstr(), STGM_READ) }?;
+
+        // SAFETY: Must be called within COM context.
+        unsafe { inst.Resolve(None, SLR_NO_UI.0 as _) }?;
+
+        f(&inst)
     }
 
     pub fn target_path(&self) -> Result<PathBuf> {
         self.with_instance(|link| {
             let mut target = vec![0; MAX_PATH as _];
+
+            // SAFETY: No preconditions. Path is copied to `target`.
             unsafe { link.GetPath(target.as_mut_slice(), ptr::null_mut(), SLGP_SHORTPATH.0 as _) }?;
 
-            if let Some(idx) = target
-                .iter()
-                .enumerate()
-                .filter(|(_, x)| **x == 0)
-                .map(|(i, _)| i)
-                .next()
-            {
-                target.truncate(idx);
-            }
-
-            Ok(PathBuf::from(OsString::from_wide(&target)))
+            Ok(PathBuf::from(OsString::from_wide(nul_slice_wide_str(&target))))
         })
     }
 
     pub fn target_args(&self) -> Result<String> {
         self.with_instance(|link| {
             let mut target = vec![0; std::cmp::max(INFOTIPSIZE as _, MAX_PATH as _)];
+
+            // SAFETY: No preconditions. Arguments is copied to `target`.
             unsafe { link.GetArguments(target.as_mut_slice()) }?;
 
-            if let Some(idx) = target
-                .iter()
-                .enumerate()
-                .filter(|(_, x)| **x == 0)
-                .map(|(i, _)| i)
-                .next()
-            {
-                target.truncate(idx);
-            }
-
-            Ok(String::from_utf16(&target)?)
+            Ok(String::from_utf16(nul_slice_wide_str(&target))?)
         })
     }
 
     pub fn target_working_directory(&self) -> Result<PathBuf> {
         self.with_instance(|link| {
             let mut target = vec![0; MAX_PATH as _];
+
+            // SAFETY: No preconditions. Path is copied to `target` and truncated afterwards.
             unsafe { link.GetWorkingDirectory(target.as_mut_slice()) }?;
 
-            if let Some(idx) = target
-                .iter()
-                .enumerate()
-                .filter(|(_, x)| **x == 0)
-                .map(|(i, _)| i)
-                .next()
-            {
-                target.truncate(idx);
-            }
-
-            Ok(PathBuf::from(OsString::from_wide(&target)))
+            Ok(PathBuf::from(OsString::from_wide(nul_slice_wide_str(&target))))
         })
     }
 }
@@ -580,6 +595,7 @@ pub fn create_directory(path: &Path, security_attributes: &SecurityAttributes) -
 
     let security_attributes = RawSecurityAttributes::try_from(security_attributes)?;
 
+    // SAFETY: `path` is NUL terminated. We assume `security_attributes` is well constructed.
     unsafe { CreateDirectoryW(path.as_pcwstr(), Some(security_attributes.raw())) }?;
 
     Ok(())
@@ -596,6 +612,7 @@ impl Pipe {
 
         let security_attributes = security_attributes.map(RawSecurityAttributes::try_from).transpose()?;
 
+        // SAFETY: No preconditions. `rx` and `tx` are valid out params.
         unsafe {
             CreatePipe(
                 &mut rx,
@@ -607,10 +624,12 @@ impl Pipe {
         Ok((Self { handle: rx.into() }, Self { handle: tx.into() }))
     }
 
+    /// Peeks the contents of the pipe in `data`, while returning the amount of bytes available on the pipe.
     pub fn peek(&self, data: Option<&mut [u8]>) -> Result<u32> {
         let mut available = 0;
         let size = data.as_ref().map(|b| b.len() as _).unwrap_or_default();
 
+        // SAFETY: No preconditions. The buffer is valid and its size is in bytes.
         unsafe {
             PeekNamedPipe(
                 self.handle.raw(),
@@ -644,9 +663,7 @@ impl Pipe {
         let mut pid = 0u32;
 
         // SAFETY: Only precondition is for the handle to be created by `CreateNamedPipe`. Will fail otherwise.
-        unsafe {
-            GetNamedPipeClientProcessId(self.handle.raw(), &mut pid)?;
-        }
+        unsafe { GetNamedPipeClientProcessId(self.handle.raw(), &mut pid) }?;
 
         Ok(pid)
     }
@@ -693,20 +710,59 @@ impl HandleWrapper for Pipe {
     }
 }
 
-pub struct NamedPipeImpersonation<'a> {
-    _pipe: &'a Pipe,
+#[macro_export]
+macro_rules! create_impersonation_context {
+    ($name:ident, $underlying:ident, $impersonate:ident) => {
+        pub struct $name<'a> {
+            _handle: &'a $underlying,
+        }
+
+        impl<'a> $name<'a> {
+            fn try_new(handle: &'a $underlying) -> Result<Self> {
+                // SAFETY: No preconditions and handle is valid.
+                unsafe { $impersonate(handle.handle().raw()) }?;
+
+                Ok(Self { _handle: handle })
+            }
+        }
+
+        impl Drop for $name<'_> {
+            fn drop(&mut self) {
+                // SAFETY: Must be called after a call to `ImpersonateNamedPipeClient` or friends.
+                // Panic on fail, or rest of code will run in context of user.
+                if unsafe { RevertToSelf() }.is_err() {
+                    panic!("failed to revert to context of current thread");
+                }
+            }
+        }
+    };
 }
 
-impl<'a> NamedPipeImpersonation<'a> {
-    fn try_new(pipe: &'a Pipe) -> Result<Self> {
-        unsafe { ImpersonateNamedPipeClient(pipe.handle().raw()) }?;
+create_impersonation_context!(NamedPipeImpersonation, Pipe, ImpersonateNamedPipeClient);
 
-        Ok(Self { _pipe: pipe })
+/// Creates a slice from a pointer. Returns an empty slice on NULL.
+///
+/// # Safety
+///
+/// - data must point to len consecutive properly initialized values of type T.
+/// - The memory referenced by the returned slice must not be mutated for the duration of lifetime 'a, except inside an UnsafeCell.
+pub(crate) unsafe fn slice_from_ptr<'a, T>(data: *const T, len: usize) -> &'a [T] {
+    if data.is_null() || len == 0 {
+        &[]
+    } else {
+        // SAFETY: `data` is non NULL and `len` is not 0.
+        unsafe { slice::from_raw_parts(data, len) }
     }
 }
 
-impl Drop for NamedPipeImpersonation<'_> {
-    fn drop(&mut self) {
-        let _ = unsafe { RevertToSelf() };
-    }
+pub fn nul_slice_wide_str(slice: &[u16]) -> &[u16] {
+    let last_idx = slice
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| **x == 0)
+        .map(|(i, _)| i)
+        .next()
+        .unwrap_or_else(|| slice.len());
+
+    &slice[..last_idx]
 }

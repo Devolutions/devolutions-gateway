@@ -4,9 +4,9 @@ use std::{ptr, slice};
 
 use anyhow::{bail, Result};
 
-use crate::error::Error;
 use crate::identity::sid::{RawSid, Sid};
 use crate::utils::WideString;
+use crate::Error;
 use windows::Win32::Foundation::{ERROR_INVALID_VARIANT, E_POINTER};
 use windows::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_OBJECT_TYPE};
 use windows::Win32::Security::{
@@ -17,7 +17,7 @@ use windows::Win32::Security::{
     SE_DACL_PRESENT, SE_DACL_PROTECTED, SE_SACL_AUTO_INHERITED, SE_SACL_DEFAULTED, SE_SACL_PRESENT, SE_SACL_PROTECTED,
     SID, UNPROTECTED_DACL_SECURITY_INFORMATION, UNPROTECTED_SACL_SECURITY_INFORMATION,
 };
-use windows::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION};
+use windows::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, MAXDWORD, SECURITY_DESCRIPTOR_REVISION};
 
 pub enum AceType {
     AccessAllowed(Sid),
@@ -36,9 +36,11 @@ impl AceType {
         }
     }
 
-    pub unsafe fn from_raw(kind: u8, buf: &[u8]) -> Result<Self> {
+    pub fn from_raw(kind: u8, buf: &[u8]) -> Result<Self> {
+        let raw_sid = PSID(buf.as_ptr().cast_mut().cast());
+
         Ok(match kind as _ {
-            ACCESS_ALLOWED_ACE_TYPE => Self::AccessAllowed(Sid::try_from(PSID(buf.as_ptr().cast_mut().cast()))?),
+            ACCESS_ALLOWED_ACE_TYPE => Self::AccessAllowed(Sid::try_from(raw_sid)?),
             _ => bail!(Error::from_win32(ERROR_INVALID_VARIANT)),
         })
     }
@@ -64,17 +66,22 @@ impl Ace {
 
         let mut buf = vec![0; size];
 
-        unsafe {
-            let mut ptr = buf.as_mut_ptr();
+        let mut ptr = buf.as_mut_ptr();
 
-            ptr.cast::<ACE_HEADER>().write(header);
-            ptr = ptr.byte_add(mem::size_of::<ACE_HEADER>());
+        // SAFETY: Buffer is at least `size_of::<ACE_HEADER>` big.
+        unsafe { ptr.cast::<ACE_HEADER>().write(header) };
 
-            ptr.cast::<u32>().write(self.access_mask);
-            ptr = ptr.byte_add(mem::size_of::<u32>());
+        // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
+        ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
 
-            ptr.copy_from(body.as_ptr(), body.len());
-        }
+        // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32>` big.
+        unsafe { ptr.cast::<u32>().write(self.access_mask) };
+
+        // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
+        ptr = unsafe { ptr.byte_add(mem::size_of::<u32>()) };
+
+        // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32> + body.len()` big.
+        unsafe { ptr.copy_from(body.as_ptr(), body.len()) };
 
         buf
     }
@@ -126,21 +133,29 @@ impl Acl {
 
         let mut buf = vec![0; size];
 
-        unsafe {
-            InitializeAcl(buf.as_mut_ptr() as _, buf.len() as _, self.revision)?;
+        // SAFETY: The buffer must be preallocated and it must be DWORD aligned.
+        unsafe { InitializeAcl(buf.as_mut_ptr() as _, buf.len() as _, self.revision) }?;
 
-            for raw_ace in raw_aces {
+        for raw_ace in raw_aces {
+            // SAFETY: No preconditions. Buffer is valid and `raw_ace` as well.
+            unsafe {
                 AddAce(
                     buf.as_mut_ptr().cast(),
                     self.revision,
-                    0,
+                    MAXDWORD, // Append to end of list
                     raw_ace.as_ptr().cast(),
                     raw_ace.len() as _,
-                )?;
-            }
+                )
+            }?;
         }
 
         Ok(buf)
+    }
+}
+
+impl Default for Acl {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -151,11 +166,13 @@ impl TryFrom<&ACL> for Acl {
         Ok(Self {
             revision: ACE_REVISION(value.AclRevision as _),
             aces: (0..value.AceCount as _)
-                .map(|i| unsafe {
+                .map(|i| {
                     let mut ace = ptr::null_mut();
-                    GetAce(value, i, &mut ace)?;
 
-                    Ace::from_ptr(ace)
+                    // SAFETY: We assume `AceCount` is truthful and that `value` is well constructed.
+                    unsafe { GetAce(value, i, &mut ace) }?;
+
+                    unsafe { Ace::from_ptr(ace) }
                 })
                 .collect::<Result<_>>()?,
         })
@@ -214,6 +231,8 @@ pub fn set_named_security_info(
     let dacl = dacl.map(|x| x.acl.to_raw()).transpose()?;
     let sacl = sacl.map(|x| x.acl.to_raw()).transpose()?;
 
+    // SAFETY: No preconditions. `target` is valid and null terminated.
+    // We assume `RawSid` builds valid SIDs. We assume the ACL encoding builds valid ACLs.
     unsafe {
         SetNamedSecurityInfoW(
             target.as_pcwstr(),
@@ -309,6 +328,9 @@ impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
             };
         }
 
+        // TODO: Per remarks in https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-security_descriptor, `SECURITY_DESCRIPTOR` must be aligned
+        // on `malloc` or `LocalAlloc` boundaries.
+        // Per https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/malloc, `malloc` will align to 16 bytes on 64-bit platforms.
         let raw = SECURITY_DESCRIPTOR {
             Revision: value.revision,
             Sbz1: 0,
@@ -358,6 +380,7 @@ impl TryFrom<&SECURITY_DESCRIPTOR> for SecurityDescriptor {
                         } else {
                             InheritableAclKind::Default
                         },
+                        // SAFETY: We assume `field` actually points to an `ACL`.
                         acl: Acl::try_from(unsafe { field.as_ref() }.ok_or_else(|| Error::from_hresult(E_POINTER))?)?,
                     })
                 })
@@ -369,9 +392,11 @@ impl TryFrom<&SECURITY_DESCRIPTOR> for SecurityDescriptor {
 
         Ok(Self {
             revision: value.Revision,
+            // SAFETY: We assume `Owner` points to a valid `SID`.
             owner: unsafe { value.Owner.0.cast::<SID>().as_ref() }
                 .map(Sid::try_from)
                 .transpose()?,
+            // SAFETY: We assume `Group` points to a valid `SID`.
             group: unsafe { value.Group.0.cast::<SID>().as_ref() }
                 .map(Sid::try_from)
                 .transpose()?,

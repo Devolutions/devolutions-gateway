@@ -1,3 +1,9 @@
+//! Elevator in charge of local admin elevation.
+//!
+//! This works without ever adding the target user to the administrator group.
+//! A token is manually created using `NtCreateToken`, and the administrator group is specified.
+//! This has the advantage of granting the user a token for admin purposes we can control without a timespan where the user
+//! is free to do what they want in the admin group.
 use anyhow::Result;
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
 use win_api_wrappers::raw::Win32::Foundation::LUID;
@@ -18,8 +24,11 @@ pub struct LocalAdminElevator {
 
 impl LocalAdminElevator {
     pub fn new(source_name: &[u8; 8], source_identifier: LUID) -> Self {
-        let mut source = TOKEN_SOURCE::default();
-        source.SourceIdentifier = source_identifier;
+        let mut source = TOKEN_SOURCE {
+            SourceIdentifier: source_identifier,
+            ..Default::default()
+        };
+
         source
             .SourceName
             .iter_mut()

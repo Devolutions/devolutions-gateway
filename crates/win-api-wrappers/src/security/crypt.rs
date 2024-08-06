@@ -1,15 +1,16 @@
+use std::ffi::OsString;
 use std::fmt::Debug;
 use std::fs::File;
 use std::mem::{self};
+use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
-use std::slice;
 
 use anyhow::{anyhow, bail, Result};
 
-use crate::error::Error;
-use crate::utils::{SafeWindowsString, WideString};
-use windows::core::{HRESULT, PCWSTR};
+use crate::utils::{nul_slice_wide_str, slice_from_ptr, SafeWindowsString, WideString};
+use crate::Error;
+use windows::core::HRESULT;
 use windows::Win32::Foundation::{
     CRYPT_E_BAD_MSG, ERROR_INCORRECT_SIZE, ERROR_INVALID_VARIANT, HANDLE, HWND, INVALID_HANDLE_VALUE, NTE_BAD_ALGID,
     S_OK, TRUST_E_BAD_DIGEST, TRUST_E_EXPLICIT_DISTRUST, TRUST_E_NOSIGNATURE, TRUST_E_PROVIDER_UNKNOWN,
@@ -63,7 +64,6 @@ pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Resul
         )
     });
 
-    #[derive(Debug)]
     enum WintrustInfo {
         Catalog(WINTRUST_CATALOG_INFO),
         File(WINTRUST_FILE_INFO),
@@ -103,25 +103,26 @@ pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Resul
 
     let mut guid = WINTRUST_ACTION_GENERIC_VERIFY_V2;
 
+    // SAFETY: No preconditions. Both `pgActionId` and `pWinTrustData` are valid.
+    // `pWinTrustData` must rego through `WinVerifyTrustEx` with `WTD_STATEACTION_CLOSE` to close the opened objects.
     let status = unsafe { WinVerifyTrustEx(HWND(INVALID_HANDLE_VALUE.0), &mut guid, &mut win_trust_data) };
 
     let result = AuthenticodeSignatureStatus::try_from(HRESULT(status));
     let provider = if win_trust_data.hWVTStateData.is_invalid() {
         None
     } else {
-        unsafe {
-            WTHelperProvDataFromStateData(win_trust_data.hWVTStateData)
-                .as_ref()
-                .map(CryptProviderData::try_from)
-        }
+        // SAFETY: No preconditions. We assume that if the returned pointer is non null it points to a valid `CRYPT_PROVIDER_DATA`.
+        unsafe { WTHelperProvDataFromStateData(win_trust_data.hWVTStateData).as_ref() }.map(CryptProviderData::try_from)
     };
 
     win_trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
 
+    // SAFETY: No preconditions. Both `pgActionId` and `pWinTrustData` are valid.
     unsafe { WinVerifyTrustEx(HWND(INVALID_HANDLE_VALUE.0), &mut guid, &mut win_trust_data) };
+
     Ok(WinVerifyTrustResult {
         provider: provider.transpose()?,
-        status: result.map_err(|x| x.ok().unwrap_err())?,
+        status: result.map_err(Error::from_hresult)?,
     })
 }
 
@@ -145,7 +146,8 @@ impl CatalogAdminContext {
     pub fn try_new() -> Result<Self> {
         let mut handle = HANDLE::default();
 
-        // TODO add arguments
+        // TODO: Add more arguments to allow any usage.
+        // SAFETY: No preconditions. Must be freed with CryptCATAdminReleaseContext.
         unsafe { CryptCATAdminAcquireContext2(&mut handle.0 as *mut _ as _, None, BCRYPT_SHA256_ALGORITHM, None, 0) }?;
 
         Ok(Self { handle })
@@ -155,29 +157,34 @@ impl CatalogAdminContext {
         let file = File::open(path)?;
         let mut required_size = 0u32;
 
-        unsafe {
-            let _ = CryptCATAdminCalcHashFromFileHandle2(
+        // SAFETY: `hFile` must not be NULL and must be a valid file pointer. The `file` is not dropped so it should be valid.
+        let _ = unsafe {
+            CryptCATAdminCalcHashFromFileHandle2(
                 self.handle.0 as _,
                 HANDLE(file.as_raw_handle() as _),
                 &mut required_size,
                 None,
                 0,
-            );
+            )
+        };
 
-            let mut hash = Vec::with_capacity(required_size as _);
+        let mut hash = vec![0u8; required_size as _];
 
+        // SAFETY: `hFile` must not be NULL and must be a valid file pointer. The `file` is not dropped so it should be valid.
+        // `hash` is valid and is of the size `required_size`.
+        unsafe {
             CryptCATAdminCalcHashFromFileHandle2(
                 self.handle.0 as _,
                 HANDLE(file.as_raw_handle() as _),
                 &mut required_size,
                 Some(hash.as_mut_ptr()),
                 0,
-            )?;
+            )
+        }?;
 
-            hash.set_len(required_size as _);
+        hash.truncate(required_size as _);
 
-            Ok(hash)
-        }
+        Ok(hash)
     }
 
     pub fn catalogs_for_hash<'a>(&'a self, hash: &'a [u8]) -> CatalogIterator<'a> {
@@ -187,6 +194,7 @@ impl CatalogAdminContext {
 
 impl Drop for CatalogAdminContext {
     fn drop(&mut self) {
+        // SAFETY: Handle is valid as it is created at construction of this object.
         let _ = unsafe { CryptCATAdminReleaseContext(self.handle.0 as _, 0) };
     }
 }
@@ -211,10 +219,11 @@ impl Iterator for CatalogIterator<'_> {
     type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: `hCatAdmin` must remain alive for the lifetime of this object.
         let new_ctx = unsafe {
             CryptCATAdminEnumCatalogFromHash(
                 self.admin_ctx.handle.0 as _,
-                &self.hash,
+                self.hash,
                 0,
                 self.cur.map(|mut x| &mut x.0 as *mut _ as _),
             )
@@ -230,9 +239,12 @@ impl Iterator for CatalogIterator<'_> {
                 ..Default::default()
             };
 
+            // SAFETY: Nopreconditions. `new_ctx` is not NULL. `info` is not NULL and writeable.
             unsafe { CryptCATCatalogInfoFromContext(new_ctx, &mut info, 0) }.ok()?;
 
-            PCWSTR(info.wszCatalogFile.as_ptr()).to_path_safe().ok()
+            Some(PathBuf::from(OsString::from_wide(nul_slice_wide_str(
+                &info.wszCatalogFile,
+            ))))
         }
     }
 }
@@ -240,6 +252,7 @@ impl Iterator for CatalogIterator<'_> {
 impl Drop for CatalogIterator<'_> {
     fn drop(&mut self) {
         if let Some(handle) = self.cur {
+            // SAFETY: No preconditions. `hCatAdmin` and `hCatInfo` are both valid.
             let _ = unsafe { CryptCATAdminReleaseCatalogContext(self.admin_ctx.handle.0 as _, handle.0 as _, 0) };
         }
     }
@@ -357,12 +370,12 @@ impl TryFrom<&CRYPT_ATTRIBUTE> for CryptAttribute {
     fn try_from(value: &CRYPT_ATTRIBUTE) -> Result<Self, Self::Error> {
         Ok(Self {
             oid: value.pszObjId.to_string_safe()?,
-            data: unsafe {
-                slice::from_raw_parts(value.rgValue, value.cValue as _)
-                    .iter()
-                    .map(|rg| slice::from_raw_parts(rg.pbData, rg.cbData as _).to_vec())
-                    .collect()
-            },
+            // SAFETY: We assume `value` is truthful about its members.
+            data: unsafe { slice_from_ptr(value.rgValue, value.cValue as _) }
+                .iter()
+                // SAFETY: We assume `rg` is truthful about its members.
+                .map(|rg| unsafe { slice_from_ptr(rg.pbData, rg.cbData as _) }.to_vec())
+                .collect(),
         })
     }
 }
@@ -373,16 +386,17 @@ impl TryFrom<&CMSG_SIGNER_INFO> for SignerInfo {
     fn try_from(value: &CMSG_SIGNER_INFO) -> Result<Self, Self::Error> {
         Ok(Self {
             issuer: cert_name_blob_to_str(X509_ASN_ENCODING, &value.Issuer, CERT_SIMPLE_NAME_STR)?,
-            serial_number: unsafe { slice::from_raw_parts(value.SerialNumber.pbData, value.SerialNumber.cbData as _) }
+            // SAFETY: We assume `value.SerialNumber` is truthful.
+            serial_number: unsafe { slice_from_ptr(value.SerialNumber.pbData, value.SerialNumber.cbData as _) }
                 .to_vec(),
-            authenticated_attributes: unsafe {
-                slice::from_raw_parts(value.AuthAttrs.rgAttr, value.AuthAttrs.cAttr as _)
-                    .iter()
-                    .map(CryptAttribute::try_from)
-                    .collect::<Result<_>>()?
-            },
+            // SAFETY: We assume `value.AuthAttrs` is truthful.
+            authenticated_attributes: unsafe { slice_from_ptr(value.AuthAttrs.rgAttr, value.AuthAttrs.cAttr as _) }
+                .iter()
+                .map(CryptAttribute::try_from)
+                .collect::<Result<_>>()?,
+            // SAFETY: We assume `value.UnauthAttrs` is truthful.
             unauthenticated_attributes: unsafe {
-                slice::from_raw_parts(value.UnauthAttrs.rgAttr, value.UnauthAttrs.cAttr as _)
+                slice_from_ptr(value.UnauthAttrs.rgAttr, value.UnauthAttrs.cAttr as _)
                     .iter()
                     .map(CryptAttribute::try_from)
                     .collect::<Result<_>>()?
@@ -398,7 +412,8 @@ impl TryFrom<&CERT_EXTENSION> for CertificateExtension {
         Ok(Self {
             oid: value.pszObjId.to_string_safe()?,
             critical: value.fCritical.as_bool(),
-            data: unsafe { slice::from_raw_parts(value.Value.pbData, value.Value.cbData as _) }.to_vec(),
+            // SAFETY: We assume `value.Value` is truthful.
+            data: unsafe { slice_from_ptr(value.Value.pbData, value.Value.cbData as _) }.to_vec(),
         })
     }
 }
@@ -414,12 +429,13 @@ impl TryFrom<&CERT_INFO> for CertificateInfo {
                 CERT_V3 => Ok(CertificateVersion::V3),
                 _ => Err(anyhow!(Error::from_win32(ERROR_INVALID_VARIANT))),
             }?,
-            serial_number: unsafe {
-                slice::from_raw_parts(value.SerialNumber.pbData, value.SerialNumber.cbData as _).to_vec()
-            },
+            // SAFETY: We assume `value.SerialNumber` is truthful.
+            serial_number: unsafe { slice_from_ptr(value.SerialNumber.pbData, value.SerialNumber.cbData as _) }
+                .to_vec(),
             issuer: cert_name_blob_to_str(X509_ASN_ENCODING, &value.Issuer, CERT_SIMPLE_NAME_STR)?,
             subject: cert_name_blob_to_str(X509_ASN_ENCODING, &value.Subject, CERT_SIMPLE_NAME_STR)?,
-            extensions: unsafe { slice::from_raw_parts(value.rgExtension, value.cExtension as _) }
+            // SAFETY: We assume `value.rgExtension` is truthful.
+            extensions: unsafe { slice_from_ptr(value.rgExtension, value.cExtension as _) }
                 .iter()
                 .map(CertificateExtension::try_from)
                 .collect::<Result<_>>()?,
@@ -437,11 +453,11 @@ impl TryFrom<&CERT_CONTEXT> for CertificateContext {
                 PKCS_7_ASN_ENCODING => Ok(CertificateEncodingType::Pkcs7Asn),
                 _ => Err(anyhow!(Error::from_win32(ERROR_INVALID_VARIANT))),
             }?,
-            encoded: unsafe { slice::from_raw_parts(value.pbCertEncoded, value.cbCertEncoded as _).to_vec() },
-            info: unsafe { value.pCertInfo.as_ref() }.map_or_else(
-                || bail!(Error::NullPointer("pCertInfo")),
-                |x| CertificateInfo::try_from(x),
-            )?,
+            // SAFETY: We assume `value` is truthful.
+            encoded: unsafe { slice_from_ptr(value.pbCertEncoded, value.cbCertEncoded as _) }.to_vec(),
+            // SAFETY: We assume that if `value.pCertInfo` is non NULL, it points to a valid `CERT_INFO`.
+            info: unsafe { value.pCertInfo.as_ref() }
+                .map_or_else(|| bail!(Error::NullPointer("pCertInfo")), CertificateInfo::try_from)?,
             eku: cert_ctx_eku(value)?,
         })
     }
@@ -452,6 +468,7 @@ impl TryFrom<&CRYPT_PROVIDER_CERT> for CryptProviderCertificate {
 
     fn try_from(value: &CRYPT_PROVIDER_CERT) -> Result<Self, Self::Error> {
         Ok(Self {
+            // SAFETY: We assume that if `value.pCert` is non NULL, it points to a valid `CERT_CONTEXT`.
             cert: unsafe { value.pCert.as_ref() }
                 .ok_or_else(|| Error::NullPointer("pCert"))?
                 .try_into()?,
@@ -468,14 +485,14 @@ impl TryFrom<&CRYPT_PROVIDER_SGNR> for CryptProviderSigner {
 
     fn try_from(value: &CRYPT_PROVIDER_SGNR) -> Result<Self, Self::Error> {
         Ok(Self {
+            // SAFETY: We assume that if `value.psSigner` is non NULL, it points to a valid `CMSG_SIGNER_INFO`.
             signer: unsafe { value.psSigner.as_ref() }
-                .map_or_else(|| bail!(Error::NullPointer("psSigner")), |x| SignerInfo::try_from(x))?,
-            cert_chain: unsafe {
-                slice::from_raw_parts(value.pasCertChain, value.csCertChain as _)
-                    .iter()
-                    .map(CryptProviderCertificate::try_from)
-                    .collect::<Result<_>>()?
-            },
+                .map_or_else(|| bail!(Error::NullPointer("psSigner")), SignerInfo::try_from)?,
+            // SAFETY: We assume `value` is truthful.
+            cert_chain: unsafe { slice_from_ptr(value.pasCertChain, value.csCertChain as _) }
+                .iter()
+                .map(CryptProviderCertificate::try_from)
+                .collect::<Result<_>>()?,
         })
     }
 }
@@ -485,12 +502,11 @@ impl TryFrom<&CRYPT_PROVIDER_DATA> for CryptProviderData {
 
     fn try_from(value: &CRYPT_PROVIDER_DATA) -> Result<Self, Self::Error> {
         Ok(Self {
-            signers: unsafe {
-                slice::from_raw_parts(value.pasSigners, value.csSigners as _)
-                    .iter()
-                    .map(|x| CryptProviderSigner::try_from(x))
-                    .collect::<Result<_>>()?
-            },
+            // SAFETY: We assume `value` is truthful.
+            signers: unsafe { slice_from_ptr(value.pasSigners, value.csSigners as _) }
+                .iter()
+                .map(CryptProviderSigner::try_from)
+                .collect::<Result<_>>()?,
         })
     }
 }
@@ -500,42 +516,44 @@ pub fn cert_name_blob_to_str(
     value: &CRYPT_INTEGER_BLOB,
     string_type: CERT_STRING_TYPE,
 ) -> Result<String> {
+    // SAFETY: We assume `value` is a valid `CERT_NAME_BLOB`.
     let required_size = unsafe { CertNameToStrW(encoding, value, string_type, None) };
 
     let mut buf = vec![0; required_size as _];
-    unsafe {
-        let converted_bytes = CertNameToStrW(X509_ASN_ENCODING, value, string_type, Some(buf.as_mut_slice()));
 
-        if converted_bytes as usize != buf.len() || buf.len() < 1 {
-            bail!(Error::from_win32(ERROR_INCORRECT_SIZE));
-        }
+    // SAFETY: We assume `value` is a valid `CERT_NAME_BLOB`.
+    let converted_bytes = unsafe { CertNameToStrW(X509_ASN_ENCODING, value, string_type, Some(buf.as_mut_slice())) };
 
-        // Trailing null byte needs to be removed
-        buf.set_len(buf.capacity() - 1)
+    if converted_bytes as usize != buf.len() || buf.is_empty() {
+        bail!(Error::from_win32(ERROR_INCORRECT_SIZE));
     }
 
-    Ok(String::from_utf16(&buf)?)
+    Ok(String::from_utf16(nul_slice_wide_str(&buf))?)
 }
 
 pub fn cert_ctx_eku(ctx: &CERT_CONTEXT) -> Result<Vec<String>> {
     let mut required_size = 0;
 
-    unsafe {
-        CertGetEnhancedKeyUsage(ctx, 0, None, &mut required_size)?;
-    }
+    // SAFETY: `ctx` is valid. No preconditions.
+    unsafe { CertGetEnhancedKeyUsage(ctx, 0, None, &mut required_size) }?;
 
     let mut raw_buf = vec![0u8; required_size as _];
 
-    unsafe {
-        CertGetEnhancedKeyUsage(ctx, 0, Some(raw_buf.as_mut_ptr() as _), &mut required_size)?;
+    // SAFETY: `ctx` is valid. No preconditions.
+    unsafe { CertGetEnhancedKeyUsage(ctx, 0, Some(raw_buf.as_mut_ptr() as _), &mut required_size) }?;
 
-        let ctl_usage = raw_buf.as_ptr().cast::<CTL_USAGE>().read();
-
-        Ok(
-            slice::from_raw_parts(ctl_usage.rgpszUsageIdentifier, ctl_usage.cUsageIdentifier as _)
-                .iter()
-                .filter_map(|id| id.to_string_safe().ok())
-                .collect(),
-        )
+    if required_size as usize != raw_buf.len() {
+        bail!(Error::from_win32(ERROR_INCORRECT_SIZE));
     }
+
+    // SAFETY: We assume `CertGetEnhancedKeyUsage` actually wrote a valid `CTL_USAGE`.
+    let ctl_usage = unsafe { raw_buf.as_ptr().cast::<CTL_USAGE>().read() };
+
+    Ok(
+        // SAFETY: We assume `ctl_usage` is truthful. We assume `ctl_usage` is big enough to fit the VLA.
+        unsafe { slice_from_ptr(ctl_usage.rgpszUsageIdentifier, ctl_usage.cUsageIdentifier as _) }
+            .iter()
+            .filter_map(|id| id.to_string_safe().ok())
+            .collect(),
+    )
 }

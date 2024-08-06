@@ -4,15 +4,15 @@ use std::mem::{self};
 
 use anyhow::{bail, Result};
 
-use crate::error::Error;
 use crate::handle::{Handle, HandleWrapper};
 use crate::process::Process;
 use crate::token::Token;
+use crate::Error;
 use windows::Win32::Foundation::{E_HANDLE, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::System::Threading::{
     DeleteProcThreadAttributeList, GetCurrentThread, InitializeProcThreadAttributeList, OpenThread, OpenThreadToken,
-    ResumeThread, SetThreadToken, SuspendThread, UpdateProcThreadAttribute, WaitForSingleObject, INFINITE,
+    ResumeThread, SuspendThread, UpdateProcThreadAttribute, WaitForSingleObject, INFINITE,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
     THREAD_ACCESS_RIGHTS,
 };
@@ -32,6 +32,7 @@ impl Thread {
     }
 
     pub fn try_get_by_id(id: u32, desired_access: THREAD_ACCESS_RIGHTS) -> Result<Self> {
+        // SAFETY: No preconditions.
         let handle = unsafe { OpenThread(desired_access, false, id) }?;
 
         Self::try_with_handle(handle)
@@ -39,12 +40,14 @@ impl Thread {
 
     pub fn current() -> Self {
         Self {
+            // SAFETY: No preconditions. Returns a pseudohandle, thus not owning it.
             handle: Handle::new(unsafe { GetCurrentThread() }, false),
         }
     }
 
-    pub fn join(&self) -> Result<()> {
-        let result = unsafe { WaitForSingleObject(self.handle.raw(), INFINITE) };
+    pub fn join(&self, timeout_ms: Option<u32>) -> Result<()> {
+        // SAFETY: No preconditions.
+        let result = unsafe { WaitForSingleObject(self.handle.raw(), timeout_ms.unwrap_or(INFINITE)) };
         match result {
             WAIT_OBJECT_0 => Ok(()),
             _ => bail!(Error::last_error()),
@@ -52,6 +55,7 @@ impl Thread {
     }
 
     pub fn suspend(&self) -> Result<()> {
+        // SAFETY: No preconditions.
         if unsafe { SuspendThread(self.handle.raw()) } == u32::MAX {
             bail!(Error::last_error())
         } else {
@@ -60,6 +64,7 @@ impl Thread {
     }
 
     pub fn resume(&self) -> Result<()> {
+        // SAFETY: No preconditions.
         if unsafe { ResumeThread(self.handle.raw()) } == u32::MAX {
             bail!(Error::last_error())
         } else {
@@ -70,22 +75,10 @@ impl Thread {
     pub fn token(&self, desired_access: TOKEN_ACCESS_MASK, open_as_self: bool) -> Result<Token> {
         let mut handle = Default::default();
 
+        // SAFETY: Returned handle must be closed, which is done in its RAII wrapper.
         unsafe { OpenThreadToken(self.handle.raw(), desired_access, open_as_self, &mut handle) }?;
 
         Token::try_with_handle(handle)
-    }
-
-    pub fn set_token(&self, token: &Token) -> Result<()> {
-        unsafe {
-            Ok(SetThreadToken(
-                if self.handle.raw() == Thread::current().handle.raw() {
-                    None
-                } else {
-                    Some(&self.handle.raw())
-                },
-                token.handle().raw(),
-            )?)
-        }
     }
 }
 
@@ -100,12 +93,15 @@ pub struct ThreadAttributeList(Vec<u8>);
 impl<'a> ThreadAttributeList {
     pub fn with_count(count: u32) -> Result<ThreadAttributeList> {
         let mut out_size = 0;
+
+        // SAFETY: No preconditions.
         let _ = unsafe {
             InitializeProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST::default(), count, 0, &mut out_size)
         };
 
         let mut buf = vec![0; out_size];
 
+        // SAFETY: `lpAttributeList` points to a buffer of the `out_size`.
         unsafe {
             InitializeProcThreadAttributeList(
                 LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr() as _),
@@ -122,7 +118,9 @@ impl<'a> ThreadAttributeList {
         LPPROC_THREAD_ATTRIBUTE_LIST(self.0.as_mut_ptr() as _)
     }
 
-    pub fn update(&mut self, attribute: &'a ThreadAttributeType) -> Result<()> {
+    pub fn update(&mut self, attribute: &'a ThreadAttributeType<'a>) -> Result<()> {
+        // SAFETY: List must be initialized with `InitializeProcThreadAttributeList`, which is done in `ThreadAttributeList::with_count`.
+        // Value must persists until list is dropped.
         unsafe {
             Ok(UpdateProcThreadAttribute(
                 self.raw(),
@@ -139,6 +137,7 @@ impl<'a> ThreadAttributeList {
 
 impl Drop for ThreadAttributeList {
     fn drop(&mut self) {
+        // SAFETY: List must be initialized with `InitializeProcThreadAttributeList`, which is done in `ThreadAttributeList::with_count`.
         unsafe { DeleteProcThreadAttributeList(self.raw()) };
     }
 }
@@ -149,7 +148,7 @@ pub enum ThreadAttributeType<'a> {
     HandleList(Vec<HANDLE>),
 }
 
-impl<'a> ThreadAttributeType<'a> {
+impl ThreadAttributeType<'_> {
     pub fn attribute(&self) -> u32 {
         match self {
             ThreadAttributeType::ParentProcess(_) => PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,

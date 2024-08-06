@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm"
-version = "2024.8.2"
+version = "0.0.0"
 dependencies = [
  "aide",
  "anyhow",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm-contextmenu"
-version = "2024.8.2"
+version = "0.0.0"
 dependencies = [
  "devolutions-pedm-contextmenu-shell",
  "devolutions-pedm-shared",
@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm-contextmenu-hook"
-version = "2024.8.2"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "devolutions-pedm-shared",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm-contextmenu-shell"
-version = "2024.8.2"
+version = "0.0.0"
 dependencies = [
  "devolutions-pedm-shared",
  "parking_lot",
@@ -1213,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm-shared"
-version = "2024.8.2"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "devolutions-pedm-client-http",
@@ -5832,7 +5832,7 @@ checksum = "7219d36b6eac893fa81e84ebe06485e7dcbb616177469b142df14f1f4deb1311"
 
 [[package]]
 name = "win-api-wrappers"
-version = "2024.8.2"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "base16ct",

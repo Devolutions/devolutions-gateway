@@ -12,7 +12,7 @@ use crate::undoc::LSA_SID_NAME_MAPPING_OPERATION_ERROR;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Error {
-    #[error("Win32 error")]
+    #[error(transparent)]
     Win32(#[from] windows::core::Error),
     #[error("Lsa SID name mapping error: {}", _0.0)]
     Lsa(LSA_SID_NAME_MAPPING_OPERATION_ERROR),
@@ -42,8 +42,8 @@ impl Error {
     }
 }
 
-impl From<windows::core::HRESULT> for Error {
-    fn from(err: windows::core::HRESULT) -> Self {
+impl From<HRESULT> for Error {
+    fn from(err: HRESULT) -> Self {
         Self::from_hresult(err)
     }
 }

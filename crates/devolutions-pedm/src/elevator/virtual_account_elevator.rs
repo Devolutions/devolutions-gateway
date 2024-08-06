@@ -1,3 +1,12 @@
+//! Elevator in charge of virtual account elevation.
+//!
+//! Virtual account elevation works by creating a virtual SID name mapping using `LsaManageSidNameMapping`,
+//! and then logging into the account using `LogonUserExExW` with the undocumented `LOGON32_PROVIDER_VIRTUAL` provider.
+//! Then we add the logon ID of the logged in user to the virtual user's groups so that it has access to the user's desktop.
+//! This way, we can start processes with administrator privileges on the user's desktop without it being their account.
+//!
+//! This method can however lead to isses when doing remote authentication etc. since sometimes it can expect a user, which
+//! is not the virtual user.
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
@@ -31,29 +40,27 @@ impl VirtualAccountElevator {
     }
 
     fn create_token(&self, token: &Token) -> Result<()> {
-        let virtual_account = create_virtual_account(self.rid, &self.domain, &token)?;
+        let virtual_account = create_virtual_account(self.rid, &self.domain, token)?;
 
-        let mut groups = Vec::new();
-
-        groups.push(SidAndAttributes {
-            sid: token.logon_sid()?,
-            attributes: (SE_GROUP_LOGON_ID | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0xc0000007
-        });
-
-        groups.push(SidAndAttributes {
-            sid: Sid::from_well_known(WinLocalSid, None)?, // S-1-2-0
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0x7
-        });
-
-        groups.push(SidAndAttributes {
-            sid: Sid::from_well_known(WinBuiltinAdministratorsSid, None)?, // S-1-5-32-544
-            attributes: (SE_GROUP_OWNER | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0xf
-        });
-
-        groups.push(SidAndAttributes {
-            sid: virtual_account.domain_sid,
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0x7
-        });
+        let groups = vec![
+            SidAndAttributes {
+                sid: token.logon_sid()?,
+                attributes: (SE_GROUP_LOGON_ID | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY)
+                    as _, // 0xc0000007
+            },
+            SidAndAttributes {
+                sid: Sid::from_well_known(WinLocalSid, None)?, // S-1-2-0
+                attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0x7
+            },
+            SidAndAttributes {
+                sid: Sid::from_well_known(WinBuiltinAdministratorsSid, None)?, // S-1-5-32-544
+                attributes: (SE_GROUP_OWNER | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0xf
+            },
+            SidAndAttributes {
+                sid: virtual_account.domain_sid,
+                attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0x7
+            },
+        ];
 
         let base_token = Token::logon(
             &virtual_account.account_name,

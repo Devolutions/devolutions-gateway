@@ -4,8 +4,8 @@ use std::mem::{self};
 use std::{ptr, slice};
 
 use anyhow::{bail, Result};
+use windows::core::PCWSTR;
 
-use crate::error::Error;
 use crate::handle::{Handle, HandleWrapper};
 use crate::identity::account::{create_profile, get_username, ProfileInfo};
 use crate::identity::sid::{RawSid, RawSidAndAttributes, Sid, SidAndAttributes};
@@ -23,9 +23,10 @@ use crate::undoc::{
     TOKEN_SECURITY_ATTRIBUTE_TYPE_UINT64, TOKEN_SECURITY_ATTRIBUTE_V1, TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
 };
 use crate::utils::WideString;
+use crate::{create_impersonation_context, Error};
 use windows::Win32::Foundation::{
     ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, E_HANDLE,
-    E_POINTER, HANDLE, LUID,
+    HANDLE, LUID,
 };
 use windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT;
 use windows::Win32::Security::{
@@ -103,8 +104,10 @@ impl Token {
         ]))?;
 
         let mut handle = HANDLE::default();
-        priv_token.impersonate(|| unsafe {
-            Ok(NtCreateToken(
+        let _ctx = priv_token.impersonate()?;
+
+        unsafe {
+            NtCreateToken(
                 &mut handle,
                 TOKEN_ALL_ACCESS,
                 &object_attributes,
@@ -127,8 +130,8 @@ impl Token {
                         .unwrap_or(ptr::null_mut()),
                 },
                 source,
-            )?)
-        })?;
+            )?;
+        }
 
         Ok(Self { handle: handle.into() })
     }
@@ -141,6 +144,8 @@ impl Token {
         token_type: TOKEN_TYPE,
     ) -> Result<Self> {
         let mut handle = Default::default();
+
+        // SAFETY: Returned `handle` must be closed, which it is in its RAII wrapper.
         unsafe {
             DuplicateTokenEx(
                 self.handle.raw(),
@@ -159,25 +164,18 @@ impl Token {
         self.duplicate(TOKEN_ACCESS_MASK(0), None, SecurityImpersonation, TokenPrimary)
     }
 
-    pub fn impersonate<F>(&self, f: F) -> Result<()>
-    where
-        F: FnOnce() -> Result<()>,
-    {
-        unsafe { ImpersonateLoggedOnUser(self.handle.raw()) }?;
-
-        let r = f();
-
-        unsafe { RevertToSelf() }?;
-
-        r
+    pub fn impersonate(&self) -> Result<TokenImpersonation<'_>> {
+        TokenImpersonation::try_new(self)
     }
 
-    pub fn reset(&mut self) -> Result<()> {
-        unsafe { AdjustTokenGroups(self.handle.raw(), true, None, 0, None, None) }?;
+    pub fn reset_privileges(&mut self) -> Result<()> {
+        // SAFETY: No preconditions.
+        unsafe { AdjustTokenPrivileges(self.handle.raw(), true, None, 0, None, None) }?;
         Ok(())
     }
 
     pub fn reset_groups(&mut self) -> Result<()> {
+        // SAFETY: No preconditions.
         unsafe { AdjustTokenGroups(self.handle.raw(), true, None, 0, None, None) }?;
         Ok(())
     }
@@ -187,29 +185,32 @@ impl Token {
         anyhow::Error: for<'a> From<<D as TryFrom<&'a S>>::Error>,
     {
         let mut required_size = 0u32;
+
+        // SAFETY: No preconditions. We ignore result because we are collecting size.
         let _ = unsafe { GetTokenInformation(self.handle.raw(), info_class, None, 0, &mut required_size as _) };
 
-        let mut buf: Vec<u8> = Vec::with_capacity(required_size as _);
+        let mut buf = vec![0u8; required_size as _];
 
+        // SAFETY: No preconditions. `TokenInformationLength` matches length of `buf` in `TokenInformation`.
         unsafe {
             GetTokenInformation(
                 self.handle.raw(),
                 info_class,
                 Some(buf.as_mut_ptr() as _),
-                buf.capacity() as _,
+                buf.len() as _,
                 &mut required_size as _,
             )
         }?;
 
-        let raw_groups = unsafe { buf.as_ptr().cast::<S>().as_ref() };
-
-        Ok(raw_groups.ok_or_else(|| Error::from_hresult(E_POINTER))?.try_into()?)
+        // SAFETY: We assume the target buffer matches the requested type. We can safely dereference because it is our buffer.
+        Ok(unsafe { &*buf.as_ptr().cast::<S>() }.try_into()?)
     }
 
     fn information_raw<T: Default + Sized>(&self, info_class: TOKEN_INFORMATION_CLASS) -> Result<T> {
         let mut info = T::default();
         let mut return_length = 0u32;
 
+        // SAFETY: No preconditions. `TokenInformationLength` matches length of `info` in `TokenInformation`.
         unsafe {
             GetTokenInformation(
                 self.handle.raw(),
@@ -224,6 +225,7 @@ impl Token {
     }
 
     fn set_information_raw<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS, value: &T) -> Result<()> {
+        // SAFETY: No preconditions. `TokenInformationLength` matches length of `info` in `TokenInformation`.
         unsafe {
             SetTokenInformation(
                 self.handle.raw(),
@@ -258,13 +260,9 @@ impl Token {
     }
 
     pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> Result<String> {
-        let mut username = String::new();
-        self.impersonate(|| {
-            username = get_username(format)?;
-            Ok(())
-        })?;
+        let _ctx = self.impersonate()?;
 
-        Ok(username)
+        get_username(format)
     }
 
     pub fn logon(
@@ -277,23 +275,29 @@ impl Token {
     ) -> Result<Self> {
         let mut raw_token = HANDLE::default();
 
-        let raw_groups = groups.map(RawTokenGroups::from);
+        let groups = groups.map(RawTokenGroups::from);
+        let username = WideString::from(username);
+        let domain = domain.map(WideString::from);
+        let password = password.map(WideString::from);
 
+        // SAFETY: No preconditions. `username` is valid and NUL terminated.
+        // `domain` and `password` are either NULL or valid NUL terminated strings.
+        // We assume `groups` is well constructed.
         unsafe {
             LogonUserExExW(
-                WideString::from(username).as_pcwstr(),
-                domain.map(WideString::from).unwrap_or_default().as_pcwstr(),
-                password.map(WideString::from).unwrap_or_default().as_pcwstr(),
+                username.as_pcwstr(),
+                domain.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
+                password.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
                 logon_type,
                 logon_provider,
-                raw_groups.as_ref().map(|x| x.as_raw() as _),
+                groups.as_ref().map(|x| x.as_raw() as _),
                 Some(&mut raw_token as _),
                 None,
                 None,
                 None,
                 None,
-            )?;
-        }
+            )
+        }?;
 
         Token::try_with_handle(raw_token)
     }
@@ -331,7 +335,7 @@ impl Token {
         )
     }
 
-    pub fn load_profile(&self, username: &str) -> Result<ProfileInfo> {
+    pub fn load_profile(&self, username: &str) -> Result<ProfileInfo<'_>> {
         if let Err(err) = create_profile(&self.sid_and_attributes()?.sid, username) {
             match err.downcast::<windows::core::Error>() {
                 Ok(err) => {
@@ -348,13 +352,15 @@ impl Token {
 
     pub fn adjust_groups(&mut self, adjustment: &TokenGroupAdjustment) -> Result<()> {
         match adjustment {
+            // SAFETY: No preconditions.
             TokenGroupAdjustment::ResetToDefaults => unsafe {
                 AdjustTokenGroups(self.handle.raw(), true, None, 0, None, None)?;
             },
             TokenGroupAdjustment::Enable(groups) => {
-                let raw_groups = RawTokenGroups::from(groups);
+                let groups = RawTokenGroups::from(groups);
+                // SAFETY: No preconditions. We assume `groups` is well constructed.
                 unsafe {
-                    AdjustTokenGroups(self.handle.raw(), false, Some(raw_groups.as_raw()), 0, None, None)?;
+                    AdjustTokenGroups(self.handle.raw(), false, Some(groups.as_raw()), 0, None, None)?;
                 }
             }
         }
@@ -364,6 +370,7 @@ impl Token {
 
     pub fn adjust_privileges(&mut self, adjustment: &TokenPrivilegesAdjustment) -> Result<()> {
         match adjustment {
+            // SAFETY: No preconditions.
             TokenPrivilegesAdjustment::DisableAllPrivileges => unsafe {
                 AdjustTokenPrivileges(self.handle.raw(), true, None, 0, None, None)?;
             },
@@ -388,11 +395,10 @@ impl Token {
                         .collect(),
                 );
 
-                let raw_privs = RawTokenPrivileges::from(&privs);
+                let privs = RawTokenPrivileges::from(&privs);
 
-                unsafe {
-                    AdjustTokenPrivileges(self.handle.raw(), false, Some(raw_privs.as_raw()), 0, None, None)?;
-                }
+                // SAFETY: No preconditions. We assume `privs` is well constructed.
+                unsafe { AdjustTokenPrivileges(self.handle.raw(), false, Some(privs.as_raw()), 0, None, None) }?;
 
                 let last_err = Error::last_error();
                 if last_err.code() != ERROR_SUCCESS.0 as _ {
@@ -486,30 +492,35 @@ pub struct RawTokenGroups {
 
 impl RawTokenGroups {
     pub fn as_raw(&self) -> &TOKEN_GROUPS {
+        // SAFETY: We assume our buffer is well constructed. We can safely dereference because it is our buffer.
         unsafe { &*self.buf.as_ptr().cast::<TOKEN_GROUPS>() }
     }
 }
 
 impl From<&TokenGroups> for RawTokenGroups {
     fn from(value: &TokenGroups) -> Self {
+        let raw_sid_and_attributes = value.0.iter().map(RawSidAndAttributes::from).collect::<Vec<_>>();
+
         let mut raw_buf = vec![
             0u8;
             mem::size_of::<TOKEN_GROUPS>()
-                + (value.0.len().saturating_sub(1)) * mem::size_of::<SID_AND_ATTRIBUTES>()
+                + (raw_sid_and_attributes.len().saturating_sub(1))
+                    * mem::size_of::<SID_AND_ATTRIBUTES>()
         ];
 
         let raw = raw_buf.as_mut_ptr().cast::<TOKEN_GROUPS>();
 
-        let raw_sid_and_attributes = value.0.iter().map(RawSidAndAttributes::from).collect::<Vec<_>>();
-
+        // SAFETY: Buffer is big enough to fit `GroupCount` because it is at least `size_of::<TOKEN_GROUPS>` long.
         unsafe {
             ptr::addr_of_mut!((*raw).GroupCount).write(value.0.len() as _);
+        }
 
-            let groups_ptr = ptr::addr_of_mut!((*raw).Groups).cast::<SID_AND_ATTRIBUTES>();
+        // SAFETY: `addr_of_mut!` will not dereference the pointer.
+        let groups_ptr = unsafe { ptr::addr_of_mut!((*raw).Groups).cast::<SID_AND_ATTRIBUTES>() };
 
-            for (i, v) in raw_sid_and_attributes.iter().enumerate() {
-                groups_ptr.add(i).write(*v.as_raw());
-            }
+        for (i, v) in raw_sid_and_attributes.iter().enumerate() {
+            // SAFETY: Buffer is big enough to fit at least `raw_sid_and_attributes.len()` entries.
+            unsafe { groups_ptr.add(i).write(*v.as_raw()) };
         }
 
         Self {
@@ -523,6 +534,7 @@ impl TryFrom<&TOKEN_GROUPS> for TokenGroups {
     type Error = anyhow::Error;
 
     fn try_from(value: &TOKEN_GROUPS) -> Result<Self> {
+        // SAFETY: We assume `Groups` and `GroupCount` are well constructed and valid.
         let groups_slice = unsafe { slice::from_raw_parts(value.Groups.as_ptr(), value.GroupCount as _) };
 
         let mut groups = Vec::with_capacity(groups_slice.len());
@@ -594,7 +606,7 @@ impl<'a> From<&'a TokenSecurityAttribute> for RawTokenSecurityAttribute<'a> {
     }
 }
 
-impl<'a> RawTokenSecurityAttribute<'a> {
+impl RawTokenSecurityAttribute<'_> {
     pub fn as_raw(&self) -> TOKEN_SECURITY_ATTRIBUTE_V1 {
         struct RawValues {
             value_type: TOKEN_SECURITY_ATTRIBUTE_TYPE,
@@ -604,7 +616,7 @@ impl<'a> RawTokenSecurityAttribute<'a> {
         }
 
         impl RawValues {
-            pub fn new(
+            fn new(
                 value_type: TOKEN_SECURITY_ATTRIBUTE_TYPE,
                 value_count: usize,
                 ctx: Option<Box<dyn Any>>,
@@ -667,7 +679,7 @@ impl<'a> RawTokenSecurityAttribute<'a> {
 
                 RawValues::new(TOKEN_SECURITY_ATTRIBUTE_TYPE_OCTET_STRING, x.len(), Some(ctx), values)
             }
-            TokenSecurityAttributeValues::Invalid | _ => RawValues::new(
+            _ => RawValues::new(
                 TOKEN_SECURITY_ATTRIBUTE_TYPE_INVALID,
                 0,
                 None,
@@ -711,6 +723,7 @@ impl TryFrom<&TOKEN_DEFAULT_DACL> for TokenDefaultDacl {
 
     fn try_from(value: &TOKEN_DEFAULT_DACL) -> Result<Self, Self::Error> {
         Ok(Self {
+            // SAFETY: We assume `DefaultDacl` actually points to an ACL.
             default_dacl: unsafe { value.DefaultDacl.as_ref() }.map(Acl::try_from).transpose()?,
         })
     }
@@ -729,3 +742,5 @@ impl TryFrom<&TOKEN_PRIMARY_GROUP> for TokenPrimaryGroup {
         })
     }
 }
+
+create_impersonation_context!(TokenImpersonation, Token, ImpersonateLoggedOnUser);

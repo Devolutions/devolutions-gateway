@@ -89,6 +89,7 @@ pub async fn post_launch(
         .executable_path
         .map(|x| win_canonicalize(&x, Some(named_pipe_info.token.as_ref())))
         .transpose()?;
+
     payload.working_directory = payload
         .working_directory
         .map(|x| win_canonicalize(&x, Some(named_pipe_info.token.as_ref())))

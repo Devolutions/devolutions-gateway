@@ -1,3 +1,7 @@
+//! Module in charge of handling elevation logs for each user.
+//!
+//! Each user will have a directory only readable by them in `%ProgramData%\Devolutions\Agent\pedm\logs\<SID>`.
+//! This directory will only be writeable by `NT AUTHORITY\SYSTEM`.
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use chrono::Local;
@@ -35,11 +39,7 @@ pub fn log_elevation(res: &ElevationResult) -> Result<()> {
 
     log_path.push(cur_time.format("%Y_%m_%d.json").to_string());
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .create(true)
-        .open(log_path)?;
+    let mut file = OpenOptions::new().append(true).create(true).open(log_path)?;
 
     file.write_all(serde_json::to_string(res)?.as_bytes())?;
     file.write_all(b"\n")?;

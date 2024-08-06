@@ -12,10 +12,10 @@ use windows::Win32::System::Rpc::{
     RPC_QUERY_CLIENT_PRINCIPAL_NAME, RPC_QUERY_SERVER_PRINCIPAL_NAME, RPC_SERVER_INTERFACE, SERVER_ROUTINE,
 };
 
-use crate::error::Error;
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::utils::set_memory_protection;
+use crate::Error;
 
 use anyhow::{bail, Result};
 
@@ -35,9 +35,12 @@ impl RpcBindingHandle {
         let mut client_principal_name = Vec::new();
         let mut server_principal_name = Vec::new();
 
-        let mut attribs = RPC_CALL_ATTRIBUTES_V2_W::default();
-        attribs.Version = RPC_CALL_ATTRIBUTES_VERSION;
-        attribs.Flags = RPC_QUERY_SERVER_PRINCIPAL_NAME | RPC_QUERY_CLIENT_PRINCIPAL_NAME | RPC_QUERY_CLIENT_PID;
+        let mut attribs = RPC_CALL_ATTRIBUTES_V2_W {
+            Version: RPC_CALL_ATTRIBUTES_VERSION,
+            Flags: RPC_QUERY_SERVER_PRINCIPAL_NAME | RPC_QUERY_CLIENT_PRINCIPAL_NAME | RPC_QUERY_CLIENT_PID,
+            ..Default::default()
+        };
+
         let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as _) };
 
         if status.0 != ERROR_MORE_DATA.0 as i32 {

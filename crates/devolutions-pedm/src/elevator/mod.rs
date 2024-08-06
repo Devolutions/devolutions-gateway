@@ -1,3 +1,4 @@
+//! Module in charge of elevating tokens.
 mod local_admin_elevator;
 mod virtual_account_elevator;
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ trait Elevator {
 
 fn local_admin_elevator() -> &'static LocalAdminElevator {
     static ELEVATOR: OnceLock<LocalAdminElevator> = OnceLock::new();
-    ELEVATOR.get_or_init(|| LocalAdminElevator::new(&config::LADM_SRC_NAME, config::LADM_SRC_LUID))
+    ELEVATOR.get_or_init(|| LocalAdminElevator::new(config::LADM_SRC_NAME, config::LADM_SRC_LUID))
 }
 
 fn virtual_account_elevator() -> &'static VirtualAccountElevator {
@@ -66,7 +67,7 @@ fn validate_elevation(
 ) -> Result<()> {
     let asker = policy::application_from_process(client_pid)?;
     let working_directory = working_directory
-        .unwrap_or_else(|| asker.working_directory.as_path())
+        .unwrap_or(asker.working_directory.as_path())
         .to_owned();
 
     let (executable_path, command_line) = match (executable_path, command_line) {
@@ -74,7 +75,7 @@ fn validate_elevation(
         (None, Some(command_line)) => Ok::<_, Error>((
             command_line
                 .args()
-                .get(0)
+                .first()
                 .and_then(|x| PathBuf::from_str(x).ok())
                 .ok_or_else(|| Error::from_win32(ERROR_INVALID_PARAMETER))?,
             command_line.clone(),
@@ -134,9 +135,9 @@ pub fn try_start_elevated(
     )?;
 
     // Build environment with client token, as admin token might be Virtual Account.
-    let environment = environment_block(Some(&client_token), false)?;
+    let environment = environment_block(Some(client_token), false)?;
 
-    Ok(start_process(
+    start_process(
         &elevation,
         executable_path,
         command_line,
@@ -145,5 +146,5 @@ pub fn try_start_elevated(
         Some(&environment),
         current_directory,
         startup_info,
-    )?)
+    )
 }

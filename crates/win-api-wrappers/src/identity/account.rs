@@ -5,7 +5,6 @@ use std::ptr;
 
 use anyhow::{bail, Result};
 
-use crate::error::Error;
 use crate::handle::HandleWrapper;
 use crate::token::Token;
 use crate::undoc::{
@@ -13,7 +12,8 @@ use crate::undoc::{
     LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
 };
 use crate::utils::WideString;
-use windows::core::{HRESULT, PWSTR};
+use crate::Error;
+use windows::core::{HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_INVALID_SID, MAX_PATH};
 use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
@@ -62,7 +62,6 @@ pub fn create_virtual_identifier(domain_id: u32, domain_name: &str, token: Optio
         .map(WideString::from)
         .unwrap_or_default();
 
-    // Just as intune?
     let input = LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT {
         DomainName: domain_name.as_unicode_string(),
         AccountName: account_name.as_unicode_string(),
@@ -72,14 +71,19 @@ pub fn create_virtual_identifier(domain_id: u32, domain_name: &str, token: Optio
 
     let mut output = ptr::null_mut::<LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT>();
 
-    unsafe {
-        let _r = LsaManageSidNameMapping(
+    // We ignore the result because it will almost run successfully while returning a failing code.
+    // SAFETY: Since `LsaSidNameMappingOperation_Add` is specified, `OpInput` will be read as a `LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT`.
+    let _ = unsafe {
+        LsaManageSidNameMapping(
             LsaSidNameMappingOperation_Add,
             &input as *const _ as _,
             &mut output as _,
-        );
+        )
+    };
 
-        if !output.is_null() {
+    if !output.is_null() {
+        // SAFETY: No preconditions, and `output` is non null.
+        unsafe {
             LsaFreeMemory(Some(output as _)).ok()?;
         }
     }
@@ -106,10 +110,14 @@ pub fn create_virtual_account(domain_id: u32, domain_name: &str, token: &Token) 
 pub fn get_username(format: EXTENDED_NAME_FORMAT) -> Result<String> {
     let mut required_size = 0u32;
 
+    // Ignore return code since we care about size.
+    // SAFETY: No preconditions. Required size is valid.
     let _ = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size as _) };
 
     let mut buf = vec![0u16; required_size as _];
     let mut tchars_copied = buf.len() as u32;
+
+    // SAFETY: `lpNameBuffer` is correctly sized and matches the size announced in `nSize` AKA `tchars_copied`.
     let success = unsafe { GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut tchars_copied as _) };
 
     if success.into() {
@@ -120,23 +128,29 @@ pub fn get_username(format: EXTENDED_NAME_FORMAT) -> Result<String> {
 }
 
 pub fn is_username_valid(server_name: Option<&String>, username: &str) -> Result<bool> {
-    let server_name = server_name.map(WideString::from).unwrap_or_default();
+    let server_name = server_name.map(WideString::from);
     let username = WideString::from(username);
 
+    let mut out = ptr::null_mut::<USER_INFO_4>();
+
+    // 4 is arbitrary. consent.exe uses it so we do too
+    // SAFETY: `server_name` is either NULL which is defined or defined and NUL terminated.
+    // `username` is always valid and NUL terminated.
     let status = unsafe {
-        // 4 is arbitrary. consent.exe uses it so we do too
-        let mut out = ptr::null_mut::<USER_INFO_4>();
-        let status = NetUserGetInfo(
-            server_name.as_pcwstr(),
+        NetUserGetInfo(
+            server_name.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
             username.as_pcwstr(),
             4,
             &mut out as *mut _ as _,
-        );
-
-        NetApiBufferFree(Some(out as _));
-
-        status
+        )
     };
+
+    if out.is_null() {
+        // SAFETY: No preconditions. `out` is non null.
+        unsafe {
+            NetApiBufferFree(Some(out as _));
+        }
+    }
 
     // TODO: Support other errors and hardcheck on NERR_UserNotFound
     if status == NERR_Success {
@@ -149,19 +163,17 @@ pub fn is_username_valid(server_name: Option<&String>, username: &str) -> Result
 }
 
 pub fn virtual_account_name(token: &Token) -> Result<String> {
-    Ok(token.username(NameSamCompatible)?.replace("\\", "_"))
+    Ok(token.username(NameSamCompatible)?.replace('\\', "_"))
 }
 
 pub fn create_profile(account_sid: &Sid, account_name: &str) -> Result<String> {
     let mut buf: Vec<u16> = vec![0; MAX_PATH as _];
 
-    unsafe {
-        CreateProfile(
-            WideString::from(&account_sid.to_string()).as_pcwstr(),
-            WideString::from(account_name).as_pcwstr(),
-            buf.as_mut_slice(),
-        )?;
-    }
+    let account_sid = WideString::from(&account_sid.to_string());
+    let account_name = WideString::from(account_name);
+
+    // SAFETY: `account_sid` and `account_name` are non NULL and NUL terminated. `buf` is big enough to receive profile path.
+    unsafe { CreateProfile(account_sid.as_pcwstr(), account_name.as_pcwstr(), buf.as_mut_slice()) }?;
 
     let raw_string = buf.into_iter().take_while(|x| *x != 0).collect::<Vec<_>>();
 
@@ -188,15 +200,14 @@ impl<'a> ProfileInfo<'a> {
 
         profile_info.raw.lpUserName = profile_info.username.as_pwstr();
 
-        unsafe {
-            LoadUserProfileW(profile_info.token.handle().raw(), &mut profile_info.raw)?;
-        }
+        // SAFETY: Only prerequisite is for `profile_info`'s `dwSize` member to be set correctly, which it is.
+        unsafe { LoadUserProfileW(profile_info.token.handle().raw(), &mut profile_info.raw) }?;
 
         Ok(profile_info)
     }
 }
 
-impl<'a> Drop for ProfileInfo<'a> {
+impl Drop for ProfileInfo<'_> {
     fn drop(&mut self) {
         // unsafe {
         // TODO unload

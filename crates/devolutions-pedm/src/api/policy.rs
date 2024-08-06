@@ -44,11 +44,11 @@ async fn get_profiles_id(
     let policy = policy::policy().read();
 
     let profile = if named_pipe_info.token.is_elevated()? {
-        policy.profile(&id.id).ok_or_else(|| Error::NotFound)?
+        policy.profile(&id.id).ok_or(Error::NotFound)?
     } else {
         policy
             .user_profile(&named_pipe_info.user, &id.id)
-            .ok_or_else(|| Error::AccessDenied)?
+            .ok_or(Error::AccessDenied)?
     };
 
     Ok(Json(profile.clone()))
@@ -147,17 +147,16 @@ async fn get_rules_id(
     let policy = policy::policy().read();
 
     // If we are not elevated, check that user has access to rule.
-    if !named_pipe_info.token.is_elevated()? {
-        if policy
+    if !named_pipe_info.token.is_elevated()?
+        && policy
             .user_profiles(&named_pipe_info.user)
             .iter()
             .all(|p| !p.rules.contains(&id.id))
-        {
-            return Err(Error::AccessDenied);
-        }
+    {
+        return Err(Error::AccessDenied);
     }
 
-    Ok(Json(policy.rule(&id.id).ok_or_else(|| Error::NotFound)?.clone()))
+    Ok(Json(policy.rule(&id.id).ok_or(Error::NotFound)?.clone()))
 }
 
 async fn put_rules_id(

@@ -24,11 +24,7 @@ fn original_handlers() -> &'static Mutex<HashMap<GUID, Box<[SERVER_ROUTINE]>>> {
 
 /// GUID obtained from RpcView on the AppInfo service.
 /// Can also be obtained from [here](https://github.com/tyranid/WindowsRpcClients/blob/master/Win10_20H1/appinfo.dll/201ef99a-7fa0-444c-9399-19ba84f12a1a_1.0.cs).
-fn appinfo_guid() -> &'static GUID {
-    static APPINFO_GUID: OnceLock<GUID> = OnceLock::new();
-
-    APPINFO_GUID.get_or_init(|| GUID::from("201ef99a-7fa0-444c-9399-19ba84f12a1a"))
-}
+pub const APPINFO_GUID: GUID = GUID::from_u128(0x201ef99a_7fa0_444c_9399_19ba84f12a1a);
 
 fn hook() -> Result<()> {
     if Module::from_name("appinfo.dll").is_err() {
@@ -43,7 +39,7 @@ fn hook() -> Result<()> {
 
         origs.insert(interface.id(), handlers);
 
-        if &interface.id() == appinfo_guid() {
+        if interface.id() == APPINFO_GUID {
             let mut hooks = origs
                 .get(&interface.id())
                 .expect("interface hooks not found")
