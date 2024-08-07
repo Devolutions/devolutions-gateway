@@ -104,7 +104,7 @@ fn validate_elevation(
     validation
 }
 
-pub fn try_start_elevated(
+pub(crate) fn try_start_elevated(
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,

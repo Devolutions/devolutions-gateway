@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::mem::{self};
 use std::ptr;
 
 use anyhow::{bail, Result};
@@ -11,19 +10,19 @@ use crate::undoc::{
     LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT,
     LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
 };
-use crate::utils::WideString;
+use crate::utils::{size_of_u32, WideString};
 use crate::Error;
-use windows::core::{HRESULT, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{ERROR_INVALID_SID, MAX_PATH};
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Foundation::{ERROR_INVALID_SID, MAX_PATH, WIN32_ERROR};
 use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
 };
 use windows::Win32::Security::Authentication::Identity::{
     GetUserNameExW, LsaFreeMemory, NameSamCompatible, EXTENDED_NAME_FORMAT,
 };
-use windows::Win32::Security::{PSID, SECURITY_NT_AUTHORITY};
+use windows::Win32::Security::SECURITY_NT_AUTHORITY;
 use windows::Win32::System::GroupPolicy::PI_NOUI;
-use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, PROFILEINFOW};
+use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, UnloadUserProfile, PROFILEINFOW};
 
 use super::sid::{RawSid, Sid};
 
@@ -53,7 +52,7 @@ pub fn create_virtual_identifier(domain_id: u32, domain_name: &str, token: Optio
         }
     };
 
-    let raw_sid = RawSid::from(&sid);
+    let raw_sid = RawSid::try_from(&sid)?;
 
     let domain_name = WideString::from(domain_name);
     let account_name = token
@@ -63,9 +62,9 @@ pub fn create_virtual_identifier(domain_id: u32, domain_name: &str, token: Optio
         .unwrap_or_default();
 
     let input = LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT {
-        DomainName: domain_name.as_unicode_string(),
-        AccountName: account_name.as_unicode_string(),
-        Sid: PSID(raw_sid.as_raw() as *const _ as _),
+        DomainName: domain_name.as_unicode_string()?,
+        AccountName: account_name.as_unicode_string()?,
+        Sid: raw_sid.as_psid(),
         ..Default::default()
     };
 
@@ -76,31 +75,31 @@ pub fn create_virtual_identifier(domain_id: u32, domain_name: &str, token: Optio
     let _ = unsafe {
         LsaManageSidNameMapping(
             LsaSidNameMappingOperation_Add,
-            &input as *const _ as _,
-            &mut output as _,
+            &input as *const _ as *const _,
+            &mut output,
         )
     };
 
     if !output.is_null() {
         // SAFETY: No preconditions, and `output` is non null.
         unsafe {
-            LsaFreeMemory(Some(output as _)).ok()?;
+            LsaFreeMemory(Some(output.cast())).ok()?;
         }
     }
 
     Ok(sid)
 }
 
-pub fn create_virtual_account(domain_id: u32, domain_name: &str, token: &Token) -> Result<Account> {
-    let domain_sid = create_virtual_identifier(domain_id, domain_name, None)?;
-    let account_sid = create_virtual_identifier(domain_id, domain_name, Some(token))?;
+pub fn create_virtual_account(virt_domain_id: u32, virt_domain_name: &str, token: &Token) -> Result<Account> {
+    let domain_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, None)?;
+    let account_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, Some(token))?;
 
-    if account_sid.is_valid() {
+    if account_sid.is_valid()? {
         Ok(Account {
             domain_sid,
             account_sid,
             account_name: virtual_account_name(token)?,
-            domain_name: domain_name.to_owned(),
+            domain_name: virt_domain_name.to_owned(),
         })
     } else {
         bail!(Error::from_win32(ERROR_INVALID_SID))
@@ -112,16 +111,15 @@ pub fn get_username(format: EXTENDED_NAME_FORMAT) -> Result<String> {
 
     // Ignore return code since we care about size.
     // SAFETY: No preconditions. Required size is valid.
-    let _ = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size as _) };
+    let _ = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size) };
 
-    let mut buf = vec![0u16; required_size as _];
-    let mut tchars_copied = buf.len() as u32;
+    let mut buf = Vec::with_capacity(required_size as usize);
 
-    // SAFETY: `lpNameBuffer` is correctly sized and matches the size announced in `nSize` AKA `tchars_copied`.
-    let success = unsafe { GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut tchars_copied as _) };
+    // SAFETY: `lpNameBuffer` is correctly sized and matches the size announced in `nSize` AKA `required_size`.
+    let success = unsafe { GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut required_size) };
 
     if success.into() {
-        Ok(String::from_utf16(&buf[..tchars_copied as _])?)
+        Ok(String::from_utf16(&buf[..required_size as usize])?)
     } else {
         bail!(Error::last_error())
     }
@@ -141,14 +139,14 @@ pub fn is_username_valid(server_name: Option<&String>, username: &str) -> Result
             server_name.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
             username.as_pcwstr(),
             4,
-            &mut out as *mut _ as _,
+            &mut out as *mut _ as *mut _,
         )
     };
 
     if out.is_null() {
         // SAFETY: No preconditions. `out` is non null.
         unsafe {
-            NetApiBufferFree(Some(out as _));
+            NetApiBufferFree(Some(out.cast()));
         }
     }
 
@@ -158,7 +156,7 @@ pub fn is_username_valid(server_name: Option<&String>, username: &str) -> Result
     } else if status == NERR_UserNotFound {
         Ok(false)
     } else {
-        bail!(Error::from_hresult(HRESULT(status as _)))
+        bail!(Error::from_win32(WIN32_ERROR(status)))
     }
 }
 
@@ -167,7 +165,7 @@ pub fn virtual_account_name(token: &Token) -> Result<String> {
 }
 
 pub fn create_profile(account_sid: &Sid, account_name: &str) -> Result<String> {
-    let mut buf: Vec<u16> = vec![0; MAX_PATH as _];
+    let mut buf: Vec<u16> = vec![0; MAX_PATH as usize];
 
     let account_sid = WideString::from(&account_sid.to_string());
     let account_name = WideString::from(account_name);
@@ -180,19 +178,19 @@ pub fn create_profile(account_sid: &Sid, account_name: &str) -> Result<String> {
     Ok(String::from_utf16(&raw_string)?)
 }
 
-pub struct ProfileInfo<'a> {
-    token: &'a Token,
+pub struct ProfileInfo {
+    token: Token,
     username: WideString,
     raw: PROFILEINFOW,
 }
 
-impl<'a> ProfileInfo<'a> {
-    pub fn from_token(token: &'a Token, username: &str) -> Result<Self> {
+impl ProfileInfo {
+    pub fn from_token(token: Token, username: &str) -> Result<Self> {
         let mut profile_info = Self {
             token,
             username: WideString::from(username),
             raw: PROFILEINFOW {
-                dwSize: mem::size_of::<PROFILEINFOW>() as _,
+                dwSize: size_of_u32::<PROFILEINFOW>(),
                 dwFlags: PI_NOUI,
                 ..Default::default()
             },
@@ -207,11 +205,11 @@ impl<'a> ProfileInfo<'a> {
     }
 }
 
-impl Drop for ProfileInfo<'_> {
+impl Drop for ProfileInfo {
     fn drop(&mut self) {
-        // unsafe {
-        // TODO unload
-        // let _ = UnloadUserProfile(self.token.handle, self.raw.hProfile);
-        // }
+        // SAFETY: No preconditions.
+        unsafe {
+            let _ = UnloadUserProfile(self.token.handle().raw(), self.raw.hProfile);
+        }
     }
 }

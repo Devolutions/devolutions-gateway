@@ -77,7 +77,7 @@ impl Service<Uri> for NamedPipeConnector {
                 if iter < 5
                     && client
                         .as_ref()
-                        .is_err_and(|e| e.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32))
+                        .is_err_and(|e| e.raw_os_error() == Some(ERROR_PIPE_BUSY.to_hresult().0))
                 {
                     iter += 1;
 
@@ -92,22 +92,16 @@ impl Service<Uri> for NamedPipeConnector {
 }
 
 pub fn client() -> APIClient {
-    devolutions_pedm_client_http::apis::client::APIClient::new(
-        devolutions_pedm_client_http::apis::configuration::Configuration::new(
-            hyper::Client::builder().build::<_, hyper::Body>(NamedPipeConnector),
-        ),
-    )
+    APIClient::new(devolutions_pedm_client_http::apis::configuration::Configuration::new(
+        hyper::Client::builder().build::<_, hyper::Body>(NamedPipeConnector),
+    ))
 }
 
-pub async fn conv_resp(
-    resp: devolutions_pedm_client_http::apis::Error,
-) -> Result<devolutions_pedm_client_http::models::ErrorResponse> {
+pub async fn conv_resp(resp: devolutions_pedm_client_http::apis::Error) -> Result<models::ErrorResponse> {
     match resp {
-        devolutions_pedm_client_http::apis::Error::Api(api_err) => {
-            Ok(serde_json::from_slice::<
-                devolutions_pedm_client_http::models::ErrorResponse,
-            >(&api_err.body.collect().await?.to_bytes())?)
-        }
+        devolutions_pedm_client_http::apis::Error::Api(api_err) => Ok(serde_json::from_slice::<models::ErrorResponse>(
+            &api_err.body.collect().await?.to_bytes(),
+        )?),
         devolutions_pedm_client_http::apis::Error::Header(x) => bail!(x),
         devolutions_pedm_client_http::apis::Error::Http(x) => bail!(x),
         devolutions_pedm_client_http::apis::Error::Hyper(x) => bail!(x),
@@ -116,7 +110,7 @@ pub async fn conv_resp(
     }
 }
 
-pub fn block_req<F, R>(f: F) -> Result<Result<R, devolutions_pedm_client_http::models::ErrorResponse>>
+pub fn block_req<F, R>(f: F) -> Result<Result<R, models::ErrorResponse>>
 where
     F: Future<Output = Result<R, devolutions_pedm_client_http::apis::Error>>,
 {

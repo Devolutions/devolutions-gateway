@@ -95,7 +95,7 @@ fn launch_desktop(
     Ok(buf)
 }
 
-pub fn launch_consent(session_id: u32, user_behalf: &Sid, path: &Path) -> Result<bool> {
+pub(crate) fn launch_consent(session_id: u32, user_behalf: &Sid, path: &Path) -> Result<bool> {
     let status = launch_desktop(
         session_id,
         "consent",

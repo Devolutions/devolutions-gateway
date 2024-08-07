@@ -10,7 +10,10 @@ fn main() -> Result<()> {
     let mut out_path = target_dir()?;
     out_path.push("policy.schema.json");
 
-    fs::write(&out_path, serde_json::to_string_pretty(&schema).unwrap())?;
+    fs::write(
+        &out_path,
+        serde_json::to_string_pretty(&schema).expect("failed to serialize PEDM schema"),
+    )?;
 
     Ok(())
 }

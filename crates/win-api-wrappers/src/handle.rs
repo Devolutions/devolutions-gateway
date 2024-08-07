@@ -12,7 +12,10 @@ pub struct Handle {
     owned: bool,
 }
 
+// SAFETY: A `HANDLE` is, by definition, thread safe.
 unsafe impl Send for Handle {}
+
+// SAFETY: A `HANDLE` is simply an integer, no dereferencing is done.
 unsafe impl Sync for Handle {}
 
 impl Handle {
@@ -74,7 +77,7 @@ impl TryFrom<&BorrowedHandle<'_>> for Handle {
 
     fn try_from(value: &BorrowedHandle<'_>) -> Result<Self, Self::Error> {
         let handle = Handle {
-            raw: HANDLE(value.as_raw_handle() as _),
+            raw: HANDLE(value.as_raw_handle().cast()),
             owned: false,
         };
 
@@ -92,7 +95,7 @@ impl TryFrom<BorrowedHandle<'_>> for Handle {
 
 impl From<OwnedHandle> for Handle {
     fn from(handle: OwnedHandle) -> Self {
-        Self::from(HANDLE(handle.into_raw_handle() as _))
+        Self::from(HANDLE(handle.into_raw_handle().cast()))
     }
 }
 

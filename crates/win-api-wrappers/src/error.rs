@@ -1,4 +1,3 @@
-use std::ffi::NulError;
 use std::fmt::Debug;
 use std::string::{FromUtf16Error, FromUtf8Error};
 
@@ -48,12 +47,6 @@ impl From<HRESULT> for Error {
     }
 }
 
-impl From<Error> for std::io::Error {
-    fn from(err: Error) -> Self {
-        err.into()
-    }
-}
-
 impl From<RPC_STATUS> for Error {
     fn from(err: RPC_STATUS) -> Self {
         Self::from_hresult(err.to_hresult())
@@ -62,24 +55,18 @@ impl From<RPC_STATUS> for Error {
 
 impl From<FromUtf8Error> for Error {
     fn from(err: FromUtf8Error) -> Self {
-        err.into()
+        Self::Win32(windows::core::Error::from(err))
     }
 }
 
 impl From<FromUtf16Error> for Error {
     fn from(err: FromUtf16Error) -> Self {
-        err.into()
-    }
-}
-
-impl From<NulError> for Error {
-    fn from(err: NulError) -> Self {
-        err.into()
+        Self::Win32(windows::core::Error::from(err))
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        err.into()
+        Self::Win32(windows::core::Error::from(err))
     }
 }

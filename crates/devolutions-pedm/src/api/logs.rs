@@ -7,7 +7,7 @@ use crate::log;
 
 use super::NamedPipeConnectInfo;
 
-pub async fn get_logs(
+pub(crate) async fn get_logs(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
 ) -> Result<Json<Vec<ElevationResult>>, Error> {
     info!(user = ?named_pipe_info.user, "Querying logs for user");

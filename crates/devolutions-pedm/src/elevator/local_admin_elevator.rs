@@ -18,22 +18,24 @@ use win_api_wrappers::token::Token;
 
 use super::Elevator;
 
-pub struct LocalAdminElevator {
+pub(crate) struct LocalAdminElevator {
     source: TOKEN_SOURCE,
 }
 
 impl LocalAdminElevator {
-    pub fn new(source_name: &[u8; 8], source_identifier: LUID) -> Self {
+    pub(crate) fn new(source_name: &[u8; 8], source_identifier: LUID) -> Self {
         let mut source = TOKEN_SOURCE {
             SourceIdentifier: source_identifier,
             ..Default::default()
         };
 
+        // Wrapping is what we want.
+        #[allow(clippy::cast_possible_wrap)]
         source
             .SourceName
             .iter_mut()
             .zip(source_name.iter())
-            .for_each(|(x, y)| *x = *y as _);
+            .for_each(|(x, y)| *x = *y as i8);
 
         Self { source }
     }
@@ -48,17 +50,20 @@ impl Elevator for LocalAdminElevator {
         let mut groups = token.groups()?;
         groups.0.push(SidAndAttributes {
             sid: Sid::from_well_known(WinLocalAccountAndAdministratorSid, None)?,
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _,
+            #[allow(clippy::cast_sign_loss)]
+            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
         });
 
         groups.0.push(SidAndAttributes {
             sid: owner_sid.clone(),
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY | SE_GROUP_OWNER) as _,
+            #[allow(clippy::cast_sign_loss)]
+            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY | SE_GROUP_OWNER) as u32,
         });
 
         groups.0.push(SidAndAttributes {
             sid: Sid::from_well_known(WinHighLabelSid, None)?,
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _,
+            #[allow(clippy::cast_sign_loss)]
+            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
         });
 
         let mut admin_token = Token::create_token(

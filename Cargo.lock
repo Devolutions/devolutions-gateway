@@ -1143,6 +1143,7 @@ dependencies = [
  "base16ct",
  "base64 0.22.1",
  "camino",
+ "cfg-if",
  "chrono",
  "devolutions-agent-shared",
  "devolutions-gateway-task",
@@ -1189,18 +1190,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "devolutions-pedm-contextmenu-hook"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "devolutions-pedm-shared",
- "parking_lot",
- "retour",
- "tracing",
- "win-api-wrappers",
-]
-
-[[package]]
 name = "devolutions-pedm-contextmenu-shell"
 version = "0.0.0"
 dependencies = [
@@ -1209,6 +1198,18 @@ dependencies = [
  "tokio 1.38.1",
  "win-api-wrappers",
  "windows-core 0.58.0",
+]
+
+[[package]]
+name = "devolutions-pedm-hook"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "devolutions-pedm-shared",
+ "parking_lot",
+ "retour",
+ "tracing",
+ "win-api-wrappers",
 ]
 
 [[package]]

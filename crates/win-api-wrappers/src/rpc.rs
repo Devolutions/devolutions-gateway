@@ -3,7 +3,7 @@ use std::ptr::{self, NonNull};
 use std::{mem, slice};
 
 use windows::core::GUID;
-use windows::Win32::Foundation::{ERROR_MORE_DATA, E_INVALIDARG, E_POINTER};
+use windows::Win32::Foundation::{ERROR_MORE_DATA, E_INVALIDARG};
 use windows::Win32::Security::{SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS};
 use windows::Win32::System::Memory::PAGE_READWRITE;
 use windows::Win32::System::Rpc::{
@@ -42,22 +42,22 @@ impl RpcBindingHandle {
         };
 
         // SAFETY: No preconditions.
-        let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as _) };
+        let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as *mut c_void) };
 
-        if status.0 != ERROR_MORE_DATA.0 as i32 {
+        if status.to_hresult() != ERROR_MORE_DATA.to_hresult() {
             bail!(Error::from(status));
         }
 
-        client_principal_name.resize((attribs.ClientPrincipalNameBufferLength / 2) as _, 0);
-        server_principal_name.resize((attribs.ServerPrincipalNameBufferLength / 2) as _, 0);
+        client_principal_name.resize((attribs.ClientPrincipalNameBufferLength / 2) as usize, 0);
+        server_principal_name.resize((attribs.ServerPrincipalNameBufferLength / 2) as usize, 0);
 
         attribs.ClientPrincipalName = client_principal_name.as_mut_ptr();
-        attribs.ClientPrincipalNameBufferLength = (client_principal_name.len() * mem::size_of::<u16>()) as _;
+        attribs.ClientPrincipalNameBufferLength = (client_principal_name.len() * mem::size_of::<u16>()).try_into()?;
         attribs.ServerPrincipalName = server_principal_name.as_mut_ptr();
-        attribs.ServerPrincipalNameBufferLength = (server_principal_name.len() * mem::size_of::<u16>()) as _;
+        attribs.ServerPrincipalNameBufferLength = (server_principal_name.len() * mem::size_of::<u16>()).try_into()?;
 
         // SAFETY: No preconditions.
-        let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as _) };
+        let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as *mut c_void) };
 
         status.ok()?;
 
@@ -66,7 +66,7 @@ impl RpcBindingHandle {
         server_principal_name.pop();
 
         Ok(RpcCallAttributes {
-            client_pid: attribs.ClientPID.0 as _,
+            client_pid: u32::try_from(attribs.ClientPID.0 as usize)?,
             client_principal_name: String::from_utf16(&client_principal_name).map_err(windows::core::Error::from)?,
             server_principal_name: String::from_utf16(&server_principal_name).map_err(windows::core::Error::from)?,
         })
@@ -120,11 +120,11 @@ unsafe impl Send for RpcServerInterfacePointer {}
 
 impl RpcServerInterfacePointer {
     pub fn handler_cnt(&self) -> Result<usize> {
-        // SAFETY: We assume `DispatchTable` points to a valid `RPC_DISPATCH_TABLE` if non null.
         let dispatch_table =
+            // SAFETY: We assume `DispatchTable` points to a valid `RPC_DISPATCH_TABLE` if non null.
             unsafe { self.raw.DispatchTable.as_ref() }.ok_or_else(|| Error::NullPointer("RPC_DISPATCH_TABLE"))?;
 
-        Ok(dispatch_table.DispatchTableCount as _)
+        Ok(dispatch_table.DispatchTableCount as usize)
     }
 
     pub fn handlers(&self) -> Result<Box<[SERVER_ROUTINE]>> {
@@ -136,8 +136,13 @@ impl RpcServerInterfacePointer {
         let mut handlers = Vec::with_capacity(handler_cnt);
 
         for i in 0..handler_cnt {
-            let raw = unsafe { *raw_dispatch_table.add(i) };
-            handlers.push(raw);
+            // SAFETY: We assume `DispatchTable` and `DispatchTableCount` are truthful.
+            let raw = unsafe { raw_dispatch_table.add(i) };
+
+            // SAFETY: We assume that `DispatchTable` has actual function pointers under it.
+            let raw = unsafe { raw.as_ref() }.ok_or_else(|| Error::NullPointer("DispatchTable entry"))?;
+
+            handlers.push(*raw);
         }
 
         Ok(handlers.into_boxed_slice())
@@ -157,14 +162,14 @@ impl RpcServerInterfacePointer {
             let addr = unsafe { raw_dispatch_table.add(i) }.cast_mut();
 
             // SAFETY: Assume the address points to a valid handler which is not currently in use.
-            let old_prot = unsafe { set_memory_protection(addr as _, mem::size_of::<*const ()>(), PAGE_READWRITE) }?;
+            let old_prot = unsafe { set_memory_protection(addr.cast(), mem::size_of::<*const ()>(), PAGE_READWRITE) }?;
 
             // TODO: See if it could be possible to freeze other threads during switch or to do an atomic switch.
             // SAFETY: Because of previous assumption and memory protection, this should succeed.
             unsafe { *addr = *new_handler };
 
             // SAFETY: Address is already assumed to be valid.
-            let _ = unsafe { set_memory_protection(addr as _, mem::size_of::<*const ()>(), old_prot) }?;
+            let _ = unsafe { set_memory_protection(addr.cast(), mem::size_of::<*const ()>(), old_prot) }?;
         }
 
         Ok(())
@@ -199,8 +204,8 @@ impl RpcBindingVector {
 
         status.ok()?;
 
-        // SAFETY: Assume `raw` is non NULL if `RpcServerInqBindings` is successful.
         Ok(RpcBindingVector {
+            // SAFETY: Assume `raw` is non NULL if `RpcServerInqBindings` is successful.
             raw: unsafe { NonNull::new_unchecked(raw) },
         })
     }

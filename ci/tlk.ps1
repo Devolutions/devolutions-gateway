@@ -411,7 +411,7 @@ class TlkRecipe
                     }
                 }
                 "agent" {
-                    if (Test-Path Env:DAGENT_EXECUTABLE) {
+                    if ($CargoPackage.Name -Eq "devolutions-agent" -And (Test-Path Env:DAGENT_EXECUTABLE)) {
                         $Env:DAGENT_EXECUTABLE
                     } else {
                         $null

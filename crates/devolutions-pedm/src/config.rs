@@ -18,13 +18,13 @@ pub(crate) static LADM_SRC_LUID: LUID = LUID {
 pub(crate) const VADM_RID: u32 = 99;
 pub(crate) static VADM_DOMAIN: &str = "_DEPM";
 
-pub fn pedm_desktop_path() -> &'static Path {
+pub(crate) fn pedm_desktop_path() -> &'static Path {
     static PEDM_DESKTOP_PATH: OnceLock<PathBuf> = OnceLock::new();
 
     PEDM_DESKTOP_PATH.get_or_init(|| install_directory().join(PEDM_DESKTOP_RELPATH))
 }
 
-pub fn install_directory() -> &'static Path {
+pub(crate) fn install_directory() -> &'static Path {
     static INSTALL_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
 
     INSTALL_DIRECTORY.get_or_init(|| {
@@ -38,7 +38,7 @@ pub fn install_directory() -> &'static Path {
     })
 }
 
-pub fn data_dir() -> Utf8PathBuf {
+pub(crate) fn data_dir() -> Utf8PathBuf {
     let mut dir = devolutions_agent_shared::get_data_dir();
     dir.push("pedm");
     dir

@@ -1,6 +1,6 @@
+use std::alloc::Layout;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
-use std::mem::{self};
 use std::ptr;
 
 use anyhow::{bail, Result};
@@ -36,70 +36,54 @@ impl Hash for Sid {
 impl Sid {
     pub fn virtual_account_sid(name: &str, base_sub_authority: u32) -> Result<Self> {
         let name = WideString::from(name);
-        let mut buf = vec![0; SECURITY_MAX_SID_SIZE as _];
-        let mut out_size = buf.len() as u32;
+        let mut buf = vec![0; SECURITY_MAX_SID_SIZE as usize];
+        let mut out_size = u32::try_from(buf.len())?;
 
         // SAFETY: `SidLength` must be the size of `buf`, which it is. Name is valid.
         unsafe {
             RtlCreateVirtualAccountSid(
-                &name.as_unicode_string(),
+                &name.as_unicode_string()?,
                 base_sub_authority,
-                PSID(buf.as_mut_ptr() as _),
-                &mut out_size as _,
+                PSID(buf.as_mut_ptr().cast()),
+                &mut out_size,
             )
         }?;
 
-        buf.truncate(out_size as _);
+        buf.truncate(out_size as usize);
 
-        // SAFETY: We can safely dereference since it is our buffer. We assume it is actually a SID thati is held.
+        // SAFETY: We can safely dereference since it is our buffer. We assume it is actually a SID that is held.
         Ok(unsafe { &*buf.as_ptr().cast::<SID>() }.into())
     }
 
     pub fn from_well_known(sid_type: WELL_KNOWN_SID_TYPE, domain_sid: Option<&Self>) -> Result<Self> {
         let mut out_size = 0u32;
 
-        let domain_sid = domain_sid.map(RawSid::from);
+        let domain_sid = domain_sid.map(RawSid::try_from).transpose()?;
 
-        let domain_sid_ptr = domain_sid
-            .as_ref()
-            .map(|x| x.as_raw() as *const _)
-            .unwrap_or_else(ptr::null);
+        let domain_sid_ptr = domain_sid.as_ref().map(RawSid::as_psid).unwrap_or_default();
 
-        // SAFETY: No preconditions. We assume `RawSid`'s `as_raw()` works correctly.
-        let _ = unsafe {
-            CreateWellKnownSid(
-                sid_type,
-                PSID(domain_sid_ptr as _),
-                PSID(ptr::null_mut()),
-                &mut out_size as _,
-            )
-        };
+        // SAFETY: No preconditions. We assume `RawSid`'s `as_psid()` works correctly.
+        let _ = unsafe { CreateWellKnownSid(sid_type, domain_sid_ptr, PSID(ptr::null_mut()), &mut out_size) };
 
-        let mut buf: Vec<u8> = vec![0; out_size as _];
+        let mut buf: Vec<u8> = vec![0; out_size as usize];
 
-        // SAFETY: No preconditions. We assume `RawSid`'s `as_raw()` works correctly.
+        // SAFETY: No preconditions. We assume `RawSid`'s `as_psid()` works correctly.
         // `buf`'s size matches the previously returned `out_size` for the same arguments.
-        unsafe {
-            CreateWellKnownSid(
-                sid_type,
-                PSID(domain_sid_ptr as _),
-                PSID(buf.as_mut_ptr() as _),
-                &mut out_size as _,
-            )
-        }?;
+        unsafe { CreateWellKnownSid(sid_type, domain_sid_ptr, PSID(buf.as_mut_ptr().cast()), &mut out_size) }?;
 
-        buf.truncate(out_size as _);
+        buf.truncate(out_size as usize);
 
+        #[allow(clippy::cast_ptr_alignment)]
         // SAFETY: We can safely dereference since this is our buffer. We assume the data in the buffer is a SID.
         Ok(Self::from(unsafe { &*buf.as_ptr().cast::<SID>() }))
     }
 
-    pub fn is_valid(&self) -> bool {
-        RawSid::from(self).is_valid()
+    pub fn is_valid(&self) -> Result<bool> {
+        Ok(RawSid::try_from(self)?.is_valid())
     }
 
     pub fn account(&self, system_name: Option<&str>) -> Result<Account> {
-        let raw_sid = RawSid::from(self);
+        let raw_sid = RawSid::try_from(self)?;
         let mut name_size = 0u32;
         let mut domain_size = 0u32;
         let mut sid_name_use = SID_NAME_USE::default();
@@ -112,7 +96,7 @@ impl Sid {
         let _ = unsafe {
             LookupAccountSidW(
                 system_name.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
-                PSID(raw_sid.as_raw() as *const _ as _),
+                raw_sid.as_psid(),
                 PWSTR::null(),
                 &mut name_size,
                 PWSTR::null(),
@@ -121,15 +105,15 @@ impl Sid {
             )
         };
 
-        let mut name_buf = vec![0u16; name_size as _];
-        let mut domain_buf = vec![0u16; domain_size as _];
+        let mut name_buf = vec![0u16; name_size as usize];
+        let mut domain_buf = vec![0u16; domain_size as usize];
 
         // SAFETY: `system_name` is borrowed so the original buffer is not dropped. No preconditions.
         // `name_buf` and `domain_buf` match the sizes announced.
         unsafe {
             LookupAccountSidW(
                 system_name.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
-                PSID(raw_sid.as_raw() as *const _ as _),
+                raw_sid.as_psid(),
                 PWSTR::from_raw(name_buf.as_mut_ptr()),
                 &mut name_size,
                 PWSTR::from_raw(domain_buf.as_mut_ptr()),
@@ -151,7 +135,7 @@ impl Sid {
 
 impl fmt::Display for Sid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        RawSid::from(self).fmt(f)
+        RawSid::try_from(self).map_err(|_| fmt::Error)?.fmt(f)
     }
 }
 
@@ -173,7 +157,7 @@ impl RawSid {
     pub fn len(&self) -> usize {
         // SAFETY: The underlying SID must be valid or an undefined value is returned.
         // We assume our buffer is well constructed and valid.
-        unsafe { GetLengthSid(PSID(self.as_raw() as *const _ as _)) as _ }
+        unsafe { GetLengthSid(self.as_psid()) as usize }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -181,14 +165,21 @@ impl RawSid {
     }
 
     pub fn as_raw(&self) -> &SID {
-        // SAFETY: Dereferencing i spossible since it is our buffer.
+        #[allow(clippy::cast_ptr_alignment)]
+        // SAFETY: Dereferencing is possible since it is our buffer.
         // We assume our buffer is well constructed and valid.
-        unsafe { &*self.buf.as_ptr().cast::<SID>() }
+        unsafe {
+            &*self.buf.as_ptr().cast::<SID>()
+        }
+    }
+
+    pub fn as_psid(&self) -> PSID {
+        PSID(self.as_raw() as *const _ as *mut _)
     }
 
     pub fn is_valid(&self) -> bool {
         // SAFETY: The pointer must not be null, which cannot be since it is our buffer.
-        unsafe { IsValidSid(PSID(self.as_raw() as *const _ as _)) }.as_bool()
+        unsafe { IsValidSid(self.as_psid()) }.as_bool()
     }
 }
 
@@ -198,8 +189,7 @@ impl fmt::Display for RawSid {
 
         // SAFETY: We assume that our SID is well constructed. It must be valid since it is our buffer.
         // We must free the returned buffer with `LocalFree`.
-        unsafe { ConvertSidToStringSidW(PSID(self.as_raw() as *const _ as _), &mut raw_string_sid as _) }
-            .map_err(|_| fmt::Error)?;
+        unsafe { ConvertSidToStringSidW(self.as_psid(), &mut raw_string_sid) }.map_err(|_| fmt::Error)?;
 
         // To avoid skipping the free, we wrap in a lambda.
         let res = (|| {
@@ -208,7 +198,7 @@ impl fmt::Display for RawSid {
         })();
 
         // SAFETY: No preconditions. Buffer can be null.
-        unsafe { LocalFree(HLOCAL(raw_string_sid.0 as _)) };
+        unsafe { LocalFree(HLOCAL(raw_string_sid.0.cast())) };
 
         res
     }
@@ -241,32 +231,33 @@ impl TryFrom<&str> for Sid {
     }
 }
 
-impl From<&Sid> for RawSid {
-    fn from(value: &Sid) -> Self {
-        let raw_sid_buf_size = mem::size_of::<SID>() // Size of the SID's header
-            + value.sub_authority.len().saturating_sub(1) * mem::size_of::<u32>(); // Size of the SID's data part, minus the trailing VLA entry in the header
-        let mut raw_sid_buf = vec![0u8; raw_sid_buf_size];
+impl TryFrom<&Sid> for RawSid {
+    type Error = anyhow::Error;
 
-        let raw_sid = raw_sid_buf.as_mut_ptr().cast::<SID>();
+    fn try_from(value: &Sid) -> Result<Self> {
+        let mut buf = vec![
+            0u8;
+            Layout::new::<SID>()
+                .extend(Layout::array::<u32>(value.sub_authority.len().saturating_sub(1))?)?
+                .0
+                .pad_to_align()
+                .size()
+        ];
 
-        // SAFETY: Buffer is valid and can fit `IdentifierAuthority` since it is at least `size_of::<SID>()` bytes large.
-        unsafe { ptr::addr_of_mut!((*raw_sid).IdentifierAuthority).write(value.identifier_identity) };
+        #[allow(clippy::cast_ptr_alignment)]
+        // SAFETY: Buffer is valid and can fit `SID` and all sub authorites.
+        let sid = unsafe { &mut *buf.as_mut_ptr().cast::<SID>() };
 
-        // SAFETY: Buffer is valid and can fit `Revision` since it is at least `size_of::<SID>()` bytes large.
-        unsafe { ptr::addr_of_mut!((*raw_sid).Revision).write(value.revision) };
-
-        // SAFETY: Buffer is valid and can fit `SubAuthorityCount` since it is at least `size_of::<SID>()` bytes large.
-        unsafe { ptr::addr_of_mut!((*raw_sid).SubAuthorityCount).write(value.sub_authority.len() as _) };
-
-        // SAFETY: No dereference is done in `ptr::addr_of_mut!`.
-        let sub_auth_ptr = unsafe { ptr::addr_of_mut!((*raw_sid).SubAuthority).cast::<u32>() };
+        sid.IdentifierAuthority = value.identifier_identity;
+        sid.Revision = value.revision;
+        sid.SubAuthorityCount = value.sub_authority.len().try_into()?;
 
         for (i, v) in value.sub_authority.iter().enumerate() {
-            // SAFETY: Buffer has at least `value.sub_authority.len()` entries, which is the upper bound of `i`.
-            unsafe { sub_auth_ptr.add(i).write(*v) };
+            // SAFETY: `SubAuthority` is a VLA and we have previously correctly sized it.
+            unsafe { *sid.SubAuthority.get_unchecked_mut(i) = *v };
         }
 
-        Self { buf: raw_sid_buf }
+        Ok(Self { buf })
     }
 }
 
@@ -287,9 +278,10 @@ impl TryFrom<PSID> for Sid {
 impl From<&SID> for Sid {
     fn from(sid: &SID) -> Self {
         let mut sub_authority = Vec::new();
-        for i in 0..sid.SubAuthorityCount {
+        for i in 0..u32::from(sid.SubAuthorityCount) {
             // SAFETY: We assume `SubAuthorityCount` matches with the actual amount of sub authorities of the SID.
-            let ptr = unsafe { GetSidSubAuthority(PSID(sid as *const _ as _), i as _) };
+            // *mut cast is safe since `GetSidSubAuthority` does not mutate `SID`.
+            let ptr = unsafe { GetSidSubAuthority(PSID(sid as *const _ as *mut _), i) };
 
             // SAFETY: We assume the returned pointer is valid.
             // Pointer is undefined if index is OOB. We assume it is in range.
@@ -320,26 +312,28 @@ impl RawSidAndAttributes {
     }
 }
 
-impl From<&SidAndAttributes> for RawSidAndAttributes {
-    fn from(value: &SidAndAttributes) -> Self {
-        let raw_sid = RawSid::from(&value.sid);
+impl TryFrom<&SidAndAttributes> for RawSidAndAttributes {
+    type Error = anyhow::Error;
 
-        let raw_sid_ptr = raw_sid.as_raw() as *const _;
+    fn try_from(value: &SidAndAttributes) -> Result<Self> {
+        let raw_sid = RawSid::try_from(&value.sid)?;
 
-        Self {
+        let raw_sid_ptr = raw_sid.as_psid();
+
+        Ok(Self {
             _sid: raw_sid,
             raw: SID_AND_ATTRIBUTES {
-                Sid: PSID(raw_sid_ptr as _),
+                Sid: raw_sid_ptr,
                 Attributes: value.attributes,
             },
-        }
+        })
     }
 }
 
 impl TryFrom<&SID_AND_ATTRIBUTES> for SidAndAttributes {
     type Error = anyhow::Error;
 
-    fn try_from(value: &SID_AND_ATTRIBUTES) -> Result<Self, Self::Error> {
+    fn try_from(value: &SID_AND_ATTRIBUTES) -> Result<Self> {
         Ok(Self {
             sid: Sid::try_from(value.Sid)?,
             attributes: value.Attributes,

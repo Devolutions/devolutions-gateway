@@ -22,7 +22,9 @@ use win_api_wrappers::utils::{create_directory, CommandLine};
 
 use anyhow::Result;
 
-pub fn start_process(
+// WinAPI is verbose, so are we.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_process(
     token: &Token,
     executable_path: Option<&Path>,
     command_line: Option<&CommandLine>,
@@ -59,18 +61,18 @@ pub fn start_process(
 }
 
 #[derive(Default)]
-pub struct MultiHasher {
+pub(crate) struct MultiHasher {
     sha1: Sha1,
     sha256: Sha256,
 }
 
 impl MultiHasher {
-    pub fn chain_update(mut self, data: &[u8]) -> Self {
+    pub(crate) fn chain_update(mut self, data: &[u8]) -> Self {
         self.update(data);
         self
     }
 
-    pub fn finalize(self) -> Hash {
+    pub(crate) fn finalize(self) -> Hash {
         let sha1 = self.sha1.finalize();
         let sha256 = self.sha256.finalize();
 
@@ -88,7 +90,7 @@ impl Update for MultiHasher {
     }
 }
 
-pub fn file_hash(path: &Path) -> Result<Hash> {
+pub(crate) fn file_hash(path: &Path) -> Result<Hash> {
     let data = fs::read(path)?;
 
     let mut hasher = MultiHasher::default();
@@ -96,7 +98,7 @@ pub fn file_hash(path: &Path) -> Result<Hash> {
     Ok(hasher.finalize())
 }
 
-pub fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Result<()> {
+pub(crate) fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Result<()> {
     let owner = Sid::from_well_known(WinLocalSystemSid, None)?;
 
     let mut aces = vec![Ace {
@@ -142,7 +144,7 @@ pub fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Result<()> {
     Ok(())
 }
 
-pub trait AccountExt {
+pub(crate) trait AccountExt {
     fn to_user(self) -> User;
 }
 

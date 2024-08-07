@@ -48,3 +48,6 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "implement",
 ]
+
+[lints]
+workspace = true

@@ -81,14 +81,14 @@ impl AnsiString {
     pub fn as_pcstr(&self) -> PCSTR {
         self.0
             .as_ref()
-            .map(|x| PCSTR::from_raw(x.as_ptr() as _))
+            .map(|x| PCSTR::from_raw(x.as_ptr()))
             .unwrap_or_else(PCSTR::null)
     }
 
     pub fn as_pstr(&mut self) -> PSTR {
         self.0
-            .as_ref()
-            .map(|x| PSTR::from_raw(x.as_ptr() as _))
+            .as_mut()
+            .map(|x| PSTR::from_raw(x.as_mut_ptr()))
             .unwrap_or_else(PSTR::null)
     }
 }
@@ -133,28 +133,34 @@ impl WideString {
     pub fn as_pcwstr(&self) -> PCWSTR {
         self.0
             .as_ref()
-            .map(|x| PCWSTR::from_raw(x.as_ptr() as _))
+            .map(|x| PCWSTR::from_raw(x.as_ptr()))
             .unwrap_or_else(PCWSTR::null)
     }
 
     pub fn as_pwstr(&mut self) -> PWSTR {
         self.0
-            .as_ref()
-            .map(|x| PWSTR::from_raw(x.as_ptr() as _))
+            .as_mut()
+            .map(|x| PWSTR::from_raw(x.as_mut_ptr()))
             .unwrap_or_else(PWSTR::null)
     }
 
-    pub fn as_unicode_string(&self) -> UNICODE_STRING {
-        UNICODE_STRING {
+    pub fn as_unicode_string(&self) -> Result<UNICODE_STRING> {
+        Ok(UNICODE_STRING {
             Length: self
                 .0
                 .as_ref()
                 .and_then(|x| x.split_last())
                 .map(|x| mem::size_of_val(x.1))
-                .unwrap_or(0) as _,
-            MaximumLength: self.0.as_ref().map(|x| mem::size_of_val(x.as_slice())).unwrap_or(0) as _,
+                .unwrap_or(0)
+                .try_into()?,
+            MaximumLength: self
+                .0
+                .as_ref()
+                .map(|x| mem::size_of_val(x.as_slice()))
+                .unwrap_or(0)
+                .try_into()?,
             Buffer: PWSTR(self.as_pcwstr().0.cast_mut()),
-        }
+        })
     }
 }
 
@@ -198,13 +204,15 @@ impl CommandLine {
         // SAFETY: `command_line` is valid and NUL terminated. `raw_args` will point to memory allocated by `LocalAlloc`.
         let raw_args = unsafe { CommandLineToArgvW(command_line.as_pcwstr(), &mut arg_cnt) };
 
+        let arg_cnt = usize::try_from(arg_cnt).unwrap_or_default();
+
         // If we get an error, no args.
         if raw_args.is_null() {
             return Self(vec![]);
         }
 
         // SAFETY: We assume that if the address is valid and the function did not have an error, arg_cnt will be valid.
-        let args = unsafe { slice::from_raw_parts(raw_args, arg_cnt as _) }
+        let args = unsafe { slice::from_raw_parts(raw_args, arg_cnt) }
             .iter()
             .filter_map(|x| x.to_string_safe().ok())
             .collect::<Vec<_>>();
@@ -318,7 +326,9 @@ impl Drop for Allocation<'_> {
 }
 
 /// Sets the memory protection of an address.
-/// # Safety:
+///
+/// # Safety
+///
 /// `addr` must not point to neighboring code, as if permissions are set incorrectly a crash or UB will occur.
 pub unsafe fn set_memory_protection(
     addr: *const c_void,
@@ -328,7 +338,7 @@ pub unsafe fn set_memory_protection(
     let mut old_prot = Default::default();
 
     // SAFETY: `addr` is valid by safety of function. No preconditions.
-    unsafe { VirtualProtect(addr as _, size, prot, &mut old_prot) }?;
+    unsafe { VirtualProtect(addr, size, prot, &mut old_prot) }?;
 
     Ok(old_prot)
 }
@@ -362,30 +372,32 @@ pub fn environment_block(token: Option<&Token>, inherit: bool) -> Result<HashMap
     // We can safely cast a *const to a *mut as we have no intention of modifying the data under the pointer.
     unsafe {
         CreateEnvironmentBlock(
-            &mut raw_blocks as *mut _ as _,
+            &mut raw_blocks as *mut _ as *mut *mut c_void,
             token.map(|x| x.handle().raw()).unwrap_or_default(),
             inherit,
         )?;
     }
 
-    let mut i = 0;
+    let mut cur_char_ptr = raw_blocks;
 
-    // SAFETY: `i` only increments by one. This means it will always be at maximum one byte beyond the last string.
+    // SAFETY: `cur_char` only increments by one. This means it will always be at maximum one byte beyond the last string.
     // This means the address it points to will always be valid.
-    while unsafe { raw_blocks.add(i).read() } != 0 {
+    while unsafe { cur_char_ptr.read() } != 0 {
         let mut block = Vec::new();
 
         loop {
-            // SAFETY: If `i` indexes to a zero value, we break out. This ensures the previous check will always be safe.
+            // SAFETY: If `cur_char` indexes to a zero value, we break out. This ensures the previous check will always be safe.
             // This iteration will always stop on the first zero. This means on each string, or on the before to last zero byte.
-            let cur_val = unsafe { raw_blocks.add(i).read() };
-            i += 1;
+            let cur_char = unsafe { cur_char_ptr.read() };
 
-            if cur_val == 0 {
+            // SAFETY: Since we are not dereferencing, it is safe to increment it even if we go beyond the before to last zero byte.
+            cur_char_ptr = unsafe { cur_char_ptr.add(1) };
+
+            if cur_char == 0 {
                 break;
             }
 
-            block.push(cur_val);
+            block.push(cur_char);
         }
 
         blocks.push(block);
@@ -421,16 +433,20 @@ pub fn expand_environment(src: &str, environment: &HashMap<String, String>) -> S
 
     while let Some(segment) = it.next() {
         let var_value = environment.get(segment);
-        if !last_replaced && it.peek().is_some() && var_value.is_some() {
-            expanded.push_str(var_value.unwrap());
-            last_replaced = true;
-        } else {
-            if !last_replaced {
-                expanded.push('%');
-            }
 
-            expanded.push_str(segment);
-            last_replaced = false;
+        match (last_replaced, it.peek(), var_value) {
+            (true, Some(_), Some(var_value)) => {
+                expanded.push_str(var_value);
+                last_replaced = true;
+            }
+            (_, _, _) => {
+                if !last_replaced {
+                    expanded.push('%');
+                }
+
+                expanded.push_str(segment);
+                last_replaced = false;
+            }
         }
     }
 
@@ -462,7 +478,7 @@ impl<'a> ProcessIdIterator<'a> {
             snapshot,
             is_first: true,
             entry: PROCESSENTRY32 {
-                dwSize: mem::size_of::<PROCESSENTRY32>() as _,
+                dwSize: size_of_u32::<PROCESSENTRY32>(),
                 ..Default::default()
             },
         }
@@ -540,7 +556,7 @@ impl Link {
         let mut persist_file = MaybeUninit::<IPersistFile>::zeroed();
 
         // SAFETY: Must be called within COM context. `persist_file` is valid and correctly sized.
-        unsafe { inst.query(&IPersistFile::IID, persist_file.as_mut_ptr() as _) }.ok()?;
+        unsafe { inst.query(&IPersistFile::IID, persist_file.as_mut_ptr().cast()) }.ok()?;
 
         // SAFETY: We assume that `.query` initializes `persist_file`.
         let persist_file = unsafe { persist_file.assume_init() };
@@ -551,17 +567,17 @@ impl Link {
         unsafe { persist_file.Load(raw_path.as_pcwstr(), STGM_READ) }?;
 
         // SAFETY: Must be called within COM context.
-        unsafe { inst.Resolve(None, SLR_NO_UI.0 as _) }?;
+        unsafe { inst.Resolve(None, SLR_NO_UI.0 as u32) }?;
 
         f(&inst)
     }
 
     pub fn target_path(&self) -> Result<PathBuf> {
         self.with_instance(|link| {
-            let mut target = vec![0; MAX_PATH as _];
+            let mut target = vec![0; MAX_PATH as usize];
 
             // SAFETY: No preconditions. Path is copied to `target`.
-            unsafe { link.GetPath(target.as_mut_slice(), ptr::null_mut(), SLGP_SHORTPATH.0 as _) }?;
+            unsafe { link.GetPath(target.as_mut_slice(), ptr::null_mut(), SLGP_SHORTPATH.0 as u32) }?;
 
             Ok(PathBuf::from(OsString::from_wide(nul_slice_wide_str(&target))))
         })
@@ -569,7 +585,7 @@ impl Link {
 
     pub fn target_args(&self) -> Result<String> {
         self.with_instance(|link| {
-            let mut target = vec![0; std::cmp::max(INFOTIPSIZE as _, MAX_PATH as _)];
+            let mut target = vec![0; std::cmp::max(INFOTIPSIZE as usize, MAX_PATH as usize)];
 
             // SAFETY: No preconditions. Arguments is copied to `target`.
             unsafe { link.GetArguments(target.as_mut_slice()) }?;
@@ -580,7 +596,7 @@ impl Link {
 
     pub fn target_working_directory(&self) -> Result<PathBuf> {
         self.with_instance(|link| {
-            let mut target = vec![0; MAX_PATH as _];
+            let mut target = vec![0; MAX_PATH as usize];
 
             // SAFETY: No preconditions. Path is copied to `target` and truncated afterwards.
             unsafe { link.GetWorkingDirectory(target.as_mut_slice()) }?;
@@ -596,7 +612,7 @@ pub fn create_directory(path: &Path, security_attributes: &SecurityAttributes) -
     let security_attributes = RawSecurityAttributes::try_from(security_attributes)?;
 
     // SAFETY: `path` is NUL terminated. We assume `security_attributes` is well constructed.
-    unsafe { CreateDirectoryW(path.as_pcwstr(), Some(security_attributes.raw())) }?;
+    unsafe { CreateDirectoryW(path.as_pcwstr(), Some(security_attributes.as_raw())) }?;
 
     Ok(())
 }
@@ -617,23 +633,28 @@ impl Pipe {
             CreatePipe(
                 &mut rx,
                 &mut tx,
-                security_attributes.as_ref().map(|x| x.raw() as _),
+                security_attributes.as_ref().map(|x| x.as_raw() as *const _),
                 size,
             )
         }?;
+
         Ok((Self { handle: rx.into() }, Self { handle: tx.into() }))
     }
 
     /// Peeks the contents of the pipe in `data`, while returning the amount of bytes available on the pipe.
     pub fn peek(&self, data: Option<&mut [u8]>) -> Result<u32> {
         let mut available = 0;
-        let size = data.as_ref().map(|b| b.len() as _).unwrap_or_default();
+        let size = data
+            .as_ref()
+            .map(|b| b.len().try_into())
+            .transpose()?
+            .unwrap_or_default();
 
         // SAFETY: No preconditions. The buffer is valid and its size is in bytes.
         unsafe {
             PeekNamedPipe(
                 self.handle.raw(),
-                data.map(|b| b.as_mut_ptr() as _),
+                data.map(|b| b.as_mut_ptr().cast()),
                 size,
                 None,
                 Some(&mut available),
@@ -678,7 +699,7 @@ impl Read for Pipe {
             ReadFile(self.handle.raw(), Some(buf), Some(&mut read_bytes), None)?;
         }
 
-        Ok(read_bytes as _)
+        Ok(read_bytes as usize)
     }
 }
 
@@ -691,7 +712,7 @@ impl Write for Pipe {
             WriteFile(self.handle.raw(), Some(buf), Some(&mut written_bytes), None)?;
         }
 
-        Ok(written_bytes as _)
+        Ok(written_bytes as usize)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -762,7 +783,12 @@ pub fn nul_slice_wide_str(slice: &[u16]) -> &[u16] {
         .filter(|(_, x)| **x == 0)
         .map(|(i, _)| i)
         .next()
-        .unwrap_or_else(|| slice.len());
+        .unwrap_or(slice.len());
 
     &slice[..last_idx]
+}
+
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) const fn size_of_u32<T>() -> u32 {
+    mem::size_of::<T>() as u32
 }

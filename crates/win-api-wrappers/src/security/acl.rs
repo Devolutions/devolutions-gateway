@@ -1,10 +1,11 @@
+use std::alloc::Layout;
 use std::mem::{self};
 use std::{ptr, slice};
 
 use anyhow::{bail, Result};
 
 use crate::identity::sid::{RawSid, Sid};
-use crate::utils::WideString;
+use crate::utils::{size_of_u32, WideString};
 use crate::Error;
 use windows::Win32::Foundation::{ERROR_INVALID_DATA, ERROR_INVALID_VARIANT, E_POINTER};
 use windows::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_OBJECT_TYPE};
@@ -25,20 +26,21 @@ pub enum AceType {
 impl AceType {
     pub fn kind(&self) -> u8 {
         match self {
-            AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as _,
+            #[allow(clippy::cast_possible_truncation)]
+            AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as u8,
         }
     }
 
-    pub fn to_raw(&self) -> Vec<u8> {
-        match self {
-            AceType::AccessAllowed(sid) => RawSid::from(sid).buf,
-        }
+    pub fn to_raw(&self) -> Result<Vec<u8>> {
+        Ok(match self {
+            AceType::AccessAllowed(sid) => RawSid::try_from(sid)?.buf,
+        })
     }
 
     pub fn from_raw(kind: u8, buf: &[u8]) -> Result<Self> {
         let raw_sid = PSID(buf.as_ptr().cast_mut().cast());
 
-        Ok(match kind as _ {
+        Ok(match u32::from(kind) {
             ACCESS_ALLOWED_ACE_TYPE => Self::AccessAllowed(Sid::try_from(raw_sid)?),
             _ => bail!(Error::from_win32(ERROR_INVALID_VARIANT)),
         })
@@ -52,29 +54,41 @@ pub struct Ace {
 }
 
 impl Ace {
-    pub fn to_raw(&self) -> Vec<u8> {
-        let body = self.data.to_raw();
+    pub fn to_raw(&self) -> Result<Vec<u8>> {
+        let body = self.data.to_raw()?;
 
-        let size = mem::size_of::<ACE_HEADER>() + mem::size_of::<u32>() + body.len();
+        let size = Layout::new::<ACE_HEADER>()
+            .extend(Layout::new::<u32>())?
+            .0
+            .extend(Layout::array::<u8>(body.len())?)?
+            .0
+            .pad_to_align()
+            .size();
 
         let header = ACE_HEADER {
             AceType: self.data.kind(),
-            AceFlags: self.flags.0 as u8,
-            AceSize: size as _,
+            AceFlags: self.flags.0.try_into()?,
+            AceSize: size.try_into()?,
         };
 
         let mut buf = vec![0; size];
 
         let mut ptr = buf.as_mut_ptr();
 
+        #[allow(clippy::cast_ptr_alignment)]
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER>` big.
-        unsafe { ptr.cast::<ACE_HEADER>().write(header) };
+        unsafe {
+            ptr.cast::<ACE_HEADER>().write(header)
+        };
 
         // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
         ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
 
+        #[allow(clippy::cast_ptr_alignment)]
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32>` big.
-        unsafe { ptr.cast::<u32>().write(self.access_mask) };
+        unsafe {
+            ptr.cast::<u32>().write(self.access_mask)
+        };
 
         // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
         ptr = unsafe { ptr.byte_add(mem::size_of::<u32>()) };
@@ -82,7 +96,7 @@ impl Ace {
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32> + body.len()` big.
         unsafe { ptr.copy_from(body.as_ptr(), body.len()) };
 
-        buf
+        Ok(buf)
     }
 
     /// Creates an `Ace` from a pointer to an `ACE_HEADER`.
@@ -102,6 +116,7 @@ impl Ace {
         ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
 
         // SAFETY: Assume that the header is followed by a 4 byte access mask.
+        #[allow(clippy::cast_ptr_alignment)]
         let access_mask = unsafe { ptr.cast::<u32>().read() };
 
         // SAFETY: Assume buffer is big enough to fit Ace data.
@@ -113,7 +128,7 @@ impl Ace {
         let body = unsafe { slice::from_raw_parts(ptr.cast::<u8>(), body_size) };
 
         Ok(Self {
-            flags: ACE_FLAGS(header.AceFlags as _),
+            flags: ACE_FLAGS(u32::from(header.AceFlags)),
             access_mask,
             data: AceType::from_raw(header.AceType, body)?,
         })
@@ -141,7 +156,7 @@ impl Acl {
     }
 
     pub fn to_raw(&self) -> Result<Vec<u8>> {
-        let raw_aces = self.aces.iter().map(Ace::to_raw).collect::<Vec<_>>();
+        let raw_aces = self.aces.iter().map(Ace::to_raw).collect::<Result<Vec<_>>>()?;
         let size = mem::size_of::<ACL>() + raw_aces.iter().map(Vec::len).sum::<usize>();
 
         // Align on u32 boundary
@@ -150,7 +165,7 @@ impl Acl {
         let mut buf = vec![0; size];
 
         // SAFETY: The buffer must be preallocated and it must be DWORD aligned.
-        unsafe { InitializeAcl(buf.as_mut_ptr() as _, buf.len() as _, self.revision) }?;
+        unsafe { InitializeAcl(buf.as_mut_ptr().cast(), buf.len().try_into()?, self.revision) }?;
 
         for raw_ace in raw_aces {
             // SAFETY: No preconditions. Buffer is valid and `raw_ace` as well.
@@ -160,7 +175,7 @@ impl Acl {
                     self.revision,
                     MAXDWORD, // Append to end of list
                     raw_ace.as_ptr().cast(),
-                    raw_ace.len() as _,
+                    raw_ace.len().try_into()?,
                 )
             }?;
         }
@@ -180,8 +195,8 @@ impl TryFrom<&ACL> for Acl {
 
     fn try_from(value: &ACL) -> Result<Self, Self::Error> {
         Ok(Self {
-            revision: ACE_REVISION(value.AclRevision as _),
-            aces: (0..value.AceCount as _)
+            revision: ACE_REVISION(u32::from(value.AclRevision)),
+            aces: (0..u32::from(value.AceCount))
                 .map(|i| {
                     let mut ace = ptr::null_mut();
 
@@ -243,8 +258,8 @@ pub fn set_named_security_info(
         };
     }
 
-    let owner = owner.map(RawSid::from);
-    let group = group.map(RawSid::from);
+    let owner = owner.map(RawSid::try_from).transpose()?;
+    let group = group.map(RawSid::try_from).transpose()?;
     let dacl = dacl.map(|x| x.acl.to_raw()).transpose()?;
     let sacl = sacl.map(|x| x.acl.to_raw()).transpose()?;
 
@@ -255,14 +270,8 @@ pub fn set_named_security_info(
             target.as_pcwstr(),
             object_type,
             security_info,
-            owner
-                .as_ref()
-                .map(|x| PSID(x.as_raw() as *const _ as _))
-                .unwrap_or_default(),
-            group
-                .as_ref()
-                .map(|x| PSID(x.as_raw() as *const _ as _))
-                .unwrap_or_default(),
+            owner.as_ref().map(RawSid::as_psid).unwrap_or_default(),
+            group.as_ref().map(RawSid::as_psid).unwrap_or_default(),
             dacl.as_ref().map(|x| x.as_ptr().cast()),
             sacl.as_ref().map(|x| x.as_ptr().cast()),
         )
@@ -283,7 +292,9 @@ pub struct SecurityDescriptor {
 impl Default for SecurityDescriptor {
     fn default() -> Self {
         Self {
-            revision: SECURITY_DESCRIPTOR_REVISION as _,
+            // This is a constant =1.
+            #[allow(clippy::cast_possible_truncation)]
+            revision: SECURITY_DESCRIPTOR_REVISION as u8,
             owner: None,
             group: None,
             sacl: None,
@@ -301,8 +312,12 @@ pub struct RawSecurityDescriptor {
 }
 
 impl RawSecurityDescriptor {
-    pub fn raw(&self) -> &SECURITY_DESCRIPTOR {
+    pub fn as_raw(&self) -> &SECURITY_DESCRIPTOR {
         &self.raw
+    }
+
+    pub fn as_raw_mut(&mut self) -> &mut SECURITY_DESCRIPTOR {
+        &mut self.raw
     }
 }
 
@@ -310,8 +325,8 @@ impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
     type Error = anyhow::Error;
 
     fn try_from(value: &SecurityDescriptor) -> std::result::Result<Self, Self::Error> {
-        let owner = value.owner.as_ref().map(RawSid::from);
-        let group = value.group.as_ref().map(RawSid::from);
+        let owner = value.owner.as_ref().map(RawSid::try_from).transpose()?;
+        let group = value.group.as_ref().map(RawSid::try_from).transpose()?;
         let sacl = value
             .sacl
             .as_ref()
@@ -352,16 +367,8 @@ impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
             Revision: value.revision,
             Sbz1: 0,
             Control: control,
-            Owner: PSID(
-                owner
-                    .as_ref()
-                    .map_or_else(ptr::null_mut, |x| x.as_raw() as *const _ as _),
-            ),
-            Group: PSID(
-                group
-                    .as_ref()
-                    .map_or_else(ptr::null_mut, |x| x.as_raw() as *const _ as _),
-            ),
+            Owner: owner.as_ref().map(RawSid::as_psid).unwrap_or_default(),
+            Group: group.as_ref().map(RawSid::as_psid).unwrap_or_default(),
             Sacl: sacl
                 .as_ref()
                 .map_or_else(ptr::null_mut, |x| x.1.as_ptr().cast_mut().cast()),
@@ -434,7 +441,7 @@ pub struct RawSecurityAttributes {
 }
 
 impl RawSecurityAttributes {
-    pub fn raw(&self) -> &SECURITY_ATTRIBUTES {
+    pub fn as_raw(&self) -> &SECURITY_ATTRIBUTES {
         &self.raw
     }
 }
@@ -443,17 +450,17 @@ impl TryFrom<&SecurityAttributes> for RawSecurityAttributes {
     type Error = anyhow::Error;
 
     fn try_from(value: &SecurityAttributes) -> Result<Self, Self::Error> {
-        let security_descriptor = value
+        let mut security_descriptor = value
             .security_descriptor
             .as_ref()
             .map(RawSecurityDescriptor::try_from)
             .transpose()?;
 
         let raw = SECURITY_ATTRIBUTES {
-            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as _,
+            nLength: size_of_u32::<SECURITY_ATTRIBUTES>(),
             lpSecurityDescriptor: security_descriptor
-                .as_ref()
-                .map_or_else(ptr::null_mut, |x| x.raw() as *const _ as _),
+                .as_mut()
+                .map_or_else(ptr::null_mut, |x| x.as_raw_mut() as *mut _ as *mut _),
             bInheritHandle: value.inherit_handle.into(),
         };
 

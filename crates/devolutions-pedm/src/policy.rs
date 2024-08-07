@@ -38,20 +38,20 @@ use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHashe
 use crate::{config, elevations};
 use devolutions_pedm_shared::policy;
 
-pub struct IdList<T: Identifiable> {
+pub(crate) struct IdList<T: Identifiable> {
     root_path: PathBuf,
     data: HashMap<Id, T>,
 }
 
 impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
-    pub fn new(root_path: PathBuf) -> Self {
+    pub(crate) fn new(root_path: PathBuf) -> Self {
         Self {
             root_path,
             data: HashMap::new(),
         }
     }
 
-    pub fn load(&mut self) -> Result<()> {
+    pub(crate) fn load(&mut self) -> Result<()> {
         self.data.clear();
 
         for dir_entry in fs::read_dir(self.path())? {
@@ -84,23 +84,23 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         Ok(())
     }
 
-    pub fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.root_path
     }
 
-    pub fn get(&self, id: &Id) -> Option<&T> {
+    pub(crate) fn get(&self, id: &Id) -> Option<&T> {
         self.data.get(id)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         self.data.values()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
         self.data.values_mut()
     }
 
-    pub fn contains(&self, id: &Id) -> bool {
+    pub(crate) fn contains(&self, id: &Id) -> bool {
         self.data.contains_key(id)
     }
 
@@ -123,11 +123,11 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         Ok(())
     }
 
-    pub fn add(&mut self, entry: T) -> Result<()> {
+    pub(crate) fn add(&mut self, entry: T) -> Result<()> {
         self.add_internal(entry, true)
     }
 
-    pub fn remove(&mut self, id: &Id) -> Result<()> {
+    pub(crate) fn remove(&mut self, id: &Id) -> Result<()> {
         if !self.contains(id) {
             bail!(Error::NotFound);
         }
@@ -144,7 +144,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
     }
 }
 
-pub struct Policy {
+pub(crate) struct Policy {
     config_path: PathBuf,
     config: Configuration,
     profiles: IdList<Profile>,
@@ -153,7 +153,7 @@ pub struct Policy {
 }
 
 impl Policy {
-    pub fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         let mut policy = Self {
             config_path: policy_config_path().into_std_path_buf(),
             config: Configuration::default(),
@@ -188,18 +188,18 @@ impl Policy {
         }
     }
 
-    pub fn load(&mut self) -> Result<()> {
+    pub(crate) fn load(&mut self) -> Result<()> {
         self.load_config();
         self.profiles.load()?;
         self.rules.load()?;
         Ok(())
     }
 
-    pub fn profile(&self, id: &Id) -> Option<&Profile> {
+    pub(crate) fn profile(&self, id: &Id) -> Option<&Profile> {
         self.profiles.get(id)
     }
 
-    pub fn user_profile(&self, user: &User, id: &Id) -> Option<&Profile> {
+    pub(crate) fn user_profile(&self, user: &User, id: &Id) -> Option<&Profile> {
         // Check that the user has access to profile.
         if !self
             .config
@@ -213,7 +213,7 @@ impl Policy {
         self.profiles.get(id)
     }
 
-    pub fn user_profiles(&self, user: &User) -> Vec<&Profile> {
+    pub(crate) fn user_profiles(&self, user: &User) -> Vec<&Profile> {
         self.config
             .assignments
             .keys()
@@ -221,7 +221,7 @@ impl Policy {
             .collect()
     }
 
-    pub fn set_user_current_profile(&mut self, user: User, profile_id: Option<Id>) -> Result<()> {
+    pub(crate) fn set_user_current_profile(&mut self, user: User, profile_id: Option<Id>) -> Result<()> {
         if let Some(profile_id) = profile_id {
             if !self
                 .config
@@ -240,7 +240,7 @@ impl Policy {
         Ok(())
     }
 
-    pub fn user_current_profile(&self, user: &User) -> Option<&Profile> {
+    pub(crate) fn user_current_profile(&self, user: &User) -> Option<&Profile> {
         let profile_id = self.current_profiles.get(user)?;
 
         // Make sure the user's assigned profile is actually allowed.
@@ -256,11 +256,11 @@ impl Policy {
         self.profiles.get(profile_id)
     }
 
-    pub fn profiles(&self) -> impl Iterator<Item = &Profile> + '_ {
+    pub(crate) fn profiles(&self) -> impl Iterator<Item = &Profile> + '_ {
         self.profiles.iter()
     }
 
-    pub fn add_profile(&mut self, profile: Profile) -> Result<()> {
+    pub(crate) fn add_profile(&mut self, profile: Profile) -> Result<()> {
         let id = profile.id.clone();
         self.profiles.add(profile)?;
 
@@ -269,7 +269,7 @@ impl Policy {
         Ok(())
     }
 
-    pub fn replace_profile(&mut self, old_id: &Id, profile: Profile) -> Result<()> {
+    pub(crate) fn replace_profile(&mut self, old_id: &Id, profile: Profile) -> Result<()> {
         if !self.profiles.contains(old_id) {
             bail!(Error::NotFound);
         } else if old_id != &profile.id && self.profiles.contains(&profile.id) {
@@ -288,7 +288,7 @@ impl Policy {
         Ok(())
     }
 
-    pub fn replace_rule(&mut self, old_id: &Id, rule: Rule) -> Result<()> {
+    pub(crate) fn replace_rule(&mut self, old_id: &Id, rule: Rule) -> Result<()> {
         if !self.rules.contains(old_id) {
             bail!(Error::NotFound);
         } else if old_id != &rule.id && self.rules.contains(&rule.id) {
@@ -321,7 +321,7 @@ impl Policy {
         Ok(())
     }
 
-    pub fn remove_profile(&mut self, id: &Id) -> Result<()> {
+    pub(crate) fn remove_profile(&mut self, id: &Id) -> Result<()> {
         self.profiles.remove(id)?;
 
         self.config.assignments.remove(id);
@@ -329,19 +329,19 @@ impl Policy {
         Ok(())
     }
 
-    pub fn rule(&self, id: &Id) -> Option<&Rule> {
+    pub(crate) fn rule(&self, id: &Id) -> Option<&Rule> {
         self.rules.get(id)
     }
 
-    pub fn rules(&self) -> impl Iterator<Item = &Rule> + '_ {
+    pub(crate) fn rules(&self) -> impl Iterator<Item = &Rule> + '_ {
         self.rules.iter()
     }
 
-    pub fn add_rule(&mut self, rule: Rule) -> Result<()> {
+    pub(crate) fn add_rule(&mut self, rule: Rule) -> Result<()> {
         self.rules.add(rule)
     }
 
-    pub fn remove_rule(&mut self, id: &Id) -> Result<()> {
+    pub(crate) fn remove_rule(&mut self, id: &Id) -> Result<()> {
         self.rules.remove(id)?;
 
         for prof in self.profiles.iter_mut() {
@@ -353,11 +353,11 @@ impl Policy {
         Ok(())
     }
 
-    pub fn assignments(&self) -> &HashMap<Id, Vec<User>> {
+    pub(crate) fn assignments(&self) -> &HashMap<Id, Vec<User>> {
         &self.config.assignments
     }
 
-    pub fn set_assignments(&mut self, profile_id: Id, users: Vec<User>) -> Result<()> {
+    pub(crate) fn set_assignments(&mut self, profile_id: Id, users: Vec<User>) -> Result<()> {
         if !self.profiles.contains(&profile_id) {
             bail!(Error::NotFound);
         }
@@ -382,32 +382,35 @@ impl Policy {
         Ok(())
     }
 
-    pub fn validate(&self, session_id: u32, request: &ElevationRequest) -> Result<()> {
+    fn rule_for_request(&self, profile: &Profile, request: &ElevationRequest) -> Option<&Rule> {
+        for rule_id in &profile.rules {
+            match self.rules.get(rule_id) {
+                Some(rule) => {
+                    if !rule.target.is_match(&request.target)
+                        || rule.asker.as_ref().is_some_and(|x| !x.is_match(&request.asker))
+                    {
+                        continue;
+                    }
+
+                    return Some(rule);
+                }
+                None => {
+                    warn!(%profile.id, %rule_id, "Profile assigned to non existent rule");
+                }
+            };
+        }
+
+        None
+    }
+
+    pub(crate) fn validate(&self, session_id: u32, request: &ElevationRequest) -> Result<()> {
         let profile = self
             .user_current_profile(&request.asker.user)
             .ok_or_else(|| anyhow!(Error::AccessDenied))?;
 
-        let rule = 'r: loop {
-            for rule_id in &profile.rules {
-                let rule = self.rules.get(rule_id);
-                if rule.is_none() {
-                    warn!(%profile.id, %rule_id, "Profile assigned to non existent rule");
-                    continue;
-                }
-
-                let rule = rule.unwrap();
-
-                if !rule.target.is_match(&request.target)
-                    || rule.asker.as_ref().is_some_and(|x| !x.is_match(&request.asker))
-                {
-                    continue;
-                }
-
-                break 'r rule;
-            }
-
-            bail!(Error::AccessDenied);
-        };
+        let rule = self
+            .rule_for_request(profile, request)
+            .ok_or_else(|| anyhow!(Error::AccessDenied))?;
 
         let mut elevation_type = rule.elevation_kind;
         if elevations::is_elevated(&request.asker.user) {
@@ -457,7 +460,7 @@ fn policy_rules_path() -> Utf8PathBuf {
     dir
 }
 
-pub fn policy() -> &'static RwLock<Policy> {
+pub(crate) fn policy() -> &'static RwLock<Policy> {
     static POLICY: OnceLock<RwLock<Policy>> = OnceLock::new();
 
     POLICY.get_or_init(|| {
@@ -479,7 +482,7 @@ where
     Ok(serde_json::from_reader(reader)?)
 }
 
-pub fn load_signature(path: &Path) -> Result<Signature> {
+pub(crate) fn load_signature(path: &Path) -> Result<Signature> {
     let wintrust_result = authenticode_status(path)?;
 
     // Windows only supports one signer, so getting the first is ok.
@@ -495,7 +498,7 @@ pub fn load_signature(path: &Path) -> Result<Signature> {
     })
 }
 
-pub fn application_from_path(
+pub(crate) fn application_from_path(
     path: PathBuf,
     command_line: CommandLine,
     working_directory: PathBuf,
@@ -514,7 +517,7 @@ pub fn application_from_path(
     })
 }
 
-pub fn application_from_process(pid: u32) -> Result<Application> {
+pub(crate) fn application_from_process(pid: u32) -> Result<Application> {
     let process = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
 
     let path = process.exe_path()?;
@@ -531,7 +534,7 @@ pub fn application_from_process(pid: u32) -> Result<Application> {
     application_from_path(path, proc_params.command_line, proc_params.working_directory, user)
 }
 
-pub fn authenticode_win_to_policy(
+pub(crate) fn authenticode_win_to_policy(
     win_status: win_api_wrappers::security::crypt::AuthenticodeSignatureStatus,
 ) -> policy::AuthenticodeSignatureStatus {
     match win_status {

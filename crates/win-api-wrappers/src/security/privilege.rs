@@ -1,5 +1,4 @@
-use std::mem::{self};
-use std::ptr;
+use std::alloc::Layout;
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -30,7 +29,7 @@ impl TryFrom<&TOKEN_PRIVILEGES> for TokenPrivileges {
 
     fn try_from(value: &TOKEN_PRIVILEGES) -> Result<Self, Self::Error> {
         // SAFETY: We assume `value.Privileges` is truthful and big enough to fit its VLA.
-        let privs_slice = unsafe { slice_from_ptr(value.Privileges.as_ptr(), value.PrivilegeCount as _) };
+        let privs_slice = unsafe { slice_from_ptr(value.Privileges.as_ptr(), value.PrivilegeCount as usize) };
 
         Ok(Self(privs_slice.to_vec()))
     }
@@ -39,33 +38,38 @@ impl TryFrom<&TOKEN_PRIVILEGES> for TokenPrivileges {
 impl RawTokenPrivileges {
     pub fn as_raw(&self) -> &TOKEN_PRIVILEGES {
         // SAFETY: It is safe to dereference since it is our buffer.
-        unsafe { &*self.0.as_ptr().cast::<TOKEN_PRIVILEGES>() }
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            &*self.0.as_ptr().cast::<TOKEN_PRIVILEGES>()
+        }
     }
 }
 
-impl From<&TokenPrivileges> for RawTokenPrivileges {
-    fn from(value: &TokenPrivileges) -> Self {
-        let mut raw_buf = vec![
+impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &TokenPrivileges) -> Result<Self> {
+        let mut buf = vec![
             0;
-            mem::size_of::<TOKEN_PRIVILEGES>()
-                + value.0.len().saturating_sub(1) * mem::size_of::<LUID_AND_ATTRIBUTES>()
+            Layout::new::<TOKEN_PRIVILEGES>()
+                .extend(Layout::array::<LUID_AND_ATTRIBUTES>(value.0.len().saturating_sub(1))?)?
+                .0
+                .pad_to_align()
+                .size()
         ];
 
-        let raw = raw_buf.as_mut_ptr().cast::<TOKEN_PRIVILEGES>();
+        // SAFETY: `buf` is at least as big as `TOKEN_PRIVILEGES` and its privileges.
+        #[allow(clippy::cast_ptr_alignment)]
+        let privileges = unsafe { &mut *buf.as_mut_ptr().cast::<TOKEN_PRIVILEGES>() };
 
-        // SAFETY: `raw_buf` can fit `PrivilegeCount` since it is at least `size_of::<TOKEN_PRIVILEGES>` bytes large.
-        unsafe { ptr::addr_of_mut!((*raw).PrivilegeCount).write(value.0.len() as _) };
-
-        // SAFETY: No dereference is done in `addr_of_mut!`.
-        let privs_ptr = unsafe { ptr::addr_of_mut!((*raw).Privileges).cast::<LUID_AND_ATTRIBUTES>() };
+        privileges.PrivilegeCount = value.0.len().try_into()?;
 
         for (i, v) in value.0.iter().enumerate() {
-            // SAFETY: `raw_buf` is at least `size_of::<TOKEN_PRIVILEGES> + (value.0.len() - 1) * size_of::<LUID_AND_ATTRIBUTES>` bytes large.
-            // This means it can fit all the entries being iterated on.
-            unsafe { privs_ptr.add(i).write(*v) };
+            // SAFETY: `Privileges` is a VLA and we have previously correctly sized it.
+            unsafe { *privileges.Privileges.get_unchecked_mut(i) = *v };
         }
 
-        Self(raw_buf)
+        Ok(Self(buf))
     }
 }
 

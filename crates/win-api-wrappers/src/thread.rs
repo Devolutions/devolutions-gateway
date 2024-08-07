@@ -104,7 +104,7 @@ impl<'a> ThreadAttributeList {
         // SAFETY: `lpAttributeList` points to a buffer of the `out_size`.
         unsafe {
             InitializeProcThreadAttributeList(
-                LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr() as _),
+                LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr().cast()),
                 count,
                 0,
                 &mut out_size,
@@ -115,7 +115,7 @@ impl<'a> ThreadAttributeList {
     }
 
     pub fn raw(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        LPPROC_THREAD_ATTRIBUTE_LIST(self.0.as_mut_ptr() as _)
+        LPPROC_THREAD_ATTRIBUTE_LIST(self.0.as_mut_ptr().cast())
     }
 
     pub fn update(&mut self, attribute: &'a ThreadAttributeType<'a>) -> Result<()> {
@@ -125,7 +125,7 @@ impl<'a> ThreadAttributeList {
             Ok(UpdateProcThreadAttribute(
                 self.raw(),
                 0,
-                attribute.attribute() as _,
+                attribute.attribute() as usize,
                 Some(attribute.value()),
                 attribute.size(),
                 None,
@@ -159,9 +159,9 @@ impl ThreadAttributeType<'_> {
 
     pub fn value(&self) -> *const c_void {
         match self {
-            ThreadAttributeType::ParentProcess(p) => p.handle.as_raw_ref() as *const _ as _,
-            ThreadAttributeType::ExtendedFlags(v) => &v as *const _ as _,
-            ThreadAttributeType::HandleList(h) => h.as_ptr() as _,
+            ThreadAttributeType::ParentProcess(p) => p.handle.as_raw_ref() as *const _ as *const c_void,
+            ThreadAttributeType::ExtendedFlags(v) => &v as *const _ as *const c_void,
+            ThreadAttributeType::HandleList(h) => h.as_ptr().cast(),
         }
     }
 

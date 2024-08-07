@@ -10,27 +10,27 @@ use super::NamedPipeConnectInfo;
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
-pub struct TemporaryElevationStatus {
-    pub enabled: bool,
-    pub maximum_seconds: u64,
-    pub time_left: u64,
+pub(crate) struct TemporaryElevationStatus {
+    pub(crate) enabled: bool,
+    pub(crate) maximum_seconds: u64,
+    pub(crate) time_left: u64,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
-pub struct SessionElevationStatus {
-    pub enabled: bool,
+pub(crate) struct SessionElevationStatus {
+    pub(crate) enabled: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
-pub struct StatusResponse {
-    pub elevated: bool,
-    pub temporary: TemporaryElevationStatus,
-    pub session: SessionElevationStatus,
+pub(crate) struct StatusResponse {
+    pub(crate) elevated: bool,
+    pub(crate) temporary: TemporaryElevationStatus,
+    pub(crate) session: SessionElevationStatus,
 }
 
-pub async fn get_status(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Json<StatusResponse> {
+pub(crate) async fn get_status(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Json<StatusResponse> {
     info!(user = ?named_pipe_info.user, "Querying status for user");
 
     let policy = policy::policy().read();

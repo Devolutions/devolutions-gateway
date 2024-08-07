@@ -8,7 +8,7 @@ description = "Shared code for Devolutions PEDM"
 publish = false
 
 [dependencies]
-anyhow = "1.0.86"
+anyhow ={ version = "1.0.86", optional = true }
 serde = { version = "1.0.203", features = ["derive"], optional = true }
 win-api-wrappers = { path = "../win-api-wrappers", optional = true }
 hyper = { version = "~0.14", features = ["client", "http1"], optional = true } # old version required for OpenAPI generator
@@ -23,8 +23,7 @@ tower = { version = "0.3", optional = true } # old version required for OpenAPI 
 pin-project = { version = "1.1.5", optional = true }
 
 [features]
-pedm_client = ["hyper", "serde_json", "tokio", "winapi", "policy", "serde", "devolutions-pedm-client-http", "tower", "pin-project"]
+pedm_client = ["hyper", "serde_json", "tokio", "win-api-wrappers", "policy", "serde", "devolutions-pedm-client-http", "tower", "pin-project", "anyhow"]
 policy = ["regex", "schemars", "serde", "glob"]
 build = []
-desktop = ["windows-registry", "winapi"]
-winapi = ["win-api-wrappers"]
+desktop = ["windows-registry", "win-api-wrappers", "anyhow"]

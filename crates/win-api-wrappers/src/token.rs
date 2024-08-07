@@ -1,6 +1,8 @@
+use std::alloc::Layout;
 use std::any::Any;
+use std::ffi::c_void;
 use std::fmt::Debug;
-use std::mem::{self};
+use std::mem::MaybeUninit;
 use std::{ptr, slice};
 
 use anyhow::{bail, Result};
@@ -31,16 +33,18 @@ use windows::Win32::Foundation::{
 use windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT;
 use windows::Win32::Security::{
     AdjustTokenGroups, AdjustTokenPrivileges, DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser,
-    RevertToSelf, SecurityImpersonation, SetTokenInformation, TokenElevationTypeDefault, TokenElevationTypeFull,
-    TokenElevationTypeLimited, TokenPrimary, TokenSecurityAttributes, LOGON32_LOGON, LOGON32_PROVIDER,
-    LUID_AND_ATTRIBUTES, PSID, SECURITY_ATTRIBUTES, SECURITY_DYNAMIC_TRACKING, SECURITY_IMPERSONATION_LEVEL,
-    SECURITY_QUALITY_OF_SERVICE, SE_ASSIGNPRIMARYTOKEN_NAME, SE_CREATE_TOKEN_NAME, SE_PRIVILEGE_ENABLED,
-    SE_PRIVILEGE_REMOVED, SID_AND_ATTRIBUTES, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL,
-    TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID,
-    TOKEN_OWNER, TOKEN_PRIMARY_GROUP, TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_SOURCE, TOKEN_STATISTICS,
-    TOKEN_TYPE, TOKEN_USER,
+    RevertToSelf, SecurityIdentification, SecurityImpersonation, SetTokenInformation, TokenElevationTypeDefault,
+    TokenElevationTypeFull, TokenElevationTypeLimited, TokenPrimary, TokenSecurityAttributes, LOGON32_LOGON,
+    LOGON32_PROVIDER, LUID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES, SECURITY_DYNAMIC_TRACKING,
+    SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE, SE_ASSIGNPRIMARYTOKEN_NAME, SE_CREATE_TOKEN_NAME,
+    SE_PRIVILEGE_ENABLED, SE_PRIVILEGE_REMOVED, SID_AND_ATTRIBUTES, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
+    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_IMPERSONATE,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_OWNER, TOKEN_PRIMARY_GROUP,
+    TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY, TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER,
 };
 use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
+
+use super::utils::size_of_u32;
 
 #[derive(Debug)]
 pub struct Token {
@@ -58,10 +62,12 @@ impl Token {
 
     pub fn current_process_token() -> Self {
         Self {
-            handle: Handle::new(HANDLE(-4 as _), false),
+            handle: Handle::new(HANDLE(-4isize as *mut c_void), false),
         }
     }
 
+    // Wrapper around `NtCreateToken`, which has a lot of arguments.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_token(
         authentication_id: &LUID,
         expiration_time: i64,
@@ -75,24 +81,24 @@ impl Token {
     ) -> Result<Self> {
         // See https://github.com/decoder-it/CreateTokenExample/blob/master/StopZillaCreateToken.cpp#L344
         let sqos = SECURITY_QUALITY_OF_SERVICE {
-            Length: mem::size_of::<SECURITY_QUALITY_OF_SERVICE>() as _,
+            Length: size_of_u32::<SECURITY_QUALITY_OF_SERVICE>(),
             ImpersonationLevel: SecurityImpersonation,
             ContextTrackingMode: SECURITY_DYNAMIC_TRACKING.0,
             EffectiveOnly: false.into(),
         };
 
         let object_attributes = OBJECT_ATTRIBUTES {
-            Length: mem::size_of::<OBJECT_ATTRIBUTES>() as _,
-            SecurityQualityOfService: &sqos as *const _ as _,
+            Length: size_of_u32::<OBJECT_ATTRIBUTES>(),
+            SecurityQualityOfService: &sqos as *const _ as *const c_void,
             ..Default::default()
         };
 
         let default_dacl = default_dacl.map(Acl::to_raw).transpose()?;
-        let owner_sid = RawSid::from(owner);
-        let groups = RawTokenGroups::from(groups);
-        let privileges = RawTokenPrivileges::from(privileges);
-        let primary_group = RawSid::from(primary_group);
-        let user = RawSidAndAttributes::from(user);
+        let owner_sid = RawSid::try_from(owner)?;
+        let groups = RawTokenGroups::try_from(groups)?;
+        let privileges = RawTokenPrivileges::try_from(privileges)?;
+        let primary_group = RawSid::try_from(primary_group)?;
+        let user = RawSidAndAttributes::try_from(user)?;
 
         let mut priv_token = find_token_with_privilege(lookup_privilege_value(None, SE_CREATE_TOKEN_NAME)?)?
             .ok_or_else(|| Error::from_win32(ERROR_NO_TOKEN))?
@@ -119,10 +125,10 @@ impl Token {
                 groups.as_raw(),
                 privileges.as_raw(),
                 &TOKEN_OWNER {
-                    Owner: PSID(owner_sid.as_raw() as *const _ as _),
+                    Owner: owner_sid.as_psid(),
                 },
                 &TOKEN_PRIMARY_GROUP {
-                    PrimaryGroup: PSID(primary_group.as_raw() as *const _ as _),
+                    PrimaryGroup: primary_group.as_psid(),
                 },
                 &TOKEN_DEFAULT_DACL {
                     DefaultDacl: default_dacl
@@ -151,7 +157,7 @@ impl Token {
             DuplicateTokenEx(
                 self.handle.raw(),
                 desired_access,
-                attributes.map(|x| x as _),
+                attributes.map(|x| x as *const _),
                 impersonation_level,
                 token_type,
                 &mut handle,
@@ -188,18 +194,18 @@ impl Token {
         let mut required_size = 0u32;
 
         // SAFETY: No preconditions. We ignore result because we are collecting size.
-        let _ = unsafe { GetTokenInformation(self.handle.raw(), info_class, None, 0, &mut required_size as _) };
+        let _ = unsafe { GetTokenInformation(self.handle.raw(), info_class, None, 0, &mut required_size) };
 
-        let mut buf = vec![0u8; required_size as _];
+        let mut buf = vec![0u8; required_size as usize];
 
         // SAFETY: No preconditions. `TokenInformationLength` matches length of `buf` in `TokenInformation`.
         unsafe {
             GetTokenInformation(
                 self.handle.raw(),
                 info_class,
-                Some(buf.as_mut_ptr() as _),
-                buf.len() as _,
-                &mut required_size as _,
+                Some(buf.as_mut_ptr().cast()),
+                u32::try_from(buf.len())?,
+                &mut required_size,
             )
         }?;
 
@@ -207,8 +213,8 @@ impl Token {
         Ok(unsafe { &*buf.as_ptr().cast::<S>() }.try_into()?)
     }
 
-    fn information_raw<T: Default + Sized>(&self, info_class: TOKEN_INFORMATION_CLASS) -> Result<T> {
-        let mut info = T::default();
+    fn information_raw<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS) -> Result<T> {
+        let mut info = MaybeUninit::<T>::uninit();
         let mut return_length = 0u32;
 
         // SAFETY: No preconditions. `TokenInformationLength` matches length of `info` in `TokenInformation`.
@@ -216,13 +222,14 @@ impl Token {
             GetTokenInformation(
                 self.handle.raw(),
                 info_class,
-                Some(&mut info as *mut _ as _),
-                mem::size_of::<T>() as _,
-                &mut return_length as _,
+                Some(info.as_mut_ptr().cast()),
+                size_of_u32::<T>(),
+                &mut return_length,
             )
         }?;
 
-        Ok(info)
+        // SAFETY: `GetTokenInformation` is successful here. Assume the value has been initialized.
+        Ok(unsafe { info.assume_init() })
     }
 
     fn set_information_raw<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS, value: &T) -> Result<()> {
@@ -231,8 +238,8 @@ impl Token {
             SetTokenInformation(
                 self.handle.raw(),
                 info_class,
-                value as *const _ as _,
-                mem::size_of::<T>() as _,
+                value as *const _ as *const _,
+                size_of_u32::<T>(),
             )?;
         }
 
@@ -276,7 +283,7 @@ impl Token {
     ) -> Result<Self> {
         let mut raw_token = HANDLE::default();
 
-        let groups = groups.map(RawTokenGroups::from);
+        let groups = groups.map(RawTokenGroups::try_from).transpose()?;
         let username = WideString::from(username);
         let domain = domain.map(WideString::from);
         let password = password.map(WideString::from);
@@ -291,8 +298,8 @@ impl Token {
                 password.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
                 logon_type,
                 logon_provider,
-                groups.as_ref().map(|x| x.as_raw() as _),
-                Some(&mut raw_token as _),
+                groups.as_ref().map(|x| x.as_raw() as *const _),
+                Some(&mut raw_token),
                 None,
                 None,
                 None,
@@ -336,7 +343,7 @@ impl Token {
         )
     }
 
-    pub fn load_profile(&self, username: &str) -> Result<ProfileInfo<'_>> {
+    pub fn load_profile(&self, username: &str) -> Result<ProfileInfo> {
         if let Err(err) = create_profile(&self.sid_and_attributes()?.sid, username) {
             match err.downcast::<windows::core::Error>() {
                 Ok(err) => {
@@ -348,7 +355,15 @@ impl Token {
             };
         }
 
-        ProfileInfo::from_token(self, username)
+        ProfileInfo::from_token(
+            self.duplicate(
+                TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE,
+                None,
+                SecurityIdentification,
+                TokenPrimary,
+            )?,
+            username,
+        )
     }
 
     pub fn adjust_groups(&mut self, adjustment: &TokenGroupAdjustment) -> Result<()> {
@@ -358,7 +373,7 @@ impl Token {
                 AdjustTokenGroups(self.handle.raw(), true, None, 0, None, None)?;
             },
             TokenGroupAdjustment::Enable(groups) => {
-                let groups = RawTokenGroups::from(groups);
+                let groups = RawTokenGroups::try_from(groups)?;
                 // SAFETY: No preconditions. We assume `groups` is well constructed.
                 unsafe {
                     AdjustTokenGroups(self.handle.raw(), false, Some(groups.as_raw()), 0, None, None)?;
@@ -396,13 +411,13 @@ impl Token {
                         .collect(),
                 );
 
-                let privs = RawTokenPrivileges::from(&privs);
+                let privs = RawTokenPrivileges::try_from(&privs)?;
 
                 // SAFETY: No preconditions. We assume `privs` is well constructed.
                 unsafe { AdjustTokenPrivileges(self.handle.raw(), false, Some(privs.as_raw()), 0, None, None) }?;
 
                 let last_err = Error::last_error();
-                if last_err.code() != ERROR_SUCCESS.0 as _ {
+                if last_err.code() != ERROR_SUCCESS.to_hresult().0 {
                     bail!(last_err);
                 }
             }
@@ -432,11 +447,12 @@ impl Token {
     }
 
     pub fn logon_sid(&self) -> Result<Sid> {
+        #[allow(clippy::cast_sign_loss)]
         Ok(self
             .groups()?
             .0
             .into_iter()
-            .find(|g| (g.attributes & SE_GROUP_LOGON_ID.unsigned_abs()) != 0)
+            .find(|g| (g.attributes & SE_GROUP_LOGON_ID as u32) != 0)
             .ok_or_else(|| Error::from_win32(ERROR_INVALID_SECURITY_DESCR))?
             .sid)
     }
@@ -447,7 +463,7 @@ impl Token {
         attribute: &TokenSecurityAttribute,
     ) -> Result<()> {
         let attribute = RawTokenSecurityAttribute::from(attribute);
-        let raw_attribute = attribute.as_raw();
+        let raw_attribute = attribute.as_raw()?;
         let attribute_info = TOKEN_SECURITY_ATTRIBUTES_INFORMATION {
             Version: TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1,
             Reserved: 0,
@@ -493,41 +509,47 @@ pub struct RawTokenGroups {
 
 impl RawTokenGroups {
     pub fn as_raw(&self) -> &TOKEN_GROUPS {
-        // SAFETY: We assume our buffer is well constructed. We can safely dereference because it is our buffer.
-        unsafe { &*self.buf.as_ptr().cast::<TOKEN_GROUPS>() }
+        // SAFETY: We assume our buffer is well constructed and aligned. We can safely dereference because it is our buffer.
+        unsafe { &*self.buf.as_ptr().cast() }
     }
 }
 
-impl From<&TokenGroups> for RawTokenGroups {
-    fn from(value: &TokenGroups) -> Self {
-        let raw_sid_and_attributes = value.0.iter().map(RawSidAndAttributes::from).collect::<Vec<_>>();
+impl TryFrom<&TokenGroups> for RawTokenGroups {
+    type Error = anyhow::Error;
 
-        let mut raw_buf = vec![
+    fn try_from(value: &TokenGroups) -> Result<Self> {
+        let raw_sid_and_attributes = value
+            .0
+            .iter()
+            .map(RawSidAndAttributes::try_from)
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut buf = vec![
             0u8;
-            mem::size_of::<TOKEN_GROUPS>()
-                + (raw_sid_and_attributes.len().saturating_sub(1))
-                    * mem::size_of::<SID_AND_ATTRIBUTES>()
+            Layout::new::<TOKEN_GROUPS>()
+                .extend(Layout::array::<SID_AND_ATTRIBUTES>(
+                    raw_sid_and_attributes.len().saturating_sub(1)
+                )?)?
+                .0
+                .pad_to_align()
+                .size()
         ];
 
-        let raw = raw_buf.as_mut_ptr().cast::<TOKEN_GROUPS>();
+        // SAFETY: `buf` is at least as big as `TOKEN_GROUPS` and its groups.
+        #[allow(clippy::cast_ptr_alignment)]
+        let groups = unsafe { &mut *buf.as_mut_ptr().cast::<TOKEN_GROUPS>() };
 
-        // SAFETY: Buffer is big enough to fit `GroupCount` because it is at least `size_of::<TOKEN_GROUPS>` long.
-        unsafe {
-            ptr::addr_of_mut!((*raw).GroupCount).write(value.0.len() as _);
-        }
-
-        // SAFETY: `addr_of_mut!` will not dereference the pointer.
-        let groups_ptr = unsafe { ptr::addr_of_mut!((*raw).Groups).cast::<SID_AND_ATTRIBUTES>() };
+        groups.GroupCount = value.0.len().try_into()?;
 
         for (i, v) in raw_sid_and_attributes.iter().enumerate() {
-            // SAFETY: Buffer is big enough to fit at least `raw_sid_and_attributes.len()` entries.
-            unsafe { groups_ptr.add(i).write(*v.as_raw()) };
+            // SAFETY: `Groups` is a VLA and we have previously correctly sized it.
+            unsafe { *groups.Groups.get_unchecked_mut(i) = *v.as_raw() };
         }
 
-        Self {
-            buf: raw_buf,
+        Ok(Self {
+            buf,
             _sid_and_attributes: raw_sid_and_attributes,
-        }
+        })
     }
 }
 
@@ -536,7 +558,7 @@ impl TryFrom<&TOKEN_GROUPS> for TokenGroups {
 
     fn try_from(value: &TOKEN_GROUPS) -> Result<Self> {
         // SAFETY: We assume `Groups` and `GroupCount` are well constructed and valid.
-        let groups_slice = unsafe { slice::from_raw_parts(value.Groups.as_ptr(), value.GroupCount as _) };
+        let groups_slice = unsafe { slice::from_raw_parts(value.Groups.as_ptr(), value.GroupCount as usize) };
 
         let mut groups = Vec::with_capacity(groups_slice.len());
 
@@ -608,7 +630,7 @@ impl<'a> From<&'a TokenSecurityAttribute> for RawTokenSecurityAttribute<'a> {
 }
 
 impl RawTokenSecurityAttribute<'_> {
-    pub fn as_raw(&self) -> TOKEN_SECURITY_ATTRIBUTE_V1 {
+    pub fn as_raw(&self) -> Result<TOKEN_SECURITY_ATTRIBUTE_V1> {
         struct RawValues {
             value_type: TOKEN_SECURITY_ATTRIBUTE_TYPE,
             value_count: usize,
@@ -646,18 +668,25 @@ impl RawTokenSecurityAttribute<'_> {
                 TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pUint64: x.as_ptr() },
             ),
             TokenSecurityAttributeValues::String(x) => {
-                let ctx = Box::new(x.iter().map(WideString::as_unicode_string).collect::<Vec<_>>());
+                let ctx = Box::new(
+                    x.iter()
+                        .map(WideString::as_unicode_string)
+                        .collect::<Result<Vec<_>>>()?,
+                );
+
                 let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pString: ctx.as_ptr() };
                 RawValues::new(TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING, x.len(), Some(ctx), values)
             }
             TokenSecurityAttributeValues::Fqbn(x) => {
                 let ctx = Box::new(
                     x.iter()
-                        .map(|x| TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE {
-                            Version: x.version,
-                            Name: x.name.as_unicode_string(),
+                        .map(|x| {
+                            Ok(TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE {
+                                Version: x.version,
+                                Name: x.name.as_unicode_string()?,
+                            })
                         })
-                        .collect::<Vec<_>>(),
+                        .collect::<Result<Vec<_>>>()?,
                 );
 
                 let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pFqbn: ctx.as_ptr() };
@@ -667,11 +696,13 @@ impl RawTokenSecurityAttribute<'_> {
             TokenSecurityAttributeValues::OctetString(x) => {
                 let ctx = Box::new(
                     x.iter()
-                        .map(|x| TOKEN_SECURITY_ATTRIBUTE_OCTET_STRING_VALUE {
-                            ValueLength: x.len() as _,
-                            pValue: x.as_ptr(),
+                        .map(|x| {
+                            Ok(TOKEN_SECURITY_ATTRIBUTE_OCTET_STRING_VALUE {
+                                ValueLength: x.len().try_into()?,
+                                pValue: x.as_ptr(),
+                            })
                         })
-                        .collect::<Vec<_>>(),
+                        .collect::<Result<Vec<_>>>()?,
                 );
 
                 let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE {
@@ -688,14 +719,14 @@ impl RawTokenSecurityAttribute<'_> {
             ),
         };
 
-        TOKEN_SECURITY_ATTRIBUTE_V1 {
-            Name: self.base.name.as_unicode_string(),
+        Ok(TOKEN_SECURITY_ATTRIBUTE_V1 {
+            Name: self.base.name.as_unicode_string()?,
             ValueType: values.value_type,
             Reserved: 0,
             Flags: self.base.flags,
-            ValueCount: values.value_count as _,
+            ValueCount: values.value_count.try_into()?,
             Values: values.values,
-        }
+        })
     }
 }
 

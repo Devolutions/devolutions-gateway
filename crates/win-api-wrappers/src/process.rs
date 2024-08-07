@@ -35,7 +35,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
-use super::utils::ComContext;
+use super::utils::{size_of_u32, ComContext};
 
 #[derive(Debug)]
 pub struct Process {
@@ -59,12 +59,12 @@ impl Process {
     }
 
     pub fn exe_path(&self) -> Result<PathBuf> {
-        let mut path = Vec::with_capacity(MAX_PATH as _);
+        let mut path = Vec::with_capacity(MAX_PATH as usize);
 
         let mut status;
         let mut length;
         loop {
-            length = path.capacity() as u32;
+            length = u32::try_from(path.capacity())?;
 
             // SAFETY: `path` always has capacity of `length`.
             status = unsafe {
@@ -77,7 +77,7 @@ impl Process {
             };
 
             // Break if successful or if path is becoming too big.
-            if status.is_ok() || path.capacity() > u16::MAX as _ {
+            if status.is_ok() || path.capacity() > u16::MAX as usize {
                 break;
             }
 
@@ -89,7 +89,7 @@ impl Process {
 
         // SAFETY: We assume `QueryFullProcessImageNameW` will set `length` to be less than or equal to its input value.
         // This guarantees the length will fit in the vec's capacity.
-        unsafe { path.set_len(length as _) };
+        unsafe { path.set_len(length as usize) };
 
         Ok(OsString::from_wide(&path).into())
     }
@@ -157,7 +157,7 @@ impl Process {
     /// - `address` should not be the currently executing code.
     pub unsafe fn write_memory(&self, data: &[u8], address: *mut c_void) -> Result<()> {
         // SAFETY: Based on the security requirements of the function, the span of `address` until `address + data.len()` should be valid and writeable.
-        unsafe { WriteProcessMemory(self.handle.raw(), address, data.as_ptr() as _, data.len(), None) }?;
+        unsafe { WriteProcessMemory(self.handle.raw(), address, data.as_ptr().cast(), data.len(), None) }?;
 
         Ok(())
     }
@@ -205,8 +205,8 @@ impl Process {
             NtQueryInformationProcess(
                 self.handle.raw(),
                 ProcessBasicInformation,
-                &mut basic_info as *mut _ as _,
-                mem::size_of_val(&basic_info) as _,
+                &mut basic_info as *mut _ as *mut _,
+                size_of_u32::<PROCESS_BASIC_INFORMATION>(),
                 None,
             )
         }?;
@@ -237,8 +237,8 @@ impl Process {
         unsafe {
             ReadProcessMemory(
                 self.handle.raw(),
-                address as _,
-                data.as_mut_ptr() as _,
+                address,
+                data.as_mut_ptr().cast(),
                 data.len(),
                 Some(&mut bytes_read),
             )
@@ -276,16 +276,14 @@ impl Process {
         let mut buf = Vec::with_capacity(count);
 
         // SAFETY: The address is valid and the size is valid. We will never read this data.
-        // Array is continuous in memory, so it is safe to cast to a continuous `u8` array.
+        let data = unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr(), buf.capacity()) };
+
+        // SAFETY: Array is continuous in memory, so it is safe to cast to a continuous `u8` array.
         // However, we assume that the data will be alined as `Vec` wants.
-        let data = unsafe {
-            slice::from_raw_parts_mut(buf.as_mut_ptr(), buf.capacity())
-                .align_to_mut::<u8>()
-                .1
-        };
+        let data = unsafe { data.align_to_mut::<u8>().1 };
 
         // SAFETY: `read_memory` does not read `data`, so we can safely pass an unitialized buffer.
-        let read_bytes = unsafe { self.read_memory(address as _, data) }?;
+        let read_bytes = unsafe { self.read_memory(address.cast(), data) }?;
 
         if count * mem::size_of::<T>() == read_bytes {
             // SAFETY: Buffer can hold `count` items and was filled up to that point.
@@ -317,7 +315,7 @@ pub fn shell_execute(
     let verb = WideString::from(verb);
 
     let mut exec_info = SHELLEXECUTEINFOW {
-        cbSize: mem::size_of::<SHELLEXECUTEINFOW>() as _,
+        cbSize: size_of_u32::<SHELLEXECUTEINFOW>(),
         fMask: SEE_MASK_NOCLOSEPROCESS,
         lpFile: path.as_pcwstr(),
         lpParameters: command_line.as_pcwstr(),
@@ -353,7 +351,7 @@ impl Peb<'_> {
         // SAFETY: We assume `raw_peb`'s `ProcessParameters` is valid.
         let raw_params = unsafe {
             self.process
-                .read_struct::<RTL_USER_PROCESS_PARAMETERS>(raw_peb.ProcessParameters as _)?
+                .read_struct::<RTL_USER_PROCESS_PARAMETERS>(raw_peb.ProcessParameters.cast())?
         };
 
         // SAFETY: We assume `raw_params.ImagePathName` is truthful and valid.
@@ -426,14 +424,14 @@ pub struct StartupInfo {
 }
 
 impl StartupInfo {
-    pub fn as_raw(&mut self) -> STARTUPINFOEXW {
-        STARTUPINFOEXW {
+    pub fn as_raw(&mut self) -> Result<STARTUPINFOEXW> {
+        Ok(STARTUPINFOEXW {
             StartupInfo: STARTUPINFOW {
                 cb: if self.attribute_list.is_some() {
-                    mem::size_of::<STARTUPINFOEXW>()
+                    size_of_u32::<STARTUPINFOEXW>()
                 } else {
-                    mem::size_of::<STARTUPINFOW>()
-                } as _,
+                    size_of_u32::<STARTUPINFOW>()
+                },
                 lpReserved: self.reserved.as_pwstr(),
                 lpDesktop: self.desktop.as_pwstr(),
                 lpTitle: self.title.as_pwstr(),
@@ -446,7 +444,7 @@ impl StartupInfo {
                 dwFillAttribute: self.fill_attribute,
                 dwFlags: self.flags,
                 wShowWindow: self.show_window,
-                cbReserved2: self.reserved2.as_ref().map(|x| x.len()).unwrap_or(0) as _,
+                cbReserved2: u16::try_from(self.reserved2.as_ref().map(|x| x.len()).unwrap_or(0))?,
                 lpReserved2: self
                     .reserved2
                     .as_ref()
@@ -457,7 +455,7 @@ impl StartupInfo {
                 hStdError: self.std_error,
             },
             lpAttributeList: self.attribute_list.unwrap_or_default().unwrap_or_default(),
-        }
+        })
     }
 }
 
@@ -484,7 +482,7 @@ impl Module {
         unsafe {
             GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                PCWSTR(address as *const _ as _),
+                PCWSTR(address as *const _ as *const u16),
                 &mut handle,
             )
         }?;
@@ -498,10 +496,10 @@ impl Module {
     }
 
     pub fn file_name(&self) -> Result<PathBuf> {
-        let mut buf = vec![0; MAX_PATH as _];
+        let mut buf = vec![0; MAX_PATH as usize];
 
         // SAFETY: No preconditions. `buf` is large enough and handle is valid.
-        let size = unsafe { GetModuleFileNameW(self.handle, &mut buf) } as _;
+        let size = unsafe { GetModuleFileNameW(self.handle, &mut buf) } as usize;
         if size == 0 {
             bail!(Error::last_error());
         }
@@ -516,6 +514,8 @@ impl Module {
 
         // SAFETY: No preconditions. Both handle and symbol are valid.
         match unsafe { GetProcAddress(self.handle, symbol.as_pcstr()) } {
+            // Function pointer is wanted.
+            #[allow(clippy::fn_to_numeric_cast_any)]
             Some(func) => Ok(func as *const c_void),
             None => Err(windows::core::Error::from_win32()),
         }
@@ -539,6 +539,8 @@ pub struct ProcessInformation {
     pub thread_id: u32,
 }
 
+// Goal is to wrap `CreateProcessAsUserW`, which has a lot of arguments.
+#[allow(clippy::too_many_arguments)]
 pub fn create_process_as_user(
     token: Option<&Token>,
     application_name: Option<&Path>,
@@ -571,18 +573,19 @@ pub fn create_process_as_user(
     let process_attributes = process_attributes.map(RawSecurityAttributes::try_from).transpose()?;
     let thread_attributes = thread_attributes.map(RawSecurityAttributes::try_from).transpose()?;
 
+    // SAFETY: No preconditions. All buffers are valid.
     unsafe {
         CreateProcessAsUserW(
             token.map(|x| x.handle().raw()).unwrap_or_default(),
             application_name.as_pcwstr(),
             command_line.as_pwstr(),
-            process_attributes.as_ref().map(|x| x.raw() as _),
-            thread_attributes.as_ref().map(|x| x.raw() as _),
+            process_attributes.as_ref().map(|x| x.as_raw() as *const _),
+            thread_attributes.as_ref().map(|x| x.as_raw() as *const _),
             inherit_handles,
             creation_flags,
-            environment.as_ref().map(|x| x.as_ptr() as _),
+            environment.as_ref().map(|x| x.as_ptr().cast()),
             current_directory.as_pcwstr(),
-            &startup_info.as_raw().StartupInfo,
+            &startup_info.as_raw()?.StartupInfo,
             &mut raw_process_information,
         )
     }?;

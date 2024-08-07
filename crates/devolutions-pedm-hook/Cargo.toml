@@ -1,5 +1,5 @@
 [package]
-name = "devolutions-pedm-contextmenu-hook"
+name = "devolutions-pedm-hook"
 version = "0.0.0"
 edition = "2021"
 license = "MIT/Apache-2.0"

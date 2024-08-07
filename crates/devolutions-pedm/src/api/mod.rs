@@ -49,20 +49,20 @@ mod status;
 
 #[derive(Debug, Clone)]
 struct NamedPipeConnectInfo {
-    pub user: User,
-    pub token: Arc<Token>,
-    pub pipe_process_id: u32,
+    pub(crate) user: User,
+    pub(crate) token: Arc<Token>,
+    pub(crate) pipe_process_id: u32,
 }
 
 #[derive(Debug, Clone)]
 struct RawNamedPipeConnectInfo {
-    pub handle: Handle,
+    pub(crate) handle: Handle,
 }
 
 impl Connected<&NamedPipeServer> for RawNamedPipeConnectInfo {
     fn connect_info(target: &NamedPipeServer) -> Self {
         Self {
-            handle: Handle::new(HANDLE(target.as_raw_handle() as _), false),
+            handle: Handle::new(HANDLE(target.as_raw_handle().cast()), false),
         }
     }
 }
@@ -110,7 +110,7 @@ fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
     // We assume the `.to_raw()` function generated a correct ACL.
     unsafe {
         SetSecurityInfo(
-            HANDLE(pipe.as_raw_handle() as _),
+            HANDLE(pipe.as_raw_handle().cast()),
             SE_KERNEL_OBJECT,
             DACL_SECURITY_INFORMATION,
             PSID::default(),
@@ -124,7 +124,7 @@ fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
     Ok(pipe)
 }
 
-pub fn api_router() -> ApiRouter {
+pub(crate) fn api_router() -> ApiRouter {
     ApiRouter::new()
         .api_route("/elevate/temporary", post(post_elevate_temporary))
         .api_route("/elevate/session", post(post_elevate_session))
@@ -146,8 +146,8 @@ pub fn openapi() -> OpenApi {
         ..OpenApi::default()
     };
 
-    aide::gen::in_context(|ctx| {
-        ctx.schema = schemars::gen::SchemaGenerator::new(schemars::gen::SchemaSettings::openapi3());
+    aide::r#gen::in_context(|ctx| {
+        ctx.schema = schemars::r#gen::SchemaGenerator::new(schemars::r#gen::SchemaSettings::openapi3());
     });
 
     let _ = api_router().finish_api_with(&mut api, |doc| doc.default_response::<Json<ErrorResponse>>());
@@ -155,7 +155,7 @@ pub fn openapi() -> OpenApi {
     api
 }
 
-pub async fn serve(pipe_name: &'static str) -> Result<()> {
+pub(crate) async fn serve(pipe_name: &'static str) -> Result<()> {
     let app = api_router();
 
     let mut make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();
