@@ -7,7 +7,7 @@
 | AccessDenied | AccessDenied |
 | NotFound | NotFound |
 | InvalidParameter | InvalidParameter |
-| InternalError | InternalError |
+| Internal | Internal |
 | Cancelled | Cancelled |
 
 

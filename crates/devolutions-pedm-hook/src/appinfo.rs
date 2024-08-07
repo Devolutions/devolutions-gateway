@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 use std::mem;
-use std::ptr::NonNull;
 use std::sync::OnceLock;
 
 use parking_lot::Mutex;
@@ -100,11 +99,10 @@ extern "system" fn rpc_server_register_if_ex(
     maxcalls: u32,
     ifcallback: RPC_IF_CALLBACK_FN,
 ) -> RPC_STATUS {
-    {
+    // SAFETY: Assume that if `ifspec` is not NULL, it is a valid `RPC_SERVER_INTERFACE`.
+    if let Some(raw) = unsafe { ifspec.as_ref() } {
         let mut handles = INTERFACE_HANDLES.lock();
-        handles.push(RpcServerInterfacePointer {
-            raw: unsafe { NonNull::new_unchecked(ifspec.cast_mut()) },
-        });
+        handles.push(RpcServerInterfacePointer { raw });
     }
 
     unsafe { rpc_server_register_if_ex_hook().call(ifspec, mgrtypeuuid, mgrepv, flags, maxcalls, ifcallback) }

@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 **desktop** | Option<**String**> |  | [optional]
 **fill_attribute** | **u32** |  | 
 **flags** | **u32** |  | 
-**parent_pid** | **u32** |  | 
+**parent_pid** | Option<**u32**> |  | [optional]
 **show_window** | **u32** |  | 
 **title** | Option<**String**> |  | [optional]
 **x** | **u32** |  | 

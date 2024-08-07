@@ -34,7 +34,7 @@ pub struct StartupInfoDto {
     pub fill_attribute: u32,
     pub flags: u32,
     pub show_window: u16,
-    pub parent_pid: u32,
+    pub parent_pid: Option<u32>,
 }
 
 impl From<&StartupInfoDto> for StartupInfo {
@@ -102,7 +102,8 @@ pub async fn post_launch(
     let parent_pid = payload
         .startup_info
         .as_ref()
-        .map_or(named_pipe_info.pipe_process_id, |x| x.parent_pid);
+        .and_then(|x| x.parent_pid)
+        .unwrap_or(named_pipe_info.pipe_process_id);
 
     let process = Process::try_get_by_pid(parent_pid, PROCESS_QUERY_INFORMATION | PROCESS_CREATE_PROCESS)?;
 

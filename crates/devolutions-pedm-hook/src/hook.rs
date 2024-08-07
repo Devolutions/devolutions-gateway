@@ -101,7 +101,7 @@ fn rai_launch_admin_process_handler(
         fill_attribute: startup_info.FillAttribute,
         flags: startup_info.Flags & 0xfffffcff, // as decompiler says (not STARTF_PREVENTPINNING and STARTF_TITLEISAPPID)
         show_window: startup_info.ShowWindow as _,
-        parent_pid: caller.client_pid,
+        parent_pid: Some(caller.client_pid),
     };
 
     let ctx = binding.impersonate_client()?;

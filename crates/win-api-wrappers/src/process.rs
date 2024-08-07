@@ -156,7 +156,8 @@ impl Process {
     /// - [`address`, `address` + `data.len()`] should be accessible and writeable.
     /// - `address` should not be the currently executing code.
     pub unsafe fn write_memory(&self, data: &[u8], address: *mut c_void) -> Result<()> {
-        WriteProcessMemory(self.handle.raw(), address, data.as_ptr() as _, data.len(), None)?;
+        // SAFETY: Based on the security requirements of the function, the span of `address` until `address + data.len()` should be valid and writeable.
+        unsafe { WriteProcessMemory(self.handle.raw(), address, data.as_ptr() as _, data.len(), None) }?;
 
         Ok(())
     }
@@ -222,7 +223,8 @@ impl Process {
         })
     }
 
-    /// Reads process memory at a specified address.
+    /// Reads process memory at a specified address into a buffer.
+    /// The buffer is not read.
     /// Returns the number of bytes read.
     ///
     /// # Safety
@@ -231,13 +233,16 @@ impl Process {
     pub unsafe fn read_memory(&self, address: *const c_void, data: &mut [u8]) -> Result<usize> {
         let mut bytes_read = 0;
 
-        ReadProcessMemory(
-            self.handle.raw(),
-            address as _,
-            data.as_mut_ptr() as _,
-            data.len(),
-            Some(&mut bytes_read),
-        )?;
+        // SAFETY: Based on the security requirements of the function, the span of `address` until `address + data.len()` should be valid and readable.
+        unsafe {
+            ReadProcessMemory(
+                self.handle.raw(),
+                address as _,
+                data.as_mut_ptr() as _,
+                data.len(),
+                Some(&mut bytes_read),
+            )
+        }?;
 
         Ok(bytes_read)
     }
@@ -250,10 +255,13 @@ impl Process {
     pub unsafe fn read_struct<T: Sized>(&self, address: *const c_void) -> Result<T> {
         let mut buf = vec![0; mem::size_of::<T>()];
 
-        let read = self.read_memory(address, buf.as_mut_slice())?;
+        // SAFETY: Based on the security requirements of the function, the `address` should
+        // point to a valid and correctly sized instance of `T`.
+        let read = unsafe { self.read_memory(address, buf.as_mut_slice()) }?;
 
         if buf.len() == read {
-            Ok(buf.as_ptr().cast::<T>().read())
+            // SAFETY: We assume the buffer is a valid `T`.
+            Ok(unsafe { buf.as_ptr().cast::<T>().read() })
         } else {
             bail!(Error::from_win32(ERROR_INCORRECT_SIZE))
         }
@@ -267,10 +275,17 @@ impl Process {
     pub unsafe fn read_array<T: Sized>(&self, address: *const T, count: usize) -> Result<Vec<T>> {
         let mut buf = Vec::with_capacity(count);
 
-        let read_bytes = self.read_memory(
-            address as _,
-            slice::from_raw_parts_mut(buf.as_mut_ptr() as _, buf.capacity() * mem::size_of::<T>()),
-        )?;
+        // SAFETY: The address is valid and the size is valid. We will never read this data.
+        // Array is continuous in memory, so it is safe to cast to a continuous `u8` array.
+        // However, we assume that the data will be alined as `Vec` wants.
+        let data = unsafe {
+            slice::from_raw_parts_mut(buf.as_mut_ptr(), buf.capacity())
+                .align_to_mut::<u8>()
+                .1
+        };
+
+        // SAFETY: `read_memory` does not read `data`, so we can safely pass an unitialized buffer.
+        let read_bytes = unsafe { self.read_memory(address as _, data) }?;
 
         if count * mem::size_of::<T>() == read_bytes {
             // SAFETY: Buffer can hold `count` items and was filled up to that point.

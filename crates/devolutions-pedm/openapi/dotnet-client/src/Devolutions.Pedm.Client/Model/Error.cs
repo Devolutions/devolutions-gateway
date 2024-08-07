@@ -50,10 +50,10 @@ namespace Devolutions.Pedm.Client.Model
         InvalidParameter = 3,
 
         /// <summary>
-        /// Enum InternalError for value: InternalError
+        /// Enum Internal for value: Internal
         /// </summary>
-        [EnumMember(Value = "InternalError")]
-        InternalError = 4,
+        [EnumMember(Value = "Internal")]
+        Internal = 4,
 
         /// <summary>
         /// Enum Cancelled for value: Cancelled

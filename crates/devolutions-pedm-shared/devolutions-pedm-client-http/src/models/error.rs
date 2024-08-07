@@ -20,8 +20,8 @@ pub enum Error {
     NotFound,
     #[serde(rename = "InvalidParameter")]
     InvalidParameter,
-    #[serde(rename = "InternalError")]
-    InternalError,
+    #[serde(rename = "Internal")]
+    Internal,
     #[serde(rename = "Cancelled")]
     Cancelled,
 }
@@ -32,7 +32,7 @@ impl std::fmt::Display for Error {
             Self::AccessDenied => write!(f, "AccessDenied"),
             Self::NotFound => write!(f, "NotFound"),
             Self::InvalidParameter => write!(f, "InvalidParameter"),
-            Self::InternalError => write!(f, "InternalError"),
+            Self::Internal => write!(f, "Internal"),
             Self::Cancelled => write!(f, "Cancelled"),
         }
     }

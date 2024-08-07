@@ -1,4 +1,3 @@
-use std::ffi::c_void;
 use std::mem::{self};
 use std::{ptr, slice};
 
@@ -7,7 +6,7 @@ use anyhow::{bail, Result};
 use crate::identity::sid::{RawSid, Sid};
 use crate::utils::WideString;
 use crate::Error;
-use windows::Win32::Foundation::{ERROR_INVALID_VARIANT, E_POINTER};
+use windows::Win32::Foundation::{ERROR_INVALID_DATA, ERROR_INVALID_VARIANT, E_POINTER};
 use windows::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_OBJECT_TYPE};
 use windows::Win32::Security::{
     AddAce, GetAce, InitializeAcl, ACE_FLAGS, ACE_HEADER, ACE_REVISION, ACL, ACL_REVISION, DACL_SECURITY_INFORMATION,
@@ -86,15 +85,32 @@ impl Ace {
         buf
     }
 
-    pub unsafe fn from_ptr(mut ptr: *const c_void) -> Result<Self> {
-        let header = ptr.cast::<ACE_HEADER>().read();
-        ptr = ptr.byte_add(mem::size_of::<ACE_HEADER>());
+    /// Creates an `Ace` from a pointer to an `ACE_HEADER`.
+    ///
+    /// # Safety
+    ///
+    /// - if `ptr` is non null, it must point to a valid `ACE` which starts by an `ACE_HEADER`.
+    pub unsafe fn from_ptr(mut ptr: *const ACE_HEADER) -> Result<Self> {
+        // SAFETY: Assume that the pointer points to a valid ACE_HEADER if not null.
+        let header = unsafe { ptr.as_ref() }.ok_or_else(|| Error::NullPointer("ACE header"))?;
 
-        let access_mask = ptr.cast::<u32>().read();
-        ptr = ptr.byte_add(mem::size_of::<u32>());
+        if (header.AceSize as usize) < mem::size_of::<ACE_HEADER>() + mem::size_of::<u32>() {
+            bail!(Error::from_win32(ERROR_INVALID_DATA));
+        }
+
+        // SAFETY: Assume that the header is followed by a 4 byte access mask.
+        ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
+
+        // SAFETY: Assume that the header is followed by a 4 byte access mask.
+        let access_mask = unsafe { ptr.cast::<u32>().read() };
+
+        // SAFETY: Assume buffer is big enough to fit Ace data.
+        ptr = unsafe { ptr.byte_add(mem::size_of::<u32>()) };
 
         let body_size = header.AceSize as usize - mem::size_of::<ACE_HEADER>() - mem::size_of::<u32>();
-        let body = slice::from_raw_parts(ptr.cast::<u8>(), body_size);
+
+        // SAFETY: `body_size` must be >= 0 because of previous check. Pointer is valid.
+        let body = unsafe { slice::from_raw_parts(ptr.cast::<u8>(), body_size) };
 
         Ok(Self {
             flags: ACE_FLAGS(header.AceFlags as _),
@@ -172,7 +188,8 @@ impl TryFrom<&ACL> for Acl {
                     // SAFETY: We assume `AceCount` is truthful and that `value` is well constructed.
                     unsafe { GetAce(value, i, &mut ace) }?;
 
-                    unsafe { Ace::from_ptr(ace) }
+                    // SAFETY: We assume the obtained `ACE` is valid and starts with an `ACE_HEADER`.
+                    unsafe { Ace::from_ptr(ace.cast_const().cast()) }
                 })
                 .collect::<Result<_>>()?,
         })

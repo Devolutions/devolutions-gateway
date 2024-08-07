@@ -2,7 +2,6 @@
 Devolutions.Pedm.Client.sln
 README.md
 api/openapi.yaml
-appveyor.yml
 docs/Application.md
 docs/ApplicationFilter.md
 docs/Assignment.md
@@ -40,7 +39,6 @@ docs/StringFilterKind.md
 docs/TemporaryElevationConfiguration.md
 docs/TemporaryElevationStatus.md
 docs/User.md
-git_push.sh
 src/Devolutions.Pedm.Client/Api/DefaultApi.cs
 src/Devolutions.Pedm.Client/Client/ApiClient.cs
 src/Devolutions.Pedm.Client/Client/ApiException.cs

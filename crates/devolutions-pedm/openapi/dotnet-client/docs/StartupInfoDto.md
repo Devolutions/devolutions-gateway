@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 **Desktop** | **string** |  | [optional] 
 **FillAttribute** | **int** |  | 
 **Flags** | **int** |  | 
-**ParentPid** | **int** |  | 
+**ParentPid** | **int** |  | [optional] 
 **ShowWindow** | **int** |  | 
 **Title** | **string** |  | [optional] 
 **X** | **int** |  | 

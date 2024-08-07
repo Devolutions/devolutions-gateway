@@ -515,7 +515,7 @@ components:
       - AccessDenied
       - NotFound
       - InvalidParameter
-      - InternalError
+      - Internal
       - Cancelled
     ErrorResponse:
       type: object
@@ -724,7 +724,6 @@ components:
       required:
       - FillAttribute
       - Flags
-      - ParentPid
       - ShowWindow
       - X
       - XCountChars
@@ -748,6 +747,7 @@ components:
           type: integer
           format: int32
           minimum: 0.0
+          nullable: true
         ShowWindow:
           type: integer
           format: int32

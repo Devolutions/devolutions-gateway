@@ -324,12 +324,17 @@ class TlkRecipe
     [TlkPackage[]] CargoPackages() {
         $CargoPackages = `
         switch ($this.Product) {
-            "gateway" { @([TlkPackage]::new("DevolutionsGateway", "devolutions-gateway", $false)) }
-            "agent" { @(
-                [TlkPackage]::new("devolutions-agent", "devolutions-agent", $false),
-                [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true),
-                [TlkPackage]::new("devolutions-pedm-contextmenu", "crates/devolutions-pedm-contextmenu", $true)
-            ) }
+            "gateway" { @([TlkPackage]::new("devolutions-gateway", "devolutions-gateway", $false)) }
+            "agent" {
+                $agentPackages = @([TlkPackage]::new("devolutions-agent", "devolutions-agent", $false))
+
+                if ($this.Target.IsWindows()) {
+                    $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
+                    $agentPackages += [TlkPackage]::new("devolutions-pedm-contextmenu", "crates/devolutions-pedm-contextmenu", $true)
+                }
+
+                $agentPackages
+            }
             "jetsocat" { @([TlkPackage]::new("jetsocat", "jetsocat", $false)) }
         }
         return $CargoPackages

@@ -41,6 +41,7 @@ impl RpcBindingHandle {
             ..Default::default()
         };
 
+        // SAFETY: No preconditions.
         let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as _) };
 
         if status.0 != ERROR_MORE_DATA.0 as i32 {
@@ -55,6 +56,7 @@ impl RpcBindingHandle {
         attribs.ServerPrincipalName = server_principal_name.as_mut_ptr();
         attribs.ServerPrincipalNameBufferLength = (server_principal_name.len() * mem::size_of::<u16>()) as _;
 
+        // SAFETY: No preconditions.
         let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as _) };
 
         status.ok()?;
@@ -70,7 +72,7 @@ impl RpcBindingHandle {
         })
     }
 
-    pub fn impersonate_client(&self) -> Result<RpcBindingImpersonation> {
+    pub fn impersonate_client(&self) -> Result<RpcBindingImpersonation<'_>> {
         RpcBindingImpersonation::try_new(self)
     }
 
@@ -92,6 +94,8 @@ pub struct RpcBindingImpersonation<'a> {
 
 impl<'a> RpcBindingImpersonation<'a> {
     fn try_new(handle: &'a RpcBindingHandle) -> Result<Self> {
+        // SAFETY: Caller should have `SeImpersonatePrivilege` to impersonate beyond identification.
+        // Must be reverted by `RpcRevertToSelfEx` in multithreaded applications.
         unsafe { RpcImpersonateClient(Some(handle.0)) }.ok()?;
 
         Ok(Self { handle })
@@ -100,30 +104,34 @@ impl<'a> RpcBindingImpersonation<'a> {
 
 impl Drop for RpcBindingImpersonation<'_> {
     fn drop(&mut self) {
-        let _ = unsafe { RpcRevertToSelfEx(Some(self.handle.0)) };
+        // SAFETY: No preconditions. Panic on fail as thread will remain in client context.
+        unsafe { RpcRevertToSelfEx(Some(self.handle.0)) }
+            .ok()
+            .expect("RpcRevertToSelfEx failed")
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct RpcServerInterfacePointer {
-    pub raw: NonNull<RPC_SERVER_INTERFACE>,
+    pub raw: &'static RPC_SERVER_INTERFACE,
 }
 
 unsafe impl Send for RpcServerInterfacePointer {}
 
 impl RpcServerInterfacePointer {
     pub fn handler_cnt(&self) -> Result<usize> {
+        // SAFETY: We assume `DispatchTable` points to a valid `RPC_DISPATCH_TABLE` if non null.
         let dispatch_table =
-            NonNull::new(unsafe { self.raw.as_ref() }.DispatchTable).ok_or_else(|| Error::from_hresult(E_POINTER))?;
+            unsafe { self.raw.DispatchTable.as_ref() }.ok_or_else(|| Error::NullPointer("RPC_DISPATCH_TABLE"))?;
 
-        Ok(unsafe { dispatch_table.as_ref() }.DispatchTableCount as _)
+        Ok(dispatch_table.DispatchTableCount as _)
     }
 
     pub fn handlers(&self) -> Result<Box<[SERVER_ROUTINE]>> {
         let handler_cnt = self.handler_cnt()?;
         let server_info = self.server_info()?;
 
-        let raw_dispatch_table = unsafe { server_info.as_ref() }.DispatchTable;
+        let raw_dispatch_table = server_info.DispatchTable;
 
         let mut handlers = Vec::with_capacity(handler_cnt);
 
@@ -140,36 +148,41 @@ impl RpcServerInterfacePointer {
             bail!(Error::from_hresult(E_INVALIDARG));
         }
 
-        let mut server_info = self.server_info()?;
+        let server_info = self.server_info()?;
 
-        let raw_dispatch_table = unsafe { server_info.as_mut() }.DispatchTable;
+        let raw_dispatch_table = server_info.DispatchTable;
 
-        for i in 0..handlers.len() {
-            unsafe {
-                let addr = raw_dispatch_table.add(i).cast_mut();
-                let old_prot = set_memory_protection(addr as _, mem::size_of::<*const ()>(), PAGE_READWRITE)?;
+        for (i, new_handler) in handlers.iter().enumerate() {
+            // SAFETY: Assume structure is truthful and has correct number of handlers.
+            let addr = unsafe { raw_dispatch_table.add(i) }.cast_mut();
 
-                *addr = handlers[i];
+            // SAFETY: Assume the address points to a valid handler which is not currently in use.
+            let old_prot = unsafe { set_memory_protection(addr as _, mem::size_of::<*const ()>(), PAGE_READWRITE) }?;
 
-                let _ = set_memory_protection(addr as _, mem::size_of::<*const ()>(), old_prot)?;
-            }
+            // TODO: See if it could be possible to freeze other threads during switch or to do an atomic switch.
+            // SAFETY: Because of previous assumption and memory protection, this should succeed.
+            unsafe { *addr = *new_handler };
+
+            // SAFETY: Address is already assumed to be valid.
+            let _ = unsafe { set_memory_protection(addr as _, mem::size_of::<*const ()>(), old_prot) }?;
         }
 
         Ok(())
     }
 
-    fn server_info(&self) -> Result<NonNull<MIDL_SERVER_INFO>> {
-        Ok(NonNull::new(
-            unsafe { self.raw.as_ref() }
+    fn server_info(&self) -> Result<&'static MIDL_SERVER_INFO> {
+        // SAFETY: We assume `self.raw.InterpreterInfo` is a valid `MIDL_SERVER_INFO` if non null.
+        Ok(unsafe {
+            self.raw
                 .InterpreterInfo
                 .cast::<MIDL_SERVER_INFO>()
-                .cast_mut(),
-        )
-        .ok_or_else(|| Error::from_hresult(E_POINTER))?)
+                .as_ref()
+                .ok_or_else(|| Error::NullPointer("MIDL_SERVER_INFO"))
+        }?)
     }
 
     pub fn id(&self) -> GUID {
-        unsafe { self.raw.as_ref() }.InterfaceId.SyntaxGUID
+        self.raw.InterfaceId.SyntaxGUID
     }
 }
 
@@ -180,28 +193,36 @@ pub struct RpcBindingVector {
 impl RpcBindingVector {
     pub fn try_inquire_server() -> Result<Self> {
         let mut raw = ptr::null_mut();
+
+        // SAFETY: No preconditions. Must be freed with `RpcBindingVectorFree`.
         let status = unsafe { RpcServerInqBindings(&mut raw) };
 
         status.ok()?;
 
+        // SAFETY: Assume `raw` is non NULL if `RpcServerInqBindings` is successful.
         Ok(RpcBindingVector {
             raw: unsafe { NonNull::new_unchecked(raw) },
         })
     }
 
-    pub unsafe fn as_slice(&self) -> &[RPC_BINDING_HANDLE] {
-        let deref = self.raw.as_ref();
+    pub fn as_slice(&self) -> &[RPC_BINDING_HANDLE] {
+        // SAFETY: Assume `self.raw` points to a valid `RPC_BINDING_VECTOR`.
+        let deref = unsafe { self.raw.as_ref() };
 
-        // Windows doesn't include RPC_BINDING_HANDLE. Explicit cast needed
-        slice::from_raw_parts(
-            deref.BindingH.as_ptr().cast::<RPC_BINDING_HANDLE>(),
-            deref.Count as usize,
-        )
+        // SAFETY: `deref.BindingH` is non NULL since it is the first element of the VLA.
+        // Assume the structure is truthful.
+        unsafe {
+            slice::from_raw_parts(
+                deref.BindingH.as_ptr().cast::<RPC_BINDING_HANDLE>(),
+                deref.Count as usize,
+            )
+        }
     }
 }
 
 impl Drop for RpcBindingVector {
     fn drop(&mut self) {
+        // SAFETY: No preconditions.
         let _ = unsafe { RpcBindingVectorFree(&mut self.raw.as_ptr()) };
     }
 }

@@ -19,8 +19,8 @@ pub struct StartupInfoDto {
     pub fill_attribute: u32,
     #[serde(rename = "Flags")]
     pub flags: u32,
-    #[serde(rename = "ParentPid")]
-    pub parent_pid: u32,
+    #[serde(rename = "ParentPid", skip_serializing_if = "Option::is_none")]
+    pub parent_pid: Option<u32>,
     #[serde(rename = "ShowWindow")]
     pub show_window: u32,
     #[serde(rename = "Title", skip_serializing_if = "Option::is_none")]
@@ -43,7 +43,6 @@ impl StartupInfoDto {
     pub fn new(
         fill_attribute: u32,
         flags: u32,
-        parent_pid: u32,
         show_window: u32,
         x: u32,
         x_count_chars: u32,
@@ -56,7 +55,7 @@ impl StartupInfoDto {
             desktop: None,
             fill_attribute,
             flags,
-            parent_pid,
+            parent_pid: None,
             show_window,
             title: None,
             x,

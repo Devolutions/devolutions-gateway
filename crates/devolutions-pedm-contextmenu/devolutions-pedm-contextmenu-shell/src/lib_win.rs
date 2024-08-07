@@ -234,8 +234,7 @@ fn start_listener() {
                                     Token::current_process_token()
                                         .session_id()
                                         .expect("Session ID not found for current process"),
-                                )
-                                .unwrap_or(0),
+                                ),
                                 ..Default::default()
                             });
 

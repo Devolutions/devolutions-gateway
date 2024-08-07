@@ -106,6 +106,7 @@ impl Token {
         let mut handle = HANDLE::default();
         let _ctx = priv_token.impersonate()?;
 
+        // SAFETY: All buffers are valid. No documentation so no known preconditions.
         unsafe {
             NtCreateToken(
                 &mut handle,

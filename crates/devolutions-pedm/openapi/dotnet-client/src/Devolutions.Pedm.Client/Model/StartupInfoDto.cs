@@ -42,7 +42,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="desktop">desktop.</param>
         /// <param name="fillAttribute">fillAttribute (required).</param>
         /// <param name="flags">flags (required).</param>
-        /// <param name="parentPid">parentPid (required).</param>
+        /// <param name="parentPid">parentPid.</param>
         /// <param name="showWindow">showWindow (required).</param>
         /// <param name="title">title.</param>
         /// <param name="x">x (required).</param>
@@ -55,7 +55,6 @@ namespace Devolutions.Pedm.Client.Model
         {
             this.FillAttribute = fillAttribute;
             this.Flags = flags;
-            this.ParentPid = parentPid;
             this.ShowWindow = showWindow;
             this.X = x;
             this.XCountChars = xCountChars;
@@ -64,6 +63,7 @@ namespace Devolutions.Pedm.Client.Model
             this.YCountChars = yCountChars;
             this.YSize = ySize;
             this.Desktop = desktop;
+            this.ParentPid = parentPid;
             this.Title = title;
         }
 
@@ -88,7 +88,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <summary>
         /// Gets or Sets ParentPid
         /// </summary>
-        [DataMember(Name = "ParentPid", IsRequired = true, EmitDefaultValue = true)]
+        [DataMember(Name = "ParentPid", EmitDefaultValue = false)]
         public int ParentPid { get; set; }
 
         /// <summary>
