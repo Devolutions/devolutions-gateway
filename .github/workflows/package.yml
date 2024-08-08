@@ -150,12 +150,12 @@ jobs:
     strategy:
       matrix:
         project: [ jetsocat, devolutions-gateway, devolutions-agent ]
-        os: [ windows, macos, linux ]
+        os: [ windows, linux ]
         include:
           - os: windows
             runner: windows-2022
-          - os: macos
-            runner: macos-latest
+          #- os: macos
+          #  runner: macos-latest
           - os: linux
             runner: ubuntu-20.04
         exclude:
