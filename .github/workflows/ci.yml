@@ -592,7 +592,7 @@ jobs:
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
-            $Env:DAGENT_PEDM_DESKTOP_BUILD_DIR = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1 -Property Directory
+            $Env:DAGENT_PEDM_DESKTOP_BUILD_DIR = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1 -ExpandProperty Directory
             $Env:DAGENT_BUILD_DIR = Get-Item "./target/${{ matrix.arch }}-*${{ matrix.os }}*/release" | Select -First 1
           }
 

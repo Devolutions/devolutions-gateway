@@ -462,7 +462,7 @@ class TlkRecipe
                     throw "MakeAppx package creation failed: ${MakeAppxOutput}"
                 }
 
-                if ($(Test-Path $Env:DAGENT_PEDM_PFX) -And $Env:DAGENT_PEDM_PFX_PASSWORD -And (Get-Command "SignTool.exe" -ErrorAction SilentlyContinue)) {
+                if ($Env:DAGENT_PEDM_PFX -And (Test-Path $Env:DAGENT_PEDM_PFX) -And $Env:DAGENT_PEDM_PFX_PASSWORD -And (Get-Command "SignTool.exe" -ErrorAction SilentlyContinue)) {
                     $SignToolOutput = & 'SignTool.exe' 'sign' '/fd' 'SHA256' '/a' '/f' "${Env:DAGENT_PEDM_PFX}" '/p' "${Env:DAGENT_PEDM_PFX_PASSWORD}" (Get-Item "./devolutions-pedm-contextmenu.msix").FullName
                     if (!$?) {
                         throw "SignTool failed: ${SignToolOutput}"
