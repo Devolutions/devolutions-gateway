@@ -4,6 +4,6 @@ $ErrorActionPreference = "Stop"
 
 Push-Location -Path $PSScriptRoot
 
-dotnet build --configuration Release
+& 'MSBuild.exe' "/t:restore,build" "/p:Configuration=Release" | Out-Host
 
 Pop-Location
