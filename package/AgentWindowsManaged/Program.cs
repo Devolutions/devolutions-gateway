@@ -120,15 +120,6 @@ internal class Program
     private static string DevolutionsPedmDesktopExePath => ResolveArtifact(DevolutionsAgentPedmDesktopBuildDirectory,
         "DevolutionsPedmDesktop.exe", "The PEDM desktop executable was not found");
 
-    private static string DevolutionsPedmDesktopDllPath => ResolveArtifact(DevolutionsAgentPedmDesktopBuildDirectory,
-        "DevolutionsPedmDesktop.dll", "The PEDM desktop library was not found");
-
-    private static string DevolutionsPedmDesktopDepsPath => ResolveArtifact(DevolutionsAgentPedmDesktopBuildDirectory,
-        "DevolutionsPedmDesktop.deps.json", "The PEDM desktop dependencies file was not found");
-
-    private static string DevolutionsPedmDesktopRuntimeConfigPath => ResolveArtifact(DevolutionsAgentPedmDesktopBuildDirectory,
-        "DevolutionsPedmDesktop.runtimeconfig.json", "The PEDM desktop runtime configuration was not found");
-
     private static Version DevolutionsAgentVersion
     {
         get
@@ -299,9 +290,6 @@ internal class Program
                         Files = new File[]
                         {
                             new (Includes.PEDM_FEATURE, DevolutionsPedmDesktopExePath),
-                            new (Includes.PEDM_FEATURE, DevolutionsPedmDesktopDllPath),
-                            new (Includes.PEDM_FEATURE, DevolutionsPedmDesktopDepsPath),
-                            new (Includes.PEDM_FEATURE, DevolutionsPedmDesktopRuntimeConfigPath),
                         }
                     }
                 }

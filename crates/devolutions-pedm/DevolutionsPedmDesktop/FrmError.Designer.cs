@@ -36,13 +36,14 @@
             // 
             this.btnOk.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnOk.Font = new System.Drawing.Font("Segoe UI", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.btnOk.Location = new System.Drawing.Point(305, 106);
+            this.btnOk.Location = new System.Drawing.Point(305, 60);
             this.btnOk.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.btnOk.Name = "btnOk";
             this.btnOk.Size = new System.Drawing.Size(103, 27);
             this.btnOk.TabIndex = 2;
             this.btnOk.Text = "Ok";
             this.btnOk.UseVisualStyleBackColor = true;
+            this.btnOk.Click += new System.EventHandler(this.BtnOk_Click);
             // 
             // ctrlHeader1
             // 
@@ -51,7 +52,7 @@
             this.ctrlHeader1.Dock = System.Windows.Forms.DockStyle.Top;
             this.ctrlHeader1.Location = new System.Drawing.Point(0, 0);
             this.ctrlHeader1.Name = "ctrlHeader1";
-            this.ctrlHeader1.Size = new System.Drawing.Size(420, 43);
+            this.ctrlHeader1.Size = new System.Drawing.Size(420, 42);
             this.ctrlHeader1.Subtitle = "Error";
             this.ctrlHeader1.TabIndex = 5;
             // 
@@ -60,7 +61,7 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoSize = true;
-            this.ClientSize = new System.Drawing.Size(420, 143);
+            this.ClientSize = new System.Drawing.Size(420, 97);
             this.Controls.Add(this.ctrlHeader1);
             this.Controls.Add(this.btnOk);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
