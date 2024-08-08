@@ -227,11 +227,11 @@ jobs:
         run: |
           $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe' }
+            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix' }
             'jetsocat' { 'jetsocat_*' }
           }
           $ExcludePattern = "*.pdb"
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$IncludePattern" -Exclude $ExcludePattern | % {
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
               $Params = @('sign',
                 '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
@@ -300,6 +300,8 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
+          $Env:DAGENT_PEDM_DESKTOP_BUILD_DIR = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1 -ExpandProperty Directory
+          $Env:DAGENT_BUILD_DIR = Get-Item "./target/*${{ matrix.os }}*/release" | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 
