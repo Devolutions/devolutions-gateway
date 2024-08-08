@@ -448,7 +448,7 @@ class TlkRecipe
             }
 
             if ($CargoPackage.Name -Eq 'devolutions-pedm-contextmenu') {
-                if ($Null -Eq (Get-Command "MakeAppx.exe" -ErrorAction SilentlyContinue) -Or $Null -Eq (Get-Command "SignTool.exe" -ErrorAction SilentlyContinue)) {
+                if ($Null -Eq (Get-Command "MakeAppx.exe" -ErrorAction SilentlyContinue)) {
                     throw 'MakeAppx was not found in the PATH'
                 }
 
@@ -462,13 +462,11 @@ class TlkRecipe
                     throw "MakeAppx package creation failed: ${MakeAppxOutput}"
                 }
 
-                if (-Not ($(Test-Path $Env:DAGENT_PEDM_PFX) -And $Env:DAGENT_PEDM_PFX_PASSWORD)) {
-                    throw 'DAGENT_PEDM_PFX / DAGENT_PEDM_PFX_PASSWORD was not found in the environment'
-                }
-
-                $SignToolOutput = & 'SignTool.exe' 'sign' '/fd' 'SHA256' '/a' '/f' "${Env:DAGENT_PEDM_PFX}" '/p' "${Env:DAGENT_PEDM_PFX_PASSWORD}" (Get-Item "./devolutions-pedm-contextmenu.msix").FullName
-                if (!$?) {
-                    throw "SignTool failed: ${SignToolOutput}"
+                if ($(Test-Path $Env:DAGENT_PEDM_PFX) -And $Env:DAGENT_PEDM_PFX_PASSWORD -And (Get-Command "SignTool.exe" -ErrorAction SilentlyContinue)) {
+                    $SignToolOutput = & 'SignTool.exe' 'sign' '/fd' 'SHA256' '/a' '/f' "${Env:DAGENT_PEDM_PFX}" '/p' "${Env:DAGENT_PEDM_PFX_PASSWORD}" (Get-Item "./devolutions-pedm-contextmenu.msix").FullName
+                    if (!$?) {
+                        throw "SignTool failed: ${SignToolOutput}"
+                    }
                 }
 
                 Pop-Location

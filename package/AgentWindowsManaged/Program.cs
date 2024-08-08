@@ -29,6 +29,30 @@ internal class Program
 {
     private const string PackageName = "DevolutionsAgent";
 
+    private static string DevolutionsAgentExePath
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("DAGENT_EXECUTABLE");
+
+            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutionsagent.exe";
+#else
+                throw new Exception("The environment variable DAGENT_EXECUTABLE is not specified or the file does not exist");
+#endif
+            }
+
+            if (!System.IO.File.Exists(path))
+            {
+                throw new FileNotFoundException("The agent executable was not found", path);
+            }
+
+            return path;
+        }
+    }
+
     private static string DevolutionsAgentBuildDirectory
     {
         get
@@ -88,8 +112,6 @@ internal class Program
 
         return path;
     }
-
-    private static string DevolutionsAgentExePath => ResolveArtifact(DevolutionsAgentBuildDirectory, "devolutions-agent.exe", "The agent executable was not found");
 
     private static string DevolutionsPedmHookPath => ResolveArtifact(DevolutionsAgentBuildDirectory, "devolutions_pedm_hook.dll", "The PEDM hook was not found");
 
@@ -288,6 +310,7 @@ internal class Program
         project.ResolveWildCards(true);
 
         project.DefaultRefAssemblies.Add(typeof(ZipArchive).Assembly.Location);
+        project.DefaultRefAssemblies.Add(typeof(Newtonsoft.Json.JsonConvert).Assembly.Location);
         project.Actions = AgentActions.Actions;
         project.RegValues = new RegValue[]
         {

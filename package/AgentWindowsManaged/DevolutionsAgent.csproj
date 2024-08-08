@@ -25,6 +25,7 @@
     <EmbeddedResource Include="Resources\DevolutionsAgent_fr-fr.wxl" />
   </ItemGroup>
   <ItemGroup>
+	<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 	<PackageReference Include="System.IO.Compression" Version="4.3.0" />
 	<PackageReference Include="System.ValueTuple" Version="4.5.0" />
     <PackageReference Include="WixSharp" Version="1.25.3" />

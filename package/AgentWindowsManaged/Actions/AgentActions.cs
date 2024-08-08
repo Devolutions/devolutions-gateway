@@ -194,6 +194,19 @@ internal static class AgentActions
         Execute = Execute.rollback,
     };
 
+    private static readonly ElevatedManagedAction installPedm = new(
+        CustomActions.InstallPedm
+    )
+    {
+        Id = new Id("installPedm"),
+        Feature = Includes.PEDM_FEATURE,
+        Sequence = Sequence.InstallExecuteSequence,
+        Return = Return.check,
+        Step = Step.InstallFiles,
+        When = When.After,
+        Condition = Includes.PEDM_FEATURE.BeingInstall(),
+    };
+
     private static readonly PathFileAction uninstallPedmContextMenu = new(
         @"$(env.WinDir)\System32\WindowsPowerShell\v1.0\powershell.exe",
         "-Command \"& { Get-AppxProvisionedPackage -Online | Where-Object DisplayName -EQ 'DevolutionsPedmContextMenu' | ForEach-Object { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName }; Get-AppxPackage -All -Name 'DevolutionsPedmContextMenu' | Remove-AppxPackage -AllUsers }\"",
@@ -208,7 +221,7 @@ internal static class AgentActions
         Step = Step.InstallFiles,
         When = When.After,
         Sequence = Sequence.InstallExecuteSequence,
-        Condition = Condition.BeingUninstalled,
+        Condition = Includes.PEDM_FEATURE.BeingUninstall(),
     };
 
     // For some reason, when running as NT AUTHORITY\SYSTEM on Windows 11,
@@ -228,7 +241,7 @@ internal static class AgentActions
         Sequence = Sequence.InstallExecuteSequence,
         Step = new Step(uninstallPedmContextMenu.Id),
         When = When.After,
-        Condition = Condition.NOT_Installed,
+        Condition = Includes.PEDM_FEATURE.BeingInstall(),
     };
 
     private static string UseProperties(IEnumerable<IWixProperty> properties)
@@ -260,6 +273,7 @@ internal static class AgentActions
         setArpInstallLocation,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
+        installPedm,
         uninstallPedmContextMenu,
         installPedmContextMenu,
 

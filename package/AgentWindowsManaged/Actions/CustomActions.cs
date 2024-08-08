@@ -3,7 +3,9 @@ using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
+using Newtonsoft.Json;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -192,6 +194,38 @@ namespace DevolutionsAgent.Actions
             session.Set(AgentProperties.netFx45Version, version);
 
             return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult InstallPedm(Session session)
+        {
+            string path = Path.Combine(ProgramDataDirectory, "agent.json");
+
+            try
+            {
+                Dictionary<string, object> config = [];
+                try
+                {
+                    using var reader = new StreamReader(path);
+                    config = JsonConvert.DeserializeObject<Dictionary<string, object>>(reader.ReadToEnd());
+                }
+                catch (Exception)
+                {
+                    // ignored. Previous config is either invalid or non existent.
+                }
+
+                config["Pedm"] = new Dictionary<string, bool> { { "Enabled", true } };
+
+                using var writer = new StreamWriter(path);
+                writer.Write(JsonConvert.SerializeObject(config));
+
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to install pedm: {e}");
+                return ActionResult.Failure;
+            }
         }
 
         [CustomAction]
