@@ -6,6 +6,8 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 	</PropertyGroup>
 	<ItemGroup>
+	  <PackageReference Include="ilmerge" Version="3.0.41" />
+	  <PackageReference Include="MSBuild.ILMerge.Task" Version="2.0.0-pre501" />
 	  <PackageReference Include="StandardSocketsHttpHandler" Version="2.2.0.8" />
 	</ItemGroup>
 
