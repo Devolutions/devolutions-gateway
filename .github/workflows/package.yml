@@ -34,8 +34,23 @@ jobs:
       run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
       version: ${{ steps.get-version.outputs.version }}
+      package-env: ${{ steps.info.outputs.package-env }}
 
     steps:
+      - name: Package information
+        id: info
+        shell: pwsh
+        run: |
+          $ref = '${{ github.ref_name }}'
+          $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
+          $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
+          $PackageEnv = if ($IsMasterBranch -And -Not $IsScheduledJob) {
+            "publish-prod"
+          } else {
+            "publish-test"
+          }
+          echo "package-env=$PackageEnv" >> $Env:GITHUB_OUTPUT
+
       ## workflow_dispatch: The run_id is read from the inputs
       ## workflow_call:     The run_id is the current run_id
       - name: Get run
@@ -130,8 +145,8 @@ jobs:
   codesign:
     name: Codesign
     runs-on: ${{ matrix.runner }}
-    environment: publish-prod
     needs: preflight
+    environment: ${{ needs.preflight.outputs.package-env }}
     strategy:
       matrix:
         project: [ jetsocat, devolutions-gateway, devolutions-agent ]
