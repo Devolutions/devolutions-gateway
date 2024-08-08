@@ -475,7 +475,7 @@ class TlkRecipe
             Pop-Location
         }
 
-        if ($this.Product -Eq "agent") {
+        if ($this.Product -Eq "agent" -And $this.Target.IsWindows()) {
             & './crates/devolutions-pedm/DevolutionsPedmDesktop/build.ps1' | Out-Host
         }
 
