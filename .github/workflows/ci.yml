@@ -526,8 +526,14 @@ jobs:
 
             echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
 
-            $DAgentDesktopExecutable = Join-Path $TargetOutputPath "DevolutionsPedmDesktop.exe"
-            echo "dagent-pedm-desktop-executable=$DAgentDesktopExecutable" >> $Env:GITHUB_OUTPUT
+            $DAgentPedmDesktopExecutable = Join-Path $TargetOutputPath "DevolutionsPedmDesktop.exe"
+            echo "dagent-pedm-desktop-executable=$DAgentPedmDesktopExecutable" >> $Env:GITHUB_OUTPUT
+
+            $DAgentPedmContextMenuMsix = Join-Path $TargetOutputPath "devolutions-pedm-contextmenu.msix"
+            echo "dagent-pedm-context-menu-msix=$DAgentPedmContextMenuMsix" >> $Env:GITHUB_OUTPUT
+            
+            $DAgentPedmHook = Join-Path $TargetOutputPath "devolutions_pedm_hook.dll"
+            echo "dagent-pedm-hook=$DAgentPedmHook" >> $Env:GITHUB_OUTPUT
           }
 
           $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
@@ -587,6 +593,8 @@ jobs:
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_PEDM_HOOK = "${{ steps.load-variables.outputs.dagent-pedm-hook }}"
+            $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-context-menu-msix }}"
           }
           
           ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
@@ -601,6 +609,8 @@ jobs:
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
             $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_PEDM_HOOK = "${{ steps.load-variables.outputs.dagent-pedm-hook }}"
+            $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-context-menu-msix }}"
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

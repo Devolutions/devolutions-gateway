@@ -413,8 +413,8 @@ class TlkRecipe
                 "agent" {
                     if ($CargoPackage.Name -Eq "devolutions-agent" -And (Test-Path Env:DAGENT_EXECUTABLE)) {
                         $Env:DAGENT_EXECUTABLE
-                    } elseif ($CargoPackage.Name -Eq "devolutions-pedm-hook") {
-                        $OutputPath
+                    } elseif ($CargoPackage.Name -Eq "devolutions-pedm-hook" -And (Test-Path Env:DAGENT_PEDM_HOOK)) {
+                        $Env:DAGENT_PEDM_HOOK
                     } else {
                         $null
                     }
@@ -473,7 +473,9 @@ class TlkRecipe
 
                 Pop-Location
 
-                Copy-Item -Path $(Join-Path $CargoOutputPath "devolutions-pedm-contextmenu.msix") -Destination $OutputPath
+                if (Test-Path Env:DAGENT_PEDM_CONTEXT_MENU_MSIX) {
+                    Copy-Item -Path $(Join-Path $CargoOutputPath "devolutions-pedm-contextmenu.msix") -Destination $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX
+                }
             }
 
             Pop-Location
@@ -483,7 +485,7 @@ class TlkRecipe
             & './crates/devolutions-pedm/DevolutionsPedmDesktop/build.ps1' | Out-Host
 
             if (Test-Path Env:DAGENT_PEDM_DESKTOP_EXECUTABLE) {
-                $builtDesktopExe = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select-Object -First 1
+                $builtDesktopExe = Get-ChildItem -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select-Object -First 1
 
                 Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
             }

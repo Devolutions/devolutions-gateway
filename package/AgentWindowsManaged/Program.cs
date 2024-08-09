@@ -101,9 +101,9 @@ internal class Program
         }
     }
 
-    private static string ResolveArtifact(string buildDir, string artifact, string error)
+    private static string ResolveArtifact(string varName, string error)
     {
-        string path = Path.Combine(buildDir, artifact);
+        string path = Environment.GetEnvironmentVariable(varName);
 
         if (!System.IO.File.Exists(path))
         {
@@ -113,9 +113,9 @@ internal class Program
         return path;
     }
 
-    private static string DevolutionsPedmHookPath => ResolveArtifact(TargetOutputPath, "devolutions_pedm_hook.dll", "The PEDM hook was not found");
+    private static string DevolutionsPedmHook => ResolveArtifact("DAGENT_PEDM_HOOK", "The PEDM hook was not found");
 
-    private static string DevolutionsPedmContextMenuMsixPath => ResolveArtifact(TargetOutputPath, "devolutions-pedm-contextmenu.msix", "The PEDM context menu MSIX was not found");
+    private static string DevolutionsPedmContextMenuMsix => ResolveArtifact("DAGENT_PEDM_CONTEXT_MENU_MSIX", "The PEDM context menu MSIX was not found");
 
     private static Version DevolutionsAgentVersion
     {
@@ -277,8 +277,8 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
-                    new (Includes.PEDM_FEATURE, DevolutionsPedmHookPath),
-                    new (new Id("DevolutionsPedmContextMenuMsix"), Includes.PEDM_FEATURE, DevolutionsPedmContextMenuMsixPath)
+                    new (Includes.PEDM_FEATURE, DevolutionsPedmHook),
+                    new (new Id("DevolutionsPedmContextMenuMsix"), Includes.PEDM_FEATURE, DevolutionsPedmContextMenuMsix)
                 },
                 Dirs = new[]
                 {
