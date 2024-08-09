@@ -235,7 +235,7 @@ jobs:
             if ('${{ matrix.os }}' -Eq 'windows') {
               if ($_.Name -Eq 'devolutions-pedm-contextmenu.msix') {
                 $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
-                $UnpackedMsix = Join-Path $Env:OutputPath "unpacked-context-menu-msix"
+                $UnpackedMsix = Join-Path ${{ runner.temp }} "unpacked-context-menu-msix"
                 $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
                 $PackedMsix = $_.FullName
 
@@ -249,7 +249,9 @@ jobs:
                 $xmlTextWriter = [System.Xml.XmlTextWriter]::Create($AppxManifest, $xmlWriterSettings)
                 $appx.Save($xmlTextWriter)
                 $xmlTextWriter.Close()
-                makeappx.exe pack /d $UnpackedMsix /p $PackedMsix
+                & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix
+              
+                Remove-Item $UnpackedMsix -Recurse -Force | Out-Null
               }
 
               $Params = @('sign',
