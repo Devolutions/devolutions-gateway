@@ -239,7 +239,7 @@ jobs:
                 $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
                 $PackedMsix = $_.FullName
 
-                & 'MakeAppx.exe' unpack /p $PackedMsix /d $UnpackedMsix
+                & 'MakeAppx.exe' unpack /p $PackedMsix /d $UnpackedMsix /nv
                 Remove-Item $PackedMsix -Force | Out-Null
                 $appx = [xml](Get-Content -Path $AppxManifest)
                 $appx.Package.Identity.Publisher = $PackagePublisher
@@ -249,7 +249,7 @@ jobs:
                 $xmlTextWriter = [System.Xml.XmlTextWriter]::Create($AppxManifest, $xmlWriterSettings)
                 $appx.Save($xmlTextWriter)
                 $xmlTextWriter.Close()
-                & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix
+                & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix /nv
               
                 Remove-Item $UnpackedMsix -Recurse -Force | Out-Null
               }
