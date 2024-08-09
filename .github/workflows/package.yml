@@ -380,7 +380,7 @@ jobs:
           }
 
       - name: Verification
-        if: matrix.os == 'windows' || matrix.os == 'macos'
+        if: (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod'
         shell: pwsh
         run: |
           $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
