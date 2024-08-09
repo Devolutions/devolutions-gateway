@@ -21,8 +21,9 @@ pub fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError
     use windows::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
-    use windows::Win32::Security::PSID;
-    use windows::Win32::Security::{GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::Win32::Security::{
+        GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    };
 
     struct OwnedPSecurityDescriptor(PSECURITY_DESCRIPTOR);
 

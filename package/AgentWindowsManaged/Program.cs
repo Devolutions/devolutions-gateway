@@ -15,8 +15,10 @@ using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Xml;
 using WixSharp;
+using WixSharp.Bootstrapper;
 using WixSharp.CommonTasks;
 using WixSharpSetup.Dialogs;
+using Action = WixSharp.Action;
 using Assembly = System.Reflection.Assembly;
 using CompressionLevel = WixSharp.CompressionLevel;
 using File = WixSharp.File;
@@ -50,6 +52,70 @@ internal class Program
             return path;
         }
     }
+
+    private static string TargetOutputPath
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("TARGET_OUTPUT_PATH");
+
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\target\\x86_64-pc-windows-msvc\\release\\";
+#else
+                throw new Exception("The environment variable TARGET_OUTPUT_PATH is not specified or the directory does not exist");
+#endif
+            }
+
+            if (!Directory.Exists(path))
+            {
+                throw new FileNotFoundException("The target output path was not found", path);
+            }
+
+            return path;
+        }
+    }
+
+    private static string DevolutionsAgentPedmDesktopExecutable
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("DAGENT_PEDM_DESKTOP_EXECUTABLE");
+
+            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\crates\\devolutions-pedm\\DevolutionsPedmDesktop\\bin\\Release\\net8.0-windows\\DevolutionsPedmDesktop.exe";
+#else
+                throw new Exception("The environment variable DAGENT_PEDM_DESKTOP_EXECUTABLE is not specified or the file does not exist");
+#endif
+            }
+
+            if (!System.IO.File.Exists(path))
+            {
+                throw new FileNotFoundException("The agent PEDM desktop executable was not found", path);
+            }
+
+            return path;
+        }
+    }
+
+    private static string ResolveArtifact(string varName, string error)
+    {
+        string path = Environment.GetEnvironmentVariable(varName);
+
+        if (!System.IO.File.Exists(path))
+        {
+            throw new FileNotFoundException(error, path);
+        }
+
+        return path;
+    }
+
+    private static string DevolutionsPedmHook => ResolveArtifact("DAGENT_PEDM_HOOK", "The PEDM hook was not found");
+
+    private static string DevolutionsPedmContextMenuMsix => ResolveArtifact("DAGENT_PEDM_CONTEXT_MENU_MSIX", "The PEDM context menu MSIX was not found");
 
     private static Version DevolutionsAgentVersion
     {
@@ -211,12 +277,25 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
+                    new (Includes.PEDM_FEATURE, DevolutionsPedmHook),
+                    new (new Id("DevolutionsPedmContextMenuMsix"), Includes.PEDM_FEATURE, DevolutionsPedmContextMenuMsix)
+                },
+                Dirs = new[]
+                {
+                    new Dir(Includes.PEDM_FEATURE, "desktop")
+                    {
+                        Files = new File[]
+                        {
+                            new (Includes.PEDM_FEATURE, DevolutionsAgentPedmDesktopExecutable),
+                        }
+                    }
                 }
             })),
         };
         project.ResolveWildCards(true);
 
         project.DefaultRefAssemblies.Add(typeof(ZipArchive).Assembly.Location);
+        project.DefaultRefAssemblies.Add(typeof(Newtonsoft.Json.JsonConvert).Assembly.Location);
         project.Actions = AgentActions.Actions;
         project.RegValues = new RegValue[]
         {

@@ -1,0 +1,8 @@
+{
+  "packageName": "devolutions-pedm-client-http",
+  "packageVersion": "0.0.1",
+  "library": "hyper",
+  "preferUnsignedInt": true,
+  "bestFitInt": true,
+  "avoidBoxedModels": true
+}

@@ -1,4 +1,5 @@
 ﻿using System;
+using WixSharp;
 namespace DevolutionsAgent.Resources
 {
     internal static class Includes
@@ -24,6 +25,8 @@ namespace DevolutionsAgent.Resources
         internal static Guid UPGRADE_CODE = new("82318D3C-811F-4D5D-9A82-B7C31B076755");
 
         internal static string INFO_URL = "https://server.devolutions.net";
+
+        internal static Feature PEDM_FEATURE = new Feature("Devolutions PEDM", "Installs Devolutions PEDM", false);
 
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\agent ACL

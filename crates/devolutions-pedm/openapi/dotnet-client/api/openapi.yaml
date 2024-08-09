@@ -1,0 +1,1251 @@
+openapi: 3.1.0
+info:
+  title: Devolutions PEDM API
+  version: ""
+servers:
+- url: /
+paths:
+  /elevate/temporary:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ElevateTemporaryPayload'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /elevate/session:
+    post:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /launch:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LaunchPayload'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchResponse'
+          description: ""
+  /revoke:
+    post:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /logs:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ElevationResult'
+                type: array
+          description: ""
+  /status:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+          description: ""
+  /policy/me:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetProfilesMeResponse'
+          description: ""
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OptionalId'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /policy/profiles:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Id'
+                type: array
+          description: ""
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Profile'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /policy/profiles/{id}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ""
+    put:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Profile'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /policy/rules:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Id'
+                type: array
+          description: ""
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Rule'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /policy/rules/{id}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+          description: ""
+    put:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Rule'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+  /policy/assignments:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Assignment'
+                type: array
+          description: ""
+  /policy/assignments/{id}:
+    put:
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              items:
+                $ref: '#/components/schemas/User'
+              type: array
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          description: no content
+components:
+  schemas:
+    Application:
+      example:
+        Path: Path
+        WorkingDirectory: WorkingDirectory
+        CommandLine:
+        - CommandLine
+        - CommandLine
+        User:
+          DomainSid: DomainSid
+          DomainName: DomainName
+          AccountSid: AccountSid
+          AccountName: AccountName
+        Signature:
+          Signer:
+            Issuer: Issuer
+          Status: Valid
+          Certificates:
+          - Base64: Base64
+            SerialNumber: SerialNumber
+            Issuer: Issuer
+            Thumbprint:
+              Sha1: Sha1
+              Sha256: Sha256
+            Eku:
+            - Eku
+            - Eku
+            Subject: Subject
+          - Base64: Base64
+            SerialNumber: SerialNumber
+            Issuer: Issuer
+            Thumbprint:
+              Sha1: Sha1
+              Sha256: Sha256
+            Eku:
+            - Eku
+            - Eku
+            Subject: Subject
+        Hash:
+          Sha1: Sha1
+          Sha256: Sha256
+      properties:
+        CommandLine:
+          items:
+            type: string
+          type: array
+        Hash:
+          $ref: '#/components/schemas/Hash'
+        Path:
+          type: string
+        Signature:
+          $ref: '#/components/schemas/Signature'
+        User:
+          $ref: '#/components/schemas/User'
+        WorkingDirectory:
+          type: string
+      required:
+      - CommandLine
+      - Hash
+      - Path
+      - Signature
+      - User
+      - WorkingDirectory
+    ApplicationFilter:
+      example:
+        Path:
+          Kind: Equals
+          Data: Data
+        WorkingDirectory:
+          Kind: Equals
+          Data: Data
+        CommandLine:
+        - Kind: Equals
+          Data: Data
+        - Kind: Equals
+          Data: Data
+        Hashes:
+        - Sha1: Sha1
+          Sha256: Sha256
+        - Sha1: Sha1
+          Sha256: Sha256
+        Signature:
+          CheckAuthenticode: true
+      properties:
+        CommandLine:
+          items:
+            $ref: '#/components/schemas/StringFilter'
+          type: array
+          nullable: true
+        Hashes:
+          items:
+            $ref: '#/components/schemas/HashFilter'
+          type: array
+          nullable: true
+        Path:
+          $ref: '#/components/schemas/PathFilter'
+        Signature:
+          $ref: '#/components/schemas/SignatureFilter'
+        WorkingDirectory:
+          $ref: '#/components/schemas/PathFilter'
+      required:
+      - Path
+    Assignment:
+      example:
+        Users:
+        - DomainSid: DomainSid
+          DomainName: DomainName
+          AccountSid: AccountSid
+          AccountName: AccountName
+        - DomainSid: DomainSid
+          DomainName: DomainName
+          AccountSid: AccountSid
+          AccountName: AccountName
+        Profile:
+          PromptSecureDesktop: true
+          DefaultElevationKind: AutoApprove
+          Id: Id
+          ElevationSettings:
+            Temporary:
+              MaximumSeconds: 0
+              Enabled: true
+            Session:
+              Enabled: true
+          ElevationMethod: LocalAdmin
+          Rules:
+          - null
+          - null
+          Name: Unnamed profile
+      properties:
+        Profile:
+          $ref: '#/components/schemas/Profile'
+        Users:
+          items:
+            $ref: '#/components/schemas/User'
+          type: array
+      required:
+      - Profile
+      - Users
+    AuthenticodeSignatureStatus:
+      enum:
+      - Valid
+      - Incompatible
+      - NotSigned
+      - HashMismatch
+      - NotSupportedFileFormat
+      - NotTrusted
+      type: string
+    Certificate:
+      example:
+        Base64: Base64
+        SerialNumber: SerialNumber
+        Issuer: Issuer
+        Thumbprint:
+          Sha1: Sha1
+          Sha256: Sha256
+        Eku:
+        - Eku
+        - Eku
+        Subject: Subject
+      properties:
+        Base64:
+          type: string
+        Eku:
+          items:
+            type: string
+          type: array
+        Issuer:
+          type: string
+        SerialNumber:
+          type: string
+        Subject:
+          type: string
+        Thumbprint:
+          $ref: '#/components/schemas/Hash'
+      required:
+      - Base64
+      - Eku
+      - Issuer
+      - SerialNumber
+      - Subject
+      - Thumbprint
+    ElevateTemporaryPayload:
+      example:
+        Seconds: 0
+      properties:
+        Seconds:
+          format: int64
+          minimum: 0.0
+          type: integer
+      required:
+      - Seconds
+    ElevationConfigurations:
+      example:
+        Temporary:
+          MaximumSeconds: 0
+          Enabled: true
+        Session:
+          Enabled: true
+      properties:
+        Session:
+          $ref: '#/components/schemas/SessionElevationConfiguration'
+        Temporary:
+          $ref: '#/components/schemas/TemporaryElevationConfiguration'
+      required:
+      - Session
+      - Temporary
+    ElevationKind:
+      enum:
+      - AutoApprove
+      - Confirm
+      - ReasonApproval
+      - Deny
+      type: string
+    ElevationMethod:
+      enum:
+      - LocalAdmin
+      - VirtualAccount
+      type: string
+    ElevationRequest:
+      example:
+        Target:
+          Path: Path
+          WorkingDirectory: WorkingDirectory
+          CommandLine:
+          - CommandLine
+          - CommandLine
+          User:
+            DomainSid: DomainSid
+            DomainName: DomainName
+            AccountSid: AccountSid
+            AccountName: AccountName
+          Signature:
+            Signer:
+              Issuer: Issuer
+            Status: Valid
+            Certificates:
+            - Base64: Base64
+              SerialNumber: SerialNumber
+              Issuer: Issuer
+              Thumbprint:
+                Sha1: Sha1
+                Sha256: Sha256
+              Eku:
+              - Eku
+              - Eku
+              Subject: Subject
+            - Base64: Base64
+              SerialNumber: SerialNumber
+              Issuer: Issuer
+              Thumbprint:
+                Sha1: Sha1
+                Sha256: Sha256
+              Eku:
+              - Eku
+              - Eku
+              Subject: Subject
+          Hash:
+            Sha1: Sha1
+            Sha256: Sha256
+        UnixTimestampSeconds: 0
+        Asker:
+          Path: Path
+          WorkingDirectory: WorkingDirectory
+          CommandLine:
+          - CommandLine
+          - CommandLine
+          User:
+            DomainSid: DomainSid
+            DomainName: DomainName
+            AccountSid: AccountSid
+            AccountName: AccountName
+          Signature:
+            Signer:
+              Issuer: Issuer
+            Status: Valid
+            Certificates:
+            - Base64: Base64
+              SerialNumber: SerialNumber
+              Issuer: Issuer
+              Thumbprint:
+                Sha1: Sha1
+                Sha256: Sha256
+              Eku:
+              - Eku
+              - Eku
+              Subject: Subject
+            - Base64: Base64
+              SerialNumber: SerialNumber
+              Issuer: Issuer
+              Thumbprint:
+                Sha1: Sha1
+                Sha256: Sha256
+              Eku:
+              - Eku
+              - Eku
+              Subject: Subject
+          Hash:
+            Sha1: Sha1
+            Sha256: Sha256
+      properties:
+        Asker:
+          $ref: '#/components/schemas/Application'
+        Target:
+          $ref: '#/components/schemas/Application'
+        UnixTimestampSeconds:
+          format: int64
+          minimum: 0.0
+          type: integer
+      required:
+      - Asker
+      - Target
+      - UnixTimestampSeconds
+    ElevationResult:
+      example:
+        Request:
+          Target:
+            Path: Path
+            WorkingDirectory: WorkingDirectory
+            CommandLine:
+            - CommandLine
+            - CommandLine
+            User:
+              DomainSid: DomainSid
+              DomainName: DomainName
+              AccountSid: AccountSid
+              AccountName: AccountName
+            Signature:
+              Signer:
+                Issuer: Issuer
+              Status: Valid
+              Certificates:
+              - Base64: Base64
+                SerialNumber: SerialNumber
+                Issuer: Issuer
+                Thumbprint:
+                  Sha1: Sha1
+                  Sha256: Sha256
+                Eku:
+                - Eku
+                - Eku
+                Subject: Subject
+              - Base64: Base64
+                SerialNumber: SerialNumber
+                Issuer: Issuer
+                Thumbprint:
+                  Sha1: Sha1
+                  Sha256: Sha256
+                Eku:
+                - Eku
+                - Eku
+                Subject: Subject
+            Hash:
+              Sha1: Sha1
+              Sha256: Sha256
+          UnixTimestampSeconds: 0
+          Asker:
+            Path: Path
+            WorkingDirectory: WorkingDirectory
+            CommandLine:
+            - CommandLine
+            - CommandLine
+            User:
+              DomainSid: DomainSid
+              DomainName: DomainName
+              AccountSid: AccountSid
+              AccountName: AccountName
+            Signature:
+              Signer:
+                Issuer: Issuer
+              Status: Valid
+              Certificates:
+              - Base64: Base64
+                SerialNumber: SerialNumber
+                Issuer: Issuer
+                Thumbprint:
+                  Sha1: Sha1
+                  Sha256: Sha256
+                Eku:
+                - Eku
+                - Eku
+                Subject: Subject
+              - Base64: Base64
+                SerialNumber: SerialNumber
+                Issuer: Issuer
+                Thumbprint:
+                  Sha1: Sha1
+                  Sha256: Sha256
+                Eku:
+                - Eku
+                - Eku
+                Subject: Subject
+            Hash:
+              Sha1: Sha1
+              Sha256: Sha256
+        Successful: true
+      properties:
+        Request:
+          $ref: '#/components/schemas/ElevationRequest'
+        Successful:
+          type: boolean
+      required:
+      - Request
+      - Successful
+    Error:
+      enum:
+      - AccessDenied
+      - NotFound
+      - InvalidParameter
+      - Internal
+      - Cancelled
+      type: string
+    ErrorResponse:
+      example:
+        Kind: AccessDenied
+        Win32Error: 0
+      properties:
+        Kind:
+          $ref: '#/components/schemas/Error'
+        Win32Error:
+          format: int32
+          minimum: 0.0
+          type: integer
+      required:
+      - Kind
+      - Win32Error
+    GetProfilesMeResponse:
+      example:
+        Active: Active
+        Available:
+        - null
+        - null
+      properties:
+        Active:
+          type: string
+        Available:
+          items:
+            $ref: '#/components/schemas/Id'
+          type: array
+      required:
+      - Available
+    Hash:
+      example:
+        Sha1: Sha1
+        Sha256: Sha256
+      properties:
+        Sha1:
+          type: string
+        Sha256:
+          type: string
+      required:
+      - Sha1
+      - Sha256
+    HashFilter:
+      example:
+        Sha1: Sha1
+        Sha256: Sha256
+      properties:
+        Sha1:
+          type: string
+          nullable: true
+        Sha256:
+          type: string
+          nullable: true
+    Id:
+      type: string
+    LaunchPayload:
+      example:
+        CreationFlags: 0
+        WorkingDirectory: WorkingDirectory
+        CommandLine: CommandLine
+        StartupInfo:
+          Desktop: Desktop
+          XSize: 0
+          YCountChars: 0
+          YSize: 0
+          FillAttribute: 0
+          ShowWindow: 0
+          X: 0
+          ParentPid: 0
+          Title: Title
+          "Y": 0
+          XCountChars: 0
+          Flags: 0
+        ExecutablePath: ExecutablePath
+      properties:
+        CommandLine:
+          type: string
+          nullable: true
+        CreationFlags:
+          format: int32
+          minimum: 0.0
+          type: integer
+        ExecutablePath:
+          type: string
+          nullable: true
+        StartupInfo:
+          $ref: '#/components/schemas/StartupInfoDto'
+        WorkingDirectory:
+          type: string
+          nullable: true
+      required:
+      - CreationFlags
+    LaunchResponse:
+      example:
+        ThreadId: 0
+        ProcessId: 0
+      properties:
+        ProcessId:
+          format: int32
+          minimum: 0.0
+          type: integer
+        ThreadId:
+          format: int32
+          minimum: 0.0
+          type: integer
+      required:
+      - ProcessId
+      - ThreadId
+    OptionalId:
+      example:
+        Id: Id
+      properties:
+        Id:
+          type: string
+    PathFilter:
+      example:
+        Kind: Equals
+        Data: Data
+      properties:
+        Data:
+          type: string
+        Kind:
+          $ref: '#/components/schemas/PathFilterKind'
+      required:
+      - Data
+      - Kind
+    PathFilterKind:
+      enum:
+      - Equals
+      - FileName
+      - Wildcard
+      type: string
+    PathIdParameter:
+      properties:
+        id:
+          type: string
+      required:
+      - id
+    Profile:
+      example:
+        PromptSecureDesktop: true
+        DefaultElevationKind: AutoApprove
+        Id: Id
+        ElevationSettings:
+          Temporary:
+            MaximumSeconds: 0
+            Enabled: true
+          Session:
+            Enabled: true
+        ElevationMethod: LocalAdmin
+        Rules:
+        - null
+        - null
+        Name: Unnamed profile
+      properties:
+        DefaultElevationKind:
+          $ref: '#/components/schemas/ElevationKind'
+        ElevationMethod:
+          $ref: '#/components/schemas/ElevationMethod'
+        ElevationSettings:
+          $ref: '#/components/schemas/ElevationConfigurations'
+        Id:
+          type: string
+        Name:
+          default: Unnamed profile
+          type: string
+        PromptSecureDesktop:
+          default: true
+          type: boolean
+        Rules:
+          default: []
+          items:
+            $ref: '#/components/schemas/Id'
+          type: array
+    Rule:
+      example:
+        Target:
+          Path:
+            Kind: Equals
+            Data: Data
+          WorkingDirectory:
+            Kind: Equals
+            Data: Data
+          CommandLine:
+          - Kind: Equals
+            Data: Data
+          - Kind: Equals
+            Data: Data
+          Hashes:
+          - Sha1: Sha1
+            Sha256: Sha256
+          - Sha1: Sha1
+            Sha256: Sha256
+          Signature:
+            CheckAuthenticode: true
+        ElevationKind: AutoApprove
+        Id: Id
+        Asker:
+          Path:
+            Kind: Equals
+            Data: Data
+          WorkingDirectory:
+            Kind: Equals
+            Data: Data
+          CommandLine:
+          - Kind: Equals
+            Data: Data
+          - Kind: Equals
+            Data: Data
+          Hashes:
+          - Sha1: Sha1
+            Sha256: Sha256
+          - Sha1: Sha1
+            Sha256: Sha256
+          Signature:
+            CheckAuthenticode: true
+        Name: Name
+      properties:
+        Asker:
+          $ref: '#/components/schemas/ApplicationFilter'
+        ElevationKind:
+          $ref: '#/components/schemas/ElevationKind'
+        Id:
+          type: string
+        Name:
+          type: string
+        Target:
+          $ref: '#/components/schemas/ApplicationFilter'
+      required:
+      - ElevationKind
+      - Id
+      - Name
+      - Target
+    SessionElevationConfiguration:
+      example:
+        Enabled: true
+      properties:
+        Enabled:
+          type: boolean
+      required:
+      - Enabled
+    SessionElevationStatus:
+      example:
+        Enabled: true
+      properties:
+        Enabled:
+          type: boolean
+      required:
+      - Enabled
+    Signature:
+      example:
+        Signer:
+          Issuer: Issuer
+        Status: Valid
+        Certificates:
+        - Base64: Base64
+          SerialNumber: SerialNumber
+          Issuer: Issuer
+          Thumbprint:
+            Sha1: Sha1
+            Sha256: Sha256
+          Eku:
+          - Eku
+          - Eku
+          Subject: Subject
+        - Base64: Base64
+          SerialNumber: SerialNumber
+          Issuer: Issuer
+          Thumbprint:
+            Sha1: Sha1
+            Sha256: Sha256
+          Eku:
+          - Eku
+          - Eku
+          Subject: Subject
+      properties:
+        Certificates:
+          items:
+            $ref: '#/components/schemas/Certificate'
+          type: array
+          nullable: true
+        Signer:
+          $ref: '#/components/schemas/Signer'
+        Status:
+          $ref: '#/components/schemas/AuthenticodeSignatureStatus'
+      required:
+      - Status
+    SignatureFilter:
+      example:
+        CheckAuthenticode: true
+      properties:
+        CheckAuthenticode:
+          type: boolean
+      required:
+      - CheckAuthenticode
+    Signer:
+      example:
+        Issuer: Issuer
+      properties:
+        Issuer:
+          type: string
+      required:
+      - Issuer
+    StartupInfoDto:
+      example:
+        Desktop: Desktop
+        XSize: 0
+        YCountChars: 0
+        YSize: 0
+        FillAttribute: 0
+        ShowWindow: 0
+        X: 0
+        ParentPid: 0
+        Title: Title
+        "Y": 0
+        XCountChars: 0
+        Flags: 0
+      properties:
+        Desktop:
+          type: string
+          nullable: true
+        FillAttribute:
+          format: int32
+          minimum: 0.0
+          type: integer
+        Flags:
+          format: int32
+          minimum: 0.0
+          type: integer
+        ParentPid:
+          format: int32
+          minimum: 0.0
+          type: integer
+          nullable: true
+        ShowWindow:
+          format: int32
+          minimum: 0.0
+          type: integer
+        Title:
+          type: string
+          nullable: true
+        X:
+          format: int32
+          minimum: 0.0
+          type: integer
+        XCountChars:
+          format: int32
+          minimum: 0.0
+          type: integer
+        XSize:
+          format: int32
+          minimum: 0.0
+          type: integer
+        "Y":
+          format: int32
+          minimum: 0.0
+          type: integer
+        YCountChars:
+          format: int32
+          minimum: 0.0
+          type: integer
+        YSize:
+          format: int32
+          minimum: 0.0
+          type: integer
+      required:
+      - FillAttribute
+      - Flags
+      - ShowWindow
+      - X
+      - XCountChars
+      - XSize
+      - "Y"
+      - YCountChars
+      - YSize
+    StatusResponse:
+      example:
+        Elevated: true
+        Temporary:
+          MaximumSeconds: 0
+          TimeLeft: 0
+          Enabled: true
+        Session:
+          Enabled: true
+      properties:
+        Elevated:
+          type: boolean
+        Session:
+          $ref: '#/components/schemas/SessionElevationStatus'
+        Temporary:
+          $ref: '#/components/schemas/TemporaryElevationStatus'
+      required:
+      - Elevated
+      - Session
+      - Temporary
+    StringFilter:
+      example:
+        Kind: Equals
+        Data: Data
+      properties:
+        Data:
+          type: string
+        Kind:
+          $ref: '#/components/schemas/StringFilterKind'
+      required:
+      - Data
+      - Kind
+    StringFilterKind:
+      enum:
+      - Equals
+      - Regex
+      - StartsWith
+      - EndsWith
+      - Contains
+      type: string
+    TemporaryElevationConfiguration:
+      example:
+        MaximumSeconds: 0
+        Enabled: true
+      properties:
+        Enabled:
+          type: boolean
+        MaximumSeconds:
+          format: int64
+          minimum: 0.0
+          type: integer
+      required:
+      - Enabled
+      - MaximumSeconds
+    TemporaryElevationStatus:
+      example:
+        MaximumSeconds: 0
+        TimeLeft: 0
+        Enabled: true
+      properties:
+        Enabled:
+          type: boolean
+        MaximumSeconds:
+          format: int64
+          minimum: 0.0
+          type: integer
+        TimeLeft:
+          format: int64
+          minimum: 0.0
+          type: integer
+      required:
+      - Enabled
+      - MaximumSeconds
+      - TimeLeft
+    User:
+      example:
+        DomainSid: DomainSid
+        DomainName: DomainName
+        AccountSid: AccountSid
+        AccountName: AccountName
+      properties:
+        AccountName:
+          type: string
+        AccountSid:
+          type: string
+        DomainName:
+          type: string
+        DomainSid:
+          type: string
+      required:
+      - AccountName
+      - AccountSid
+      - DomainName
+      - DomainSid
+

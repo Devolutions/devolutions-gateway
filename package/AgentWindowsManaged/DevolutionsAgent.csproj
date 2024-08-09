@@ -25,10 +25,11 @@
     <EmbeddedResource Include="Resources\DevolutionsAgent_fr-fr.wxl" />
   </ItemGroup>
   <ItemGroup>
+	<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 	<PackageReference Include="System.IO.Compression" Version="4.3.0" />
 	<PackageReference Include="System.ValueTuple" Version="4.5.0" />
-    <PackageReference Include="WixSharp" Version="1.25.1" />
-    <PackageReference Include="WixSharp.bin" Version="1.25.1" />
+    <PackageReference Include="WixSharp" Version="1.25.3" />
+    <PackageReference Include="WixSharp.bin" Version="1.25.3" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Security" />
@@ -39,6 +40,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Dialogs\VerifyReadyDialog.cs" />
+    <Compile Update="Dialogs\FeaturesDialog.cs" />
     <Compile Update="Properties\AgentProperties.g.cs">
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>

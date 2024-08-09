@@ -20,6 +20,7 @@ internal static class Wizard
         List<Type> dialogs = new()
         {
             typeof(WelcomeDialog),
+            typeof(FeaturesDialog),
             typeof(InstallDirDialog),
         };
 
