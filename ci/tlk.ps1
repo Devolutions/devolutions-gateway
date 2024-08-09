@@ -413,8 +413,10 @@ class TlkRecipe
                 "agent" {
                     if ($CargoPackage.Name -Eq "devolutions-agent" -And (Test-Path Env:DAGENT_EXECUTABLE)) {
                         $Env:DAGENT_EXECUTABLE
-                    } else {
+                    } elseif ($CargoPackage.Name -Eq "devolutions-pedm-hook") {
                         $OutputPath
+                    } else {
+                        $null
                     }
                 }
                 "jetsocat" {
