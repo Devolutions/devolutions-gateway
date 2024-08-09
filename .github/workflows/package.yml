@@ -300,8 +300,8 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
-          $Env:DAGENT_PEDM_DESKTOP_BUILD_DIR = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1 -ExpandProperty Directory
-          $Env:DAGENT_BUILD_DIR = Get-Item "./target/*${{ matrix.os }}*/release" | Select -First 1
+          $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1
+          $Env:TARGET_OUTPUT_PATH = $PackageRoot
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 

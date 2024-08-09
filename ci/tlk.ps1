@@ -414,7 +414,7 @@ class TlkRecipe
                     if ($CargoPackage.Name -Eq "devolutions-agent" -And (Test-Path Env:DAGENT_EXECUTABLE)) {
                         $Env:DAGENT_EXECUTABLE
                     } else {
-                        $null
+                        $OutputPath
                     }
                 }
                 "jetsocat" {
@@ -470,6 +470,8 @@ class TlkRecipe
                 }
 
                 Pop-Location
+
+                Copy-Item -Path $(Join-Path $CargoOutputPath "devolutions-pedm-contextmenu.msix") -Destination $OutputPath
             }
 
             Pop-Location
@@ -477,6 +479,12 @@ class TlkRecipe
 
         if ($this.Product -Eq "agent" -And $this.Target.IsWindows()) {
             & './crates/devolutions-pedm/DevolutionsPedmDesktop/build.ps1' | Out-Host
+
+            if (Test-Path Env:DAGENT_PEDM_DESKTOP_EXECUTABLE) {
+                $builtDesktopExe = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select-Object -First 1
+
+                Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
+            }
         }
 
         Pop-Location

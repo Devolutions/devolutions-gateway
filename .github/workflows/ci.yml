@@ -525,6 +525,9 @@ jobs:
             $DAgentPackage = Join-Path $TargetOutputPath $PackageFileName
 
             echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
+
+            $DAgentDesktopExecutable = Join-Path $TargetOutputPath "DevolutionsPedmDesktop.exe"
+            echo "dagent-pedm-desktop-executable=$DAgentDesktopExecutable" >> $Env:GITHUB_OUTPUT
           }
 
           $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
@@ -581,7 +584,12 @@ jobs:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
           CARGO_PACKAGE: devolutions-agent
-        run: ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+          }
+          
+          ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Package
         shell: pwsh
@@ -592,8 +600,7 @@ jobs:
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
-            $Env:DAGENT_PEDM_DESKTOP_BUILD_DIR = Get-ChildItem -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1 -ExpandProperty Directory
-            $Env:DAGENT_BUILD_DIR = Get-Item "./target/${{ matrix.arch }}-*${{ matrix.os }}*/release" | Select -First 1
+            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

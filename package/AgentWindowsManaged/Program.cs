@@ -53,48 +53,48 @@ internal class Program
         }
     }
 
-    private static string DevolutionsAgentBuildDirectory
+    private static string TargetOutputPath
     {
         get
         {
-            string path = Environment.GetEnvironmentVariable("DAGENT_BUILD_DIR");
+            string path = Environment.GetEnvironmentVariable("TARGET_OUTPUT_PATH");
 
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
             {
 #if DEBUG
                 path = "..\\..\\target\\x86_64-pc-windows-msvc\\release\\";
 #else
-                throw new Exception("The environment variable DAGENT_BUILD_DIR is not specified or the directory does not exist");
+                throw new Exception("The environment variable TARGET_OUTPUT_PATH is not specified or the directory does not exist");
 #endif
             }
 
             if (!Directory.Exists(path))
             {
-                throw new FileNotFoundException("The agent build directory was not found", path);
+                throw new FileNotFoundException("The target output path was not found", path);
             }
 
             return path;
         }
     }
 
-    private static string DevolutionsAgentPedmDesktopBuildDirectory
+    private static string DevolutionsAgentPedmDesktopExecutable
     {
         get
         {
-            string path = Environment.GetEnvironmentVariable("DAGENT_PEDM_DESKTOP_BUILD_DIR");
+            string path = Environment.GetEnvironmentVariable("DAGENT_PEDM_DESKTOP_EXECUTABLE");
 
-            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
             {
 #if DEBUG
-                path = "..\\..\\crates\\devolutions-pedm\\DevolutionsPedmDesktop\\bin\\Release\\net8.0-windows\\";
+                path = "..\\..\\crates\\devolutions-pedm\\DevolutionsPedmDesktop\\bin\\Release\\net8.0-windows\\DevolutionsPedmDesktop.exe";
 #else
-                throw new Exception("The environment variable DAGENT_PEDM_DESKTOP_BUILD_DIR is not specified or the directory does not exist");
+                throw new Exception("The environment variable DAGENT_PEDM_DESKTOP_EXECUTABLE is not specified or the file does not exist");
 #endif
             }
 
-            if (!Directory.Exists(path))
+            if (!System.IO.File.Exists(path))
             {
-                throw new FileNotFoundException("The agent PEDM desktop build directory was not found", path);
+                throw new FileNotFoundException("The agent PEDM desktop executable was not found", path);
             }
 
             return path;
@@ -113,12 +113,9 @@ internal class Program
         return path;
     }
 
-    private static string DevolutionsPedmHookPath => ResolveArtifact(DevolutionsAgentBuildDirectory, "devolutions_pedm_hook.dll", "The PEDM hook was not found");
+    private static string DevolutionsPedmHookPath => ResolveArtifact(TargetOutputPath, "devolutions_pedm_hook.dll", "The PEDM hook was not found");
 
-    private static string DevolutionsPedmContextMenuMsixPath => ResolveArtifact(DevolutionsAgentBuildDirectory, "devolutions-pedm-contextmenu.msix", "The PEDM context menu MSIX was not found");
-
-    private static string DevolutionsPedmDesktopExePath => ResolveArtifact(DevolutionsAgentPedmDesktopBuildDirectory,
-        "DevolutionsPedmDesktop.exe", "The PEDM desktop executable was not found");
+    private static string DevolutionsPedmContextMenuMsixPath => ResolveArtifact(TargetOutputPath, "devolutions-pedm-contextmenu.msix", "The PEDM context menu MSIX was not found");
 
     private static Version DevolutionsAgentVersion
     {
@@ -289,7 +286,7 @@ internal class Program
                     {
                         Files = new File[]
                         {
-                            new (Includes.PEDM_FEATURE, DevolutionsPedmDesktopExePath),
+                            new (Includes.PEDM_FEATURE, DevolutionsAgentPedmDesktopExecutable),
                         }
                     }
                 }
