@@ -227,12 +227,31 @@ jobs:
         run: |
           $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix' }
+            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix', 'DevolutionsPedmDesktop.exe' }
             'jetsocat' { 'jetsocat_*' }
           }
           $ExcludePattern = "*.pdb"
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
+              if ($_.Name -Eq 'devolutions-pedm-contextmenu.msix') {
+                $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
+                $UnpackedMsix = Join-Path $Env:OutputPath "unpacked-context-menu-msix"
+                $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
+                $PackedMsix = $_.FullName
+
+                & 'MakeAppx.exe' unpack /p $PackedMsix /d $UnpackedMsix
+                Remove-Item $PackedMsix -Force | Out-Null
+                $appx = [xml](Get-Content -Path $AppxManifest)
+                $appx.Package.Identity.Publisher = $PackagePublisher
+                $xmlWriterSettings = New-Object System.Xml.XmlWriterSettings
+                $xmlWriterSettings.Indent = $true
+                $xmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
+                $xmlTextWriter = [System.Xml.XmlTextWriter]::Create($AppxManifest, $xmlWriterSettings)
+                $appx.Save($xmlTextWriter)
+                $xmlTextWriter.Close()
+                makeappx.exe pack /d $UnpackedMsix /p $PackedMsix
+              }
+
               $Params = @('sign',
                 '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
                 '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
