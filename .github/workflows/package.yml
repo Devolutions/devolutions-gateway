@@ -227,7 +227,7 @@ jobs:
         run: |
           $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix', 'DevolutionsPedmDesktop.exe' }
+            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix', 'DevolutionsPedmDesktop.exe', 'devolutions_pedm_hook.dll' }
             'jetsocat' { 'jetsocat_*' }
           }
           $ExcludePattern = "*.pdb"
