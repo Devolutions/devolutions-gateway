@@ -300,8 +300,9 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
-          $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include DevolutionsPedmDesktop.exe | Select -First 1
-          $Env:TARGET_OUTPUT_PATH = $PackageRoot
+          $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select -First 1
+          $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions-pedm-contextmenu.msix' | Select -First 1
+          $Env:DAGENT_PEDM_HOOK = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions_pedm_hook.dll' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 
