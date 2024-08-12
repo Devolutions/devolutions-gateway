@@ -104,7 +104,7 @@ etherparse = "0.15"
 portpicker = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-rustls-cng = "0.3"
+rustls-cng = "0.5"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
