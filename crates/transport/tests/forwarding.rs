@@ -19,27 +19,21 @@ async fn node(
     port_server: u16,
     server_kind: TransportKind,
 ) -> anyhow::Result<()> {
-    let (mut client_reader, mut client_writer) =
-        tokio::io::split(client_kind.accept(port_node).await.context("accept")?);
+    let mut client_stream = client_kind.accept(port_node).await.context("accept")?;
+    let mut server_stream = server_kind.connect(port_server).await.context("connect")?;
 
-    let (mut server_reader, mut server_writer) =
-        tokio::io::split(server_kind.connect(port_server).await.context("connect")?);
+    tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream)
+        .await
+        .context("copy_bidirectional")?;
 
-    let client_to_server_fut =
-        transport::forward(&mut client_reader, &mut server_writer).map(|res| res.context("forward to server"));
-    let server_to_client_fut =
-        transport::forward(&mut server_reader, &mut client_writer).map(|res| res.context("forward to client"));
-
-    tokio::try_join!(client_to_server_fut, server_to_client_fut)?;
-
-    client_writer
+    client_stream
         .shutdown()
         .await
-        .context("shutdown operation on client_writer")?;
-    server_writer
+        .context("shutdown operation on client_stream")?;
+    server_stream
         .shutdown()
         .await
-        .context("shutdown operation on server_writer")?;
+        .context("shutdown operation on server_stream")?;
 
     Ok(())
 }
