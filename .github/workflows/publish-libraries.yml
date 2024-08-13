@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        library: [ dotnet-client, dotnet-subscriber, utils ]
+        library: [ dotnet-client, dotnet-subscriber, utils, pedm-dotnet-client ]
         include:
           - library: dotnet-client
             libpath: ./devolutions-gateway/openapi/dotnet-client
@@ -48,6 +48,8 @@ jobs:
             libpath: ./devolutions-gateway/openapi/dotnet-subscriber
           - library: utils
             libpath: ./utils/dotnet
+          - library: pedm-dotnet-client
+            libpath: ./crates/devolutions-pedm/openapi/dotnet-client
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -62,8 +64,8 @@ jobs:
           & "$Path/build.ps1"
 
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
-          Get-ChildItem -Path $Path -Recurse *.nupkg | ForEach { Copy-Item $_ "./nuget-packages" }
-          Get-ChildItem -Path $Path -Recurse *.snupkg | ForEach { Copy-Item $_ "./nuget-packages" }
+          Get-ChildItem -Path $Path -Recurse -Include '*.nupkg' | ForEach { Copy-Item $_ "./nuget-packages" }
+          Get-ChildItem -Path $Path -Recurse -Include '*.snupkg' | ForEach { Copy-Item $_ "./nuget-packages" }
 
       - name: Upload packages
         uses: actions/upload-artifact@v4

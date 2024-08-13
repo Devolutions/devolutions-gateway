@@ -5,7 +5,6 @@ edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 description = "Devolutions Agent PEDM module"
-build = "build.rs"
 publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -38,11 +37,6 @@ aide = { version = "0.13.4", features = ["axum", "axum-extra"] }
 tower-http = { version = "0.5.2", features = ["timeout"] }
 parking_lot = "0.12.3"
 cfg-if = "1.0.0"
-
-[build-dependencies]
-devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["build", "policy"] }
-schemars = "0.8.21"
-serde_json = "1.0.124"
 
 [lints]
 workspace = true

@@ -644,7 +644,7 @@ components:
               MaximumSeconds: 0
           $ref: '#/components/schemas/ElevationConfigurations'
         Id:
-          default: ''
+          default: default
           $ref: '#/components/schemas/Id'
         Name:
           default: Unnamed profile
