@@ -22,10 +22,7 @@ async fn node(
     let mut client_stream = client_kind.accept(port_node).await.context("accept")?;
     let mut server_stream = server_kind.connect(port_server).await.context("connect")?;
 
-    tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream)
-        .await
-        .context("copy_bidirectional")?;
-
+    let _ = tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream).await;
     let _ = client_stream.shutdown().await;
     let _ = server_stream.shutdown().await;
 
@@ -59,8 +56,8 @@ fn three_points() {
     )| {
         rt.block_on(async {
             let server_fut = server(&payload.0, node_to_server_kind, port_server).map(|res| res.context("server"));
-            let node_fut = node(port_node, client_to_node_kind, port_server, node_to_server_kind).map(|res| res.context("node"));
             let client_fut = client(&payload.0, client_to_node_kind, port_node).map(|res| res.context("client"));
+            let node_fut = node(port_node, client_to_node_kind, port_server, node_to_server_kind).map(|res| res.context("node"));
             tokio::try_join!(server_fut, node_fut, client_fut).unwrap();
         });
     })
