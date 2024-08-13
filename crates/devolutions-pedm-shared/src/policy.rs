@@ -325,16 +325,14 @@ pub struct ElevationConfigurations {
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Eq, Hash, Clone)]
 #[serde(try_from = "String")]
-pub struct Id {
-    id: String,
-}
+pub struct Id(String);
 
 impl Id {
     pub fn try_new(id: String) -> anyhow::Result<Self> {
         let pat = Regex::new(ID_PATTERN)?;
 
         pat.is_match(&id)
-            .then(|| Id { id })
+            .then(|| Id(id))
             .ok_or_else(|| anyhow::anyhow!("Invalid ID"))
     }
 }
@@ -349,7 +347,7 @@ impl TryFrom<String> for Id {
 
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.id.fmt(f)
+        self.0.fmt(f)
     }
 }
 
@@ -379,9 +377,7 @@ impl Identifiable for Profile {
 impl Default for Profile {
     fn default() -> Self {
         Self {
-            id: Id {
-                id: "default".to_owned(),
-            },
+            id: Id("default".to_owned()),
             name: "Unnamed profile".to_owned(),
             elevation_method: ElevationMethod::LocalAdmin,
             elevation_settings: ElevationConfigurations::default(),

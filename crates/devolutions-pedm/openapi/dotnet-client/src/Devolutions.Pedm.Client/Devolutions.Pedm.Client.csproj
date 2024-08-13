@@ -12,7 +12,7 @@
     <Description>Client for Devolutions PEDM REST API</Description>
     <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
     <RootNamespace>Devolutions.Pedm.Client</RootNamespace>
-    <Version>2024.7.5</Version>
+    <Version>2024.8.13</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Pedm.Client.xml</DocumentationFile>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
