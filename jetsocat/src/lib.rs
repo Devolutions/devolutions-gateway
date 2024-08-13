@@ -116,8 +116,10 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg) -> anyhow::Result<()> {
         .await
         .context("couldn't open pipe")?;
 
+    let (reader, writer) = tokio::io::split(pipe.stream);
+
     // Start JMUX proxy over the pipe
-    let proxy_fut = JmuxProxy::new(pipe.read, pipe.write)
+    let proxy_fut = JmuxProxy::new(Box::new(reader), Box::new(writer))
         .with_config(cfg.jmux_cfg)
         .with_requester_api(api_request_rx)
         .run();

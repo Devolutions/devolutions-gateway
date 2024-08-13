@@ -2,7 +2,7 @@ use crate::proxy::ProxyConfig;
 use anyhow::{Context as _, Result};
 use std::any::Any;
 use std::path::PathBuf;
-use transport::{ErasedRead, ErasedWrite};
+use transport::ErasedReadWrite;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -43,15 +43,13 @@ pub enum PipeMode {
 
 pub struct Pipe {
     pub name: &'static str,
-    pub read: ErasedRead,
-    pub write: ErasedWrite,
+    pub stream: ErasedReadWrite,
 
     // Useful when we don't want to drop something before the Pipe
-    pub _handle: Option<Box<dyn Any + Send>>,
+    _handle: Option<Box<dyn Any + Send>>,
 }
 
 pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result<Pipe> {
-    use crate::utils::DummyReaderWriter;
     use anyhow::Context as _;
     use std::process::Stdio;
     use tokio::fs;
@@ -60,8 +58,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
     match mode {
         PipeMode::Stdio => Ok(Pipe {
             name: "stdio",
-            read: Box::new(tokio::io::stdin()),
-            write: Box::new(tokio::io::stdout()),
+            stream: Box::new(tokio::io::join(tokio::io::stdin(), tokio::io::stdout())),
             _handle: None,
         }),
         PipeMode::ProcessCmd { command } => {
@@ -90,8 +87,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             Ok(Pipe {
                 name: "process",
-                read: Box::new(stdout),
-                write: Box::new(stdin),
+                stream: Box::new(tokio::io::join(stdout, stdin)),
                 _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
@@ -111,8 +107,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             Ok(Pipe {
                 name: "write-file",
-                read: Box::new(DummyReaderWriter),
-                write: Box::new(file),
+                stream: Box::new(file),
                 _handle: None,
             })
         }
@@ -131,8 +126,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             Ok(Pipe {
                 name: "read-file",
-                read: Box::new(file),
-                write: Box::new(DummyReaderWriter),
+                stream: Box::new(file),
                 _handle: None,
             })
         }
@@ -148,12 +142,9 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             info!(%peer_addr, "Accepted peer");
 
-            let (read, write) = tokio::io::split(socket);
-
             Ok(Pipe {
                 name: "tcp-listener",
-                read: Box::new(read),
-                write: Box::new(write),
+                stream: Box::new(socket),
                 _handle: None,
             })
         }
@@ -162,7 +153,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             info!(%addr, "TCP connect");
 
-            let (read, write) = tcp_connect(addr, proxy_cfg)
+            let stream = tcp_connect(addr, proxy_cfg)
                 .await
                 .with_context(|| "TCP connect failed")?;
 
@@ -170,8 +161,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             Ok(Pipe {
                 name: "tcp",
-                read,
-                write,
+                stream,
                 _handle: None,
             })
         }
@@ -189,22 +179,21 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 association_id, candidate_id
             );
 
-            let (mut read, mut write) = tcp_connect(addr, proxy_cfg)
+            let mut stream = tcp_connect(addr, proxy_cfg)
                 .await
                 .with_context(|| "TCP connect failed")?;
 
             debug!("Sending JET accept request…");
-            write_jet_accept_request(&mut write, association_id, candidate_id).await?;
+            write_jet_accept_request(&mut stream, association_id, candidate_id).await?;
             debug!("JET accept request sent, waiting for response…");
-            read_jet_accept_response(&mut read).await?;
+            read_jet_accept_response(&mut stream).await?;
             debug!("JET accept response received and processed successfully!");
 
             debug!("Connected");
 
             Ok(Pipe {
                 name: "jet-tcp-accept",
-                read,
-                write,
+                stream,
                 _handle: None,
             })
         }
@@ -221,22 +210,21 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 "TCP connect with JET connect protocol for {}/{}", association_id, candidate_id
             );
 
-            let (mut read, mut write) = tcp_connect(addr, proxy_cfg)
+            let mut stream = tcp_connect(addr, proxy_cfg)
                 .await
                 .with_context(|| "TCP connect failed")?;
 
             debug!("Sending JET connect request…");
-            write_jet_connect_request(&mut write, association_id, candidate_id).await?;
+            write_jet_connect_request(&mut stream, association_id, candidate_id).await?;
             debug!("JET connect request sent, waiting for response…");
-            read_jet_connect_response(&mut read).await?;
+            read_jet_connect_response(&mut stream).await?;
             debug!("JET connect response received and processed successfully!");
 
             debug!("Connected");
 
             Ok(Pipe {
                 name: "jet-tcp-connect",
-                read,
-                write,
+                stream,
                 _handle: None,
             })
         }
@@ -253,7 +241,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 }
             );
 
-            let (read, write, rsp) = ws_connect(url, proxy_cfg)
+            let (stream, rsp) = ws_connect(url, proxy_cfg)
                 .await
                 .with_context(|| "WebSocket connect failed")?;
 
@@ -261,14 +249,12 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             Ok(Pipe {
                 name: "websocket",
-                read,
-                write,
+                stream,
                 _handle: None,
             })
         }
         PipeMode::WebSocketListen { bind_addr } => {
-            use crate::utils::{websocket_read, websocket_write};
-            use futures_util::StreamExt as _;
+            use crate::utils::websocket_compat;
             use tokio::net::TcpListener;
             use tokio_tungstenite::accept_async;
 
@@ -288,16 +274,11 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .await
                 .with_context(|| "WebSocket handshake failed")?;
 
-            // By splitting that way, critical section (protected by lock) is smaller
-            let (sink, stream) = ws.split();
-
-            let read = Box::new(websocket_read(stream));
-            let write = Box::new(websocket_write(sink));
+            let stream = Box::new(websocket_compat(ws)) as ErasedReadWrite;
 
             Ok(Pipe {
                 name: "websocket-listener",
-                read,
-                write,
+                stream,
                 _handle: None,
             })
         }
@@ -306,24 +287,24 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
 #[instrument(skip_all)]
 pub async fn pipe(mut a: Pipe, mut b: Pipe) -> Result<()> {
-    use tokio::io::AsyncWriteExt;
-    use transport::forward;
+    use tokio::io::copy_bidirectional_with_sizes;
+    use tokio::io::AsyncWriteExt as _;
 
-    let a_to_b = forward(&mut a.read, &mut b.write);
-    let b_to_a = forward(&mut b.read, &mut a.write);
+    const BUF_SIZE: usize = 16 * 1024;
+
+    let forward = copy_bidirectional_with_sizes(&mut a.stream, &mut b.stream, BUF_SIZE, BUF_SIZE);
 
     info!(%a.name, %b.name, "Start piping");
 
-    let result = tokio::select! {
-        result = a_to_b => result.context("a to b forward"),
-        result = b_to_a => result.context("b to a forward"),
-    }
-    .map(|_| ());
+    let result = forward
+        .await
+        .map(|_| ())
+        .context("copy_bidirectional_with_sizes failed");
 
     info!("Ended");
 
-    a.write.shutdown().await?;
-    b.write.shutdown().await?;
+    a.stream.shutdown().await?;
+    b.stream.shutdown().await?;
 
     result
 }
