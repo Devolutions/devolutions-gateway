@@ -6,6 +6,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-tokio = { version = "1.38", features = ["rt", "net"] }
+tokio = { version = "1.39", features = ["rt", "net"] }
 proxy-http = { path = "../proxy-http" }
 proxy-socks = { path = "../proxy-socks" }

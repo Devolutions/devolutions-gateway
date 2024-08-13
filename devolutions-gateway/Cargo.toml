@@ -64,7 +64,7 @@ argon2 = { version = "0.5", features = ["std"] }
 tracing = "0.1"
 
 # Async, futures…
-tokio = { version = "1.38", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+tokio = { version = "1.39", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] } # TODO: directly use hyper in subscriber module
 futures = "0.3"
