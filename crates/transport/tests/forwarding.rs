@@ -26,14 +26,8 @@ async fn node(
         .await
         .context("copy_bidirectional")?;
 
-    client_stream
-        .shutdown()
-        .await
-        .context("shutdown operation on client_stream")?;
-    server_stream
-        .shutdown()
-        .await
-        .context("shutdown operation on server_stream")?;
+    let _ = client_stream.shutdown().await;
+    let _ = server_stream.shutdown().await;
 
     Ok(())
 }
