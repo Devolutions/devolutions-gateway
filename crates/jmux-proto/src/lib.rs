@@ -160,7 +160,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::PacketOversized { packet_size, max } => {
-                write!(f, "Packet oversized: max is {max}, got {packet_size}")
+                write!(f, "packet oversized: max is {max}, got {packet_size}")
             }
             Error::NotEnoughBytes {
                 name,
@@ -168,13 +168,13 @@ impl fmt::Display for Error {
                 expected,
             } => write!(
                 f,
-                "Not enough bytes provided to decode {name}: received {received} bytes, expected {expected} bytes"
+                "not enough bytes provided to decode {name}: received {received} bytes, expected {expected} bytes"
             ),
             Error::InvalidPacket { name, field, reason } => {
-                write!(f, "Invalid `{field}` in {name}: {reason}")
+                write!(f, "invalid `{field}` in {name}: {reason}")
             }
             Error::InvalidDestinationUrl { value, reason } => {
-                write!(f, "Invalid destination URL `{value}`: {reason}")
+                write!(f, "invalid destination URL `{value}`: {reason}")
             }
         }
     }
