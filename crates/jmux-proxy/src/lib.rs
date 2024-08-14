@@ -250,27 +250,42 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
     #[instrument("sender", skip_all)]
     async fn run(self) -> anyhow::Result<()> {
         let Self {
-            mut jmux_writer,
+            jmux_writer,
             mut msg_to_send_rx,
         } = self;
 
+        let mut jmux_writer = tokio::io::BufWriter::with_capacity(16 * 1024, jmux_writer);
         let mut buf = bytes::BytesMut::new();
+        let mut needs_flush = false;
 
-        while let Some(msg) = msg_to_send_rx.recv().await {
-            trace!(?msg, "Send channel message");
+        loop {
+            tokio::select! {
+                msg = msg_to_send_rx.recv() => {
+                    let Some(msg) = msg else {
+                        break;
+                    };
 
-            buf.clear();
-            msg.encode(&mut buf)?;
+                    trace!(?msg, "Send channel message");
 
-            jmux_writer.write_all(&buf).await?;
+                    buf.clear();
+                    msg.encode(&mut buf)?;
 
-            jmux_writer.flush().await?;
+                    jmux_writer.write_all(&buf).await?;
+                    needs_flush = true;
+                }
+                _ = tokio::time::sleep(core::time::Duration::from_millis(10)), if needs_flush => {
+                    jmux_writer.flush().await?;
+                    needs_flush = false;
+                }
+            }
         }
 
         // TODO: send a signal to the main scheduler when we are done processing channel data messages
         // and adjust windows for all the channels only then.
 
         info!("Closing JMUX sender task...");
+
+        jmux_writer.flush().await?;
 
         Ok(())
     }
