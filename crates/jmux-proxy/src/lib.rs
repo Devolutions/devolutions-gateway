@@ -12,7 +12,6 @@ pub use jmux_proto::DestinationUrl;
 
 use self::codec::JmuxCodec;
 use self::id_allocator::IdAllocator;
-use crate::codec::MAXIMUM_PACKET_SIZE_IN_BYTES;
 use anyhow::Context as _;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -29,6 +28,18 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tracing::{Instrument as _, Span};
+
+// PERF/FIXME: changing this parameter to 16 * 1024 greatly improves the throughput,
+//  but we need to wait until 2025 before making this change.
+//
+//  iperf result for 4 * 1024:
+//  > 0.0000-19.4523 sec  26.6 GBytes  11.7 Gbits/sec
+//
+//  iperf result for 16 * 1024:
+//  > 0.0000-13.8540 sec  33.6 GBytes  20.8 Gbits/sec
+//
+//  This is an improvement of 77.7%.
+const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024;
 
 pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
 pub type ApiResponseReceiver = oneshot::Receiver<JmuxApiResponse>;
@@ -316,7 +327,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 debug!("{} request {}", id, destination_url);
                                 pending_channels.insert(id, (destination_url.clone(), api_response_tx));
                                 msg_to_send_tx
-                                    .send(Message::open(id, u16::try_from(MAXIMUM_PACKET_SIZE_IN_BYTES).expect("fits in a u16"), destination_url))
+                                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES, destination_url))
                                     .context("couldn’t send CHANNEL OPEN message through mpsc channel")?;
                             }
                             None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
@@ -586,11 +597,11 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                     Message::Data(msg) => {
                         let id = LocalChannelId::from(msg.recipient_channel_id);
-                        let data_length = u32::try_from(msg.transfer_data.len()).expect("MAXIMUM_PACKET_SIZE_IN_BYTES < u32::MAX");
-                        let distant_id = match jmux_ctx.get_channel(id) {
-                            Some(channel) => channel.distant_id,
+                        let data_length = u16::try_from(msg.transfer_data.len()).expect("header.size (u16) <= u16::MAX");
+                        let channel = match jmux_ctx.get_channel(id) {
+                            Some(channel) => channel,
                             None => {
-                                warn!("Couldn’t find channel with id {}", id);
+                                warn!(channel.id = %id, "Couldn’t find channel");
                                 continue;
                             },
                         };
@@ -598,16 +609,21 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let data_tx = match data_senders.get_mut(&id) {
                             Some(sender) => sender,
                             None => {
-                                warn!("Received data but associated data sender is missing");
+                                warn!(channel.id = %id, "Received data but associated data sender is missing");
                                 continue;
                             }
                         };
+
+                        if channel.maximum_packet_size < data_length {
+                            warn!(channel.id = %id, "Packet's size is exceeding the maximum size for this channel and was dropped");
+                            continue;
+                        }
 
                         let _ = data_tx.send(msg.transfer_data);
 
                         // Simplest flow control logic for now: just send back a WINDOW ADJUST message to
                         // increase back peer’s window size.
-                        msg_to_send_tx.send(Message::window_adjust(distant_id, data_length))
+                        msg_to_send_tx.send(Message::window_adjust(channel.distant_id, u32::from(data_length)))
                             .context("couldn’t send WINDOW ADJUST message")?;
                     }
                     Message::Eof(msg) => {
