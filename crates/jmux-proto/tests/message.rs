@@ -152,7 +152,7 @@ pub fn channel_window_adjust() {
 #[test]
 pub fn error_on_oversized_packet() {
     let mut buf = BytesMut::new();
-    let err = Message::data(DistantChannelId::from(1), vec![0; u16::MAX as usize])
+    let err = Message::data(DistantChannelId::from(1), vec![0; u16::MAX as usize].into())
         .encode(&mut buf)
         .err()
         .unwrap();
@@ -171,7 +171,7 @@ pub fn channel_data() {
 
     let msg_example = ChannelData {
         recipient_channel_id: 1,
-        transfer_data: vec![11, 12, 13, 14],
+        transfer_data: vec![11, 12, 13, 14].into(),
     };
 
     check_encode_decode(Message::Data(msg_example), raw_msg);
