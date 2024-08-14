@@ -4,9 +4,6 @@ use bytes::BytesMut;
 use jmux_proto::{Header, Message};
 use tokio_util::codec::{Decoder, Encoder};
 
-/// This is a purely arbitrary number
-pub(crate) const MAXIMUM_PACKET_SIZE_IN_BYTES: usize = 4096;
-
 pub(crate) struct JmuxCodec;
 
 impl Decoder for JmuxCodec {
@@ -15,6 +12,8 @@ impl Decoder for JmuxCodec {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        const MAX_RESERVE_CHUNK_IN_BYTES: usize = 8 * 1024;
+
         if src.len() < Header::SIZE {
             // Not enough data to read length marker.
             return Ok(None);
@@ -25,17 +24,11 @@ impl Decoder for JmuxCodec {
         length_bytes.copy_from_slice(&src[1..3]);
         let length = u16::from_be_bytes(length_bytes) as usize;
 
-        if length > MAXIMUM_PACKET_SIZE_IN_BYTES {
-            return Err(io::Error::other(format!(
-                "received JMUX packet is exceeding the maximum packet size: {} (max is {})",
-                length, MAXIMUM_PACKET_SIZE_IN_BYTES,
-            )));
-        }
-
         if src.len() < length {
             // The full packet has not arrived yet.
             // Reserve more space in the buffer (good performance-wise).
-            src.reserve(length - src.len());
+            let additional = core::cmp::min(MAX_RESERVE_CHUNK_IN_BYTES, length - src.len());
+            src.reserve(additional);
 
             // Inform the Framed that more bytes are required to form the next frame.
             return Ok(None);
@@ -56,17 +49,7 @@ impl Encoder<Message> for JmuxCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        if item.size() > MAXIMUM_PACKET_SIZE_IN_BYTES {
-            return Err(io::Error::other(format!(
-                "attempted to send a JMUX packet whose size is too big: {} (max is {})",
-                item.size(),
-                MAXIMUM_PACKET_SIZE_IN_BYTES
-            )));
-        }
-
-        item.encode(dst).map_err(io::Error::other)?;
-
-        Ok(())
+        item.encode(dst).map_err(io::Error::other)
     }
 }
 
