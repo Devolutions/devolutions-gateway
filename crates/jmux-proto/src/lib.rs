@@ -1,8 +1,11 @@
 //! [Specification document](https://github.com/Devolutions/devolutions-gateway/blob/master/crates/jmux-proto/spec/JMUX_Spec.md)
 
-use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
+use bytes::{Buf as _, BufMut as _};
 use core::fmt;
 use smol_str::SmolStr;
+
+// We re-export these types, because they are used in the public API.
+pub use bytes::{Bytes, BytesMut};
 
 /// Distant identifier for a channel
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -235,7 +238,7 @@ impl Message {
         Self::WindowAdjust(ChannelWindowAdjust::new(distant_id, window_adjustment))
     }
 
-    pub fn data(id: DistantChannelId, data: Vec<u8>) -> Self {
+    pub fn data(id: DistantChannelId, data: Bytes) -> Self {
         Self::Data(ChannelData::new(id, data))
     }
 
@@ -654,7 +657,7 @@ impl ChannelWindowAdjust {
 #[derive(PartialEq, Eq)]
 pub struct ChannelData {
     pub recipient_channel_id: u32,
-    pub transfer_data: Vec<u8>,
+    pub transfer_data: Bytes,
 }
 
 // We don't want to print `transfer_data` content (usually too big)
@@ -671,7 +674,7 @@ impl ChannelData {
     pub const NAME: &'static str = "CHANNEL DATA";
     pub const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/;
 
-    pub fn new(id: DistantChannelId, data: Vec<u8>) -> Self {
+    pub fn new(id: DistantChannelId, data: Bytes) -> Self {
         ChannelData {
             recipient_channel_id: u32::from(id),
             transfer_data: data,
@@ -684,14 +687,14 @@ impl ChannelData {
 
     pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u32(self.recipient_channel_id);
-        buf.put(self.transfer_data.as_slice());
+        buf.put(self.transfer_data.slice(..));
     }
 
     pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
         ensure_size!(fixed Self in buf);
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
-            transfer_data: buf.to_vec(),
+            transfer_data: buf,
         })
     }
 }

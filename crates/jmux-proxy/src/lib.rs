@@ -217,8 +217,8 @@ impl JmuxCtx {
 
 type MessageReceiver = mpsc::UnboundedReceiver<Message>;
 type MessageSender = mpsc::UnboundedSender<Message>;
-type DataReceiver = mpsc::UnboundedReceiver<Vec<u8>>;
-type DataSender = mpsc::UnboundedSender<Vec<u8>>;
+type DataReceiver = mpsc::UnboundedReceiver<Bytes>;
+type DataSender = mpsc::UnboundedSender<Bytes>;
 type InternalMessageSender = mpsc::UnboundedSender<InternalMessage>;
 
 #[derive(Debug)]
@@ -325,7 +325,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     JmuxApiRequest::Start { id, stream, leftover } => {
                         let channel = jmux_ctx.get_channel(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
 
-                        let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+                        let (data_tx, data_rx) = mpsc::unbounded_channel::<Bytes>();
 
                         if data_senders.insert(id, data_tx).is_some() {
                             anyhow::bail!("detected two streams with the same ID {}", id);
@@ -333,7 +333,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         // Send leftover bytes if any
                         if let Some(leftover) = leftover {
-                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover.to_vec())) {
+                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)) {
                                 error!(%error, "Couldn't send leftover bytes");
                             }                               ;
                         }
@@ -405,7 +405,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let window_size = Arc::clone(&channel.window_size);
                         let channel_span = channel.span.clone();
 
-                        let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+                        let (data_tx, data_rx) = mpsc::unbounded_channel::<Bytes>();
 
                         if data_senders.insert(channel.local_id, data_tx).is_some() {
                             anyhow::bail!("detected two streams with the same local ID {}", channel.local_id);
@@ -746,7 +746,7 @@ impl DataReaderTask {
         trace!("Started forwarding");
 
         while let Some(bytes) = bytes_stream.next().await {
-            let bytes = match bytes {
+            let mut bytes = match bytes {
                 Ok(bytes) => bytes,
                 Err(error) if is_really_an_error(&error) => {
                     return Err(anyhow::Error::new(error).context("couldn’t read next bytes from stream"))
@@ -759,12 +759,13 @@ impl DataReaderTask {
 
             let chunk_size = maximum_packet_size - Header::SIZE - ChannelData::FIXED_PART_SIZE;
 
-            let queue: Vec<Vec<u8>> = bytes.chunks(chunk_size).map(|slice| slice.to_vec()).collect();
+            while !bytes.is_empty() {
+                let split_at = core::cmp::min(chunk_size, bytes.len());
+                let mut chunk = bytes.split_to(split_at);
 
-            for mut bytes in queue {
                 loop {
                     let window_size_now = window_size.load(Ordering::SeqCst);
-                    if window_size_now < bytes.len() {
+                    if window_size_now < chunk.len() {
                         trace!(
                             window_size_now,
                             full_packet_size = bytes.len(),
@@ -772,10 +773,10 @@ impl DataReaderTask {
                         );
 
                         if window_size_now > 0 {
-                            let bytes_to_send_now: Vec<u8> = bytes.drain(..window_size_now).collect();
+                            let bytes_to_send_now = chunk.split_to(window_size_now);
                             window_size.fetch_sub(bytes_to_send_now.len(), Ordering::SeqCst);
                             msg_to_send_tx
-                                .send(Message::data(distant_id, bytes_to_send_now))
+                                .send(Message::data(distant_id, bytes_to_send_now.freeze()))
                                 .context("couldn’t send DATA message")?;
                         }
 
@@ -783,7 +784,7 @@ impl DataReaderTask {
                     } else {
                         window_size.fetch_sub(bytes.len(), Ordering::SeqCst);
                         msg_to_send_tx
-                            .send(Message::data(distant_id, bytes))
+                            .send(Message::data(distant_id, chunk.freeze()))
                             .context("couldn’t send DATA message")?;
                         break;
                     }
