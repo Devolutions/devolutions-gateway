@@ -70,10 +70,9 @@ iperf -c "$ADDR" -p $PORT -P 10 -t 600
 
 Let’s assume the script is in a file named `run_iperf.sh`.
 
-Running `iperf` for long enough is important to ensure that the buffering happening at the socket level is not influencing the numbers too much.
-When running less a minute, we end up measuring the rate at which `iperf` enqueue bytes into the socket’s buffer.
-Filling the buffer can be done very quickly and can have a significant impact on the measured average speed.
-10 minutes is long enough to obtain convergent results.
+It's important to note that `iperf` should be run for an extended period to account for the initial filling of TCP socket buffers,
+which can artificially inflate the average throughput if tested for less than a minute.
+Running `iperf` for 10 minutes is enough to ensure the results accurately reflect the effective average throughput.
 
 ## Applied optimizations
 
@@ -274,7 +273,7 @@ The flow control algorithm, particularly the window size, is a critical paramete
 Since such delays are common in almost all practical setups, it’s safe to say that this is the most important metric to optimize.
 
 Other optimizations, while beneficial, primarily serve to reduce CPU usage and increase throughput on very high-speed networks.
-A speed of 30 Mbits/s is already considered high, but networks with throughput exceeding 1 Gbits/s also exist.
+A speed of 30 Mbits/s is already considered high, but networks with throughput exceeding 1 Gbits/s also exist (e.g.: ultra-high speed local area networks).
 Enhancing performance for these networks is valuable, particularly in reducing CPU usage as the volume of data processed increases.
 
 Measurements indicate that our JMUX proxy should perform well, even on high-speed networks.
@@ -286,3 +285,80 @@ In real-world wide-area networks, packet loss will inevitably occur.
 
 Nevertheless, these results provide valuable data, confirming that our optimizations are effective with a high degree of confidence.
 While further optimization could be pursued to address more specific scenarios, the current implementation is likely sufficient for most practical purposes.
+
+## 2025.2.0 update
+
+Related patches:
+
+- <https://github.com/Devolutions/devolutions-gateway/pull/974>
+- <https://github.com/Devolutions/devolutions-gateway/pull/979>
+
+### Results
+
+```shell
+./run_iperf.sh 5000
+```
+
+#### With 50ms delay on loopback
+
+1 connection:
+
+```
+[  1] 0.0000-600.4552 sec  16.1 GBytes   231 Mbits/sec
+```
+
+2 connections:
+
+```
+[  1] 0.0000-605.1600 sec  8.16 GBytes   116 Mbits/sec
+[  2] 0.0000-605.1599 sec  8.16 GBytes   116 Mbits/sec
+[SUM] 0.0000-605.1599 sec  16.3 GBytes   232 Mbits/sec
+```
+
+10 connections:
+
+```
+[  8] 0.0000-625.8346 sec  1.69 GBytes  23.2 Mbits/sec
+[  9] 0.0000-626.1828 sec  1.69 GBytes  23.2 Mbits/sec
+[  2] 0.0000-626.1820 sec  1.69 GBytes  23.2 Mbits/sec
+[  5] 0.0000-626.1817 sec  1.69 GBytes  23.2 Mbits/sec
+[  6] 0.0000-626.1815 sec  1.69 GBytes  23.2 Mbits/sec
+[  4] 0.0000-626.1827 sec  1.69 GBytes  23.2 Mbits/sec
+[  3] 0.0000-626.1814 sec  1.69 GBytes  23.2 Mbits/sec
+[  7] 0.0000-626.1821 sec  1.69 GBytes  23.2 Mbits/sec
+[  1] 0.0000-626.2831 sec  1.69 GBytes  23.1 Mbits/sec
+[ 10] 0.0000-626.2819 sec  1.69 GBytes  23.1 Mbits/sec
+[SUM] 0.0000-626.2832 sec  16.9 GBytes   232 Mbits/sec
+```
+
+#### Without delay
+
+1 connection:
+
+```
+[  1] 0.0000-600.0402 sec  1.68 TBytes  24.6 Gbits/sec
+```
+
+2 connections:
+
+```
+[  1] 0.0000-600.0628 sec   752 GBytes  10.8 Gbits/sec
+[  2] 0.0000-601.0794 sec   751 GBytes  10.7 Gbits/sec
+[SUM] 0.0000-601.0794 sec  1.47 TBytes  21.5 Gbits/sec
+```
+
+10 connections:
+
+```
+[  6] 0.0000-600.3015 sec   127 GBytes  1.82 Gbits/sec
+[  3] 0.0000-600.3014 sec   127 GBytes  1.82 Gbits/sec
+[  7] 0.0000-600.3012 sec   127 GBytes  1.82 Gbits/sec
+[  5] 0.0000-600.2992 sec   127 GBytes  1.82 Gbits/sec
+[  9] 0.0000-600.3014 sec   127 GBytes  1.82 Gbits/sec
+[  1] 0.0000-600.3006 sec   127 GBytes  1.82 Gbits/sec
+[  2] 0.0000-600.3601 sec   127 GBytes  1.82 Gbits/sec
+[ 10] 0.0000-600.3592 sec   127 GBytes  1.82 Gbits/sec
+[  8] 0.0000-600.3604 sec   127 GBytes  1.82 Gbits/sec
+[  4] 0.0000-600.3586 sec   127 GBytes  1.82 Gbits/sec
+[SUM] 0.0000-600.3605 sec  1.24 TBytes  18.2 Gbits/sec
+```
