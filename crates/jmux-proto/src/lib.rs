@@ -484,7 +484,7 @@ pub struct ChannelOpen {
 
 impl ChannelOpen {
     pub const NAME: &'static str = "CHANNEL OPEN";
-    pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 64 * 1024 * 1024; // 64 MB
+    pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 64 * 1024 * 1024; // 64 MiB
     pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 2 /* maximumPacketSize */;
 
     pub fn new(id: LocalChannelId, maximum_packet_size: u16, destination_url: DestinationUrl) -> Self {

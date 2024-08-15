@@ -40,8 +40,8 @@ use tracing::{Instrument as _, Span};
 //  > 0.0000-13.8540 sec  33.6 GBytes  20.8 Gbits/sec
 //
 //  This is an improvement of 77.7%.
-const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kB
-const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kB
+const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
+const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 
 pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
 pub type ApiResponseReceiver = oneshot::Receiver<JmuxApiResponse>;

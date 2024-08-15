@@ -12,7 +12,7 @@ impl Decoder for JmuxCodec {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        const MAX_RESERVE_CHUNK_IN_BYTES: usize = 8 * 1024;
+        const MAX_RESERVE_CHUNK_IN_BYTES: usize = 8 * 1024; // 8 kiB
 
         if src.len() < Header::SIZE {
             // Not enough data to read length marker.
