@@ -34,12 +34,12 @@ use tracing::{Instrument as _, Span};
 //  but we need to wait until 2025 before making this change.
 //
 //  iperf result for 4 * 1024:
-//  > 0.0000-19.4523 sec  26.6 GBytes  11.7 Gbits/sec
+//  > 0.0000-10.0490 sec 23.0 GBytes 19.7 Gbits/sec
 //
 //  iperf result for 16 * 1024:
-//  > 0.0000-13.8540 sec  33.6 GBytes  20.8 Gbits/sec
+//  > 0.0000-10.0393 sec 30.6 GBytes 26.2 Gbits/sec
 //
-//  This is an improvement of 77.7%.
+//  This is an improvement of ~32.9%.
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 
