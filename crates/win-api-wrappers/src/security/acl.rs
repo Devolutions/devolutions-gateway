@@ -327,20 +327,12 @@ impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
     fn try_from(value: &SecurityDescriptor) -> std::result::Result<Self, Self::Error> {
         let owner = value.owner.as_ref().map(RawSid::try_from).transpose()?;
         let group = value.group.as_ref().map(RawSid::try_from).transpose()?;
-        let sacl = value
-            .sacl
-            .as_ref()
-            .map(|x| x.acl.to_raw().map(|y| (x.kind, y)))
-            .transpose()?;
+        let sacl = value.sacl.as_ref().map(|x| x.acl.to_raw()).transpose()?;
 
-        let dacl = value
-            .dacl
-            .as_ref()
-            .map(|x| x.acl.to_raw().map(|y| (x.kind, y)))
-            .transpose()?;
+        let dacl = value.dacl.as_ref().map(|x| x.acl.to_raw()).transpose()?;
 
         let mut control = SECURITY_DESCRIPTOR_CONTROL(0);
-        if let Some((kind, _)) = sacl {
+        if let Some(kind) = value.sacl.as_ref().map(|x| x.kind) {
             control |= SE_SACL_PRESENT;
 
             control |= match kind {
@@ -350,7 +342,7 @@ impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
             };
         }
 
-        if let Some((kind, _)) = dacl {
+        if let Some(kind) = value.dacl.as_ref().map(|x| x.kind) {
             control |= SE_DACL_PRESENT;
 
             control |= match kind {
@@ -371,17 +363,17 @@ impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
             Group: group.as_ref().map(RawSid::as_psid).unwrap_or_default(),
             Sacl: sacl
                 .as_ref()
-                .map_or_else(ptr::null_mut, |x| x.1.as_ptr().cast_mut().cast()),
+                .map_or_else(ptr::null_mut, |x| x.as_ptr().cast_mut().cast()),
             Dacl: dacl
                 .as_ref()
-                .map_or_else(ptr::null_mut, |x| x.1.as_ptr().cast_mut().cast()),
+                .map_or_else(ptr::null_mut, |x| x.as_ptr().cast_mut().cast()),
         };
 
         Ok(Self {
             _owner: owner,
             _group: group,
-            _sacl: sacl.map(|x| x.1),
-            _dacl: dacl.map(|x| x.1),
+            _sacl: sacl,
+            _dacl: dacl,
             raw,
         })
     }
