@@ -9,6 +9,8 @@ namespace DevolutionsPedmDesktop
         public FrmConsent(PipeStream pipe, string path)
         {
             InitializeComponent();
+            uint cornerPreference = 2;
+            WinAPI.DwmSetWindowAttribute(this.Handle, 33, ref cornerPreference, 4);
 
             appView.ExePath = path;
             _pipe = pipe;

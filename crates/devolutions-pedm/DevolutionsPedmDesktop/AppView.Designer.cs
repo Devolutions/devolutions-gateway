@@ -36,21 +36,27 @@
             // 
             // lblApplication
             // 
-            this.lblApplication.AutoSize = true;
-            this.lblApplication.Font = new System.Drawing.Font("Segoe UI", 12F);
-            this.lblApplication.Location = new System.Drawing.Point(131, 21);
+            this.lblApplication.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblApplication.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.lblApplication.Location = new System.Drawing.Point(108, 0);
+            this.lblApplication.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblApplication.Name = "lblApplication";
-            this.lblApplication.Size = new System.Drawing.Size(52, 21);
+            this.lblApplication.Size = new System.Drawing.Size(235, 44);
             this.lblApplication.TabIndex = 0;
             this.lblApplication.Text = "label1";
             // 
             // lblPath
             // 
-            this.lblPath.AutoSize = true;
-            this.lblPath.Font = new System.Drawing.Font("Segoe UI", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lblPath.Location = new System.Drawing.Point(131, 44);
+            this.lblPath.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblPath.Font = new System.Drawing.Font("Segoe UI", 8F);
+            this.lblPath.Location = new System.Drawing.Point(108, 44);
+            this.lblPath.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblPath.Name = "lblPath";
-            this.lblPath.Size = new System.Drawing.Size(43, 17);
+            this.lblPath.Size = new System.Drawing.Size(235, 60);
             this.lblPath.TabIndex = 1;
             this.lblPath.Text = "label1";
             // 
@@ -58,25 +64,25 @@
             // 
             this.imgIcon.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left)));
-            this.imgIcon.Location = new System.Drawing.Point(23, 21);
+            this.imgIcon.Location = new System.Drawing.Point(0, 0);
+            this.imgIcon.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.imgIcon.Name = "imgIcon";
-            this.imgIcon.Size = new System.Drawing.Size(91, 85);
+            this.imgIcon.Size = new System.Drawing.Size(104, 104);
             this.imgIcon.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.imgIcon.TabIndex = 2;
             this.imgIcon.TabStop = false;
             // 
             // AppView
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.Controls.Add(this.imgIcon);
             this.Controls.Add(this.lblPath);
             this.Controls.Add(this.lblApplication);
+            this.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.Name = "AppView";
-            this.Size = new System.Drawing.Size(457, 128);
+            this.Size = new System.Drawing.Size(343, 104);
             ((System.ComponentModel.ISupportInitialize)(this.imgIcon)).EndInit();
             this.ResumeLayout(false);
-            this.PerformLayout();
 
         }
 
