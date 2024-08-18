@@ -17,7 +17,7 @@ use self::id_allocator::IdAllocator;
 use anyhow::Context as _;
 use bytes::Bytes;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -30,16 +30,6 @@ use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
 
-// PERF/FIXME: changing this parameter to 16 * 1024 greatly improves the throughput,
-//  but we need to wait until 2025 before making this change.
-//
-//  iperf result for 4 * 1024:
-//  > 0.0000-10.0490 sec 23.0 GBytes 19.7 Gbits/sec
-//
-//  iperf result for 16 * 1024:
-//  > 0.0000-10.0393 sec 30.6 GBytes 26.2 Gbits/sec
-//
-//  This is an improvement of ~32.9%.
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 
@@ -323,13 +313,12 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
     let mut jmux_ctx = JmuxCtx::new();
     let mut data_senders: HashMap<LocalChannelId, DataSender> = HashMap::new();
     let mut pending_channels: HashMap<LocalChannelId, (DestinationUrl, ApiResponseSender)> = HashMap::new();
+    let mut needs_window_adjustment: HashSet<LocalChannelId> = HashSet::new();
     let (internal_msg_tx, mut internal_msg_rx) = mpsc::unbounded_channel::<InternalMessage>();
 
     // Safety net against poor AsyncRead trait implementations.
     const MAX_CONSECUTIVE_PIPE_FAILURES: u8 = 5;
     let mut nb_consecutive_pipe_failures = 0;
-
-    let mut needs_window_adjustment = false;
 
     loop {
         // NOTE: Current task is the "jmux scheduler" or "jmux orchestrator".
@@ -368,7 +357,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         if let Some(leftover) = leftover {
                             if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)) {
                                 error!(%error, "Couldn't send leftover bytes");
-                            }                               ;
+                            }
                         }
 
                         let (reader, writer) = stream.into_split();
@@ -646,7 +635,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         let _ = data_tx.send(msg.transfer_data);
 
-                        needs_window_adjustment = true;
+                        needs_window_adjustment.insert(id);
                     }
                     Message::Eof(msg) => {
                         // Per the spec:
@@ -722,15 +711,15 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 }
             }
-            _ = core::future::ready(()), if needs_window_adjustment => {
-                for channel in jmux_ctx.channels.values_mut() {
+            _ = core::future::ready(()), if !needs_window_adjustment.is_empty() => {
+                for channel_id in needs_window_adjustment.drain() {
+                    let Some(channel) = jmux_ctx.get_channel_mut(channel_id) else {
+                        continue;
+                    };
+
                     let window_adjustment = channel.initial_window_size - channel.remote_window_size;
 
                     if window_adjustment > WINDOW_ADJUSTMENT_THRESHOLD {
-                        channel.span.in_scope(|| {
-                            trace!(%channel.distant_id, "Send WindowAdjust message");
-                        });
-
                         msg_to_send_tx
                             .send(Message::window_adjust(channel.distant_id, window_adjustment))
                             .context("couldn’t send WINDOW ADJUST message")?;
@@ -738,8 +727,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         channel.remote_window_size = channel.initial_window_size;
                     }
                 }
-
-                needs_window_adjustment = false;
             }
         }
     }
@@ -820,7 +807,7 @@ impl DataReaderTask {
                         trace!(
                             window_size_now,
                             chunk_length = chunk.len(),
-                            "Window size insufficient to send full chunk. Truncate and wait."
+                            "Window size insufficient to send full chunk; truncate and wait"
                         );
 
                         if window_size_now > 0 {
