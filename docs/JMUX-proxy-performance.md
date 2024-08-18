@@ -112,6 +112,12 @@ In other words, the maximum overall throughput we can hope to achieve using the 
 
 ### Old unoptimized JMUX proxy up to 2024.3.1
 
+This time, `iperf` client is run against the JMUX proxy and redirected to the server.
+
+```shell
+./run_iperf.sh 5000
+```
+
 #### With 50ms delay on loopback
 
 1 connection:
@@ -180,6 +186,12 @@ This shows that our control flow algorithm is not efficient.
 ```
 
 ### New optimized JMUX proxy starting 2024.3.2
+
+Again, `iperf` client is run against the JMUX proxy and redirected to the server.
+
+```shell
+./run_iperf.sh 5000
+```
 
 #### With 50ms delay on loopback
 
