@@ -70,6 +70,11 @@ iperf -c "$ADDR" -p $PORT -P 10 -t 600
 
 Let’s assume the script is in a file named `run_iperf.sh`.
 
+Running `iperf` for long enough is important to ensure that the buffering happening at the socket level is not influencing the numbers too much.
+When running less a minute, we end up measuring the rate at which `iperf` enqueue bytes into the socket’s buffer.
+Filling the buffer can be done very quickly and can have a significant impact on the measured average speed.
+10 minutes is long enough to obtain convergent results.
+
 ## Applied optimizations
 
 - <https://github.com/Devolutions/devolutions-gateway/pull/973>
@@ -225,8 +230,8 @@ Again, `iperf` client is run against the JMUX proxy and redirected to the server
 [SUM] 0.0000-626.3986 sec  16.9 GBytes   232 Mbits/sec
 ```
 
-We are able to reach same throughput as our "direct" baseline.
-This shows that the flow control algorithm is not getting in the way.
+We are able to reach the same throughput as our "direct" baseline.
+This shows that the flow control algorithm is not getting in the way anymore.
 
 #### Without delay
 
