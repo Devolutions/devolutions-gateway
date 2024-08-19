@@ -20,17 +20,14 @@ ctrlc = "3.4"
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
-# TODO(@pacmancoder): This should point to IronRDP repo after `now-proto-pdu` code is merged to `IronRDP` codebase
-# now-proto-pdu = { path = "../crates/now-proto-pdu" }
 futures = "0.3"
 parking_lot = "0.12"
 rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
-rustls = "0.23"
 rustls-pemfile = "2.1" # FIXME(@CBenoit): maybe we don’t need this crate
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tap = "1.0"
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"
 
 [dependencies.ironrdp]
@@ -38,7 +35,7 @@ git = "https://github.com/Devolutions/IronRDP"
 rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861"
 default-features = false
 features = [
-    "server",
+    "server", # FIXME(@CBenoit): this is enabling AWS LC unconditionnally.
     "acceptor",
 ]
 

@@ -294,7 +294,7 @@ pub async fn handle(
         .peer_certificates()
         .context("no peer certificate found in TLS transport")?
         .iter()
-        .map(|cert| cert.0.clone());
+        .map(|cert| cert.to_vec());
 
     trace!("Sending RDCleanPath response");
 
@@ -352,7 +352,7 @@ fn io_to_rdcleanpath_err(err: &io::Error) -> RDCleanPathPdu {
         .get_ref()
         .and_then(|e| e.downcast_ref::<tokio_rustls::rustls::Error>())
     {
-        RDCleanPathPdu::new_tls_error(tls_alert.get_u8())
+        RDCleanPathPdu::new_tls_error(u8::from(*tls_alert))
     } else {
         RDCleanPathPdu::new_wsa_error(WsaError::from(err).as_u16())
     }

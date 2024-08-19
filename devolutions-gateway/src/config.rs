@@ -14,7 +14,7 @@ use std::io::BufReader;
 use std::sync::Arc;
 use tap::prelude::*;
 use tokio::sync::Notify;
-use tokio_rustls::rustls;
+use tokio_rustls::rustls::pki_types;
 use url::Url;
 use uuid::Uuid;
 
@@ -569,7 +569,10 @@ fn default_hostname() -> Option<String> {
 fn read_pfx_file(
     path: &Utf8Path,
     password: Option<&dto::Password>,
-) -> anyhow::Result<(Vec<rustls::Certificate>, rustls::PrivateKey)> {
+) -> anyhow::Result<(
+    Vec<pki_types::CertificateDer<'static>>,
+    pki_types::PrivateKeyDer<'static>,
+)> {
     use picky::pkcs12::{
         Pfx, Pkcs12AttributeKind, Pkcs12CryptoContext, Pkcs12ParsingParams, SafeBagKind, SafeContentsKind,
     };
@@ -665,19 +668,19 @@ fn read_pfx_file(
     let private_key = private_key.context("leaf private key not found")?.clone();
     let private_key = private_key
         .to_pkcs8()
-        .map(rustls::PrivateKey)
+        .map(|der| pki_types::PrivateKeyDer::Pkcs8(der.into()))
         .context("invalid private key")?;
 
     let certificates = certificates
         .into_iter()
-        .map(|(cert, _)| cert.to_der().map(rustls::Certificate))
+        .map(|(cert, _)| cert.to_der().map(pki_types::CertificateDer::from))
         .collect::<Result<_, _>>()
         .context("invalid certificate")?;
 
     Ok((certificates, private_key))
 }
 
-fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<rustls::Certificate>> {
+fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<pki_types::CertificateDer<'static>>> {
     read_rustls_certificate(Some(path), None)
         .transpose()
         .expect("a path is provided, so it’s never None")
@@ -686,7 +689,7 @@ fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<rustls::C
 fn read_rustls_certificate(
     path: Option<&Utf8Path>,
     data: Option<&dto::ConfData<dto::CertFormat>>,
-) -> anyhow::Result<Option<Vec<rustls::Certificate>>> {
+) -> anyhow::Result<Option<Vec<pki_types::CertificateDer<'static>>>> {
     use picky::pem::{read_pem, PemError};
 
     match (path, data) {
@@ -709,7 +712,7 @@ fn read_rustls_certificate(
                             );
                         }
 
-                        x509_chain.push(rustls::Certificate(pem.into_data().into_owned()));
+                        x509_chain.push(pki_types::CertificateDer::from(pem.into_data().into_owned()));
                     }
                     Err(e @ PemError::HeaderNotFound) => {
                         if x509_chain.is_empty() {
@@ -734,7 +737,7 @@ fn read_rustls_certificate(
             let value = data.decode_value()?;
 
             match data.format {
-                dto::CertFormat::X509 => Ok(Some(vec![rustls::Certificate(value)])),
+                dto::CertFormat::X509 => Ok(Some(vec![pki_types::CertificateDer::from(value)])),
             }
         }
         (None, None) => Ok(None),
@@ -771,7 +774,7 @@ fn read_pub_key(
     }
 }
 
-fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<rustls::PrivateKey> {
+fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<pki_types::PrivateKeyDer<'static>> {
     read_rustls_priv_key(Some(path), None)
         .transpose()
         .expect("path is provided, so it’s never None")
@@ -780,8 +783,8 @@ fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<rustls::PrivateK
 fn read_rustls_priv_key(
     path: Option<&Utf8Path>,
     data: Option<&dto::ConfData<dto::PrivKeyFormat>>,
-) -> anyhow::Result<Option<rustls::PrivateKey>> {
-    let data = match (path, data) {
+) -> anyhow::Result<Option<pki_types::PrivateKeyDer<'static>>> {
+    let private_key = match (path, data) {
         (Some(path), _) => {
             let pem: Pem<'_> = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(std::fs::read_to_string)
@@ -789,20 +792,31 @@ fn read_rustls_priv_key(
                 .pipe_deref(str::parse)
                 .context("couldn't parse pem document")?;
 
-            if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
-                anyhow::bail!(
-                    "bad pem label (got {}, expected one of {PRIVATE_KEY_LABELS:?})",
-                    pem.label(),
-                );
+            match pem.label() {
+                "PRIVATE KEY" => pki_types::PrivateKeyDer::Pkcs8(pem.into_data().into_owned().into()),
+                "RSA PRIVATE KEY" => pki_types::PrivateKeyDer::Pkcs1(pem.into_data().into_owned().into()),
+                "EC PRIVATE KEY" => pki_types::PrivateKeyDer::Sec1(pem.into_data().into_owned().into()),
+                _ => {
+                    anyhow::bail!(
+                        "bad pem label (got {}, expected one of {PRIVATE_KEY_LABELS:?})",
+                        pem.label(),
+                    );
+                }
             }
-
-            pem.into_data().into_owned()
         }
-        (None, Some(data)) => data.decode_value()?,
+        (None, Some(data)) => {
+            let value = data.decode_value()?;
+
+            match data.format {
+                dto::PrivKeyFormat::Pkcs8 => pki_types::PrivateKeyDer::Pkcs8(value.into()),
+                dto::PrivKeyFormat::Pkcs1 => pki_types::PrivateKeyDer::Pkcs1(value.into()),
+                dto::PrivKeyFormat::Ec => pki_types::PrivateKeyDer::Sec1(value.into()),
+            }
+        }
         (None, None) => return Ok(None),
     };
 
-    Ok(Some(rustls::PrivateKey(data)))
+    Ok(Some(private_key))
 }
 
 fn read_priv_key(
