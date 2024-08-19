@@ -66,6 +66,21 @@ impl GatewayService {
             );
         }
 
+        if let Some((cert_subject_name, hostname)) = conf_file
+            .tls_certificate_subject_name
+            .as_deref()
+            .zip(conf_file.hostname.as_deref())
+        {
+            if !devolutions_gateway::utils::wildcard_host_match(cert_subject_name, hostname) {
+                warn!(
+                    %hostname,
+                    %cert_subject_name,
+                    "Hostname doesn’t match the TLS certificate subject name configured; \
+                    not necessarily a problem if it is instead matched by an alternative subject name"
+                )
+            }
+        }
+
         if let Err(error) = devolutions_gateway::tls::sanity::check_default_configuration() {
             warn!(
                 error = format!("{error:#}"),
