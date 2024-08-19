@@ -36,7 +36,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _jetsocat,dgw_: major throughput improvement for JMUX proxy (Devolutions Gateway Tunnel) ([#973](https://github.com/Devolutions/devolutions-gateway/issues/973)) ([32de1d50de](https://github.com/Devolutions/devolutions-gateway/commit/32de1d50de509559e2b8f2d6c7e1259c0db85cb1)) ([#975](https://github.com/Devolutions/devolutions-gateway/issues/975)) ([8ebfd2316d](https://github.com/Devolutions/devolutions-gateway/commit/8ebfd2316d2bcc1355e9dadd3d379b635c74bb23)) ([#976](https://github.com/Devolutions/devolutions-gateway/issues/976)) ([11efaa5cfe](https://github.com/Devolutions/devolutions-gateway/commit/11efaa5cfe1a87d3880c82a27e37a4da9d38ed4e)) ([#977](https://github.com/Devolutions/devolutions-gateway/issues/977)) ([6b77a993ab](https://github.com/Devolutions/devolutions-gateway/commit/6b77a993abdfb9022babf35194b66c135c06fa53)) ([DGW-202](https://devolutions.atlassian.net/browse/DGW-202)) ([#980](https://github.com/Devolutions/devolutions-gateway/issues/980)) ([53af6fa7c7](https://github.com/Devolutions/devolutions-gateway/commit/53af6fa7c7bab58498b8b0e82d5f7998efe0c368))
 
-  See [JMUX-proxy-performance.md](../docs/JMUX-proxy-performance.md).
+  See [JMUX-proxy-performance.md](./docs/JMUX-proxy-performance.md).
 
 ### Build
 
