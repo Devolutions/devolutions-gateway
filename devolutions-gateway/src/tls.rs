@@ -58,6 +58,8 @@ pub enum CertificateSource {
         private_key: pki_types::PrivateKeyDer<'static>,
     },
     SystemStore {
+        /// This field is only used to diagnostic potential configuration problems.
+        machine_hostname: String,
         cert_subject_name: String,
         store_location: crate::config::dto::CertStoreLocation,
         store_name: String,
@@ -77,12 +79,14 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
 
         #[cfg(windows)]
         CertificateSource::SystemStore {
+            machine_hostname,
             cert_subject_name,
             store_location,
             store_name,
         } => {
-            let resolver = windows::ServerCertResolver::new(cert_subject_name, store_location, &store_name)
-                .context("create ServerCertResolver")?;
+            let resolver =
+                windows::ServerCertResolver::new(machine_hostname, cert_subject_name, store_location, &store_name)
+                    .context("create ServerCertResolver")?;
             Ok(builder.with_cert_resolver(Arc::new(resolver)))
         }
         #[cfg(not(windows))]
@@ -114,12 +118,14 @@ pub mod windows {
 
     #[derive(Debug)]
     pub struct ServerCertResolver {
+        machine_hostname: String,
         subject_name: String,
         store: CertStore,
     }
 
     impl ServerCertResolver {
         pub fn new(
+            machine_hostname: String,
             cert_subject_name: String,
             store_type: dto::CertStoreLocation,
             store_name: &str,
@@ -133,6 +139,7 @@ pub mod windows {
             let store = CertStore::open(store_type, store_name).context("open Windows certificate store")?;
 
             Ok(Self {
+                machine_hostname,
                 subject_name: cert_subject_name,
                 store,
             })
@@ -145,11 +152,21 @@ pub mod windows {
                 .server_name()
                 .context("server name missing from ClientHello")?;
 
-            if !crate::utils::wildcard_host_match(&self.subject_name, request_server_name) {
+            // Sanity check.
+            if !request_server_name.eq_ignore_ascii_case(&self.machine_hostname) {
                 warn!(
                     request_server_name,
+                    machine_hostname = self.machine_hostname,
+                    "Requested server name does not match the hostname"
+                );
+            }
+
+            // Sanity check.
+            if !crate::utils::wildcard_host_match(&self.subject_name, request_server_name) {
+                debug!(
+                    request_server_name,
                     expected_server_name = self.subject_name,
-                    "Subject name mismatch"
+                    "Subject name mismatch; not necessarily a problem if it is instead matched by an alternative subject name"
                 )
             }
 

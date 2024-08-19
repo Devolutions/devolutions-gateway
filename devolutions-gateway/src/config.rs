@@ -190,11 +190,6 @@ impl Conf {
                     .clone()
                     .context("TLS usage implied, but TLS certificate subject name is missing")?;
 
-                anyhow::ensure!(
-                    crate::utils::wildcard_host_match(&cert_subject_name, &hostname),
-                    "hostname doesn’t match the TLS certificate subject name configured",
-                );
-
                 let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
 
                 let store_name = conf_file
@@ -203,6 +198,7 @@ impl Conf {
                     .unwrap_or_else(|| String::from("My"));
 
                 let cert_source = crate::tls::CertificateSource::SystemStore {
+                    machine_hostname: hostname.clone(),
                     cert_subject_name,
                     store_location,
                     store_name,
