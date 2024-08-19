@@ -23,7 +23,7 @@ camino = "1.1"
 
 # Async
 async-trait = "0.1"
-tokio = { version = "1.38", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+tokio = { version = "1.39", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 
 # Logging
 tracing = "0.1"
