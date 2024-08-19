@@ -2,6 +2,8 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-gateway library.
+#[cfg(windows)]
+use rustls_cng as _;
 #[cfg(feature = "openapi")]
 use utoipa as _;
 use {

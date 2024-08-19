@@ -73,13 +73,16 @@ impl GatewayService {
             );
         }
 
+        devolutions_gateway::tls::install_default_crypto_provider();
+
         if let Some(path) = conf.get_lib_xmf_path() {
             // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
             let result = unsafe { cadeau::xmf::init(path.as_str()) };
 
             match result {
-                Ok(_) => info!("XMF native library loaded and installed"),
+                Ok(_) => info!(%path, "XMF native library loaded and installed"),
                 Err(error) => warn!(
+                    %path,
                     %error,
                     "Failed to load XMF native library, video processing features are disabled"
                 ),

@@ -4,8 +4,8 @@
 // Used by devolutions-agent library.
 use {
     anyhow as _, async_trait as _, camino as _, devolutions_agent_shared as _, devolutions_gateway_task as _,
-    devolutions_log as _, futures as _, ironrdp as _, parking_lot as _, rand as _, rustls as _, rustls_pemfile as _,
-    serde as _, serde_json as _, tap as _, tokio as _, tokio_rustls as _,
+    devolutions_log as _, futures as _, ironrdp as _, parking_lot as _, rand as _, rustls_pemfile as _, serde as _,
+    serde_json as _, tap as _, tokio as _, tokio_rustls as _,
 };
 
 #[macro_use]
