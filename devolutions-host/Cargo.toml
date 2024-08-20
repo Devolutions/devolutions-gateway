@@ -1,0 +1,38 @@
+[package]
+name = "devolutions-host"
+version = "2024.3.1"
+edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Per-session host application for Devolutions Agent"
+build = "build.rs"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+camino = { version = "1.1", features = ["serde1"] }
+cfg-if = "1"
+ctrlc = "3.4"
+devolutions-log = { path = "../crates/devolutions-log" }
+parking_lot = "0.12"
+serde = "1"
+serde_json = "1"
+tap = "1.0"
+tracing = "0.1"
+
+[lints]
+workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "2.4"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+    "Win32_Security",
+]

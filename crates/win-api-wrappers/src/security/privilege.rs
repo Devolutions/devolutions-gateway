@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 
 use crate::process::Process;
-use crate::token::Token;
+use crate::token::{Token, TokenPrivilegesAdjustment};
 use crate::utils::{slice_from_ptr, Snapshot, WideString};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::LUID;
@@ -102,6 +102,67 @@ pub fn find_token_with_privilege(privilege: LUID) -> Result<Option<Token>> {
             None
         }
     }))
+}
+
+/// ScopedPrivilege enables a Windows privilege for the lifetime of the object and
+/// disables it when going out of scope.
+///
+/// Token is borrowed to ensure that the token is alive throughout the lifetime of the scope.
+pub struct ScopedPrivileges<'a> {
+    token: &'a mut Token,
+    token_privileges: Vec<LUID>,
+    description: String,
+}
+
+impl<'a> ScopedPrivileges<'a> {
+    pub fn enter(token: &'a mut Token, privileges: &[PCWSTR]) -> Result<ScopedPrivileges<'a>> {
+        let mut token_privileges = Vec::with_capacity(privileges.len());
+
+        for privilege in privileges.iter().copied() {
+            let luid = lookup_privilege_value(None, privilege)?;
+            token_privileges.push(luid);
+        }
+
+        let description = privileges
+            .iter()
+            .map(|p| {
+                // SAFETY: `p` is a valid pointer to a NUL-terminated string.
+                String::from_utf16_lossy(unsafe { p.as_wide() })
+            })
+            .reduce(|mut acc, value| {
+                acc.push_str(", ");
+                acc.push_str(&value);
+                acc
+            })
+            .unwrap_or_default();
+
+        token.adjust_privileges(&TokenPrivilegesAdjustment::Enable(token_privileges.clone()))?;
+
+        Ok(ScopedPrivileges {
+            token,
+            token_privileges,
+            description,
+        })
+    }
+
+    pub fn token(&self) -> &Token {
+        &self.token
+    }
+
+    pub fn token_mut(&mut self) -> &mut Token {
+        &mut self.token
+    }
+}
+
+impl Drop for ScopedPrivileges<'_> {
+    fn drop(&mut self) {
+        if let Err(err) = self
+            .token
+            .adjust_privileges(&TokenPrivilegesAdjustment::Disable(self.token_privileges.clone()))
+        {
+            error!(%err, "Failed to disable ScopedPrivileges({})", self.description);
+        }
+    }
 }
 
 #[rustfmt::skip]

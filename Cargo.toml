@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/*",
     "devolutions-agent",
-    "devolutions-gateway",
+    "devolutions-gateway", "devolutions-host",
     "jetsocat",
     "tools/generate-openapi",
 ]

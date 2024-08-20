@@ -15,19 +15,18 @@ use std::env;
 use std::sync::mpsc;
 
 use ceviche::controller::*;
-use ceviche::{Service, ServiceEvent};
+use ceviche::Service;
 
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
+use devolutions_agent::AgentServiceEvent;
 
 const BAD_CONFIG_ERR_CODE: u32 = 1;
 const START_FAILED_ERR_CODE: u32 = 2;
 
-enum AgentServiceEvent {}
-
 fn agent_service_main(
-    rx: mpsc::Receiver<ServiceEvent<AgentServiceEvent>>,
-    _tx: mpsc::Sender<ServiceEvent<AgentServiceEvent>>,
+    rx: mpsc::Receiver<AgentServiceEvent>,
+    _tx: mpsc::Sender<AgentServiceEvent>,
     _args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
@@ -53,13 +52,34 @@ fn agent_service_main(
         }
     }
 
+    let mut service_event_tx = service.service_event_tx();
+
     loop {
         if let Ok(control_code) = rx.recv() {
             info!(%control_code, "Received control code");
 
-            if let ServiceEvent::Stop = control_code {
-                service.stop();
-                break;
+            match control_code {
+                AgentServiceEvent::Stop => {
+                    break;
+                }
+                AgentServiceEvent::SessionConnect(_)
+                | AgentServiceEvent::SessionDisconnect(_)
+                | AgentServiceEvent::SessionRemoteConnect(_)
+                | AgentServiceEvent::SessionRemoteDisconnect(_)
+                | AgentServiceEvent::SessionLogon(_)
+                | AgentServiceEvent::SessionLogoff(_) => {
+                    if let Some(tx) = service_event_tx.as_mut() {
+                        match tx.send(control_code) {
+                            Ok(()) => {}
+                            Err(err) => {
+                                error!(%err, "Failed to send event to session manager");
+                                service_event_tx = None;
+                            }
+                        }
+                    }
+                }
+
+                _ => {}
             }
         }
     }
@@ -101,7 +121,7 @@ fn main() {
                 let _tx = tx.clone();
 
                 ctrlc::set_handler(move || {
-                    let _ = tx.send(ServiceEvent::Stop);
+                    let _ = tx.send(AgentServiceEvent::Stop);
                 })
                 .expect("failed to register Ctrl-C handler");
 

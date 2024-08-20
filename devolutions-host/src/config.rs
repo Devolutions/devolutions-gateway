@@ -1,24 +1,33 @@
-use std::fs::File;
-use std::io::BufReader;
-use std::net::SocketAddr;
-use std::sync::Arc;
-
-use anyhow::{bail, Context};
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_agent_shared::get_data_dir;
+use cfg_if::cfg_if;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
 
-const DEFAULT_RDP_PORT: u16 = 3389;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+
+cfg_if! {
+    if #[cfg(target_os = "windows")] {
+        const COMPANY_DIR: &str = "Devolutions";
+        const PROGRAM_DIR: &str = "Host";
+        const APPLICATION_DIR: &str = "Devolutions\\Host";
+    } else if #[cfg(target_os = "macos")] {
+        const COMPANY_DIR: &str = "Devolutions";
+        const PROGRAM_DIR: &str = "Host";
+        const APPLICATION_DIR: &str = "Devolutions Host";
+    } else {
+        const COMPANY_DIR: &str = "devolutions";
+        const PROGRAM_DIR: &str = "Host";
+        const APPLICATION_DIR: &str = "devolutions-host";
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub verbosity_profile: dto::VerbosityProfile,
-    pub updater: dto::UpdaterConf,
-    pub remote_desktop: RemoteDesktopConf,
-    pub pedm: dto::PedmConf,
-    pub session_host: dto::SessionHostConf,
     pub debug: dto::DebugConf,
 }
 
@@ -29,75 +38,13 @@ impl Conf {
         let log_file = conf_file
             .log_file
             .clone()
-            .unwrap_or_else(|| Utf8PathBuf::from("agent"))
+            .unwrap_or_else(|| Utf8PathBuf::from("host"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
-
-        let remote_desktop = conf_file
-            .remote_desktop
-            .clone()
-            .unwrap_or_default()
-            .pipe(RemoteDesktopConf::try_from)
-            .context("invalid remote desktop config")?;
 
         Ok(Conf {
             log_file,
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
-            updater: conf_file.updater.clone().unwrap_or_default(),
-            remote_desktop,
-            pedm: conf_file.pedm.clone().unwrap_or_default(),
-            session_host: conf_file.session_host.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
-        })
-    }
-}
-
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub struct RemoteDesktopConf {
-    pub enabled: bool,
-    pub bind_addresses: Vec<SocketAddr>,
-    pub certificate: Option<Utf8PathBuf>,
-    pub private_key: Option<Utf8PathBuf>,
-}
-
-impl TryFrom<dto::RemoteDesktopConf> for RemoteDesktopConf {
-    type Error = anyhow::Error;
-
-    fn try_from(conf: dto::RemoteDesktopConf) -> anyhow::Result<Self> {
-        use std::net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr};
-        use std::str::FromStr as _;
-
-        let data_dir = get_data_dir();
-
-        let enabled = conf.enabled;
-
-        let default_port = conf.port.unwrap_or(DEFAULT_RDP_PORT);
-
-        let bind_addresses = if conf.listeners.is_empty() {
-            vec![
-                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), default_port),
-                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), default_port),
-            ]
-        } else {
-            let addresses: Result<Vec<SocketAddr>, AddrParseError> = conf
-                .listeners
-                .iter()
-                .map(|address| {
-                    SocketAddr::from_str(address)
-                        .or_else(|_| IpAddr::from_str(address).map(|ip| SocketAddr::new(ip, default_port)))
-                })
-                .collect();
-            addresses.context("failed to parse listener address")?
-        };
-
-        let certificate = conf.certificate.map(|path| normalize_data_path(&path, &data_dir));
-
-        let private_key = conf.private_key.map(|path| normalize_data_path(&path, &data_dir));
-
-        Ok(Self {
-            enabled,
-            bind_addresses,
-            certificate,
-            private_key,
         })
     }
 }
@@ -171,7 +118,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
 }
 
 #[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it’s fine to write to stdout.
-pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
+pub(crate) fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
     let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
@@ -187,86 +134,8 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     Ok(conf_file)
 }
 
-pub mod dto {
+pub(crate) mod dto {
     use super::*;
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct UpdaterConf {
-        /// Enable updater module
-        pub enabled: bool,
-    }
-
-    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
-    impl Default for UpdaterConf {
-        fn default() -> Self {
-            Self { enabled: false }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct RemoteDesktopConf {
-        /// Enable remote desktop module
-        pub enabled: bool,
-        /// Port number that the service listens on
-        ///
-        /// Specifies the port number that the RDP service listens on.
-        /// The default is 3389.
-        pub port: Option<u16>,
-        /// Binding addresses for the listeners
-        ///
-        /// Specifies the local addresses the RDP service should listen on.
-        /// The format of a binding address is `<IPv4_addr|IPv6_addr>[:<port>]`.
-        /// If `<port>` is not specified, the service will listen on the address and the port specified by the `Port` option.
-        /// The default is to listen on all local addresses (the wildcard bind IPv4 address `0.0.0.0` and the wildcard bind IPv6 address `[::]`).
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub listeners: Vec<String>,
-        /// Certificate to use for TLS
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub certificate: Option<Utf8PathBuf>,
-        /// Private key to use for TLS
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub private_key: Option<Utf8PathBuf>,
-    }
-
-    impl Default for RemoteDesktopConf {
-        fn default() -> Self {
-            Self {
-                enabled: false,
-                port: Some(DEFAULT_RDP_PORT),
-                listeners: Vec::new(),
-                certificate: None,
-                private_key: None,
-            }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct PedmConf {
-        /// Enable PEDM module (disabled by default)
-        pub enabled: bool,
-    }
-
-    impl Default for PedmConf {
-        fn default() -> Self {
-            Self { enabled: false }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct SessionHostConf {
-        /// Enable Session host module (disabled by default)
-        pub enabled: bool,
-    }
-
-    impl Default for SessionHostConf {
-        fn default() -> Self {
-            Self { enabled: false }
-        }
-    }
 
     /// Source of truth for Agent configuration
     ///
@@ -285,20 +154,6 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
 
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub updater: Option<UpdaterConf>,
-
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub remote_desktop: Option<RemoteDesktopConf>,
-
-        /// Devolutions PEDM configuration
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub pedm: Option<PedmConf>,
-
-        /// Devolutions Session Host configuration
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub session_host: Option<SessionHostConf>,
-
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -315,11 +170,7 @@ pub mod dto {
             Self {
                 verbosity_profile: None,
                 log_file: None,
-                updater: Some(UpdaterConf { enabled: true }),
-                remote_desktop: None,
-                pedm: None,
                 debug: None,
-                session_host: Some(SessionHostConf { enabled: true }),
                 rest: serde_json::Map::new(),
             }
         }
@@ -362,12 +213,6 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
 
-        /// Skip MSI installation in updater module
-        ///
-        /// Useful for debugging updater logic without actually changing the system.
-        #[serde(default)]
-        pub skip_msi_install: bool,
-
         /// Enable unstable features which may break at any point
         #[serde(default)]
         pub enable_unstable: bool,
@@ -379,7 +224,6 @@ pub mod dto {
         fn default() -> Self {
             Self {
                 log_directives: None,
-                skip_msi_install: false,
                 enable_unstable: false,
             }
         }
@@ -392,15 +236,25 @@ pub mod dto {
     }
 }
 
-pub fn handle_cli(command: &str) -> Result<(), anyhow::Error> {
-    match command {
-        "init" => {
-            let _config = load_conf_file_or_generate_new()?;
-        }
-        _ => {
-            bail!("unknown config command: {}", command);
-        }
-    }
+pub fn get_data_dir() -> Utf8PathBuf {
+    if let Ok(config_path_env) = std::env::var("DHOST_DATA_PATH") {
+        Utf8PathBuf::from(config_path_env)
+    } else {
+        let mut config_path = Utf8PathBuf::new();
 
-    Ok(())
+        if cfg!(target_os = "windows") {
+            let program_data_env = std::env::var("APPDATA").expect("APPDATA env variable should be set on Windows");
+            config_path.push(program_data_env);
+            config_path.push(COMPANY_DIR);
+            config_path.push(PROGRAM_DIR);
+        } else if cfg!(target_os = "macos") {
+            config_path.push("/Library/Application Support");
+            config_path.push(APPLICATION_DIR);
+        } else {
+            config_path.push("/etc");
+            config_path.push(APPLICATION_DIR);
+        }
+
+        config_path
+    }
 }

@@ -155,8 +155,7 @@ where
         + Send
         + 'static,
 {
-    use futures_util::SinkExt as _;
-    use futures_util::StreamExt as _;
+    use futures_util::{SinkExt as _, StreamExt as _};
 
     let compat = stream
         .map(|item| {

@@ -45,6 +45,7 @@ use windows::Win32::Security::{
 use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
 
 use super::utils::size_of_u32;
+use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
 
 #[derive(Debug)]
 pub struct Token {
@@ -62,6 +63,17 @@ impl Token {
         Self {
             handle: Handle::new_borrowed(HANDLE(-4isize as *mut c_void)).expect("always valid"),
         }
+    }
+
+    pub fn for_session(session_id: u32) -> Result<Self> {
+        let mut user_token = HANDLE::default();
+
+        // SAFETY: query user token is always safe if dst pointer is valid.
+        unsafe { WTSQueryUserToken(session_id, &mut user_token as *mut _)? };
+
+        Ok(Self {
+            handle: user_token.into(),
+        })
     }
 
     // Wrapper around `NtCreateToken`, which has a lot of arguments.
@@ -337,6 +349,14 @@ impl Token {
 
     pub fn set_session_id(&mut self, session_id: u32) -> Result<()> {
         self.set_information_raw(windows::Win32::Security::TokenSessionId, &session_id)
+    }
+
+    pub fn ui_access(&self) -> Result<u32> {
+        self.information_raw::<u32>(windows::Win32::Security::TokenUIAccess)
+    }
+
+    pub fn set_ui_access(&mut self, ui_access: u32) -> Result<()> {
+        self.set_information_raw(windows::Win32::Security::TokenUIAccess, &ui_access)
     }
 
     pub fn mandatory_policy(&self) -> Result<TOKEN_MANDATORY_POLICY_ID> {
