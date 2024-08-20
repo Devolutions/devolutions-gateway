@@ -10,7 +10,7 @@ use devolutions_pedm_shared::client::{self};
 use devolutions_pedm_shared::desktop;
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use win_api_wrappers::process::Process;
+use win_api_wrappers::process::{Module, Process};
 use win_api_wrappers::raw::core::{
     implement, interface, w, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
 };
@@ -29,7 +29,9 @@ use win_api_wrappers::raw::Win32::UI::Shell::{
     ECS_ENABLED, SIGDN_FILESYSPATH,
 };
 use win_api_wrappers::token::Token;
-use win_api_wrappers::utils::{environment_block, expand_environment, expand_environment_path, Link, Snapshot};
+use win_api_wrappers::utils::{
+    environment_block, expand_environment, expand_environment_path, Link, Snapshot, WideString,
+};
 
 struct Channels {
     pub tx: Sender<ChannelCommand>,
@@ -68,11 +70,24 @@ impl IElevationContextMenuCommand_Impl for ElevationContextMenuCommand_Impl {}
 impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
     fn GetTitle(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
         // SAFETY: The `w` macro creates a constant, so the argument is valid.
-        unsafe { SHStrDupW(w!("Run as administrator with Devolutions PEDM")) }
+        unsafe { SHStrDupW(w!("Run elevated")) }
     }
 
     fn GetIcon(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
-        Err(E_NOTIMPL.into())
+        let module = match Module::current() {
+            Ok(mod_) => mod_,
+            Err(_) => return Err(E_NOTIMPL.into()),
+        };
+
+        let module_path = match module.file_name() {
+            Ok(path) => path,
+            Err(_) => return Err(E_NOTIMPL.into()),
+        };
+
+        let module_path_str = module_path.to_string_lossy();
+        let icon_path = format!("{},-101", module_path_str); // current dll path + ",-101" (icon resource id)
+        let mut icon_path = WideString::from(icon_path.as_str());
+        unsafe { SHStrDupW(icon_path.as_pwstr()) }
     }
 
     fn GetToolTip(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
