@@ -2,7 +2,47 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
-## [Unreleased]
+## 2024.3.2 (2024-08-20)
+
+### Features
+
+- _agent_: initial PEDM implementation ([1ed573ae54](https://github.com/Devolutions/devolutions-gateway/commit/1ed573ae546d17582e6cb1209d588d21e8b47236)) 
+
+### Improvements
+
+- _dgw_: log KDC domain when throwing the error ([#963](https://github.com/Devolutions/devolutions-gateway/issues/963)) ([873217c804](https://github.com/Devolutions/devolutions-gateway/commit/873217c8042167bf378613f812b3db2a399d256a)) 
+
+  We now print the name of the requested domain when the requested
+  domain didn't match the authorized (expected) domain.
+
+- _dgw_: accept subject name even if it does not match the hostname ([1f40b45bae](https://github.com/Devolutions/devolutions-gateway/commit/1f40b45baed4c4aca71344de30d826b354029086)) 
+
+  Configurations where the certificate subject name does not match the
+  hostname are now accepted.
+  Instead, a few warning and debug log records are added to help
+  discover configuration issues in case of problem.
+  The problem with the strict approach we had previously is that we
+  may reject valid configurations where the hostname was actually
+  matched by one of the subject alternative names in the certificate.
+
+### Performance
+
+- _jetsocat_: use a larger buffer for plain forwarding ([#968](https://github.com/Devolutions/devolutions-gateway/issues/968)) ([6c18ff1fc1](https://github.com/Devolutions/devolutions-gateway/commit/6c18ff1fc133ecf7bb00ff0a235494988f479e19)) 
+
+  By increasing the size of the intermediate buffer from 8k to 16k,
+  performance of raw TCP forwarding is increased by ~19.4%.
+  
+  Performance was measured using `iperf` on local network.
+
+- _jetsocat,dgw_: major throughput improvement for JMUX proxy (Devolutions Gateway Tunnel) ([#973](https://github.com/Devolutions/devolutions-gateway/issues/973)) ([32de1d50de](https://github.com/Devolutions/devolutions-gateway/commit/32de1d50de509559e2b8f2d6c7e1259c0db85cb1)) ([#975](https://github.com/Devolutions/devolutions-gateway/issues/975)) ([8ebfd2316d](https://github.com/Devolutions/devolutions-gateway/commit/8ebfd2316d2bcc1355e9dadd3d379b635c74bb23)) ([#976](https://github.com/Devolutions/devolutions-gateway/issues/976)) ([11efaa5cfe](https://github.com/Devolutions/devolutions-gateway/commit/11efaa5cfe1a87d3880c82a27e37a4da9d38ed4e)) ([#977](https://github.com/Devolutions/devolutions-gateway/issues/977)) ([6b77a993ab](https://github.com/Devolutions/devolutions-gateway/commit/6b77a993abdfb9022babf35194b66c135c06fa53)) ([DGW-202](https://devolutions.atlassian.net/browse/DGW-202)) ([#980](https://github.com/Devolutions/devolutions-gateway/issues/980)) ([53af6fa7c7](https://github.com/Devolutions/devolutions-gateway/commit/53af6fa7c7bab58498b8b0e82d5f7998efe0c368))
+
+  See [JMUX-proxy-performance.md](./docs/JMUX-proxy-performance.md).
+
+### Build
+
+- _dgw_: update cryptography dependencies ([787027cbf9](https://github.com/Devolutions/devolutions-gateway/commit/787027cbf96c19a440a401512f9b351b340632e6)) 
+
+  We keep using ring as our crypto provider for now.
 
 ## 2024.3.1 (2024-08-01)
 
