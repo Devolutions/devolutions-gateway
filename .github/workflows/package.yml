@@ -432,8 +432,8 @@ jobs:
         
           Get-ChildItem -Path $PackageRoot -Recurse
 
-          Compress-Archive "$PackageRoot\*.pdb" "$PackageRoot\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
-          Remove-Item "$PackageRoot\*.pdb" | Out-Null
+          Compress-Archive "$PackageRoot\windows\x86_64\*.pdb" "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
+          Remove-Item "$PackageRoot\windows\x86_64\*.pdb" | Out-Null
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
