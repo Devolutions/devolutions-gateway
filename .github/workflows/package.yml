@@ -462,27 +462,12 @@ jobs:
         with:
           pattern: devolutions-agent-*
           merge-multiple: true
-      
-      - name: Split symbols
-        shell: pwsh
-        run: |
-          $SymbolsPath = New-Item -ItemType Directory $(Join-Path "${{ runner.temp }}" 'symbols')
-          Get-ChildItem -Path "${{ github.workspace }}" -Recurse -Include '*.pdb' | % {
-            Move-Item $_ $SymbolsPath
-          }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           path: ${{ github.workspace }}/**/*
           name: devolutions-agent
-          overwrite: true
-  
-      - name: Upload Symbol Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ runner.temp }}/symbols
-          name: devolutions-agent-symbols
           overwrite: true
 
   jetsocat-merge:
