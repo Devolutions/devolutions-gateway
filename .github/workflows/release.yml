@@ -235,7 +235,7 @@ jobs:
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $HashPath = 'checksums'
-          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md','*.pdb' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
           echo "::group::checksums"
@@ -405,12 +405,7 @@ jobs:
           New-Item -Path "$destinationFolder" -ItemType "directory"
 
           Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.msi"
-
-          Move-Item -Path "./windows/x86_64/DevolutionsAgent_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.pdb"
-          Move-Item -Path "./windows/x86_64/devolutions_pedm_contextmenu_shell.pdb" -Destination "$destinationFolder/devolutions_pedm_contextmenu_shell.pdb"
-          Move-Item -Path "./windows/x86_64/devolutions_pedm_contextmenu.pdb" -Destination "$destinationFolder/devolutions_pedm_contextmenu.pdb"
-          Move-Item -Path "./windows/x86_64/devolutions_pedm_hook.pdb" -Destination "$destinationFolder/devolutions_pedm_hook.pdb"
-          Move-Item -Path "./windows/x86_64/DevolutionsPedmDesktop.pdb" -Destination "$destinationFolder/DevolutionsPedmDesktop.pdb"
+          Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.symbols.zip"
 
           # Note that at this point the deb package is already named using the ".0" suffix.
           Move-Item -Path "./linux/x86_64/devolutions-agent_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
