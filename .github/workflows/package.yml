@@ -424,6 +424,17 @@ jobs:
             }
           }
 
+      - name: Zip debug symbol files
+        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+        
+          Get-ChildItem -Path $PackageRoot -Recurse
+
+          Compress-Archive "$PackageRoot\*.pdb" "$PackageRoot\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
+          Remove-Item "$PackageRoot\*.pdb" | Out-Null
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
