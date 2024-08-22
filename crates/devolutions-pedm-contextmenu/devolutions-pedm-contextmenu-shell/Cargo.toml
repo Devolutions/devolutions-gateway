@@ -16,3 +16,6 @@ windows-core = "0.58.0" # necessary because of macro resolving `windows::core`. 
 devolutions-pedm-shared = { path = "../../devolutions-pedm-shared", features = ["pedm_client", "desktop"] }
 win-api-wrappers = { path = "../../win-api-wrappers" }
 parking_lot = "0.12.3"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "2.4"

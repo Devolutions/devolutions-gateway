@@ -1193,6 +1193,7 @@ name = "devolutions-pedm-contextmenu-shell"
 version = "0.0.0"
 dependencies = [
  "devolutions-pedm-shared",
+ "embed-resource",
  "parking_lot",
  "tokio 1.38.1",
  "win-api-wrappers",
