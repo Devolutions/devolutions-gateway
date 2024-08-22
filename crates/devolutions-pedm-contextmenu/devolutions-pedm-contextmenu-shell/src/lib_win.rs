@@ -74,19 +74,22 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
     }
 
     fn GetIcon(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
-        let module = match Module::current() {
-            Ok(mod_) => mod_,
-            Err(_) => return Err(E_NOTIMPL.into()),
+        let Ok(module) = Module::current() else {
+            return Err(E_FAIL.into());
         };
 
-        let module_path = match module.file_name() {
-            Ok(path) => path,
-            Err(_) => return Err(E_NOTIMPL.into()),
+        let Ok(module_path) = module.file_name() else {
+            return Err(E_FAIL.into());
         };
 
-        let module_path_str = module_path.to_string_lossy();
-        let icon_path = format!("{},-101", module_path_str); // current dll path + ",-101" (icon resource id)
+        let Some(module_path) = module_path.to_str() else {
+            return Err(E_FAIL.into());
+        };
+
+        let icon_path = format!("{module_path},-101"); // current dll path + ",-101" (icon resource id)
         let mut icon_path = WideString::from(icon_path.as_str());
+
+        // SAFETY: WideString holds a null-terminated UTF-16 string, and as_pwstr() returns a valid pointer to it.
         unsafe { SHStrDupW(icon_path.as_pwstr()) }
     }
 
