@@ -344,7 +344,7 @@ class TlkRecipe
 
                 if ($this.Target.IsWindows()) {
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
-                    $agentPackages += [TlkPackage]::new("devolutions-pedm-contextmenu", "crates/devolutions-pedm-contextmenu", $true)
+                    $agentPackages += [TlkPackage]::new("devolutions-pedm-shell-ext", "crates/devolutions-pedm-shell-ext", $true)
                 }
 
                 $agentPackages
@@ -429,6 +429,8 @@ class TlkRecipe
                         $Env:DAGENT_EXECUTABLE
                     } elseif ($CargoPackage.Name -Eq "devolutions-pedm-hook" -And (Test-Path Env:DAGENT_PEDM_HOOK)) {
                         $Env:DAGENT_PEDM_HOOK
+                    } elseif ($CargoPackage.Name -Eq "devolutions-pedm-shell-ext" -And (Test-Path Env:DAGENT_PEDM_SHELL_EXT_DLL)) {
+                        $Env:DAGENT_PEDM_SHELL_EXT_DLL
                     } else {
                         $null
                     }
@@ -461,7 +463,7 @@ class TlkRecipe
                 Copy-Item -Path $SrcBinaryPath -Destination $DestinationExecutable
             }
 
-            if ($CargoPackage.Name -Eq 'devolutions-pedm-contextmenu') {
+            if ($CargoPackage.Name -Eq 'devolutions-pedm-shell-ext') {
                 if ($Null -Eq (Get-Command "MakeAppx.exe" -ErrorAction SilentlyContinue)) {
                     throw 'MakeAppx was not found in the PATH'
                 }
@@ -471,27 +473,15 @@ class TlkRecipe
                 Push-Location
                 Set-Location $CargoOutputPath
     
-                $MakeAppxOutput = & 'MakeAppx.exe' 'pack' '/f' "${CargoPackagePath}/mapping.txt" '/p' "./devolutions-pedm-contextmenu.msix" '/nv' '/o'
+                $MakeAppxOutput = & 'MakeAppx.exe' 'pack' '/f' "${CargoPackagePath}/mapping.txt" '/p' "./DevolutionsPedmShellExt.msix" '/nv' '/o'
                 if (!$?) {
                     throw "MakeAppx package creation failed: ${MakeAppxOutput}"
                 }
 
-                if ($Env:DAGENT_PEDM_PFX -And (Test-Path $Env:DAGENT_PEDM_PFX) -And $Env:DAGENT_PEDM_PFX_PASSWORD -And (Get-Command "SignTool.exe" -ErrorAction SilentlyContinue)) {
-                    $SignToolOutput = & 'SignTool.exe' 'sign' '/fd' 'SHA256' '/a' '/f' "${Env:DAGENT_PEDM_PFX}" '/p' "${Env:DAGENT_PEDM_PFX_PASSWORD}" (Get-Item "./devolutions-pedm-contextmenu.msix").FullName
-                    if (!$?) {
-                        throw "SignTool failed: ${SignToolOutput}"
-                    }
-                }
-
                 Pop-Location
 
-                if (Test-Path Env:DAGENT_PEDM_CONTEXT_MENU_MSIX) {
-                    Copy-Item -Path $(Join-Path $CargoOutputPath "devolutions-pedm-contextmenu.msix") -Destination $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX
-
-                    $DestinationSymbolsFolder = Split-Path $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX -Parent
-                    Copy-Item "${CargoOutputPath}/devolutions_pedm_contextmenu.pdb" -Destination $DestinationSymbolsFolder
-                    Copy-Item "${CargoOutputPath}/deps/devolutions_pedm_contextmenu_shell.pdb" -Destination $DestinationSymbolsFolder
-    
+                if (Test-Path Env:DAGENT_PEDM_SHELL_EXT_MSIX) {
+                    Copy-Item -Path $(Join-Path $CargoOutputPath "DevolutionsPedmShellExt.msix") -Destination $Env:DAGENT_PEDM_SHELL_EXT_MSIX
                 }
             }
 
@@ -506,7 +496,6 @@ class TlkRecipe
                 $builtDesktopPdb = Get-ChildItem -Recurse -Include 'DevolutionsPedmDesktop.pdb' | Select-Object -First 1
 
                 Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
-
                 Copy-Item -Path $builtDesktopPdb -Destination $(Get-DestinationSymbolFile $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE $this.Target)
                 
             }
