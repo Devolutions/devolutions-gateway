@@ -115,7 +115,9 @@ internal class Program
 
     private static string DevolutionsPedmHook => ResolveArtifact("DAGENT_PEDM_HOOK", "The PEDM hook was not found");
 
-    private static string DevolutionsPedmContextMenuMsix => ResolveArtifact("DAGENT_PEDM_CONTEXT_MENU_MSIX", "The PEDM context menu MSIX was not found");
+    private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "The PEDM shell extension DLL was not found");
+
+    private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "The PEDM shell extension MSIX was not found");
 
     private static Version DevolutionsAgentVersion
     {
@@ -278,7 +280,8 @@ internal class Program
                         },
                     },
                     new (Includes.PEDM_FEATURE, DevolutionsPedmHook),
-                    new (new Id("DevolutionsPedmContextMenuMsix"), Includes.PEDM_FEATURE, DevolutionsPedmContextMenuMsix)
+                    new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtDll),
+                    new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtMsix)
                 },
                 Dirs = new[]
                 {

@@ -227,13 +227,14 @@ jobs:
         run: |
           $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix', 'DevolutionsPedmDesktop.exe', 'devolutions_pedm_hook.dll' }
+            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
+              'DevolutionsPedmShellExt.msix', 'DevolutionsPedmDesktop.exe', 'devolutions_pedm_hook.dll' }
             'jetsocat' { 'jetsocat_*' }
           }
           $ExcludePattern = "*.pdb"
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
-              if ($_.Name -Eq 'devolutions-pedm-contextmenu.msix') {
+              if ($_.Name -Eq 'DevolutionsPedmShellExt.msix') {
                 $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
                 $UnpackedMsix = Join-Path ${{ runner.temp }} "unpacked-context-menu-msix"
                 $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
@@ -322,7 +323,8 @@ jobs:
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
           $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select -First 1
-          $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions-pedm-contextmenu.msix' | Select -First 1
+          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
+          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
           $Env:DAGENT_PEDM_HOOK = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions_pedm_hook.dll' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate

@@ -79,7 +79,7 @@ internal static class AgentActions
     // Deferred sequence
 
     /// <summary>
-    /// Create the path %programdata%\Devolutions\Gateway if it does not exist
+    /// Create the path %ProgramData%\Devolutions\Agent if it does not exist
     /// </summary>
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
@@ -94,7 +94,7 @@ internal static class AgentActions
         Sequence.InstallExecuteSequence);
 
     /// <summary>
-    /// Set or reset the ACL on %programdata%\Devolutions\Gateway
+    /// Set or reset the ACL on %ProgramData%\Devolutions\Agent
     /// </summary>
     private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
         new Id($"CA.{nameof(setProgramDataDirectoryPermissions)}"),
@@ -172,7 +172,7 @@ internal static class AgentActions
     /// </summary>
     /// <remarks>
     /// This was necessary in the old Wayk installer to reread configurations that may have been updated
-    /// by the installer. It's usefulness os questionable with Devolutions Gateway.
+    /// by the installer. It's usefulness os questionable with Devolutions Agent.
     /// </remarks>
     private static readonly ElevatedManagedAction restartAgent= new(
         CustomActions.RestartAgent,
@@ -207,41 +207,49 @@ internal static class AgentActions
         Condition = Includes.PEDM_FEATURE.BeingInstall(),
     };
 
-    private static readonly PathFileAction uninstallPedmContextMenu = new(
-        @"$(env.WinDir)\System32\WindowsPowerShell\v1.0\powershell.exe",
-        "-Command \"& { Get-AppxProvisionedPackage -Online | Where-Object DisplayName -EQ 'DevolutionsPedmContextMenu' | ForEach-Object { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName }; Get-AppxPackage -All -Name 'DevolutionsPedmContextMenu' | Remove-AppxPackage -AllUsers }\"",
-        "INSTALLDIR"
+    private static readonly ElevatedManagedAction cleanupPedmShellExt = new(
+        CustomActions.UninstallMsix
     )
     {
-        Id = new Id("uninstallPedmContextMenu"),
+        Id = new Id("cleanupPedmShellExt"),
         Feature = Includes.PEDM_FEATURE,
         Impersonate = false,
+        Execute = Execute.deferred,
+        Return = Return.check,
+        Step = Step.RemoveFiles,
+        When = When.Before,
+        Sequence = Sequence.InstallExecuteSequence,
+        Condition = Includes.PEDM_FEATURE.BeingUninstall(),
+    };
+
+    private static readonly ElevatedManagedAction installPedmShellExt = new(
+        CustomActions.InstallMsix
+    )
+    {
+        Id = new Id("installPedmShellExt"),
+        Feature = Includes.PEDM_FEATURE,
+        Impersonate = true,
         Execute = Execute.deferred,
         Return = Return.check,
         Step = Step.InstallFiles,
         When = When.After,
         Sequence = Sequence.InstallExecuteSequence,
-        Condition = Includes.PEDM_FEATURE.BeingUninstall(),
+        Condition = Includes.PEDM_FEATURE.BeingInstall(),
     };
 
-    // For some reason, when running as NT AUTHORITY\SYSTEM on Windows 11,
-    // Add-AppxProvisionedPackage needs to be done 3 times for a successful
-    // system install.
-    private static readonly PathFileAction installPedmContextMenu = new(
-        @"$(env.WinDir)\System32\WindowsPowerShell\v1.0\powershell.exe",
-        "-Command \"{ 0..2 | % { Add-AppxProvisionedPackage -Online -SkipLicense -PackagePath '[#DevolutionsPedmContextMenuMsix]' -ErrorAction Ignore } }\"",
-        "INSTALLDIR"
+    private static readonly ElevatedManagedAction uninstallPedmShellExt = new(
+        CustomActions.UninstallMsix
     )
     {
-        Id = new Id("installPedmContextMenu"),
+        Id = new Id("uninstallPedmShellExt"),
         Feature = Includes.PEDM_FEATURE,
         Impersonate = false,
         Execute = Execute.deferred,
         Return = Return.check,
+        Step = Step.RemoveFiles,
+        When = When.Before,
         Sequence = Sequence.InstallExecuteSequence,
-        Step = new Step(uninstallPedmContextMenu.Id),
-        When = When.After,
-        Condition = Includes.PEDM_FEATURE.BeingInstall(),
+        Condition = Includes.PEDM_FEATURE.BeingUninstall(),
     };
 
     private static string UseProperties(IEnumerable<IWixProperty> properties)
@@ -274,8 +282,9 @@ internal static class AgentActions
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         installPedm,
-        uninstallPedmContextMenu,
-        installPedmContextMenu,
+        cleanupPedmShellExt,
+        uninstallPedmShellExt,
+        installPedmShellExt,
 
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,

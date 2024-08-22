@@ -1,6 +1,7 @@
 ﻿using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
+using Windows.Management.Deployment;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using Newtonsoft.Json;
@@ -520,6 +521,95 @@ namespace DevolutionsAgent.Actions
             }
 
             return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult InstallMsix(Session session)
+        {
+            try
+            {
+                string packageName = "DevolutionsAgent";
+                string installPath = session.Property("INSTALLDIR");
+                string packageFileName = "DevolutionsPedmShellExt.msix";
+                string packagePath = System.IO.Path.Combine(installPath, packageFileName);
+
+                session.Log($"Installing MSIX package from path: {packagePath}");
+                session.Log($"with external location: {installPath}");
+
+                InstallMsixPackage(packagePath, installPath);
+                return ActionResult.Success;
+            }
+            catch (Exception ex)
+            {
+                session.Log("ERROR: " + ex.Message);
+                session.Log("Stack Trace: " + ex.StackTrace);
+                if (ex.InnerException != null)
+                {
+                    session.Log("Inner Exception: " + ex.InnerException.Message);
+                    session.Log("Inner Exception Stack Trace: " + ex.InnerException.StackTrace);
+                }
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult UninstallMsix(Session session)
+        {
+            try
+            {
+                string packageFamilyName = "DevolutionsAgent_tr5fa5yv8zr8w";
+                UninstallMsixPackage(packageFamilyName);
+                return ActionResult.Success;
+            }
+            catch (Exception ex)
+            {
+                session.Log("ERROR: " + ex.Message);
+                session.Log("Stack Trace: " + ex.StackTrace);
+                if (ex.InnerException != null)
+                {
+                    session.Log("Inner Exception: " + ex.InnerException.Message);
+                    session.Log("Inner Exception Stack Trace: " + ex.InnerException.StackTrace);
+                }
+                return ActionResult.Failure;
+            }
+        }
+
+        private static void InstallMsixPackage(string packagePath, string externalLocation)
+        {
+            var packageManager = new PackageManager();
+
+            if (!string.IsNullOrEmpty(externalLocation))
+            {
+                var options = new AddPackageOptions();
+                options.ExternalLocationUri = new Uri(externalLocation);
+                var deploymentOperation = packageManager.AddPackageByUriAsync(
+                    new Uri(packagePath), options
+                );
+                deploymentOperation.AsTask().Wait();
+            }
+            else
+            {
+                var deploymentOperation = packageManager.AddPackageAsync(
+                    new Uri(packagePath), null, DeploymentOptions.None
+                );
+                deploymentOperation.AsTask().Wait();
+            }
+        }
+
+        public static void UninstallMsixPackage(string packageFamilyName)
+        {
+            var packageManager = new PackageManager();
+
+            var packages = packageManager.FindPackages(packageFamilyName);
+
+            if (packages != null && packages.Any())
+            {
+                foreach (var package in packages)
+                {
+                    var deploymentOperation = packageManager.RemovePackageAsync(package.Id.FullName, RemovalOptions.RemoveForAllUsers);
+                    deploymentOperation.AsTask().Wait();
+                }
+            }
         }
 
         private static string FormatHttpUrl(string scheme, uint port)

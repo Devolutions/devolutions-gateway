@@ -1180,27 +1180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "devolutions-pedm-contextmenu"
-version = "0.0.0"
-dependencies = [
- "devolutions-pedm-contextmenu-shell",
- "devolutions-pedm-shared",
- "fs_extra",
-]
-
-[[package]]
-name = "devolutions-pedm-contextmenu-shell"
-version = "0.0.0"
-dependencies = [
- "devolutions-pedm-shared",
- "embed-resource",
- "parking_lot",
- "tokio 1.38.1",
- "win-api-wrappers",
- "windows-core 0.58.0",
-]
-
-[[package]]
 name = "devolutions-pedm-hook"
 version = "0.0.0"
 dependencies = [
@@ -1229,6 +1208,19 @@ dependencies = [
  "tower 0.3.1",
  "win-api-wrappers",
  "windows-registry",
+]
+
+[[package]]
+name = "devolutions-pedm-shell-ext"
+version = "0.0.0"
+dependencies = [
+ "devolutions-pedm-shared",
+ "embed-resource",
+ "fs_extra",
+ "parking_lot",
+ "tokio 1.38.1",
+ "win-api-wrappers",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
