@@ -82,7 +82,7 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
             return Err(E_FAIL.into());
         };
 
-        let Ok(module_path) = core::str::from_utf8(&module_path) else {
+        let Some(module_path) = module_path.to_str() else {
             return Err(E_FAIL.into());
         };
 
