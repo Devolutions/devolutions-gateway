@@ -17,7 +17,7 @@ use self::id_allocator::IdAllocator;
 use anyhow::Context as _;
 use bytes::Bytes;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -31,7 +31,6 @@ use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
-const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 
 // The JMUX channel will require at most `MAXIMUM_PACKET_SIZE_IN_BYTES × JMUX_MESSAGE_CHANNEL_SIZE` bytes to be kept alive.
 const JMUX_MESSAGE_MPSC_CHANNEL_SIZE: usize = 512;
@@ -257,6 +256,7 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
 
         loop {
             tokio::select! {
+                biased; // Disable fairness via random number generation to save CPU time.
                 msg = msg_to_send_rx.recv() => {
                     let Some(msg) = msg else {
                         break;
@@ -318,7 +318,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
     let mut jmux_ctx = JmuxCtx::new();
     let mut data_senders: HashMap<LocalChannelId, DataSender> = HashMap::new();
     let mut pending_channels: HashMap<LocalChannelId, (DestinationUrl, ApiResponseSender)> = HashMap::new();
-    let mut needs_window_adjustment: HashSet<LocalChannelId> = HashSet::new();
     let (internal_msg_tx, mut internal_msg_rx) = mpsc::channel::<InternalMessage>(INTERNAL_MPSC_CHANNEL_SIZE);
 
     // Safety net against poor AsyncRead trait implementations.
@@ -334,62 +333,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         // It's also expected to be resilient and `?` operator should be used only for unrecoverable failures.
 
         tokio::select! {
-            Some(request) = api_request_rx.recv() => {
-                match request {
-                    JmuxApiRequest::OpenChannel { destination_url, api_response_tx } => {
-                        match jmux_ctx.allocate_id() {
-                            Some(id) => {
-                                trace!("Allocated local ID {}", id);
-                                debug!("{} request {}", id, destination_url);
-                                pending_channels.insert(id, (destination_url.clone(), api_response_tx));
-                                msg_to_send_tx
-                                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES, destination_url))
-                                    .await
-                                    .context("couldn’t send CHANNEL OPEN message through mpsc channel")?;
-                            }
-                            None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
-                        }
-                    }
-                    JmuxApiRequest::Start { id, stream, leftover } => {
-                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
-
-                        let (data_tx, data_rx) = mpsc::channel::<Bytes>(CHANNEL_DATA_MPSC_CHANNEL_SIZE);
-
-                        if data_senders.insert(id, data_tx).is_some() {
-                            anyhow::bail!("detected two streams with the same ID {}", id);
-                        }
-
-                        // Send leftover bytes if any.
-                        if let Some(leftover) = leftover {
-                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await {
-                                error!(%error, "Couldn't send leftover bytes");
-                            }
-                        }
-
-                        let (reader, writer) = stream.into_split();
-
-                        DataWriterTask {
-                            writer,
-                            data_rx,
-                        }
-                        .spawn(channel.span.clone())
-                        .detach();
-
-                        DataReaderTask {
-                            reader,
-                            local_id: channel.local_id,
-                            distant_id: channel.distant_id,
-                            window_size_updated: Arc::clone(&channel.window_size_updated),
-                            window_size: Arc::clone(&channel.window_size),
-                            maximum_packet_size: channel.maximum_packet_size,
-                            msg_to_send_tx: msg_to_send_tx.clone(),
-                            internal_msg_tx: internal_msg_tx.clone(),
-                        }
-                        .spawn(channel.span.clone())
-                        .detach();
-                    }
-                }
-            }
             Some(internal_msg) = internal_msg_rx.recv() => {
                 match internal_msg {
                     InternalMessage::Eof { id } => {
@@ -473,6 +416,62 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             internal_msg_tx: internal_msg_tx.clone(),
                         }
                         .spawn(channel_span)
+                        .detach();
+                    }
+                }
+            }
+            Some(request) = api_request_rx.recv() => {
+                match request {
+                    JmuxApiRequest::OpenChannel { destination_url, api_response_tx } => {
+                        match jmux_ctx.allocate_id() {
+                            Some(id) => {
+                                trace!("Allocated local ID {}", id);
+                                debug!("{} request {}", id, destination_url);
+                                pending_channels.insert(id, (destination_url.clone(), api_response_tx));
+                                msg_to_send_tx
+                                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES, destination_url))
+                                    .await
+                                    .context("couldn’t send CHANNEL OPEN message through mpsc channel")?;
+                            }
+                            None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
+                        }
+                    }
+                    JmuxApiRequest::Start { id, stream, leftover } => {
+                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
+
+                        let (data_tx, data_rx) = mpsc::channel::<Bytes>(CHANNEL_DATA_MPSC_CHANNEL_SIZE);
+
+                        if data_senders.insert(id, data_tx).is_some() {
+                            anyhow::bail!("detected two streams with the same ID {}", id);
+                        }
+
+                        // Send leftover bytes if any.
+                        if let Some(leftover) = leftover {
+                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await {
+                                error!(%error, "Couldn't send leftover bytes");
+                            }
+                        }
+
+                        let (reader, writer) = stream.into_split();
+
+                        DataWriterTask {
+                            writer,
+                            data_rx,
+                        }
+                        .spawn(channel.span.clone())
+                        .detach();
+
+                        DataReaderTask {
+                            reader,
+                            local_id: channel.local_id,
+                            distant_id: channel.distant_id,
+                            window_size_updated: Arc::clone(&channel.window_size_updated),
+                            window_size: Arc::clone(&channel.window_size),
+                            maximum_packet_size: channel.maximum_packet_size,
+                            msg_to_send_tx: msg_to_send_tx.clone(),
+                            internal_msg_tx: internal_msg_tx.clone(),
+                        }
+                        .spawn(channel.span.clone())
                         .detach();
                     }
                 }
@@ -621,6 +620,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         channel.window_size_updated.notify_one();
                     }
                     Message::Data(msg) => {
+                        let num_channels = jmux_ctx.channels.len() as u32;
+
                         let id = LocalChannelId::from(msg.recipient_channel_id);
                         let Some(channel) = jmux_ctx.get_channel_mut(id) else {
                             warn!(channel.id = %id, "Couldn’t find channel");
@@ -647,7 +648,32 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         let _ = data_tx.send(msg.transfer_data).await;
 
-                        needs_window_adjustment.insert(id);
+                        // The following formula is used to determine the threshold:
+                        //   threshold = initial_window_size ÷ (num_channels + 3) × 3
+                        // That is, the more open channels, the higher the threshold.
+                        // E.g.: for initial_window_size = 1000, a WINDOW ADJUST message will be sent if
+                        //   num_channel = 1 and window_size <= 750
+                        //   num_channel = 2 and window_size <= 600
+                        //   num_channel = 3 and window_size <= 500
+                        //   num_channel = 10 and window_size <= 230
+                        //   num_channel = 50 and window_size <= 56
+                        //   num_channel = 100 and window_size <= 29
+                        // A channel using a lot of the throughput will have to wait for a WINDOW ADJUST message at some
+                        // point, allowing the other channels to use a higher share of the the available throughput.
+                        // This system also helps reducing the number of WINDOW ADJUST messages sent over the wire by
+                        // eliminating all "small" WINDOW ADJUST messages which overall are irrelevants.
+                        let window_adjustment_threshold = channel.initial_window_size / (num_channels + 3) * 3;
+
+                        if channel.remote_window_size <= window_adjustment_threshold {
+                            let adjustment = channel.initial_window_size - channel.remote_window_size;
+
+                            msg_to_send_tx
+                                .send(Message::window_adjust(channel.distant_id, adjustment))
+                                .await
+                                .context("couldn’t send WINDOW ADJUST message")?;
+
+                            channel.remote_window_size = channel.initial_window_size;
+                        }
                     }
                     Message::Eof(msg) => {
                         // Per the spec:
@@ -722,24 +748,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             jmux_ctx.unregister(local_id);
                             trace!("Channel closed");
                         }
-                    }
-                }
-            }
-            _ = core::future::ready(()), if !needs_window_adjustment.is_empty() => {
-                for channel_id in needs_window_adjustment.drain() {
-                    let Some(channel) = jmux_ctx.get_channel_mut(channel_id) else {
-                        continue;
-                    };
-
-                    let window_adjustment = channel.initial_window_size - channel.remote_window_size;
-
-                    if window_adjustment > WINDOW_ADJUSTMENT_THRESHOLD {
-                        msg_to_send_tx
-                            .send(Message::window_adjust(channel.distant_id, window_adjustment))
-                            .await
-                            .context("couldn’t send WINDOW ADJUST message")?;
-
-                        channel.remote_window_size = channel.initial_window_size;
                     }
                 }
             }
