@@ -16,15 +16,15 @@ base16ct = { version = "0.2.0", features = ["std", "alloc"] }
 base64 = "0.22.1"
 chrono = "0.4.38"
 digest = "0.10.7"
-hyper = { version = "1.3.1", features = ["server"] }
-hyper-util = { version = "0.1.5", features = ["tokio"] }
+hyper = { version = "1.4.1", features = ["server"] }
+hyper-util = { version = "0.1.7", features = ["tokio"] }
 schemars = "0.8.21"
 serde = "1.0.208"
 serde_json = "1.0.125"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
 tokio = { version = "1.38.0", features = ["net", "rt-multi-thread"] }
-tower-service = "0.3.2"
+tower-service = "0.3.3"
 win-api-wrappers = { path = "../win-api-wrappers" }
 devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["policy"]}
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
