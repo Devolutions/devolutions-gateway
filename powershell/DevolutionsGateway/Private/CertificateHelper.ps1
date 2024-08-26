@@ -179,6 +179,9 @@ function Expand-PfxCertificate
             'PrivateKey' {
                 $PrivateKey = $safeBag.PrivateKey
             }
+            default {
+                Write-Host "SafeBag of ${safeBag.Kind} kind found"
+            }
         }
 
         $safeBag.Dispose()
@@ -226,16 +229,17 @@ function Get-PemCertificate
         }
         $PemData = $sb.ToString()
 
-        if ($null -ne $expanded.PrivateKey) {
+        if ($expanded.PrivateKey -Ne $null) {
             $PrivateKey = $expanded.PrivateKey.ToPem().ToRepr()
+        } else {
+            Write-Host "No private key was found in PFX file"
         }
     } else {
-        
         try {
             $PemData = [System.IO.File]::ReadAllBytes($CertificateFile)
             # Try to parse the file as if it was a DER binary file.
-            $Cert = [Devolutions.Picky.Cert]::FromDer($PemData);
-            $PemData = $Cert.ToPem().ToRepr();
+            $Cert = [Devolutions.Picky.Cert]::FromDer($PemData)
+            $PemData = $Cert.ToPem().ToRepr()
         } catch {
             # Assume we have a PEM.
             $PemData = Get-Content -Path $CertificateFile -Encoding UTF8 -Raw
@@ -244,8 +248,8 @@ function Get-PemCertificate
         try {
             $PrivateKey = [System.IO.File]::ReadAllBytes($PrivateKeyFile)
             # Try to parse the file as if it was a DER binary file.
-            $PrivateKey = [Devolutions.Picky.PrivateKey]::FromPkcs8($PrivateKey);
-            $PrivateKey = $PrivateKey.ToPem().ToRepr();
+            $PrivateKey = [Devolutions.Picky.PrivateKey]::FromPkcs8($PrivateKey)
+            $PrivateKey = $PrivateKey.ToPem().ToRepr()
         } catch {
             # Assume we have a PEM.
             $PrivateKey = Get-Content -Path $PrivateKeyFile -Encoding UTF8 -Raw
