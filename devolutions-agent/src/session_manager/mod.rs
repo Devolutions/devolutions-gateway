@@ -199,13 +199,13 @@ impl Task for SessionManager {
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
                             info!(%id, "Session logged off");
-                            ctx.write().await.get_session_mut(&id).map(|session| {
+                            if let Some(mut session) = ctx.write().await.get_session_mut(&id) {
                                 // When a user logs off, host process will be stopped by the system;
                                 // Console sessions could be reused for different users, therefore
                                 // we should not remove the session from the list, but mark it as
                                 // not yet ready (host will be started as soon as new user logs in).
                                 session.set_host_ready(false);
-                            });
+                            }
                         }
                         _ => {
                             continue;
@@ -225,16 +225,16 @@ impl Task for SessionManager {
 
 /// Starts Devolutions Host process in the target session.
 fn try_start_host_process(ctx: &mut SessionManagerCtx, session: &Session) -> anyhow::Result<()> {
-    match ctx.get_session_mut(&session) {
+    match ctx.get_session_mut(session) {
         Some(gw_session) => {
-            if is_host_running_in_session(&session)? {
+            if is_host_running_in_session(session)? {
                 gw_session.set_host_ready(true);
                 return Ok(());
             }
 
             info!(%session, "Starting host process in session");
 
-            match start_host_process(&session) {
+            match start_host_process(session) {
                 Ok(()) => {
                     info!(%session, "Host process started in session");
                     gw_session.set_host_ready(true);
@@ -285,7 +285,11 @@ fn start_host_process(session: &Session) -> anyhow::Result<()> {
     let mut startup_info = StartupInfo::default();
 
     // Run with GUI access
-    startup_info.show_window = SW_SHOW.0 as u16;
+    // NOTE: silent clippy warning, just to be more explicit about `show_window` value
+    #[allow(clippy::field_reassign_with_default)]
+    {
+        startup_info.show_window = u16::try_from(SW_SHOW.0).expect("BUG: SW_SHOW always fit u16");
+    }
     startup_info.flags = STARTF_USESHOWWINDOW;
     startup_info.desktop = WideString::from("WinSta0\\Default");
 

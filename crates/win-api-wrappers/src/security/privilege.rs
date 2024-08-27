@@ -146,11 +146,11 @@ impl<'a> ScopedPrivileges<'a> {
     }
 
     pub fn token(&self) -> &Token {
-        &self.token
+        self.token
     }
 
     pub fn token_mut(&mut self) -> &mut Token {
-        &mut self.token
+        self.token
     }
 }
 

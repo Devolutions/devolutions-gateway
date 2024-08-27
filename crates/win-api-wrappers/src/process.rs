@@ -572,7 +572,9 @@ impl ProcessEntry32Iterator {
 
         // SAFETY: It is safe to zero out the structure as it is a simple POD type.
         let mut process_entry: PROCESSENTRY32W = unsafe { mem::zeroed() };
-        process_entry.dwSize = mem::size_of::<PROCESSENTRY32W>().try_into().unwrap();
+        process_entry.dwSize = mem::size_of::<PROCESSENTRY32W>()
+            .try_into()
+            .expect("BUG: PROCESSENTRY32W size always fits in u32");
 
         Ok(ProcessEntry32Iterator {
             snapshot_handle,
@@ -625,7 +627,7 @@ impl ProcessEntry {
             .szExeFile
             .iter()
             .position(|&c| c == 0)
-            .ok_or(anyhow!("Executable name null terminator not found"))?;
+            .ok_or_else(|| anyhow!("Executable name null terminator not found"))?;
 
         let name = String::from_utf16(&self.0.szExeFile[..exe_name_length])
             .map_err(|_| anyhow!("Invalid executable name UTF16 encoding"))?;
@@ -650,18 +652,15 @@ impl ProcessEnvironment {
 
 impl Drop for ProcessEnvironment {
     fn drop(&mut self) {
-        match self {
-            ProcessEnvironment::OsDefined(block) => {
-                // SAFETY: `block` is checked to be valid before free.
-                unsafe {
-                    if !block.is_null() {
-                        if let Err(err) = DestroyEnvironmentBlock(*block) {
-                            warn!(%err, "Failed to destroy environment block");
-                        }
+        if let ProcessEnvironment::OsDefined(block) = self {
+            // SAFETY: `block` is checked to be valid before free.
+            unsafe {
+                if !block.is_null() {
+                    if let Err(err) = DestroyEnvironmentBlock(*block) {
+                        warn!(%err, "Failed to destroy environment block");
                     }
-                };
-            }
-            _ => {}
+                }
+            };
         }
     }
 }
@@ -689,10 +688,11 @@ pub fn create_process_as_user(
         let mut environment: *mut c_void = ptr::null_mut();
 
         if let Some(token) = token {
+            // SAFETY: Allocated memory will be freed by `ProcessEnvironment` destructor.
             unsafe { CreateEnvironmentBlock(&mut environment, token.handle().raw(), false) }?;
         }
 
-        ProcessEnvironment::OsDefined(environment as *const _)
+        ProcessEnvironment::OsDefined(environment.cast_const())
     };
 
     let mut command_line = command_line
@@ -743,6 +743,7 @@ pub fn create_process_as_user(
 
 /// Starts new process in the specified session. Note that this function requires the current
 /// process to have `SYSTEM`-level permissions. Use with caution.
+#[allow(clippy::too_many_arguments)]
 pub fn create_process_in_session(
     session_id: u32,
     application_name: Option<&Path>,
@@ -841,6 +842,7 @@ fn terminate_process_by_name_impl(process_name: &str, session_id: Option<u32>) -
 
             match process {
                 Ok(process) => {
+                    // SAFETY: `OpenProcess` ensures that the handle is valid.
                     unsafe {
                         if let Err(err) = TerminateProcess(process, 1) {
                             warn!(process_name, session_id, %err, "TerminateProcess failed");

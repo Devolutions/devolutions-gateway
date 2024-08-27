@@ -1,6 +1,6 @@
 // Start the program without a console window.
 // It has no effect on platforms other than Windows.
-#![windows_subsystem = "windows"]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[macro_use]
 extern crate tracing;

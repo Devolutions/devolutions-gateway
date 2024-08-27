@@ -262,6 +262,7 @@ pub mod dto {
         pub enabled: bool,
     }
 
+    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
     impl Default for SessionHostConf {
         fn default() -> Self {
             Self { enabled: false }

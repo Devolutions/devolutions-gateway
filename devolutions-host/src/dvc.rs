@@ -41,6 +41,8 @@ pub fn loop_dvc(config: ConfHandle) {
     info!("DVC loop finished");
 }
 
+#[allow(clippy::multiple_unsafe_ops_per_block)]
+#[allow(clippy::undocumented_unsafe_blocks)]
 fn open_virtual_channel(channel_name: &str) -> windows::core::Result<HANDLE> {
     unsafe {
         let channel_name_wide = PCSTR::from_raw(channel_name.as_ptr());
@@ -76,6 +78,8 @@ fn open_virtual_channel(channel_name: &str) -> windows::core::Result<HANDLE> {
     }
 }
 
+#[allow(clippy::multiple_unsafe_ops_per_block)]
+#[allow(clippy::undocumented_unsafe_blocks)]
 fn write_virtual_channel_message(h_file: HANDLE, cb_size: u32, buffer: *const u8) -> windows::core::Result<()> {
     unsafe {
         let buffer_slice = std::slice::from_raw_parts(buffer, cb_size as usize);
@@ -86,6 +90,10 @@ fn write_virtual_channel_message(h_file: HANDLE, cb_size: u32, buffer: *const u8
 
 #[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::cast_ptr_alignment)]
+#[allow(clippy::ptr_offset_with_cast)]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::multiple_unsafe_ops_per_block)]
+#[allow(clippy::undocumented_unsafe_blocks)]
 fn handle_virtual_channel(h_file: HANDLE) -> windows::core::Result<()> {
     unsafe {
         let mut read_buffer = [0u8; CHANNEL_PDU_LENGTH];
@@ -111,7 +119,7 @@ fn handle_virtual_channel(h_file: HANDLE) -> windows::core::Result<()> {
             if let Err(e) = result {
                 if GetLastError() == WIN32_ERROR(ERROR_IO_PENDING.0) {
                     let _dw_status = WaitForSingleObject(h_event, INFINITE);
-                    if !GetOverlappedResult(h_file, &mut overlapped, &mut dw_read, false).is_ok() {
+                    if GetOverlappedResult(h_file, &overlapped, &mut dw_read, false).is_err() {
                         return Err(windows::core::Error::from_win32());
                     }
                 } else {
@@ -119,14 +127,14 @@ fn handle_virtual_channel(h_file: HANDLE) -> windows::core::Result<()> {
                 }
             }
 
-            println!("read {} bytes", dw_read);
+            info!("read {} bytes", dw_read);
 
             let packet_size = dw_read as usize - std::mem::size_of::<CHANNEL_PDU_HEADER>();
             let p_data = read_buffer
                 .as_ptr()
-                .offset(std::mem::size_of::<CHANNEL_PDU_HEADER>() as isize) as *const u8;
+                .offset(std::mem::size_of::<CHANNEL_PDU_HEADER>() as isize);
 
-            println!(
+            info!(
                 ">> {}",
                 std::str::from_utf8(std::slice::from_raw_parts(p_data, packet_size)).unwrap_or("Invalid UTF-8")
             );
