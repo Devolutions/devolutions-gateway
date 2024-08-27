@@ -319,7 +319,7 @@ pub mod dto {
                 remote_desktop: None,
                 pedm: None,
                 debug: None,
-                session_host: Some(SessionHostConf { enabled: true }),
+                session_host: Some(SessionHostConf { enabled: false }),
                 rest: serde_json::Map::new(),
             }
         }
