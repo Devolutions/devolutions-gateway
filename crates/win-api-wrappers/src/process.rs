@@ -17,7 +17,7 @@ use crate::utils::{serialize_environment, Allocation, AnsiString, CommandLine, W
 use crate::Error;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    FreeLibrary, ERROR_INCORRECT_SIZE, E_HANDLE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
+    FreeLibrary, ERROR_INCORRECT_SIZE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
 };
 use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -39,23 +39,24 @@ use super::utils::{size_of_u32, ComContext};
 
 #[derive(Debug)]
 pub struct Process {
+    // Handle is closed with RAII wrapper.
     pub handle: Handle,
 }
 
-impl Process {
-    pub fn try_get_by_pid(pid: u32, desired_access: PROCESS_ACCESS_RIGHTS) -> Result<Self> {
-        // SAFETY: No preconditions. Handle is closed with RAII wrapper.
-        let handle = unsafe { OpenProcess(desired_access, false, pid) }?;
-
-        Ok(Self { handle: handle.into() })
+impl From<Handle> for Process {
+    fn from(handle: Handle) -> Self {
+        Self { handle }
     }
+}
 
-    pub fn try_with_handle(handle: HANDLE) -> Result<Self> {
-        if handle.is_invalid() {
-            bail!(Error::from_hresult(E_HANDLE))
-        } else {
-            Ok(Self { handle: handle.into() })
-        }
+impl Process {
+    pub fn get_by_pid(pid: u32, desired_access: PROCESS_ACCESS_RIGHTS) -> Result<Self> {
+        // SAFETY: No preconditions.
+        let handle = unsafe { OpenProcess(desired_access, false, pid) }?;
+        // SAFETY: The handle is owned by us, we opened the process above.
+        let handle = unsafe { Handle::new_owned(handle)? };
+
+        Ok(Self { handle })
     }
 
     pub fn exe_path(&self) -> Result<PathBuf> {
@@ -129,7 +130,6 @@ impl Process {
         let mut thread_id: u32 = 0;
 
         // SAFETY: We assume `start_address` points to a valid and executable memory address.
-        // No preconditions.
         let handle = unsafe {
             CreateRemoteThread(
                 self.handle.raw(),
@@ -139,10 +139,13 @@ impl Process {
                 parameter,
                 0,
                 Some(&mut thread_id),
-            )
+            )?
         };
 
-        Thread::try_with_handle(handle?)
+        // SAFETY: The handle is owned by us, we opened the ressource above.
+        let handle = unsafe { Handle::new_owned(handle) }?;
+
+        Ok(Thread::from(handle))
     }
 
     pub fn allocate(&self, size: usize) -> Result<Allocation<'_>> {
@@ -163,19 +166,23 @@ impl Process {
     }
 
     pub fn current_process() -> Self {
-        Self {
-            // SAFETY: `GetCurrentProcess()` has no preconditions and always returns a valid handle.
-            handle: Handle::new(unsafe { GetCurrentProcess() }, false),
-        }
+        // SAFETY: `GetCurrentProcess()` has no preconditions and always returns a valid handle.
+        let handle = unsafe { GetCurrentProcess() };
+        let handle = Handle::new_borrowed(handle).expect("always valid");
+
+        Self { handle }
     }
 
     pub fn token(&self, desired_access: TOKEN_ACCESS_MASK) -> Result<Token> {
-        let mut handle = Default::default();
+        let mut handle = HANDLE::default();
 
         // SAFETY: No preconditions. Returned handle will be closed with its RAII wrapper.
         unsafe { OpenProcessToken(self.handle.raw(), desired_access, &mut handle) }?;
 
-        Token::try_with_handle(handle)
+        // SAFETY: We own the handle.
+        let handle = unsafe { Handle::new_owned(handle)? };
+
+        Ok(Token::from(handle))
     }
 
     pub fn wait(&self, timeout_ms: Option<u32>) -> Result<WAIT_EVENT> {
@@ -330,7 +337,10 @@ pub fn shell_execute(
     // SAFETY: Must be called with COM context initialized.
     unsafe { ShellExecuteExW(&mut exec_info) }?;
 
-    Process::try_with_handle(exec_info.hProcess)
+    // SAFETY: We are responsibles for closing the handle.
+    let handle = unsafe { Handle::new_owned(exec_info.hProcess)? };
+
+    Ok(Process::from(handle))
 }
 
 pub struct Peb<'a> {
@@ -590,9 +600,15 @@ pub fn create_process_as_user(
         )
     }?;
 
+    // SAFETY: The handle is owned by us, we opened the ressource above.
+    let process = unsafe { Handle::new_owned(raw_process_information.hProcess).map(Process::from)? };
+
+    // SAFETY: The handle is owned by us, we opened the ressource above.
+    let thread = unsafe { Handle::new_owned(raw_process_information.hThread).map(Thread::from)? };
+
     Ok(ProcessInformation {
-        process: Process::try_with_handle(raw_process_information.hProcess)?,
-        thread: Thread::try_with_handle(raw_process_information.hThread)?,
+        process,
+        thread,
         process_id: raw_process_information.dwProcessId,
         thread_id: raw_process_information.dwThreadId,
     })

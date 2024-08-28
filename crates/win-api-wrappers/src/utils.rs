@@ -507,10 +507,10 @@ impl Snapshot {
     pub fn new(flags: CREATE_TOOLHELP_SNAPSHOT_FLAGS, process_id: Option<u32>) -> Result<Self> {
         // SAFETY: No preconditions. Flags or process ID cannot create scenarios where unsafe behavior happens.
         let handle = unsafe { CreateToolhelp32Snapshot(flags, process_id.unwrap_or(0))? };
+        // SAFETY: We created the handle just above and are responsibles for closing it ourselves.
+        let handle = unsafe { Handle::new_owned(handle)? };
 
-        Ok(Self {
-            handle: Handle::new(handle, true),
-        })
+        Ok(Self { handle })
     }
 
     pub fn process_ids(&self) -> ProcessIdIterator<'_> {
@@ -638,7 +638,13 @@ impl Pipe {
             )
         }?;
 
-        Ok((Self { handle: rx.into() }, Self { handle: tx.into() }))
+        // SAFETY: We created the ressource above and are thus owning it.
+        let rx = unsafe { Handle::new_owned(rx)? };
+
+        // SAFETY: We created the ressource above and are thus owning it.
+        let tx = unsafe { Handle::new_owned(tx)? };
+
+        Ok((Self { handle: rx }, Self { handle: tx }))
     }
 
     /// Peeks the contents of the pipe in `data`, while returning the amount of bytes available on the pipe.

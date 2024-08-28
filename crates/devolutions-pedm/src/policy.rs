@@ -518,7 +518,7 @@ pub(crate) fn application_from_path(
 }
 
 pub(crate) fn application_from_process(pid: u32) -> Result<Application> {
-    let process = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
+    let process = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
 
     let path = process.exe_path()?;
 

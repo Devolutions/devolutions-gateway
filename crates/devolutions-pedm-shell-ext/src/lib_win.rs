@@ -179,7 +179,7 @@ fn find_main_explorer(session: u32) -> Option<u32> {
     let snapshot = Snapshot::new(TH32CS_SNAPPROCESS, None).ok()?;
 
     snapshot.process_ids().find_map(|pid| {
-        let proc = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ).ok()?;
+        let proc = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ).ok()?;
 
         if !(proc
             .exe_path()
