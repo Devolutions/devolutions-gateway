@@ -5,6 +5,8 @@ use windows::Win32::Foundation::E_HANDLE;
 use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
+// TODO: Use/implement AsHandle and AsRawHandle as appropriate
+
 /// A wrapper around a Windows [`HANDLE`].
 ///
 /// Whenever possible, you should use [`BorrowedHandle`] or [`OwnedHandle`] instead.
@@ -115,6 +117,8 @@ impl Drop for Handle {
         }
     }
 }
+
+// TODO: make this return a borrowed `Handle`.
 
 impl TryFrom<&BorrowedHandle<'_>> for Handle {
     type Error = anyhow::Error;
