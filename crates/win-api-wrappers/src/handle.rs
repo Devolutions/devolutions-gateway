@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle, IntoRawHandle, OwnedHandle};
 
+use windows::Win32::Foundation::E_HANDLE;
 use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
 use windows::Win32::System::Threading::GetCurrentProcess;
 

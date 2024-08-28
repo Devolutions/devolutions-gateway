@@ -8,7 +8,7 @@ use crate::handle::{Handle, HandleWrapper};
 use crate::process::Process;
 use crate::token::Token;
 use crate::Error;
-use windows::Win32::Foundation::{E_HANDLE, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::System::Threading::{
     DeleteProcThreadAttributeList, GetCurrentThread, InitializeProcThreadAttributeList, OpenThread, OpenThreadToken,

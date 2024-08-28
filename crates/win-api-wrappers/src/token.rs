@@ -27,8 +27,8 @@ use crate::undoc::{
 use crate::utils::WideString;
 use crate::{create_impersonation_context, Error};
 use windows::Win32::Foundation::{
-    ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, E_HANDLE,
-    HANDLE, LUID,
+    ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, HANDLE,
+    LUID,
 };
 use windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT;
 use windows::Win32::Security::{

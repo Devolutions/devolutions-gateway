@@ -17,7 +17,7 @@ use crate::utils::{serialize_environment, Allocation, AnsiString, CommandLine, W
 use crate::Error;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    FreeLibrary, ERROR_INCORRECT_SIZE, E_HANDLE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
+    FreeLibrary, ERROR_INCORRECT_SIZE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
 };
 use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
