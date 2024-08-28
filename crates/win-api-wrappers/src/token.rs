@@ -272,7 +272,7 @@ impl Token {
         // SAFETY: We are responsible for closing the linked token.
         let handle = unsafe { Handle::new_owned(handle)? };
 
-        Self::from(handle)
+        Ok(Self::from(handle))
     }
 
     pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> Result<String> {
