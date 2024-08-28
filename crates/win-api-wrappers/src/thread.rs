@@ -22,32 +22,34 @@ pub struct Thread {
     pub handle: Handle,
 }
 
-impl Thread {
-    pub fn try_with_handle(handle: HANDLE) -> Result<Self> {
-        if handle.is_invalid() {
-            bail!(Error::from_hresult(E_HANDLE))
-        } else {
-            Ok(Self { handle: handle.into() })
-        }
+impl From<Handle> for Thread {
+    fn from(handle: Handle) -> Self {
+        Self { handle }
     }
+}
 
-    pub fn try_get_by_id(id: u32, desired_access: THREAD_ACCESS_RIGHTS) -> Result<Self> {
+impl Thread {
+    pub fn get_by_id(id: u32, desired_access: THREAD_ACCESS_RIGHTS) -> Result<Self> {
         // SAFETY: No preconditions.
         let handle = unsafe { OpenThread(desired_access, false, id) }?;
+        // SAFETY: The handle is owned by us, we opened the ressource above.
+        let handle = unsafe { Handle::new_owned(handle) }?;
 
-        Self::try_with_handle(handle)
+        Ok(Self::from(handle))
     }
 
     pub fn current() -> Self {
-        Self {
-            // SAFETY: No preconditions. Returns a pseudohandle, thus not owning it.
-            handle: Handle::new(unsafe { GetCurrentThread() }, false),
-        }
+        // SAFETY: No preconditions. Returns a pseudohandle, thus not owning it.
+        let handle = unsafe { GetCurrentThread() };
+        let handle = Handle::new_borrowed(handle);
+
+        Self::from(handle)
     }
 
     pub fn join(&self, timeout_ms: Option<u32>) -> Result<()> {
         // SAFETY: No preconditions.
         let result = unsafe { WaitForSingleObject(self.handle.raw(), timeout_ms.unwrap_or(INFINITE)) };
+
         match result {
             WAIT_OBJECT_0 => Ok(()),
             _ => bail!(Error::last_error()),
@@ -73,12 +75,15 @@ impl Thread {
     }
 
     pub fn token(&self, desired_access: TOKEN_ACCESS_MASK, open_as_self: bool) -> Result<Token> {
-        let mut handle = Default::default();
+        let mut handle = HANDLE::default();
 
         // SAFETY: Returned handle must be closed, which is done in its RAII wrapper.
         unsafe { OpenThreadToken(self.handle.raw(), desired_access, open_as_self, &mut handle) }?;
 
-        Token::try_with_handle(handle)
+        // SAFETY: We own the handle.
+        let handle = unsafe { Handle::new_owned(handle)? };
+
+        Ok(Token::from(handle))
     }
 }
 
@@ -159,7 +164,7 @@ impl ThreadAttributeType<'_> {
 
     pub fn value(&self) -> *const c_void {
         match self {
-            ThreadAttributeType::ParentProcess(p) => p.handle.as_raw_ref() as *const _ as *const c_void,
+            ThreadAttributeType::ParentProcess(p) => p.handle.raw_as_ref() as *const _ as *const c_void,
             ThreadAttributeType::ExtendedFlags(v) => &v as *const _ as *const c_void,
             ThreadAttributeType::HandleList(h) => h.as_ptr().cast(),
         }

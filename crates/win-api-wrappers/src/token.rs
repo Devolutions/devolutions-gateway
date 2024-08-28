@@ -51,18 +51,16 @@ pub struct Token {
     handle: Handle,
 }
 
-impl Token {
-    pub fn try_with_handle(handle: HANDLE) -> Result<Self> {
-        if handle.is_invalid() {
-            bail!(Error::from_hresult(E_HANDLE))
-        } else {
-            Ok(Self { handle: handle.into() })
-        }
+impl From<Handle> for Token {
+    fn from(handle: Handle) -> Self {
+        Self { handle }
     }
+}
 
+impl Token {
     pub fn current_process_token() -> Self {
         Self {
-            handle: Handle::new(HANDLE(-4isize as *mut c_void), false),
+            handle: Handle::new_borrowed(HANDLE(-4isize as *mut c_void)).expect("always valid"),
         }
     }
 
@@ -150,7 +148,7 @@ impl Token {
         impersonation_level: SECURITY_IMPERSONATION_LEVEL,
         token_type: TOKEN_TYPE,
     ) -> Result<Self> {
-        let mut handle = Default::default();
+        let mut handle = HANDLE::default();
 
         // SAFETY: Returned `handle` must be closed, which it is in its RAII wrapper.
         unsafe {
@@ -164,7 +162,10 @@ impl Token {
             )
         }?;
 
-        Self::try_with_handle(handle)
+        // SAFETY: We own the handle.
+        let handle = unsafe { Handle::new_owned(handle)? };
+
+        Ok(Self::from(handle))
     }
 
     pub fn duplicate_impersonation(&self) -> Result<Self> {
@@ -307,7 +308,10 @@ impl Token {
             )
         }?;
 
-        Token::try_with_handle(raw_token)
+        // SAFETY: We own the handle.
+        let handle = unsafe { Handle::new_owned(raw_token)? };
+
+        Ok(Token::from(handle))
     }
 
     pub fn statistics(&self) -> Result<TOKEN_STATISTICS> {

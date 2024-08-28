@@ -123,8 +123,8 @@ fn rai_launch_admin_process_handler(
     let proc_info =
         proc_info.map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error as _)))?;
 
-    let mut process = Process::try_get_by_pid(proc_info.process_id, PROCESS_ALL_ACCESS)?;
-    let mut thread = Thread::try_get_by_id(proc_info.thread_id, THREAD_ALL_ACCESS)?;
+    let mut process = Process::get_by_pid(proc_info.process_id, PROCESS_ALL_ACCESS)?;
+    let mut thread = Thread::get_by_id(proc_info.thread_id, THREAD_ALL_ACCESS)?;
 
     thread.resume()?;
 

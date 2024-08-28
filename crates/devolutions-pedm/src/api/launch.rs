@@ -105,7 +105,7 @@ pub(crate) async fn post_launch(
         .and_then(|x| x.parent_pid)
         .unwrap_or(named_pipe_info.pipe_process_id);
 
-    let process = Process::try_get_by_pid(parent_pid, PROCESS_QUERY_INFORMATION | PROCESS_CREATE_PROCESS)?;
+    let process = Process::get_by_pid(parent_pid, PROCESS_QUERY_INFORMATION | PROCESS_CREATE_PROCESS)?;
 
     let caller_sid = named_pipe_info.token.sid_and_attributes()?.sid;
 

@@ -93,7 +93,7 @@ pub fn find_token_with_privilege(privilege: LUID) -> Result<Option<Token>> {
     let snapshot = Snapshot::new(TH32CS_SNAPPROCESS, None)?;
 
     Ok(snapshot.process_ids().find_map(|pid| {
-        let proc = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION).ok()?;
+        let proc = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION).ok()?;
         let token = proc.token(TOKEN_ALL_ACCESS).ok()?;
 
         if token.privileges().ok()?.0.iter().any(|p| p.Luid == privilege) {
