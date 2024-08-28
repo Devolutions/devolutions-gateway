@@ -139,7 +139,7 @@ impl Process {
                 parameter,
                 0,
                 Some(&mut thread_id),
-            )?;
+            )?
         };
 
         // SAFETY: The handle is owned by us, we opened the ressource above.
@@ -168,10 +168,9 @@ impl Process {
     pub fn current_process() -> Self {
         // SAFETY: `GetCurrentProcess()` has no preconditions and always returns a valid handle.
         let handle = unsafe { GetCurrentProcess() };
+        let handle = Handle::new_borrowed(handle).expect("always valid");
 
-        Self {
-            handle: Handle::new_borrowed(handle),
-        }
+        Self { handle }
     }
 
     pub fn token(&self, desired_access: TOKEN_ACCESS_MASK) -> Result<Token> {

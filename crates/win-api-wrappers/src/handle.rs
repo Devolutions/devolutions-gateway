@@ -43,7 +43,7 @@ impl Handle {
             return Err(crate::Error::from_hresult(E_HANDLE));
         }
 
-        Self { raw: handle, owned }
+        Ok(Self { raw: handle, owned })
     }
 
     /// Wraps an owned Windows [`HANDLE`].

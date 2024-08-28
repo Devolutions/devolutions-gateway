@@ -31,9 +31,9 @@ impl From<Handle> for Thread {
 impl Thread {
     pub fn get_by_id(id: u32, desired_access: THREAD_ACCESS_RIGHTS) -> Result<Self> {
         // SAFETY: No preconditions.
-        let handle = unsafe { OpenThread(desired_access, false, id) }?;
+        let handle = unsafe { OpenThread(desired_access, false, id)? };
         // SAFETY: The handle is owned by us, we opened the ressource above.
-        let handle = unsafe { Handle::new_owned(handle) }?;
+        let handle = unsafe { Handle::new_owned(handle)? };
 
         Ok(Self::from(handle))
     }
@@ -41,7 +41,7 @@ impl Thread {
     pub fn current() -> Self {
         // SAFETY: No preconditions. Returns a pseudohandle, thus not owning it.
         let handle = unsafe { GetCurrentThread() };
-        let handle = Handle::new_borrowed(handle);
+        let handle = Handle::new_borrowed(handle).expect("always valid");
 
         Self::from(handle)
     }

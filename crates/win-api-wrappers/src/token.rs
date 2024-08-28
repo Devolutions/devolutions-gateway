@@ -138,7 +138,10 @@ impl Token {
             )?;
         }
 
-        Ok(Self { handle: handle.into() })
+        // SAFETY: We create the token, and thus own it.
+        let handle = unsafe { Handle::new_owned(handle)? };
+
+        Ok(Self::from(handle))
     }
 
     pub fn duplicate(
@@ -265,7 +268,11 @@ impl Token {
     }
 
     pub fn linked_token(&self) -> Result<Self> {
-        Self::try_with_handle(self.information_raw::<HANDLE>(windows::Win32::Security::TokenLinkedToken)?)
+        let handle = self.information_raw::<HANDLE>(windows::Win32::Security::TokenLinkedToken)?;
+        // SAFETY: We are responsible for closing the linked token.
+        let handle = unsafe { Handle::new_owned(handle)? };
+
+        Self::from(handle)
     }
 
     pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> Result<String> {
