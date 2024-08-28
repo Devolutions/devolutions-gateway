@@ -34,7 +34,7 @@ impl Handle {
     ///
     /// - `handle` is a valid handle to an open object.
     /// - `handle` is not a pseudohandle.
-    /// - The caller is actually responsible for freeing the `HANDLE` when the value goes out of scope.
+    /// - The caller is actually responsible for closing the `HANDLE` when the value goes out of scope.
     ///
     /// When `owned` is `false`: no outstanding precondition.
     pub unsafe fn new(handle: HANDLE, owned: bool) -> Result<Self, crate::Error> {
@@ -51,7 +51,7 @@ impl Handle {
     ///
     /// - `handle` is a valid handle to an open object.
     /// - `handle` is not a pseudohandle.
-    /// - The caller is actually responsible for freeing the `HANDLE` when the value goes out of scope.
+    /// - The caller is actually responsible for closing the `HANDLE` when the value goes out of scope.
     pub unsafe fn new_owned(handle: HANDLE) -> Result<Self, crate::Error> {
         // SAFETY: Same preconditions as the called function.
         unsafe { Self::new(handle, true) }
@@ -109,7 +109,7 @@ impl Drop for Handle {
     fn drop(&mut self) {
         if self.owned {
             // SAFETY: `self.raw` is a valid handle to an open object by construction.
-            //    It’s also safe to free it ourselves when `self.owned` is true per contract.
+            //    It’s also safe to close it ourselves when `self.owned` is true per contract.
             let _ = unsafe { CloseHandle(self.raw) };
         }
     }
