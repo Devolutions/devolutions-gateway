@@ -34,8 +34,9 @@ const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 
 // The JMUX channel will require at most `MAXIMUM_PACKET_SIZE_IN_BYTES × JMUX_MESSAGE_CHANNEL_SIZE` bytes to be kept alive.
-const JMUX_MESSAGE_MPSC_CHANNEL_SIZE: usize = 512;
-const CHANNEL_DATA_MPSC_CHANNEL_SIZE: usize = 256;
+const JMUX_MESSAGE_MPSC_CHANNEL_SIZE: usize = 1024;
+const CHANNEL_DATA_MPSC_CHANNEL_MAX_SIZE: usize = 1024;
+const CHANNEL_DATA_MPSC_CHANNEL_MIN_SIZE: usize = 32;
 const INTERNAL_MPSC_CHANNEL_SIZE: usize = 32;
 
 pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
@@ -351,9 +352,14 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
                     }
                     JmuxApiRequest::Start { id, stream, leftover } => {
+                        let channel_capacity = core::cmp::max(
+                            CHANNEL_DATA_MPSC_CHANNEL_MAX_SIZE / jmux_ctx.channels.len(),
+                            CHANNEL_DATA_MPSC_CHANNEL_MIN_SIZE
+                        );
+
                         let channel = jmux_ctx.get_channel(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
 
-                        let (data_tx, data_rx) = mpsc::channel::<Bytes>(CHANNEL_DATA_MPSC_CHANNEL_SIZE);
+                        let (data_tx, data_rx) = mpsc::channel::<Bytes>(channel_capacity);
 
                         if data_senders.insert(id, data_tx).is_some() {
                             anyhow::bail!("detected two streams with the same ID {}", id);
@@ -436,7 +442,13 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let window_size = Arc::clone(&channel.window_size);
                         let channel_span = channel.span.clone();
 
-                        let (data_tx, data_rx) = mpsc::channel::<Bytes>(CHANNEL_DATA_MPSC_CHANNEL_SIZE);
+                        let channel_capacity = core::cmp::max(
+                            // Add 1 because the channel is not yet inserted into `jmux_ctx.channels`.
+                            CHANNEL_DATA_MPSC_CHANNEL_MAX_SIZE / (jmux_ctx.channels.len() + 1),
+                            CHANNEL_DATA_MPSC_CHANNEL_MIN_SIZE
+                        );
+
+                        let (data_tx, data_rx) = mpsc::channel::<Bytes>(channel_capacity);
 
                         if data_senders.insert(channel.local_id, data_tx).is_some() {
                             anyhow::bail!("detected two streams with the same local ID {}", channel.local_id);
