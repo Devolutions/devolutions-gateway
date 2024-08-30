@@ -16,7 +16,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Mime;
 using Devolutions.Gateway.Client.Client;
-using Devolutions.Gateway.Client.Model;
 
 namespace Devolutions.Gateway.Client.Api
 {
@@ -24,70 +23,69 @@ namespace Devolutions.Gateway.Client.Api
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public interface IConfigApiSync : IApiAccessor
+    public interface IUpdateApiSync : IApiAccessor
     {
         #region Synchronous Operations
         /// <summary>
-        /// Modifies configuration
-        /// </summary>
-        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
-        /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns></returns>
-        void PatchConfig(ConfigPatch configPatch, int operationIndex = 0);
-
-        /// <summary>
-        /// Modifies configuration
+        /// Triggers Devolutions Gateway update process.
         /// </summary>
         /// <remarks>
-        /// 
+        /// This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns>ApiResponse of Object(void)</returns>
-        ApiResponse<Object> PatchConfigWithHttpInfo(ConfigPatch configPatch, int operationIndex = 0);
+        /// <returns>Object</returns>
+        Object Update(int operationIndex = 0);
+
+        /// <summary>
+        /// Triggers Devolutions Gateway update process.
+        /// </summary>
+        /// <remarks>
+        /// This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="operationIndex">Index associated with the operation.</param>
+        /// <returns>ApiResponse of Object</returns>
+        ApiResponse<Object> UpdateWithHttpInfo(int operationIndex = 0);
         #endregion Synchronous Operations
     }
 
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public interface IConfigApiAsync : IApiAccessor
+    public interface IUpdateApiAsync : IApiAccessor
     {
         #region Asynchronous Operations
         /// <summary>
-        /// Modifies configuration
+        /// Triggers Devolutions Gateway update process.
         /// </summary>
         /// <remarks>
-        /// 
+        /// This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch configPatch, int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of Object</returns>
+        System.Threading.Tasks.Task<Object> UpdateAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
-        /// Modifies configuration
+        /// Triggers Devolutions Gateway update process.
         /// </summary>
         /// <remarks>
-        /// 
+        /// This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> PatchConfigWithHttpInfoAsync(ConfigPatch configPatch, int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of ApiResponse (Object)</returns>
+        System.Threading.Tasks.Task<ApiResponse<Object>> UpdateWithHttpInfoAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public interface IConfigApi : IConfigApiSync, IConfigApiAsync
+    public interface IUpdateApi : IUpdateApiSync, IUpdateApiAsync
     {
 
     }
@@ -95,23 +93,23 @@ namespace Devolutions.Gateway.Client.Api
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public partial class ConfigApi : IConfigApi
+    public partial class UpdateApi : IUpdateApi
     {
         private Devolutions.Gateway.Client.Client.ExceptionFactory _exceptionFactory = (name, response) => null;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ConfigApi"/> class.
+        /// Initializes a new instance of the <see cref="UpdateApi"/> class.
         /// </summary>
         /// <returns></returns>
-        public ConfigApi() : this((string)null)
+        public UpdateApi() : this((string)null)
         {
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ConfigApi"/> class.
+        /// Initializes a new instance of the <see cref="UpdateApi"/> class.
         /// </summary>
         /// <returns></returns>
-        public ConfigApi(string basePath)
+        public UpdateApi(string basePath)
         {
             this.Configuration = Devolutions.Gateway.Client.Client.Configuration.MergeConfigurations(
                 Devolutions.Gateway.Client.Client.GlobalConfiguration.Instance,
@@ -123,12 +121,12 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ConfigApi"/> class
+        /// Initializes a new instance of the <see cref="UpdateApi"/> class
         /// using Configuration object
         /// </summary>
         /// <param name="configuration">An instance of Configuration</param>
         /// <returns></returns>
-        public ConfigApi(Devolutions.Gateway.Client.Client.Configuration configuration)
+        public UpdateApi(Devolutions.Gateway.Client.Client.Configuration configuration)
         {
             if (configuration == null) throw new ArgumentNullException("configuration");
 
@@ -142,13 +140,13 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ConfigApi"/> class
+        /// Initializes a new instance of the <see cref="UpdateApi"/> class
         /// using a Configuration object and client instance.
         /// </summary>
         /// <param name="client">The client interface for synchronous API access.</param>
         /// <param name="asyncClient">The client interface for asynchronous API access.</param>
         /// <param name="configuration">The configuration object.</param>
-        public ConfigApi(Devolutions.Gateway.Client.Client.ISynchronousClient client, Devolutions.Gateway.Client.Client.IAsynchronousClient asyncClient, Devolutions.Gateway.Client.Client.IReadableConfiguration configuration)
+        public UpdateApi(Devolutions.Gateway.Client.Client.ISynchronousClient client, Devolutions.Gateway.Client.Client.IAsynchronousClient asyncClient, Devolutions.Gateway.Client.Client.IReadableConfiguration configuration)
         {
             if (client == null) throw new ArgumentNullException("client");
             if (asyncClient == null) throw new ArgumentNullException("asyncClient");
@@ -202,40 +200,33 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Modifies configuration 
+        /// Triggers Devolutions Gateway update process. This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns></returns>
-        public void PatchConfig(ConfigPatch configPatch, int operationIndex = 0)
+        /// <returns>Object</returns>
+        public Object Update(int operationIndex = 0)
         {
-            PatchConfigWithHttpInfo(configPatch);
+            Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = UpdateWithHttpInfo();
+            return localVarResponse.Data;
         }
 
         /// <summary>
-        /// Modifies configuration 
+        /// Triggers Devolutions Gateway update process. This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns>ApiResponse of Object(void)</returns>
-        public Devolutions.Gateway.Client.Client.ApiResponse<Object> PatchConfigWithHttpInfo(ConfigPatch configPatch, int operationIndex = 0)
+        /// <returns>ApiResponse of Object</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<Object> UpdateWithHttpInfo(int operationIndex = 0)
         {
-            // verify the required parameter 'configPatch' is set
-            if (configPatch == null)
-            {
-                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'configPatch' when calling ConfigApi->PatchConfig");
-            }
-
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
 
             string[] _contentTypes = new string[] {
-                "application/json"
             };
 
             // to determine the Accept header
             string[] _accepts = new string[] {
+                "application/json"
             };
 
             var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
@@ -250,9 +241,8 @@ namespace Devolutions.Gateway.Client.Api
                 localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
             }
 
-            localVarRequestOptions.Data = configPatch;
 
-            localVarRequestOptions.Operation = "ConfigApi.PatchConfig";
+            localVarRequestOptions.Operation = "UpdateApi.Update";
             localVarRequestOptions.OperationIndex = operationIndex;
 
             // authentication (scope_token) required
@@ -263,10 +253,10 @@ namespace Devolutions.Gateway.Client.Api
             }
 
             // make the HTTP request
-            var localVarResponse = this.Client.Patch<Object>("/jet/config", localVarRequestOptions, this.Configuration);
+            var localVarResponse = this.Client.Post<Object>("/jet/update", localVarRequestOptions, this.Configuration);
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("PatchConfig", localVarResponse);
+                Exception _exception = this.ExceptionFactory("Update", localVarResponse);
                 if (_exception != null)
                 {
                     throw _exception;
@@ -277,43 +267,36 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Modifies configuration 
+        /// Triggers Devolutions Gateway update process. This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch configPatch, int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of Object</returns>
+        public async System.Threading.Tasks.Task<Object> UpdateAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            await PatchConfigWithHttpInfoAsync(configPatch, operationIndex, cancellationToken).ConfigureAwait(false);
+            Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = await UpdateWithHttpInfoAsync(operationIndex, cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
         }
 
         /// <summary>
-        /// Modifies configuration 
+        /// Triggers Devolutions Gateway update process. This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="configPatch">JSON-encoded configuration patch</param>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> PatchConfigWithHttpInfoAsync(ConfigPatch configPatch, int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of ApiResponse (Object)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> UpdateWithHttpInfoAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            // verify the required parameter 'configPatch' is set
-            if (configPatch == null)
-            {
-                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'configPatch' when calling ConfigApi->PatchConfig");
-            }
-
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
 
             string[] _contentTypes = new string[] {
-                "application/json"
             };
 
             // to determine the Accept header
             string[] _accepts = new string[] {
+                "application/json"
             };
 
             var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
@@ -328,9 +311,8 @@ namespace Devolutions.Gateway.Client.Api
                 localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
             }
 
-            localVarRequestOptions.Data = configPatch;
 
-            localVarRequestOptions.Operation = "ConfigApi.PatchConfig";
+            localVarRequestOptions.Operation = "UpdateApi.Update";
             localVarRequestOptions.OperationIndex = operationIndex;
 
             // authentication (scope_token) required
@@ -341,11 +323,11 @@ namespace Devolutions.Gateway.Client.Api
             }
 
             // make the HTTP request
-            var localVarResponse = await this.AsynchronousClient.PatchAsync<Object>("/jet/config", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+            var localVarResponse = await this.AsynchronousClient.PostAsync<Object>("/jet/update", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
 
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("PatchConfig", localVarResponse);
+                Exception _exception = this.ExceptionFactory("Update", localVarResponse);
                 if (_exception != null)
                 {
                     throw _exception;

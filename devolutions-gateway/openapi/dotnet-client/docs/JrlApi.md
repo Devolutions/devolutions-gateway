@@ -13,8 +13,6 @@ All URIs are relative to *http://localhost*
 
 Retrieves current JRL (Json Revocation List) info
 
-Retrieves current JRL (Json Revocation List) info
-
 ### Example
 ```csharp
 using System.Collections.Generic;
@@ -103,8 +101,6 @@ This endpoint does not need any parameter.
 <a id="updatejrl"></a>
 # **UpdateJrl**
 > void UpdateJrl ()
-
-Updates JRL (Json Revocation List) using a JRL token
 
 Updates JRL (Json Revocation List) using a JRL token
 

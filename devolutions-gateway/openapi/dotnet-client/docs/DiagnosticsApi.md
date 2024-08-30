@@ -14,7 +14,7 @@ All URIs are relative to *http://localhost*
 
 Retrieves server's clock in order to diagnose clock drifting.
 
-Retrieves server's clock in order to diagnose clock drifting.  This route is not secured by access token. Indeed, this route is used to retrieve server's clock when diagnosing clock drifting. If there is clock drift, token validation will fail because claims such as `nbf` will then be invalid, and thus prevent the clock drift diagnosis.
+This route is not secured by access token. Indeed, this route is used to retrieve server's clock when diagnosing clock drifting. If there is clock drift, token validation will fail because claims such as `nbf` will then be invalid, and thus prevent the clock drift diagnosis.
 
 ### Example
 ```csharp
@@ -100,7 +100,7 @@ No authorization required
 
 Retrieves a subset of the configuration, for diagnosis purposes.
 
-Retrieves a subset of the configuration, for diagnosis purposes.  This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch, outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to provide configuration auto-filling, in order to assist the end user.  It must be noted that this route will never return the whole configuration file as-is, for security reasons. For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
+This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch, outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to provide configuration auto-filling, in order to assist the end user.  It must be noted that this route will never return the whole configuration file as-is, for security reasons. For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
 
 ### Example
 ```csharp
@@ -189,8 +189,6 @@ This endpoint does not need any parameter.
 <a id="getlogs"></a>
 # **GetLogs**
 > string GetLogs ()
-
-Retrieves latest logs.
 
 Retrieves latest logs.
 

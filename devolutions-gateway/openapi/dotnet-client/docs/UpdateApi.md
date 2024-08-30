@@ -1,16 +1,18 @@
-# Devolutions.Gateway.Client.Api.ConfigApi
+# Devolutions.Gateway.Client.Api.UpdateApi
 
 All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
-| [**PatchConfig**](ConfigApi.md#patchconfig) | **PATCH** /jet/config | Modifies configuration |
+| [**Update**](UpdateApi.md#update) | **POST** /jet/update | Triggers Devolutions Gateway update process. |
 
-<a id="patchconfig"></a>
-# **PatchConfig**
-> void PatchConfig (ConfigPatch configPatch)
+<a id="update"></a>
+# **Update**
+> Object Update ()
 
-Modifies configuration
+Triggers Devolutions Gateway update process.
+
+This is done via updating `Agent/update.json` file, which is then read by Devolutions Agent when changes are detected. If the version written to `update.json` is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
 
 ### Example
 ```csharp
@@ -22,7 +24,7 @@ using Devolutions.Gateway.Client.Model;
 
 namespace Example
 {
-    public class PatchConfigExample
+    public class UpdateExample
     {
         public static void Main()
         {
@@ -31,17 +33,17 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new ConfigApi(config);
-            var configPatch = new ConfigPatch(); // ConfigPatch | JSON-encoded configuration patch
+            var apiInstance = new UpdateApi(config);
 
             try
             {
-                // Modifies configuration
-                apiInstance.PatchConfig(configPatch);
+                // Triggers Devolutions Gateway update process.
+                Object result = apiInstance.Update();
+                Debug.WriteLine(result);
             }
             catch (ApiException  e)
             {
-                Debug.Print("Exception when calling ConfigApi.PatchConfig: " + e.Message);
+                Debug.Print("Exception when calling UpdateApi.Update: " + e.Message);
                 Debug.Print("Status Code: " + e.ErrorCode);
                 Debug.Print(e.StackTrace);
             }
@@ -50,32 +52,31 @@ namespace Example
 }
 ```
 
-#### Using the PatchConfigWithHttpInfo variant
+#### Using the UpdateWithHttpInfo variant
 This returns an ApiResponse object which contains the response data, status code and headers.
 
 ```csharp
 try
 {
-    // Modifies configuration
-    apiInstance.PatchConfigWithHttpInfo(configPatch);
+    // Triggers Devolutions Gateway update process.
+    ApiResponse<Object> response = apiInstance.UpdateWithHttpInfo();
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
 }
 catch (ApiException e)
 {
-    Debug.Print("Exception when calling ConfigApi.PatchConfigWithHttpInfo: " + e.Message);
+    Debug.Print("Exception when calling UpdateApi.UpdateWithHttpInfo: " + e.Message);
     Debug.Print("Status Code: " + e.ErrorCode);
     Debug.Print(e.StackTrace);
 }
 ```
 
 ### Parameters
-
-| Name | Type | Description | Notes |
-|------|------|-------------|-------|
-| **configPatch** | [**ConfigPatch**](ConfigPatch.md) | JSON-encoded configuration patch |  |
-
+This endpoint does not need any parameter.
 ### Return type
 
-void (empty response body)
+**Object**
 
 ### Authorization
 
@@ -83,18 +84,19 @@ void (empty response body)
 
 ### HTTP request headers
 
- - **Content-Type**: application/json
- - **Accept**: Not defined
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
 
 
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | Configuration has been patched with success |  -  |
-| **400** | Bad patch request |  -  |
+| **200** | Update request has been processed successfully |  -  |
+| **400** | Bad request |  -  |
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
-| **500** | Failed to patch configuration |  -  |
+| **500** | Agent updater service is malfunctioning |  -  |
+| **503** | Agent updater service is unavailable |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

@@ -13,8 +13,6 @@ All URIs are relative to *http://localhost*
 
 Requests a web application token using the configured authorization method
 
-Requests a web application token using the configured authorization method
-
 ### Example
 ```csharp
 using System.Collections.Generic;
@@ -109,8 +107,6 @@ catch (ApiException e)
 <a id="signsessiontoken"></a>
 # **SignSessionToken**
 > string SignSessionToken (SessionTokenSignRequest sessionTokenSignRequest)
-
-Requests a session token using a web application token
 
 Requests a session token using a web application token
 

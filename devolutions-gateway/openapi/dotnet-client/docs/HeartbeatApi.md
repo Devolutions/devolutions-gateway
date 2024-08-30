@@ -12,8 +12,6 @@ All URIs are relative to *http://localhost*
 
 Performs a heartbeat check
 
-Performs a heartbeat check
-
 ### Example
 ```csharp
 using System.Collections.Generic;
