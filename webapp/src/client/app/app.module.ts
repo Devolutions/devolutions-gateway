@@ -1,10 +1,10 @@
 import { APP_BASE_HREF } from '@angular/common';
-import { HTTP_INTERCEPTORS, HttpClientModule } from '@angular/common/http';
+import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BrowserModule } from '@angular/platform-browser';
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations'; // Import BrowserAnimationsModule
-import { RouterModule } from '@angular/router';
+import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
+import {ExtraOptions, RouterModule} from '@angular/router';
 
 import { MenuListActiveSessionsComponent } from '@gateway/modules/base/menu/menu-list-active-sessions/menu-list-active-sessions.component';
 import { LoginComponent } from '@gateway/modules/login/login.component';
@@ -32,45 +32,43 @@ import { TabView, TabViewModule } from 'primeng/tabview';
 import { ToastModule } from 'primeng/toast';
 // Other
 import { routes } from './app.routes';
-import { SshKeyService } from './shared/services/ssh-key.service';
+import { SshKeyService } from '@shared/services/ssh-key.service';
 
-@NgModule({
-  declarations: [
-    AppComponent,
-    LoginComponent,
-    MainAppComponent,
-    AppMenuComponent,
-    AppHeaderComponent,
-    MenuListItemComponent,
-    MenuListActiveSessionsComponent,
-    MenuGroupListItemComponent,
-    GatewayAlertMessageComponent,
-  ],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  imports: [
-    FormsModule,
-    BrowserModule,
-    BrowserAnimationsModule,
-    RouterModule.forRoot(routes),
-    HttpClientModule,
-    SharedModule,
-    SidebarModule,
-    ToastModule,
-    TabViewModule,
-    AutoCompleteModule,
-  ],
-  providers: [
-    { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
-    { provide: APP_BASE_HREF, useValue: '/jet/webapp/client/' },
-    MainMenuService,
-    GatewayAlertMessageService,
-    LoadingService,
-    WebSessionService,
-    WebClientService,
-    SshKeyService,
-    TabView,
-  ],
-  exports: [],
-  bootstrap: [AppComponent],
-})
+const routerOptions: ExtraOptions = {
+  paramsInheritanceStrategy: 'always',
+};
+
+@NgModule({ declarations: [
+        AppComponent,
+        LoginComponent,
+        MainAppComponent,
+        AppMenuComponent,
+        AppHeaderComponent,
+        MenuListItemComponent,
+        MenuListActiveSessionsComponent,
+        MenuGroupListItemComponent,
+        GatewayAlertMessageComponent,
+    ],
+    schemas: [CUSTOM_ELEMENTS_SCHEMA],
+    exports: [],
+    bootstrap: [AppComponent], imports: [FormsModule,
+        BrowserModule,
+        BrowserAnimationsModule,
+        RouterModule.forRoot(routes, routerOptions),
+        SharedModule,
+        SidebarModule,
+        ToastModule,
+        TabViewModule,
+        AutoCompleteModule], providers: [
+        { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
+        { provide: APP_BASE_HREF, useValue: '/jet/webapp/client/' },
+        MainMenuService,
+        GatewayAlertMessageService,
+        LoadingService,
+        WebSessionService,
+        WebClientService,
+        SshKeyService,
+        TabView,
+        provideHttpClient(withInterceptorsFromDi()),
+    ] })
 export class AppModule {}

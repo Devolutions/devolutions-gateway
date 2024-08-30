@@ -13,6 +13,7 @@ import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
 import { WebSession } from '@shared/models/web-session.model';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
+import {DVL_WARNING_ICON, ProtocolIconMap} from "@gateway/app.constants";
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024
@@ -21,6 +22,7 @@ export const SESSIONS_MENU_OFFSET: number = 1;
 export interface ExtraSessionParameter {
   sshPrivateKey?: string;
 }
+
 
 @Injectable({
   providedIn: 'root',
@@ -125,14 +127,14 @@ export class WebSessionService {
 
     if (index !== -1) {
       webSession.icon = icon;
-      if (icon === WebClientRdpComponent.DVL_WARNING_ICON) {
+      if (icon === DVL_WARNING_ICON) {
         webSession.iconTooltip = 'Connection has been terminated.';
       }
 
       currentSessions[index] = webSession;
       this.webSessionDataSubject.next(currentSessions);
     } else {
-      console.error('Web Session not found.');
+      console.warn('Web Session not found.');
     }
   }
 
@@ -261,19 +263,3 @@ export class WebSessionService {
     return autoCompleteInput?.hostname || '';
   }
 }
-
-export const ProtocolIconMap = {
-  [Protocol.RDP]: WebClientRdpComponent.DVL_RDP_ICON,
-  [Protocol.Telnet]: WebClientTelnetComponent.DVL_TELNET_ICON,
-  [Protocol.SSH]: WebClientSshComponent.DVL_SSH_ICON,
-  [Protocol.VNC]: WebClientVncComponent.DVL_VNC_ICON,
-  [Protocol.ARD]: WebClientArdComponent.DVL_ARD_ICON,
-};
-
-export const ProtocolNameToProtocolMap = {
-  vnc: Protocol.VNC,
-  ssh: Protocol.SSH,
-  telnet: Protocol.Telnet,
-  rdp: Protocol.RDP,
-  ard: Protocol.ARD,
-};

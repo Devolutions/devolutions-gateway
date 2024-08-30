@@ -31,6 +31,7 @@ import {
 } from '@devolutions/web-telnet-gui';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import {DVL_TELNET_ICON, DVL_WARNING_ICON, JET_TELNET_URL} from "@gateway/app.constants";
 
 @Component({
   templateUrl: 'web-client-telnet.component.html',
@@ -44,10 +45,6 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
   @ViewChild('sessionTelnetContainer') sessionContainerElement: ElementRef;
   @ViewChild('webTelnetGuiTerminal') webGuiTerminal: ElementRef;
-
-  static DVL_TELNET_ICON = 'dvl-icon-entry-session-telnet';
-  static DVL_WARNING_ICON = 'dvl-icon-warning';
-  static JET_TELNET_URL = '/jet/fwd/tcp';
 
   currentStatus: ComponentStatus;
   inputFormData: TelnetFormDataInput;
@@ -204,7 +201,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultTelnetPort);
     const gatewayHttpAddress: URL = new URL(
-      WebClientTelnetComponent.JET_TELNET_URL + `/${sessionId}`,
+      JET_TELNET_URL + `/${sessionId}`,
       window.location.href,
     );
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
@@ -266,10 +263,10 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
     const icon: string =
       status !== TerminalConnectionStatus.connected
-        ? WebClientTelnetComponent.DVL_WARNING_ICON
-        : WebClientTelnetComponent.DVL_TELNET_ICON;
+        ? DVL_WARNING_ICON
+        : DVL_TELNET_ICON;
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
   private handleSubscriptionError(error: any): void {
@@ -278,7 +275,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
   private handleClientConnectStarted(): void {
     this.loading = false;
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientTelnetComponent.DVL_TELNET_ICON);
+   void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_TELNET_ICON);
   }
 
   private handleTelnetError(error: string): void {
@@ -286,7 +283,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     console.error(error);
     this.disableComponentStatus();
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientTelnetComponent.DVL_WARNING_ICON);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
   private getMessage(status: TerminalConnectionStatus): string {

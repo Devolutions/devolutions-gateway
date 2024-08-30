@@ -8,7 +8,7 @@ import {
   Output,
   SimpleChanges,
 } from '@angular/core';
-import { AbstractControl, FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
+import { AbstractControl, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Message } from 'primeng/api';
 import { EMPTY, Observable, forkJoin, of } from 'rxjs';
 import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
@@ -115,20 +115,21 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
 
     protocolControl.valueChanges
       .pipe(startWith(protocolControl.value as Protocol), takeUntil(this.destroyed$))
-      .subscribe(
-        (protocol) => {
+      .subscribe({
+        next: (protocol) => {
           const exceptions: string[] = ['protocol', 'autoComplete', 'hostname', 'authMode'];
           Object.keys(this.connectSessionForm.controls).forEach((key) => {
             if (!exceptions.includes(key)) {
-              this.connectSessionForm.get(key).disable();
+              this.connectSessionForm.get(key)?.disable();
             }
           });
 
           this.updateProtocolTooltip(protocol);
           this.formService.detectFormChanges(this.cdr);
         },
-        (error) => console.error('Error subscribing to protocol changes:', error),
-      );
+        error: (error) => console.error('Error subscribing to protocol changes:', error)
+      });
+
   }
 
   private initializeFormAndOptions(): void {

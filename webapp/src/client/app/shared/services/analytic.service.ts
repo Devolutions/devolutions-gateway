@@ -1,5 +1,4 @@
 import { Injectable, isDevMode } from '@angular/core';
-import { from } from 'rxjs';
 import { environment } from 'src/environments/environment';
 import { v4 as uuidv4 } from 'uuid';
 import { Protocol } from '../enums/web-client-protocol.enum';

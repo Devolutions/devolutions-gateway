@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { MessageService } from 'primeng/api';
 import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
@@ -31,6 +31,7 @@ import {
 } from '@devolutions/web-ssh-gui';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import {DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL} from "@gateway/app.constants";
 
 @Component({
   templateUrl: 'web-client-ssh.component.html',
@@ -43,10 +44,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   @ViewChild('sessionSshContainer') sessionContainerElement: ElementRef;
-  @ViewChild('web-ssh-gui') webGuiTerminal: ElementRef;
-
-  static DVL_SSH_ICON = 'dvl-icon-entry-session-ssh';
-  static JET_SSH_URL = '/jet/fwd/tcp';
+  @ViewChild('webSSHGuiTerminal') webGuiTerminal: ElementRef;
 
   currentStatus: ComponentStatus;
   inputFormData: SSHFormDataInput;
@@ -103,7 +101,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       return;
     }
     this.currentStatus.isInitialized = false;
-    this.remoteTerminal.close();
+    void this.remoteTerminal.close();
   }
 
   removeWebClientGuiElement(): void {
@@ -205,7 +203,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
-    const gatewayHttpAddress: URL = new URL(WebClientSshComponent.JET_SSH_URL + `/${sessionId}`, window.location.href);
+    const gatewayHttpAddress: URL = new URL(JET_SSH_URL + `/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
     const privateKeyPassphrase: string = formData.passphrase || null;
@@ -268,10 +266,10 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
     const icon: string =
       status !== TerminalConnectionStatus.connected
-        ? WebClientSshComponent.DVL_WARNING_ICON
-        : WebClientSshComponent.DVL_SSH_ICON;
+        ? DVL_WARNING_ICON
+        : DVL_SSH_ICON;
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
   private handleSubscriptionError(error: any): void {
@@ -280,7 +278,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
   private handleClientConnectStarted(): void {
     this.loading = false;
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientSshComponent.DVL_SSH_ICON);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_SSH_ICON);
     super.webClientConnectionSuccess();
   }
 
@@ -289,7 +287,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     console.error(error);
     this.disableComponentStatus();
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientSshComponent.DVL_WARNING_ICON);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
   private getMessage(status: TerminalConnectionStatus): string {

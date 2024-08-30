@@ -14,19 +14,7 @@
        class="session-toolbar">
 
     <div class="session-toolbar-left-group">
-      <p-button
-        (onClick)="sendWindowsKey()"
-        label="Start"
-        icon="dvl-icon dvl-icon-windows"
-        iconPos="left"></p-button>
 
-      <div class="separator"></div>
-
-      <p-button
-        (onClick)="sendCtrlAltDel()"
-        label="Ctrl+Alt+Del"
-        icon="dvl-icon dvl-icon-admin"
-        iconPos="left"></p-button>
     </div>
 
     <div class="session-toolbar-middle-group">
@@ -67,6 +55,6 @@
     </div>
   </div>
 
-  <iron-remote-gui-vnc #ironGuiElementVnc scale="fit" flexcenter="true"></iron-remote-gui-vnc>
+  <iron-remote-gui-vnc #ironGuiElementVnc targetplatform="web" verbose="true" scale="fit"></iron-remote-gui-vnc>
 
 </div>
