@@ -13,8 +13,6 @@ All URIs are relative to *http://localhost*
 
 Lists running sessions
 
-Lists running sessions
-
 ### Example
 ```csharp
 using System.Collections.Generic;
@@ -103,8 +101,6 @@ This endpoint does not need any parameter.
 <a id="terminatesession"></a>
 # **TerminateSession**
 > void TerminateSession (Guid id)
-
-Terminate forcefully a running session
 
 Terminate forcefully a running session
 

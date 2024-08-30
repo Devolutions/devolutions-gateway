@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2024.1.5
+2024.3.2
 :toc: left
 :numbered:
 :toclevels: 4
@@ -70,7 +70,7 @@ Modifies configuration
 
 ===== Description
 
-Modifies configuration
+
 
 
 // markup not found, no include::{specDir}jet/config/PATCH/spec.adoc[opts=optional]
@@ -173,7 +173,7 @@ Retrieves server's clock in order to diagnose clock drifting.
 
 ===== Description
 
-Retrieves server's clock in order to diagnose clock drifting.  This route is not secured by access token. Indeed, this route is used to retrieve server's clock when diagnosing clock drifting. If there is clock drift, token validation will fail because claims such as `nbf` will then be invalid, and thus prevent the clock drift diagnosis.
+This route is not secured by access token. Indeed, this route is used to retrieve server's clock when diagnosing clock drifting. If there is clock drift, token validation will fail because claims such as `nbf` will then be invalid, and thus prevent the clock drift diagnosis.
 
 
 // markup not found, no include::{specDir}jet/diagnostics/clock/GET/spec.adoc[opts=optional]
@@ -227,7 +227,7 @@ Retrieves a subset of the configuration, for diagnosis purposes.
 
 ===== Description
 
-Retrieves a subset of the configuration, for diagnosis purposes.  This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch, outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to provide configuration auto-filling, in order to assist the end user.  It must be noted that this route will never return the whole configuration file as-is, for security reasons. For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
+This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch, outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to provide configuration auto-filling, in order to assist the end user.  It must be noted that this route will never return the whole configuration file as-is, for security reasons. For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
 
 
 // markup not found, no include::{specDir}jet/diagnostics/configuration/GET/spec.adoc[opts=optional]
@@ -303,7 +303,7 @@ Retrieves latest logs.
 
 ===== Description
 
-Retrieves latest logs.
+
 
 
 // markup not found, no include::{specDir}jet/diagnostics/logs/GET/spec.adoc[opts=optional]
@@ -389,7 +389,7 @@ Performs a health check
 
 ===== Description
 
-Performs a health check
+
 
 
 // markup not found, no include::{specDir}jet/health/GET/spec.adoc[opts=optional]
@@ -452,7 +452,7 @@ Performs a heartbeat check
 
 ===== Description
 
-Performs a heartbeat check
+
 
 
 // markup not found, no include::{specDir}jet/heartbeat/GET/spec.adoc[opts=optional]
@@ -532,7 +532,7 @@ Lists all recordings stored on this instance
 
 ===== Description
 
-Lists all recordings stored on this instance
+
 
 
 // markup not found, no include::{specDir}jet/jrec/list/GET/spec.adoc[opts=optional]
@@ -609,7 +609,7 @@ Retrieves a recording file for a given session
 
 ===== Description
 
-Retrieves a recording file for a given session
+
 
 
 // markup not found, no include::{specDir}jet/jrec/pull/\{id\}/\{filename\}/GET/spec.adoc[opts=optional]
@@ -721,7 +721,7 @@ Retrieves current JRL (Json Revocation List) info
 
 ===== Description
 
-Retrieves current JRL (Json Revocation List) info
+
 
 
 // markup not found, no include::{specDir}jet/jrl/info/GET/spec.adoc[opts=optional]
@@ -802,7 +802,7 @@ Updates JRL (Json Revocation List) using a JRL token
 
 ===== Description
 
-Updates JRL (Json Revocation List) using a JRL token
+
 
 
 // markup not found, no include::{specDir}jet/jrl/POST/spec.adoc[opts=optional]
@@ -885,7 +885,7 @@ Lists running sessions
 
 ===== Description
 
-Lists running sessions
+
 
 
 // markup not found, no include::{specDir}jet/sessions/GET/spec.adoc[opts=optional]
@@ -966,7 +966,7 @@ Terminate forcefully a running session
 
 ===== Description
 
-Terminate forcefully a running session
+
 
 
 // markup not found, no include::{specDir}jet/session/\{id\}/terminate/POST/spec.adoc[opts=optional]
@@ -1061,6 +1061,97 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Update]
+=== Update
+
+
+[.update]
+==== update
+
+`POST /jet/update`
+
+Triggers Devolutions Gateway update process.
+
+===== Description
+
+This is done via updating `Agent/update.json` file, which is then read by Devolutions Agent when changes are detected. If the version written to `update.json` is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
+
+
+// markup not found, no include::{specDir}jet/update/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+
+===== Return Type
+
+
+<<Object>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Update request has been processed successfully
+|  <<Object>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Agent updater service is malfunctioning
+|  <<>>
+
+
+| 503
+| Agent updater service is unavailable
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/update/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.WebApp]
 === WebApp
 
@@ -1074,7 +1165,7 @@ Requests a web application token using the configured authorization method
 
 ===== Description
 
-Requests a web application token using the configured authorization method
+
 
 
 // markup not found, no include::{specDir}jet/webapp/app-token/POST/spec.adoc[opts=optional]
@@ -1176,7 +1267,7 @@ Requests a session token using a web application token
 
 ===== Description
 
-Requests a session token using a web application token
+
 
 
 // markup not found, no include::{specDir}jet/webapp/session-token/POST/spec.adoc[opts=optional]
@@ -1296,6 +1387,7 @@ endif::internal-generation[]
 | gateway.heartbeat.read
 | gateway.recording.delete
 | gateway.recordings.read
+| gateway.update
 
 |===
 
@@ -1675,7 +1767,7 @@ Service configuration diagnostic
 | Enum Values
 
 | Spki
-| Rsa
+| Pkcs1
 
 |===
 
@@ -1858,7 +1950,7 @@ Information about an ongoing Gateway session
 | X
 |  <<PubKeyFormat>>  
 | 
-|    Spki, Rsa,  
+|    Spki, Pkcs1,  
 
 | Id
 | X
