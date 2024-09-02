@@ -30,7 +30,7 @@ devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["po
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 camino = { version = "1.1" }
-async-trait = "0.1.80"
+async-trait = "0.1.82"
 tracing = "0.1.40"
 walkdir = "2.5.0"
 aide = { version = "0.13.4", features = ["axum", "axum-extra"] }
