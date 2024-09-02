@@ -3,14 +3,15 @@ resolver = "2"
 members = [
     "crates/*",
     "devolutions-agent",
-    "devolutions-gateway", "devolutions-host",
+    "devolutions-gateway",
+    "devolutions-host",
     "jetsocat",
     "tools/generate-openapi",
 ]
 default-members = [
     "devolutions-agent",
     "devolutions-gateway",
-    "devolutions-agent",
+    "devolutions-host",
     "jetsocat",
 ]
 

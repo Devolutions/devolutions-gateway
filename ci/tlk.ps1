@@ -345,7 +345,7 @@ class TlkRecipe
                 if ($this.Target.IsWindows()) {
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-shell-ext", "crates/devolutions-pedm-shell-ext", $true)
-                    $agentPackages += [TlkPackage]::new("devolutions-host", "crates/devolutions-host", $false)
+                    $agentPackages += [TlkPackage]::new("devolutions-host", "devolutions-host", $false)
                 }
 
                 $agentPackages

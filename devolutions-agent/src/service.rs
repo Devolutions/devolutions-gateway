@@ -24,7 +24,7 @@ struct TasksCtx {
     /// Spawned service tasks
     tasks: Tasks,
     /// Sender side of the service event channel (Used for session manager module)
-    service_event_tx: Option<mpsc::UnboundedSender<AgentServiceEvent>>,
+    service_event_tx: Option<mpsc::Sender<AgentServiceEvent>>,
 }
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
@@ -40,7 +40,7 @@ pub struct AgentService {
     conf_handle: ConfHandle,
     state: AgentState,
     _logger_guard: LoggerGuard,
-    service_event_tx: Option<mpsc::UnboundedSender<AgentServiceEvent>>,
+    service_event_tx: Option<mpsc::Sender<AgentServiceEvent>>,
 }
 
 impl AgentService {
@@ -165,7 +165,7 @@ impl AgentService {
         }
     }
 
-    pub fn service_event_tx(&self) -> Option<mpsc::UnboundedSender<AgentServiceEvent>> {
+    pub fn service_event_tx(&self) -> Option<mpsc::Sender<AgentServiceEvent>> {
         self.service_event_tx.clone()
     }
 }

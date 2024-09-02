@@ -41,8 +41,8 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterErr
         info!("MSI installation log: {log_path}");
 
         // Schedule log file for deletion on reboot
-        if let Err(err) = remove_file_on_reboot(&log_path) {
-            error!(%err, "Failed to schedule log file for deletion on reboot");
+        if let Err(error) = remove_file_on_reboot(&log_path) {
+            error!(%error, "Failed to schedule log file for deletion on reboot");
         }
     }
 

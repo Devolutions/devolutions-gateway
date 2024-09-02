@@ -156,11 +156,11 @@ impl<'a> ScopedPrivileges<'a> {
 
 impl Drop for ScopedPrivileges<'_> {
     fn drop(&mut self) {
-        if let Err(err) = self
+        if let Err(error) = self
             .token
             .adjust_privileges(&TokenPrivilegesAdjustment::Disable(self.token_privileges.clone()))
         {
-            error!(%err, "Failed to disable ScopedPrivileges({})", self.description);
+            error!(%error, "Failed to disable ScopedPrivileges({})", self.description);
         }
     }
 }

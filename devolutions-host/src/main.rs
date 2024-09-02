@@ -15,7 +15,7 @@ use anyhow::Context;
 use std::sync::mpsc;
 
 fn main() -> anyhow::Result<()> {
-    // Ensure per-user data dir exists
+    // Ensure per-user data dir exists.
 
     std::fs::create_dir_all(get_data_dir()).context("Failed to create data directory")?;
 
@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Starting Devolutions Host");
 
-    // TMP: Copy-paste from MSRDPEX project for testing purposes
+    // TMP: Copy-paste from MSRDPEX project for testing purposes.
     #[cfg(windows)]
     loop_dvc(config);
 

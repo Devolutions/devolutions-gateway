@@ -23,7 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
 const HOST_BINARY: &str = "DevolutionsHost.exe";
 
 #[derive(Debug, Clone, Copy)]
-pub enum SessionKind {
+pub(crate) enum SessionKind {
     /// Console session. For example, when you connect to a user session on the local computer
     /// by switching users on the computer.
     Console,
@@ -58,14 +58,17 @@ impl GatewaySession {
         }
     }
 
+    #[allow(dead_code)]
     fn kind(&self) -> SessionKind {
         self.kind
     }
 
+    #[allow(dead_code)]
     fn os_session(&self) -> &Session {
         &self.session
     }
 
+    #[allow(dead_code)]
     fn is_host_ready(&self) -> bool {
         self.is_host_ready
     }
@@ -99,15 +102,15 @@ impl SessionManagerCtx {
     }
 }
 
-pub struct SessionManager {
+pub(crate) struct SessionManager {
     ctx: RwLock<SessionManagerCtx>,
-    service_event_tx: mpsc::UnboundedSender<AgentServiceEvent>,
-    service_event_rx: mpsc::UnboundedReceiver<AgentServiceEvent>,
+    service_event_tx: mpsc::Sender<AgentServiceEvent>,
+    service_event_rx: mpsc::Receiver<AgentServiceEvent>,
 }
 
 impl Default for SessionManager {
     fn default() -> Self {
-        let (service_event_tx, service_event_rx) = mpsc::unbounded_channel();
+        let (service_event_tx, service_event_rx) = mpsc::channel(100);
 
         Self {
             ctx: RwLock::new(SessionManagerCtx::default()),
@@ -118,7 +121,7 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
-    pub(crate) fn service_event_tx(&self) -> mpsc::UnboundedSender<AgentServiceEvent> {
+    pub(crate) fn service_event_tx(&self) -> mpsc::Sender<AgentServiceEvent> {
         self.service_event_tx.clone()
     }
 }
@@ -147,7 +150,7 @@ impl Task for SessionManager {
                         event
                     } else {
                         error!("Service event channel closed");
-                        // Channel closed, all senders were dropped
+                        // Channel closed, all senders were dropped.
                         break;
                     };
 
@@ -162,44 +165,44 @@ impl Task for SessionManager {
                         }
                         AgentServiceEvent::SessionDisconnect(id) => {
                             info!(%id, "Session disconnected");
-                            try_terminate_host_process(&id);
+                            terminate_host_process(&id);
                             ctx.write().await.unregister_session(&id);
                         }
                         AgentServiceEvent::SessionRemoteConnect(id) => {
                             info!(%id, "Remote session connected");
-                            // Terminate old host process if it is already running
-                            try_terminate_host_process(&id);
+                            // Terminate old host process if it is already running.
+                            terminate_host_process(&id);
 
                             {
                                 let mut ctx = ctx.write().await;
                                 ctx.register_session(&id, SessionKind::Remote);
-                                try_start_host_process(&mut ctx, &id)?;
+                                start_host_process_if_not_running(&mut ctx, &id)?;
                             }
                         }
                         AgentServiceEvent::SessionRemoteDisconnect(id) => {
                             info!(%id, "Remote session disconnected");
                             // Terminate host process when remote session is disconnected
                             // (NOTE: depending on the system settings, session could
-                            // still be running in the background after RDP disconnect)
-                            try_terminate_host_process(&id);
+                            // still be running in the background after RDP disconnect).
+                            terminate_host_process(&id);
                             ctx.write().await.unregister_session(&id);
                         }
                         AgentServiceEvent::SessionLogon(id) => {
                             info!(%id, "Session logged on");
 
-                            // Terminate old host process if it is already running
-                            try_terminate_host_process(&id);
+                            // Terminate old host process if it is already running.
+                            terminate_host_process(&id);
 
 
                             // NOTE: In some cases, SessionRemoteConnect is fired before
                             // an actual user is logged in, therefore we need to try start the host
-                            // app on logon, if not yet started
+                            // app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
-                            try_start_host_process(&mut ctx, &id)?;
+                            start_host_process_if_not_running(&mut ctx, &id)?;
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
                             info!(%id, "Session logged off");
-                            if let Some(mut session) = ctx.write().await.get_session_mut(&id) {
+                            if let Some(session) = ctx.write().await.get_session_mut(&id) {
                                 // When a user logs off, host process will be stopped by the system;
                                 // Console sessions could be reused for different users, therefore
                                 // we should not remove the session from the list, but mark it as
@@ -224,7 +227,7 @@ impl Task for SessionManager {
 }
 
 /// Starts Devolutions Host process in the target session.
-fn try_start_host_process(ctx: &mut SessionManagerCtx, session: &Session) -> anyhow::Result<()> {
+fn start_host_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Session) -> anyhow::Result<()> {
     match ctx.get_session_mut(session) {
         Some(gw_session) => {
             if is_host_running_in_session(session)? {
@@ -239,8 +242,8 @@ fn try_start_host_process(ctx: &mut SessionManagerCtx, session: &Session) -> any
                     info!(%session, "Host process started in session");
                     gw_session.set_host_ready(true);
                 }
-                Err(err) => {
-                    error!(%err, %session, "Failed to start host process for session");
+                Err(error) => {
+                    error!(%error, %session, "Failed to start host process for session");
                 }
             }
         }
@@ -253,7 +256,7 @@ fn try_start_host_process(ctx: &mut SessionManagerCtx, session: &Session) -> any
 }
 
 /// Terminates Devolutions Host process in the target session.
-fn try_terminate_host_process(session: &Session) {
+fn terminate_host_process(session: &Session) {
     match terminate_process_by_name_in_session(HOST_BINARY, session.id) {
         Ok(false) => {
             trace!(%session, "Host process is not running in the session");
@@ -261,8 +264,8 @@ fn try_terminate_host_process(session: &Session) {
         Ok(true) => {
             info!(%session, "Host process terminated in session");
         }
-        Err(err) => {
-            error!(%err, %session, "Failed to terminate host process in session");
+        Err(error) => {
+            error!(%error, %session, "Failed to terminate host process in session");
         }
     }
 }
@@ -285,7 +288,7 @@ fn start_host_process(session: &Session) -> anyhow::Result<()> {
     let mut startup_info = StartupInfo::default();
 
     // Run with GUI access
-    // NOTE: silent clippy warning, just to be more explicit about `show_window` value
+    // NOTE: silent clippy warning, just to be more explicit about `show_window` value.
     #[allow(clippy::field_reassign_with_default)]
     {
         startup_info.show_window = u16::try_from(SW_SHOW.0).expect("BUG: SW_SHOW always fit u16");
@@ -311,9 +314,9 @@ fn start_host_process(session: &Session) -> anyhow::Result<()> {
             info!("{HOST_BINARY} started in session {session}");
             Ok(())
         }
-        Err(err) => {
-            error!(%err, "Failed to start {HOST_BINARY} in session {session}");
-            Err(err)
+        Err(error) => {
+            error!(%error, "Failed to start {HOST_BINARY} in session {session}");
+            Err(error)
         }
     }
 }

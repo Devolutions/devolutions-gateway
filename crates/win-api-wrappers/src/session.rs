@@ -1,8 +1,7 @@
-use super::handle::Handle;
 use super::process::Process;
 use super::security::privilege::ScopedPrivileges;
 use anyhow::Result;
-use windows::Win32::Foundation::{ERROR_NO_TOKEN, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_NO_TOKEN, HANDLE};
 use windows::Win32::Security::{SE_TCB_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
 
@@ -20,7 +19,8 @@ pub fn session_has_logged_in_user(session_id: u32) -> Result<bool> {
         Err(err) => Err(err.into()),
         Ok(()) => {
             // Close handle immediately.
-            let _handle: Handle = Handle::new(handle, true);
+            // SAFETY: `CloseHandle` is safe to call with a valid handle.
+            unsafe { CloseHandle(handle).expect("BUG: WTSQueryUserToken should return a valid handle") };
             Ok(true)
         }
     }

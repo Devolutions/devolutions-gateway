@@ -60,6 +60,7 @@ fn agent_service_main(
 
             match control_code {
                 AgentServiceEvent::Stop => {
+                    service.stop();
                     break;
                 }
                 AgentServiceEvent::SessionConnect(_)
@@ -69,10 +70,10 @@ fn agent_service_main(
                 | AgentServiceEvent::SessionLogon(_)
                 | AgentServiceEvent::SessionLogoff(_) => {
                     if let Some(tx) = service_event_tx.as_mut() {
-                        match tx.send(control_code) {
+                        match tx.blocking_send(control_code) {
                             Ok(()) => {}
-                            Err(err) => {
-                                error!(%err, "Failed to send event to session manager");
+                            Err(error) => {
+                                error!(%error, "Failed to send event to session manager");
                                 service_event_tx = None;
                             }
                         }

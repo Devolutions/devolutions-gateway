@@ -28,12 +28,12 @@ pub fn loop_dvc(config: ConfHandle) {
         Ok(h_file) => {
             info!("Virtual channel opened");
 
-            if let Err(err) = handle_virtual_channel(h_file) {
-                error!(%err, "DVC handling falied");
+            if let Err(error) = handle_virtual_channel(h_file) {
+                error!(%error, "DVC handling falied");
             }
         }
-        Err(err) => {
-            error!(%err, "Failed to open virtual channel");
+        Err(error) => {
+            error!(%error, "Failed to open virtual channel");
             // NOTE: Not exiting the program here, as it is not the main functionality
         }
     }
