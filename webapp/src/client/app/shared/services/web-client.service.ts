@@ -4,7 +4,6 @@ import { catchError, map, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
 import { DesktopSize } from '@devolutions/iron-remote-gui';
-import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebSession } from '@shared/models/web-session.model';
@@ -20,6 +19,7 @@ import {
   TelnetConnectionParameters,
   sessionTokenParameters,
 } from '@shared/interfaces/connection-params.interfaces';
+import {JET_KDC_PROXY_URL} from "@gateway/app.constants";
 
 export enum DefaultPowerShellPort {
   SSL = 5986,
@@ -67,7 +67,35 @@ export class WebClientService extends BaseComponent {
     );
   }
 
-  fetchProtocolToken(
+  private getDefaultPort(protocol: Protocol): number {
+    switch (protocol) {
+      case Protocol.RDP:
+        return DefaultRDPPort;
+      case Protocol.Telnet:
+        return DefaultTelnetPort;
+      case Protocol.SSH:
+        return DefaultSshPort;
+      case Protocol.VNC:
+        return DefaultVncPort;
+      case Protocol.ARD:
+        return DefaultArdPort;
+      default:
+        throw new Error(`Getting default port, unsupported protocol: ${protocol}`);
+    }
+  }
+
+  private handleProtocolTokenRequest<T extends TelnetConnectionParameters | SshConnectionParameters | IronRDPConnectionParameters | IronVNCConnectionParameters | IronARDConnectionParameters>(
+    protocol: Protocol,
+    connectionParameters: T
+  ): Observable<T> {
+    return this.generateProtocolToken(protocol, connectionParameters).pipe(
+      takeUntil(this.destroyed$),
+      map((params) => params as T),
+      catchError((err) => throwError(() => err)),
+    );
+  }
+
+  generateProtocolToken(
     protocol: Protocol,
     connectionParameters:
       | TelnetConnectionParameters
@@ -94,66 +122,33 @@ export class WebClientService extends BaseComponent {
 
     return this.fetchToken(data).pipe(
       takeUntil(this.destroyed$),
-      map((token) => ({ ...connectionParameters, token })),
-      catchError((err) => throwError(err)),
+      map((token) => {
+        return { ...connectionParameters, token } as typeof connectionParameters;
+      }),
+      catchError((err) => {
+        return throwError(() => new Error('Failed to fetch protocol token'));
+      }),
     );
-  }
-
-  private getDefaultPort(protocol: Protocol): number {
-    switch (protocol) {
-      case Protocol.RDP:
-        return DefaultRDPPort;
-      case Protocol.Telnet:
-        return DefaultTelnetPort;
-      case Protocol.SSH:
-        return DefaultSshPort;
-      case Protocol.VNC:
-        return DefaultVncPort;
-      case Protocol.ARD:
-        return DefaultArdPort;
-      default:
-        throw new Error(`Getting default port, unsupported protocol: ${protocol}`);
-    }
   }
 
   fetchTelnetToken(connectionParameters: TelnetConnectionParameters): Observable<TelnetConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.Telnet, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters: TelnetConnectionParameters) => connectionParameters),
-      catchError((err) => throwError(err)),
-    );
+    return this.handleProtocolTokenRequest(Protocol.Telnet, connectionParameters);
   }
 
   fetchSshToken(connectionParameters: SshConnectionParameters): Observable<SshConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.SSH, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters: SshConnectionParameters) => connectionParameters),
-      catchError((err) => throwError(err)),
-    );
+    return this.handleProtocolTokenRequest(Protocol.SSH, connectionParameters);
   }
 
   fetchRdpToken(connectionParameters: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.RDP, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters: IronRDPConnectionParameters) => connectionParameters),
-      catchError((err) => throwError(err)),
-    );
+    return this.handleProtocolTokenRequest(Protocol.RDP, connectionParameters);
   }
 
   fetchVncToken(connectionParameters: IronVNCConnectionParameters): Observable<IronVNCConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.VNC, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters: IronVNCConnectionParameters) => connectionParameters),
-      catchError((err) => throwError(err)),
-    );
+    return this.handleProtocolTokenRequest(Protocol.VNC, connectionParameters);
   }
 
   fetchArdToken(connectionParameters: IronARDConnectionParameters): Observable<IronARDConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.ARD, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters: IronARDConnectionParameters) => connectionParameters),
-      catchError((err) => throwError(err)),
-    );
+    return this.handleProtocolTokenRequest(Protocol.ARD, connectionParameters);
   }
 
   fetchNetScanToken(): Observable<string> {
@@ -198,7 +193,7 @@ export class WebClientService extends BaseComponent {
       return of(connectionParameters);
     }
 
-    const currentURL: URL = new URL(WebClientRdpComponent.JET_KDC_PROXY_URL, window.location.href);
+    const currentURL: URL = new URL(JET_KDC_PROXY_URL, window.location.href);
     connectionParameters.kdcProxyUrl = `${currentURL.href}/${connectionParameters.kdcToken}`;
     return of(connectionParameters);
   }

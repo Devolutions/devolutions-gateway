@@ -12,10 +12,9 @@ import {
 import { TabView } from 'primeng/tabview';
 import { takeUntil } from 'rxjs/operators';
 
-import { WebSession } from '@shared/models/web-session.model';
+import {WebSession, WebSessionComponentType} from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
 
-import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { BaseComponent } from '@shared/bases/base.component';
 import { MainPanelComponent } from '../main-panel/main-panel.component';
 
@@ -28,7 +27,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   @ViewChild('tabView') tabView: TabView;
   @ViewChild('sessionsContainer') sessionsContainer: ElementRef;
 
-  webSessionTabs: WebSession<any, any>[] = [];
+  webSessionTabs: WebSession<WebSessionComponentType, any>[] = [];
   currentTabIndex = 0;
 
   constructor(
@@ -78,17 +77,25 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   }
 
   private loadFormTab(): void {
-    const newSessionTabExists: boolean = this.webSessionService
-      .getWebSessionSnapshot()
-      .some((webSession) => webSession.name === 'New Session');
-
-    if (!newSessionTabExists) {
-      const newSessionTab: WebSession<Type<MainPanelComponent>, any> = new WebSession(
+    if (!this.isSessionTabExists('New Session')) {
+      const newSessionTab = this.createNewSessionTab(
         'New Session',
-        MainPanelComponent,
-      );
+        MainPanelComponent as unknown as Type<MainPanelComponent>);
       this.webSessionService.addSession(newSessionTab);
     }
+  }
+
+  private isSessionTabExists(tabName: string): boolean {
+    return this.webSessionService
+      .getWebSessionSnapshot()
+      .some((webSession) => webSession.name === tabName);
+  }
+
+  private createNewSessionTab(
+    name: string,
+    component: Type<MainPanelComponent>
+  ): WebSession<WebSessionComponentType, any> {
+    return new WebSession(name, component as WebSessionComponentType);
   }
 
   private subscribeToTabMenuArray(): void {

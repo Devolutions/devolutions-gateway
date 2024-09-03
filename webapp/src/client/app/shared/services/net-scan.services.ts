@@ -1,10 +1,9 @@
-import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, Subject, from, merge, of } from 'rxjs';
+import { Observable, Subject, from, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Protocol } from '../enums/web-client-protocol.enum';
 import { WebClientService } from './web-client.service';
-import { ProtocolIconMap, ProtocolNameToProtocolMap } from './web-session.service';
+import {ProtocolIconMap, ProtocolNameToProtocolMap} from "@gateway/app.constants";
 
 export type NetScanEntry = {
   ip: string;

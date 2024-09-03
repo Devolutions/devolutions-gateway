@@ -5,8 +5,6 @@ import { AnalyticService, ConnectionIdentifier, ProtocolString } from '../servic
 
 @Directive()
 export abstract class WebClientBaseComponent extends BaseComponent {
-  static DVL_WARNING_ICON = 'dvl-icon-warning';
-
   hideSpinnerOnly = false;
   error: string;
 

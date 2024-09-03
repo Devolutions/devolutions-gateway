@@ -12,6 +12,6 @@ export function authGuard(route: ActivatedRouteSnapshot, state: RouterStateSnaps
   }
 
   //TODO Add when standalone has more feature pages: { queryParams: { returnUrl: state.url } }
-  router.navigate(['login']);
+ void router.navigate(['login']);
   return false;
 }

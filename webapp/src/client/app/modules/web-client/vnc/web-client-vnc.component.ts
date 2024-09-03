@@ -12,7 +12,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { MessageService } from 'primeng/api';
-import { EMPTY, Observable, Subject, from, of } from 'rxjs';
+import {EMPTY, Observable, Subject, from, of, throwError} from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
@@ -32,6 +32,7 @@ import '@devolutions/iron-remote-gui-vnc/iron-remote-gui-vnc.umd.cjs';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
+import {DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL} from "@gateway/app.constants";
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -54,10 +55,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   @ViewChild('sessionVncContainer') sessionContainerElement: ElementRef;
   @ViewChild('ironGuiElementVnc') ironGuiElement: ElementRef;
-
-  static DVL_VNC_ICON = 'dvl-icon-entry-session-vnc';
-  static DVL_WARNING_ICON = 'dvl-icon-warning';
-  static JET_VNC_URL = '/jet/fwd/tcp';
 
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
@@ -130,7 +127,11 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }
 
   scaleTo(scale: ScreenScale): void {
-    scale === ScreenScale.Full ? this.toggleFullscreen() : this.remoteClient.setScale(scale);
+    if (scale === ScreenScale.Full) {
+      this.toggleFullscreen();
+    } else {
+      this.remoteClient.setScale(scale.valueOf());
+    }
   }
 
   removeWebClientGuiElement(): void {
@@ -216,7 +217,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
     }
 
-    this.remoteClient.setScale(ScreenScale.Fit);
+    this.remoteClient.setScale(ScreenScale.Fit.valueOf());
   }
 
   private initiateRemoteClientListener(): void {
@@ -245,14 +246,15 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
         switchMap(() => this.setScreenSizeScale(this.inputFormData.screenSize)),
         switchMap(() => this.fetchParameters(this.inputFormData)),
         switchMap((params) => this.fetchTokens(params)),
-        switchMap((params) => this.callConnect(params)),
         catchError((error) => {
           console.error(error.message);
           this.handleIronRDPError(error.message);
           return EMPTY;
         }),
       )
-      .subscribe();
+      .subscribe((params) => {
+        this.callConnect(params)
+      });
   }
 
   private getFormData(): Observable<void> {
@@ -266,7 +268,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultVncPort);
 
     const sessionId: string = uuidv4();
-    const gatewayHttpAddress: URL = new URL(WebClientVncComponent.JET_VNC_URL + `/${sessionId}`, window.location.href);
+    const gatewayHttpAddress: URL = new URL(JET_VNC_URL + `/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
 
     const desktopScreenSize: DesktopSize =
@@ -299,10 +301,9 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     return of(undefined);
   }
 
-  private callConnect(connectionParameters: IronVNCConnectionParameters): Observable<void> {
+  private callConnect(connectionParameters: IronVNCConnectionParameters): void {
     this.remoteClient.setKeyboardUnicodeMode(true);
-
-    return this.remoteClient
+    this.remoteClient
       .connect(
         connectionParameters.username,
         connectionParameters.password,
@@ -315,18 +316,16 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
         connectionParameters.kdcProxyUrl,
       )
       .pipe(
+        // @ts-ignore // update iron-remote-gui rxjs to 7.8.1
         takeUntil(this.destroyed$),
-        map((connectionData) => {
-          // Connection data processing for future
-        }),
         catchError((err) => {
-          throw err;
+          return throwError(() => err);
         }),
-      );
+      ).subscribe();
   }
 
   private initSessionEventHandler(): void {
-    this.remoteClient.sessionListener.pipe(takeUntil(this.destroyed$)).subscribe({
+    this.remoteClient.sessionListener.subscribe({
       next: (event: SessionEvent): void => {
         switch (event.type) {
           case SessionEventType.STARTED:
@@ -352,7 +351,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       this.exitFullScreen();
     }
 
-    this.notifyUser(event.type, event.data);
+    this.notifyUser(event, event.data);
     this.disableComponentStatus();
     super.webClientConnectionClosed();
   }
@@ -360,11 +359,12 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   private handleIronRDPConnectStarted(): void {
     this.loading = false;
     this.remoteClient.setVisibility(true);
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientVncComponent.DVL_VNC_ICON);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_VNC_ICON);
     this.webClientConnectionSuccess();
   }
 
-  private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
+  private notifyUser(event: SessionEvent, errorData: UserIronRdpError | string): void {
+    const eventType = event.type.valueOf() ;
     this.clientError = {
       kind: this.getMessage(errorData),
       backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : '',
@@ -372,10 +372,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     const icon: string =
       eventType === SessionEventType.TERMINATED || SessionEventType.ERROR
-        ? WebClientVncComponent.DVL_WARNING_ICON
-        : WebClientVncComponent.DVL_VNC_ICON;
+        ? DVL_WARNING_ICON
+        : DVL_VNC_ICON;
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
   private handleSubscriptionError(error: any): void {
@@ -393,7 +393,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       backtrace: typeof error !== 'string' ? error?.backtrace() : '',
     };
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientVncComponent.DVL_WARNING_ICON);
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
   private getMessage(errorData: UserIronRdpError | string): string {
@@ -402,7 +402,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     if (typeof errorData === 'string') {
       return errorData;
     } else {
-      errorKind = errorData.kind();
+      errorKind = errorData.kind().valueOf();
     }
 
     //For translation 'UnknownError'

@@ -41,7 +41,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
 
   onCloseButtonClick(event: MouseEvent, webSession: WebSession<any, any>): void {
     event.stopPropagation();
-    this.webSessionService.removeSession(webSession.id);
+    void this.webSessionService.removeSession(webSession.id);
   }
 
   private selectTab(tabIndex: number): void {

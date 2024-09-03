@@ -73,7 +73,7 @@ export class DynamicTabComponent extends BaseComponent implements AfterViewInit,
 
   private onComponentDisabled(status: ComponentStatus): void {
     if (status.isDisabledByUser) {
-      this.webSessionService.removeSession(status.id);
+      void this.webSessionService.removeSession(status.id);
     }
   }
 }

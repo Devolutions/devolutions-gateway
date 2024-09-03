@@ -9,7 +9,8 @@ import { ValidateFileResult } from '../../../../../shared/services/ssh-key.servi
   styleUrls: ['./file-control.component.scss'],
 })
 export class FileControlComponent implements OnInit, OnDestroy {
-  @ViewChild('publicKeyFileControl') publicKeyFileControl: ElementRef;
+  // TODO Check if this is necessary
+  // @ViewChild('publicKeyFileControl') publicKeyFileControl: ElementRef;
 
   @Input()
   set disabled(value: boolean) {

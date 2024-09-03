@@ -7,12 +7,14 @@ import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-clien
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
+import { MainPanelComponent } from "@shared/components/main-panel/main-panel.component";
 
 export type WebSessionComponentType =
   | Type<WebClientFormComponent>
   | Type<WebClientTelnetComponent>
   | Type<WebClientSshComponent>
-  | Type<WebClientRdpComponent>;
+  | Type<WebClientRdpComponent>
+  | Type<MainPanelComponent>;
 
 export class WebSession<WebSessionComponentType, TData> {
   public static readonly TOOLBAR_SIZE: number = 44;

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, Subscription, interval, of } from 'rxjs';
-import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
+import {BehaviorSubject, Observable, Subscription, interval, of, throwError} from 'rxjs';
+import { catchError, map, takeUntil, tap } from 'rxjs/operators';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { Session } from '@shared/models/session';
@@ -63,7 +63,7 @@ export class AuthService extends BaseComponent {
       catchError((error) => {
         sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(false));
         this.isAutoLoginOn.next(false);
-        throw error;
+        return throwError(() => error);
       }),
       map((success) => !!success),
     );
@@ -79,18 +79,17 @@ export class AuthService extends BaseComponent {
       }),
       map((token) => !!token),
       catchError((error) => {
-        //console.error('Login error:', error);
-        throw error;
+        return throwError(() => error);
       }),
     );
   }
 
   public logout(): void {
-    this.webSessionService.cleanupWebSessionService();
+    void this.webSessionService.cleanupWebSessionService();
     this.removeAllStorageData();
     this.sessionSubject.next(null);
     this.isAutoLoginOn.next(false);
-    this.navigationService.navigateToLogin();
+    void this.navigationService.navigateToLogin();
   }
 
   public startExpirationCheck(): void {
@@ -114,7 +113,7 @@ export class AuthService extends BaseComponent {
   private requestToken(username?: string, password?: string): Observable<string> {
     return this.apiService.generateAppToken(username, password).pipe(
       catchError((error) => {
-        throw error;
+        return throwError(() => error);
       }),
     );
   }
@@ -183,8 +182,8 @@ export class AuthService extends BaseComponent {
   }
 
   private handleTokenExpiration(): void {
-    this.webSessionService.cleanupWebSessionService();
+    void this.webSessionService.cleanupWebSessionService();
     this.removeAllStorageData();
-    this.navigationService.navigateToLogin();
+    void this.navigationService.navigateToLogin();
   }
 }

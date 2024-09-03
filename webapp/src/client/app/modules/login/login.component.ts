@@ -2,7 +2,6 @@ import { Component, OnInit } from '@angular/core';
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
-import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
 import { UtilsService } from '@shared/services/utils.service';
@@ -24,8 +23,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   constructor(
     private authService: AuthService,
     private navigationService: NavigationService,
-    protected utils: UtilsService,
-    private gatewayAlertMessageService: GatewayAlertMessageService,
+    protected utils: UtilsService
   ) {
     super();
   }
@@ -35,7 +33,10 @@ export class LoginComponent extends BaseComponent implements OnInit {
       .autoLogin()
       .pipe(
         takeUntil(this.destroyed$),
-        catchError((error) => this.handleAutoLoginError(error)),
+        catchError((error) => {
+          this.handleAutoLoginError(error);
+          return of(false);
+        }),
       )
       .subscribe((success) => this.handleLoginResult(success));
 
@@ -49,18 +50,19 @@ export class LoginComponent extends BaseComponent implements OnInit {
     this.messages = [];
     const submittedData = this.loginForm.value;
 
-    this.authService.login(submittedData.username, submittedData.password).subscribe(
-      (success) => {
-        if (success) {
-          this.navigationService.navigateToNewSession();
-        } else {
-          // 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-          this.handleLoginError(new Error('Connection error: Please verify your connection settings.'));
+    this.authService.login(submittedData.username, submittedData.password)
+      .subscribe({
+        next: (success) => {
+          if (success) {
+            void this.navigationService.navigateToNewSession();
+          } else {
+            this.handleLoginError(new Error('Connection error: Please verify your connection settings.'));
+          }
+        },
+        error: (error) => {
+          this.handleLoginError(error);
         }
-      },
-      (error) => {
-        this.handleLoginError(error);
-      },
+      }
     );
   }
 
@@ -70,7 +72,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
 
   private handleLoginResult(success: boolean): void {
     if (success) {
-      this.navigationService.navigateToNewSession();
+      void this.navigationService.navigateToNewSession();
     } else {
       this.autoLoginAttempted = true;
     }
@@ -103,7 +105,6 @@ export class LoginComponent extends BaseComponent implements OnInit {
         detail: message,
       },
     ]);
-    //this.gatewayAlertMessageService.addError(error.message);
     console.error('Login Error', error);
   }
 
