@@ -28,6 +28,8 @@ namespace DevolutionsAgent.Resources
 
         internal static Feature PEDM_FEATURE = new Feature("Devolutions PEDM", "Installs Devolutions PEDM", false);
 
+        internal static Feature HOST_FEATURE = new Feature("Devolutions Host", "Installs Devolutions Host", false);
+
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\agent ACL
         /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`

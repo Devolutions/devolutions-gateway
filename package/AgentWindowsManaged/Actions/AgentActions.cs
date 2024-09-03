@@ -120,7 +120,7 @@ internal static class AgentActions
         Impersonate = false,
         UsesProperties = UseProperties(new [] { AgentProperties.installId })
     };
-    
+
     private static readonly ElevatedManagedAction cleanAgentConfigIfNeededRollback = new(
         new Id($"CA.{nameof(cleanAgentConfigIfNeededRollback)}"),
         CustomActions.CleanAgentConfigRollback,
@@ -252,6 +252,19 @@ internal static class AgentActions
         Condition = Includes.PEDM_FEATURE.BeingUninstall(),
     };
 
+    private static readonly ElevatedManagedAction installHost = new(
+        CustomActions.InstallHost
+    )
+    {
+        Id = new Id("installHost"),
+        Feature = Includes.PEDM_FEATURE,
+        Sequence = Sequence.InstallExecuteSequence,
+        Return = Return.check,
+        Step = Step.InstallFiles,
+        When = When.After,
+        Condition = Includes.PEDM_FEATURE.BeingInstall(),
+    };
+
     private static string UseProperties(IEnumerable<IWixProperty> properties)
     {
         if (!properties?.Any() ?? false)
@@ -285,6 +298,7 @@ internal static class AgentActions
         cleanupPedmShellExt,
         uninstallPedmShellExt,
         installPedmShellExt,
+        installHost,
 
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,
