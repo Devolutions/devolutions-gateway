@@ -870,6 +870,7 @@ fn terminate_process_by_name_impl(process_name: &str, session_id: Option<u32>) -
         }
 
         if str::eq_ignore_ascii_case(process.executable_name()?.as_str(), process_name) {
+            // SAFETY: `OpenProcess` is always safe to call and returns a valid handle on success.
             let process = unsafe { OpenProcess(PROCESS_TERMINATE, false, process.process_id()) };
 
             match process {
