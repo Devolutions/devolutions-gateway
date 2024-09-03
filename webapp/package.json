@@ -57,15 +57,6 @@
     "typescript": "^5.5.4"
   },
   "optionalDependencies": {
-    "@swc/core-darwin-arm64": "^1.7.4-nightly-20240729.1",
-    "@swc/core-darwin-x64": "^1.7.4-nightly-20240729.1",
-    "@swc/core-linux-arm-gnueabihf": "^1.7.4-nightly-20240729.1",
-    "@swc/core-linux-arm64-gnu": "^1.7.4-nightly-20240729.1",
-    "@swc/core-linux-arm64-musl": "^1.7.4-nightly-20240729.1",
-    "@swc/core-linux-x64-gnu": "^1.7.4-nightly-20240729.1",
-    "@swc/core-linux-x64-musl": "^1.7.4-nightly-20240729.1",
-    "@swc/core-win32-arm64-msvc": "^1.7.4-nightly-20240729.1",
-    "@swc/core-win32-ia32-msvc": "^1.7.4-nightly-20240729.1",
-    "@swc/core-win32-x64-msvc": "^1.7.4-nightly-20240729.1"
+    "@rollup/rollup-linux-x64-gnu": "^4.21.2"
   }
 }
