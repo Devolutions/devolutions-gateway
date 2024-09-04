@@ -432,6 +432,8 @@ class TlkRecipe
                         $Env:DAGENT_PEDM_HOOK
                     } elseif ($CargoPackage.Name -Eq "devolutions-pedm-shell-ext" -And (Test-Path Env:DAGENT_PEDM_SHELL_EXT_DLL)) {
                         $Env:DAGENT_PEDM_SHELL_EXT_DLL
+                    } elseif ($CargoPackage.Name -Eq "devolutions-host" -And (Test-Path Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE)) {
+                        $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE
                     } else {
                         $null
                     }
@@ -499,6 +501,12 @@ class TlkRecipe
                 Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
                 Copy-Item -Path $builtDesktopPdb -Destination $(Get-DestinationSymbolFile $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE $this.Target)
 
+            }
+
+            if (Test-Path Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE) {
+                $hostExe = Get-ChildItem -Recurse -Include 'devolutions-host.exe' | Select-Object -First 1
+
+                Copy-Item -Path $hostExe -Destination $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE
             }
         }
 

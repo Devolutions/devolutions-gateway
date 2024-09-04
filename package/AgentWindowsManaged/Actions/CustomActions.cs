@@ -197,8 +197,7 @@ namespace DevolutionsAgent.Actions
             return ActionResult.Success;
         }
 
-        [CustomAction]
-        public static ActionResult InstallPedm(Session session)
+        static ActionResult EnableAgentFeature(Session session, string feature)
         {
             string path = Path.Combine(ProgramDataDirectory, "agent.json");
 
@@ -215,7 +214,7 @@ namespace DevolutionsAgent.Actions
                     // ignored. Previous config is either invalid or non existent.
                 }
 
-                config["Pedm"] = new Dictionary<string, bool> { { "Enabled", true } };
+                config[feature] = new Dictionary<string, bool> { { "Enabled", true } };
 
                 using var writer = new StreamWriter(path);
                 writer.Write(JsonConvert.SerializeObject(config));
@@ -224,9 +223,21 @@ namespace DevolutionsAgent.Actions
             }
             catch (Exception e)
             {
-                session.Log($"failed to install pedm: {e}");
+                session.Log($"failed to install {feature}: {e}");
                 return ActionResult.Failure;
             }
+        }
+
+        [CustomAction]
+        public static ActionResult InstallPedm(Session session)
+        {
+            return EnableAgentFeature(session, "Pedm");
+        }
+
+        [CustomAction]
+        public static ActionResult InstallHost(Session session)
+        {
+            return EnableAgentFeature(session, "SessionHost");
         }
 
         [CustomAction]

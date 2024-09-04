@@ -119,6 +119,8 @@ internal class Program
 
     private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "The PEDM shell extension MSIX was not found");
 
+    private static string DevolutionsHost => ResolveArtifact("DAGENT_DEVOLUTIONS_HOST_EXECUTABLE", "The Devolutions Host executable was not found");
+
     private static Version DevolutionsAgentVersion
     {
         get
@@ -281,7 +283,8 @@ internal class Program
                     },
                     new (Includes.PEDM_FEATURE, DevolutionsPedmHook),
                     new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtDll),
-                    new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtMsix)
+                    new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtMsix),
+                    new (Includes.HOST_FEATURE, DevolutionsHost)
                 },
                 Dirs = new[]
                 {

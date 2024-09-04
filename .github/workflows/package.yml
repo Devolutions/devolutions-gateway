@@ -251,7 +251,7 @@ jobs:
                 $appx.Save($xmlTextWriter)
                 $xmlTextWriter.Close()
                 & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix /nv
-              
+
                 Remove-Item $UnpackedMsix -Recurse -Force | Out-Null
               }
 
@@ -326,6 +326,7 @@ jobs:
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
           $Env:DAGENT_PEDM_HOOK = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions_pedm_hook.dll' | Select -First 1
+          $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsHost.dll' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 
@@ -431,7 +432,7 @@ jobs:
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-        
+
           Get-ChildItem -Path $PackageRoot -Recurse
 
           Compress-Archive "$PackageRoot\windows\x86_64\*.pdb" "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
