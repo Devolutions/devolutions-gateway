@@ -542,7 +542,9 @@ jobs:
             echo "dagent-pedm-hook=$DAgentPedmHook" >> $Env:GITHUB_OUTPUT
 
             $DAgentDevolutionsHostExecutable = Join-Path $TargetOutputPath "DevolutionsHost.exe"
-            echo "dagent-pedm-desktop-executable=$DAgentDevolutionsHostExecutable" >> $Env:GITHUB_OUTPUT
+            echo "dagent-devolutions-host-executable=$DAgentDevolutionsHostExecutable" >> $Env:GITHUB_OUTPUT
+
+
           }
 
           $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
