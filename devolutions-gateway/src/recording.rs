@@ -94,14 +94,20 @@ where
 
         debug!(path = %recording_file, "Opening file");
 
-        let res = match fs::OpenOptions::new()
-            .read(false)
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(&recording_file)
-            .await
+        let mut open_options = fs::OpenOptions::new();
+
+        open_options.read(false).write(true).truncate(true).create(true);
+
+        #[cfg(windows)]
         {
+            use std::os::windows::fs::OpenOptionsExt as _;
+
+            const FILE_SHARE_READ: u32 = 1;
+
+            open_options.share_mode(FILE_SHARE_READ);
+        }
+
+        let res = match open_options.open(&recording_file).await {
             Ok(file) => {
                 let mut file = BufWriter::new(file);
 
