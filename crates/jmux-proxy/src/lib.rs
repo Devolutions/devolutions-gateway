@@ -28,6 +28,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
+use tokio_util::sync::CancellationToken;
 use tracing::{Instrument as _, Span};
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
@@ -71,6 +72,7 @@ pub enum JmuxApiResponse {
 pub struct JmuxProxy {
     cfg: JmuxConfig,
     api_request_rx: Option<ApiRequestReceiver>,
+    scheduler_cancellation_token: Option<CancellationToken>,
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
 }
@@ -84,6 +86,7 @@ impl JmuxProxy {
         Self {
             cfg: JmuxConfig::default(),
             api_request_rx: None,
+            scheduler_cancellation_token: None,
             jmux_reader,
             jmux_writer,
         }
@@ -101,6 +104,12 @@ impl JmuxProxy {
         self
     }
 
+    #[must_use]
+    pub fn with_cancellation_token(mut self, cancellation_token: CancellationToken) -> Self {
+        self.scheduler_cancellation_token = Some(cancellation_token);
+        self
+    }
+
     pub async fn run(self) -> anyhow::Result<()> {
         let span = Span::current();
         run_proxy_impl(self, span.clone()).instrument(span).await
@@ -111,17 +120,18 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
     let JmuxProxy {
         cfg,
         api_request_rx,
+        scheduler_cancellation_token,
         jmux_reader,
         jmux_writer,
     } = proxy;
 
-    let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
-
+    let (msg_sender, msg_receiver) = MessageSender::init();
     let jmux_stream = FramedRead::new(jmux_reader, JmuxCodec);
+    let scheduler_cancellation_token = scheduler_cancellation_token.unwrap_or_else(CancellationToken::new);
 
     let sender_task_handle = JmuxSenderTask {
         jmux_writer,
-        msg_to_send_rx,
+        msg_receiver,
     }
     .spawn(span.clone());
 
@@ -130,8 +140,9 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
     let scheduler_task_handle = JmuxSchedulerTask {
         cfg,
         jmux_stream,
-        msg_to_send_tx,
+        msg_sender,
         api_request_rx,
+        scheduler_cancellation_token,
         parent_span: span,
     }
     .spawn();
@@ -218,10 +229,28 @@ impl JmuxCtx {
 }
 
 type MessageReceiver = mpsc::Receiver<Message>;
-type MessageSender = mpsc::Sender<Message>;
 type DataReceiver = mpsc::Receiver<Bytes>;
 type DataSender = mpsc::Sender<Bytes>;
 type InternalMessageSender = mpsc::Sender<InternalMessage>;
+
+#[derive(Clone)]
+struct MessageSender {
+    tx: mpsc::Sender<Message>,
+}
+
+impl MessageSender {
+    fn init() -> (Self, MessageReceiver) {
+        let (tx, rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
+        (Self { tx }, rx)
+    }
+
+    async fn send(&self, msg: Message) -> anyhow::Result<()> {
+        self.tx
+            .send(msg)
+            .await
+            .map_err(|e| anyhow::anyhow!("couldn’t send {} message: {}", e.0.ty(), e))
+    }
+}
 
 #[derive(Debug)]
 enum InternalMessage {
@@ -235,7 +264,7 @@ enum InternalMessage {
 
 struct JmuxSenderTask<T: AsyncWrite + Unpin + Send + 'static> {
     jmux_writer: T,
-    msg_to_send_rx: MessageReceiver,
+    msg_receiver: MessageReceiver,
 }
 
 impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
@@ -248,7 +277,7 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
     async fn run(self) -> anyhow::Result<()> {
         let Self {
             jmux_writer,
-            mut msg_to_send_rx,
+            mut msg_receiver,
         } = self;
 
         let mut jmux_writer = tokio::io::BufWriter::with_capacity(16 * 1024, jmux_writer);
@@ -257,7 +286,8 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
 
         loop {
             tokio::select! {
-                msg = msg_to_send_rx.recv() => {
+                biased;
+                msg = msg_receiver.recv() => {
                     let Some(msg) = msg else {
                         break;
                     };
@@ -270,7 +300,8 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
                     jmux_writer.write_all(&buf).await?;
                     needs_flush = true;
                 }
-                _ = tokio::time::sleep(core::time::Duration::from_millis(10)), if needs_flush => {
+                () = tokio::time::sleep(core::time::Duration::from_millis(10)), if needs_flush => {
+                    trace!("Flush JMUX writer");
                     jmux_writer.flush().await?;
                     needs_flush = false;
                 }
@@ -290,8 +321,9 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
 struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     cfg: JmuxConfig,
     jmux_stream: FramedRead<T, JmuxCodec>,
-    msg_to_send_tx: MessageSender,
+    msg_sender: MessageSender,
     api_request_rx: ApiRequestReceiver,
+    scheduler_cancellation_token: CancellationToken,
     parent_span: Span,
 }
 
@@ -310,8 +342,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
     let JmuxSchedulerTask {
         cfg,
         mut jmux_stream,
-        msg_to_send_tx,
+        msg_sender,
         mut api_request_rx,
+        scheduler_cancellation_token,
         parent_span,
     } = task;
 
@@ -334,20 +367,21 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         // It's also expected to be resilient and `?` operator should be used only for unrecoverable failures.
 
         tokio::select! {
+            () = scheduler_cancellation_token.cancelled() => {
+                debug!("JMUX proxy was cancelled");
+                break;
+            }
             Some(request) = api_request_rx.recv() => {
                 match request {
                     JmuxApiRequest::OpenChannel { destination_url, api_response_tx } => {
                         match jmux_ctx.allocate_id() {
                             Some(id) => {
-                                trace!("Allocated local ID {}", id);
-                                debug!("{} request {}", id, destination_url);
+                                trace!("Allocated local ID {id}");
+                                debug!("{id} request {destination_url}");
                                 pending_channels.insert(id, (destination_url.clone(), api_response_tx));
-                                msg_to_send_tx
-                                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES, destination_url))
-                                    .await
-                                    .context("couldn’t send CHANNEL OPEN message through mpsc channel")?;
+                                msg_sender.send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES, destination_url)).await?;
                             }
-                            None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
+                            None => warn!("Couldn’t allocate ID for API request: {destination_url}"),
                         }
                     }
                     JmuxApiRequest::Start { id, stream, leftover } => {
@@ -361,9 +395,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         // Send leftover bytes if any.
                         if let Some(leftover) = leftover {
-                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await {
-                                error!(%error, "Couldn't send leftover bytes");
-                            }
+                            msg_sender.send(Message::data(channel.distant_id, leftover)).await?;
                         }
 
                         let (reader, writer) = stream.into_split();
@@ -382,7 +414,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             window_size_updated: Arc::clone(&channel.window_size_updated),
                             window_size: Arc::clone(&channel.window_size),
                             maximum_packet_size: channel.maximum_packet_size,
-                            msg_to_send_tx: msg_to_send_tx.clone(),
+                            msg_sender: msg_sender.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
                         }
                         .spawn(channel.span.clone())
@@ -401,24 +433,15 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         match channel.distant_state {
                             JmuxChannelState::Streaming => {
                                 channel.local_state = JmuxChannelState::Eof;
-                                msg_to_send_tx
-                                    .send(Message::eof(distant_id))
-                                    .await
-                                    .context("couldn’t send EOF message")?;
+                                msg_sender.send(Message::eof(distant_id)).await?;
                             },
                             JmuxChannelState::Eof => {
                                 channel.local_state = JmuxChannelState::Closed;
-                                msg_to_send_tx
-                                    .send(Message::close(distant_id))
-                                    .await
-                                    .context("couldn’t send CLOSE message")?;
+                                msg_sender.send(Message::close(distant_id)).await?;
                             },
                             JmuxChannelState::Closed => {
                                 jmux_ctx.unregister(local_id);
-                                msg_to_send_tx
-                                    .send(Message::close(distant_id))
-                                    .await
-                                    .context("couldn’t send CLOSE message")?;
+                                msg_sender.send(Message::close(distant_id)).await?;
                                 channel_span.in_scope(|| {
                                     debug!("Channel closed");
                                 });
@@ -442,12 +465,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             anyhow::bail!("detected two streams with the same local ID {}", channel.local_id);
                         };
 
-                        jmux_ctx.register_channel(channel)?;
-
-                        msg_to_send_tx
-                            .send(Message::open_success(distant_id, local_id, initial_window_size, maximum_packet_size))
-                            .await
-                            .context("couldn’t send OPEN SUCCESS message through mpsc channel")?;
+                        msg_sender.send(Message::open_success(distant_id, local_id, initial_window_size, maximum_packet_size)).await?;
 
                         channel_span.in_scope(|| {
                             debug!("Channel accepted");
@@ -469,11 +487,13 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             window_size_updated,
                             window_size,
                             maximum_packet_size,
-                            msg_to_send_tx: msg_to_send_tx.clone(),
+                            msg_sender: msg_sender.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
                         }
                         .spawn(channel_span)
                         .detach();
+
+                        jmux_ctx.register_channel(channel)?;
                     }
                 }
             }
@@ -498,23 +518,24 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         if really_an_error {
                             error!(error = format!("{error:#}"), "JMUX pipe error");
+
+                            nb_consecutive_pipe_failures += 1;
+                            if nb_consecutive_pipe_failures > MAX_CONSECUTIVE_PIPE_FAILURES {
+                                // Some underlying `AsyncRead` implementations might handle errors poorly and cause infinite polling on errors such as broken pipe.
+                                // (This should stop instead of returning the same error indefinitely.)
+                                // Hence, this safety net to escape from such infinite loops.
+                                anyhow::bail!("forced JMUX proxy shutdown because of too many consecutive pipe failures");
+                            } else {
+                                continue;
+                            }
                         } else {
                             info!(reason = format!("{error:#}"), "JMUX pipe closed abruptly");
-                        }
-
-                        nb_consecutive_pipe_failures += 1;
-                        if nb_consecutive_pipe_failures > MAX_CONSECUTIVE_PIPE_FAILURES {
-                            // Some underlying `AsyncRead` implementations might handle errors poorly and cause infinite polling on errors such as broken pipe.
-                            // (This should stop instead of returning the same error indefinitely.)
-                            // Hence, this safety net to escape from such infinite loops.
-                            anyhow::bail!("forced JMUX proxy shutdown because of too many consecutive pipe failures");
-                        } else {
-                            continue;
+                            break;
                         }
                     }
                 };
 
-                trace!(?msg, "Received channel message");
+                trace!(?msg, "Received JMUX message");
 
                 match msg {
                     Message::Open(msg) => {
@@ -522,10 +543,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         if let Err(error) = cfg.filtering.validate_destination(&msg.destination_url) {
                             debug!(error = format!("{error:#}"), %msg.destination_url, %peer_id, "Invalid destination requested");
-                            msg_to_send_tx
-                                .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, error.to_string()))
-                                .await
-                                .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
+                            msg_sender.send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, error.to_string())).await?;
                             continue;
                         }
 
@@ -533,10 +551,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             Some(id) => id,
                             None => {
                                 warn!("Couldn’t allocate local ID for distant peer {}: no more ID available", peer_id);
-                                msg_to_send_tx
-                                    .send(Message::open_failure(peer_id, ReasonCode::GENERAL_FAILURE, "no more ID available"))
-                                    .await
-                                    .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
+                                msg_sender.send(Message::open_failure(peer_id, ReasonCode::GENERAL_FAILURE, "no more ID available")).await?;
                                 continue;
                             }
                         };
@@ -570,7 +585,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             channel,
                             destination_url: msg.destination_url,
                             internal_msg_tx: internal_msg_tx.clone(),
-                            msg_to_send_tx: msg_to_send_tx.clone(),
+                            msg_sender: msg_sender.clone(),
                         }
                         .spawn()
                         .detach();
@@ -674,10 +689,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             JmuxChannelState::Streaming => {},
                             JmuxChannelState::Eof => {
                                 channel.local_state = JmuxChannelState::Closed;
-                                msg_to_send_tx
-                                    .send(Message::close(channel.distant_id))
-                                    .await
-                                    .context("couldn’t send CLOSE message")?;
+                                msg_sender.send(Message::close(channel.distant_id)).await?;
                             },
                             JmuxChannelState::Closed => {},
                         }
@@ -712,15 +724,12 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         if channel.local_state == JmuxChannelState::Eof {
                             channel.local_state = JmuxChannelState::Closed;
-                            msg_to_send_tx
-                                .send(Message::close(distant_id))
-                                .await
-                                .context("couldn’t send CLOSE message")?;
+                            msg_sender.send(Message::close(distant_id)).await?;
                         }
 
                         if channel.local_state == JmuxChannelState::Closed {
                             jmux_ctx.unregister(local_id);
-                            trace!("Channel closed");
+                            debug!("Channel closed");
                         }
                     }
                 }
@@ -734,11 +743,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     let window_adjustment = channel.initial_window_size - channel.remote_window_size;
 
                     if window_adjustment > WINDOW_ADJUSTMENT_THRESHOLD {
-                        msg_to_send_tx
-                            .send(Message::window_adjust(channel.distant_id, window_adjustment))
-                            .await
-                            .context("couldn’t send WINDOW ADJUST message")?;
-
+                        msg_sender.send(Message::window_adjust(channel.distant_id, window_adjustment)).await?;
                         channel.remote_window_size = channel.initial_window_size;
                     }
                 }
@@ -760,7 +765,7 @@ struct DataReaderTask {
     window_size_updated: Arc<Notify>,
     window_size: Arc<AtomicUsize>,
     maximum_packet_size: u16,
-    msg_to_send_tx: MessageSender,
+    msg_sender: MessageSender,
     internal_msg_tx: InternalMessageSender,
 }
 
@@ -787,7 +792,7 @@ impl DataReaderTask {
             window_size_updated,
             window_size,
             maximum_packet_size,
-            msg_to_send_tx,
+            msg_sender,
             internal_msg_tx,
         } = self;
 
@@ -828,26 +833,20 @@ impl DataReaderTask {
                         if window_size_now > 0 {
                             let to_send_now = chunk.split_to(window_size_now);
                             window_size.fetch_sub(to_send_now.len(), Ordering::SeqCst);
-                            msg_to_send_tx
-                                .send(Message::data(distant_id, to_send_now.freeze()))
-                                .await
-                                .context("couldn’t send DATA message")?;
+                            msg_sender.send(Message::data(distant_id, to_send_now.freeze())).await?;
                         }
 
                         window_size_updated.notified().await;
                     } else {
                         window_size.fetch_sub(chunk.len(), Ordering::SeqCst);
-                        msg_to_send_tx
-                            .send(Message::data(distant_id, chunk.freeze()))
-                            .await
-                            .context("couldn’t send DATA message")?;
+                        msg_sender.send(Message::data(distant_id, chunk.freeze())).await?;
                         break;
                     }
                 }
             }
         }
 
-        trace!("Finished forwarding (EOF)");
+        debug!("Finished forwarding (EOF)");
 
         // Attempt to send the EOF message to the JMUX peer.
         // When the JMUX pipe is closed, it is common for the internal channel receiver to have already been dropped and closed.
@@ -894,7 +893,7 @@ struct StreamResolverTask {
     channel: JmuxChannelCtx,
     destination_url: DestinationUrl,
     internal_msg_tx: InternalMessageSender,
-    msg_to_send_tx: MessageSender,
+    msg_sender: MessageSender,
 }
 
 impl StreamResolverTask {
@@ -918,7 +917,7 @@ impl StreamResolverTask {
             channel,
             destination_url,
             internal_msg_tx,
-            msg_to_send_tx,
+            msg_sender,
         } = self;
 
         let scheme = destination_url.scheme();
@@ -935,7 +934,7 @@ impl StreamResolverTask {
                 }
                 Err(error) => {
                     debug!(?error, "TcpStream::connect failed");
-                    msg_to_send_tx
+                    msg_sender
                         .send(Message::open_failure(
                             channel.distant_id,
                             ReasonCode::from(error.kind()),
@@ -943,7 +942,7 @@ impl StreamResolverTask {
                         ))
                         .await
                         .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
-                    anyhow::bail!("couldn’t open TCP stream to {}:{}: {}", host, port, error);
+                    anyhow::bail!("couldn’t open TCP stream to {host}:{port}: {error}");
                 }
             },
             _ => anyhow::bail!("unsupported scheme: {}", scheme),

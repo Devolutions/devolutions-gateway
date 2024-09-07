@@ -11,20 +11,20 @@ workspace = true
 
 [dependencies]
 
-# jmux
+# JMUX
 jmux-proto = { path = "../jmux-proto" }
 
-# async
+# Async
 tokio = { version = "1.38", features = ["net", "rt", "io-util", "macros"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
 
-# error handling
+# Error handling
 anyhow = "1.0"
 
-# logging
+# Logging
 tracing = "0.1"
 
-# codec implementation
+# Codec implementation
 bytes = "1.6"
 bitvec = "1.0"

@@ -344,6 +344,18 @@ impl Message {
 
         Ok(message)
     }
+
+    pub fn ty(&self) -> MessageType {
+        match self {
+            Message::Open(_) => MessageType::Open,
+            Message::OpenSuccess(_) => MessageType::OpenSuccess,
+            Message::OpenFailure(_) => MessageType::OpenFailure,
+            Message::WindowAdjust(_) => MessageType::WindowAdjust,
+            Message::Data(_) => MessageType::Data,
+            Message::Eof(_) => MessageType::Eof,
+            Message::Close(_) => MessageType::Close,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -424,6 +436,20 @@ pub enum MessageType {
     Data = 104,
     Eof = 105,
     Close = 106,
+}
+
+impl fmt::Display for MessageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageType::Open => f.write_str(ChannelOpen::NAME),
+            MessageType::OpenSuccess => f.write_str(ChannelOpenSuccess::NAME),
+            MessageType::OpenFailure => f.write_str(ChannelOpenFailure::NAME),
+            MessageType::WindowAdjust => f.write_str(ChannelWindowAdjust::NAME),
+            MessageType::Data => f.write_str(ChannelData::NAME),
+            MessageType::Eof => f.write_str(ChannelEof::NAME),
+            MessageType::Close => f.write_str(ChannelClose::NAME),
+        }
+    }
 }
 
 impl TryFrom<u8> for MessageType {
