@@ -75,17 +75,15 @@ When running less a minute, we end up measuring the rate at which `iperf` enqueu
 Filling the buffer can be done very quickly and can have a significant impact on the measured average speed.
 10 minutes is long enough to obtain convergent results.
 
-## Applied optimizations
+## 2024.3.2 optimizations
+
+### Applied optimizations
 
 - <https://github.com/Devolutions/devolutions-gateway/pull/973>
 - <https://github.com/Devolutions/devolutions-gateway/pull/975>
 - <https://github.com/Devolutions/devolutions-gateway/pull/976>
 - <https://github.com/Devolutions/devolutions-gateway/pull/977>
 - <https://github.com/Devolutions/devolutions-gateway/pull/980>
-
-## Measures
-
-Results obtained following the above procedure.
 
 ### Direct (no JMUX proxy)
 
@@ -115,7 +113,7 @@ In other words, the maximum overall throughput we can hope to achieve using the 
 [  1] 0.0000-600.0059 sec  6.84 TBytes   100 Gbits/sec
 ```
 
-### Old unoptimized JMUX proxy up to 2024.3.1
+### JMUX proxy up to 2024.3.1
 
 This time, `iperf` client is run against the JMUX proxy and redirected to the server.
 
@@ -190,7 +188,7 @@ This shows that our control flow algorithm is not efficient.
 [SUM] 0.0000-600.1641 sec   327 GBytes  4.67 Gbits/sec
 ```
 
-### New optimized JMUX proxy starting 2024.3.2
+### JMUX proxy starting 2024.3.2
 
 Again, `iperf` client is run against the JMUX proxy and redirected to the server.
 
@@ -268,7 +266,7 @@ This shows that the flow control algorithm is not getting in the way anymore.
 Even without delay, the throughput is greatly improved over the unoptimized version.
 Improved CPU usage is allowing more bytes to be processed in the same amount of time.
 
-## Analysis
+### Analysis
 
 The flow control algorithm, particularly the window size, is a critical parameter for maintaining good throughput, especially when wide area network delays are present.
 Since such delays are common in almost all practical setups, it’s safe to say that this is the most important metric to optimize.
@@ -286,3 +284,130 @@ In real-world wide-area networks, packet loss will inevitably occur.
 
 Nevertheless, these results provide valuable data, confirming that our optimizations are effective with a high degree of confidence.
 While further optimization could be pursued to address more specific scenarios, the current implementation is likely sufficient for most practical purposes.
+
+## 2024.3.3 optimizations
+
+### Applied optimizations
+
+- <TODO>
+- <TODO>
+
+### Direct (no JMUX proxy)
+
+#### With 50ms delay on loopback
+
+1 connection:
+
+```
+[  1] 0.0000-600.1467 sec  15.5 GBytes   222 Mbits/sec
+```
+
+#### Without delay
+
+1 connection:
+
+```
+[  1] 0.0000-600.0097 sec  6.86 TBytes   101 Gbits/sec
+```
+
+### JMUX proxy 2024.3.2
+
+#### With 50ms delay on loopback
+
+1 connection:
+
+```
+```
+
+2 connections:
+
+```
+```
+
+10 connections:
+
+```
+```
+
+#### Without delay
+
+1 connection:
+
+```
+```
+
+2 connections:
+
+```
+```
+
+10 connections:
+
+```
+```
+
+### JMUX proxy 2024.3.3
+
+#### With 50ms delay on loopback
+
+1 connection:
+
+```
+[  1] 0.0000-600.3984 sec  15.8 GBytes   226 Mbits/sec
+```
+
+2 connections:
+
+```
+[  2] 0.0000-605.1320 sec  7.94 GBytes   113 Mbits/sec
+[  1] 0.0000-605.2325 sec  7.94 GBytes   113 Mbits/sec
+[SUM] 0.0000-605.2325 sec  15.9 GBytes   225 Mbits/sec
+```
+
+10 connections:
+
+```
+[ 10] 0.0000-626.4699 sec  1.67 GBytes  22.9 Mbits/sec
+[  4] 0.0000-626.6715 sec  1.67 GBytes  22.9 Mbits/sec
+[  3] 0.0000-626.6702 sec  1.67 GBytes  22.8 Mbits/sec
+[  2] 0.0000-626.8106 sec  1.67 GBytes  22.8 Mbits/sec
+[  5] 0.0000-626.8119 sec  1.67 GBytes  22.9 Mbits/sec
+[  7] 0.0000-626.9101 sec  1.67 GBytes  22.8 Mbits/sec
+[  1] 0.0000-626.9117 sec  1.67 GBytes  22.8 Mbits/sec
+[  9] 0.0000-626.9107 sec  1.67 GBytes  22.8 Mbits/sec
+[  6] 0.0000-626.9106 sec  1.67 GBytes  22.8 Mbits/sec
+[  8] 0.0000-627.0104 sec  1.67 GBytes  22.8 Mbits/sec
+[SUM] 0.0000-627.0123 sec  16.7 GBytes   228 Mbits/sec
+```
+
+#### Without delay
+
+1 connection:
+
+```
+[  1] 0.0000-600.0393 sec  1.64 TBytes  24.0 Gbits/sec
+```
+
+2 connections:
+
+```
+[  2] 0.0000-600.0757 sec   646 GBytes  9.24 Gbits/sec
+[  1] 0.0000-600.0758 sec   646 GBytes  9.24 Gbits/sec
+[SUM] 0.0000-600.0758 sec  1.26 TBytes  18.5 Gbits/sec
+```
+
+10 connections:
+
+```
+[  8] 0.0000-600.3408 sec   118 GBytes  1.69 Gbits/sec
+[  9] 0.0000-600.3421 sec   118 GBytes  1.69 Gbits/sec
+[  5] 0.0000-600.3422 sec   118 GBytes  1.69 Gbits/sec
+[ 10] 0.0000-600.3417 sec   118 GBytes  1.69 Gbits/sec
+[  4] 0.0000-600.3413 sec   118 GBytes  1.69 Gbits/sec
+[  7] 0.0000-600.3409 sec   118 GBytes  1.69 Gbits/sec
+[  6] 0.0000-600.3420 sec   118 GBytes  1.69 Gbits/sec
+[  2] 0.0000-600.3417 sec   118 GBytes  1.69 Gbits/sec
+[  1] 0.0000-600.3419 sec   118 GBytes  1.69 Gbits/sec
+[  3] 0.0000-600.3531 sec   118 GBytes  1.69 Gbits/sec
+[SUM] 0.0000-600.3538 sec  1.16 TBytes  16.9 Gbits/sec
+```
