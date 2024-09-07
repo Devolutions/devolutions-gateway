@@ -1,42 +1,58 @@
-#/usr/bin/nu
+#!/usr/bin/env nu
 
 # Requirements for running this script:
 # - nushell itself
 # - pueue
 # - GNU time
+#
+# This Nushell script is also a Nushell module that can be `use`d.
 
 use std log
 use std null-device
 
-let $proxy_port = 4000
-let $iperf_c_port = 5000
-let $iperf_s_port = 5001
-let $iperf_duration = 300
-let $addr = "127.0.0.1"
-let $out_folder = "bench_out"
-let $pueue_group = "iperf-bench"
+const $proxy_port = 4000
+const $iperf_c_port = 5000
+const $iperf_s_port = 5001
+const $iperf_duration = 300
+const $addr = "127.0.0.1"
+const $bench_folder = "jetsocat-bench-out"
+const $results_folder = $bench_folder | path join "results"
+const $bin_folder = $bench_folder | path join "bin"
+const $pueue_group = "iperf-bench"
 
-def run_iperf [par_con_count: int, name: string] {
-  let $name = ($name | str replace '/' '-')
+export def main [ ] {
+  print $"proxy_port='($proxy_port)'"
+  print $"iperf_c_port='($iperf_c_port)'"
+  print $"iperf_s_port='($iperf_s_port)'"
+  print $"iperf_duration='($iperf_duration)'"
+  print $"addr='($addr)'"
+  print $"bench_folder='($bench_folder)'"
+  print $"results_folder='($results_folder)'"
+  print $"bin_folder='($bin_folder)'"
+  print $"pueue_group='($pueue_group)'"
+  print "Script subcommands: `run`, `build`, `build-run`"
+}
+
+def run_iperf [binary_path: path, par_con_count: int, name: string] {
   let $par_con_count_padded = ($par_con_count | fill -a right -c '0' -w 3)
-  let $server_node_log_file = $"($out_folder)/server-node.($name).($par_con_count_padded).log"
-  let $server_node_peak_used_mem_file = $"($out_folder)/server-node.($name).($par_con_count_padded).peak-used-mem"
-  let $client_node_log_file = $"($out_folder)/client-node.($name).($par_con_count_padded).log"
-  let $client_node_peak_used_mem_file = $"($out_folder)/client-node.($name).($par_con_count_padded).peak-used-mem"
-  let $iperf_csv_file = $"($out_folder)/iperf.($name).($par_con_count_padded).csv"
+  let $server_node_log_file = $results_folder | path join $"server-node.($name).($par_con_count_padded).log"
+  let $server_node_peak_used_mem_file = $results_folder | path join $"server-node.($name).($par_con_count_padded).peak-used-mem"
+  let $client_node_log_file = $results_folder | path join $"client-node.($name).($par_con_count_padded).log"
+  let $client_node_peak_used_mem_file = $results_folder | path join $"client-node.($name).($par_con_count_padded).peak-used-mem"
+  let $iperf_csv_file = $results_folder | path join $"iperf.($name).($par_con_count_padded).csv"
 
-  log debug $"server_node_log_file = ($server_node_log_file)"
-  log debug $"server_node_peak_used_mem_file = ($server_node_peak_used_mem_file)"
-  log debug $"client_node_log_file = ($client_node_log_file)"
-  log debug $"client_node_peak_used_mem_file = ($client_node_peak_used_mem_file)"
-  log debug $"iperf_csv_file = ($iperf_csv_file)"
+  log debug $"server_node_log_file='($server_node_log_file)'"
+  log debug $"server_node_peak_used_mem_file='($server_node_peak_used_mem_file)'"
+  log debug $"client_node_log_file='($client_node_log_file)'"
+  log debug $"client_node_peak_used_mem_file='($client_node_peak_used_mem_file)'"
+  log debug $"iperf_csv_file='($iperf_csv_file)'"
 
   log debug "Start server node"
-  let $server_node_id = pueue add -g $pueue_group -p -- time -f "%MKB" -- ./target/release/jetsocat jmux-proxy $"tcp-listen://127.0.0.1:($proxy_port)" --allow-all --log-file $server_node_log_file
+  let $server_node_id = pueue add -g $pueue_group -p -- time -f "%MKB" -- $binary_path jmux-proxy $"tcp-listen://127.0.0.1:($proxy_port)" --allow-all --log-file $server_node_log_file
   sleep 1sec
 
   log debug "Start client node"
-  let $client_node_id = (pueue add -g $pueue_group -p -- time -f "%MKB" -- ./target/release/jetsocat jmux-proxy $"tcp://127.0.0.1:($proxy_port)" $"tcp-listen://127.0.0.1:($iperf_c_port)/127.0.0.1:($iperf_s_port)" --log-file $client_node_log_file)
+  let $client_node_id = pueue add -g $pueue_group -p -- time -f "%MKB" -- $binary_path jmux-proxy $"tcp://127.0.0.1:($proxy_port)" $"tcp-listen://127.0.0.1:($iperf_c_port)/127.0.0.1:($iperf_s_port)" --log-file $client_node_log_file
   sleep 1sec
 
   log debug "Start iperf"
@@ -62,13 +78,21 @@ def run_iperf [par_con_count: int, name: string] {
   }
 }
 
-def benchmark [branch: string] {
-  log info "============="
-  log info $"=== ($branch) ==="
-  log info "============="
+def benchmark [binary_path: path] {
+  let $name = $binary_path | path parse | get stem
 
-  git checkout $branch o+e> (null-device)
-  cargo build -p jetsocat --release o+e> (null-device)
+  log info ('' | fill --width 40 --character '=')
+  log info ($" ($name) " | fill --alignment center --width 40 --character '=')
+  log info ('' | fill --width 40 --character '=')
+
+  log debug $"binary_path='($binary_path)'"
+
+  def batch_run_helper [name: string] {
+    [1 2 10] | each { |$n|
+      log info $"==> ($n) connection\(s)"
+      run_iperf $binary_path $n $name
+    }
+  }
 
   try {
     sudo tc qdisc add dev lo root handle 1:0 netem delay 50msec o+e> (null-device)
@@ -76,27 +100,13 @@ def benchmark [branch: string] {
   } catch {
     log info "==> Delay already enabled"
   }
-
-  log info "==> 1 connection"
-  print (run_iperf 1 $"($branch).delay")
-
-  log info "==> 2 connections"
-  print (run_iperf 2 $"($branch).delay")
-
-  log info "==> 10 connections"
-  print (run_iperf 10 $"($branch).delay")
+  let $delay_results = batch_run_helper $"($name).delay"
 
   sudo tc qdisc del dev lo root
   log info "==> Disabled delay"
+  let $nodelay_results = batch_run_helper $"($name).nodelay"
 
-  log info "==> 1 connection"
-  print (run_iperf 1 $"($branch).nodelay")
-
-  log info "==> 2 connections"
-  print (run_iperf 2 $"($branch).nodelay")
-
-  log info "==> 10 connections"
-  print (run_iperf 10 $"($branch).nodelay")
+  [...$delay_results ...$nodelay_results]
 }
 
 def pueue_cleanup [] {
@@ -109,32 +119,93 @@ def pueue_cleanup [] {
   }
 }
 
-try {
-  log info "Start pueue deamon"
-  pueued e> (null-device)
-} catch {
-  log warning "Failed to start the pueue deamon; it is likely already started"
+def make_folders [] {
+  mkdir $results_folder
+  mkdir $bin_folder
 }
 
-pueue_cleanup
+# Benchmark binaries found in the bench folder
+def "main run" [ ] {
+  log info "Run benchmarks..."
 
-log debug $"PROXY_PORT=($proxy_port)"
-log debug $"IPERF_C_PORT=($iperf_c_port)"
-log debug $"IPERF_S_PORT=($iperf_s_port)"
-log debug $"ADDR=($addr)"
-log debug $"IPERF_DURATION=($iperf_duration)"
-log debug $"OUT_FOLDER=($out_folder)"
-log debug $"PUEUE_GROUP=($pueue_group)"
+  make_folders
 
-mkdir $out_folder
+  try {
+    log info "Start pueue deamon"
+    pueued e> (null-device)
+  } catch {
+    log warning "Failed to start the pueue deamon; it is likely already started"
+  }
 
-pueue group add $pueue_group o+e> (null-device)
-pueue parallel -g $pueue_group 2 o+e> (null-device)
+  pueue_cleanup
 
-benchmark "master"
-benchmark "perf/jmux-proxy-7"
-benchmark "perf/jmux-proxy-8"
-benchmark "perf/jmux-proxy-9"
-benchmark "perf/jmux-proxy-10"
+  pueue group add $pueue_group o+e> (null-device)
+  pueue parallel -g $pueue_group 2 o+e> (null-device)
 
-pueue_cleanup
+  let $results = ls $bin_folder | get name | each { |$binary_path| benchmark $binary_path } | flatten
+
+  pueue_cleanup
+
+  $results
+}
+
+# Benchmark binaries found in the bench folder
+export def "run" [ ] {
+  main run
+}
+
+# Build binaries to benchmark from Git branches and move them to the bench folder
+def "main build" [
+  target_path: path # Path to cargo’s target folder
+  ...branches: string # Git branches to benchmark
+] {
+  log info "Build binaries..."
+
+  make_folders
+
+  for $branch in $branches {
+    log info $"Build jetsocat binary on branch '($branch)'..."
+    git checkout $branch
+    cargo build -p jetsocat --release
+    let $bin_name = ($branch | str replace '/' '-')
+    cp $"($target_path)/release/jetsocat" $"($bin_folder)/($bin_name)"
+  }
+}
+
+# Build binaries to benchmark from Git branches and move them to the bench folder
+export def "build" [
+  target_path: path # Path to cargo’s target folder
+  ...branches: string # Git branches to benchmark
+] {
+  main build $target_path ...$branches
+}
+
+# Build binaries and run the benchmarks
+def "main build-run" [
+  target_path: path # Path to cargo’s target folder
+  ...branches: string # Git branches to benchmark
+] {
+  main build $target_path ...$branches o+e> (null-device)
+  main run
+}
+
+# Build binaries and run the benchmarks
+export def "build-run" [
+  target_path: path # Path to cargo’s target folder
+  ...branches: string # Git branches to benchmark
+] {
+  main build-run $target_path ...$branches
+}
+
+# Generate a markdown table summarizing the results
+#
+# The input is expected to have the following type:
+#   table<name: string, parallel_connections: int, average_throughput_per_sec: filesize, server_node_peak_used_mem: filesize, client_node_peak_used_mem: filesize>
+export def "mdtable" [ ] {
+  let $results = $in
+  print "| Name | Parallel connections | Average throughput | Server node peak memory usage | Client node peak memory usage |"
+  print "|------|----------------------|--------------------|-------------------------------|-------------------------------|"
+  for $result in $results {
+    print $"|($result.name)|($result.parallel_connections)|($result.average_throughput_per_sec)/s|($result.server_node_peak_used_mem)|($result.client_node_peak_used_mem)|";
+  }
+}
