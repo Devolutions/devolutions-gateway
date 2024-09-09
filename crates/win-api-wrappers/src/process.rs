@@ -176,9 +176,11 @@ impl Process {
     }
 
     pub fn current_process() -> Self {
-        // SAFETY: `GetCurrentProcess()` has no preconditions and always returns a valid handle.
+        // SAFETY: `GetCurrentProcess()` has no preconditions and always returns
+        // a valid pseudo handle.
         let handle = unsafe { GetCurrentProcess() };
-        let handle = Handle::new_borrowed(handle).expect("always valid");
+        // SAFETY: The handle returned by `GetCurrentProcess` is a pseudo handle.
+        let handle = unsafe { Handle::new_pseudo_handle(handle) };
 
         Self { handle }
     }

@@ -58,6 +58,18 @@ impl Handle {
         // SAFETY: Same preconditions as the called function.
         unsafe { Self::new(handle, true) }
     }
+
+    /// Wraps a pseudo Windows [`HANDLE`].
+    ///
+    /// # Safety
+    ///
+    /// - The caller should ensure that `handle` is a pseudo handle, as its validity is not checked.
+    pub unsafe fn new_pseudo_handle(handle: HANDLE) -> Self {
+        Self {
+            raw: handle,
+            owned: false,
+        }
+    }
 }
 
 impl Handle {

@@ -235,15 +235,15 @@ fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &S
                 return Ok(());
             }
 
-            info!(%session, "Starting session process in session");
+            info!(%session, "Starting session process");
 
             match start_session_process(session) {
                 Ok(()) => {
-                    info!(%session, "Session process started in session");
+                    info!(%session, "Session process started");
                     gw_session.set_session_ready(true);
                 }
                 Err(error) => {
-                    error!(%error, %session, "Failed to start session process for session");
+                    error!(%error, %session, "Failed to start session process");
                 }
             }
         }
@@ -259,13 +259,13 @@ fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &S
 fn terminate_session_process(session: &Session) {
     match terminate_process_by_name_in_session(SESSION_BINARY, session.id) {
         Ok(false) => {
-            trace!(%session, "Session process is not running in the session");
+            trace!(%session, "Session process is not running");
         }
         Ok(true) => {
-            info!(%session, "Session process terminated in session");
+            info!(%session, "Session process terminated");
         }
         Err(error) => {
-            error!(%error, %session, "Failed to terminate session process in session");
+            error!(%error, %session, "Failed to terminate session process");
         }
     }
 }
@@ -283,7 +283,7 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
     let session_app_path = session_app_path();
     let command_line = CommandLine::new(vec!["--session".to_owned(), session.to_string()]);
 
-    info!("Starting `{session_app_path}` in session `{session}`");
+    info!(%session, "Starting `{session_app_path}`");
 
     let mut startup_info = StartupInfo::default();
 
@@ -311,11 +311,11 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
 
     match start_result {
         Ok(_) => {
-            info!("{SESSION_BINARY} started in session {session}");
+            info!(%session, "{SESSION_BINARY} started");
             Ok(())
         }
         Err(error) => {
-            error!(%error, "Failed to start {SESSION_BINARY} in session {session}");
+            error!(%error, %session, "Failed to start {SESSION_BINARY}");
             Err(error)
         }
     }
