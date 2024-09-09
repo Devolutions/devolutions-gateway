@@ -78,8 +78,8 @@ impl Task for UpdaterTask {
                 Ok(_) => {
                     let _ = file_change_tx.notify_waiters();
                 }
-                Err(err) => {
-                    error!(%err, "Failed to watch update.json file");
+                Err(error) => {
+                    error!(%error, "Failed to watch update.json file");
                 }
             })
             .context("failed to create file notify debouncer")?;
@@ -100,8 +100,8 @@ impl Task for UpdaterTask {
 
                     let update_json = match read_update_json(&update_file_path).await {
                         Ok(update_json) => update_json,
-                        Err(err) => {
-                            error!(%err, "Failed to parse `update.json`");
+                        Err(error) => {
+                            error!(%error, "Failed to parse `update.json`");
                             // Allow this error to be non-critical, as this file could be
                             // updated later to be valid again
                             continue;
@@ -113,8 +113,8 @@ impl Task for UpdaterTask {
                     for product in PRODUCTS {
                         let update_order = match check_for_updates(*product, &update_json).await {
                             Ok(order) => order,
-                            Err(err) => {
-                                error!(%product, %err, "Failed to check for updates for a product.");
+                            Err(error) => {
+                                error!(%product, %error, "Failed to check for updates for a product.");
                                 continue;
                             }
                         };
@@ -129,8 +129,8 @@ impl Task for UpdaterTask {
                     }
 
                     for (product, order) in update_orders {
-                        if let Err(err) = update_product(conf.clone(), product, order).await {
-                            error!(%product, %err, "Failed to update product");
+                        if let Err(error) = update_product(conf.clone(), product, order).await {
+                            error!(%product, %error, "Failed to update product");
                         }
                     }
                 }
@@ -271,8 +271,9 @@ async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
         }
         Err(err) => {
             // Remove update.json file if failed to set permissions
-            std::fs::remove_file(update_file_path.as_std_path())
-                .unwrap_or_else(|err| warn!(%err, "Failed to remove update.json file after failed permissions set"));
+            std::fs::remove_file(update_file_path.as_std_path()).unwrap_or_else(
+                |error| warn!(%error, "Failed to remove update.json file after failed permissions set"),
+            );
 
             // Treat as fatal error
             return Err(anyhow!(err).context("failed to set update.json file permissions"));

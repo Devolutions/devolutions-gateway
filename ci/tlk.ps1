@@ -122,7 +122,7 @@ function Get-DestinationSymbolFile {
 
     $DestinationSymbolsName = $(Split-Path $DestinationExecutable -LeafBase) + ".$($Target.SymbolsExtension)"
     $DestinationDirectory  = Split-Path $DestinationExecutable -Parent
-    
+
     Join-Path $DestinationDirectory $DestinationSymbolsName
 }
 
@@ -345,6 +345,7 @@ class TlkRecipe
                 if ($this.Target.IsWindows()) {
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-shell-ext", "crates/devolutions-pedm-shell-ext", $true)
+                    $agentPackages += [TlkPackage]::new("devolutions-session", "devolutions-session", $false)
                 }
 
                 $agentPackages
@@ -405,13 +406,13 @@ class TlkRecipe
         $CargoPackages = $this.CargoPackages()
         $CargoTarget = $this.Target.CargoTarget()
         $CargoProfile = $this.Target.CargoProfile
-        
+
         $CargoOutputPath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}"
 
         foreach ($CargoPackage in $CargoPackages) {
             Push-Location
             Set-Location -Path $CargoPackage.Path
-    
+
             $this.Cargo(@('build'))
 
             $SrcBinaryPath = "${CargoOutputPath}/$($CargoPackage.BinaryFileName($this.Target))"
@@ -431,6 +432,8 @@ class TlkRecipe
                         $Env:DAGENT_PEDM_HOOK
                     } elseif ($CargoPackage.Name -Eq "devolutions-pedm-shell-ext" -And (Test-Path Env:DAGENT_PEDM_SHELL_EXT_DLL)) {
                         $Env:DAGENT_PEDM_SHELL_EXT_DLL
+                    } elseif ($CargoPackage.Name -Eq "devolutions-session" -And (Test-Path Env:DAGENT_SESSION_EXECUTABLE)) {
+                        $Env:DAGENT_SESSION_EXECUTABLE
                     } else {
                         $null
                     }
@@ -455,10 +458,10 @@ class TlkRecipe
                 if (Test-Path Env:STRIP_EXECUTABLE) {
                     $StripExecutable = $Env:STRIP_EXECUTABLE
                 }
-    
+
                 & $StripExecutable $SrcBinaryPath | Out-Host
             }
-    
+
             if ($DestinationExecutable) {
                 Copy-Item -Path $SrcBinaryPath -Destination $DestinationExecutable
             }
@@ -472,7 +475,7 @@ class TlkRecipe
 
                 Push-Location
                 Set-Location $CargoOutputPath
-    
+
                 $MakeAppxOutput = & 'MakeAppx.exe' 'pack' '/f' "${CargoPackagePath}/mapping.txt" '/p' "./DevolutionsPedmShellExt.msix" '/nv' '/o'
                 if (!$?) {
                     throw "MakeAppx package creation failed: ${MakeAppxOutput}"
@@ -497,7 +500,13 @@ class TlkRecipe
 
                 Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
                 Copy-Item -Path $builtDesktopPdb -Destination $(Get-DestinationSymbolFile $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE $this.Target)
-                
+
+            }
+
+            if (Test-Path Env:DAGENT_SESSION_EXECUTABLE) {
+                $sessionExe = Get-ChildItem -Recurse -Include 'devolutions-session.exe' | Select-Object -First 1
+
+                Copy-Item -Path $sessionExe -Destination $Env:DAGENT_SESSION_EXECUTABLE
             }
         }
 

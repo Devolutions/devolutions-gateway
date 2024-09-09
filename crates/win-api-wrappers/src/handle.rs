@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle, IntoRawHandle, OwnedHandle};
 
-use windows::Win32::Foundation::E_HANDLE;
-use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, E_HANDLE, HANDLE};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
 // TODO: Use/implement AsHandle and AsRawHandle as appropriate
@@ -58,6 +57,18 @@ impl Handle {
     pub unsafe fn new_owned(handle: HANDLE) -> Result<Self, crate::Error> {
         // SAFETY: Same preconditions as the called function.
         unsafe { Self::new(handle, true) }
+    }
+
+    /// Wraps a pseudo Windows [`HANDLE`].
+    ///
+    /// # Safety
+    ///
+    /// - The caller should ensure that `handle` is a pseudo handle, as its validity is not checked.
+    pub unsafe fn new_pseudo_handle(handle: HANDLE) -> Self {
+        Self {
+            raw: handle,
+            owned: false,
+        }
     }
 }
 

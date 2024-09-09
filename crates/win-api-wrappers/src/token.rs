@@ -24,7 +24,7 @@ use crate::undoc::{
     TOKEN_SECURITY_ATTRIBUTE_TYPE_OCTET_STRING, TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING,
     TOKEN_SECURITY_ATTRIBUTE_TYPE_UINT64, TOKEN_SECURITY_ATTRIBUTE_V1, TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
 };
-use crate::utils::WideString;
+use crate::utils::{size_of_u32, WideString};
 use crate::{create_impersonation_context, Error};
 use windows::Win32::Foundation::{
     ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, HANDLE,
@@ -42,9 +42,8 @@ use windows::Win32::Security::{
     TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_OWNER, TOKEN_PRIMARY_GROUP,
     TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY, TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER,
 };
+use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
 use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
-
-use super::utils::size_of_u32;
 
 #[derive(Debug)]
 pub struct Token {
@@ -62,6 +61,21 @@ impl Token {
         Self {
             handle: Handle::new_borrowed(HANDLE(-4isize as *mut c_void)).expect("always valid"),
         }
+    }
+
+    pub fn for_session(session_id: u32) -> Result<Self> {
+        let mut user_token = HANDLE::default();
+
+        // SAFETY: Query user token is always safe if dst pointer is valid.
+        unsafe { WTSQueryUserToken(session_id, &mut user_token as *mut _)? };
+
+        Ok(Self {
+            // SAFETY: As per `WTSQueryUserToken` documentation, returned token should be closed
+            // by caller.
+            handle: unsafe {
+                Handle::new_owned(user_token).expect("BUG: WTSQueryUserToken should return a valid handle")
+            },
+        })
     }
 
     // Wrapper around `NtCreateToken`, which has a lot of arguments.
@@ -337,6 +351,14 @@ impl Token {
 
     pub fn set_session_id(&mut self, session_id: u32) -> Result<()> {
         self.set_information_raw(windows::Win32::Security::TokenSessionId, &session_id)
+    }
+
+    pub fn ui_access(&self) -> Result<u32> {
+        self.information_raw::<u32>(windows::Win32::Security::TokenUIAccess)
+    }
+
+    pub fn set_ui_access(&mut self, ui_access: u32) -> Result<()> {
+        self.set_information_raw(windows::Win32::Security::TokenUIAccess, &ui_access)
     }
 
     pub fn mandatory_policy(&self) -> Result<TOKEN_MANDATORY_POLICY_ID> {

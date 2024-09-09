@@ -276,8 +276,7 @@ pub mod sanity {
 
 mod danger {
     use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-    use tokio_rustls::rustls::pki_types;
-    use tokio_rustls::rustls::{DigitallySignedStruct, Error, SignatureScheme};
+    use tokio_rustls::rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
 
     #[derive(Debug)]
     pub(super) struct NoCertificateVerification;

@@ -343,25 +343,6 @@ pub unsafe fn set_memory_protection(
     Ok(old_prot)
 }
 
-pub fn serialize_environment(environment: &HashMap<String, String>) -> Result<Vec<u16>> {
-    let mut serialized = Vec::new();
-
-    for (k, v) in environment.iter() {
-        if k.contains('=') {
-            bail!(Error::from_hresult(E_INVALIDARG));
-        }
-
-        serialized.extend(k.encode_utf16());
-        serialized.extend("=".encode_utf16());
-        serialized.extend(v.encode_utf16());
-        serialized.push(0);
-    }
-
-    serialized.push(0);
-
-    Ok(serialized)
-}
-
 pub fn environment_block(token: Option<&Token>, inherit: bool) -> Result<HashMap<String, String>> {
     let mut blocks = Vec::new();
 

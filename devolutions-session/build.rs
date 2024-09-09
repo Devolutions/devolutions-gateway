@@ -14,11 +14,10 @@ mod win {
         fs::write(&version_rc_file, version_rc_data).expect("BUG: failed to write version.rc");
 
         embed_resource::compile(&version_rc_file, embed_resource::NONE);
-        embed_resource::compile("resources.rc", embed_resource::NONE);
     }
 
     fn generate_version_rc() -> String {
-        let output_name = "DevolutionsAgent";
+        let output_name = "DevolutionsSession";
         let filename = format!("{}.exe", output_name);
         let company_name = "Devolutions Inc.";
         let legal_copyright = format!("Copyright 2020-2024 {}", company_name);

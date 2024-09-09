@@ -1,10 +1,14 @@
 use tokio::runtime::{self, Runtime};
+use tokio::sync::mpsc;
 
 use crate::config::ConfHandle;
 use crate::log::AgentLog;
 use crate::remote_desktop::RemoteDesktopTask;
 #[cfg(windows)]
+use crate::session_manager::SessionManager;
+#[cfg(windows)]
 use crate::updater::UpdaterTask;
+use crate::AgentServiceEvent;
 use anyhow::Context;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
@@ -15,6 +19,13 @@ use std::time::Duration;
 pub const SERVICE_NAME: &str = "devolutions-agent";
 pub const DISPLAY_NAME: &str = "Devolutions Agent";
 pub const DESCRIPTION: &str = "Devolutions Agent service";
+
+struct TasksCtx {
+    /// Spawned service tasks
+    tasks: Tasks,
+    /// Sender side of the service event channel (Used for session manager module)
+    service_event_tx: Option<mpsc::Sender<AgentServiceEvent>>,
+}
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 enum AgentState {
@@ -29,6 +40,7 @@ pub struct AgentService {
     conf_handle: ConfHandle,
     state: AgentState,
     _logger_guard: LoggerGuard,
+    service_event_tx: Option<mpsc::Sender<AgentServiceEvent>>,
 }
 
 impl AgentService {
@@ -57,6 +69,7 @@ impl AgentService {
         Ok(AgentService {
             conf_handle,
             state: AgentState::Stopped,
+            service_event_tx: None,
             _logger_guard: logger_guard,
         })
     }
@@ -70,7 +83,10 @@ impl AgentService {
         let config = self.conf_handle.clone();
 
         // create_futures needs to be run in the runtime in order to bind the sockets.
-        let tasks = runtime.block_on(spawn_tasks(config))?;
+        let TasksCtx {
+            tasks,
+            service_event_tx,
+        } = runtime.block_on(spawn_tasks(config))?;
 
         trace!("Tasks created");
 
@@ -94,6 +110,7 @@ impl AgentService {
             }
         });
 
+        self.service_event_tx = service_event_tx;
         self.state = AgentState::Running {
             shutdown_handle: tasks.shutdown_handle,
             runtime,
@@ -147,6 +164,10 @@ impl AgentService {
             }
         }
     }
+
+    pub fn service_event_tx(&self) -> Option<mpsc::Sender<AgentServiceEvent>> {
+        self.service_event_tx.clone()
+    }
 }
 
 struct Tasks {
@@ -175,7 +196,7 @@ impl Tasks {
     }
 }
 
-async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
+async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
     let conf = conf_handle.get_conf();
 
     let mut tasks = Tasks::new();
@@ -183,18 +204,34 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
 
     #[cfg(windows)]
-    if conf.updater.enabled {
-        tasks.register(UpdaterTask::new(conf_handle.clone()));
-    }
+    let service_event_tx = {
+        if conf.updater.enabled {
+            tasks.register(UpdaterTask::new(conf_handle.clone()));
+        }
+
+        if conf.pedm.enabled {
+            tasks.register(PedmTask::new())
+        }
+
+        if conf.session.enabled {
+            let session_manager = SessionManager::default();
+            let tx = session_manager.service_event_tx();
+            tasks.register(session_manager);
+            Some(tx)
+        } else {
+            None
+        }
+    };
+
+    #[cfg(not(windows))]
+    let service_event_tx = None;
 
     if conf.debug.enable_unstable && conf.remote_desktop.enabled {
         tasks.register(RemoteDesktopTask::new(conf_handle));
     }
 
-    #[cfg(windows)]
-    if conf.pedm.enabled {
-        tasks.register(PedmTask::new())
-    }
-
-    Ok(tasks)
+    Ok(TasksCtx {
+        tasks,
+        service_event_tx,
+    })
 }

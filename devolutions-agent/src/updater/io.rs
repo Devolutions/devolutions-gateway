@@ -62,8 +62,8 @@ pub fn remove_file_on_reboot_impl(file_path: &Utf8Path) -> Result<(), UpdaterErr
 
     let move_result = unsafe { MoveFileExW(&hstring_file_path, None, MOVEFILE_DELAY_UNTIL_REBOOT) };
 
-    if let Err(err) = move_result {
-        warn!(%err, %file_path, "Failed to mark file for deletion on reboot");
+    if let Err(error) = move_result {
+        warn!(%error, %file_path, "Failed to mark file for deletion on reboot");
     }
 
     Ok(())

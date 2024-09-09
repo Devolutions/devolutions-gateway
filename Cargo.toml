@@ -4,13 +4,14 @@ members = [
     "crates/*",
     "devolutions-agent",
     "devolutions-gateway",
+    "devolutions-session",
     "jetsocat",
     "tools/generate-openapi",
 ]
 default-members = [
     "devolutions-agent",
     "devolutions-gateway",
-    "devolutions-agent",
+    "devolutions-session",
     "jetsocat",
 ]
 

@@ -1014,6 +1014,7 @@ dependencies = [
  "tokio-rustls 0.26.0",
  "tracing",
  "uuid",
+ "win-api-wrappers",
  "windows 0.58.0",
  "winreg 0.52.0",
 ]
@@ -1221,6 +1222,24 @@ dependencies = [
  "tokio 1.38.1",
  "win-api-wrappers",
  "windows-core 0.58.0",
+]
+
+[[package]]
+name = "devolutions-session"
+version = "2024.3.2"
+dependencies = [
+ "anyhow",
+ "camino",
+ "cfg-if",
+ "ctrlc",
+ "devolutions-log",
+ "embed-resource",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tap",
+ "tracing",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -5803,6 +5822,7 @@ dependencies = [
  "anyhow",
  "base16ct",
  "thiserror",
+ "tracing",
  "windows 0.58.0",
 ]
 

@@ -6,20 +6,24 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::{ptr, slice};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::handle::{Handle, HandleWrapper};
 use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
-use crate::utils::{serialize_environment, Allocation, AnsiString, CommandLine, WideString};
+use crate::utils::{Allocation, AnsiString, CommandLine, WideString};
 use crate::Error;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    FreeLibrary, ERROR_INCORRECT_SIZE, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT, WAIT_FAILED,
+    FreeLibrary, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, E_INVALIDARG, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT,
+    WAIT_FAILED,
 };
-use windows::Win32::Security::TOKEN_ACCESS_MASK;
+use windows::Win32::Security::{
+    SE_ASSIGNPRIMARYTOKEN_NAME, SE_INCREASE_QUOTA_NAME, SE_TCB_NAME, TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES,
+    TOKEN_QUERY,
+};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::LibraryLoader::{
@@ -27,15 +31,21 @@ use windows::Win32::System::LibraryLoader::{
 };
 use windows::Win32::System::Threading::{
     CreateProcessAsUserW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
-    QueryFullProcessImageNameW, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
-    INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, PEB, PROCESS_ACCESS_RIGHTS,
-    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, STARTUPINFOEXW,
-    STARTUPINFOW, STARTUPINFOW_FLAGS,
+    QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
+    EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, PEB,
+    PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
+    PROCESS_TERMINATE, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS,
 };
 use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
+use super::security::privilege::ScopedPrivileges;
 use super::utils::{size_of_u32, ComContext};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
+use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 
 #[derive(Debug)]
 pub struct Process {
@@ -166,9 +176,11 @@ impl Process {
     }
 
     pub fn current_process() -> Self {
-        // SAFETY: `GetCurrentProcess()` has no preconditions and always returns a valid handle.
+        // SAFETY: `GetCurrentProcess()` has no preconditions and always returns
+        // a valid pseudo handle.
         let handle = unsafe { GetCurrentProcess() };
-        let handle = Handle::new_borrowed(handle).expect("always valid");
+        // SAFETY: The handle returned by `GetCurrentProcess` is a pseudo handle.
+        let handle = unsafe { Handle::new_pseudo_handle(handle) };
 
         Self { handle }
     }
@@ -549,6 +561,119 @@ pub struct ProcessInformation {
     pub thread_id: u32,
 }
 
+pub struct ProcessEntry32Iterator {
+    snapshot_handle: Handle,
+    process_entry: PROCESSENTRY32W,
+    first: bool,
+}
+
+impl ProcessEntry32Iterator {
+    pub fn new() -> Result<Self> {
+        // SAFETY: `CreateToolhelp32Snapshot` call is always safe to call and returns a
+        // valid handle on success.
+        let raw_handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }?;
+
+        // SAFETY: `Handle::new` is safe to call because the `raw_handle` is valid.
+        let snapshot_handle = unsafe {
+            Handle::new_owned(raw_handle).expect("BUG: handle should be valid after CreateToolhelp32Snapshot call")
+        };
+
+        // SAFETY: It is safe to zero out the structure as it is a simple POD type.
+        let mut process_entry: PROCESSENTRY32W = unsafe { mem::zeroed() };
+        process_entry.dwSize = mem::size_of::<PROCESSENTRY32W>()
+            .try_into()
+            .expect("BUG: PROCESSENTRY32W size always fits in u32");
+
+        Ok(ProcessEntry32Iterator {
+            snapshot_handle,
+            process_entry,
+            first: true,
+        })
+    }
+}
+
+impl Iterator for ProcessEntry32Iterator {
+    type Item = ProcessEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = if self.first {
+            // SAFETY: `windows` library ensures that `snapshot` handle is correct on creation,
+            // therefore it is safe to call Process32First.
+            unsafe { Process32FirstW(self.snapshot_handle.raw(), &mut self.process_entry as *mut _) }
+        } else {
+            // SAFETY: `Process32Next` is safe to call because the `snapshot_handle` is valid while it
+            // is owned by the iterator.
+            unsafe { Process32NextW(self.snapshot_handle.raw(), &mut self.process_entry as *mut _) }
+        };
+
+        match result {
+            Err(error) if error.code() == ERROR_NO_MORE_FILES.to_hresult() => None,
+            Err(error) => {
+                error!(%error, "Failed to iterate over processes");
+                None
+            }
+            Ok(()) => {
+                self.first = false;
+                Some(ProcessEntry(self.process_entry))
+            }
+        }
+    }
+}
+
+pub struct ProcessEntry(PROCESSENTRY32W);
+
+impl ProcessEntry {
+    pub fn process_id(&self) -> u32 {
+        self.0.th32ProcessID
+    }
+
+    pub fn executable_name(&self) -> Result<String> {
+        // NOTE: If for some reason szExeFile all 260 bytes filled and there is no null terminator,
+        // then the executable name will be truncated.
+        let exe_name_length = self
+            .0
+            .szExeFile
+            .iter()
+            .position(|&c| c == 0)
+            .context("executable name null terminator not found")?;
+
+        let name = String::from_utf16(&self.0.szExeFile[..exe_name_length])
+            .context("invalid executable name UTF16 encoding")?;
+
+        Ok(name)
+    }
+}
+
+enum ProcessEnvironment {
+    OsDefined(*const c_void),
+    Custom(Vec<u16>),
+}
+
+impl ProcessEnvironment {
+    fn as_mut_ptr(&self) -> Option<*const c_void> {
+        match self {
+            ProcessEnvironment::OsDefined(ptr) => Some(*ptr),
+            ProcessEnvironment::Custom(vec) => Some(vec.as_ptr() as *const _),
+        }
+    }
+}
+
+impl Drop for ProcessEnvironment {
+    fn drop(&mut self) {
+        if let ProcessEnvironment::OsDefined(block) = self {
+            // SAFETY: `ProcessEnvironment` is a private enum, and we ensured that `block` will only
+            // ever hold pointers returned by `CreateEnvironmentBlock` in the current module.
+            unsafe {
+                if !block.is_null() {
+                    if let Err(error) = DestroyEnvironmentBlock(*block) {
+                        warn!(%error, "Failed to destroy environment block");
+                    }
+                }
+            };
+        }
+    }
+}
+
 // Goal is to wrap `CreateProcessAsUserW`, which has a lot of arguments.
 #[allow(clippy::too_many_arguments)]
 pub fn create_process_as_user(
@@ -566,7 +691,24 @@ pub fn create_process_as_user(
     let application_name = application_name.map(WideString::from).unwrap_or_default();
     let current_directory = current_directory.map(WideString::from).unwrap_or_default();
 
-    let environment = environment.map(serialize_environment).transpose()?;
+    let environment = if let Some(env) = environment {
+        ProcessEnvironment::Custom(serialize_environment(env)?)
+    } else {
+        let mut environment: *mut c_void = ptr::null_mut();
+
+        if let Some(token) = token {
+            // SAFETY: As per `CreateEnvironmentBlock` documentation: We must specify
+            // `CREATE_UNICODE_ENVIRONMENT` and call `DestroyEnvironmentBlock` after
+            // `CreateProcessAsUser` call.
+            // - `CREATE_UNICODE_ENVIRONMENT` is always set unconditionaly.
+            // - `DestroyEnvironmentBlock` is called in the `ProcessEnvironment` destructor.
+            //
+            // Therefore, all preconditions are met to safely call `CreateEnvironmentBlock`.
+            unsafe { CreateEnvironmentBlock(&mut environment, token.handle().raw(), false) }?;
+        }
+
+        ProcessEnvironment::OsDefined(environment.cast_const())
+    };
 
     let mut command_line = command_line
         .map(CommandLine::to_command_line)
@@ -593,7 +735,7 @@ pub fn create_process_as_user(
             thread_attributes.as_ref().map(|x| x.as_raw() as *const _),
             inherit_handles,
             creation_flags,
-            environment.as_ref().map(|x| x.as_ptr().cast()),
+            environment.as_mut_ptr(),
             current_directory.as_pcwstr(),
             &startup_info.as_raw()?.StartupInfo,
             &mut raw_process_information,
@@ -612,4 +754,153 @@ pub fn create_process_as_user(
         process_id: raw_process_information.dwProcessId,
         thread_id: raw_process_information.dwThreadId,
     })
+}
+
+fn serialize_environment(environment: &HashMap<String, String>) -> Result<Vec<u16>> {
+    let mut serialized = Vec::new();
+
+    for (k, v) in environment.iter() {
+        if k.contains('=') {
+            bail!(Error::from_hresult(E_INVALIDARG));
+        }
+
+        serialized.extend(k.encode_utf16());
+        serialized.extend("=".encode_utf16());
+        serialized.extend(v.encode_utf16());
+        serialized.push(0);
+    }
+
+    serialized.push(0);
+
+    Ok(serialized)
+}
+
+/// Starts new process in the specified session. Note that this function requires the current
+/// process to have `SYSTEM`-level permissions. Use with caution.
+#[allow(clippy::too_many_arguments)]
+pub fn create_process_in_session(
+    session_id: u32,
+    application_name: Option<&Path>,
+    command_line: Option<&CommandLine>,
+    process_attributes: Option<&SecurityAttributes>,
+    thread_attributes: Option<&SecurityAttributes>,
+    inherit_handles: bool,
+    creation_flags: PROCESS_CREATION_FLAGS,
+    environment: Option<&HashMap<String, String>>,
+    current_directory: Option<&Path>,
+    startup_info: &mut StartupInfo,
+) -> Result<ProcessInformation> {
+    let mut current_process_token = Process::current_process().token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
+
+    // (needs investigation) Setting all of these at once fails and crashes the process.
+    // In `wayk-agent` project they are set one by one.
+    let mut _priv_tcb = ScopedPrivileges::enter(&mut current_process_token, &[SE_TCB_NAME])?;
+    let mut _priv_primary = ScopedPrivileges::enter(_priv_tcb.token_mut(), &[SE_ASSIGNPRIMARYTOKEN_NAME])?;
+    let _priv_quota = ScopedPrivileges::enter(_priv_primary.token_mut(), &[SE_INCREASE_QUOTA_NAME])?;
+
+    let mut session_token = Token::for_session(session_id)?;
+
+    session_token.set_session_id(session_id)?;
+    session_token.set_ui_access(1)?;
+
+    create_process_as_user(
+        Some(&session_token),
+        application_name,
+        command_line,
+        process_attributes,
+        thread_attributes,
+        inherit_handles,
+        creation_flags,
+        environment,
+        current_directory,
+        startup_info,
+    )
+}
+
+pub fn is_process_running(process_name: &str) -> Result<bool> {
+    is_process_running_impl(process_name, None)
+}
+
+pub fn is_process_running_in_session(process_name: &str, session_id: u32) -> Result<bool> {
+    is_process_running_impl(process_name, Some(session_id))
+}
+
+fn is_process_running_impl(process_name: &str, session_id: Option<u32>) -> Result<bool> {
+    for process in ProcessEntry32Iterator::new()? {
+        if let Some(session_id) = session_id {
+            let actual_session = match process_id_to_session(process.process_id()) {
+                Ok(session) => session,
+                Err(_) => {
+                    continue;
+                }
+            };
+
+            if session_id != actual_session {
+                continue;
+            }
+        }
+
+        if str::eq_ignore_ascii_case(process.executable_name()?.as_str(), process_name) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+pub fn terminate_process_by_name(process_name: &str) -> Result<bool> {
+    terminate_process_by_name_impl(process_name, None)
+}
+
+pub fn terminate_process_by_name_in_session(process_name: &str, session_id: u32) -> Result<bool> {
+    terminate_process_by_name_impl(process_name, Some(session_id))
+}
+
+fn terminate_process_by_name_impl(process_name: &str, session_id: Option<u32>) -> Result<bool> {
+    for process in ProcessEntry32Iterator::new()? {
+        if let Some(session_id) = session_id {
+            let actual_session = match process_id_to_session(process.process_id()) {
+                Ok(session) => session,
+                Err(_) => {
+                    continue;
+                }
+            };
+
+            if session_id != actual_session {
+                continue;
+            }
+        }
+
+        if str::eq_ignore_ascii_case(process.executable_name()?.as_str(), process_name) {
+            // SAFETY: `OpenProcess` is always safe to call and returns a valid handle on success.
+            let process = unsafe { OpenProcess(PROCESS_TERMINATE, false, process.process_id()) };
+
+            match process {
+                Ok(process) => {
+                    // SAFETY: `OpenProcess` ensures that the handle is valid.
+                    unsafe {
+                        if let Err(error) = TerminateProcess(process, 1) {
+                            warn!(process_name, session_id, %error, "TerminateProcess failed");
+                            return Ok(false);
+                        }
+                    }
+
+                    return Ok(true);
+                }
+                Err(error) => {
+                    warn!(process_name, session_id, %error, "OpenProcess failed");
+                    continue;
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+fn process_id_to_session(pid: u32) -> Result<u32> {
+    let mut session_id = 0;
+    // SAFETY: `session_id` is always pointing to a valid memory location.
+    unsafe { ProcessIdToSessionId(pid, &mut session_id as *mut _) }?;
+    Ok(session_id)
 }
