@@ -504,9 +504,9 @@ class TlkRecipe
             }
 
             if (Test-Path Env:DAGENT_SESSION_EXECUTABLE) {
-                $hostExe = Get-ChildItem -Recurse -Include 'devolutions-session.exe' | Select-Object -First 1
+                $sessionExe = Get-ChildItem -Recurse -Include 'devolutions-session.exe' | Select-Object -First 1
 
-                Copy-Item -Path $hostExe -Destination $Env:DAGENT_SESSION_EXECUTABLE
+                Copy-Item -Path $sessionExe -Destination $Env:DAGENT_SESSION_EXECUTABLE
             }
         }
 
