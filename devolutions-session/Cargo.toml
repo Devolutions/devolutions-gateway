@@ -1,10 +1,10 @@
 [package]
-name = "devolutions-host"
+name = "devolutions-session"
 version = "2024.3.2"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
-description = "Per-session host application for Devolutions Agent"
+description = "Session host application for Devolutions Agent"
 build = "build.rs"
 publish = false
 

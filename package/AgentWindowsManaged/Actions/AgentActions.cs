@@ -252,17 +252,17 @@ internal static class AgentActions
         Condition = Includes.PEDM_FEATURE.BeingUninstall(),
     };
 
-    private static readonly ElevatedManagedAction installHost = new(
-        CustomActions.InstallHost
+    private static readonly ElevatedManagedAction installSession = new(
+        CustomActions.InstallSession
     )
     {
-        Id = new Id("installHost"),
-        Feature = Includes.PEDM_FEATURE,
+        Id = new Id("installSession"),
+        Feature = Includes.SESSION_FEATURE,
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
         Step = Step.InstallFiles,
         When = When.After,
-        Condition = Includes.PEDM_FEATURE.BeingInstall(),
+        Condition = Includes.SESSION_FEATURE.BeingInstall(),
     };
 
     private static string UseProperties(IEnumerable<IWixProperty> properties)
@@ -298,7 +298,7 @@ internal static class AgentActions
         cleanupPedmShellExt,
         uninstallPedmShellExt,
         installPedmShellExt,
-        installHost,
+        installSession,
 
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,

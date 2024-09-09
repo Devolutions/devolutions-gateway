@@ -1119,24 +1119,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "devolutions-host"
-version = "2024.3.2"
-dependencies = [
- "anyhow",
- "camino",
- "cfg-if",
- "ctrlc",
- "devolutions-log",
- "embed-resource",
- "parking_lot",
- "serde",
- "serde_json",
- "tap",
- "tracing",
- "windows 0.58.0",
-]
-
-[[package]]
 name = "devolutions-log"
 version = "0.0.0"
 dependencies = [
@@ -1240,6 +1222,24 @@ dependencies = [
  "tokio 1.38.1",
  "win-api-wrappers",
  "windows-core 0.58.0",
+]
+
+[[package]]
+name = "devolutions-session"
+version = "2024.3.2"
+dependencies = [
+ "anyhow",
+ "camino",
+ "cfg-if",
+ "ctrlc",
+ "devolutions-log",
+ "embed-resource",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tap",
+ "tracing",
+ "windows 0.58.0",
 ]
 
 [[package]]

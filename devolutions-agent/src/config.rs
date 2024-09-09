@@ -18,7 +18,7 @@ pub struct Conf {
     pub updater: dto::UpdaterConf,
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
-    pub session_host: dto::SessionHostConf,
+    pub session: dto::SessionConf,
     pub debug: dto::DebugConf,
 }
 
@@ -45,7 +45,7 @@ impl Conf {
             updater: conf_file.updater.clone().unwrap_or_default(),
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
-            session_host: conf_file.session_host.clone().unwrap_or_default(),
+            session: conf_file.session.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -257,13 +257,13 @@ pub mod dto {
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
-    pub struct SessionHostConf {
-        /// Enable Session host module (disabled by default)
+    pub struct SessionConf {
+        /// Enable Devolutions Session module (disabled by default)
         pub enabled: bool,
     }
 
     #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
-    impl Default for SessionHostConf {
+    impl Default for SessionConf {
         fn default() -> Self {
             Self { enabled: false }
         }
@@ -296,9 +296,9 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub pedm: Option<PedmConf>,
 
-        /// Devolutions Session Host configuration
+        /// Devolutions Session configuration
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub session_host: Option<SessionHostConf>,
+        pub session: Option<SessionConf>,
 
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
@@ -320,7 +320,7 @@ pub mod dto {
                 remote_desktop: None,
                 pedm: None,
                 debug: None,
-                session_host: Some(SessionHostConf { enabled: false }),
+                session: Some(SessionConf { enabled: false }),
                 rest: serde_json::Map::new(),
             }
         }

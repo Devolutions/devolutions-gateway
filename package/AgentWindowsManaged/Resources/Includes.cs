@@ -28,7 +28,7 @@ namespace DevolutionsAgent.Resources
 
         internal static Feature PEDM_FEATURE = new Feature("Devolutions PEDM", "Installs Devolutions PEDM", false);
 
-        internal static Feature HOST_FEATURE = new Feature("Devolutions Host", "Installs Devolutions Host", false);
+        internal static Feature SESSION_FEATURE = new Feature("Devolutions Session", "Installs Devolutions Session", false);
 
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\agent ACL

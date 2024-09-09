@@ -5,10 +5,10 @@
 #[macro_use]
 extern crate tracing;
 
-use devolutions_host::{get_data_dir, init_log, ConfHandle};
+use devolutions_session::{get_data_dir, init_log, ConfHandle};
 
 #[cfg(windows)]
-use devolutions_host::loop_dvc;
+use devolutions_session::loop_dvc;
 
 use anyhow::Context;
 
@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
 
     let _logger_guard = init_log(config.clone());
 
-    info!("Starting Devolutions Host");
+    info!("Starting Devolutions Session");
 
     // TMP: Copy-paste from MSRDPEX project for testing purposes.
     #[cfg(windows)]
@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
     info!("Waiting for shutdown signal");
     shutdown_rx.recv().expect("BUG: Shutdown signal was lost");
 
-    info!("Exiting Devolutions Host");
+    info!("Exiting Devolutions Session");
 
     Ok(())
 }
