@@ -213,7 +213,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
             tasks.register(PedmTask::new())
         }
 
-        if conf.session_host.enabled {
+        if conf.session.enabled {
             let session_manager = SessionManager::default();
             let tx = session_manager.service_event_tx();
             tasks.register(session_manager);

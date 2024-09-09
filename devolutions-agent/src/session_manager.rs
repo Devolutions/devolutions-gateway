@@ -1,4 +1,4 @@
-//! Module for starting and managing the Devolutions Host process in user sessions.
+//! Module for starting and managing the Devolutions Session process in user sessions.
 
 use tokio::sync::{mpsc, RwLock};
 
@@ -20,7 +20,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
 
-const HOST_BINARY: &str = "DevolutionsHost.exe";
+const SESSION_BINARY: &str = "DevolutionsSession.exe";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SessionKind {
@@ -35,7 +35,7 @@ pub(crate) enum SessionKind {
 struct GatewaySession {
     session: Session,
     kind: SessionKind,
-    is_host_ready: bool,
+    is_session_ready: bool,
 }
 
 // NOTE: `ceviche::controller::Session` do not implement `Debug` for session.
@@ -44,7 +44,7 @@ impl Debug for GatewaySession {
         f.debug_struct("GatewaySession")
             .field("session", &self.session.id)
             .field("kind", &self.kind)
-            .field("is_host_ready", &self.is_host_ready)
+            .field("is_session_ready", &self.is_session_ready)
             .finish()
     }
 }
@@ -54,7 +54,7 @@ impl GatewaySession {
         Self {
             session,
             kind,
-            is_host_ready: false,
+            is_session_ready: false,
         }
     }
 
@@ -69,12 +69,12 @@ impl GatewaySession {
     }
 
     #[allow(dead_code)]
-    fn is_host_ready(&self) -> bool {
-        self.is_host_ready
+    fn is_session_ready(&self) -> bool {
+        self.is_session_ready
     }
 
-    fn set_host_ready(&mut self, is_ready: bool) {
-        self.is_host_ready = is_ready;
+    fn set_session_ready(&mut self, is_ready: bool) {
+        self.is_session_ready = is_ready;
     }
 }
 
@@ -159,55 +159,55 @@ impl Task for SessionManager {
                             info!(%id, "Session connected");
                             let mut ctx = ctx.write().await;
                             ctx.register_session(&id, SessionKind::Console);
-                            // We only start the host process for remote sessions (initiated
-                            // via RDP), as Host process with DVC handler is only needed for remote
+                            // We only start the session process for remote sessions (initiated
+                            // via RDP), as session process with DVC handler is only needed for remote
                             // sessions.
                         }
                         AgentServiceEvent::SessionDisconnect(id) => {
                             info!(%id, "Session disconnected");
-                            terminate_host_process(&id);
+                            terminate_session_process(&id);
                             ctx.write().await.unregister_session(&id);
                         }
                         AgentServiceEvent::SessionRemoteConnect(id) => {
                             info!(%id, "Remote session connected");
-                            // Terminate old host process if it is already running.
-                            terminate_host_process(&id);
+                            // Terminate old session process if it is already running.
+                            terminate_session_process(&id);
 
                             {
                                 let mut ctx = ctx.write().await;
                                 ctx.register_session(&id, SessionKind::Remote);
-                                start_host_process_if_not_running(&mut ctx, &id)?;
+                                start_session_process_if_not_running(&mut ctx, &id)?;
                             }
                         }
                         AgentServiceEvent::SessionRemoteDisconnect(id) => {
                             info!(%id, "Remote session disconnected");
-                            // Terminate host process when remote session is disconnected
+                            // Terminate session process when remote session is disconnected
                             // (NOTE: depending on the system settings, session could
                             // still be running in the background after RDP disconnect).
-                            terminate_host_process(&id);
+                            terminate_session_process(&id);
                             ctx.write().await.unregister_session(&id);
                         }
                         AgentServiceEvent::SessionLogon(id) => {
                             info!(%id, "Session logged on");
 
-                            // Terminate old host process if it is already running.
-                            terminate_host_process(&id);
+                            // Terminate old session process if it is already running.
+                            terminate_session_process(&id);
 
 
                             // NOTE: In some cases, SessionRemoteConnect is fired before
-                            // an actual user is logged in, therefore we need to try start the host
-                            // app on logon, if not yet started.
+                            // an actual user is logged in, therefore we need to try start the
+                            // session app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
-                            start_host_process_if_not_running(&mut ctx, &id)?;
+                            start_session_process_if_not_running(&mut ctx, &id)?;
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
                             info!(%id, "Session logged off");
                             if let Some(session) = ctx.write().await.get_session_mut(&id) {
-                                // When a user logs off, host process will be stopped by the system;
+                                // When a user logs off, session process will be stopped by the system;
                                 // Console sessions could be reused for different users, therefore
                                 // we should not remove the session from the list, but mark it as
-                                // not yet ready (host will be started as soon as new user logs in).
-                                session.set_host_ready(false);
+                                // not yet ready (session will be started as soon as new user logs in).
+                                session.set_session_ready(false);
                             }
                         }
                         _ => {
@@ -226,24 +226,24 @@ impl Task for SessionManager {
     }
 }
 
-/// Starts Devolutions Host process in the target session.
-fn start_host_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Session) -> anyhow::Result<()> {
+/// Starts Devolutions Session process in the target session.
+fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Session) -> anyhow::Result<()> {
     match ctx.get_session_mut(session) {
         Some(gw_session) => {
-            if is_host_running_in_session(session)? {
-                gw_session.set_host_ready(true);
+            if is_session_running_in_session(session)? {
+                gw_session.set_session_ready(true);
                 return Ok(());
             }
 
-            info!(%session, "Starting host process in session");
+            info!(%session, "Starting session process in session");
 
-            match start_host_process(session) {
+            match start_session_process(session) {
                 Ok(()) => {
-                    info!(%session, "Host process started in session");
-                    gw_session.set_host_ready(true);
+                    info!(%session, "Session process started in session");
+                    gw_session.set_session_ready(true);
                 }
                 Err(error) => {
-                    error!(%error, %session, "Failed to start host process for session");
+                    error!(%error, %session, "Failed to start session process for session");
                 }
             }
         }
@@ -255,35 +255,35 @@ fn start_host_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Sess
     Ok(())
 }
 
-/// Terminates Devolutions Host process in the target session.
-fn terminate_host_process(session: &Session) {
-    match terminate_process_by_name_in_session(HOST_BINARY, session.id) {
+/// Terminates Devolutions Session process in the target session.
+fn terminate_session_process(session: &Session) {
+    match terminate_process_by_name_in_session(SESSION_BINARY, session.id) {
         Ok(false) => {
-            trace!(%session, "Host process is not running in the session");
+            trace!(%session, "Session process is not running in the session");
         }
         Ok(true) => {
-            info!(%session, "Host process terminated in session");
+            info!(%session, "Session process terminated in session");
         }
         Err(error) => {
-            error!(%error, %session, "Failed to terminate host process in session");
+            error!(%error, %session, "Failed to terminate session process in session");
         }
     }
 }
 
-fn is_host_running_in_session(session: &Session) -> anyhow::Result<bool> {
-    let is_running = is_process_running_in_session(HOST_BINARY, session.id)?;
+fn is_session_running_in_session(session: &Session) -> anyhow::Result<bool> {
+    let is_running = is_process_running_in_session(SESSION_BINARY, session.id)?;
     Ok(is_running)
 }
 
-fn start_host_process(session: &Session) -> anyhow::Result<()> {
+fn start_session_process(session: &Session) -> anyhow::Result<()> {
     if !session_has_logged_in_user(session.id)? {
         anyhow::bail!("Session {} does not have a logged in user", session);
     }
 
-    let host_app_path = host_app_path();
+    let session_app_path = session_app_path();
     let command_line = CommandLine::new(vec!["--session".to_owned(), session.to_string()]);
 
-    info!("Starting `{host_app_path}` in session `{session}`");
+    info!("Starting `{session_app_path}` in session `{session}`");
 
     let mut startup_info = StartupInfo::default();
 
@@ -298,7 +298,7 @@ fn start_host_process(session: &Session) -> anyhow::Result<()> {
 
     let start_result = create_process_in_session(
         session.id,
-        Some(host_app_path.as_std_path()),
+        Some(session_app_path.as_std_path()),
         Some(&command_line),
         None,
         None,
@@ -311,22 +311,22 @@ fn start_host_process(session: &Session) -> anyhow::Result<()> {
 
     match start_result {
         Ok(_) => {
-            info!("{HOST_BINARY} started in session {session}");
+            info!("{SESSION_BINARY} started in session {session}");
             Ok(())
         }
         Err(error) => {
-            error!(%error, "Failed to start {HOST_BINARY} in session {session}");
+            error!(%error, "Failed to start {SESSION_BINARY} in session {session}");
             Err(error)
         }
     }
 }
 
-fn host_app_path() -> Utf8PathBuf {
+fn session_app_path() -> Utf8PathBuf {
     let mut current_dir = Utf8PathBuf::from_path_buf(std::env::current_exe().expect("BUG: can't get current exe path"))
         .expect("BUG: OS should always return valid UTF-8 executable path");
 
     current_dir.pop();
-    current_dir.push(HOST_BINARY);
+    current_dir.push(SESSION_BINARY);
 
     current_dir
 }

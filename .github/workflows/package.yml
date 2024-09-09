@@ -326,7 +326,7 @@ jobs:
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
           $Env:DAGENT_PEDM_HOOK = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions_pedm_hook.dll' | Select -First 1
-          $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsHost.dll' | Select -First 1
+          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 

@@ -23,7 +23,7 @@ namespace DevolutionsAgent.Actions
     public class CustomActions
     {
         private static readonly string[] ConfigFiles = new[] {
-            "agent.json", 
+            "agent.json",
         };
 
         private const int MAX_PATH = 260; // Defined in windows.h
@@ -235,9 +235,9 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
-        public static ActionResult InstallHost(Session session)
+        public static ActionResult InstallSession(Session session)
         {
-            return EnableAgentFeature(session, "SessionHost");
+            return EnableAgentFeature(session, "Session");
         }
 
         [CustomAction]
@@ -517,14 +517,14 @@ namespace DevolutionsAgent.Actions
                 {
                     session.Log($"error reading error from temp file: {e}");
                 }
-                
+
                 using Record record = new(3)
                 {
                     FormatString = "Command execution failure: [1]",
                 };
 
                 hTempFile.Close();
-                
+
                 record.SetString(1, result);
                 session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
 
@@ -640,7 +640,7 @@ namespace DevolutionsAgent.Actions
             const uint sdRevision = 1;
             IntPtr pSd = new IntPtr();
             UIntPtr pSzSd = new UIntPtr();
-           
+
             try
             {
                 if (!WinAPI.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, sdRevision, out pSd, out pSzSd))

@@ -17,7 +17,7 @@ mod win {
     }
 
     fn generate_version_rc() -> String {
-        let output_name = "DevolutionsHost";
+        let output_name = "DevolutionsSession";
         let filename = format!("{}.exe", output_name);
         let company_name = "Devolutions Inc.";
         let legal_copyright = format!("Copyright 2020-2024 {}", company_name);

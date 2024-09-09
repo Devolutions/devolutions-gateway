@@ -345,7 +345,7 @@ class TlkRecipe
                 if ($this.Target.IsWindows()) {
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-shell-ext", "crates/devolutions-pedm-shell-ext", $true)
-                    $agentPackages += [TlkPackage]::new("devolutions-host", "devolutions-host", $false)
+                    $agentPackages += [TlkPackage]::new("devolutions-session", "devolutions-session", $false)
                 }
 
                 $agentPackages
@@ -432,8 +432,8 @@ class TlkRecipe
                         $Env:DAGENT_PEDM_HOOK
                     } elseif ($CargoPackage.Name -Eq "devolutions-pedm-shell-ext" -And (Test-Path Env:DAGENT_PEDM_SHELL_EXT_DLL)) {
                         $Env:DAGENT_PEDM_SHELL_EXT_DLL
-                    } elseif ($CargoPackage.Name -Eq "devolutions-host" -And (Test-Path Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE)) {
-                        $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE
+                    } elseif ($CargoPackage.Name -Eq "devolutions-session" -And (Test-Path Env:DAGENT_SESSION_EXECUTABLE)) {
+                        $Env:DAGENT_SESSION_EXECUTABLE
                     } else {
                         $null
                     }
@@ -503,10 +503,10 @@ class TlkRecipe
 
             }
 
-            if (Test-Path Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE) {
-                $hostExe = Get-ChildItem -Recurse -Include 'devolutions-host.exe' | Select-Object -First 1
+            if (Test-Path Env:DAGENT_SESSION_EXECUTABLE) {
+                $hostExe = Get-ChildItem -Recurse -Include 'devolutions-session.exe' | Select-Object -First 1
 
-                Copy-Item -Path $hostExe -Destination $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE
+                Copy-Item -Path $hostExe -Destination $Env:DAGENT_SESSION_EXECUTABLE
             }
         }
 

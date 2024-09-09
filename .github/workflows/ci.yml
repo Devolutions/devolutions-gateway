@@ -541,10 +541,8 @@ jobs:
             $DAgentPedmHook = Join-Path $TargetOutputPath "devolutions_pedm_hook.dll"
             echo "dagent-pedm-hook=$DAgentPedmHook" >> $Env:GITHUB_OUTPUT
 
-            $DAgentDevolutionsHostExecutable = Join-Path $TargetOutputPath "DevolutionsHost.exe"
-            echo "dagent-devolutions-host-executable=$DAgentDevolutionsHostExecutable" >> $Env:GITHUB_OUTPUT
-
-
+            $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
+            echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
           }
 
           $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
@@ -608,7 +606,7 @@ jobs:
             $Env:DAGENT_PEDM_HOOK = "${{ steps.load-variables.outputs.dagent-pedm-hook }}"
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
-            $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-devolutions-host-executable }}"
+            $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
           }
 
           ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
@@ -626,7 +624,7 @@ jobs:
             $Env:DAGENT_PEDM_HOOK = "${{ steps.load-variables.outputs.dagent-pedm-hook }}"
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
-            $Env:DAGENT_DEVOLUTIONS_HOST_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-devolutions-host-executable }}"
+            $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

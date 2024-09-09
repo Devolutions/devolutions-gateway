@@ -11,16 +11,16 @@ use std::sync::Arc;
 cfg_if! {
     if #[cfg(target_os = "windows")] {
         const COMPANY_DIR: &str = "Devolutions";
-        const PROGRAM_DIR: &str = "Host";
-        const APPLICATION_DIR: &str = "Devolutions\\Host";
+        const PROGRAM_DIR: &str = "Session";
+        const APPLICATION_DIR: &str = "Devolutions\\Session";
     } else if #[cfg(target_os = "macos")] {
         const COMPANY_DIR: &str = "Devolutions";
-        const PROGRAM_DIR: &str = "Host";
-        const APPLICATION_DIR: &str = "Devolutions Host";
+        const PROGRAM_DIR: &str = "Session";
+        const APPLICATION_DIR: &str = "Devolutions Session";
     } else {
         const COMPANY_DIR: &str = "devolutions";
-        const PROGRAM_DIR: &str = "Host";
-        const APPLICATION_DIR: &str = "devolutions-host";
+        const PROGRAM_DIR: &str = "Session";
+        const APPLICATION_DIR: &str = "devolutions-session";
     }
 }
 
@@ -38,7 +38,7 @@ impl Conf {
         let log_file = conf_file
             .log_file
             .clone()
-            .unwrap_or_else(|| Utf8PathBuf::from("host"))
+            .unwrap_or_else(|| Utf8PathBuf::from("session"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
         Ok(Conf {
@@ -237,7 +237,7 @@ pub(crate) mod dto {
 }
 
 pub fn get_data_dir() -> Utf8PathBuf {
-    if let Ok(config_path_env) = std::env::var("DHOST_DATA_PATH") {
+    if let Ok(config_path_env) = std::env::var("DSESSION_DATA_PATH") {
         Utf8PathBuf::from(config_path_env)
     } else {
         let mut config_path = Utf8PathBuf::new();
