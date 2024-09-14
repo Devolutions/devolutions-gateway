@@ -623,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "ceviche"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddeea570a42ad62fcc3a0f76ae1a29a610204f7bc78af1d9c5b3e86741fdf152"
+checksum = "42c08bc4ee8dce2878185fe1e6dc9b550a36ac3b4fa8c8e8546c4d8792d0176d"
 dependencies = [
  "cfg-if",
  "chrono",
@@ -637,7 +637,7 @@ dependencies = [
  "system-configuration-sys",
  "timer",
  "widestring 0.4.3",
- "winapi",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
