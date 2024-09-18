@@ -13,14 +13,14 @@ use std null-device
 const $proxy_port = 4000
 const $iperf_c_port = 5000
 const $iperf_s_port = 5001
-const $iperf_duration = 300
+const $iperf_duration = 500
 const $addr = "127.0.0.1"
 const $bench_folder = "jetsocat-bench-out"
 const $results_folder = $bench_folder | path join "results"
 const $bin_folder = $bench_folder | path join "bin"
 const $pueue_group = "iperf-bench"
 
-export def main [ ] {
+export def main [] {
   print $"proxy_port='($proxy_port)'"
   print $"iperf_c_port='($iperf_c_port)'"
   print $"iperf_s_port='($iperf_s_port)'"
@@ -33,13 +33,14 @@ export def main [ ] {
   print "Script subcommands: `run`, `build`, `build-run`"
 }
 
-def run_iperf [binary_path: path, par_con_count: int, name: string] {
+def run_iperf [binary_path: path, par_con_count: int, name: string, --with-delay] {
+  let $name_suffix = if $with_delay { "delay" } else { "nodelay" }
   let $par_con_count_padded = ($par_con_count | fill -a right -c '0' -w 3)
-  let $server_node_log_file = $results_folder | path join $"server-node.($name).($par_con_count_padded).log"
-  let $server_node_peak_used_mem_file = $results_folder | path join $"server-node.($name).($par_con_count_padded).peak-used-mem"
-  let $client_node_log_file = $results_folder | path join $"client-node.($name).($par_con_count_padded).log"
-  let $client_node_peak_used_mem_file = $results_folder | path join $"client-node.($name).($par_con_count_padded).peak-used-mem"
-  let $iperf_csv_file = $results_folder | path join $"iperf.($name).($par_con_count_padded).csv"
+  let $server_node_log_file = $results_folder | path join $"server-node.($name).($name_suffix).($par_con_count_padded).log"
+  let $server_node_peak_used_mem_file = $results_folder | path join $"server-node.($name).($name_suffix).($par_con_count_padded).peak-used-mem"
+  let $client_node_log_file = $results_folder | path join $"client-node.($name).($name_suffix).($par_con_count_padded).log"
+  let $client_node_peak_used_mem_file = $results_folder | path join $"client-node.($name).($name_suffix).($par_con_count_padded).peak-used-mem"
+  let $iperf_csv_file = $results_folder | path join $"iperf.($name).($name_suffix).($par_con_count_padded).csv"
 
   log debug $"server_node_log_file='($server_node_log_file)'"
   log debug $"server_node_peak_used_mem_file='($server_node_peak_used_mem_file)'"
@@ -70,8 +71,9 @@ def run_iperf [binary_path: path, par_con_count: int, name: string] {
   pueue follow $client_node_id | lines | last o> $client_node_peak_used_mem_file
 
   {
-    name: $"($name).($par_con_count_padded)",
+    name: $name,
     parallel_connections: $par_con_count,
+    delay: $with_delay,
     average_throughput_per_sec: (open $iperf_csv_file --raw | split column ',' | get column9 | first | into int | each { |bits_per_sec| $bits_per_sec / 8 } | into filesize),
     server_node_peak_used_mem: (open $server_node_peak_used_mem_file | into filesize),
     client_node_peak_used_mem: (open $client_node_peak_used_mem_file | into filesize),
@@ -87,10 +89,10 @@ def benchmark [binary_path: path] {
 
   log debug $"binary_path='($binary_path)'"
 
-  def batch_run_helper [name: string] {
-    [1 2 10] | each { |$n|
+  def batch_run_helper [name: string, --with-delay] {
+    [1 2 10 25 50] | each { |$n|
       log info $"==> ($n) connection\(s)"
-      run_iperf $binary_path $n $name
+      run_iperf $binary_path $n $name --with-delay=$with_delay
     }
   }
 
@@ -100,11 +102,11 @@ def benchmark [binary_path: path] {
   } catch {
     log info "==> Delay already enabled"
   }
-  let $delay_results = batch_run_helper $"($name).delay"
+  let $delay_results = batch_run_helper $name --with-delay 
 
   sudo tc qdisc del dev lo root
   log info "==> Disabled delay"
-  let $nodelay_results = batch_run_helper $"($name).nodelay"
+  let $nodelay_results = batch_run_helper $name
 
   [...$delay_results ...$nodelay_results]
 }
@@ -125,7 +127,7 @@ def make_folders [] {
 }
 
 # Benchmark binaries found in the bench folder
-def "main run" [ ] {
+def "main run" [] {
   log info "Run benchmarks..."
 
   make_folders
@@ -146,11 +148,13 @@ def "main run" [ ] {
 
   pueue_cleanup
 
+  $results | save $"($bench_folder)/results.nuon"
+
   $results
 }
 
 # Benchmark binaries found in the bench folder
-export def "run" [ ] {
+export def run [] {
   main run
 }
 
@@ -159,8 +163,6 @@ def "main build" [
   target_path: path # Path to cargo’s target folder
   ...branches: string # Git branches to benchmark
 ] {
-  log info "Build binaries..."
-
   make_folders
 
   for $branch in $branches {
@@ -173,7 +175,7 @@ def "main build" [
 }
 
 # Build binaries to benchmark from Git branches and move them to the bench folder
-export def "build" [
+export def build [
   target_path: path # Path to cargo’s target folder
   ...branches: string # Git branches to benchmark
 ] {
@@ -190,7 +192,7 @@ def "main build-run" [
 }
 
 # Build binaries and run the benchmarks
-export def "build-run" [
+export def build-run [
   target_path: path # Path to cargo’s target folder
   ...branches: string # Git branches to benchmark
 ] {
@@ -201,11 +203,67 @@ export def "build-run" [
 #
 # The input is expected to have the following type:
 #   table<name: string, parallel_connections: int, average_throughput_per_sec: filesize, server_node_peak_used_mem: filesize, client_node_peak_used_mem: filesize>
-export def "mdtable" [ ] {
+# Or:
+#   table<name: string, parallel_connections: int, average_throughput_per_sec: filesize, server_node_peak_used_mem: filesize, client_node_peak_used_mem: filesize, score: int>
+export def mdtable [--with-score] {
   let $results = $in
-  print "| Name | Parallel connections | Average throughput | Server node peak memory usage | Client node peak memory usage |"
-  print "|------|----------------------|--------------------|-------------------------------|-------------------------------|"
-  for $result in $results {
-    print $"|($result.name)|($result.parallel_connections)|($result.average_throughput_per_sec)/s|($result.server_node_peak_used_mem)|($result.client_node_peak_used_mem)|";
+
+  mut $out = "| Name | Parallel connections | Average throughput | Server node peak memory usage | Client node peak memory usage |"
+
+  if $with_score {
+    $out += " Score |"
   }
+  
+  $out += "\n|------|----------------------|--------------------|-------------------------------|-------------------------------|"
+
+  if $with_score {
+    $out += "-------|"
+  }
+
+  for $result in $results {
+    $out += $"\n|($result.name)|($result.parallel_connections)|($result.average_throughput_per_sec)/s|($result.server_node_peak_used_mem)|($result.client_node_peak_used_mem)|";
+
+    if $with_score {
+      $out += $"($result.score | math round)|"
+    }
+  }
+
+  $out
+}
+
+# Insert a score for each result, helping deciding which optimization is the worthiest
+export def evaluate [] {
+  const throughput_weight = 2
+  const peak_mem_weight = 10_000_000_000_000
+
+  $in
+    | each {
+        let $score = $throughput_weight * ($in.average_throughput_per_sec | into int) + $peak_mem_weight * (1 / ($in.server_node_peak_used_mem | into int))
+        $in | insert score ($score / 1_000_000)
+      }
+}
+
+# Return an relative score for each group (benchmark)
+export def group-score [] {
+  let $results = $in
+
+  let $max_scores = $results
+    | group-by parallel_connections --to-table
+    | each {
+        let $max_score = $in.items.score | math max
+        { parallel_connections: ($in.group | into int), max_score: $max_score }
+      }
+  
+  $results
+    | group-by name --to-table
+    | each {
+        let $num_elements = $in.items | length
+        let $sum_score = $in.items
+          | each {
+              let $par_conns = $in.parallel_connections
+              $in.score / ($max_scores | where parallel_connections == $par_conns | get max_score | first)
+            }
+          | math sum
+        { name: $in.group, score: ($sum_score / $num_elements * 100) }
+      }
 }
