@@ -23,7 +23,7 @@ serde = "1.0.210"
 serde_json = "1.0.128"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
-tokio = { version = "1.38.0", features = ["net", "rt-multi-thread"] }
+tokio = { version = "1.40.0", features = ["net", "rt-multi-thread"] }
 tower-service = "0.3.2"
 win-api-wrappers = { path = "../win-api-wrappers" }
 devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["policy"]}
