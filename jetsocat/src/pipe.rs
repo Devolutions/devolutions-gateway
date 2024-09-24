@@ -39,6 +39,22 @@ pub enum PipeMode {
     WebSocketListen {
         bind_addr: String,
     },
+    #[cfg(windows)]
+    NamedPipe {
+        name: String,
+    },
+    #[cfg(windows)]
+    NamedPipeListen {
+        name: String,
+    },
+    #[cfg(unix)]
+    UnixSocket {
+        path: PathBuf,
+    },
+    #[cfg(unix)]
+    UnixSocketListen {
+        path: PathBuf,
+    },
 }
 
 pub struct Pipe {
@@ -281,6 +297,101 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 stream,
                 _handle: None,
             })
+        }
+        #[cfg(windows)]
+        PipeMode::NamedPipe { name } => {
+            use std::time::Duration;
+            use tokio::net::windows::named_pipe::ClientOptions;
+            use tokio::time;
+            use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
+
+            info!(path = %path.display(), "Open named pipe...");
+
+            let named_pipe = loop {
+                match ClientOptions::new().open(&name) {
+                    Ok(named_pipe) => break named_pipe,
+                    Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => (),
+                    Err(e) => return Err(anyhow::Error::new(e).context("named pipe open")),
+                }
+
+                time::sleep(Duration::from_millis(50)).await;
+            };
+
+            debug!("Connected");
+
+            Ok(Pipe {
+                name: "named-pipe",
+                stream: Box::new(named_pipe),
+                _handle: None,
+            })
+        }
+        #[cfg(windows)]
+        PipeMode::NamedPipeListen { name } => {
+            use tokio::net::windows::named_pipe::ServerOptions;
+
+            info!(%name, "Create named pipe...");
+
+            let mut named_pipe = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&name)
+                .context("create named pipe")?;
+
+            info!(%name, "Wait for a client to connect");
+
+            named_pipe.connect().await.context("named pipe connect")?;
+
+            info!("Peer connected");
+
+            Ok(Pipe {
+                name: "named-pipe-listener",
+                stream: Box::new(named_pipe),
+                _handle: None,
+            })
+        }
+        #[cfg(unix)]
+        PipeMode::UnixSocket { path } => {
+            use tokio::net::UnixStream;
+
+            info!(path = %path.display(), "UNIX socket connect");
+
+            let stream = UnixStream::connect(path)
+                .await
+                .with_context(|| "UNIX socket connect failed")?;
+
+            debug!("Connected");
+
+            Ok(Pipe {
+                name: "unix-socket",
+                stream: Box::new(stream),
+                _handle: None,
+            })
+        }
+        #[cfg(unix)]
+        PipeMode::UnixSocketListen { path } => {
+            use tokio::net::UnixListener;
+
+            info!(path = %path.display(), "Listening on UNIX socket");
+
+            let listener = UnixListener::bind(&path).context("failed to bind UNIX listener")?;
+            let handle = Box::new(UnlinkSocketOnDrop(path));
+
+            let (socket, peer_addr) = listener.accept().await.context("UNIX listener couldn't accept")?;
+
+            info!(?peer_addr, "Accepted peer");
+
+            return Ok(Pipe {
+                name: "unix-socket-listener",
+                stream: Box::new(socket),
+                _handle: Some(handle),
+            });
+
+            struct UnlinkSocketOnDrop(PathBuf);
+
+            impl Drop for UnlinkSocketOnDrop {
+                fn drop(&mut self) {
+                    let _ = std::fs::remove_file(&self.0);
+                }
+            }
         }
     }
 }

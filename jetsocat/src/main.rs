@@ -77,7 +77,12 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
         .build()
         .context("runtime build failed")?;
 
-    match rt.block_on(f) {
+    match rt.block_on(async {
+        tokio::select! {
+            res = f => res,
+            res = tokio::signal::ctrl_c() => res.context("ctrl-c event"),
+        }
+    }) {
         Ok(()) => info!("Terminated successfully"),
         Err(e) => {
             error!("{:#}", e);
@@ -85,7 +90,7 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
         }
     }
 
-    rt.shutdown_timeout(std::time::Duration::from_millis(100)); // just to be safe
+    rt.shutdown_timeout(std::time::Duration::from_millis(100)); // Just to be safe.
 
     Ok(())
 }
@@ -111,7 +116,11 @@ const PIPE_FORMATS: &str = r#"Pipe formats:
     `jet-tcp-accept://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as server
     `ws://<URL>`: WebSocket
     `wss://<URL>`: WebSocket Secure
-    `ws-listen://<BINDING ADDRESS>`: WebSocket listener"#;
+    `ws-listen://<BINDING ADDRESS>`: WebSocket listener
+    `np://<SERVER NAME>/pipe/<PIPE NAME>: Connect to a named pipe (Windows)`
+    `np-listen://./pipe/<PIPE NAME>`: Open a named pipe and listen on it (Windows)
+    `np://<UNIX SOCKET PATH>: Connect to a UNIX socket (non-Windows)`
+    `np-listen://<UNIX SOCKET PATH>: Create a UNIX socket and listen on it (non-Windows)`"#;
 
 // forward
 
@@ -515,6 +524,30 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
         "ws-listen" => Ok(PipeMode::WebSocketListen {
             bind_addr: value.to_owned(),
         }),
+        "np" => {
+            #[cfg(windows)]
+            {
+                Ok(PipeMode::NamedPipe { name: value.to_owned() })
+            }
+            #[cfg(unix)]
+            {
+                Ok(PipeMode::UnixSocket {
+                    path: PathBuf::from(value.to_owned()),
+                })
+            }
+        }
+        "np-listen" => {
+            #[cfg(windows)]
+            {
+                Ok(PipeMode::NamedPipeListen { name: value.to_owned() })
+            }
+            #[cfg(unix)]
+            {
+                Ok(PipeMode::UnixSocketListen {
+                    path: PathBuf::from(value.to_owned()),
+                })
+            }
+        }
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
     }
 }
