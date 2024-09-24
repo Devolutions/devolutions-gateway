@@ -528,7 +528,7 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
             #[cfg(windows)]
             {
                 Ok(PipeMode::NamedPipe {
-                    name: value.replace('/', '\\'),
+                    name: format!("\\\\{}", value.replace('/', "\\")),
                 })
             }
             #[cfg(unix)]
@@ -542,7 +542,7 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
             #[cfg(windows)]
             {
                 Ok(PipeMode::NamedPipeListen {
-                    name: value.replace('/', '\\'),
+                    name: format!("\\\\{}", value.replace('/', "\\")),
                 })
             }
             #[cfg(unix)]

@@ -332,7 +332,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             info!(%name, "Create named pipe...");
 
-            let mut named_pipe = ServerOptions::new()
+            let named_pipe = ServerOptions::new()
                 .first_pipe_instance(true)
                 .create(&name)
                 .context("create named pipe")?;
