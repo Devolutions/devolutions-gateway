@@ -527,7 +527,9 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
         "np" => {
             #[cfg(windows)]
             {
-                Ok(PipeMode::NamedPipe { name: value.to_owned() })
+                Ok(PipeMode::NamedPipe {
+                    name: value.replace('/', '\\'),
+                })
             }
             #[cfg(unix)]
             {
@@ -539,7 +541,9 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
         "np-listen" => {
             #[cfg(windows)]
             {
-                Ok(PipeMode::NamedPipeListen { name: value.to_owned() })
+                Ok(PipeMode::NamedPipeListen {
+                    name: value.replace('/', '\\'),
+                })
             }
             #[cfg(unix)]
             {

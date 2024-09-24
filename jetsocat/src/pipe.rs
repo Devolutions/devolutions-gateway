@@ -303,14 +303,15 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
             use std::time::Duration;
             use tokio::net::windows::named_pipe::ClientOptions;
             use tokio::time;
-            use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
 
-            info!(path = %path.display(), "Open named pipe...");
+            const ERROR_PIPE_BUSY: i32 = 231;
+
+            info!(%name, "Open named pipe...");
 
             let named_pipe = loop {
                 match ClientOptions::new().open(&name) {
                     Ok(named_pipe) => break named_pipe,
-                    Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => (),
+                    Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => (),
                     Err(e) => return Err(anyhow::Error::new(e).context("named pipe open")),
                 }
 
