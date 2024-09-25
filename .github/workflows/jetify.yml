@@ -60,7 +60,7 @@ jobs:
           } else {
             "publish-test"
           }
-          
+
           if (-Not $IsMasterBranch) {
             $DryRun = $true # force dry run when not on master branch
           }
@@ -134,7 +134,7 @@ jobs:
         run: |
           Enter-VsDevShell ${{matrix.arch}}
           $GitCommit = '${{ needs.preflight.outputs.detours-git-commit }}'
-          .\detours.ps1 -GitCommit $GitCommit
+          .\jetify\detours.ps1 -GitCommit $GitCommit
 
       - name: Save Detours Cache (${{matrix.arch}})
         if: steps.cache-detours.outputs.cache-hit != 'true'
@@ -145,6 +145,7 @@ jobs:
 
       - name: Build Jetify (${{matrix.arch}})
         shell: pwsh
+        working-directory: jetify
         run: |
           $Arch = "${{matrix.arch}}"
           $BuildDir = "build-$Arch"
@@ -156,13 +157,14 @@ jobs:
           @('Jetify.dll') | % {
             Copy-Item "$BuildDir/Release/$_" "dependencies/Jetify/$Arch"
           }
+          mkdir package
           Compress-Archive "dependencies\Jetify\$Arch\*" ".\package\Jetify-$PackageVersion-$Arch.zip" -CompressionLevel Optimal
 
       - name: Upload Jetify (${{matrix.arch}})
         uses: actions/upload-artifact@v4
         with:
           name: Jetify-${{matrix.arch}}
-          path: package/*.zip
+          path: jetify/package/*.zip
 
   package:
     name: Package Jetify
@@ -225,15 +227,16 @@ jobs:
             '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
             '-v')
-          Get-ChildItem "$UnpackedDir\lib" -Include @("*.dll") -Recurse | ForEach-Object {
+          Get-ChildItem "$UnpackedDir" -Include @("*.dll") -Recurse | ForEach-Object {
             AzureSignTool @Params $_.FullName
           }
           Remove-Item $PackedFile -ErrorAction SilentlyContinue | Out-Null
           Compress-Archive -Path "$UnpackedDir\*" -Destination $PackedFile -CompressionLevel Optimal
-            
+
       - name: Code sign nuget package
         if: ${{ fromJSON(needs.preflight.outputs.sign-nuget) == true }}
         shell: pwsh
+        working-directory: jetify
         run: |
           $NugetPackage = (Get-Item ".\package\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
           $Params = @('sign', $NugetPackage,
@@ -245,7 +248,7 @@ jobs:
             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
             '-v')
           & NuGetKeyVaultSignTool @Params
-  
+
       - name: Upload nuget package
         uses: actions/upload-artifact@v4
         with:
@@ -284,3 +287,22 @@ jobs:
           } else {
             & 'dotnet' $PushArgs
           }
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: actions
+          ref: v1
+
+      - name: Setup Artifactory
+        uses: ./actions/nuget-artifactory-setup
+        with:
+          artifactory_password: ${{ secrets.ARTIFACTORY_PASSWORD }}
+          artifactory_username: ${{ secrets.ARTIFACTORY_USERNAME }}
+
+      - name: Push
+        uses: ./actions/dotnet-push
+        with:
+          working_directory: package
