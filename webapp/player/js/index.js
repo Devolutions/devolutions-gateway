@@ -8,7 +8,6 @@ var videoSrcInfo = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/recording.jso
 var request = new XMLHttpRequest();
 
 request.onreadystatechange = function () {
-
   if (request.readyState !== XMLHttpRequest.DONE) {
     return false;
   }
@@ -22,7 +21,7 @@ request.onreadystatechange = function () {
   var fileType = recordingInfo.files[0].fileName.split(".")[1];
 
   var terminalDiv = document.createElement("div");
-  terminalDiv.setAttribute("id", "terminal")
+  terminalDiv.setAttribute("id", "terminal");
 
   switch (fileType) {
     case "webm":
@@ -35,6 +34,8 @@ request.onreadystatechange = function () {
 
       var videoSrcElement = document.createElement("source");
       videoSrcElement.id = "videoSrcElement";
+      videoSrcElement.type = "video/webm";
+      videoPlayer.muted = true;
 
       videoPlayer.appendChild(videoSrcElement);
       document.body.appendChild(videoPlayer);
@@ -46,6 +47,8 @@ request.onreadystatechange = function () {
       // set up video cycling
       var currentIndex = 0;
       var maxIndex = recordingInfo.files.length - 1;
+
+      videoPlayer.play();
 
       videoPlayer.onended = function () {
         currentIndex++;
@@ -68,11 +71,13 @@ request.onreadystatechange = function () {
 
       loadFile(trpSrc, (trpFileContent) => {
         const castFileContent = convertTRPtoCast(trpFileContent);
-        const objectUrl = URL.createObjectURL(new Blob([castFileContent], { type: 'text/plain' }));
+        const objectUrl = URL.createObjectURL(
+          new Blob([castFileContent], { type: "text/plain" })
+        );
         const originalFetch = window.fetch;
         // HACK: override fetch to return the cast file content, we should definately update the XtermPlayer to avoid this
         window.fetch = (url, options) => {
-          if (url === objectUrl){
+          if (url === objectUrl) {
             return Promise.resolve({
               text: () => {
                 return Promise.resolve(castFileContent);
@@ -80,7 +85,7 @@ request.onreadystatechange = function () {
             });
           }
           return originalFetch(url, options);
-        }
+        };
         const player = new XtermPlayer.XtermPlayer(objectUrl, terminalDiv);
         window.fetch = originalFetch;
 
@@ -95,10 +100,12 @@ request.onreadystatechange = function () {
       // create the Div
       document.body.appendChild(terminalDiv);
       let castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
-      const player = new XtermPlayer.XtermPlayer(castSrc, terminalDiv , {
-        fontSize: 12
+      const player = new XtermPlayer.XtermPlayer(castSrc, terminalDiv, {
+        fontSize: 12,
       });
-      player.play();
+      setTimeout(() => {
+        player.play();
+      }, 500);
 
       break;
   }
