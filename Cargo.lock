@@ -2389,20 +2389,28 @@ name = "jetsocat"
 version = "2024.3.2"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "dirs-next",
  "futures-util",
  "humantime",
  "jet-proto",
  "jmux-proto",
  "jmux-proxy",
+ "native-tls",
+ "openssl",
+ "openssl-probe",
  "proptest",
  "proxy-http",
  "proxy-socks",
  "proxy-types",
  "proxy_cfg",
+ "rustls 0.22.4",
+ "rustls-native-certs",
+ "rustls-pemfile 2.2.0",
  "seahorse",
  "sysinfo",
  "test-utils",
+ "tinyjson",
  "tokio 1.38.1",
  "tokio-tungstenite",
  "tracing",
@@ -4961,6 +4969,12 @@ checksum = "31d42176308937165701f50638db1c31586f183f1aab416268216577aec7306b"
 dependencies = [
  "chrono",
 ]
+
+[[package]]
+name = "tinyjson"
+version = "2.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ab95735ea2c8fd51154d01e39cf13912a78071c2d89abc49a7ef102a7dd725a"
 
 [[package]]
 name = "tinyvec"
