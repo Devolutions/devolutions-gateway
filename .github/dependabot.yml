@@ -30,6 +30,7 @@ updates:
           - "*tower*"
           - "*openssl*"
           - "*rustls*"
+          - "*schannel*"
           - "base64"
           - "tokio-tungstenite"
           - "reqwest"
