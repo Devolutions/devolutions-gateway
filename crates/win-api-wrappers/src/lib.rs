@@ -7,6 +7,7 @@ mod lib_win {
     mod error;
     pub use error::Error;
 
+    pub mod event;
     pub mod handle;
     pub mod identity;
     pub mod process;
@@ -15,6 +16,7 @@ mod lib_win {
     pub mod thread;
     pub mod token;
     pub mod utils;
+    pub mod wts;
 
     // Allowed since the goal is to replicate the Windows API crate so that it's familiar, which itself uses the raw names from the API.
     #[allow(

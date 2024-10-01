@@ -12,6 +12,7 @@ base16ct = { version = "0.2", features = ["alloc"] }
 anyhow = "1.0"
 thiserror = "1.0"
 tracing = "0.1"
+uuid = { version = "1.10", features = ["v4"] }
 
 [dependencies.windows]
 version = "0.58.0"

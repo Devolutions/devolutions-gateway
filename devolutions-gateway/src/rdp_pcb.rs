@@ -51,11 +51,11 @@ pub fn extract_association_claims(
 }
 
 fn decode_pcb(buf: &[u8]) -> Result<Option<(PreconnectionBlob, usize)>, io::Error> {
-    let mut cursor = ironrdp_pdu::cursor::ReadCursor::new(buf);
+    let mut cursor = ironrdp_core::ReadCursor::new(buf);
 
-    match ironrdp_pdu::decode_cursor::<PreconnectionBlob>(&mut cursor) {
+    match ironrdp_core::decode_cursor::<PreconnectionBlob>(&mut cursor) {
         Ok(pcb) => {
-            let pdu_size = ironrdp_pdu::size(&pcb);
+            let pdu_size = ironrdp_core::size(&pcb);
             let read_len = cursor.pos();
 
             // NOTE: sanity check (reporting the wrong number will corrupt the communication)
@@ -68,7 +68,7 @@ fn decode_pcb(buf: &[u8]) -> Result<Option<(PreconnectionBlob, usize)>, io::Erro
 
             Ok(Some((pcb, read_len)))
         }
-        Err(e) if matches!(e.kind, ironrdp_pdu::PduErrorKind::NotEnoughBytes { .. }) => Ok(None),
+        Err(e) if matches!(e.kind, ironrdp_core::DecodeErrorKind::NotEnoughBytes { .. }) => Ok(None),
         Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
     }
 }

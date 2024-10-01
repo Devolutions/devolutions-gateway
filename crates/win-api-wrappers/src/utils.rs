@@ -2,26 +2,26 @@ use std::collections::HashMap;
 use std::ffi::{c_void, OsStr, OsString};
 use std::fmt::Debug;
 use std::io::{Read, Write};
-use std::mem::{self, MaybeUninit};
+use std::mem::MaybeUninit;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{ptr, slice};
 
 use anyhow::{bail, Result};
-
-use crate::handle::{Handle, HandleWrapper};
-use crate::process::Process;
-use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
-use crate::thread::Thread;
-use crate::token::Token;
-use crate::Error;
+use uuid::Uuid;
 use windows::core::{Interface, PCSTR, PCWSTR, PSTR, PWSTR};
-use windows::Win32::Foundation::{LocalFree, E_INVALIDARG, E_POINTER, HANDLE, HLOCAL, MAX_PATH, UNICODE_STRING};
+use windows::Win32::Foundation::{
+    GetLastError, LocalFree, SetHandleInformation, E_INVALIDARG, E_POINTER, GENERIC_WRITE, HANDLE, HANDLE_FLAGS,
+    HANDLE_FLAG_INHERIT, HLOCAL, MAX_PATH, UNICODE_STRING,
+};
 use windows::Win32::Security::{
     RevertToSelf, SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
 };
-use windows::Win32::Storage::FileSystem::{CreateDirectoryW, FlushFileBuffers, ReadFile, WriteFile};
+use windows::Win32::Storage::FileSystem::{
+    CreateDirectoryW, CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
+};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT, COINIT_MULTITHREADED,
     STGM_READ,
@@ -35,10 +35,18 @@ use windows::Win32::System::Memory::{
     PAGE_READWRITE,
 };
 use windows::Win32::System::Pipes::{
-    CreatePipe, GetNamedPipeClientProcessId, ImpersonateNamedPipeClient, PeekNamedPipe,
+    CreateNamedPipeW, CreatePipe, GetNamedPipeClientProcessId, ImpersonateNamedPipeClient, PeekNamedPipe,
+    PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows::Win32::UI::Controls::INFOTIPSIZE;
 use windows::Win32::UI::Shell::{CommandLineToArgvW, IShellLinkW, ShellLink, SLGP_SHORTPATH, SLR_NO_UI};
+
+use crate::handle::{Handle, HandleWrapper};
+use crate::process::Process;
+use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
+use crate::thread::Thread;
+use crate::token::Token;
+use crate::Error;
 
 pub trait SafeWindowsString {
     fn to_string_safe(&self) -> Result<String>;
@@ -150,13 +158,13 @@ impl WideString {
                 .0
                 .as_ref()
                 .and_then(|x| x.split_last())
-                .map(|x| mem::size_of_val(x.1))
+                .map(|x| size_of_val(x.1))
                 .unwrap_or(0)
                 .try_into()?,
             MaximumLength: self
                 .0
                 .as_ref()
-                .map(|x| mem::size_of_val(x.as_slice()))
+                .map(|x| size_of_val(x.as_slice()))
                 .unwrap_or(0)
                 .try_into()?,
             Buffer: PWSTR(self.as_pcwstr().0.cast_mut()),
@@ -403,7 +411,7 @@ pub fn environment_block(token: Option<&Token>, inherit: bool) -> Result<HashMap
 pub fn expand_environment(src: &str, environment: &HashMap<String, String>) -> String {
     let mut expanded = String::with_capacity(src.len());
 
-    // For strings such as "%MyVar%MyVar%", only the first occurence should be replaced.
+    // For strings such as "%MyVar%MyVar%", only the first occurrence should be replaced.
     let mut last_replaced = false;
 
     let mut it = src.split('%').peekable();
@@ -628,13 +636,103 @@ impl Pipe {
             )
         }?;
 
-        // SAFETY: We created the ressource above and are thus owning it.
+        // SAFETY: We created the resource above and are thus owning it.
         let rx = unsafe { Handle::new_owned(rx)? };
 
-        // SAFETY: We created the ressource above and are thus owning it.
+        // SAFETY: We created the resource above and are thus owning it.
         let tx = unsafe { Handle::new_owned(tx)? };
 
         Ok((Self { handle: rx }, Self { handle: tx }))
+    }
+
+    /// Creates anonymous synchronous pipe for stdin.
+    pub fn new_sync_stdin_redirection_pipe() -> Result<(Self, Self)> {
+        let security_attributes = SecurityAttributes {
+            security_descriptor: None,
+            inherit_handle: true,
+        };
+
+        let (read, write) = Self::new_anonymous(Some(&security_attributes), 0)?;
+
+        // SAFETY: Handle is ensured to be valid by the code above.
+        unsafe {
+            // Ensure the write handle to the pipe for STDIN is not inherited.
+            SetHandleInformation(write.handle.raw(), HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))?;
+        }
+
+        Ok((read, write))
+    }
+
+    /// Create a new async(overlapped io) pipe for stdout/stderr redirection.
+    ///
+    /// NOTE: This method creates a **named** pipe with a random generated name. Named pipe is
+    /// required for async io, as anonymous pipes do not support async io.
+    pub fn new_async_stdout_redirection_pipe() -> Result<(Self, Self)> {
+        const PIPE_INSTANCES: u32 = 1;
+        const PIPE_BUFFER_SIZE_HINT: u32 = 4 * 1024;
+        const PIPE_PREFIX: &str = r"\\.\pipe\devolutions";
+
+        // Example pipe name: `\\.\pipe\devolutions-75993146-80c5-4c93-a2ea-1d5d5cd5de4a`.
+        let pipe_id = Uuid::new_v4().to_string();
+        let pipe_name_str = format!("{PIPE_PREFIX}-{pipe_id}");
+        let pipe_name = WideString::from(&pipe_name_str);
+
+        // SAFETY: No preconditions. We are creating a named pipe with a random name.
+        let read_endpoint = unsafe {
+            CreateNamedPipeW(
+                pipe_name.as_pcwstr(),
+                PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_INSTANCES,
+                PIPE_BUFFER_SIZE_HINT,
+                0,
+                0,
+                None,
+            )
+        };
+
+        // SAFETY: We created the resource above and are thus owning it.
+        let handle = unsafe { Handle::new_owned(read_endpoint) }?;
+
+        // For some reason, `windows` crate do not return `Result` here, we should check for invalid
+        // handle manually.
+        let read = if !read_endpoint.is_invalid() {
+            // Take ownership
+            Pipe { handle }
+        } else {
+            // SAFETY: No preconditions.
+            let error = unsafe { GetLastError() };
+            return Err(anyhow::anyhow!(
+                "Failed to create named pipe `{pipe_name_str}`; Error: {error:?}"
+            ));
+        };
+
+        let security_attributes = RawSecurityAttributes::try_from(&SecurityAttributes {
+            security_descriptor: None,
+            inherit_handle: true,
+        })?;
+
+        // SAFETY: Pipe is created above and is valid.
+        let write_endpoint = unsafe {
+            CreateFileW(
+                pipe_name.as_pcwstr(),
+                GENERIC_WRITE.0,
+                FILE_SHARE_NONE,
+                Some(security_attributes.as_raw() as *const _),
+                OPEN_EXISTING,
+                // Note that we are not setting FILE_FLAG_OVERLAPPED here, as we are not expecting async
+                // writes from target process stdout/stderr.
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                HANDLE::default(),
+            )
+        }?;
+
+        // SAFETY: We created the resource above and are thus owning it.
+        let handle = unsafe { Handle::new_owned(write_endpoint) }?;
+
+        let write = Pipe { handle };
+
+        Ok((read, write))
     }
 
     /// Peeks the contents of the pipe in `data`, while returning the amount of bytes available on the pipe.
@@ -789,5 +887,5 @@ pub fn nul_slice_wide_str(slice: &[u16]) -> &[u16] {
 /// Typically fine since we rarely work with structs whose size in memory is bigger than u32::MAX.
 #[expect(clippy::cast_possible_truncation)]
 pub(crate) const fn u32size_of<T>() -> u32 {
-    mem::size_of::<T>() as u32
+    size_of::<T>() as u32
 }

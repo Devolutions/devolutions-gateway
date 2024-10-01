@@ -95,7 +95,7 @@ fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
 }
 
 fn get_conf_file_path() -> Utf8PathBuf {
-    get_data_dir().join("agent.json")
+    get_data_dir().join("session.json")
 }
 
 fn normalize_data_path(path: &Utf8Path, data_dir: &Utf8Path) -> Utf8PathBuf {

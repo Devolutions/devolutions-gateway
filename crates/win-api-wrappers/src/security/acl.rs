@@ -1,5 +1,4 @@
 use std::alloc::Layout;
-use std::mem::{self};
 use std::{ptr, slice};
 
 use anyhow::{bail, Result};
@@ -83,7 +82,7 @@ impl Ace {
         };
 
         // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
-        ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
+        ptr = unsafe { ptr.byte_add(size_of::<ACE_HEADER>()) };
 
         #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32>` big.
@@ -92,7 +91,7 @@ impl Ace {
         };
 
         // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
-        ptr = unsafe { ptr.byte_add(mem::size_of::<u32>()) };
+        ptr = unsafe { ptr.byte_add(size_of::<u32>()) };
 
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32> + body.len()` big.
         unsafe { ptr.copy_from(body.as_ptr(), body.len()) };
@@ -109,21 +108,21 @@ impl Ace {
         // SAFETY: Assume that the pointer points to a valid ACE_HEADER if not null.
         let header = unsafe { ptr.as_ref() }.ok_or_else(|| Error::NullPointer("ACE header"))?;
 
-        if (header.AceSize as usize) < mem::size_of::<ACE_HEADER>() + mem::size_of::<u32>() {
+        if (header.AceSize as usize) < size_of::<ACE_HEADER>() + size_of::<u32>() {
             bail!(Error::from_win32(ERROR_INVALID_DATA));
         }
 
         // SAFETY: Assume that the header is followed by a 4 byte access mask.
-        ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
+        ptr = unsafe { ptr.byte_add(size_of::<ACE_HEADER>()) };
 
         // SAFETY: Assume that the header is followed by a 4 byte access mask.
         #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         let access_mask = unsafe { ptr.cast::<u32>().read() };
 
         // SAFETY: Assume buffer is big enough to fit Ace data.
-        ptr = unsafe { ptr.byte_add(mem::size_of::<u32>()) };
+        ptr = unsafe { ptr.byte_add(size_of::<u32>()) };
 
-        let body_size = header.AceSize as usize - mem::size_of::<ACE_HEADER>() - mem::size_of::<u32>();
+        let body_size = header.AceSize as usize - size_of::<ACE_HEADER>() - size_of::<u32>();
 
         // SAFETY: `body_size` must be >= 0 because of previous check. Pointer is valid.
         let body = unsafe { slice::from_raw_parts(ptr.cast::<u8>(), body_size) };
@@ -158,10 +157,10 @@ impl Acl {
 
     pub fn to_raw(&self) -> Result<Vec<u8>> {
         let raw_aces = self.aces.iter().map(Ace::to_raw).collect::<Result<Vec<_>>>()?;
-        let size = mem::size_of::<ACL>() + raw_aces.iter().map(Vec::len).sum::<usize>();
+        let size = size_of::<ACL>() + raw_aces.iter().map(Vec::len).sum::<usize>();
 
         // Align on u32 boundary
-        let size = (size + mem::size_of::<u32>() - 1) & !3;
+        let size = (size + size_of::<u32>() - 1) & !3;
 
         let mut buf = vec![0; size];
 

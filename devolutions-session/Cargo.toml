@@ -8,31 +8,53 @@ description = "Session host application for Devolutions Agent"
 build = "build.rs"
 publish = false
 
+[lints]
+workspace = true
+
+[features]
+default = ["dvc"]
+dvc = [
+    "async-trait",
+    "windows",
+    "now-proto-pdu",
+    "ironrdp",
+    "tempfile",
+    "thiserror",
+    "win-api-wrappers",
+]
+
 [dependencies]
 anyhow = "1.0"
 camino = { version = "1.1", features = ["serde1"] }
 cfg-if = "1"
 ctrlc = "3.4"
 devolutions-log = { path = "../crates/devolutions-log" }
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 parking_lot = "0.12"
 serde = "1"
 serde_json = "1"
 tap = "1.0"
 tracing = "0.1"
+futures = "0.3"
+tokio = { version = "1", features = ["macros", "sync"] }
 
-[lints]
-workspace = true
+async-trait = { version = "0.1", optional = true }
+now-proto-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf", optional = true}
+ironrdp = { version = "0.5", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf", features = ["core", "pdu"], optional = true }
+tempfile = { version = "3", optional = true }
+thiserror = { version = "1", optional = true }
+win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.58"
+optional = true
 features = [
     "Win32_Foundation",
-    "Win32_Storage_FileSystem",
-    "Win32_System_RemoteDesktop",
-    "Win32_System_IO",
-    "Win32_System_Threading",
-    "Win32_Security",
+    "Win32_System_Shutdown",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_System_Console",
 ]

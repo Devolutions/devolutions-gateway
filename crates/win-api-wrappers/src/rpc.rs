@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
-use std::{mem, slice};
+use std::slice;
 
 use windows::core::GUID;
 use windows::Win32::Foundation::{ERROR_MORE_DATA, E_INVALIDARG};
@@ -51,9 +51,9 @@ impl RpcBindingHandle {
         server_principal_name.resize((attribs.ServerPrincipalNameBufferLength / 2) as usize, 0);
 
         attribs.ClientPrincipalName = client_principal_name.as_mut_ptr();
-        attribs.ClientPrincipalNameBufferLength = (client_principal_name.len() * mem::size_of::<u16>()).try_into()?;
+        attribs.ClientPrincipalNameBufferLength = (client_principal_name.len() * size_of::<u16>()).try_into()?;
         attribs.ServerPrincipalName = server_principal_name.as_mut_ptr();
-        attribs.ServerPrincipalNameBufferLength = (server_principal_name.len() * mem::size_of::<u16>()).try_into()?;
+        attribs.ServerPrincipalNameBufferLength = (server_principal_name.len() * size_of::<u16>()).try_into()?;
 
         // SAFETY: No preconditions.
         let status = unsafe { RpcServerInqCallAttributesW(Some(self.0), &mut attribs as *mut _ as *mut c_void) };
@@ -115,6 +115,7 @@ pub struct RpcServerInterfacePointer {
     pub raw: &'static RPC_SERVER_INTERFACE,
 }
 
+// SAFETY: RpcServerInterfacePointer could be sent between threads.
 unsafe impl Send for RpcServerInterfacePointer {}
 
 impl RpcServerInterfacePointer {
@@ -161,14 +162,14 @@ impl RpcServerInterfacePointer {
             let addr = unsafe { raw_dispatch_table.add(i) }.cast_mut();
 
             // SAFETY: Assume the address points to a valid handler which is not currently in use.
-            let old_prot = unsafe { set_memory_protection(addr.cast(), mem::size_of::<*const ()>(), PAGE_READWRITE) }?;
+            let old_prot = unsafe { set_memory_protection(addr.cast(), size_of::<*const ()>(), PAGE_READWRITE) }?;
 
             // TODO: See if it could be possible to freeze other threads during switch or to do an atomic switch.
             // SAFETY: Because of previous assumption and memory protection, this should succeed.
             unsafe { *addr = *new_handler };
 
             // SAFETY: Address is already assumed to be valid.
-            let _ = unsafe { set_memory_protection(addr.cast(), mem::size_of::<*const ()>(), old_prot) }?;
+            let _ = unsafe { set_memory_protection(addr.cast(), size_of::<*const ()>(), old_prot) }?;
         }
 
         Ok(())
