@@ -14,7 +14,8 @@ macro_rules! diagnostic {
             name: diagnostic_name.to_owned(),
             success: result.is_ok(),
             output: (!output.is_empty()).then_some(output),
-            error: result.err().map(|e| format!("{e:?}")),
+            error: result.as_ref().err().map(|e| format!("{:?}", e.error)),
+            help: result.err().and_then(|e| e.help),
         };
 
         let success = (*$callback)(diagnostic);
@@ -45,7 +46,29 @@ pub struct Diagnostic {
     pub success: bool,
     pub output: Option<String>,
     pub error: Option<String>,
+    pub help: Option<String>,
 }
+
+pub fn run(args: Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
+    common_checks::run(callback);
+
+    #[cfg(feature = "rustls")]
+    {
+        rustls_checks::run(&args, callback);
+    }
+
+    #[cfg(feature = "native-tls")]
+    {
+        native_tls_checks::run(&args, callback);
+    }
+}
+
+struct DiagnosticError {
+    error: anyhow::Error,
+    help: Option<String>,
+}
+
+type DiagnosticResult = Result<(), DiagnosticError>;
 
 impl Diagnostic {
     pub fn into_json(self) -> JsonValue {
@@ -63,6 +86,10 @@ impl Diagnostic {
 
         if let Some(error_message) = self.error {
             object.insert("error".to_owned(), JsonValue::String(error_message));
+        }
+
+        if let Some(help_message) = self.help {
+            object.insert("help".to_owned(), JsonValue::String(help_message));
         }
 
         JsonValue::Object(object)
@@ -109,23 +136,32 @@ impl Diagnostic {
                     write!(f, "\n\n### Error\n{error_message}")?;
                 }
 
+                if let Some(help_message) = self.0.help.as_deref() {
+                    write!(f, "\n\n### Help\n{help_message}")?;
+                }
+
                 Ok(())
             }
         }
     }
 }
 
-pub fn run(args: Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
-    common_checks::run(callback);
-
-    #[cfg(feature = "rustls")]
-    {
-        rustls_checks::run(&args, callback);
+impl From<anyhow::Error> for DiagnosticError {
+    fn from(error: anyhow::Error) -> Self {
+        Self { error, help: None }
     }
+}
 
-    #[cfg(feature = "native-tls")]
-    {
-        native_tls_checks::run(&args, callback);
+trait AttachHelp<T> {
+    fn help(self, op: impl FnOnce() -> String) -> Result<T, DiagnosticError>;
+}
+
+impl<T> AttachHelp<T> for anyhow::Result<T> {
+    fn help(self, op: impl FnOnce() -> String) -> Result<T, DiagnosticError> {
+        self.map_err(|error| DiagnosticError {
+            error,
+            help: Some(op()),
+        })
     }
 }
 
@@ -153,13 +189,13 @@ fn write_cert_as_pem(mut out: impl fmt::Write, cert_der: &[u8]) -> fmt::Result {
 mod common_checks {
     use core::fmt;
 
-    use super::Diagnostic;
+    use super::{Diagnostic, DiagnosticResult};
 
     pub(super) fn run(callback: &mut dyn FnMut(Diagnostic) -> bool) {
         diagnostic!(callback, openssl_probe());
     }
 
-    pub(crate) fn openssl_probe(mut out: impl fmt::Write) -> anyhow::Result<()> {
+    pub(crate) fn openssl_probe(mut out: impl fmt::Write) -> DiagnosticResult {
         let result = openssl_probe::probe();
 
         output!(out, "cert_file = {:?}", result.cert_file)?;
@@ -177,7 +213,9 @@ mod rustls_checks {
     use rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
     use std::path::Path;
 
-    use super::{write_cert_as_pem, Args, Diagnostic};
+    use crate::doctor::DiagnosticError;
+
+    use super::{help, write_cert_as_pem, Args, AttachHelp as _, Diagnostic, DiagnosticResult};
 
     pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         let mut root_store = rustls::RootCertStore::empty();
@@ -205,14 +243,11 @@ mod rustls_checks {
         }
     }
 
-    fn rustls_load_native_certs(
-        mut out: impl fmt::Write,
-        root_store: &mut rustls::RootCertStore,
-    ) -> anyhow::Result<()> {
+    fn rustls_load_native_certs(mut out: impl fmt::Write, root_store: &mut rustls::RootCertStore) -> DiagnosticResult {
         for cert in rustls_native_certs::load_native_certs().context("failed to load native certificates")? {
             if let Err(e) = root_store.add(cert.clone()) {
                 output!(out, "-> Invalid root certificate: {e}")?;
-                write_cert_as_pem(&mut out, &cert)?;
+                write_cert_as_pem(&mut out, &cert).context("failed to write the certificate as PEM")?;
             }
         }
 
@@ -224,14 +259,15 @@ mod rustls_checks {
         subject_name: &str,
         port: Option<u16>,
         server_certificates: &mut Vec<pki_types::CertificateDer<'static>>,
-    ) -> anyhow::Result<()> {
+    ) -> DiagnosticResult {
         use std::io::Write as _;
         use std::net::TcpStream;
 
         output!(out, "-> Connect to {subject_name}")?;
 
-        let mut socket =
-            TcpStream::connect((subject_name, port.unwrap_or(443))).context("failed to connect to server...")?;
+        let mut socket = TcpStream::connect((subject_name, port.unwrap_or(443)))
+            .with_context(|| format!("failed to connect to {subject_name}..."))
+            .help(|| help::failed_to_connect_to_server(subject_name))?;
 
         let config = rustls::ClientConfig::builder()
             .dangerous()
@@ -258,7 +294,7 @@ mod rustls_checks {
 
             if let Some(peer_certificates) = client.peer_certificates() {
                 for certificate in peer_certificates {
-                    write_cert_as_pem(&mut out, certificate)?;
+                    write_cert_as_pem(&mut out, certificate).context("failed to write the peer certificate as PEM")?;
                     server_certificates.push(certificate.clone().into_owned());
                 }
 
@@ -273,7 +309,7 @@ mod rustls_checks {
         mut out: impl fmt::Write,
         chain_path: &Path,
         server_certificates: &mut Vec<pki_types::CertificateDer<'static>>,
-    ) -> anyhow::Result<()> {
+    ) -> DiagnosticResult {
         output!(out, "-> Read file at {}", chain_path.display())?;
 
         let mut file = std::fs::File::open(chain_path)
@@ -282,7 +318,8 @@ mod rustls_checks {
 
         for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
             let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
-            write_cert_as_pem(&mut out, &certificate)?;
+            write_cert_as_pem(&mut out, &certificate)
+                .with_context(|| format!("failed to write the certificate number {idx}"))?;
             server_certificates.push(certificate);
         }
 
@@ -292,8 +329,8 @@ mod rustls_checks {
     fn rustls_check_end_entity_cert(
         mut out: impl fmt::Write,
         server_certificates: &[pki_types::CertificateDer<'static>],
-        subject_name: Option<&str>,
-    ) -> anyhow::Result<()> {
+        subject_name_to_verify: Option<&str>,
+    ) -> DiagnosticResult {
         let end_entity_cert = server_certificates.first().cloned().context("empty chain")?;
 
         output!(out, "-> Decode end entity certificate")?;
@@ -301,11 +338,13 @@ mod rustls_checks {
         let end_entity_cert =
             rustls::server::ParsedCertificate::try_from(&end_entity_cert).context("parse end entity certificate")?;
 
-        if let Some(subject_name) = subject_name {
+        if let Some(subject_name_to_verify) = subject_name_to_verify {
             output!(out, "-> Verify validity for DNS name")?;
 
-            let subject_name = pki_types::ServerName::try_from(subject_name).context("invalid DNS name")?;
-            rustls::client::verify_server_name(&end_entity_cert, &subject_name).context("verify DNS name")?;
+            let server_name = pki_types::ServerName::try_from(subject_name_to_verify).context("invalid DNS name")?;
+            rustls::client::verify_server_name(&end_entity_cert, &server_name)
+                .context("verify DNS name")
+                .help(|| help::cert_invalid_hostname(subject_name_to_verify))?;
         }
 
         Ok(())
@@ -315,7 +354,7 @@ mod rustls_checks {
         mut out: impl fmt::Write,
         root_store: &rustls::RootCertStore,
         server_certificates: &[pki_types::CertificateDer<'static>],
-    ) -> anyhow::Result<()> {
+    ) -> DiagnosticResult {
         use rustls::client::verify_server_cert_signed_by_trust_anchor;
 
         let mut certs = server_certificates.iter().cloned();
@@ -340,7 +379,22 @@ mod rustls_checks {
             now,
             ring_crypto_provider.signature_verification_algorithms.all,
         )
-        .context("failed to verify certification chain")?;
+        .map_err(|error| {
+            let help = match &error {
+                Error::InvalidCertificate(cert_error) => match cert_error {
+                    rustls::CertificateError::Expired => Some(help::cert_is_expired()),
+                    rustls::CertificateError::NotValidYet => Some(help::cert_is_not_yet_valid()),
+                    rustls::CertificateError::UnknownIssuer => Some(help::cert_unknown_issuer()),
+                    rustls::CertificateError::InvalidPurpose => Some(help::cert_invalid_purpose()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            DiagnosticError {
+                error: anyhow::Error::new(error).context("failed to verify certification chain"),
+                help,
+            }
+        })?;
 
         Ok(())
     }
@@ -403,7 +457,7 @@ mod native_tls_checks {
     use anyhow::Context as _;
     use core::fmt;
 
-    use crate::doctor::{write_cert_as_pem, Args, Diagnostic};
+    use crate::doctor::{help, write_cert_as_pem, Args, AttachHelp as _, Diagnostic, DiagnosticResult};
 
     pub(crate) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         #[cfg(not(windows))]
@@ -419,7 +473,7 @@ mod native_tls_checks {
         }
     }
 
-    fn native_tls_connect(mut out: impl fmt::Write, subject_name: &str, port: Option<u16>) -> anyhow::Result<()> {
+    fn native_tls_connect(mut out: impl fmt::Write, subject_name: &str, port: Option<u16>) -> DiagnosticResult {
         use native_tls::TlsConnector;
         use std::net::TcpStream;
 
@@ -427,8 +481,9 @@ mod native_tls_checks {
 
         let connector = TlsConnector::new().context("failed to build TLS connector")?;
 
-        let socket =
-            TcpStream::connect((subject_name, port.unwrap_or(443))).context("failed to connect to server...")?;
+        let socket = TcpStream::connect((subject_name, port.unwrap_or(443)))
+            .context("failed to connect to server...")
+            .help(|| help::failed_to_connect_to_server(subject_name))?;
 
         output!(out, "-> Perform TLS handshake")?;
 
@@ -448,7 +503,7 @@ mod native_tls_checks {
         let peer_certificate = peer_certificate.to_der().context("peer certificate der conversion")?;
 
         output!(out, "-> Peer certificate:")?;
-        write_cert_as_pem(&mut out, &peer_certificate)?;
+        write_cert_as_pem(&mut out, &peer_certificate).context("failed to write the peer certificate as PEM")?;
 
         Ok(())
     }
@@ -460,7 +515,9 @@ mod native_tls_checks {
         use openssl::x509::X509;
         use std::path::Path;
 
-        use crate::doctor::{write_cert_as_pem, Args, Diagnostic};
+        use crate::doctor::{
+            help, write_cert_as_pem, Args, AttachHelp as _, Diagnostic, DiagnosticError, DiagnosticResult,
+        };
 
         pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
             let mut server_certificates = Vec::new();
@@ -493,7 +550,7 @@ mod native_tls_checks {
             subject_name: &str,
             port: Option<u16>,
             server_certificates: &mut Vec<X509>,
-        ) -> anyhow::Result<()> {
+        ) -> DiagnosticResult {
             use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
             use std::net::TcpStream;
 
@@ -503,8 +560,9 @@ mod native_tls_checks {
             builder.set_verify(SslVerifyMode::NONE);
             let connector = builder.build();
 
-            let socket =
-                TcpStream::connect((subject_name, port.unwrap_or(443))).context("failed to connect to server...")?;
+            let socket = TcpStream::connect((subject_name, port.unwrap_or(443)))
+                .context("failed to connect to server...")
+                .help(|| help::failed_to_connect_to_server(subject_name))?;
 
             output!(out, "-> Fetch server certificates")?;
 
@@ -520,7 +578,7 @@ mod native_tls_checks {
                 .context("peer certification chain missing from SSL context")?
             {
                 let der = certificate.to_der().context("certificate.to_der()")?;
-                write_cert_as_pem(&mut out, &der)?;
+                write_cert_as_pem(&mut out, &der).context("failed to write the peer chain as PEM")?;
                 server_certificates.push(certificate.to_owned());
             }
 
@@ -531,7 +589,7 @@ mod native_tls_checks {
             mut out: impl fmt::Write,
             chain_path: &Path,
             server_certificates: &mut Vec<X509>,
-        ) -> anyhow::Result<()> {
+        ) -> DiagnosticResult {
             output!(out, "-> Read file at {}", chain_path.display())?;
 
             let mut file = std::fs::File::open(chain_path)
@@ -540,7 +598,8 @@ mod native_tls_checks {
 
             for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
                 let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
-                write_cert_as_pem(&mut out, &certificate)?;
+                write_cert_as_pem(&mut out, &certificate)
+                    .with_context(|| format!("failed to write certificate number {idx} as PEM"))?;
                 let certificate = X509::from_der(&certificate).context("X509::from_der")?;
                 server_certificates.push(certificate);
             }
@@ -552,7 +611,7 @@ mod native_tls_checks {
             mut out: impl fmt::Write,
             subject_name_to_verify: &str,
             server_certificates: &[X509],
-        ) -> anyhow::Result<()> {
+        ) -> DiagnosticResult {
             let certificate = server_certificates
                 .first()
                 .context("end entity certificate is missing")?;
@@ -594,7 +653,12 @@ mod native_tls_checks {
                 .any(|certificate_name| wildcard_host_match(&certificate_name, subject_name_to_verify));
 
             if !success {
-                anyhow::bail!("{subject_name_to_verify} doesn't match any domain identified by the certificate");
+                return Err(DiagnosticError {
+                    error: anyhow::anyhow!(
+                        "the subject name '{subject_name_to_verify}' does not match any domain identified by the certificate"
+                    ),
+                    help: Some(help::cert_invalid_hostname(subject_name_to_verify)),
+                });
             }
 
             return Ok(());
@@ -613,7 +677,7 @@ mod native_tls_checks {
             }
         }
 
-        fn openssl_check_chain(mut out: impl fmt::Write, server_certificates: &[X509]) -> anyhow::Result<()> {
+        fn openssl_check_chain(mut out: impl fmt::Write, server_certificates: &[X509]) -> DiagnosticResult {
             use openssl::ssl::{SslConnector, SslMethod};
             use openssl::stack::Stack;
             use openssl::x509::X509StoreContext;
@@ -657,10 +721,86 @@ mod native_tls_checks {
                 .context("verification failed")?;
 
             if result != X509VerifyResult::OK {
-                anyhow::bail!("chain verification failed: {}", result.error_string());
+                let help = match result.as_raw() {
+                    10 => Some(help::cert_is_expired()),
+                    18 => Some(help_cert_is_self_signed()),
+                    19 => Some(help::cert_unknown_issuer()),
+                    _ => None,
+                };
+
+                let error = anyhow::anyhow!("chain verification failed: {}", result.error_string());
+
+                return Err(DiagnosticError { error, help });
             }
 
             Ok(())
         }
+
+        pub(crate) fn help_cert_is_self_signed() -> String {
+            format!(
+                "The certificate is self-signed.
+It is generally considered a bad practice to use self-signed certificates, because it goes against the purpose of public key infrastructures (PKIs).
+To resolve this issue, you can:
+- Trust the self-signed certificate on your system, if you know what you are doing.
+- Obtain and use a certificate signed by a legitimate certification authority."
+            )
+        }
+    }
+}
+
+mod help {
+    pub(crate) fn failed_to_connect_to_server(hostname: &str) -> String {
+        format!(
+            "Connection could not be established with the server for the hostname '{hostname}'.
+Please verify that:
+- '{hostname}' is the correct hostname.
+- The server is up and running.
+- You correctly configured DNS records for '{hostname}'."
+        )
+    }
+
+    pub(crate) fn cert_invalid_hostname(hostname: &str) -> String {
+        format!(
+            "The certificate is not valid for the subject name '{hostname}' (domain/DNS name).
+To resolve this issue, you can:
+- Update your DNS records to use a domain that is matched by the certificate, and use this name instead.
+- Generate and install a new certificate that includes '{hostname}'.
+Note that the asterisks '*' found in domain name fragments of wildcard certificates only match one level of subdomains.
+E.g.: 'a.b.c' is matched by '*.b.c', but not by '*.c' (the asterisk doesn’t match full stops).
+Suggested read on this topic: https://en.wikipedia.org/wiki/Public_key_certificate"
+        )
+    }
+
+    pub(crate) fn cert_unknown_issuer() -> String {
+        format!(
+            "The issuer is unknown.
+Ensure that:
+- The server is returning the intermediate certificates in addition to the leaf certificate.
+- The root certificate is trusted on your system.
+- If the certificate is self-signed: trust it on your system, or use a certificate signed by a certification authority."
+        )
+    }
+
+    pub(crate) fn cert_is_expired() -> String {
+        format!(
+            "The certificate is expired.
+You need to:
+- Renew it via your certification authority.
+- Install the new certificate on your server."
+        )
+    }
+
+    pub(crate) fn cert_is_not_yet_valid() -> String {
+        format!(
+            "The certificate is not yet valid.
+Make sure your clock is set to the correct time."
+        )
+    }
+
+    pub(crate) fn cert_invalid_purpose() -> String {
+        format!(
+            "The certificate is not valid for server authentication.
+You need to generate a separate certificate valid for server authentication."
+        )
     }
 }
