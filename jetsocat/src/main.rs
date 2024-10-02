@@ -257,13 +257,17 @@ Output formats:
 
 {pipe_formats}
 
-Example: valid domain
+Example: from a chain file on the disk
 
-    {command} {subcommand} --subject-name devolutions.net
+    {command} {subcommand} --subject-name devolutions.net --chain /path/to/chain.pem
 
-Example: invalid domain
+Example: fetch the chain by connecting to the server
 
-    {command} {subcommand} --subject-name expired.badssl.com"##,
+    {command} {subcommand} --subject-name devolutions.net --network
+
+Example: for an invalid domain
+
+    {command} {subcommand} --subject-name expired.badssl.com --network"##,
         command = env!("CARGO_PKG_NAME"),
         subcommand = DOCTOR_SUBCOMMAND,
         pipe_formats = PIPE_FORMATS,
