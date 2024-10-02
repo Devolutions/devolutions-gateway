@@ -2,6 +2,42 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2024.3.3 (2024-10-02)
+
+### Features
+
+- _pedm_: add context menu icon resource ([#990](https://github.com/Devolutions/devolutions-gateway/issues/990)) ([263de985cc](https://github.com/Devolutions/devolutions-gateway/commit/263de985cc7eec51cb906d8e0d3669d827e1dfcc)) 
+
+- _agent_: devolutions-session bootstrap ([#997](https://github.com/Devolutions/devolutions-gateway/issues/997)) ([f8b291d908](https://github.com/Devolutions/devolutions-gateway/commit/f8b291d9080c5c541f85c434e5fd23a39319f6b5)) 
+
+- _jetsocat_: Windows named pipes and Unix sockets ([#1022](https://github.com/Devolutions/devolutions-gateway/issues/1022)) ([b13caba5b6](https://github.com/Devolutions/devolutions-gateway/commit/b13caba5b6a3481861e5cf1595c33e3d0968c93c)) 
+
+- _jetsocat_: new doctor subcommand for diagnostics ([#1030](https://github.com/Devolutions/devolutions-gateway/issues/1030)) ([6ed8591b38](https://github.com/Devolutions/devolutions-gateway/commit/6ed8591b3865de82c6b3984ded2e335880f2b379)) 
+
+### Bug Fixes
+
+- _pwsh_: trace more info when importing Certificate from PFX ([#992](https://github.com/Devolutions/devolutions-gateway/issues/992)) ([5de155738a](https://github.com/Devolutions/devolutions-gateway/commit/5de155738a872dcdba922ea54354121277b27c93)) 
+
+- _dgw_: set dwShareMode for recording files on Windows ([#1007](https://github.com/Devolutions/devolutions-gateway/issues/1007)) ([4df3c854ca](https://github.com/Devolutions/devolutions-gateway/commit/4df3c854cae6642f6c771621c68ef79c478db796)) 
+
+  On Windows, the default default share_mode set when opening a new file
+  is `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`.
+  
+  We now override the share_mode and set it to `FILE_SHARE_READ`.
+  
+  This makes the recording process more robust by ensuring no other
+  process can write or delete the files while the Devolutions Gateway
+  is actively writing it.
+
+- _jetsocat,dgw_: add backpressure in JMUX proxy ([41ea3ee3f0](https://github.com/Devolutions/devolutions-gateway/commit/41ea3ee3f03254c1415624d2344dd9b2dca38d65)) 
+
+  The memory consumption of the JMUX proxy was unbounded because we used
+  an unbounded mpsc channel for message passing.
+  
+  Here is a `jetsocat-bench.nu` run against master:
+
+- _player_: start recording when tab is open ([#1024](https://github.com/Devolutions/devolutions-gateway/issues/1024)) ([6506b08ee2](https://github.com/Devolutions/devolutions-gateway/commit/6506b08ee2e604867bc73c46c08b6b42ba716745)) ([RDMW-16402](https://devolutions.atlassian.net/browse/RDMW-16402)) 
+
 ## 2024.3.2 (2024-08-20)
 
 ### Features

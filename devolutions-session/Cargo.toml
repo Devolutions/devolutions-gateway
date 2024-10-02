@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-session"
-version = "2024.3.2"
+version = "2024.3.3"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
