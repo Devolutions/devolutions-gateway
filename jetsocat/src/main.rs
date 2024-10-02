@@ -248,12 +248,19 @@ fn doctor() -> Command {
     let usage = format!(
         r##"{command} {subcommand}
 
-If the chain is not provided via the --chain flag, a TLS handshake will be
-performed with the server using --subject-name and --server-port.
+If the chain is not provided via the --chain flag, and if the --network option is set,
+a TLS handshake will be performed with the server using --subject-name and --server-port.
 
 Output formats:
     - human: human-readable output
     - json: print one JSON object per line for each diagnostic
+
+The JSON objects have the following fields:
+    - "name" (Required): A string for the name of the diagnostic.
+    - "success" (Required): A boolean set to true when the diagnostic is successful and false otherwise.
+    - "output" (Optional): The execution trace of the diagnostic.
+    - "error" (Optional): The error returned by the diagnostic when failed.
+    - "help" (Optional): A help message suggesting how to fix the issue.
 
 {pipe_formats}
 
