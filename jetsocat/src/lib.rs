@@ -8,6 +8,7 @@ use {proptest as _, test_utils as _};
 #[macro_use]
 extern crate tracing;
 
+pub mod doctor;
 pub mod listener;
 pub mod pipe;
 pub mod proxy;
@@ -125,4 +126,78 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg) -> anyhow::Result<()> {
         .run();
 
     utils::while_process_is_running(cfg.watch_process, proxy_fut).await
+}
+
+#[derive(Debug)]
+pub struct DoctorCfg {
+    pub pipe_mode: pipe::PipeMode,
+    pub proxy_cfg: Option<proxy::ProxyConfig>,
+    pub pipe_timeout: Option<Duration>,
+    pub watch_process: Option<sysinfo::Pid>,
+    pub format: DoctorOutputFormat,
+    pub args: doctor::Args,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DoctorOutputFormat {
+    Human,
+    Json,
+}
+
+pub async fn doctor(cfg: DoctorCfg) -> anyhow::Result<()> {
+    use pipe::open_pipe;
+    use tokio::io::AsyncWriteExt as _;
+    use tokio::sync::mpsc;
+
+    info!("Start diagnostics");
+    debug!(?cfg);
+
+    let mut pipe = utils::timeout(cfg.pipe_timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg))
+        .instrument(info_span!("open_jumx_pipe"))
+        .await
+        .context("couldn't open pipe")?;
+
+    let (tx, mut rx) = mpsc::channel(10);
+
+    let diagnostics_task = tokio::task::spawn_blocking(move || {
+        let mut num_failed: u8 = 0;
+
+        doctor::run(cfg.args, &mut |diagnostic| {
+            if !diagnostic.success {
+                num_failed += 1;
+            }
+
+            tx.blocking_send(diagnostic).is_ok()
+        });
+
+        num_failed
+    });
+
+    let pipe_future = async move {
+        while let Some(diagnostic) = rx.recv().await {
+            let formatted = match cfg.format {
+                DoctorOutputFormat::Human => format!("{}\n\n", diagnostic.human_display()),
+                DoctorOutputFormat::Json => format!("{}\n", diagnostic.json_display()),
+            };
+
+            pipe.stream
+                .write_all(formatted.as_bytes())
+                .await
+                .context("failed to write diagnostic")?;
+        }
+
+        pipe.stream.flush().await.context("failed to flush the stream")?;
+
+        anyhow::Ok(())
+    };
+
+    utils::while_process_is_running(cfg.watch_process, pipe_future).await?;
+
+    let num_failed = diagnostics_task.await.context("doctor thread failed")?;
+
+    if num_failed > 0 {
+        anyhow::bail!("Found {num_failed} issue(s)");
+    }
+
+    Ok(())
 }
