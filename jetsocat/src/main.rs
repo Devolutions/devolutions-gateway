@@ -124,10 +124,10 @@ const PIPE_FORMATS: &str = r#"Pipe formats:
     `ws://<URL>`: WebSocket
     `wss://<URL>`: WebSocket Secure
     `ws-listen://<BINDING ADDRESS>`: WebSocket listener
-    `np://<SERVER NAME>/pipe/<PIPE NAME>: Connect to a named pipe (Windows)`
+    `np://<SERVER NAME>/pipe/<PIPE NAME>`: Connect to a named pipe (Windows)
     `np-listen://./pipe/<PIPE NAME>`: Open a named pipe and listen on it (Windows)
-    `np://<UNIX SOCKET PATH>: Connect to a UNIX socket (non-Windows)`
-    `np-listen://<UNIX SOCKET PATH>: Create a UNIX socket and listen on it (non-Windows)`"#;
+    `np://<UNIX SOCKET PATH>`: Connect to a UNIX socket (non-Windows)
+    `np-listen://<UNIX SOCKET PATH>`: Create a UNIX socket and listen on it (non-Windows)"#;
 
 // forward
 
