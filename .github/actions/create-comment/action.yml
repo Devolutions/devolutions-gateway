@@ -1,0 +1,29 @@
+name: Create Comment
+description: Create a comment using the provided token
+author: Devolutions Architecture Team
+
+inputs:
+  repo-name:
+    description: "The name of the repository. Example: 'octocat/hello-world'"
+    default: ${{ github.repository }}
+  pr-number:
+    description: The ID of the pull request (/ issue)
+    default: ${{ github.event.number }}
+  branch:
+    description: Name of the branch
+    default: ${{ github.event.pull_request.head.ref }}
+  token:
+    description: GitHub token
+    default: ${{ github.token }}
+  template:
+    description: Message template
+
+runs:
+  using: composite
+
+  steps:
+    - name: Run
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      shell: pwsh
+      run: ${{ github.action_path }}/run.ps1 -RepoName ${{ inputs.repo-name }} -PullRequestId ${{ inputs.pr-number }} -Branch ${{ inputs.branch }} -Template ${{ inputs.template }}
