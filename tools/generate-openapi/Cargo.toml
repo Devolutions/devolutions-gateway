@@ -8,5 +8,5 @@ publish = false
 [dependencies]
 devolutions-gateway = { path = "../../devolutions-gateway", features = ["openapi"] }
 devolutions-pedm = { path = "../../crates/devolutions-pedm" }
-serde_yaml = "0.9.34"
+serde_yaml = "0.9"
 utoipa = { version = "4.2", default-features = false, features = ["uuid", "chrono", "yaml"] }

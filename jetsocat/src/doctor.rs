@@ -247,7 +247,11 @@ mod rustls_checks {
         let result = rustls_native_certs::load_native_certs();
 
         for error in result.errors {
-            output!(out, "-> Error when loading native certs: {error}")?;
+            output!(
+                out,
+                "-> Error when loading native certs: {:?}",
+                anyhow::Error::new(error),
+            )?;
         }
 
         for cert in result.certs {

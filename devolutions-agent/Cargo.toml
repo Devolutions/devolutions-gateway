@@ -15,7 +15,7 @@ workspace = true
 anyhow = "1"
 async-trait = "0.1"
 camino = { version = "1.1", features = ["serde1"] }
-ceviche = "0.6.1"
+ceviche = "0.6"
 ctrlc = "3.4"
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
@@ -55,7 +55,7 @@ features = [
 
 [target.'cfg(windows)'.dependencies]
 hex = "0.4"
-notify-debouncer-mini = "0.4.1"
+notify-debouncer-mini = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 sha2 = "0.10"
 smallvec = "1"
