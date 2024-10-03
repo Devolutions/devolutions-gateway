@@ -244,7 +244,13 @@ mod rustls_checks {
     }
 
     fn rustls_load_native_certs(mut out: impl fmt::Write, root_store: &mut rustls::RootCertStore) -> DiagnosticResult {
-        for cert in rustls_native_certs::load_native_certs().context("failed to load native certificates")? {
+        let result = rustls_native_certs::load_native_certs();
+
+        for error in result.errors {
+            output!(out, "-> Error when loading native certs: {error}")?;
+        }
+
+        for cert in result.certs {
             if let Err(e) = root_store.add(cert.clone()) {
                 output!(out, "-> Invalid root certificate: {e}")?;
                 write_cert_as_pem(&mut out, &cert).context("failed to write the certificate as PEM")?;

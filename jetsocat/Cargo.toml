@@ -37,7 +37,7 @@ humantime = "2.1"
 
 # async
 tokio = { version = "1.38", features = ["io-std", "io-util", "net", "fs", "signal", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-tokio-tungstenite = "0.21"
+tokio-tungstenite = "0.24"
 futures-util = "0.3"
 transport = { path = "../crates/transport" }
 
@@ -58,8 +58,8 @@ sysinfo = { version = "0.30", default-features = false }
 # doctor
 tinyjson = "2.5" # Small JSON library; used to avoid including a bigger like serde-json
 native-tls = { version = "0.2", optional = true } # Same dependency as tokio-tungstenite
-rustls = { version = "0.22", optional = true, default-features = false } # Same dependency as tokio-tungstenite
-rustls-native-certs = { version = "0.7", optional = true } # Same dependency as tokio-tungstenite
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring"] } # Same dependency as tokio-tungstenite
+rustls-native-certs = { version = "0.8", optional = true } # Same dependency as tokio-tungstenite
 openssl-probe = "0.1" # Same dependency as rustls-native-certs
 rustls-pemfile = "2.2" # Same dependency as rustls-native-certs
 base64 = "0.22" # Same dependency as rustls-pemfile
