@@ -8,9 +8,9 @@ description = "Idiomatic and safe wrappers around the Windows API"
 publish = false
 
 [dependencies]
-base16ct = { version = "0.2.0", features = ["alloc"] }
-anyhow = "1.0.89"
-thiserror = "1.0.64"
+base16ct = { version = "0.2", features = ["alloc"] }
+anyhow = "1.0"
+thiserror = "1.0"
 tracing = "0.1"
 
 [dependencies.windows]
