@@ -84,6 +84,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
       )
       .pipe(
         takeUntil(this.destroyed$),
+        switchMap((webSession) => this.manageScreenSizeIfHaveOne(webSession)),
         switchMap((webSession) => this.manageWebSessionSubject(webSession)),
         catchError((error) => {
           console.error('Failed to process web session:', error);
@@ -214,6 +215,27 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     }
     const selectedItem: SelectItemWithTooltip = this.protocolOptions.find((item) => item.value === protocolValue);
     this.protocolSelectedTooltip = selectedItem ? selectedItem.tooltipText : '';
+  }
+
+  private manageScreenSizeIfHaveOne<T extends ConnectionSessionType>(webSession: WebSession<T>) {
+    if (!this.isSelectedProtocolRdp()) {
+      return of(webSession);
+    }
+
+    console.log('We need to ajust screen size here', webSession);
+    // if (!webSession.data || !webSession.data.screenSize) {
+    //   return of(webSession);
+    // }
+
+    // const formScreenSize: ScreenSize = webSession.data?.screenSize;
+    // if (formScreenSize === ScreenSize.FullScreen) {
+    //   const width: number = window.screen.width;
+    //   const height: number = window.screen.height;
+    //   this.webSessionService.setWebSessionScreenSize({ width, height });
+    // } else {
+    //   this.sizeChange.emit();
+    // }
+    return of(webSession);
   }
 
   private manageWebSessionSubject(webSession: WebSession<SessionType>) {

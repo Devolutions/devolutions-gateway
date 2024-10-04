@@ -29,7 +29,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
     this.subscribeToWebSessionsActiveIndex();
   }
 
-  onMenuListItemClick(event: MouseEvent, webSession: WebSession<SessionType>): void {
+  onMenuListItemClick(event: MouseEvent, webSession: WebSession<ConnectionSessionType>): void {
     if (this.selected || this.disabled) {
       event.preventDefault();
       event.stopPropagation();
@@ -39,7 +39,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
     this.selectTab(webSession.tabIndex);
   }
 
-  onCloseButtonClick(event: MouseEvent, webSession: WebSession<SessionType>): void {
+  onCloseButtonClick(event: MouseEvent, webSession: WebSession<ConnectionSessionType>): void {
     event.stopPropagation();
     void this.webSessionService.removeSession(webSession.id);
   }

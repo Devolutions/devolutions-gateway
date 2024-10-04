@@ -257,7 +257,7 @@ export class WebSessionService {
   }
 
   private initializeWebSessionService(): void {
-    this.webSessionDataSubject = new BehaviorSubject<WebSession<ConnectionSessionType>[]>([]);
+    this.webSessionDataSubject = new BehaviorSubject<WebSession<SessionType>[]>([]);
     this.webSessionData$ = this.webSessionDataSubject.asObservable();
 
     this.webSessionCurrentTabIndexSubject = new BehaviorSubject(0);

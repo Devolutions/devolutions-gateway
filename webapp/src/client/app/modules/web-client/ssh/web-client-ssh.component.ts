@@ -171,6 +171,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
         switchMap((params) => this.webClientService.fetchSshToken(params)),
         switchMap((params) => this.callConnect(params)),
         catchError((error) => {
+          debugger;
           this.handleSshError(error.message);
           return EMPTY;
         }),
