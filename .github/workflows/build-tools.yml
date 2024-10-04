@@ -10,7 +10,7 @@ jobs:
       matrix:
         arch: [ x86_64, aarch64 ]
         platform: [ pc-windows-msvc, unknown-linux-gnu, apple-darwin ]
-        tool: [ jet-doctor, tokengen ]
+        tool: [ tokengen ]
         include:
           - platform: pc-windows-msvc
             runner: windows-2022
@@ -58,7 +58,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        tool: [ jet-doctor, tokengen ]
+        tool: [ tokengen ]
 
     steps:
       - name: Download binaries
@@ -96,7 +96,7 @@ jobs:
       matrix:
         arch: [ x86_64, aarch64, universal ]
         platform: [ pc-windows-msvc, apple-darwin ]
-        tool: [ jet-doctor, tokengen ]
+        tool: [ tokengen ]
         include:
           - platform: pc-windows-msvc
             runner: windows-2022

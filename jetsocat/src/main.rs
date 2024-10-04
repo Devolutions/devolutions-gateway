@@ -2,12 +2,18 @@
 #![allow(clippy::print_stdout)]
 
 // Used by the jetsocat library.
+#[cfg(feature = "native-tls")]
+use native_tls as _;
+#[cfg(all(feature = "native-tls", not(any(target_os = "windows", target_vendor = "apple"))))]
+use openssl as _;
 #[cfg(feature = "detect-proxy")]
 use proxy_cfg as _;
 use {
-    futures_util as _, jet_proto as _, jmux_proto as _, proxy_http as _, proxy_socks as _, proxy_types as _,
-    tokio_tungstenite as _, transport as _,
+    base64 as _, futures_util as _, jet_proto as _, jmux_proto as _, openssl_probe as _, proxy_http as _,
+    proxy_socks as _, proxy_types as _, rustls_pemfile as _, tinyjson as _, tokio_tungstenite as _, transport as _,
 };
+#[cfg(feature = "rustls")]
+use {rustls as _, rustls_native_certs as _};
 
 // Used by tests
 #[cfg(test)]
@@ -17,9 +23,9 @@ use {proptest as _, test_utils as _};
 extern crate tracing;
 
 use anyhow::Context as _;
-use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
+use jetsocat::{listener::ListenerMode, DoctorOutputFormat};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use std::env;
@@ -43,7 +49,8 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .usage(generate_usage())
         .command(forward_command())
-        .command(jmux_proxy());
+        .command(jmux_proxy())
+        .command(doctor());
 
     app.run(args);
 }
@@ -77,7 +84,12 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
         .build()
         .context("runtime build failed")?;
 
-    match rt.block_on(f) {
+    match rt.block_on(async {
+        tokio::select! {
+            res = f => res,
+            res = tokio::signal::ctrl_c() => res.context("ctrl-c event"),
+        }
+    }) {
         Ok(()) => info!("Terminated successfully"),
         Err(e) => {
             error!("{:#}", e);
@@ -85,7 +97,7 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
         }
     }
 
-    rt.shutdown_timeout(std::time::Duration::from_millis(100)); // just to be safe
+    rt.shutdown_timeout(std::time::Duration::from_millis(100)); // Just to be safe.
 
     Ok(())
 }
@@ -111,7 +123,11 @@ const PIPE_FORMATS: &str = r#"Pipe formats:
     `jet-tcp-accept://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as server
     `ws://<URL>`: WebSocket
     `wss://<URL>`: WebSocket Secure
-    `ws-listen://<BINDING ADDRESS>`: WebSocket listener"#;
+    `ws-listen://<BINDING ADDRESS>`: WebSocket listener
+    `np://<SERVER NAME>/pipe/<PIPE NAME>`: Connect to a named pipe (Windows)
+    `np-listen://./pipe/<PIPE NAME>`: Open a named pipe and listen on it (Windows)
+    `np://<UNIX SOCKET PATH>`: Connect to a UNIX socket (non-Windows)
+    `np-listen://<UNIX SOCKET PATH>`: Create a UNIX socket and listen on it (non-Windows)"#;
 
 // forward
 
@@ -176,7 +192,7 @@ fn jmux_proxy() -> Command {
 
 {pipe_formats}
 
-Listener format:
+Listener formats:
     - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
     - socks5-listen://<BINDING ADDRESS>
     - http-listen://<BINDING ADDRESS>
@@ -220,6 +236,81 @@ pub fn jmux_proxy_action(c: &Context) {
         };
 
         run(jetsocat::jmux_proxy(cfg))
+    });
+    exit(res);
+}
+
+// doctor
+
+const DOCTOR_SUBCOMMAND: &str = "doctor";
+
+fn doctor() -> Command {
+    let usage = format!(
+        r##"{command} {subcommand}
+
+If the chain is not provided via the --chain option, and if the --network flag is set,
+a TLS handshake will be performed with the server using --subject-name and --server-port options.
+The chain file provided via the --chain option should start with the leaf certificate followed
+by the intermediate certificates.
+
+A helpful message suggesting possible fixes will be provided for common failures.
+
+Output formats:
+    - human: human-readable output
+    - json: print one JSON object per line for each diagnostic
+
+The JSON objects have the following fields:
+    - "name" (Required): A string for the name of the diagnostic.
+    - "success" (Required): A boolean set to true when the diagnostic is successful and false otherwise.
+    - "output" (Optional): The execution trace of the diagnostic.
+    - "error" (Optional): The error returned by the diagnostic when failed.
+    - "help" (Optional): A help message suggesting how to fix the issue.
+
+{pipe_formats}
+
+Example: from a chain file on the disk
+
+    {command} {subcommand} --subject-name devolutions.net --chain /path/to/chain.pem
+
+Example: fetch the chain by connecting to the server
+
+    {command} {subcommand} --subject-name devolutions.net --network
+
+Example: for an invalid domain
+
+    {command} {subcommand} --subject-name expired.badssl.com --network"##,
+        command = env!("CARGO_PKG_NAME"),
+        subcommand = DOCTOR_SUBCOMMAND,
+        pipe_formats = PIPE_FORMATS,
+    );
+
+    let cmd = Command::new(DOCTOR_SUBCOMMAND)
+        .description("Troubleshoot TLS problems")
+        .usage(usage)
+        .action(doctor_action);
+
+    apply_common_flags(apply_doctor_flags(cmd))
+}
+
+pub fn doctor_action(c: &Context) {
+    let res = DoctorArgs::parse(c).and_then(|args| {
+        let _log_guard = setup_logger(&args.common.logging);
+
+        let cfg = jetsocat::DoctorCfg {
+            pipe_mode: args.pipe_mode,
+            proxy_cfg: args.common.proxy_cfg,
+            pipe_timeout: args.common.pipe_timeout,
+            watch_process: args.common.watch_process,
+            format: args.format,
+            args: jetsocat::doctor::Args {
+                server_port: args.server_port,
+                subject_name: args.subject_name,
+                chain_path: args.chain_path,
+                allow_network: args.allow_network,
+            },
+        };
+
+        run(jetsocat::doctor(cfg))
     });
     exit(res);
 }
@@ -515,6 +606,34 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
         "ws-listen" => Ok(PipeMode::WebSocketListen {
             bind_addr: value.to_owned(),
         }),
+        "np" => {
+            #[cfg(windows)]
+            {
+                Ok(PipeMode::NamedPipe {
+                    name: format!("\\\\{}", value.replace('/', "\\")),
+                })
+            }
+            #[cfg(unix)]
+            {
+                Ok(PipeMode::UnixSocket {
+                    path: PathBuf::from(value.to_owned()),
+                })
+            }
+        }
+        "np-listen" => {
+            #[cfg(windows)]
+            {
+                Ok(PipeMode::NamedPipeListen {
+                    name: format!("\\\\{}", value.replace('/', "\\")),
+                })
+            }
+            #[cfg(unix)]
+            {
+                Ok(PipeMode::UnixSocketListen {
+                    path: PathBuf::from(value.to_owned()),
+                })
+            }
+        }
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
     }
 }
@@ -546,6 +665,71 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
             bind_addr: value.to_owned(),
         }),
         _ => anyhow::bail!("Unknown listener scheme: {}", scheme),
+    }
+}
+
+fn apply_doctor_flags(cmd: Command) -> Command {
+    cmd.flag(Flag::new("chain", FlagType::String).description("Path to a certification chain to verify"))
+        .flag(Flag::new("subject-name", FlagType::String).description("Domain name to verify"))
+        .flag(
+            Flag::new("server-port", FlagType::Uint)
+                .description("Port to use when fetching the certification chain from the server (default: 443)"),
+        )
+        .flag(Flag::new("pipe", FlagType::String).description("Pipe in which results should be written into"))
+        .flag(Flag::new("format", FlagType::String).description("The format to use for printing the diagnostics"))
+        .flag(Flag::new("network", FlagType::Bool).description("Allow network usage to perform the verifications"))
+}
+
+struct DoctorArgs {
+    common: CommonArgs,
+    pipe_mode: PipeMode,
+    chain_path: Option<PathBuf>,
+    subject_name: Option<String>,
+    server_port: Option<u16>,
+    format: DoctorOutputFormat,
+    allow_network: bool,
+}
+
+impl DoctorArgs {
+    fn parse(c: &Context) -> anyhow::Result<Self> {
+        let common = CommonArgs::parse(JMUX_PROXY_SUBCOMMAND, c)?;
+
+        let chain_path = c.string_flag("chain").map(PathBuf::from).ok();
+        let subject_name = c.string_flag("subject-name").ok();
+
+        let server_port = if let Ok(port) = c.uint_flag("server-port") {
+            Some(u16::try_from(port).context("invalid port number")?)
+        } else {
+            None
+        };
+
+        let format = if let Ok(format) = c.string_flag("format") {
+            match format.as_str() {
+                "human" => DoctorOutputFormat::Human,
+                "json" => DoctorOutputFormat::Json,
+                _ => anyhow::bail!("unknown output format: {format}"),
+            }
+        } else {
+            DoctorOutputFormat::Human
+        };
+
+        let pipe_mode = if let Ok(pipe) = c.string_flag("pipe") {
+            parse_pipe_mode(pipe).context("bad <PIPE>")?
+        } else {
+            PipeMode::Stdio
+        };
+
+        let allow_network = c.bool_flag("network");
+
+        Ok(Self {
+            common,
+            chain_path,
+            subject_name,
+            server_port,
+            format,
+            pipe_mode,
+            allow_network,
+        })
     }
 }
 

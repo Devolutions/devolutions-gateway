@@ -14,10 +14,6 @@ updates:
       ironvnc:
         patterns:
           - "ironvnc*"
-      picky:
-        patterns:
-          - "picky*"
-          - "sspi*"
       serde:
         patterns:
           - "serde*"
@@ -29,19 +25,26 @@ updates:
           - "tracing*"
       http:
         patterns:
-          - "hyper*"
-          - "axum*"
-          - "tower*"
-          - "reqwest*"
+          - "*hyper*"
+          - "*axum*"
+          - "*tower*"
+          - "*openssl*"
+          - "*rustls*"
+          - "*schannel*"
+          - "native-tls"
+          - "base64"
+          - "tokio-tungstenite"
+          - "reqwest"
       crypto:
         patterns:
+          - "picky*"
+          - "sspi*"
           - "md-5"
           - "md5"
           - "sha1"
           - "pkcs1"
           - "x509-cert"
           - "der"
-          - "*tls*"
           - "*rand*"
           - "argon2"
           - "zeroize"

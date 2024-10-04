@@ -1,0 +1,15 @@
+<package>
+  <metadata>
+    <id>Devolutions.Jetify</id>
+    <version>2023.6.15</version>
+    <authors>Marc-André Moreau</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Devolutions Gateway Jetify</description>
+    <dependencies />
+  </metadata>
+  <files>
+    <file src="runtimes/win-x64/native/jetify.dll" target="runtimes/win-x64/native" />
+    <file src="runtimes/win-arm64/native/jetify.dll" target="runtimes/win-arm64/native" />
+    <file src="Devolutions.Jetify.targets" target="build" />
+  </files>
+</package>

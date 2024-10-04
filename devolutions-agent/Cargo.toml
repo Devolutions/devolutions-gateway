@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-agent"
-version = "2024.3.2"
+version = "2024.3.3"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
@@ -23,7 +23,7 @@ devolutions-log = { path = "../crates/devolutions-log" }
 futures = "0.3"
 parking_lot = "0.12"
 rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
-rustls-pemfile = "2.1" # FIXME(@CBenoit): maybe we don’t need this crate
+rustls-pemfile = "2.2" # FIXME(@CBenoit): maybe we don’t need this crate
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tap = "1.0"
@@ -55,7 +55,7 @@ features = [
 
 [target.'cfg(windows)'.dependencies]
 hex = "0.4"
-notify-debouncer-mini = "0.4.1"
+notify-debouncer-mini = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 sha2 = "0.10"
 smallvec = "1"

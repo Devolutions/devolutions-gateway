@@ -1,6 +1,6 @@
 [package]
 name = "jetsocat"
-version = "2024.3.2"
+version = "2024.3.3"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 description = "(Web)Socket toolkit for jet protocol related operations"
@@ -12,8 +12,8 @@ workspace = true
 [features]
 default = ["rustls", "detect-proxy"]
 detect-proxy = ["proxy_cfg"]
-rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
-native-tls = ["tokio-tungstenite/native-tls"]
+rustls = ["tokio-tungstenite/rustls-tls-native-roots", "dep:rustls", "dep:rustls-native-certs"]
+native-tls = ["tokio-tungstenite/native-tls", "dep:openssl", "dep:native-tls"]
 
 [dependencies]
 
@@ -36,8 +36,8 @@ seahorse = "2.2"
 humantime = "2.1"
 
 # async
-tokio = { version = "1.38", features = ["io-std", "io-util", "net", "fs", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-tokio-tungstenite = "0.21"
+tokio = { version = "1.38", features = ["io-std", "io-util", "net", "fs", "signal", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio-tungstenite = "0.24"
 futures-util = "0.3"
 transport = { path = "../crates/transport" }
 
@@ -54,6 +54,19 @@ dirs-next = "2.0"
 
 # find parent process / watch process 
 sysinfo = { version = "0.30", default-features = false }
+
+# doctor
+tinyjson = "2.5" # Small JSON library; used to avoid including a bigger like serde-json
+native-tls = { version = "0.2", optional = true } # Same dependency as tokio-tungstenite
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring"] } # Same dependency as tokio-tungstenite
+rustls-native-certs = { version = "0.8", optional = true } # Same dependency as tokio-tungstenite
+openssl-probe = "0.1" # Same dependency as rustls-native-certs
+rustls-pemfile = "2.2" # Same dependency as rustls-native-certs
+base64 = "0.22" # Same dependency as rustls-pemfile
+
+[target.'cfg(not(any(target_os = "windows", target_vendor = "apple")))'.dependencies]
+# doctor
+openssl = { version = "0.10", optional = true } # Same dependency as tokio-tungstenite/native-tls
 
 [dev-dependencies]
 test-utils = { path = "../crates/test-utils" }

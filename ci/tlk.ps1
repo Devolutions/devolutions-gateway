@@ -343,7 +343,6 @@ class TlkRecipe
                 $agentPackages = @([TlkPackage]::new("devolutions-agent", "devolutions-agent", $false))
 
                 if ($this.Target.IsWindows()) {
-                    $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
                     $agentPackages += [TlkPackage]::new("devolutions-pedm-shell-ext", "crates/devolutions-pedm-shell-ext", $true)
                     $agentPackages += [TlkPackage]::new("devolutions-session", "devolutions-session", $false)
                 }
@@ -428,8 +427,6 @@ class TlkRecipe
                 "agent" {
                     if ($CargoPackage.Name -Eq "devolutions-agent" -And (Test-Path Env:DAGENT_EXECUTABLE)) {
                         $Env:DAGENT_EXECUTABLE
-                    } elseif ($CargoPackage.Name -Eq "devolutions-pedm-hook" -And (Test-Path Env:DAGENT_PEDM_HOOK)) {
-                        $Env:DAGENT_PEDM_HOOK
                     } elseif ($CargoPackage.Name -Eq "devolutions-pedm-shell-ext" -And (Test-Path Env:DAGENT_PEDM_SHELL_EXT_DLL)) {
                         $Env:DAGENT_PEDM_SHELL_EXT_DLL
                     } elseif ($CargoPackage.Name -Eq "devolutions-session" -And (Test-Path Env:DAGENT_SESSION_EXECUTABLE)) {

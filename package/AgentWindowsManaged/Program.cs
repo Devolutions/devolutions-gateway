@@ -113,8 +113,6 @@ internal class Program
         return path;
     }
 
-    private static string DevolutionsPedmHook => ResolveArtifact("DAGENT_PEDM_HOOK", "The PEDM hook was not found");
-
     private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "The PEDM shell extension DLL was not found");
 
     private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "The PEDM shell extension MSIX was not found");
@@ -281,7 +279,6 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
-                    new (Includes.PEDM_FEATURE, DevolutionsPedmHook),
                     new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtDll),
                     new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtMsix),
                     new (Includes.SESSION_FEATURE, DevolutionsSession)
