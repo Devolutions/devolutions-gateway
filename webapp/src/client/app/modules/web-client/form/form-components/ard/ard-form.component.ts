@@ -1,5 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
+import { ArdFormDataInput } from '@gateway/shared/interfaces/forms.interfaces';
 
 import { BaseComponent } from '@shared/bases/base.component';
 
@@ -10,7 +11,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 })
 export class ArdFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData: ArdFormDataInput;
 
   constructor() {
     super();

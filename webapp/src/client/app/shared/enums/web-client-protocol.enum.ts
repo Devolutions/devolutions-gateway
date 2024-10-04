@@ -31,7 +31,7 @@ namespace WebClientProtocol {
     }, {});
 
     return Object.keys(Protocol)
-      .filter((key) => isNaN(Number(key)) && typeof Protocol[key as any] === 'number')
+      .filter((key) => Number.isNaN(Number(key)) && typeof Protocol[key] === 'number')
       .map((key) => {
         const label: string = key;
         const value: Protocol = Protocol[key as keyof typeof Protocol];

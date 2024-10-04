@@ -20,26 +20,19 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
 
   abstract removeWebClientGuiElement(): void;
 
-  protected webClientConnectionSuccess(message?: string): void {
+  //For translation 'ConnectionSuccessful
+  protected webClientConnectionSuccess(message = 'Connection successful'): void {
     this.hideSpinnerOnly = true;
-
-    if (!message) {
-      //For translation 'ConnectionSuccessful
-      message = 'Connection successful';
-    }
     this.gatewayAlertMessageService.addSuccess(message);
     this.analyticHandle = this.analyticService.sendOpenEvent(this.getProtocol());
   }
 
   protected webClientConnectionFail(message?: string, trace?: string): void {
     this.hideSpinnerOnly = true;
-
-    if (!message) {
-      //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-      message = 'Connection error: Please verify your connection settings.';
-    }
-    this.gatewayAlertMessageService.addError(message);
-    console.error(message);
+    //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+    const errorMessage = message || 'Connection error: Please verify your connection settings.';
+    this.gatewayAlertMessageService.addError(errorMessage);
+    console.error(errorMessage);
 
     if (trace) {
       console.error(trace);

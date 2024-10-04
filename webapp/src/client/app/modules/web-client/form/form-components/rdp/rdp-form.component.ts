@@ -10,7 +10,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 })
 export class RdpFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   showMoreSettingsToggle = false;
   showPasswordToggle = false;

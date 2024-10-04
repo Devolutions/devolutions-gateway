@@ -16,7 +16,7 @@ export class AuthInterceptor implements HttpInterceptor {
     private navigationService: NavigationService,
   ) {}
 
-  intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
+  intercept<T>(req: HttpRequest<T>, next: HttpHandler) {
     // If the request is for the app token, we don't need to add the Authorization header
     const goToNext = [];
     goToNext.push(req.url.endsWith(this.appTokenUrl));

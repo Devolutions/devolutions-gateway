@@ -44,8 +44,7 @@ export class UrlService {
   concatAddressAndPort(address: string, port: number) {
     if (port !== 0) {
       return address + ':' + port;
-    } else {
-      return address;
     }
+    return address;
   }
 }

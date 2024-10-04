@@ -45,7 +45,7 @@ export class GatewayAlertMessageService {
 
   private addMessage(message: Message): void {
     if (message) {
-      message.detail = !!message.summary ? message.summary : message.detail;
+      message.detail = message.summary ? message.summary : message.detail;
       message.summary = '';
       message.life = 5000;
       this.messageSource.next(message);

@@ -14,7 +14,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 })
 export class ScreenSizeControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   screenSizeOptions: SelectItem[];
 
@@ -33,7 +33,7 @@ export class ScreenSizeControlComponent extends BaseComponent implements OnInit 
   }
 
   private setupScreenSizeChangeListener(): void {
-    const screenSizeControl: AbstractControl<any, any> = this.parentForm.get('screenSize');
+    const screenSizeControl = this.parentForm.get('screenSize');
     if (screenSizeControl) {
       screenSizeControl.valueChanges.pipe(takeUntil(this.destroyed$)).subscribe((value) => {
         if (value === ScreenSize.Custom) {

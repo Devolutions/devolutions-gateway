@@ -11,7 +11,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 })
 export class PreConnectionBlobControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   constructor(private formService: WebFormService) {
     super();

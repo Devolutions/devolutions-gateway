@@ -55,7 +55,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
   ];
 
-  protected removeElement: Subject<any> = new Subject();
+  protected removeElement = new Subject();
   private remoteTerminal: SSHTerminal;
   private remoteTerminalEventListener: () => void;
 
@@ -107,7 +107,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.webGuiTerminal && this.webGuiTerminal.nativeElement) {
+        if (this.webGuiTerminal?.nativeElement) {
           this.webGuiTerminal.nativeElement.remove();
         }
       },
@@ -146,7 +146,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     });
   }
 
-  private webComponentReady(event: any): void {
+  private webComponentReady(event): void {
     this.remoteTerminal = event.detail.sshTerminal;
     this.initSessionEventHandler();
     this.startConnectionProcess();
@@ -171,7 +171,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
         switchMap((params) => this.webClientService.fetchSshToken(params)),
         switchMap((params) => this.callConnect(params)),
         catchError((error) => {
-          debugger;
           this.handleSshError(error.message);
           return EMPTY;
         }),
@@ -179,7 +178,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       .subscribe();
   }
 
-  private callConnect(connectionParameters: SshConnectionParameters): Observable<any> {
+  private callConnect(connectionParameters: SshConnectionParameters) {
     return from(
       this.remoteTerminal.connect(
         connectionParameters.host,
@@ -272,7 +271,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
-  private handleSubscriptionError(error: any): void {
+  private handleSubscriptionError(error): void {
     console.error('Error in session event subscription', error);
   }
 

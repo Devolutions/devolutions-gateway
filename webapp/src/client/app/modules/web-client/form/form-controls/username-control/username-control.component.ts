@@ -11,7 +11,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 })
 export class UsernameControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
   @Input() isEnabled = true;
 
   constructor(private formService: WebFormService) {
@@ -30,7 +30,7 @@ export class UsernameControlComponent extends BaseComponent implements OnInit {
   }
 
   private toggleControl(): void {
-    const control: AbstractControl<any, any> = this.parentForm.get('username');
+    const control = this.parentForm.get('username');
     if (control) {
       this.isEnabled ? control.enable() : control.disable();
     }

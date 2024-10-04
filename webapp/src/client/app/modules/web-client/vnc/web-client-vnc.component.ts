@@ -64,7 +64,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   showToolbarDiv = true;
   loading = true;
 
-  protected removeElement: Subject<any> = new Subject();
+  protected removeElement: Subject<unknown> = new Subject();
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
 
@@ -137,7 +137,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.ironGuiElement && this.ironGuiElement.nativeElement) {
+        if (this.ironGuiElement?.nativeElement) {
           this.ironGuiElement.nativeElement.remove();
         }
       },
@@ -172,7 +172,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       return;
     }
 
-    if (event.clientY == 0) {
+    if (event.clientY === 0) {
       this.showToolbarDiv = true;
     } else if (event.clientY > 44) {
       this.showToolbarDiv = false;
@@ -192,7 +192,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     try {
       const sessionContainerElement = this.sessionContainerElement.nativeElement;
       await sessionContainerElement.requestFullscreen();
-    } catch (err: any) {
+    } catch (err) {
       this.isFullScreenMode = false;
       console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
     }
@@ -232,7 +232,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }
 
   private readyRemoteClientEventListener(event: Event): void {
-    const customEvent: CustomEvent<any> = event as CustomEvent;
+    const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
     this.initSessionEventHandler();
@@ -379,7 +379,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
-  private handleSubscriptionError(error: any): void {
+  private handleSubscriptionError(error): void {
     console.error('Error in session event subscription', error);
   }
 
@@ -402,9 +402,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     if (typeof errorData === 'string') {
       return errorData;
-    } else {
-      errorKind = errorData.kind().valueOf();
     }
+    errorKind = errorData.kind().valueOf();
 
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'

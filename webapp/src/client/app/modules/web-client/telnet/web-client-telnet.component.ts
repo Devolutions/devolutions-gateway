@@ -55,7 +55,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
   ];
 
-  protected removeElement: Subject<any> = new Subject();
+  protected removeElement = new Subject();
   private remoteTerminal: TelnetTerminal;
   private remoteTerminalEventListener: () => void;
 
@@ -106,7 +106,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.webGuiTerminal && this.webGuiTerminal.nativeElement) {
+        if (this.webGuiTerminal?.nativeElement) {
           this.webGuiTerminal.nativeElement.remove();
         }
       },
@@ -145,7 +145,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     });
   }
 
-  private webComponentReady(event: any): void {
+  private webComponentReady(event): void {
     this.remoteTerminal = event.detail.telnetTerminal;
     this.initSessionEventHandler();
     this.startConnectionProcess();
@@ -177,7 +177,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       .subscribe();
   }
 
-  private callConnect(connectionParameters: any): Observable<any> {
+  private callConnect(connectionParameters: TelnetConnectionParameters) {
     return from(
       this.remoteTerminal.connect(
         connectionParameters.host,
@@ -265,7 +265,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
-  private handleSubscriptionError(error: any): void {
+  private handleSubscriptionError(error): void {
     console.error('Error in session event subscription', error);
   }
 

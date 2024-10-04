@@ -76,8 +76,8 @@ export class LoginComponent extends BaseComponent implements OnInit {
     }
   }
 
-  private handleAutoLoginError(error: Error): Observable<boolean> {
-    if (error['status'] && error['status'] != '401') {
+  private handleAutoLoginError(error): Observable<boolean> {
+    if (error.status && error.status !== '401') {
       console.error('Auto login:', error);
       this.addMessages([
         {
@@ -89,10 +89,10 @@ export class LoginComponent extends BaseComponent implements OnInit {
     return of(false);
   }
 
-  private handleLoginError(error: Error): void {
+  private handleLoginError(error): void {
     let message: string = error.message;
 
-    if (error['status'] && error['status'] === 401) {
+    if (error.status && error.status === 401) {
       //For translation 'InvalidUserNameOrPasswordPleaseVerifyYourCredentials'
       message = 'Invalid username or password, please verify your credentials';
     }
@@ -109,7 +109,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private addMessages(messages: Message[]) {
     this.messages = [];
     if (messages?.length > 0) {
-      for (const message of messages ){
+      for (const message of messages) {
         this.messages.push(message);
       }
     }

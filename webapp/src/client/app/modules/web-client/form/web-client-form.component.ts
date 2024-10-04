@@ -34,8 +34,8 @@ import { WebSessionService } from '@shared/services/web-session.service';
 export class WebClientFormComponent extends BaseSessionComponent implements OnInit, OnChanges {
   @Input() isFormExists = false;
   @Input() webSessionId: string | undefined;
-  @Input() inputFormData: any;
-  @Input() error: any;
+  @Input() inputFormData;
+  @Input() error;
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -84,7 +84,6 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
       )
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap((webSession) => this.manageScreenSizeIfHaveOne(webSession)),
         switchMap((webSession) => this.manageWebSessionSubject(webSession)),
         catchError((error) => {
           console.error('Failed to process web session:', error);
@@ -100,7 +99,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return this.hostnames?.length > 0;
   }
 
-  filterHostname(event: any): void {
+  filterHostname(event): void {
     const query = event.query.toLowerCase();
 
     Promise.resolve().then(() => {
@@ -110,7 +109,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   }
 
   private subscribeToProtocolChanges(): void {
-    const protocolControl: AbstractControl<any, any> = this.connectSessionForm.get('protocol');
+    const protocolControl = this.connectSessionForm.get('protocol');
     if (!protocolControl) {
       return;
     }
@@ -120,11 +119,11 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
       .subscribe({
         next: (protocol) => {
           const exceptions: string[] = ['protocol', 'autoComplete', 'hostname', 'authMode'];
-          Object.keys(this.connectSessionForm.controls).forEach((key) => {
+          for (const key of Object.keys(this.connectSessionForm.controls)) {
             if (!exceptions.includes(key)) {
               this.connectSessionForm.get(key)?.disable();
             }
-          });
+          }
 
           this.updateProtocolTooltip(protocol);
           this.formService.detectFormChanges(this.cdr);
@@ -161,7 +160,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
       });
   }
 
-  private buildFormGroup(inputFormData?: any): Observable<FormGroup> {
+  private buildFormGroup(inputFormData?): Observable<FormGroup> {
     const formControls = {
       protocol: [inputFormData?.protocol || 0, Validators.required],
       autoComplete: [inputFormData?.autoComplete || '', Validators.required],
@@ -208,33 +207,13 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return of(undefined);
   }
 
-  private updateProtocolTooltip(value?: any): void {
-    if (!value && this.protocolOptions.length > 0) {
-      value = this.protocolOptions[0].value;
+  private updateProtocolTooltip(value?): void {
+    let protocolValue = value;
+    if (!protocolValue && this.protocolOptions.length > 0) {
+      protocolValue = this.protocolOptions[0].value;
     }
-    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find((item) => item.value === value);
-    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
-  }
-
-  private manageScreenSizeIfHaveOne<T extends ConnectionSessionType>(webSession: WebSession<T>) {
-    if (!this.isSelectedProtocolRdp()) {
-      return of(webSession);
-    }
-
-    console.log('We need to ajust screen size here', webSession);
-    // if (!webSession.data || !webSession.data.screenSize) {
-    //   return of(webSession);
-    // }
-
-    // const formScreenSize: ScreenSize = webSession.data?.screenSize;
-    // if (formScreenSize === ScreenSize.FullScreen) {
-    //   const width: number = window.screen.width;
-    //   const height: number = window.screen.height;
-    //   this.webSessionService.setWebSessionScreenSize({ width, height });
-    // } else {
-    //   this.sizeChange.emit();
-    // }
-    return of(webSession);
+    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find((item) => item.value === protocolValue);
+    this.protocolSelectedTooltip = selectedItem ? selectedItem.tooltipText : '';
   }
 
   private manageWebSessionSubject(webSession: WebSession<SessionType>) {
@@ -280,9 +259,9 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return this.connectSessionForm.get('protocol').value;
   }
 
-  private displayErrorMessages(error: any): void {
-    const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error['kind'] ?? error);
-    const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error['backtrace'] ?? '');
+  private displayErrorMessages(error): void {
+    const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error.kind ?? error);
+    const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error.backtrace ?? '');
 
     setTimeout(() => {
       this.addMessages([
@@ -306,7 +285,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
         hostname: entry.ip,
       });
 
-      const protocol: AbstractControl<any, any> = this.connectSessionForm.get('protocol');
+      const protocol = this.connectSessionForm.get('protocol');
       if (protocol && protocol.value !== entry.protocol) {
         protocol.setValue(entry.protocol);
       }

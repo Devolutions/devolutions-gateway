@@ -12,6 +12,7 @@ import { Tooltip } from 'primeng/tooltip';
   exports: [CommonModule, ReactiveFormsModule, RouterModule, PrimeNgModules, TooltipEllipsisDirective],
   providers: [Tooltip],
 })
+// biome-ignore lint/complexity/noStaticOnlyClass: Angular need class with only static member
 export class SharedModule {
   static forRoot(): ModuleWithProviders<SharedModule> {
     return {
