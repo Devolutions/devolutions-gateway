@@ -18,7 +18,6 @@ jobs:
         template: ${{ github.workspace }}/.github/comments/pr_greetings.md
 
       - uses: ./.github/actions/create-comment
-        if: ${{ github.event.pull_request.user.login != 'CBenoit' }}
         if: ${{ github.event.action == 'labeled' && github.event.label.name == 'publish-required' && github.event.pull_request.user.login != 'CBenoit' }}
         template: ${{ github.workspace }}/.github/comments/publish_requested.md
 
