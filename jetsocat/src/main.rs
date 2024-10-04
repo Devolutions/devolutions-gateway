@@ -248,8 +248,12 @@ fn doctor() -> Command {
     let usage = format!(
         r##"{command} {subcommand}
 
-If the chain is not provided via the --chain flag, and if the --network option is set,
-a TLS handshake will be performed with the server using --subject-name and --server-port.
+If the chain is not provided via the --chain option, and if the --network flag is set,
+a TLS handshake will be performed with the server using --subject-name and --server-port options.
+The chain file provided via the --chain option should start with the leaf certificate followed
+by the intermediate certificates.
+
+A helpful message suggesting possible fixes will be provided for common failures.
 
 Output formats:
     - human: human-readable output
@@ -669,7 +673,7 @@ fn apply_doctor_flags(cmd: Command) -> Command {
         .flag(Flag::new("subject-name", FlagType::String).description("Domain name to verify"))
         .flag(
             Flag::new("server-port", FlagType::Uint)
-                .description("Port to use when fetching the certification chain from the server"),
+                .description("Port to use when fetching the certification chain from the server (default: 443)"),
         )
         .flag(Flag::new("pipe", FlagType::String).description("Pipe in which results should be written into"))
         .flag(Flag::new("format", FlagType::String).description("The format to use for printing the diagnostics"))
