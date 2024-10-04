@@ -109,7 +109,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private addMessages(messages: Message[]) {
     this.messages = [];
     if (messages?.length > 0) {
-      for (const message of messages ){
+      for (const message of messages) {
         this.messages.push(message);
       }
     }

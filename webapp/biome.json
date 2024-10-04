@@ -5,10 +5,7 @@
   },
   "files": {
     "ignore": [
-      "*.json",
-      "*.js.map",
-      "*.min.js",
-      "*.min.css"
+      "*.json"
     ]
   },
   "linter": {
