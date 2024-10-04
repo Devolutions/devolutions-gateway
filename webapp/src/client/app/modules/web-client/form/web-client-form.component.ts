@@ -20,7 +20,7 @@ import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.e
 import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.interfaces';
 import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { WebSession } from '@shared/models/web-session.model';
+import { BaseSessionComponent, ConnectionSessionType, SessionType, WebSession } from '@shared/models/web-session.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { StorageService } from '@shared/services/utils/storage.service';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -31,7 +31,7 @@ import { WebSessionService } from '@shared/services/web-session.service';
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
 })
-export class WebClientFormComponent extends BaseComponent implements OnInit, OnChanges {
+export class WebClientFormComponent extends BaseSessionComponent implements OnInit, OnChanges {
   @Input() isFormExists = false;
   @Input() webSessionId: string | undefined;
   @Input() inputFormData: any;
@@ -49,6 +49,8 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
 
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
+
+  formData: unknown;
 
   constructor(
     private fb: FormBuilder,
@@ -82,7 +84,7 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
       )
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap((webSession) => this.manageScreenSize(webSession)),
+        switchMap((webSession) => this.manageScreenSizeIfHaveOne(webSession)),
         switchMap((webSession) => this.manageWebSessionSubject(webSession)),
         catchError((error) => {
           console.error('Failed to process web session:', error);
@@ -127,9 +129,8 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
           this.updateProtocolTooltip(protocol);
           this.formService.detectFormChanges(this.cdr);
         },
-        error: (error) => console.error('Error subscribing to protocol changes:', error)
+        error: (error) => console.error('Error subscribing to protocol changes:', error),
       });
-
   }
 
   private initializeFormAndOptions(): void {
@@ -215,23 +216,28 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
     this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
   }
 
-  private manageScreenSize(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
+  private manageScreenSizeIfHaveOne<T extends ConnectionSessionType>(webSession: WebSession<T>) {
     if (!this.isSelectedProtocolRdp()) {
       return of(webSession);
     }
 
-    const formScreenSize: ScreenSize = webSession.data?.screenSize;
-    if (formScreenSize === ScreenSize.FullScreen) {
-      const width: number = window.screen.width;
-      const height: number = window.screen.height;
-      this.webSessionService.setWebSessionScreenSize({ width, height });
-    } else {
-      this.sizeChange.emit();
-    }
+    console.log('We need to ajust screen size here', webSession);
+    // if (!webSession.data || !webSession.data.screenSize) {
+    //   return of(webSession);
+    // }
+
+    // const formScreenSize: ScreenSize = webSession.data?.screenSize;
+    // if (formScreenSize === ScreenSize.FullScreen) {
+    //   const width: number = window.screen.width;
+    //   const height: number = window.screen.height;
+    //   this.webSessionService.setWebSessionScreenSize({ width, height });
+    // } else {
+    //   this.sizeChange.emit();
+    // }
     return of(webSession);
   }
 
-  private manageWebSessionSubject(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
+  private manageWebSessionSubject(webSession: WebSession<SessionType>) {
     if (this.isFormExists) {
       webSession.id = this.webSessionId;
       this.webSessionService.updateSession(webSession);

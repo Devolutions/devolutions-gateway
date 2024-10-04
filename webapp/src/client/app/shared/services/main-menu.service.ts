@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { WebSession } from '@shared/models/web-session.model';
+import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { BehaviorSubject, Observable } from 'rxjs';
 
 @Injectable()
@@ -7,10 +7,8 @@ export class MainMenuService {
   isVisible: BehaviorSubject<boolean> = new BehaviorSubject(true);
   isCollapsed: BehaviorSubject<boolean> = new BehaviorSubject(true);
 
-  private mainMenuDataSubject: BehaviorSubject<WebSession<any, any>[]> = new BehaviorSubject<WebSession<any, any>[]>(
-    [],
-  );
-  public mainMenuData$: Observable<WebSession<any, any>[]> = this.mainMenuDataSubject.asObservable();
+  private mainMenuDataSubject = new BehaviorSubject<WebSession<SessionType>[]>([]);
+  public mainMenuData$ = this.mainMenuDataSubject.asObservable();
 
   toggle(): void {
     this.isVisible.next(!this.isVisible.getValue());

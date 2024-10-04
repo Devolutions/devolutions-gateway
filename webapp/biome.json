@@ -8,6 +8,9 @@
       "style": {
         "useTemplate": "off",
         "useImportType": "off"
+      },
+      "complexity": {
+        "noUselessConstructor": "off"
       }
     }
   },

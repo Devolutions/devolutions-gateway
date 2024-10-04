@@ -11,7 +11,7 @@ export const JET_RDP_URL = '/jet/rdp';
 export const JET_TELNET_URL = '/jet/fwd/tcp';
 export const JET_SSH_URL = '/jet/fwd/tcp';
 export const JET_VNC_URL = '/jet/fwd/tcp';
-export const JET_ARD_URL = '/jet/fwd/tcp'
+export const JET_ARD_URL = '/jet/fwd/tcp';
 export const JET_KDC_PROXY_URL = '/jet/KdcProxy';
 
 export const ProtocolIconMap = {
@@ -29,4 +29,3 @@ export const ProtocolNameToProtocolMap = {
   rdp: Protocol.RDP,
   ard: Protocol.ARD,
 };
-

@@ -5,13 +5,13 @@ import { AuthService } from '@shared/services/auth.service';
 
 export function authGuard(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean {
   const router: Router = inject(Router);
-  const authService: AuthService = inject(AuthService);
+  const authService = inject(AuthService);
 
   if (authService.isAuthenticated) {
     return true;
   }
 
   //TODO Add when standalone has more feature pages: { queryParams: { returnUrl: state.url } }
- void router.navigate(['login']);
+  void router.navigate(['login']);
   return false;
 }

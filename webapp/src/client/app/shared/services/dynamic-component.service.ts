@@ -1,5 +1,5 @@
 import { ComponentRef, Injectable, Type, ViewContainerRef } from '@angular/core';
-import { WebSession } from '@shared/models/web-session.model';
+import { DataForSession, SessionType, WebSession } from '@shared/models/web-session.model';
 
 @Injectable({
   providedIn: 'root',
@@ -7,29 +7,20 @@ import { WebSession } from '@shared/models/web-session.model';
 export class DynamicComponentService {
   constructor() {}
 
-  createComponent<T>(
-    component: Type<T>,
-    container: ViewContainerRef,
-    data?: any,
-    webSession?: WebSession<any, any>,
-  ): ComponentRef<T> {
+  createComponent<T extends SessionType>(container: ViewContainerRef, webSession?: WebSession<T>) {
     container.clear();
-    const componentRef: ComponentRef<any> = container.createComponent(component);
+    const componentRef = container.createComponent(webSession.component);
 
-    if (data) {
-      for (const key of Object.keys(data)) {
-        componentRef.instance[key] = data[key];
-      }
+    if (webSession.data) {
+      componentRef.instance.formData = webSession.data;
     }
-    if (webSession?.data?.hostname) {
-      componentRef['hostname'] = webSession.data.hostname;
-    }
-    componentRef.instance['webSessionId'] = webSession.id;
+
+    componentRef.instance.webSessionId = webSession.id;
 
     return componentRef;
   }
 
-  destroyComponent(componentRef: ComponentRef<any>): void {
+  destroyComponent<T>(componentRef: ComponentRef<T>): void {
     if (componentRef) {
       componentRef.destroy();
     }

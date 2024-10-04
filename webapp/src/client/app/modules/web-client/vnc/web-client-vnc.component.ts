@@ -12,7 +12,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { MessageService } from 'primeng/api';
-import {EMPTY, Observable, Subject, from, of, throwError} from 'rxjs';
+import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
@@ -29,10 +29,10 @@ import { WebSessionService } from '@shared/services/web-session.service';
 
 import { DesktopSize, SessionEvent, UserInteraction, UserIronRdpError } from '@devolutions/iron-remote-gui-vnc';
 import '@devolutions/iron-remote-gui-vnc/iron-remote-gui-vnc.umd.cjs';
+import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
-import {DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL} from "@gateway/app.constants";
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -58,7 +58,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
-  inputFormData: VncFormDataInput;
+  formData: VncFormDataInput;
   clientError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
@@ -243,8 +243,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     this.getFormData()
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap(() => this.setScreenSizeScale(this.inputFormData.screenSize)),
-        switchMap(() => this.fetchParameters(this.inputFormData)),
+        switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
+        switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.fetchTokens(params)),
         catchError((error) => {
           console.error(error.message);
@@ -253,13 +253,16 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
         }),
       )
       .subscribe((params) => {
-        this.callConnect(params)
+        this.callConnect(params);
       });
   }
 
   private getFormData(): Observable<void> {
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
-      map((currentWebSession) => (this.inputFormData = currentWebSession.data)),
+      map((currentWebSession) => {
+        // It's not possibe to infer the type of currentWebSession.data, we case it on the fly
+        this.formData = currentWebSession.data as unknown as VncFormDataInput;
+      }),
     );
   }
 
@@ -272,8 +275,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
 
     const desktopScreenSize: DesktopSize =
-      this.webClientService.getDesktopSize(this.inputFormData) ??
-      this.webSessionService.getWebSessionScreenSizeSnapshot();
+      this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
 
     const connectionParameters: IronVNCConnectionParameters = {
       username: username ?? '',
@@ -321,7 +323,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
         catchError((err) => {
           return throwError(() => err);
         }),
-      ).subscribe();
+      )
+      .subscribe();
   }
 
   private initSessionEventHandler(): void {
@@ -364,16 +367,14 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }
 
   private notifyUser(event: SessionEvent, errorData: UserIronRdpError | string): void {
-    const eventType = event.type.valueOf() ;
+    const eventType = event.type.valueOf();
     this.clientError = {
       kind: this.getMessage(errorData),
       backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : '',
     };
 
     const icon: string =
-      eventType === SessionEventType.TERMINATED || SessionEventType.ERROR
-        ? DVL_WARNING_ICON
-        : DVL_VNC_ICON;
+      eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ? DVL_WARNING_ICON : DVL_VNC_ICON;
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }

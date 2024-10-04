@@ -10,6 +10,7 @@ import { WebSession } from '@shared/models/web-session.model';
 import { ApiService } from '@shared/services/api.service';
 import { UtilsService } from '@shared/services/utils.service';
 
+import { JET_KDC_PROXY_URL } from '@gateway/app.constants';
 import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import {
   IronARDConnectionParameters,
@@ -19,7 +20,6 @@ import {
   TelnetConnectionParameters,
   sessionTokenParameters,
 } from '@shared/interfaces/connection-params.interfaces';
-import {JET_KDC_PROXY_URL} from "@gateway/app.constants";
 
 export enum DefaultPowerShellPort {
   SSL = 5986,
@@ -84,10 +84,14 @@ export class WebClientService extends BaseComponent {
     }
   }
 
-  private handleProtocolTokenRequest<T extends TelnetConnectionParameters | SshConnectionParameters | IronRDPConnectionParameters | IronVNCConnectionParameters | IronARDConnectionParameters>(
-    protocol: Protocol,
-    connectionParameters: T
-  ): Observable<T> {
+  private handleProtocolTokenRequest<
+    T extends
+      | TelnetConnectionParameters
+      | SshConnectionParameters
+      | IronRDPConnectionParameters
+      | IronVNCConnectionParameters
+      | IronARDConnectionParameters,
+  >(protocol: Protocol, connectionParameters: T): Observable<T> {
     return this.generateProtocolToken(protocol, connectionParameters).pipe(
       takeUntil(this.destroyed$),
       map((params) => params as T),

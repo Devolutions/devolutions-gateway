@@ -29,9 +29,9 @@ import {
   TerminalConnectionStatus,
   loggingService as sshLoggingService,
 } from '@devolutions/web-ssh-gui';
+import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
-import {DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL} from "@gateway/app.constants";
 
 @Component({
   templateUrl: 'web-client-ssh.component.html',
@@ -47,7 +47,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   @ViewChild('webSSHGuiTerminal') webGuiTerminal: ElementRef;
 
   currentStatus: ComponentStatus;
-  inputFormData: SSHFormDataInput;
+  formData: SSHFormDataInput;
   clientError: string;
   loading = true;
 
@@ -167,10 +167,11 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     this.getFormData()
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap(() => this.fetchParameters(this.inputFormData)),
+        switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.webClientService.fetchSshToken(params)),
         switchMap((params) => this.callConnect(params)),
         catchError((error) => {
+          debugger;
           this.handleSshError(error.message);
           return EMPTY;
         }),
@@ -194,7 +195,9 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
   private getFormData(): Observable<void> {
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
-      map((currentWebSession) => (this.inputFormData = currentWebSession.data)),
+      map((currentWebSession) => {
+        this.formData = currentWebSession.data as SSHFormDataInput;
+      }),
     );
   }
 
@@ -264,10 +267,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   private notifyUser(status: TerminalConnectionStatus): void {
     this.clientError = this.getMessage(status);
 
-    const icon: string =
-      status !== TerminalConnectionStatus.connected
-        ? DVL_WARNING_ICON
-        : DVL_SSH_ICON;
+    const icon: string = status !== TerminalConnectionStatus.connected ? DVL_WARNING_ICON : DVL_SSH_ICON;
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }

@@ -1,6 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import { WebSession } from '@shared/models/web-session.model';
+import { ConnectionSessionType, SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { takeUntil } from 'rxjs/operators';
 
@@ -17,7 +17,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
   @Input() selected = false;
   @Input() isMenuSlim = false;
 
-  activeWebSessions: WebSession<any, any>[] = [];
+  activeWebSessions: WebSession<SessionType>[] = [];
   activeWebSessionIndex = 0;
 
   constructor(private webSessionService: WebSessionService) {
@@ -29,7 +29,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
     this.subscribeToWebSessionsActiveIndex();
   }
 
-  onMenuListItemClick(event: MouseEvent, webSession: WebSession<any, any>): void {
+  onMenuListItemClick(event: MouseEvent, webSession: WebSession<ConnectionSessionType>): void {
     if (this.selected || this.disabled) {
       event.preventDefault();
       event.stopPropagation();
@@ -39,7 +39,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
     this.selectTab(webSession.tabIndex);
   }
 
-  onCloseButtonClick(event: MouseEvent, webSession: WebSession<any, any>): void {
+  onCloseButtonClick(event: MouseEvent, webSession: WebSession<ConnectionSessionType>): void {
     event.stopPropagation();
     void this.webSessionService.removeSession(webSession.id);
   }
@@ -53,7 +53,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
       .getMenuWebSessions()
       .pipe(takeUntil(this.destroyed$))
       .subscribe({
-        next: (tabs: WebSession<any, any>[]) => {
+        next: (tabs) => {
           this.activeWebSessions = tabs;
         },
         error: (e) => console.error(e),

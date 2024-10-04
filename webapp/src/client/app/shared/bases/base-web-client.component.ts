@@ -1,10 +1,11 @@
 import { Directive } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { BaseSessionComponent } from '../models/web-session.model';
 import { AnalyticService, ConnectionIdentifier, ProtocolString } from '../services/analytic.service';
 
 @Directive()
-export abstract class WebClientBaseComponent extends BaseComponent {
+export abstract class WebClientBaseComponent extends BaseSessionComponent {
   hideSpinnerOnly = false;
   error: string;
 

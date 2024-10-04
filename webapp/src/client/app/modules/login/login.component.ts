@@ -23,7 +23,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   constructor(
     private authService: AuthService,
     private navigationService: NavigationService,
-    protected utils: UtilsService
+    protected utils: UtilsService,
   ) {
     super();
   }
@@ -50,20 +50,18 @@ export class LoginComponent extends BaseComponent implements OnInit {
     this.messages = [];
     const submittedData = this.loginForm.value;
 
-    this.authService.login(submittedData.username, submittedData.password)
-      .subscribe({
-        next: (success) => {
-          if (success) {
-            void this.navigationService.navigateToNewSession();
-          } else {
-            this.handleLoginError(new Error('Connection error: Please verify your connection settings.'));
-          }
-        },
-        error: (error) => {
-          this.handleLoginError(error);
+    this.authService.login(submittedData.username, submittedData.password).subscribe({
+      next: (success) => {
+        if (success) {
+          void this.navigationService.navigateToNewSession();
+        } else {
+          this.handleLoginError(new Error('Connection error: Please verify your connection settings.'));
         }
-      }
-    );
+      },
+      error: (error) => {
+        this.handleLoginError(error);
+      },
+    });
   }
 
   toggleShowPassword(): void {
@@ -111,9 +109,9 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private addMessages(messages: Message[]) {
     this.messages = [];
     if (messages?.length > 0) {
-      messages.forEach((message) => {
+      for (const message of messages ){
         this.messages.push(message);
-      });
+      }
     }
   }
 }

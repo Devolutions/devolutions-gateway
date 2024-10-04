@@ -12,7 +12,7 @@ import {
 import { TabView } from 'primeng/tabview';
 import { takeUntil } from 'rxjs/operators';
 
-import {WebSession, WebSessionComponentType} from '@shared/models/web-session.model';
+import { SessionDataTypeMap, SessionType, WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
 
 import { BaseComponent } from '@shared/bases/base.component';
@@ -27,7 +27,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   @ViewChild('tabView') tabView: TabView;
   @ViewChild('sessionsContainer') sessionsContainer: ElementRef;
 
-  webSessionTabs: WebSession<WebSessionComponentType, any>[] = [];
+  webSessionTabs: WebSession<SessionType>[] = [];
   currentTabIndex = 0;
 
   constructor(
@@ -38,7 +38,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   }
 
   @HostListener('window:beforeunload', ['$event'])
-  unloadNotification($event: any): void {
+  unloadNotification($event): void {
     if (this.webSessionService.hasActiveWebSessions()) {
       $event.preventDefault();
       $event.returnValue = true;
@@ -78,31 +78,24 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
 
   private loadFormTab(): void {
     if (!this.isSessionTabExists('New Session')) {
-      const newSessionTab = this.createNewSessionTab(
-        'New Session',
-        MainPanelComponent as unknown as Type<MainPanelComponent>);
+      const newSessionTab = this.createNewSessionTab('New Session') as WebSession<keyof SessionDataTypeMap>;
       this.webSessionService.addSession(newSessionTab);
     }
   }
 
   private isSessionTabExists(tabName: string): boolean {
-    return this.webSessionService
-      .getWebSessionSnapshot()
-      .some((webSession) => webSession.name === tabName);
+    return this.webSessionService.getWebSessionSnapshot().some((webSession) => webSession.name === tabName);
   }
 
-  private createNewSessionTab(
-    name: string,
-    component: Type<MainPanelComponent>
-  ): WebSession<WebSessionComponentType, any> {
-    return new WebSession(name, component as WebSessionComponentType);
+  private createNewSessionTab(name: string) {
+    return new WebSession(name, MainPanelComponent);
   }
 
   private subscribeToTabMenuArray(): void {
     this.webSessionService
       .getAllWebSessions()
       .pipe(takeUntil(this.destroyed$))
-      .subscribe((tabs: WebSession<any, any>[]) => {
+      .subscribe((tabs) => {
         this.webSessionTabs = tabs;
         this.cdr.detectChanges();
       });
