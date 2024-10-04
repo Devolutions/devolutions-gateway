@@ -467,7 +467,9 @@ mod native_tls_checks {
     use anyhow::Context as _;
     use core::fmt;
 
-    use crate::doctor::{help, write_cert_as_pem, Args, AttachHelp as _, Diagnostic, DiagnosticResult};
+    use crate::doctor::{
+        help, write_cert_as_pem, Args, AttachHelp as _, Diagnostic, DiagnosticError, DiagnosticResult,
+    };
 
     pub(crate) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         #[cfg(not(windows))]
@@ -497,9 +499,12 @@ mod native_tls_checks {
 
         output!(out, "-> Perform TLS handshake")?;
 
-        let tls_stream = connector
-            .connect(subject_name, socket)
-            .context("TLS connection failed")?;
+        let tls_stream = connector.connect(subject_name, socket).map_err(|e| {
+            let native_tls::HandshakeError::Failure(e) = e else {
+                unreachable!()
+            };
+            parse_tls_connect_error_string(e, subject_name)
+        })?;
 
         output!(
             out,
@@ -516,6 +521,65 @@ mod native_tls_checks {
         write_cert_as_pem(&mut out, &peer_certificate).context("failed to write the peer certificate as PEM")?;
 
         Ok(())
+    }
+
+    /// Parses Windows (schannel) error messages and convert them into a helpful diagnostic error
+    #[cfg(target_os = "windows")]
+    fn parse_tls_connect_error_string(error: native_tls::Error, hostname: &str) -> DiagnosticError {
+        let os_error_look_up = |code: i32| -> Option<String> {
+            match code {
+                -2146762481 => Some(help::cert_invalid_hostname(hostname)),
+                -2146762487 => Some(help::cert_unknown_issuer()),
+                -2146762495 => Some(help::cert_is_expired()),
+                _ => None,
+            }
+        };
+
+        let str_look_up = |s: &str| -> Option<String> {
+            if s.contains("CN name does not match the passed value") {
+                Some(help::cert_invalid_hostname(hostname))
+            } else if s.contains("terminated in a root certificate which is not trusted by the trust provider") {
+                Some(help::cert_unknown_issuer())
+            } else if s.contains("not within its validity period when verifying against the current system clock") {
+                Some(help::cert_is_expired())
+            } else {
+                None
+            }
+        };
+
+        let mut dyn_error: Option<&dyn std::error::Error> = Some(&error);
+
+        let help = loop {
+            let Some(source_error) = dyn_error.take() else {
+                break None;
+            };
+
+            if let Some(io_error) = source_error.downcast_ref::<std::io::Error>() {
+                if let Some(code) = io_error.raw_os_error() {
+                    if let Some(help_message) = os_error_look_up(code) {
+                        break Some(help_message);
+                    }
+                }
+            }
+
+            let formatted_error = source_error.to_string();
+
+            if let Some(help_message) = str_look_up(&formatted_error) {
+                break Some(help_message);
+            }
+
+            dyn_error = source_error.source();
+        };
+
+        DiagnosticError {
+            error: anyhow::Error::new(error).context("TLS connection failed"),
+            help,
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn parse_tls_connect_error_string(error: native_tls::Error, _hostname: &str) -> DiagnosticError {
+        anyhow::Error::new(error).context("TLS connection failed").into()
     }
 
     #[cfg(not(any(target_os = "windows", target_vendor = "apple")))]
@@ -566,7 +630,7 @@ mod native_tls_checks {
 
             output!(out, "-> Connect to {subject_name}")?;
 
-            let mut builder = SslConnector::builder(SslMethod::tls()).context("failed to create SSL builder")?;
+            let mut builder = SslConnector::builder(SslMethod::tls_client()).context("failed to create SSL builder")?;
             builder.set_verify(SslVerifyMode::NONE);
             let connector = builder.build();
 
@@ -633,8 +697,11 @@ mod native_tls_checks {
             let certificate_subject_name = certificate.subject_name();
 
             for entry in certificate_subject_name.entries() {
-                let Ok(data) = entry.data().as_utf8() else { continue };
-                certificate_names.push(data.to_owned());
+                if entry.object().nid() == openssl::nid::Nid::COMMONNAME {
+                    if let Ok(data) = entry.data().as_utf8() {
+                        certificate_names.push(data.to_owned());
+                    }
+                }
             }
 
             if let Some(alt_names) = certificate.subject_alt_names() {
@@ -645,8 +712,11 @@ mod native_tls_checks {
 
                     if let Some(directory_name) = name.directory_name() {
                         for entry in directory_name.entries() {
-                            let Ok(data) = entry.data().as_utf8() else { continue };
-                            certificate_names.push(data.to_owned());
+                            if entry.object().nid() == openssl::nid::Nid::COMMONNAME {
+                                if let Ok(data) = entry.data().as_utf8() {
+                                    certificate_names.push(data.to_owned());
+                                }
+                            }
                         }
                     }
                 }
@@ -775,28 +845,31 @@ Please verify that:
 To resolve this issue, you can:
 - Update your DNS records to use a domain that is matched by the certificate, and use this name instead.
 - Generate and install a new certificate that includes '{hostname}'.
-Note that the asterisks '*' found in domain name fragments of wildcard certificates only match one level of subdomains.
-E.g.: 'a.b.c' is matched by '*.b.c', but not by '*.c' (the asterisk doesn’t match full stops).
-Suggested read on this topic: https://en.wikipedia.org/wiki/Public_key_certificate"
+Please note that asterisks '*' found in domain name fragments of wildcard certificates only match one level of subdomains.
+For example: 'a.b.c' is matched by '*.b.c', but is not matched by '*.c' (the wildcard does not cover multiple levels).
+For more information, see: https://en.wikipedia.org/wiki/Public_key_certificate"
         )
     }
 
     pub(crate) fn cert_unknown_issuer() -> String {
         format!(
-            "The issuer is unknown.
-Ensure that:
-- The server is returning the intermediate certificates in addition to the leaf certificate.
-- The root certificate is trusted on your system.
-- If the certificate is self-signed: trust it on your system, or use a certificate signed by a certification authority."
+            "The issuer is not trusted by the trust provider (issuer is unknown).
+Please ensure the following:
+- The server is providing intermediate certificates along with the leaf certificate.
+- If you are using a custom root CA managed by you or your organization, verify that the root certificate is installed and trusted on your system.
+- For self-signed certificates, either trust the certificate on your system or obtain one signed by a recognized certificate authority.
+If none of the above applies, you could be facing a Man-in-the-Middle (MITM) attack.
+For more information on MITM attacks, see: https://en.wikipedia.org/wiki/Man-in-the-middle_attack"
         )
     }
 
     pub(crate) fn cert_is_expired() -> String {
         format!(
-            "The certificate is expired.
-You need to:
-- Renew it via your certification authority.
-- Install the new certificate on your server."
+            "The certificate has expired.
+To resolve this, you should:
+- Renew the certificate through your certification authority.
+- Install the new certificate on your server.
+If you believe the certificate should still be valid, verify that your system clock is set to the correct time."
         )
     }
 
