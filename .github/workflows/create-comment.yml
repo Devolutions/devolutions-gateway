@@ -13,14 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/create-comment
-        if: ${{ github.event.action == 'opened'}}
-        template: ${{ github.workspace }}/.github/comments/pr_greetings.md
+      - if: ${{ github.event.action == 'opened'}}
+        uses: ./.github/actions/create-comment
+        with:
+          template: ${{ github.workspace }}/.github/comments/pr_greetings.md
 
-      - uses: ./.github/actions/create-comment
-        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'publish-required' && github.event.pull_request.user.login != 'CBenoit' }}
-        template: ${{ github.workspace }}/.github/comments/publish_requested.md
+      - if: ${{ github.event.action == 'labeled' && github.event.label.name == 'publish-required' && github.event.pull_request.user.login != 'CBenoit' }}
+        uses: ./.github/actions/create-comment
+        with:
+          template: ${{ github.workspace }}/.github/comments/publish_requested.md
 
-      - uses: ./.github/actions/create-comment
-        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'release-required' && github.event.pull_request.user.login != 'CBenoit' }}
-        template: ${{ github.workspace }}/.github/comments/release_requested.md
+      - if: ${{ github.event.action == 'labeled' && github.event.label.name == 'release-required' && github.event.pull_request.user.login != 'CBenoit' }}
+        uses: ./.github/actions/create-comment
+        with:
+          template: ${{ github.workspace }}/.github/comments/release_requested.md
