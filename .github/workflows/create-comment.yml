@@ -2,7 +2,7 @@ name: Create Comment
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
     types: [ opened, labeled ]
 
 jobs:
@@ -18,9 +18,9 @@ jobs:
         template: ${{ github.workspace }}/.github/comments/pr_greetings.md
 
       - uses: ./.github/actions/create-comment
-        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'publish-required' }}
+        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'publish-required' && github.event.pull_request.user.login != 'CBenoit' }}
         template: ${{ github.workspace }}/.github/comments/publish_requested.md
 
       - uses: ./.github/actions/create-comment
-        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'release-required' }}
+        if: ${{ github.event.action == 'labeled' && github.event.label.name == 'release-required' && github.event.pull_request.user.login != 'CBenoit' }}
         template: ${{ github.workspace }}/.github/comments/release_requested.md
