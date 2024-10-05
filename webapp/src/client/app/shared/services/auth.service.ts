@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import {BehaviorSubject, Observable, Subscription, interval, of, throwError} from 'rxjs';
+import { BehaviorSubject, Observable, Subscription, interval, of, throwError } from 'rxjs';
 import { catchError, map, takeUntil, tap } from 'rxjs/operators';
 
 import { BaseComponent } from '@shared/bases/base.component';
@@ -7,6 +7,7 @@ import { Session } from '@shared/models/session';
 import { ApiService } from '@shared/services/api.service';
 import { NavigationService } from '@shared/services/navigation.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { SessionType } from '../models/web-session.model';
 
 @Injectable({
   providedIn: 'root',
@@ -151,9 +152,8 @@ export class AuthService extends BaseComponent {
     if (session && this.isSessionValid(session)) {
       this.sessionSubject.next(session);
       return true;
-    } else {
-      return false;
     }
+    return false;
   }
 
   private getStoredSession(): Session | null {

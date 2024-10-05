@@ -1,31 +1,82 @@
-import { ComponentRef, Type } from '@angular/core';
+import { Component, ComponentRef, Type } from '@angular/core';
 import { v4 as uuidv4 } from 'uuid';
 
 import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
+import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
+import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { MainPanelComponent } from "@shared/components/main-panel/main-panel.component";
+import { BaseComponent } from '../bases/base.component';
+import {
+  ArdFormDataInput,
+  RdpFormDataInput,
+  SSHFormDataInput,
+  TelnetFormDataInput,
+  VncFormDataInput,
+} from '../interfaces/forms.interfaces';
 
 export type WebSessionComponentType =
-  | Type<WebClientFormComponent>
   | Type<WebClientTelnetComponent>
   | Type<WebClientSshComponent>
   | Type<WebClientRdpComponent>
-  | Type<MainPanelComponent>;
+  | Type<WebClientArdComponent>
+  | Type<WebClientVncComponent>
+  | Type<MainPanelComponent>
+  | Type<WebClientFormComponent>;
 
-export class WebSession<WebSessionComponentType, TData> {
+export interface SessionDataTypeMap {
+  WebClientFormComponent: never;
+  MainPanelComponent: never;
+  WebClientArdComponent: ArdFormDataInput;
+  WebClientRdpComponent: RdpFormDataInput;
+  WebClientSshComponent: SSHFormDataInput;
+  WebClientTelnetComponent: TelnetFormDataInput;
+  WebClientVncComponent: VncFormDataInput;
+}
+
+export interface SessionTypeMap {
+  WebClientArdComponent: WebClientArdComponent;
+  WebClientFormComponent: WebClientFormComponent;
+  WebClientRdpComponent: WebClientRdpComponent;
+  WebClientSshComponent: WebClientSshComponent;
+  WebClientTelnetComponent: WebClientTelnetComponent;
+  WebClientVncComponent: WebClientVncComponent;
+  MainPanelComponent: MainPanelComponent;
+}
+
+export type DataForSession<T extends keyof SessionDataTypeMap> = SessionDataTypeMap[T];
+export type ComponentForSession<T extends keyof SessionDataTypeMap> = SessionTypeMap[T];
+
+export interface HasTabIndex {
+  tabIndex?: number;
+}
+
+export abstract class BaseSessionComponent extends BaseComponent implements HasTabIndex {
+  tabIndex?: number;
+  webSessionId: string;
+}
+
+export interface CanSendTerminateSessionCmd {
+  sendTerminateSessionCmd(): void;
+}
+
+export type SessionType = keyof SessionDataTypeMap;
+export type ConnectionSessionType = keyof Omit<SessionDataTypeMap, 'WebClientFormComponent' | 'MainPanelComponent'>;
+
+export class WebSession<T extends keyof SessionDataTypeMap> {
   public static readonly TOOLBAR_SIZE: number = 44;
 
   public id: string;
   public sessionId: string;
   public name = '';
-  public component: WebSessionComponentType;
-  public componentRef: ComponentRef<any>;
+  public component: Type<ComponentForSession<T>>;
+  public componentRef: ComponentRef<ComponentForSession<T> & Partial<CanSendTerminateSessionCmd>>;
   public tabIndex?: number;
-  public data?: TData;
+  public data?: DataForSession<T>;
   public icon?: string = '';
   public iconTooltip?: string = '';
   public status: ComponentStatus;
@@ -33,8 +84,8 @@ export class WebSession<WebSessionComponentType, TData> {
 
   constructor(
     name: string,
-    component: WebSessionComponentType,
-    data?: TData,
+    component: Type<ComponentForSession<T>>,
+    data?: DataForSession<T>,
     icon = '',
     tabIndex?: number,
     id: string = uuidv4(),
@@ -54,7 +105,7 @@ export class WebSession<WebSessionComponentType, TData> {
     this.desktopSize = desktopSize;
   }
 
-  updatedTabIndex(newTabIndex?: number): WebSession<WebSessionComponentType, TData> {
+  updatedTabIndex(newTabIndex?: number): WebSession<T> {
     this.componentRef.instance.tabIndex = newTabIndex;
     this.tabIndex = newTabIndex;
     return this;

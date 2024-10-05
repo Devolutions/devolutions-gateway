@@ -7,6 +7,7 @@ import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms'
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { SelectItem } from 'primeng/api';
+import { ArdFormDataInput, FormDataUnion } from '../interfaces/forms.interfaces';
 import { ExtraSessionParameter } from './web-session.service';
 
 @Injectable({ providedIn: 'root' })
@@ -42,7 +43,7 @@ export class WebFormService extends BaseComponent {
   addControlToForm(
     formGroup: FormGroup,
     controlName: string,
-    inputFormData?: any,
+    inputFormData?: unknown,
     isRequired = true,
     isDisabled = false,
     defaultValue: string | number | null = '',

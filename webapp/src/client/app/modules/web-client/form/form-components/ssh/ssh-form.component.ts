@@ -3,6 +3,7 @@ import { FormGroup } from '@angular/forms';
 
 import { ChangeDetectorRef } from '@angular/core';
 import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
+import { SSHFormDataInput } from '@gateway/shared/interfaces/forms.interfaces';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { BaseComponent } from '@shared/bases/base.component';
@@ -23,7 +24,7 @@ interface FormInputVisibility {
 })
 export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
   @Input() form: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   authModeOptions: SelectItem[];
 
@@ -59,7 +60,7 @@ export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy
     this.formService.resetCanConnectCallback();
   }
 
-  private addControlsToParentForm(inputFormData?: any): void {
+  private addControlsToParentForm(inputFormData?): void {
     if (this.form) {
       this.clearForm();
 

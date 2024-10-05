@@ -27,18 +27,18 @@ export class MainAppComponent extends BaseComponent implements OnInit {
   }
 
   private subscribeToMainMenu(): void {
-    this.mainMenuService.isCollapsed
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe((isCollapsed) => (this.isMenuCollapsed = isCollapsed));
+    this.mainMenuService.isCollapsed.pipe(takeUntil(this.destroyed$)).subscribe((isCollapsed) => {
+      this.isMenuCollapsed = isCollapsed;
+    });
 
-    this.mainMenuService.isVisible
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe((isVisible) => (this.isMenuVisible = isVisible));
+    this.mainMenuService.isVisible.pipe(takeUntil(this.destroyed$)).subscribe((isVisible) => {
+      this.isMenuVisible = isVisible;
+    });
   }
 
   private subscribeToWebClientSession(): void {
-    this.app.isWebClientSession
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe((isWebClientSession) => (this.isWebClientSession = isWebClientSession));
+    this.app.isWebClientSession.pipe(takeUntil(this.destroyed$)).subscribe((isWebClientSession) => {
+      this.isWebClientSession = isWebClientSession;
+    });
   }
 }

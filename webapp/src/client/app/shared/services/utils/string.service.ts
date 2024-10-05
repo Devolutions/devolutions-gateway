@@ -44,9 +44,8 @@ export class StringService {
 
     if (portRegex.test(url)) {
       return url;
-    } else {
-      return `${url}${defaultPort}`;
     }
+    return `${url}${defaultPort}`;
   }
 
   extractHostnameAndPort(urlString: string, DefaultPort: number): ExtractedHostnamePort {
@@ -58,9 +57,8 @@ export class StringService {
       const hostname: string = match[1];
       const port: number = match[2] ? Number.parseInt(match[2], 10) : DefaultPort;
       return { hostname, port };
-    } else {
-      return null;
     }
+    return null;
   }
 
   replaceNewlinesWithBR(text: string): string {

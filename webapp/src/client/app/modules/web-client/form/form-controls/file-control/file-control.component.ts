@@ -47,7 +47,7 @@ export class FileControlComponent implements OnInit, OnDestroy {
     this.uploadedFile = null;
   }
 
-  onDragEnter(event: any) {
+  onDragEnter(event) {
     event.preventDefault();
     event.stopPropagation();
   }

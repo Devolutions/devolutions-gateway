@@ -10,16 +10,16 @@ import { WebSession } from '@shared/models/web-session.model';
 import { ApiService } from '@shared/services/api.service';
 import { UtilsService } from '@shared/services/utils.service';
 
+import { JET_KDC_PROXY_URL } from '@gateway/app.constants';
 import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import {
   IronARDConnectionParameters,
   IronRDPConnectionParameters,
   IronVNCConnectionParameters,
+  SessionTokenParameters,
   SshConnectionParameters,
   TelnetConnectionParameters,
-  sessionTokenParameters,
 } from '@shared/interfaces/connection-params.interfaces';
-import {JET_KDC_PROXY_URL} from "@gateway/app.constants";
 
 export enum DefaultPowerShellPort {
   SSL = 5986,
@@ -42,7 +42,7 @@ export class WebClientService extends BaseComponent {
   }
 
   //TODO enhance type safety for form data. KAH Feb 15 2024
-  getDesktopSize(submittedFormData: any): DesktopSize | null {
+  getDesktopSize(submittedFormData): DesktopSize | null {
     if (!submittedFormData?.screenSize) {
       return;
     }
@@ -53,14 +53,15 @@ export class WebClientService extends BaseComponent {
       return rawSize.length > 1
         ? { width: Number.parseInt(rawSize[0]), height: Number.parseInt(rawSize[1]) - WebSession.TOOLBAR_SIZE }
         : null;
-    } else if (submittedFormData.screenSize === ScreenSize.Custom) {
+    }
+    if (submittedFormData.screenSize === ScreenSize.Custom) {
       return submittedFormData.customWidth && submittedFormData.customHeight
         ? { width: submittedFormData.customWidth, height: submittedFormData.customHeight - WebSession.TOOLBAR_SIZE }
         : null;
     }
   }
 
-  fetchToken(tokenParameters: sessionTokenParameters): Observable<string> {
+  fetchToken(tokenParameters: SessionTokenParameters): Observable<string> {
     return this.apiService.generateSessionToken(tokenParameters).pipe(
       takeUntil(this.destroyed$),
       catchError((err) => throwError(err)),
@@ -84,10 +85,14 @@ export class WebClientService extends BaseComponent {
     }
   }
 
-  private handleProtocolTokenRequest<T extends TelnetConnectionParameters | SshConnectionParameters | IronRDPConnectionParameters | IronVNCConnectionParameters | IronARDConnectionParameters>(
-    protocol: Protocol,
-    connectionParameters: T
-  ): Observable<T> {
+  private handleProtocolTokenRequest<
+    T extends
+      | TelnetConnectionParameters
+      | SshConnectionParameters
+      | IronRDPConnectionParameters
+      | IronVNCConnectionParameters
+      | IronARDConnectionParameters,
+  >(protocol: Protocol, connectionParameters: T): Observable<T> {
     return this.generateProtocolToken(protocol, connectionParameters).pipe(
       takeUntil(this.destroyed$),
       map((params) => params as T),
@@ -112,7 +117,7 @@ export class WebClientService extends BaseComponent {
   > {
     const protocolStr: string = WebClientProtocol.getEnumKey(protocol).toLowerCase();
 
-    const data: sessionTokenParameters = {
+    const data: SessionTokenParameters = {
       content_type: 'ASSOCIATION',
       protocol: protocolStr,
       destination: `tcp://${connectionParameters.host}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
@@ -152,7 +157,7 @@ export class WebClientService extends BaseComponent {
   }
 
   fetchNetScanToken(): Observable<string> {
-    const data: sessionTokenParameters = {
+    const data: SessionTokenParameters = {
       content_type: 'NETSCAN',
       lifetime: 60,
     };
@@ -169,7 +174,7 @@ export class WebClientService extends BaseComponent {
       return of(connectionParameters);
     }
 
-    const data: sessionTokenParameters = {
+    const data: SessionTokenParameters = {
       content_type: 'KDC',
       krb_kdc: connectionParameters.kdcUrl,
       krb_realm: connectionParameters.domain,

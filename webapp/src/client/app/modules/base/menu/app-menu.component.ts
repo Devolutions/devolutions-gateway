@@ -64,9 +64,9 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
   }
 
   private subscribeToIsAutoLoginOn(): void {
-    this.authService.isAutoLoginOn
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe((isAutoLoginOn) => (this.isAutoLoginOn = isAutoLoginOn));
+    this.authService.isAutoLoginOn.pipe(takeUntil(this.destroyed$)).subscribe((isAutoLoginOn) => {
+      this.isAutoLoginOn = isAutoLoginOn;
+    });
   }
 
   private initMenu(): void {
@@ -136,7 +136,8 @@ function compareVersion(a: string, b: string) {
   for (let i = 0; i < partsA.length; i++) {
     if (Number.parseInt(partsA[i]) > Number.parseInt(partsB[i])) {
       return 1;
-    } else if (Number.parseInt(partsA[i]) < Number.parseInt(partsB[i])) {
+    }
+    if (Number.parseInt(partsA[i]) < Number.parseInt(partsB[i])) {
       return -1;
     }
   }

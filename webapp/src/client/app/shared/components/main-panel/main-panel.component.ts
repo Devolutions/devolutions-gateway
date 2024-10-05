@@ -1,5 +1,6 @@
 import { AfterViewInit, Component, EventEmitter, Output, ViewChild } from '@angular/core';
 import { ComponentStatus } from '@gateway/shared/models/component-status.model';
+import { BaseSessionComponent } from '@gateway/shared/models/web-session.model';
 import { WebClientFormComponent } from '../../../modules/web-client/form/web-client-form.component';
 
 @Component({
@@ -7,7 +8,7 @@ import { WebClientFormComponent } from '../../../modules/web-client/form/web-cli
   templateUrl: './main-panel.component.html',
   styleUrls: ['./main-panel.component.scss'],
 })
-export class MainPanelComponent implements AfterViewInit {
+export class MainPanelComponent extends BaseSessionComponent implements AfterViewInit {
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
 
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -15,7 +16,11 @@ export class MainPanelComponent implements AfterViewInit {
   @ViewChild(WebClientFormComponent)
   webClientFormComponent!: WebClientFormComponent;
 
-  constructor() {}
+  formData: unknown;
+
+  constructor() {
+    super();
+  }
 
   ngAfterViewInit(): void {
     if (!this.webClientFormComponent) {

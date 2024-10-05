@@ -37,7 +37,7 @@ namespace ScreenSize {
 
   export function getSelectItems(): SelectItem[] {
     return Object.keys(ScreenSize)
-      .filter((key) => isNaN(Number(key)) && typeof ScreenSize[key as any] === 'number')
+      .filter((key) => Number.isNaN(Number(key)) && typeof ScreenSize[key] === 'number')
       .map((key) => {
         let label = key;
         if (label.startsWith('R')) {

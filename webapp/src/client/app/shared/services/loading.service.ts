@@ -20,7 +20,7 @@ export class LoadingService {
   private _mode: LoadingMode;
   private readonly subject: Subject<LoadingEvent>;
   private workCounter: number;
-  private readonly receivers: any[];
+  private readonly receivers: unknown[];
 
   public constructor() {
     this.receivers = [];
@@ -52,11 +52,11 @@ export class LoadingService {
     this.pushValue();
   }
 
-  public addReceiver(receiver: any) {
+  public addReceiver(receiver) {
     this.receivers.push(receiver);
   }
 
-  public removeReceiver(receiver: any) {
+  public removeReceiver(receiver) {
     const index = this.receivers.indexOf(receiver);
     if (index > -1) {
       this.receivers.splice(index, 1);
@@ -82,7 +82,7 @@ export class LoadingService {
   }
 
   private getCurrentReceiver() {
-    return !!this.receivers.length ? this.receivers[this.receivers.length - 1] : null;
+    return this.receivers.length ? this.receivers[this.receivers.length - 1] : null;
   }
 
   private prepare<T>(callback: (visible) => void): (source: Observable<T>) => Observable<T> {

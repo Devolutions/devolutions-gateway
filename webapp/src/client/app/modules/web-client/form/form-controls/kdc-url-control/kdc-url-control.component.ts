@@ -11,7 +11,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 })
 export class KdcUrlControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   constructor(private formService: WebFormService) {
     super();
@@ -30,7 +30,7 @@ export class KdcUrlControlComponent extends BaseComponent implements OnInit {
   }
 
   kdcServerUrlValidator(): ValidatorFn {
-    return (control: AbstractControl): { [key: string]: any } | null => {
+    return (control: AbstractControl): { [key: string]: unknown } | null => {
       if (!control.value) {
         return null;
       }

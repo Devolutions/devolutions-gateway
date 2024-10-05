@@ -8,6 +8,13 @@ export interface AutoCompleteInput {
   hostname: string;
 }
 
+export type FormDataUnion =
+  | RdpFormDataInput
+  | VncFormDataInput
+  | ArdFormDataInput
+  | SSHFormDataInput
+  | TelnetFormDataInput;
+
 export interface RdpFormDataInput {
   autoComplete: AutoCompleteInput;
   hostname: string;

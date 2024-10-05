@@ -20,7 +20,7 @@ interface FormInputVisibility {
 })
 export class VncFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   authModeOptions: SelectItem[];
 
@@ -41,7 +41,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
     this.initializeFormOptions();
   }
 
-  private addControlsToParentForm(inputFormData?: any): void {
+  private addControlsToParentForm(inputFormData?): void {
     if (this.form) {
       this.clearForm();
 

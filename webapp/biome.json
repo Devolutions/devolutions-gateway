@@ -1,13 +1,21 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.8.2/schema.json",
-  "organizeImports":{
+  "organizeImports": {
     "enabled": true
+  },
+  "files": {
+    "ignore": [
+      "*.json"
+    ]
   },
   "linter": {
     "rules": {
       "style": {
         "useTemplate": "off",
         "useImportType": "off"
+      },
+      "complexity": {
+        "noUselessConstructor": "off"
       }
     }
   },

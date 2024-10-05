@@ -80,7 +80,7 @@ export class SshKeyService {
 }
 
 function recognizeKeyFormat(keyString): RecognizeKeyFormatResult {
-  let format;
+  let format: SshKeyFormat;
   if (keyString.includes('-----BEGIN RSA PRIVATE KEY-----') || keyString.includes('-----BEGIN EC PRIVATE KEY-----')) {
     format = SshKeyFormat.PEM;
   } else if (keyString.includes('-----BEGIN PRIVATE KEY-----')) {

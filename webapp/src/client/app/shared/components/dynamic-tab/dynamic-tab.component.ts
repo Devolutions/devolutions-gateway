@@ -13,7 +13,7 @@ import {
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { WebSession } from '@shared/models/web-session.model';
+import { SessionType, WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 
@@ -22,8 +22,8 @@ import { WebSessionService } from '@shared/services/web-session.service';
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss'],
 })
-export class DynamicTabComponent extends BaseComponent implements AfterViewInit, OnDestroy {
-  @Input() webSessionTab: WebSession<any, any>;
+export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
+  @Input() webSessionTab: WebSession<T>;
   @ViewChild('dynamicComponentContainer', { read: ViewContainerRef }) container: ViewContainerRef;
   @Output() isDynamicTabInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
   @Output() componentRefSizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -53,14 +53,7 @@ export class DynamicTabComponent extends BaseComponent implements AfterViewInit,
       return;
     }
 
-    const inputData: { formData: any } = { formData: this.webSessionTab.data };
-
-    const componentRef: ComponentRef<any> = this.dynamicComponentService.createComponent(
-      this.webSessionTab.component,
-      this.container,
-      inputData,
-      this.webSessionTab,
-    );
+    const componentRef = this.dynamicComponentService.createComponent(this.container, this.webSessionTab);
 
     this.cdr.detectChanges();
 

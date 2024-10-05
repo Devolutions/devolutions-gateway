@@ -20,7 +20,7 @@ import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.e
 import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.interfaces';
 import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { WebSession } from '@shared/models/web-session.model';
+import { BaseSessionComponent, ConnectionSessionType, SessionType, WebSession } from '@shared/models/web-session.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { StorageService } from '@shared/services/utils/storage.service';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -31,11 +31,11 @@ import { WebSessionService } from '@shared/services/web-session.service';
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
 })
-export class WebClientFormComponent extends BaseComponent implements OnInit, OnChanges {
+export class WebClientFormComponent extends BaseSessionComponent implements OnInit, OnChanges {
   @Input() isFormExists = false;
   @Input() webSessionId: string | undefined;
-  @Input() inputFormData: any;
-  @Input() error: any;
+  @Input() inputFormData;
+  @Input() error;
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -49,6 +49,8 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
 
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
+
+  formData: unknown;
 
   constructor(
     private fb: FormBuilder,
@@ -82,7 +84,6 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
       )
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap((webSession) => this.manageScreenSize(webSession)),
         switchMap((webSession) => this.manageWebSessionSubject(webSession)),
         catchError((error) => {
           console.error('Failed to process web session:', error);
@@ -98,7 +99,7 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
     return this.hostnames?.length > 0;
   }
 
-  filterHostname(event: any): void {
+  filterHostname(event): void {
     const query = event.query.toLowerCase();
 
     Promise.resolve().then(() => {
@@ -108,7 +109,7 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
   }
 
   private subscribeToProtocolChanges(): void {
-    const protocolControl: AbstractControl<any, any> = this.connectSessionForm.get('protocol');
+    const protocolControl = this.connectSessionForm.get('protocol');
     if (!protocolControl) {
       return;
     }
@@ -118,18 +119,17 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
       .subscribe({
         next: (protocol) => {
           const exceptions: string[] = ['protocol', 'autoComplete', 'hostname', 'authMode'];
-          Object.keys(this.connectSessionForm.controls).forEach((key) => {
+          for (const key of Object.keys(this.connectSessionForm.controls)) {
             if (!exceptions.includes(key)) {
               this.connectSessionForm.get(key)?.disable();
             }
-          });
+          }
 
           this.updateProtocolTooltip(protocol);
           this.formService.detectFormChanges(this.cdr);
         },
-        error: (error) => console.error('Error subscribing to protocol changes:', error)
+        error: (error) => console.error('Error subscribing to protocol changes:', error),
       });
-
   }
 
   private initializeFormAndOptions(): void {
@@ -160,7 +160,7 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
       });
   }
 
-  private buildFormGroup(inputFormData?: any): Observable<FormGroup> {
+  private buildFormGroup(inputFormData?): Observable<FormGroup> {
     const formControls = {
       protocol: [inputFormData?.protocol || 0, Validators.required],
       autoComplete: [inputFormData?.autoComplete || '', Validators.required],
@@ -207,31 +207,16 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
     return of(undefined);
   }
 
-  private updateProtocolTooltip(value?: any): void {
-    if (!value && this.protocolOptions.length > 0) {
-      value = this.protocolOptions[0].value;
+  private updateProtocolTooltip(value?): void {
+    let protocolValue = value;
+    if (!protocolValue && this.protocolOptions.length > 0) {
+      protocolValue = this.protocolOptions[0].value;
     }
-    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find((item) => item.value === value);
-    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
+    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find((item) => item.value === protocolValue);
+    this.protocolSelectedTooltip = selectedItem ? selectedItem.tooltipText : '';
   }
 
-  private manageScreenSize(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
-    if (!this.isSelectedProtocolRdp()) {
-      return of(webSession);
-    }
-
-    const formScreenSize: ScreenSize = webSession.data?.screenSize;
-    if (formScreenSize === ScreenSize.FullScreen) {
-      const width: number = window.screen.width;
-      const height: number = window.screen.height;
-      this.webSessionService.setWebSessionScreenSize({ width, height });
-    } else {
-      this.sizeChange.emit();
-    }
-    return of(webSession);
-  }
-
-  private manageWebSessionSubject(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
+  private manageWebSessionSubject(webSession: WebSession<SessionType>) {
     if (this.isFormExists) {
       webSession.id = this.webSessionId;
       this.webSessionService.updateSession(webSession);
@@ -274,9 +259,9 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
     return this.connectSessionForm.get('protocol').value;
   }
 
-  private displayErrorMessages(error: any): void {
-    const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error['kind'] ?? error);
-    const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error['backtrace'] ?? '');
+  private displayErrorMessages(error): void {
+    const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error.kind ?? error);
+    const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error.backtrace ?? '');
 
     setTimeout(() => {
       this.addMessages([
@@ -300,7 +285,7 @@ export class WebClientFormComponent extends BaseComponent implements OnInit, OnC
         hostname: entry.ip,
       });
 
-      const protocol: AbstractControl<any, any> = this.connectSessionForm.get('protocol');
+      const protocol = this.connectSessionForm.get('protocol');
       if (protocol && protocol.value !== entry.protocol) {
         protocol.setValue(entry.protocol);
       }

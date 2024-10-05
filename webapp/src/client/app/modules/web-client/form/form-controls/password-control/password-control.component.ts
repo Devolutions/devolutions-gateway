@@ -11,7 +11,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 })
 export class PasswordControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
   @Input() isEnabled = true;
   @Input() label = 'Password';
   @Input() formKey = 'password';
@@ -38,7 +38,7 @@ export class PasswordControlComponent extends BaseComponent implements OnInit {
   }
 
   private toggleControl(): void {
-    const control: AbstractControl<any, any> = this.parentForm.get(this.formKey);
+    const control = this.parentForm.get(this.formKey);
     if (control) {
       this.isEnabled ? control.enable() : control.disable();
     }

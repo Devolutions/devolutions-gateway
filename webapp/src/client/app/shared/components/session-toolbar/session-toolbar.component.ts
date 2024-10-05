@@ -12,19 +12,19 @@ export class SessionToolbarComponent {
   @Input() leftButtons: {
     label: string;
     icon: string;
-    action: Function;
+    action: () => void;
   }[] = [];
 
   @Input() middleButtons: {
     label: string;
     icon: string;
-    action: Function;
+    action: () => void;
   }[] = [];
 
   @Input() rightButtons: {
     label: string;
     icon: string;
-    action: Function;
+    action: () => void;
   }[] = [];
 
   isFullScreenMode = false;
@@ -57,7 +57,7 @@ export class SessionToolbarComponent {
       return;
     }
 
-    if (event.clientY == 0) {
+    if (event.clientY === 0) {
       this.showToolbarDiv = true;
     } else if (event.clientY > 44) {
       this.showToolbarDiv = false;
@@ -77,7 +77,7 @@ export class SessionToolbarComponent {
     try {
       const sessionContainerElement = this.sessionContainerParent.nativeElement;
       await sessionContainerElement.requestFullscreen();
-    } catch (err: any) {
+    } catch (err) {
       this.isFullScreenMode = false;
       console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
     }

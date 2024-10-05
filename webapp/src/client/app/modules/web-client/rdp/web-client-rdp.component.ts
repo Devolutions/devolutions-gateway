@@ -12,7 +12,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { MessageService } from 'primeng/api';
-import {EMPTY, Observable, Subject, from, of, throwError} from 'rxjs';
+import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
@@ -30,8 +30,8 @@ import { WebSessionService } from '@shared/services/web-session.service';
 
 import { DesktopSize, SessionEvent, UserInteraction, UserIronRdpError } from '@devolutions/iron-remote-gui';
 import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
+import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import {DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL} from "@gateway/app.constants";
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -57,13 +57,13 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
-  inputFormData: RdpFormDataInput;
+  formData: RdpFormDataInput;
   rdpError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
   loading = true;
 
-  protected removeElement: Subject<any> = new Subject();
+  protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;
   private remoteClient: UserInteraction;
 
@@ -137,7 +137,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.ironGuiElement && this.ironGuiElement.nativeElement) {
+        if (this.ironGuiElement?.nativeElement) {
           this.ironGuiElement.nativeElement.remove();
         }
       },
@@ -172,7 +172,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       return;
     }
 
-    if (event.clientY == 0) {
+    if (event.clientY === 0) {
       this.showToolbarDiv = true;
     } else if (event.clientY > 44) {
       this.showToolbarDiv = false;
@@ -192,7 +192,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     try {
       const sessionContainerElement = this.sessionContainerElement.nativeElement;
       await sessionContainerElement.requestFullscreen();
-    } catch (err: any) {
+    } catch (err) {
       this.isFullScreenMode = false;
       console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
     }
@@ -232,7 +232,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private readyRemoteClientEventListener(event: Event): void {
-    const customEvent: CustomEvent<any> = event as CustomEvent;
+    const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
     this.initSessionEventHandler();
@@ -243,8 +243,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     this.getFormData()
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap(() => this.setScreenSizeScale(this.inputFormData.screenSize)),
-        switchMap(() => this.fetchParameters(this.inputFormData)),
+        switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
+        switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.fetchTokens(params)),
         switchMap((params) => this.webClientService.generateKdcProxyUrl(params)),
         catchError((error) => {
@@ -254,24 +254,25 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
         }),
       )
       .subscribe((params) => {
-        this.callConnect(params)
+        this.callConnect(params);
       });
   }
 
   private getFormData(): Observable<void> {
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
-      map((currentWebSession) => (this.inputFormData = currentWebSession.data)),
+      map((currentWebSession) => {
+        this.formData = currentWebSession.data as RdpFormDataInput;
+      }),
     );
   }
 
   private fetchParameters(formData: RdpFormDataInput): Observable<IronRDPConnectionParameters> {
     const { hostname, password, preConnectionBlob, kdcUrl } = formData;
 
-    const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.inputFormData.username);
+    const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.formData.username);
 
     const desktopScreenSize: DesktopSize =
-      this.webClientService.getDesktopSize(this.inputFormData) ??
-      this.webSessionService.getWebSessionScreenSizeSnapshot();
+      this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
 
     const connectionParameters: IronRDPConnectionParameters = {
       username: extractedData.username,
@@ -323,7 +324,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
         catchError((err) => {
           return throwError(() => err);
         }),
-      ).subscribe();
+      )
+      .subscribe();
   }
 
   private initSessionEventHandler(): void {
@@ -367,21 +369,19 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private notifyUser(event: SessionEvent, errorData: UserIronRdpError | string): void {
-    const eventType = event.type.valueOf() ;
+    const eventType = event.type.valueOf();
     this.rdpError = {
       kind: this.getMessage(errorData),
       backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : '',
     };
 
     const icon: string =
-      eventType === SessionEventType.TERMINATED || SessionEventType.ERROR
-        ? DVL_WARNING_ICON
-        : DVL_RDP_ICON;
+      eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ? DVL_WARNING_ICON : DVL_RDP_ICON;
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
-  private handleSubscriptionError(error: any): void {
+  private handleSubscriptionError(error): void {
     console.error('Error in session event subscription', error);
   }
 
@@ -404,9 +404,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
     if (typeof errorData === 'string') {
       return errorData;
-    } else {
-      errorKind = errorData.kind().valueOf();
     }
+    errorKind = errorData.kind().valueOf();
 
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'

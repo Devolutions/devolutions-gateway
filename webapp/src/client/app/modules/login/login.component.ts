@@ -23,7 +23,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   constructor(
     private authService: AuthService,
     private navigationService: NavigationService,
-    protected utils: UtilsService
+    protected utils: UtilsService,
   ) {
     super();
   }
@@ -50,20 +50,18 @@ export class LoginComponent extends BaseComponent implements OnInit {
     this.messages = [];
     const submittedData = this.loginForm.value;
 
-    this.authService.login(submittedData.username, submittedData.password)
-      .subscribe({
-        next: (success) => {
-          if (success) {
-            void this.navigationService.navigateToNewSession();
-          } else {
-            this.handleLoginError(new Error('Connection error: Please verify your connection settings.'));
-          }
-        },
-        error: (error) => {
-          this.handleLoginError(error);
+    this.authService.login(submittedData.username, submittedData.password).subscribe({
+      next: (success) => {
+        if (success) {
+          void this.navigationService.navigateToNewSession();
+        } else {
+          this.handleLoginError(new Error('Connection error: Please verify your connection settings.'));
         }
-      }
-    );
+      },
+      error: (error) => {
+        this.handleLoginError(error);
+      },
+    });
   }
 
   toggleShowPassword(): void {
@@ -78,8 +76,8 @@ export class LoginComponent extends BaseComponent implements OnInit {
     }
   }
 
-  private handleAutoLoginError(error: Error): Observable<boolean> {
-    if (error['status'] && error['status'] != '401') {
+  private handleAutoLoginError(error): Observable<boolean> {
+    if (error.status && error.status !== '401') {
       console.error('Auto login:', error);
       this.addMessages([
         {
@@ -91,10 +89,10 @@ export class LoginComponent extends BaseComponent implements OnInit {
     return of(false);
   }
 
-  private handleLoginError(error: Error): void {
+  private handleLoginError(error): void {
     let message: string = error.message;
 
-    if (error['status'] && error['status'] === 401) {
+    if (error.status && error.status === 401) {
       //For translation 'InvalidUserNameOrPasswordPleaseVerifyYourCredentials'
       message = 'Invalid username or password, please verify your credentials';
     }
@@ -111,9 +109,9 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private addMessages(messages: Message[]) {
     this.messages = [];
     if (messages?.length > 0) {
-      messages.forEach((message) => {
+      for (const message of messages) {
         this.messages.push(message);
-      });
+      }
     }
   }
 }

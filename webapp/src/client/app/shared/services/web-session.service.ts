@@ -1,9 +1,16 @@
-import { ComponentRef, Injectable } from '@angular/core';
+import { ComponentRef, Injectable, Type } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { BehaviorSubject, Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
+import {
+  BaseSessionComponent,
+  CanSendTerminateSessionCmd,
+  ConnectionSessionType,
+  SessionType,
+} from './../models/web-session.model';
 
 import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { DVL_WARNING_ICON, ProtocolIconMap } from '@gateway/app.constants';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
@@ -11,9 +18,8 @@ import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
-import { WebSession } from '@shared/models/web-session.model';
+import { WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
-import {DVL_WARNING_ICON, ProtocolIconMap} from "@gateway/app.constants";
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024
@@ -23,14 +29,13 @@ export interface ExtraSessionParameter {
   sshPrivateKey?: string;
 }
 
-
 @Injectable({
   providedIn: 'root',
 })
 export class WebSessionService {
   private NEW_SESSION_IDX = 0;
-  private webSessionDataSubject: BehaviorSubject<WebSession<any, any>[]>;
-  private webSessionData$: Observable<WebSession<any, any>[]>;
+  private webSessionDataSubject: BehaviorSubject<WebSession<SessionType>[]>;
+  private webSessionData$: Observable<WebSession<SessionType>[]>;
 
   private webSessionCurrentTabIndexSubject: BehaviorSubject<number>;
   private webSessionCurrentTabIndex$: Observable<number>;
@@ -60,9 +65,10 @@ export class WebSessionService {
 
   createWebSession(
     form: FormGroup,
-    protocol: Protocol,
+    protocol: Protocol, // Dynamically infer the type from the map
     extraData: ExtraSessionParameter,
-  ): Observable<WebSession<any, any>> {
+  ): Observable<WebSession<ConnectionSessionType>> {
+    // Use the map to infer return type
     const submittedData = form.value;
     submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
@@ -71,14 +77,22 @@ export class WebSessionService {
 
     if (!sessionComponent) {
       console.error(`Creating session, unsupported protocol: ${protocol}`);
-      return;
+      return of(null);
     }
+
     submittedData.extraData = extraData;
-    const webSession = new WebSession(submittedData.hostname, sessionComponent, submittedData, iconName);
+
+    // WebSession's type now corresponds to the mapped component type
+    const webSession = new WebSession<ConnectionSessionType>(
+      submittedData.hostname,
+      sessionComponent,
+      submittedData,
+      iconName,
+    );
     return of(webSession);
   }
 
-  addSession(newSession: WebSession<any, any>): void {
+  addSession(newSession: WebSession<SessionType>): void {
     newSession.tabIndex = this.webSessionDataSubject.getValue().length;
     const currentSessions = this.webSessionDataSubject.value;
     const updatedSessions = [...currentSessions, newSession];
@@ -86,7 +100,7 @@ export class WebSessionService {
     this.setWebSessionTabIndexToLastCreated(newSession.tabIndex);
   }
 
-  updateSession(updatedWebSession: WebSession<any, any>): void {
+  updateSession(updatedWebSession: WebSession<SessionType>): void {
     const currentSessions = this.webSessionDataSubject.value;
     const index: number = currentSessions.findIndex((webSession) => webSession.id === updatedWebSession.id);
 
@@ -121,9 +135,9 @@ export class WebSessionService {
 
   //For translation ConnectionHasBeenTerminatedEllipsis
   async updateWebSessionIcon(updateWebSessionId: string, icon: string): Promise<void> {
-    const currentSessions: WebSession<any, any>[] = this.webSessionDataSubject.value;
+    const currentSessions = this.webSessionDataSubject.value;
     const index: number = currentSessions.findIndex((session) => session.id === updateWebSessionId);
-    const webSession: WebSession<any, any> = currentSessions[index];
+    const webSession = currentSessions[index];
 
     if (index !== -1) {
       webSession.icon = icon;
@@ -165,15 +179,15 @@ export class WebSessionService {
     this.initializeWebSessionService();
   }
 
-  getAllWebSessions(): Observable<WebSession<any, any>[]> {
+  getAllWebSessions() {
     return this.webSessionData$;
   }
 
-  getMenuWebSessions(): Observable<WebSession<any, any>[]> {
+  getMenuWebSessions() {
     return this.webSessionData$.pipe(map((array) => array.slice(SESSIONS_MENU_OFFSET)));
   }
 
-  async getWebSession(webSessionId: string): Promise<WebSession<any, any>> {
+  async getWebSession(webSessionId: string) {
     const currentWebSessions = this.webSessionDataSubject.value;
     const webSession = currentWebSessions.filter((webSession) => webSession.id === webSessionId);
 
@@ -183,7 +197,7 @@ export class WebSessionService {
     return webSession[0];
   }
 
-  getWebSessionSnapshot(): WebSession<any, any>[] {
+  getWebSessionSnapshot() {
     return this.webSessionDataSubject.getValue();
   }
 
@@ -234,14 +248,16 @@ export class WebSessionService {
     this.webSessionScreenSizeSubject.complete();
   }
 
-  private async terminateSession(session: WebSession<any, any>): Promise<void> {
+  private async terminateSession<T extends SessionType & Partial<CanSendTerminateSessionCmd>>(
+    session: WebSession<T>,
+  ): Promise<void> {
     if (typeof session.componentRef.instance.sendTerminateSessionCmd === 'function') {
       session.componentRef.instance.sendTerminateSessionCmd();
     }
   }
 
   private initializeWebSessionService(): void {
-    this.webSessionDataSubject = new BehaviorSubject<WebSession<any, any>[]>([]);
+    this.webSessionDataSubject = new BehaviorSubject<WebSession<ConnectionSessionType>[]>([]);
     this.webSessionData$ = this.webSessionDataSubject.asObservable();
 
     this.webSessionCurrentTabIndexSubject = new BehaviorSubject(0);
@@ -251,8 +267,8 @@ export class WebSessionService {
     this.webSessionScreenSizeIndex$ = this.webSessionScreenSizeSubject.asObservable();
   }
 
-  private isWebSessionValid(WebSession: WebSession<any, any>): ComponentRef<any> {
-    return WebSession && WebSession.componentRef;
+  private isWebSessionValid(WebSession: WebSession<SessionType>) {
+    return WebSession?.componentRef;
   }
 
   private processHostname(autoCompleteInput: AutoCompleteInput): string {

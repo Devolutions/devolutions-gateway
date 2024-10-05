@@ -2,6 +2,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
+import { SessionTokenParameters } from '../interfaces/connection-params.interfaces';
 
 interface VersionInfo {
   latestVersion?: string;
@@ -26,12 +27,13 @@ export class ApiService {
   private devolutionProductApiURL = 'https://devolutions.net/products.htm';
   constructor(private http: HttpClient) {}
 
-  generateAppToken(username?: string, password?: string): Observable<any> {
+  generateAppToken(username?: string, password?: string) {
     let headers = new HttpHeaders({
       'Content-Type': 'application/json',
       'x-requested-with': 'XMLHttpRequest',
     });
 
+    let finalUsername = username;
     if (username && password) {
       headers = new HttpHeaders({
         Authorization: `Basic ${btoa(username + ':' + password)}`,
@@ -39,19 +41,19 @@ export class ApiService {
         'x-requested-with': 'XMLHttpRequest',
       });
     } else {
-      username = '';
+      finalUsername = '';
     }
 
     const body = {
       content_type: 'WEBAPP',
-      subject: username,
+      subject: finalUsername,
       lifetime: 7200, // 2hours
     };
 
     return this.http.post(this.appTokenApiUrl, body, { headers, responseType: 'text' });
   }
 
-  generateSessionToken(tokenParameters: any): Observable<string> {
+  generateSessionToken(tokenParameters: SessionTokenParameters): Observable<string> {
     const headers: HttpHeaders = new HttpHeaders({
       'Content-Type': 'application/json',
     });
@@ -91,6 +93,7 @@ export class ApiService {
             .split('\n')
             .map((line) => line.split('='))
             .filter((keyValue) => keyValue.length === 2 && keysToFetch.includes(keyValue[0]))
+            // biome-ignore lint/performance/noAccumulatingSpread: Not a performance concern
             .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
 
           const latestVersion = result['Gateway.Version'];

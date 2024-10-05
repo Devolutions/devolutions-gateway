@@ -1,6 +1,6 @@
 import { DesktopSize } from '@devolutions/iron-remote-gui';
 
-export interface sessionTokenParameters {
+export interface SessionTokenParameters {
   content_type: string;
   protocol?: string;
   destination?: string;
