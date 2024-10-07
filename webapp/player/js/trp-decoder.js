@@ -49,7 +49,7 @@ export function convertTRPtoCast(fileArray) {
   let castFile = JSON.stringify(castHeader) + '\n';
   for (const event of castEvents) {
     castFile += JSON.stringify(event) + '\n';
-  }
+  };
   return castFile;
 }
 
