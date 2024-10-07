@@ -1,5 +1,5 @@
 import { Component, Input, OnInit, SimpleChanges } from '@angular/core';
-import { AbstractControl, FormGroup } from '@angular/forms';
+import { AbstractControl, FormGroup, Validators } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -15,6 +15,7 @@ export class PasswordControlComponent extends BaseComponent implements OnInit {
   @Input() isEnabled = true;
   @Input() label = 'Password';
   @Input() formKey = 'password';
+  @Input() isRequired = true;
 
   showPasswordToggle = false;
 
@@ -23,7 +24,8 @@ export class PasswordControlComponent extends BaseComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.formService.addControlToForm(this.parentForm, this.formKey, this.inputFormData);
+    console.log('this is required', this.isRequired);
+    this.formService.addControlToForm(this.parentForm, this.formKey, this.inputFormData, this.isRequired);
     this.toggleControl();
   }
 
@@ -41,6 +43,19 @@ export class PasswordControlComponent extends BaseComponent implements OnInit {
     const control = this.parentForm.get(this.formKey);
     if (control) {
       this.isEnabled ? control.enable() : control.disable();
+    }
+    this.updateValidators();
+  }
+
+  private updateValidators(): void {
+    const control = this.parentForm.get(this.formKey);
+    if (control) {
+      if (this.isRequired) {
+        control.setValidators([Validators.required]);
+      } else {
+        control.clearValidators(); // Remove the 'required' validator
+      }
+      control.updateValueAndValidity(); // Ensure the form reflects new validation state
     }
   }
 }

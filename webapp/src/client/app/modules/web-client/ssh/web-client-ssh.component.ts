@@ -157,7 +157,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       return;
     }
 
-    this.remoteTerminal.status.subscribe((v) => {
+    this.remoteTerminal.onStatusChange((v) => {
       if (v === TerminalConnectionStatus.connected) {
         // connected only indicates connection to Gateway is successful
         this.remoteTerminal.writeToTerminal('connecting... \r\n');
@@ -180,15 +180,18 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
   private callConnect(connectionParameters: SshConnectionParameters) {
     return from(
-      this.remoteTerminal.connect(
-        connectionParameters.host,
-        connectionParameters.port,
-        connectionParameters.username,
-        connectionParameters.gatewayAddress + `?token=${connectionParameters.token}`,
-        connectionParameters.password,
-        connectionParameters.privateKey,
-        connectionParameters.privateKeyPassphrase,
-      ),
+      this.remoteTerminal.connect({
+        hostname: connectionParameters.host,
+        port: connectionParameters.port,
+        username: connectionParameters.username,
+        proxyUrl: connectionParameters.gatewayAddress + `?token=${connectionParameters.token}`,
+        passpharse: connectionParameters.privateKeyPassphrase ?? '',
+        privateKey: connectionParameters.privateKey ?? '',
+        password: connectionParameters.password ?? '',
+        onHostKeyReceived: (serverName, fingerprint) => {
+          return Promise.resolve(true);
+        },
+      }),
     ).pipe(catchError((error) => throwError(error)));
   }
 
@@ -228,21 +231,18 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       return;
     }
 
-    this.remoteTerminal.status.subscribe({
-      next: (status): void => {
-        switch (status) {
-          case TerminalConnectionStatus.connected:
-            this.handleSessionStarted();
-            break;
-          case TerminalConnectionStatus.failed:
-          case TerminalConnectionStatus.closed:
-            this.handleSessionEndedOrError(status);
-            break;
-          default:
-            break;
-        }
-      },
-      error: (err) => this.handleSubscriptionError(err),
+    this.remoteTerminal.onStatusChange((status) => {
+      switch (status) {
+        case TerminalConnectionStatus.connected:
+          this.handleSessionStarted();
+          break;
+        case TerminalConnectionStatus.failed:
+        case TerminalConnectionStatus.closed:
+          this.handleSessionEndedOrError(status);
+          break;
+        default:
+          break;
+      }
     });
   }
 
