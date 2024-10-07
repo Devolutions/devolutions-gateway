@@ -15,6 +15,7 @@ use std::time::Duration;
 use tap::prelude::*;
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot, Notify};
+use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Clone)]
@@ -25,50 +26,23 @@ pub enum ConnectionModeDetails {
     Fwd { destination_host: TargetAddr },
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, TypedBuilder)]
 pub struct SessionInfo {
     pub association_id: Uuid,
     pub application_protocol: ApplicationProtocol,
+    #[builder(setter(transform = |value: RecordingPolicy| value != RecordingPolicy::None))]
     pub recording_policy: bool,
+    #[builder(default = false)] // Not enforced yet, so it’s okay to not set it at all for now.
     pub filtering_policy: bool,
+    #[builder(setter(skip), default = OffsetDateTime::now_utc())]
     #[serde(with = "time::serde::rfc3339")]
     pub start_timestamp: OffsetDateTime,
     pub time_to_live: SessionTtl,
     #[serde(flatten)]
-    pub mode_details: ConnectionModeDetails,
+    pub details: ConnectionModeDetails,
 }
 
 impl SessionInfo {
-    pub fn new(association_id: Uuid, ap: ApplicationProtocol, mode_details: ConnectionModeDetails) -> Self {
-        Self {
-            association_id,
-            application_protocol: ap,
-            recording_policy: false,
-            filtering_policy: false,
-            start_timestamp: OffsetDateTime::now_utc(),
-            time_to_live: SessionTtl::Unlimited,
-            mode_details,
-        }
-    }
-
-    #[must_use]
-    pub fn with_recording_policy(mut self, value: RecordingPolicy) -> Self {
-        self.recording_policy = value != RecordingPolicy::None;
-        self
-    }
-
-    #[must_use]
-    pub fn with_filtering_policy(mut self, value: bool) -> Self {
-        self.filtering_policy = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_ttl(mut self, value: SessionTtl) -> Self {
-        self.time_to_live = value;
-        self
-    }
-
     pub fn id(&self) -> Uuid {
         self.association_id
     }

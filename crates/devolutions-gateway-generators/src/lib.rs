@@ -203,11 +203,14 @@ pub fn any_association_claims(now: i64, validity_duration: i64) -> impl Strategy
 
 pub fn session_info_fwd_only() -> impl Strategy<Value = SessionInfo> {
     (uuid_typed(), application_protocol(), target_addr()).prop_map(|(id, application_protocol, destination_host)| {
-        SessionInfo::new(
-            id,
-            application_protocol,
-            ConnectionModeDetails::Fwd { destination_host },
-        )
+        SessionInfo::builder()
+            .association_id(id)
+            .application_protocol(application_protocol)
+            .details(ConnectionModeDetails::Fwd { destination_host })
+            .recording_policy(token::RecordingPolicy::None)
+            .filtering_policy(false)
+            .time_to_live(token::SessionTtl::Unlimited)
+            .build()
     })
 }
 

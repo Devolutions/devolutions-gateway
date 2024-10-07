@@ -49,15 +49,15 @@ pub async fn handle(
 
     let session_id = claims.jet_aid;
 
-    let info = SessionInfo::new(
-        session_id,
-        claims.jet_ap,
-        ConnectionModeDetails::Fwd {
+    let info = SessionInfo::builder()
+        .association_id(session_id)
+        .application_protocol(claims.jet_ap)
+        .details(ConnectionModeDetails::Fwd {
             destination_host: main_destination_host,
-        },
-    )
-    .with_ttl(claims.jet_ttl)
-    .with_recording_policy(claims.jet_rec);
+        })
+        .time_to_live(claims.jet_ttl)
+        .recording_policy(claims.jet_rec)
+        .build();
 
     let notify_kill = Arc::new(Notify::new());
 
