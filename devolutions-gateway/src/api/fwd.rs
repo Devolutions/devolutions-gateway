@@ -181,16 +181,16 @@ where
 
             info!("WebSocket-TLS forwarding");
 
-            let info = SessionInfo::new(
-                claims.jet_aid,
-                claims.jet_ap,
-                ConnectionModeDetails::Fwd {
+            let info = SessionInfo::builder()
+                .association_id(claims.jet_aid)
+                .application_protocol(claims.jet_ap)
+                .details(ConnectionModeDetails::Fwd {
                     destination_host: selected_target.clone(),
-                },
-            )
-            .with_ttl(claims.jet_ttl)
-            .with_recording_policy(claims.jet_rec)
-            .with_filtering_policy(claims.jet_flt);
+                })
+                .time_to_live(claims.jet_ttl)
+                .recording_policy(claims.jet_rec)
+                .filtering_policy(claims.jet_flt)
+                .build();
 
             Proxy::builder()
                 .conf(conf)
@@ -209,16 +209,16 @@ where
         } else {
             info!("WebSocket-TCP forwarding");
 
-            let info = SessionInfo::new(
-                claims.jet_aid,
-                claims.jet_ap,
-                ConnectionModeDetails::Fwd {
+            let info = SessionInfo::builder()
+                .association_id(claims.jet_aid)
+                .application_protocol(claims.jet_ap)
+                .details(ConnectionModeDetails::Fwd {
                     destination_host: selected_target.clone(),
-                },
-            )
-            .with_ttl(claims.jet_ttl)
-            .with_recording_policy(claims.jet_rec)
-            .with_filtering_policy(claims.jet_flt);
+                })
+                .time_to_live(claims.jet_ttl)
+                .recording_policy(claims.jet_rec)
+                .filtering_policy(claims.jet_flt)
+                .build();
 
             Proxy::builder()
                 .conf(conf)

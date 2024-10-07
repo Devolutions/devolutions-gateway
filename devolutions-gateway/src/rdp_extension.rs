@@ -305,14 +305,15 @@ pub async fn handle(
 
     // Start actual RDP session
 
-    let info = SessionInfo::new(
-        claims.jet_aid,
-        claims.jet_ap,
-        ConnectionModeDetails::Fwd {
+    let info = SessionInfo::builder()
+        .association_id(claims.jet_aid)
+        .application_protocol(claims.jet_ap)
+        .details(ConnectionModeDetails::Fwd {
             destination_host: destination.clone(),
-        },
-    )
-    .with_ttl(claims.jet_ttl);
+        })
+        .time_to_live(claims.jet_ttl)
+        .recording_policy(claims.jet_rec)
+        .build();
 
     info!("RDP-TLS forwarding");
 
