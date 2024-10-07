@@ -8,6 +8,8 @@
     "watch": "ng build --watch --configuration development",
     "check": "biome check ./src",
     "check:write": "biome check --write ./src",
+    "check:write:player": "biome check --write ./player",
+    "check:player": "biome check ./player",
     "lint": "biome lint ./src",
     "lint:write": "biome lint --write ./src",
     "fmt": "biome format ./src",
