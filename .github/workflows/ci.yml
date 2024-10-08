@@ -363,7 +363,7 @@ jobs:
       - name: check recording player
         shell: pwsh
         working-directory: webapp
-        run: npm run check:player
+        run: npm run player:check
 
       - uses: actions/upload-artifact@v4
         with:
