@@ -420,3 +420,23 @@ jobs:
           destination_path: /Agent/${{ steps.prepare.outputs.version }}
           remote: releases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
+
+  remove-labels:
+    name: Remove release-required labels
+    runs-on: ubuntu-latest
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    needs:
+      - containers
+      - github-release
+      - psgallery-release
+      - onedrive-gateway
+      - onedrive-agent
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v4
+
+      - name: Remove labels
+        shell: pwsh
+        run: ./ci/remove-labels.ps1 -Label 'release-required'
+

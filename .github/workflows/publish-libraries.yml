@@ -194,6 +194,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_WRITE_TOKEN }}
 
+  remove-labels:
+    name: Remove publish-required labels
+    runs-on: ubuntu-latest
+    if: needs.preflight.outputs.dry-run == 'false'
+    needs:
+      - nuget-build
+      - npm-publish
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v4
+
+      - name: Remove labels
+        shell: pwsh
+        run: ./ci/remove-labels.ps1 -Label 'publish-required'
+
   notify:
     name: Notify failure
     runs-on: ubuntu-latest
