@@ -1,4 +1,3 @@
-
 export function ensureNoSameTimeCues(content) {
   const lines = content.split('\n');
   let prevLine = null; // Correctly using let to track previous line

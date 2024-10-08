@@ -1,5 +1,5 @@
-import { convertTRPtoCast } from './trp-decoder.js';
 import { ensureNoSameTimeCues } from './cast-parser.js';
+import { convertTRPtoCast } from './trp-decoder.js';
 
 const windowURL = new URL(window.location.href);
 const sessionId = windowURL.searchParams.get('sessionId');
@@ -101,7 +101,7 @@ request.onreadystatechange = () => {
       setTimeout(() => {
         player.play();
       }, 500);
-    })
+    });
   }
 };
 
