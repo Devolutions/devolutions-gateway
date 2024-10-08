@@ -5,10 +5,6 @@ export default defineConfig({
     proxy: {
       '/upload': 'http://localhost:3000',
       '/jet': 'http://localhost:3000',
-      '/player': 'http://localhost:3000'
     },
-    fs: {
-      allow: ['../player']
-    }
   }
 })

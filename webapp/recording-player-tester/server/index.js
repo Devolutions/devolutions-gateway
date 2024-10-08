@@ -3,9 +3,7 @@ import multer from "multer";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
+import { fileURLToPath } from "node:url";
 
 // Get the OS's temp directory
 const tempDir = os.tmpdir();
@@ -61,29 +59,38 @@ app.post("/upload", upload.single("file"), (req, res) => {
   }
 });
 
-const playerPath = path.join(fileURLToPath(import.meta.url), '../../../player');
-app.use('/player', express.static(playerPath));
-
-// Middleware to handle all other requests
-app.use((req, res, next) => {
-  if (req.path === "/upload" && req.method === "POST") {
-    return next();
+const playerPath = path.join(fileURLToPath(import.meta.url), "../../../player");
+app.use("/jet/jrec/play", express.static(playerPath));
+app.get("/jet/jrec/pull/:sessionId/:fileName", (req, res) => {
+  if (!uploadedFileHandle) {
+    return res.status(404).send("No file uploaded.");
   }
-
-  if (req.path === "/player"){
-    return next();
-  }
-
-  if (uploadedFileHandle && fs.existsSync(uploadedFileHandle.path)) {
-    // Send the file as a response if it exists
-    res.sendFile(uploadedFileHandle.path, (err) => {
-      if (err) {
-        res.status(500).send("Error sending file: " + err.message);
-      }
+  console.log("File pulled invoked, fileName: ", req.params.fileName);
+  if (req.params.fileName === "recording.json") {
+    res.json({
+      sessionId: req.params.sessionId,
+      startTime: 1728335793,
+      duration: 8,
+      files: [
+        {
+          fileName: uploadedFileHandle.originalname,
+          startTime: 1728335793,
+          duration: 8,
+        },
+      ],
     });
-  } else {
-    // If no file has been uploaded yet, send a 404 response
-    res.status(404).send("No file uploaded yet.");
+  } else if (req.params.fileName === uploadedFileHandle.originalname) {
+    const { path, originalname, mimetype, size } = uploadedFileHandle;
+    const fileStream = fs.createReadStream(path);
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=${originalname}`
+    );
+    res.setHeader("Content-Type", mimetype);
+    res.setHeader("Content-Length", size);
+
+    fileStream.pipe(res);
   }
 });
 
