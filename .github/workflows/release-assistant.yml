@@ -84,7 +84,7 @@ jobs:
 
       - name: Send slack notification
         id: slack
-        if: steps.verify-labels.outputs.do-send == 'yes'
+        if: steps.verify-labels.outputs.notify == 'yes'
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
