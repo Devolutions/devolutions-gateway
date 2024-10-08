@@ -17,12 +17,13 @@
   </div>
 
   <div class="col-12 gateway-form-group" [hidden]="!formInputVisibility.showPrivateKeyInput">
-      <web-client-password-control [parentForm]="form" 
-            [inputFormData]="inputFormData" 
-            [label]="'Passphrase'" 
-            [formKey]="'passphrase'" 
+      <web-client-password-control [parentForm]="form"
+            [inputFormData]="inputFormData"
+            [label]="'Passphrase'"
+            [formKey]="'passphrase'"
+            [isRequired]="false"
             [isEnabled]="formInputVisibility.showPrivateKeyInput">
-      </web-client-password-control>    
+      </web-client-password-control>
   </div>
 
   <div [hidden]="!formInputVisibility.showPrivateKeyInput">
