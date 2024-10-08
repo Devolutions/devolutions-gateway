@@ -1,4 +1,5 @@
 import { convertTRPtoCast } from './trp-decoder.js';
+import { ensureNoSameTimeCues } from './cast-parser.js';
 
 const windowURL = new URL(window.location.href);
 const sessionId = windowURL.searchParams.get('sessionId');
@@ -92,12 +93,15 @@ request.onreadystatechange = () => {
     // create the Div
     document.body.appendChild(terminalDiv);
     const castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
-    const player = new XtermPlayer.XtermPlayer(castSrc, terminalDiv, {
-      fontSize: 12,
-    });
-    setTimeout(() => {
-      player.play();
-    }, 500);
+
+    loadFile(castSrc, (castFileContent) => {
+      const fixedContent = ensureNoSameTimeCues(new TextDecoder().decode(castFileContent));
+      const objectUrl = URL.createObjectURL(new Blob([fixedContent], { type: 'text/plain' }));
+      const player = new XtermPlayer.XtermPlayer(objectUrl, terminalDiv);
+      setTimeout(() => {
+        player.play();
+      }, 500);
+    })
   }
 };
 
