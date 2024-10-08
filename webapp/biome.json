@@ -7,7 +7,8 @@
     "ignore": [
       "*.json",
       "*.js.map",
-      "*.min.js"
+      "*.min.js",
+      "*.min.css"
     ]
   },
   "linter": {

@@ -355,6 +355,16 @@ jobs:
         working-directory: webapp
         run: npm run build
 
+      - name: Check webapp
+        shell: pwsh
+        working-directory: webapp
+        run: npm run check
+      
+      - name: check recording player
+        shell: pwsh
+        working-directory: webapp
+        run: npm run player:check
+
       - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
