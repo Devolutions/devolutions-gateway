@@ -61,6 +61,8 @@ jobs:
       - name: Verify labels
         id: verify-labels
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $blockerCount = ./ci/pr-count-for-label.ps1 -Label '${{ matrix.blocker-label }}'
 
