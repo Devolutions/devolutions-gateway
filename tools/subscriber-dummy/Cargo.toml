@@ -1,6 +1,6 @@
 [package]
 name = "subscriber-dummy"
-version = "0.1"
+version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
