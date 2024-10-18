@@ -259,12 +259,18 @@ Output formats:
     - human: human-readable output
     - json: print one JSON object per line for each diagnostic
 
-The JSON objects have the following fields:
+The diagonstic JSON objects have the following fields:
     - "name" (Required): A string for the name of the diagnostic.
     - "success" (Required): A boolean set to true when the diagnostic is successful and false otherwise.
     - "output" (Optional): The execution trace of the diagnostic.
     - "error" (Optional): The error returned by the diagnostic when failed.
     - "help" (Optional): A help message suggesting how to fix the issue.
+    - "links" (Optional): An array of links. See the definition below.
+
+The link JSON objects have the following fields:
+    - "name" (Required): The title associated to the linked web page.
+    - "href" (Required): The URL to the web page.
+    - "description" (Required): A short description of the contents.
 
 {pipe_formats}
 
