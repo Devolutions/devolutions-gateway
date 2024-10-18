@@ -374,7 +374,7 @@ jobs:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: [preflight, devolutions-gateway-web-ui]
-    if: always()
+    if: always() # The webapp can’t be build without secrets that we don’t provide for PRs coming from forks.
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
@@ -508,6 +508,7 @@ jobs:
     name: devolutions gateway merge artifacts
     runs-on: ubuntu-latest
     needs: [preflight, devolutions-gateway]
+    if: always() # The job is skipped for PRs coming from forks because the devolutions-gateway job would have been skipped (if always() wasn’t used). Another GitHub action oddity.
 
     steps:
       - name: Merge Artifacts
@@ -521,7 +522,6 @@ jobs:
     name: devolutions-agent [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: [preflight]
-    if: always()
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.agent-build-matrix) }}
@@ -718,10 +718,11 @@ jobs:
   success:
     name: Success
     runs-on: ubuntu-latest
-    if: ${{ always() }}
+    if: always()
     needs:
       - tests
       - jetsocat-lipo
+      - devolutions-gateway
       - devolutions-gateway-merge
       - devolutions-agent-merge
       - dotnet-utils-tests
