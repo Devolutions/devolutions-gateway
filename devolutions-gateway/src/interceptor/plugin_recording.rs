@@ -76,8 +76,8 @@ impl PluginRecordingInspector {
 
         // FIXME: use a tokio task instead
         let handle = thread::spawn({
-            let recorder = recorder.clone();
-            let condition_timeout = condition_timeout.clone();
+            let recorder = Arc::clone(&recorder);
+            let condition_timeout = Arc::clone(&condition_timeout);
             move || timeout_task(recorder, condition_timeout)
         });
 

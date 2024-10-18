@@ -2,7 +2,237 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
-## [Unreleased]
+## 2024.3.3 (2024-10-02)
+
+### Features
+
+- _pedm_: add context menu icon resource ([#990](https://github.com/Devolutions/devolutions-gateway/issues/990)) ([263de985cc](https://github.com/Devolutions/devolutions-gateway/commit/263de985cc7eec51cb906d8e0d3669d827e1dfcc)) 
+
+- _agent_: devolutions-session bootstrap ([#997](https://github.com/Devolutions/devolutions-gateway/issues/997)) ([f8b291d908](https://github.com/Devolutions/devolutions-gateway/commit/f8b291d9080c5c541f85c434e5fd23a39319f6b5)) 
+
+- _jetsocat_: Windows named pipes and Unix sockets ([#1022](https://github.com/Devolutions/devolutions-gateway/issues/1022)) ([b13caba5b6](https://github.com/Devolutions/devolutions-gateway/commit/b13caba5b6a3481861e5cf1595c33e3d0968c93c)) 
+
+- _jetsocat_: new doctor subcommand for diagnostics ([#1030](https://github.com/Devolutions/devolutions-gateway/issues/1030)) ([6ed8591b38](https://github.com/Devolutions/devolutions-gateway/commit/6ed8591b3865de82c6b3984ded2e335880f2b379)) 
+
+### Bug Fixes
+
+- _pwsh_: trace more info when importing Certificate from PFX ([#992](https://github.com/Devolutions/devolutions-gateway/issues/992)) ([5de155738a](https://github.com/Devolutions/devolutions-gateway/commit/5de155738a872dcdba922ea54354121277b27c93)) 
+
+- _dgw_: set dwShareMode for recording files on Windows ([#1007](https://github.com/Devolutions/devolutions-gateway/issues/1007)) ([4df3c854ca](https://github.com/Devolutions/devolutions-gateway/commit/4df3c854cae6642f6c771621c68ef79c478db796)) 
+
+  On Windows, the default default share_mode set when opening a new file
+  is `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`.
+  
+  We now override the share_mode and set it to `FILE_SHARE_READ`.
+  
+  This makes the recording process more robust by ensuring no other
+  process can write or delete the files while the Devolutions Gateway
+  is actively writing it.
+
+- _jetsocat,dgw_: add backpressure in JMUX proxy ([41ea3ee3f0](https://github.com/Devolutions/devolutions-gateway/commit/41ea3ee3f03254c1415624d2344dd9b2dca38d65)) 
+
+  The memory consumption of the JMUX proxy was unbounded because we used
+  an unbounded mpsc channel for message passing.
+  
+  Here is a `jetsocat-bench.nu` run against master:
+
+- _player_: start recording when tab is open ([#1024](https://github.com/Devolutions/devolutions-gateway/issues/1024)) ([6506b08ee2](https://github.com/Devolutions/devolutions-gateway/commit/6506b08ee2e604867bc73c46c08b6b42ba716745)) ([RDMW-16402](https://devolutions.atlassian.net/browse/RDMW-16402)) 
+
+## 2024.3.2 (2024-08-20)
+
+### Features
+
+- _agent_: initial PEDM implementation ([1ed573ae54](https://github.com/Devolutions/devolutions-gateway/commit/1ed573ae546d17582e6cb1209d588d21e8b47236)) 
+
+### Improvements
+
+- _dgw_: log KDC domain when throwing the error ([#963](https://github.com/Devolutions/devolutions-gateway/issues/963)) ([873217c804](https://github.com/Devolutions/devolutions-gateway/commit/873217c8042167bf378613f812b3db2a399d256a)) 
+
+  We now print the name of the requested domain when the requested
+  domain didn't match the authorized (expected) domain.
+
+- _dgw_: accept subject name even if it does not match the hostname ([1f40b45bae](https://github.com/Devolutions/devolutions-gateway/commit/1f40b45baed4c4aca71344de30d826b354029086)) 
+
+  Configurations where the certificate subject name does not match the
+  hostname are now accepted.
+  Instead, a few warning and debug log records are added to help
+  discover configuration issues in case of problem.
+  The problem with the strict approach we had previously is that we
+  may reject valid configurations where the hostname was actually
+  matched by one of the subject alternative names in the certificate.
+
+### Performance
+
+- _jetsocat_: use a larger buffer for plain forwarding ([#968](https://github.com/Devolutions/devolutions-gateway/issues/968)) ([6c18ff1fc1](https://github.com/Devolutions/devolutions-gateway/commit/6c18ff1fc133ecf7bb00ff0a235494988f479e19)) 
+
+  By increasing the size of the intermediate buffer from 8k to 16k,
+  performance of raw TCP forwarding is increased by ~19.4%.
+  
+  Performance was measured using `iperf` on local network.
+
+- _jetsocat,dgw_: major throughput improvement for JMUX proxy (Devolutions Gateway Tunnel) ([#973](https://github.com/Devolutions/devolutions-gateway/issues/973)) ([32de1d50de](https://github.com/Devolutions/devolutions-gateway/commit/32de1d50de509559e2b8f2d6c7e1259c0db85cb1)) ([#975](https://github.com/Devolutions/devolutions-gateway/issues/975)) ([8ebfd2316d](https://github.com/Devolutions/devolutions-gateway/commit/8ebfd2316d2bcc1355e9dadd3d379b635c74bb23)) ([#976](https://github.com/Devolutions/devolutions-gateway/issues/976)) ([11efaa5cfe](https://github.com/Devolutions/devolutions-gateway/commit/11efaa5cfe1a87d3880c82a27e37a4da9d38ed4e)) ([#977](https://github.com/Devolutions/devolutions-gateway/issues/977)) ([6b77a993ab](https://github.com/Devolutions/devolutions-gateway/commit/6b77a993abdfb9022babf35194b66c135c06fa53)) ([DGW-202](https://devolutions.atlassian.net/browse/DGW-202)) ([#980](https://github.com/Devolutions/devolutions-gateway/issues/980)) ([53af6fa7c7](https://github.com/Devolutions/devolutions-gateway/commit/53af6fa7c7bab58498b8b0e82d5f7998efe0c368))
+
+  See [JMUX-proxy-performance.md](./docs/JMUX-proxy-performance.md).
+
+### Build
+
+- _dgw_: update cryptography dependencies ([787027cbf9](https://github.com/Devolutions/devolutions-gateway/commit/787027cbf96c19a440a401512f9b351b340632e6)) 
+
+  We keep using ring as our crypto provider for now.
+
+## 2024.3.1 (2024-08-01)
+
+### Features
+
+- _dgw_: dynamically load XMF native lib on startup ([#939](https://github.com/Devolutions/devolutions-gateway/issues/939)) ([86dee2631a](https://github.com/Devolutions/devolutions-gateway/commit/86dee2631a210cf89e07727bec52cc773f23e8e8)) 
+
+  The `DGATEWAY_LIB_XMF_PATH` environment variable can be used optionally to specify the path to
+  the XMF native library.
+
+- _dgw_: remux webm files when video recording ends ([#943](https://github.com/Devolutions/devolutions-gateway/issues/943)) ([cc787ef691](https://github.com/Devolutions/devolutions-gateway/commit/cc787ef69195cc55dbd001159b19a61d70fe6404)) 
+
+### Bug Fixes
+
+- _dgw_: fix recording player parsing problem ([#937](https://github.com/Devolutions/devolutions-gateway/issues/937)) ([cdf08a3e2c](https://github.com/Devolutions/devolutions-gateway/commit/cdf08a3e2cd3357af5a68573aa5ba7fe3ad07862)) ([DPS-11197](https://devolutions.atlassian.net/browse/DPS-11197)) 
+
+  - Remove usage of btoa, it fails on different charset.
+
+  - Add 1 millisecond if the time of previous event is the same at the next event.
+    Otherwise, the player will throw an error.
+
+- _webapp_: fix RDP connection form - set pre connection blob as not required ([#950](https://github.com/Devolutions/devolutions-gateway/issues/950)) ([c684994fce](https://github.com/Devolutions/devolutions-gateway/commit/c684994fcec84b376a716725a72c8e856e59ecac)) 
+
+- _webapp_: add tooltip ellipsis for long netscan service names ([#946](https://github.com/Devolutions/devolutions-gateway/issues/946)) ([5e4b3080d6](https://github.com/Devolutions/devolutions-gateway/commit/5e4b3080d6f6ce8525bf36d3fff2da8d56782276)) ([DGW-204](https://devolutions.atlassian.net/browse/DGW-204))
+
+- _dgw_: [**breaking**] jet_rec claim is now a string ([#957](https://github.com/Devolutions/devolutions-gateway/issues/957)) ([59bb0af249](https://github.com/Devolutions/devolutions-gateway/commit/59bb0af249ad99a616e2b6308db7bbab84b55068)) 
+
+  Possible values are:
+  
+  - `none`: No policy to enforce (recording is optional)
+  
+  - `stream`: An external application (e.g.: RDM) must push the
+    recording stream via a separate websocket connection
+  
+  - `proxy`: Session must be recorded directly at Devolutions Gateway
+    level (not implemented yet)
+
+  Note: Up until now, Devolutions Gateway was rejecting sessions when this claim was found because it couldn’t upheld
+  the policy. It’s effectively not breaking anything which wasn’t already broken previously.
+
+## 2024.3.0 (2024-07-24)
+
+### Features
+
+- _agent_: Devolutions Gateway service updater ([#889](https://github.com/Devolutions/devolutions-gateway/issues/889)) ([92f86bf51b](https://github.com/Devolutions/devolutions-gateway/commit/92f86bf51b072699a86173affda5b54cced1fc07)) 
+
+- _dgw_: add API to trigger Devolutions Gateway update ([#890](https://github.com/Devolutions/devolutions-gateway/issues/890)) ([799e518c15](https://github.com/Devolutions/devolutions-gateway/commit/799e518c154db18d8895b96a08eec336ff70edcb)) 
+
+- _dgw_: support .cast terminal recording files ([#900](https://github.com/Devolutions/devolutions-gateway/issues/900)) ([d1f7559a3e](https://github.com/Devolutions/devolutions-gateway/commit/d1f7559a3ee422c3e0696ed9f1ccc02eb17f9e7d)) 
+
+  The .cast extension is used for "asciicast" files, i.e.: asciinema cast files.
+  This is a widely used terminal playback format.
+
+### Bug Fixes
+
+- _dgw_: preserve DGW access URI base in recording player ([#899](https://github.com/Devolutions/devolutions-gateway/issues/899)) ([92f87c8cea](https://github.com/Devolutions/devolutions-gateway/commit/92f87c8ceac7f16e5f25cc68578474e7a4a17ee9)) 
+
+  This is notably important for DVLS side by side setups.
+
+- _dgw_: fix cast file not working in recording player page ([#904](https://github.com/Devolutions/devolutions-gateway/issues/904)) ([c6985152a2](https://github.com/Devolutions/devolutions-gateway/commit/c6985152a297c7a9b949781e6efc1f6b36be85d0)) 
+
+- _dgw_: enforce recording policy ([#906](https://github.com/Devolutions/devolutions-gateway/issues/906)) ([13ed397eee](https://github.com/Devolutions/devolutions-gateway/commit/13ed397eeea965e696bf811ef774cfaf1e2bb8ac)) ([DGW-86](https://devolutions.atlassian.net/browse/DGW-86)) 
+
+  When recording flag is set and recording stream is closed, the associated
+  session is killed within 10 seconds.
+
+- _dgw_: support for `jet_rec` claim in JMUX tokens ([#909](https://github.com/Devolutions/devolutions-gateway/issues/909)) ([8b0c3eb80b](https://github.com/Devolutions/devolutions-gateway/commit/8b0c3eb80b631307995a168d3839118874466fc8)) 
+
+- _dgw_: recording player now scales with the size of the window ([#922](https://github.com/Devolutions/devolutions-gateway/issues/922)) ([4cb95a5e0c](https://github.com/Devolutions/devolutions-gateway/commit/4cb95a5e0c19a92909df99894796e5f818cb7e1b)) ([DGW-198](https://devolutions.atlassian.net/browse/DGW-198)) 
+
+## 2024.2.3 (2024-06-18)
+
+### Bug Fixes
+
+- _installer_: fix parsing errors with configuration check ([#893](https://github.com/Devolutions/devolutions-gateway/issues/893)) ([4f89688316](https://github.com/Devolutions/devolutions-gateway/commit/4f8968831698bb82afe06eb69421c6d984c7b062))
+
+- _installer_: package web player ([#894](https://github.com/Devolutions/devolutions-gateway/issues/894)) ([bbee301682](https://github.com/Devolutions/devolutions-gateway/commit/bbee301682dbdb8191a678a5853d92586eb883ff))
+
+## 2024.2.2 (2024-06-18)
+
+### Features
+
+- _installer_: add a basic configuration check ([#888](https://github.com/Devolutions/devolutions-gateway/issues/888)) ([2c3877e802](https://github.com/Devolutions/devolutions-gateway/commit/2c3877e8023ea8bfa590dfd4d29a5d164ddb02b7)) 
+
+### Bug Fixes
+
+- _dgw_: IP restrictions fallback for ngrok TCP listeners ([#881](https://github.com/Devolutions/devolutions-gateway/issues/881)) ([c2635ec6dc](https://github.com/Devolutions/devolutions-gateway/commit/c2635ec6dca3c9820c909d7e3337311481a0376d)) ([DGW-193](https://devolutions.atlassian.net/browse/DGW-193)) 
+
+  Now properly fallbacks to disabling IP restriction rules for TCP
+  listeners as well.
+
+- _dgw_: rework network interface DTO definition ([#871](https://github.com/Devolutions/devolutions-gateway/issues/871)) ([bc2cb96f9d](https://github.com/Devolutions/devolutions-gateway/commit/bc2cb96f9ddf6f36d3a89f9b4db4bccfb39227fa)) ([DGW-133](https://devolutions.atlassian.net/browse/DGW-133)) 
+
+## 2024.2.1 (2024-05-22)
+
+### Bug Fixes
+
+- _installer_: use Win32 to set file permissions ([#869](https://github.com/Devolutions/devolutions-gateway/issues/869)) ([813fc7f3bc](https://github.com/Devolutions/devolutions-gateway/commit/813fc7f3bc2c96793f2c4a6c99f7a8067402381e)) 
+
+## 2024.2.0 (2024-05-21)
+
+### Features
+
+- _webapp_: allow ssh client to use encrypted ssh keys ([#856](https://github.com/Devolutions/devolutions-gateway/issues/856)) ([6424c40ecb](https://github.com/Devolutions/devolutions-gateway/commit/6424c40ecbb975bbca05be476e11164a1e7b76c9)) 
+
+### Improvements
+
+- _webapp_: fix netscan result duplicate and performance improvement ([#845](https://github.com/Devolutions/devolutions-gateway/issues/845)) ([f447381294](https://github.com/Devolutions/devolutions-gateway/commit/f44738129446f3d609956d09674440b8efa7155e)) ([DGW-184](https://devolutions.atlassian.net/browse/DGW-184))
+
+### Bug Fixes
+
+- _webapp_: new version button is available even when a more recent version is used ([#846](https://github.com/Devolutions/devolutions-gateway/issues/846)) ([2b92c9ab3b](https://github.com/Devolutions/devolutions-gateway/commit/2b92c9ab3b7dc94007746be4eff5434fc3b1de64)) ([DGW-182](https://devolutions.atlassian.net/browse/DGW-182))
+
+- _webapp_: fix misaligned "Fill form" buttons when the hostname is too long ([#844](https://github.com/Devolutions/devolutions-gateway/issues/844)) ([1b8a6ebe9c](https://github.com/Devolutions/devolutions-gateway/commit/1b8a6ebe9c57469ce690380b480ce081842a3271)) ([DGW-180](https://devolutions.atlassian.net/browse/DGW-180))
+
+- _webapp_: fix force rescan button ([#847](https://github.com/Devolutions/devolutions-gateway/issues/847)) ([a08dd3159e](https://github.com/Devolutions/devolutions-gateway/commit/a08dd3159eb6ee5000d9214ac1f2664531b2e78d)) ([DGW-185](https://devolutions.atlassian.net/browse/DGW-185)) 
+
+- _webapp_: add tooltip to menu warning icon when session is closed ([#852](https://github.com/Devolutions/devolutions-gateway/issues/852)) ([b4ed845695](https://github.com/Devolutions/devolutions-gateway/commit/b4ed8456956917521a37e5ac24bae10742705175)) ([DGW-145](https://devolutions.atlassian.net/browse/DGW-145)) 
+
+- _webapp_: prevent suspicious "e" console logs ([#851](https://github.com/Devolutions/devolutions-gateway/issues/851)) ([cbf9bd360e](https://github.com/Devolutions/devolutions-gateway/commit/cbf9bd360e6dd2afe75de511e966ce748e129ca6)) ([DGW-164](https://devolutions.atlassian.net/browse/DGW-164)) 
+
+  Downgrade the Primeng package as the log was introduced in version 16.5.0.
+
+- _webapp_: connect session button stays grayed out intermittently ([#855](https://github.com/Devolutions/devolutions-gateway/issues/855)) ([3fdce898e5](https://github.com/Devolutions/devolutions-gateway/commit/3fdce898e55c19e0217816020cb1ed3316b067f0)) ([DGW-183](https://devolutions.atlassian.net/browse/DGW-183)) 
+
+- _dgw_: write new JRL into a temporary file, and swap on success ([#857](https://github.com/Devolutions/devolutions-gateway/issues/857)) ([d91f1cfb6a](https://github.com/Devolutions/devolutions-gateway/commit/d91f1cfb6a982be7c49e3fbdc31ce46a4ce4e20b)) ([DGW-104](https://devolutions.atlassian.net/browse/DGW-104)) 
+
+  It’s preferable to proceed like this to avoid losing current JRL file
+  if the file is truncated without being rewritten successfully immediately.
+
+- _pwsh_: fix reading .pem files from PowerShell runspace ([#859](https://github.com/Devolutions/devolutions-gateway/issues/859)) ([98437f6f4e](https://github.com/Devolutions/devolutions-gateway/commit/98437f6f4e836d4cdaa3fdce79d70aeda977c1bf)) 
+
+- _webapp_: format the error backtrace to show line breaks ([#860](https://github.com/Devolutions/devolutions-gateway/issues/860)) ([7e50a04dbd](https://github.com/Devolutions/devolutions-gateway/commit/7e50a04dbdba2e2d33dd9fa18dd6a06d7189624c)) ([DGW-169](https://devolutions.atlassian.net/browse/DGW-169)) 
+
+- _webapp_: menu icon does not update on error for RDP, ARD, VNC ([#861](https://github.com/Devolutions/devolutions-gateway/issues/861)) ([235e3a72f5](https://github.com/Devolutions/devolutions-gateway/commit/235e3a72f511a035b4666f3a721b77a377d4a591)) ([DGW-168](https://devolutions.atlassian.net/browse/DGW-168)) 
+
+- _webapp_: tooltip for the selected protocol is always set to RDP ([#862](https://github.com/Devolutions/devolutions-gateway/issues/862)) ([717d53e149](https://github.com/Devolutions/devolutions-gateway/commit/717d53e1494cfe796ed2978c1aa2757753ef0c95)) ([DGW-187](https://devolutions.atlassian.net/browse/DGW-187)) 
+
+- _dgw_: prevent error traces caused by browser behavior ([#864](https://github.com/Devolutions/devolutions-gateway/issues/864)) ([25b86ea1b3](https://github.com/Devolutions/devolutions-gateway/commit/25b86ea1b3ff63c692eacceed6abb43248ca85f2)) ([DGW-128](https://devolutions.atlassian.net/browse/DGW-128)) 
+
+  Since those are not actual errors, this was creating noise in the logs.
+
+### Performance
+
+- _dgw_: keep HTTP connections open for 10 minutes ([#863](https://github.com/Devolutions/devolutions-gateway/issues/863)) ([245e2cfb26](https://github.com/Devolutions/devolutions-gateway/commit/245e2cfb26ae4a6e39e865c506cd557e551a67c6)) 
+
+  Most browsers will keep HTTP connections open to increase throughput
+  when performing subsequent transactions.
+  For simplicity, we don’t distinguish between idle and non-idle
+  connections.
+
+### Build
+
+- _webapp_: build using production profile ([#853](https://github.com/Devolutions/devolutions-gateway/issues/853)) ([fbbcbbe96c](https://github.com/Devolutions/devolutions-gateway/commit/fbbcbbe96ce901b9103d32d89ead5a54284bd02b)) 
 
 ## 2024.1.6 (2024-05-06)
 
@@ -69,45 +299,13 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - Bump Rust toolchain to 1.77.2 ([#828](https://github.com/Devolutions/devolutions-gateway/issues/828)) ([8898dfcce4](https://github.com/Devolutions/devolutions-gateway/commit/8898dfcce4fd7757f78943159e026d959d3269e1)) 
 
-### Continuous Integration
-
 - Set content type on macOS jetsocat binary ([#800](https://github.com/Devolutions/devolutions-gateway/issues/800)) ([6e878d8db0](https://github.com/Devolutions/devolutions-gateway/commit/6e878d8db0dd1c42ede7e3fd0cbb9327969c767c)) 
-
-- Fix artifact upload conflicts ([#801](https://github.com/Devolutions/devolutions-gateway/issues/801)) ([aa14227434](https://github.com/Devolutions/devolutions-gateway/commit/aa1422743461c10221badc1b3adc1ce68e0a9b6e)) 
-
-- Restore deb package OneDrive upload in release ([#805](https://github.com/Devolutions/devolutions-gateway/issues/805)) ([3cc7e9bb1b](https://github.com/Devolutions/devolutions-gateway/commit/3cc7e9bb1b28f752411691713d967207eb7a8ebe)) 
-
-- Preserve Windows .pdb files ([#817](https://github.com/Devolutions/devolutions-gateway/issues/817)) ([301c499936](https://github.com/Devolutions/devolutions-gateway/commit/301c4999364d12b8a81d0eac375b5b538e89c814)) 
-
-- Skip packaging in forks ([#818](https://github.com/Devolutions/devolutions-gateway/issues/818)) ([fc851f2941](https://github.com/Devolutions/devolutions-gateway/commit/fc851f2941886ac67f1efb6c70d1c00173cff85b)) 
-
-- Don't run packaging in forked repo ([#822](https://github.com/Devolutions/devolutions-gateway/issues/822)) ([abd1bbc687](https://github.com/Devolutions/devolutions-gateway/commit/abd1bbc687f0d048215a1efc13e3103b836f0c1e)) 
-
-- _artifactory_: update the cache when a new version is published to NPM ([5008ca89d9](https://github.com/Devolutions/devolutions-gateway/commit/5008ca89d9dd6834b18621f92d230459a43f883d)) 
-
-- _artifactory_: update name of env variable ([c63f174e8e](https://github.com/Devolutions/devolutions-gateway/commit/c63f174e8e55ab69e49c183035ecd00c21150ab5)) 
 
 ## 2024.1.5 (2024-04-04)
 
 ### Bug Fixes
 
 - _installer_: prevent possible prompt for firewall access in Windows installer ([f9760f2a1b](https://github.com/Devolutions/devolutions-gateway/commit/f9760f2a1b70cb000a63780eef2d279ce17a3ec7)) 
-
-### Continuous Integration
-
-- Add linux package onedrive upload ([#787](https://github.com/Devolutions/devolutions-gateway/issues/787)) ([b4d9f570ee](https://github.com/Devolutions/devolutions-gateway/commit/b4d9f570ee449d26c245b49c2cc6940916a72139)) 
-
-- Fix packaging of web client ([#789](https://github.com/Devolutions/devolutions-gateway/issues/789)) ([82b15c07e7](https://github.com/Devolutions/devolutions-gateway/commit/82b15c07e75c18339fc4e876c7d85157396ef496)) 
-
-- Package thin macOS binaries in nuget for PowerShell ([#792](https://github.com/Devolutions/devolutions-gateway/issues/792)) ([51b83d27aa](https://github.com/Devolutions/devolutions-gateway/commit/51b83d27aab3e856803b4335ea95d4aa79895985)) 
-
-- Fix typo in nuget deployment ([#793](https://github.com/Devolutions/devolutions-gateway/issues/793)) ([2627c52e15](https://github.com/Devolutions/devolutions-gateway/commit/2627c52e15022b68eafeff1a4f407022f9c36dd1)) 
-
-- Update remaining actions versions ([#794](https://github.com/Devolutions/devolutions-gateway/issues/794)) ([01ee6f162f](https://github.com/Devolutions/devolutions-gateway/commit/01ee6f162f65027f1abff378718f66db9554e487)) 
-
-- Fix macOS nuget packaging for PowerShell ([#795](https://github.com/Devolutions/devolutions-gateway/issues/795)) ([eecbdb05aa](https://github.com/Devolutions/devolutions-gateway/commit/eecbdb05aa230ee7468cde03d02d8846bf1d4e28)) 
-
-- Fix macOS nuget packaging for PowerShell ([#797](https://github.com/Devolutions/devolutions-gateway/issues/797)) ([5dd1ff1c19](https://github.com/Devolutions/devolutions-gateway/commit/5dd1ff1c196a7104cb0e9a4a2402046f35b94a44)) 
 
 ## 2024.1.4 (2024-03-22)
 
@@ -119,29 +317,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Build
 
-- _jetsocat-nuget_: add IsPowerShell to jetsocat nuget package ([#760](https://github.com/Devolutions/devolutions-gateway/issues/760)) ([d8062396ab](https://github.com/Devolutions/devolutions-gateway/commit/d8062396ab584dac1ad8b51b37c186cb6a75adba)) 
-
-- _jetsocat-nuget_: fix executable file permissions in nuget package ([#764](https://github.com/Devolutions/devolutions-gateway/issues/764)) ([e807e0abef](https://github.com/Devolutions/devolutions-gateway/commit/e807e0abefb9713367d8c36159a5c60930217913)) 
-
 - _jetsocat_: build jetsocat for linux-arm64 target ([#765](https://github.com/Devolutions/devolutions-gateway/issues/765)) ([1ccfd690e0](https://github.com/Devolutions/devolutions-gateway/commit/1ccfd690e0030a976bb0d6a0f1fd9b508026d05e)) 
-
-### Continuous Integration
-
-- _dgw_: add a webclient archive to the GitHub release ([#767](https://github.com/Devolutions/devolutions-gateway/issues/767)) ([acd34604b0](https://github.com/Devolutions/devolutions-gateway/commit/acd34604b0a699a4f1208efd34a2b8fea78dae6f)) 
-
-- _dgw_: add arm64 build for Linux ([#768](https://github.com/Devolutions/devolutions-gateway/issues/768)) ([8160def5ee](https://github.com/Devolutions/devolutions-gateway/commit/8160def5eeffcd4e462e720774594c189f94332c)) 
-
-- _dgw_: update containers ([#774](https://github.com/Devolutions/devolutions-gateway/issues/774)) ([8ce98dec11](https://github.com/Devolutions/devolutions-gateway/commit/8ce98dec117ebd19b8170d95ffad233eff6d091e)) 
-
-- _pwsh_: add PowerShell module to containers ([#776](https://github.com/Devolutions/devolutions-gateway/issues/776)) ([66b2229a94](https://github.com/Devolutions/devolutions-gateway/commit/66b2229a94c6a6858fe49692a24a328266edf7cb)) 
-
-- Update CI workflow actions ([#778](https://github.com/Devolutions/devolutions-gateway/issues/778)) ([6fb3aa09de](https://github.com/Devolutions/devolutions-gateway/commit/6fb3aa09de46702f8b7dc86b4bc8c385c2e2b18b)) 
-
-- Update release workflow actions ([#780](https://github.com/Devolutions/devolutions-gateway/issues/780)) ([ac72abcca0](https://github.com/Devolutions/devolutions-gateway/commit/ac72abcca07aa92116ae963f852e7b804a7f6107)) 
-
-- _dgw_: build arm64 deb ([#782](https://github.com/Devolutions/devolutions-gateway/issues/782)) ([635654ec0f](https://github.com/Devolutions/devolutions-gateway/commit/635654ec0f788726b2f374e1eff288899daae4f5)) 
-
-- Fix artifact idempotency ([#783](https://github.com/Devolutions/devolutions-gateway/issues/783)) ([b317d2ab3e](https://github.com/Devolutions/devolutions-gateway/commit/b317d2ab3ea76d1299fb807a1b4baa078ee8f191)) 
 
 ## 2024.1.3 (2024-03-08)
 
@@ -303,8 +479,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Build
 
-- Include debug symbols for NuGet packages (.snupkg) ([186a319b71](https://github.com/Devolutions/devolutions-gateway/commit/186a319b71dbbd541672378f5cddead44d5fd8a7)) 
-
 - _dgw_: eliminate openssl link dependency on Linux ([#707](https://github.com/Devolutions/devolutions-gateway/issues/707)) ([8ffb181995](https://github.com/Devolutions/devolutions-gateway/commit/8ffb181995f49c205722cb9548e5e90372be2610)) 
 
 ## 2023.3.0 (2023-10-30)
@@ -352,10 +526,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - Update README.md + COOKBOOK.md ([#582](https://github.com/Devolutions/devolutions-gateway/issues/582)) ([4da466553e](https://github.com/Devolutions/devolutions-gateway/commit/4da466553e88da296752649646a0f5512d3ba7fd)) 
 
-### Continuous Integration
-
-- Ensure upload to OneDrive works when dispatched with workflow_call ([#571](https://github.com/Devolutions/devolutions-gateway/issues/571)) ([efe8019faa](https://github.com/Devolutions/devolutions-gateway/commit/efe8019faab05d6628bbce722da738292646ee45)) 
-
 ## 2023.2.4 (2023-10-16)
 
 ### Features
@@ -389,14 +559,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 ### Build
 
 - Update Rust toolchain to 1.73.0 ([#560](https://github.com/Devolutions/devolutions-gateway/issues/560)) ([375ec71cf9](https://github.com/Devolutions/devolutions-gateway/commit/375ec71cf91fdf1b996f74b17dfbd2ace42b53e0)) 
-
-### Continuous Integration
-
-- Skip OneDrive upload if the release workflow is a dry run ([36ad076f32](https://github.com/Devolutions/devolutions-gateway/commit/36ad076f326e90f9e61a3bdd9ae123ce15f9b0de)) 
-
-- Change github token ([#542](https://github.com/Devolutions/devolutions-gateway/issues/542)) ([afbb7abcbf](https://github.com/Devolutions/devolutions-gateway/commit/afbb7abcbf697d3f9b3cec89ec4adcc907e2e694)) 
-
-- Fix OneDrive upload job ([#546](https://github.com/Devolutions/devolutions-gateway/issues/546)) ([787024e1f6](https://github.com/Devolutions/devolutions-gateway/commit/787024e1f6e4191f9918acf5d8280c70d412d1c7)) 
 
 ## 2023.2.3 (2023-08-15)
 
@@ -466,10 +628,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   cursor position after reading the PCB can be used to find the number of
   bytes actually read (even if re-encoding the PDU would give a different
   result).
-
-### Continuous Integration
-
-- SBOM cdxgen ([#471](https://github.com/Devolutions/devolutions-gateway/issues/471)) ([08520cdbbb](https://github.com/Devolutions/devolutions-gateway/commit/08520cdbbb8e46732ef2836cd780edbfc4ca0bd2)) 
 
 ## 2023.2.1 (2023-06-09)
 
@@ -603,16 +761,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   > This is because large collections of root certificates often include
   > ancient or syntactically invalid certificates.
 
-### Continuous Integration
-
-- Build and package jet-doctor and tokengen ([#423](https://github.com/Devolutions/devolutions-gateway/issues/423)) ([564717fbe2](https://github.com/Devolutions/devolutions-gateway/commit/564717fbe2ba5083a9aa04c3fdae399a6d3ac7eb)) 
-
-- Enable dependabot pull requests ([988921039e](https://github.com/Devolutions/devolutions-gateway/commit/988921039ee33efe7d4ee78c83ca396ff5899394)) 
-
-- Update Artifactory credentials ([#440](https://github.com/Devolutions/devolutions-gateway/issues/440)) ([8a4ecc003b](https://github.com/Devolutions/devolutions-gateway/commit/8a4ecc003b664d19e0f927741fd3b45c6dbb719b)) 
-
-- Limit builds on forked PRs, optimize CI workflow ([#441](https://github.com/Devolutions/devolutions-gateway/issues/441)) ([39d5f9a350](https://github.com/Devolutions/devolutions-gateway/commit/39d5f9a350fbc3188f76ea9afa9c7b9ee3a6fb32)) 
-
 ## 2023.1.3 (2023-03-16)
 
 ### Bug Fixes
@@ -696,17 +844,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - Update Rust toolchain to 1.67.0 ([f581e9bdc7](https://github.com/Devolutions/devolutions-gateway/commit/f581e9bdc7fa91377603443da48d22939661e470))
 
-### Continuous Integration
-
 - _jetsocat_: enable hardened runtime on macOS ([#378](https://github.com/Devolutions/devolutions-gateway/issues/378)) ([84b5c33b47](https://github.com/Devolutions/devolutions-gateway/commit/84b5c33b47a6599fe7a2aaabb6393175fe66906b))
-
-- _jetsocat_: build the jetsocat nuget in package.yml ([#380](https://github.com/Devolutions/devolutions-gateway/issues/380)) ([2e0d0eef4d](https://github.com/Devolutions/devolutions-gateway/commit/2e0d0eef4dcef4008246878a6b05d63a1a41b64c))
-
-  Build the jetsocat nuget package as part of the packaging workflow (instead of the old standalone workflow, which just took the latest release from GitHub).
-
-  If running the package workflow manually, the version number of the package may be specified; else it defaults to the current date.
-
-- _jetsocat_: add Linux binary to nuget package ([#384](https://github.com/Devolutions/devolutions-gateway/issues/384)) ([8a74ff86ca](https://github.com/Devolutions/devolutions-gateway/commit/8a74ff86cac3c01828a40ce5eceae8119bba3829))
 
 ## 2022.3.4 (2023-01-16)
 
@@ -792,10 +930,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 - _dgw_: extend subkey capabilities to KDC tokens ([#334](https://github.com/Devolutions/devolutions-gateway/pull/334)) ([cdc53d0e98](https://github.com/Devolutions/devolutions-gateway/commit/cdc53d0e989b091800f02489d2ce4d5ce9763ac1))
 
   With this change, a subkey is allowed to sign a short-lived KDC token.
-
-### Build
-
-- _jetsocat-nuget_: add win-arm64 to nuget package ([#339](https://github.com/Devolutions/devolutions-gateway/pull/339)) ([2a676caddf](https://github.com/Devolutions/devolutions-gateway/commit/2a676caddfd1ba8c437ed6f20e6f646bae64326f))
 
 ## 2022.3.0 (2022-09-21)
 

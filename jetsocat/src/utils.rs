@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
-use transport::{ErasedRead, ErasedWrite};
+use transport::ErasedReadWrite;
 
 async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
     match dest_addr {
@@ -70,7 +70,7 @@ macro_rules! impl_tcp_connect {
             }
             None => {
                 let dest_addr =
-                    resolve_dest_addr($req_addr.to_dest_addr().with_context(|| "Invalid target address")?).await?;
+                    resolve_dest_addr($req_addr.to_dest_addr().with_context(|| "invalid target address")?).await?;
                 let $stream = TcpStream::connect(dest_addr).await?;
                 $operation.await
             }
@@ -80,19 +80,15 @@ macro_rules! impl_tcp_connect {
     }};
 }
 
-type TcpConnectOutput = (ErasedRead, ErasedWrite);
-
-pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<TcpConnectOutput> {
-    impl_tcp_connect!(req_addr, proxy_cfg, anyhow::Result<TcpConnectOutput>, |stream| {
-        let (read, write) = tokio::io::split(stream);
-        future::ready(Ok((Box::new(read) as ErasedRead, Box::new(write) as ErasedWrite)))
+pub(crate) async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<ErasedReadWrite> {
+    impl_tcp_connect!(req_addr, proxy_cfg, anyhow::Result<ErasedReadWrite>, |stream| {
+        async { Ok(Box::new(stream) as ErasedReadWrite) }
     })
 }
 
-type WebSocketConnectOutput = (ErasedRead, ErasedWrite, Response);
+type WebSocketConnectOutput = (ErasedReadWrite, Response);
 
-pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<WebSocketConnectOutput> {
-    use futures_util::StreamExt as _;
+pub(crate) async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<WebSocketConnectOutput> {
     use tokio_tungstenite::client_async_tls;
 
     let req = addr.into_client_request()?;
@@ -114,15 +110,13 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow:
             let (ws, rsp) = client_async_tls(req, stream)
                 .await
                 .context("WebSocket handshake failed")?;
-            let (sink, stream) = ws.split();
-            let read = Box::new(websocket_read(stream)) as ErasedRead;
-            let write = Box::new(websocket_write(sink)) as ErasedWrite;
-            Ok((read, write, rsp))
+            let stream = Box::new(websocket_compat(ws)) as ErasedReadWrite;
+            Ok((stream, rsp))
         }
     })
 }
 
-pub async fn timeout<T, Fut, E>(duration: Option<Duration>, future: Fut) -> Result<T, E>
+pub(crate) async fn timeout<T, Fut, E>(duration: Option<Duration>, future: Fut) -> Result<T, E>
 where
     Fut: Future<Output = Result<T, E>>,
     E: From<tokio::time::error::Elapsed>,
@@ -135,7 +129,7 @@ where
     }
 }
 
-pub async fn while_process_is_running<Fut, E>(process: Option<sysinfo::Pid>, future: Fut) -> Result<(), E>
+pub(crate) async fn while_process_is_running<Fut, E>(process: Option<sysinfo::Pid>, future: Fut) -> Result<(), E>
 where
     Fut: Future<Output = Result<(), E>>,
 {
@@ -153,69 +147,27 @@ where
     }
 }
 
-pub fn websocket_read<S>(stream: S) -> impl AsyncRead + Unpin + Send + 'static
+pub(crate) fn websocket_compat<S>(stream: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
 where
-    S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin + Send + 'static,
+    S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>>
+        + Sink<tungstenite::Message, Error = tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
 {
-    use futures_util::StreamExt as _;
+    use futures_util::{SinkExt as _, StreamExt as _};
 
-    let compat = stream.map(|item| {
-        item.map(|msg| match msg {
-            tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
-            tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
-            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
-            tungstenite::Message::Close(_) => transport::WsMessage::Close,
-            tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+    let compat = stream
+        .map(|item| {
+            item.map(|msg| match msg {
+                tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
+                tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
+                tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
+                tungstenite::Message::Close(_) => transport::WsMessage::Close,
+                tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+            })
         })
-    });
+        .with(|item| future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
 
     transport::WsStream::new(compat)
-}
-
-pub fn websocket_write<S>(sink: S) -> impl AsyncWrite + Unpin + Send + 'static
-where
-    S: Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin + Send + 'static,
-{
-    use futures_util::SinkExt as _;
-
-    let compat =
-        sink.with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
-
-    transport::WsStream::new(compat)
-}
-
-pub(crate) struct DummyReaderWriter;
-
-impl tokio::io::AsyncRead for DummyReaderWriter {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        _: &mut std::task::Context<'_>,
-        _: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Pending
-    }
-}
-
-impl tokio::io::AsyncWrite for DummyReaderWriter {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        _: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        std::task::Poll::Ready(Ok(buf.len()))
-    }
-
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        _: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        _: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
 }

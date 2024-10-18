@@ -12,5 +12,7 @@ override_dh_install:
 	dh_install
 	mkdir -p $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/webapp
 	cp -r {{ dgateway_webclient }} $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/webapp
+	cp -r {{ root_path }}/webapp/player $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/webapp
+	cp {{ dgateway_libxmf }} $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/libxmf.so
 override_dh_shlibdeps:
 	{{ dh_shlibdeps }}

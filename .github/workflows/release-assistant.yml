@@ -1,0 +1,103 @@
+name: Release Assistant
+
+on:
+  pull_request:
+    branches: [ master ]
+    types: [ opened, labeled ]
+  schedule:
+    - cron: '49 3 * * 1' # 3:49 AM UTC every Monday
+
+jobs:
+  create-comment:
+    name: Create Comment
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request'
+      && github.event.pull_request.user.login != 'CBenoit'
+      && github.event.pull_request.user.login != 'dependabot'
+      && github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: github.event.action == 'opened'
+        uses: ./.github/actions/create-comment
+        with:
+          template: ${{ github.workspace }}/.github/comments/pr_greetings.md
+
+      - if: github.event.action == 'labeled' && github.event.label.name == 'publish-required'
+        uses: ./.github/actions/create-comment
+        with:
+          template: ${{ github.workspace }}/.github/comments/publish_requested.md
+
+      - if: github.event.action == 'labeled' && github.event.label.name == 'release-required'
+        uses: ./.github/actions/create-comment
+        with:
+          template: ${{ github.workspace }}/.github/comments/release_requested.md
+
+  notify-slack:
+    name: Notify Slack
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ARCHITECTURE }}
+      SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+    strategy:
+      matrix:
+        required-label: [ release-required, publish-required ]
+        include:
+          - required-label: release-required
+            blocker-label: release-blocker
+            message: Please cut a release
+          - required-label: publish-required
+            blocker-label: publish-blocker
+            message: Please publish libraries
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify labels
+        id: verify-labels
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $blockerCount = ./ci/pr-count-for-label.ps1 -Label '${{ matrix.blocker-label }}'
+
+          if ($blockerCount -ne 0)
+          {
+            echo "notify=no" >> "$GITHUB_OUTPUT"
+          }
+          else
+          {
+            $requiredCount = ./ci/pr-count-for-label.ps1 -Label '${{ matrix.required-label }}'
+
+            if ($requiredCount -ne 0)
+            {
+              echo "notify=yes" >> "$GITHUB_OUTPUT"
+            }
+            else
+            {
+              echo "notify=no" >> "$GITHUB_OUTPUT"
+            }
+          }
+
+      - name: Send slack notification
+        id: slack
+        if: steps.verify-labels.outputs.notify == 'yes'
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*${{ github.repository }}* :recycle: \n ${{ matrix.message }} for *${{ github.repository }}*"
+                  }
+                }
+              ]
+            }

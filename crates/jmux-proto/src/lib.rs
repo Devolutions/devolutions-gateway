@@ -1,8 +1,13 @@
-//! [Specification document](https://github.com/Devolutions/devolutions-gateway/blob/master/crates/jmux-proto/spec/JMUX_Spec.md)
+//! [Specification document][source]
+//!
+//! [source]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/JMUX-spec.md
 
-use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
+use bytes::{Buf as _, BufMut as _};
 use core::fmt;
 use smol_str::SmolStr;
+
+// We re-export these types, because they are used in the public API.
+pub use bytes::{Bytes, BytesMut};
 
 /// Distant identifier for a channel
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -157,7 +162,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::PacketOversized { packet_size, max } => {
-                write!(f, "Packet oversized: max is {max}, got {packet_size}")
+                write!(f, "packet oversized: max is {max}, got {packet_size}")
             }
             Error::NotEnoughBytes {
                 name,
@@ -165,13 +170,13 @@ impl fmt::Display for Error {
                 expected,
             } => write!(
                 f,
-                "Not enough bytes provided to decode {name}: received {received} bytes, expected {expected} bytes"
+                "not enough bytes provided to decode {name}: received {received} bytes, expected {expected} bytes"
             ),
             Error::InvalidPacket { name, field, reason } => {
-                write!(f, "Invalid `{field}` in {name}: {reason}")
+                write!(f, "invalid `{field}` in {name}: {reason}")
             }
             Error::InvalidDestinationUrl { value, reason } => {
-                write!(f, "Invalid destination URL `{value}`: {reason}")
+                write!(f, "invalid destination URL `{value}`: {reason}")
             }
         }
     }
@@ -235,7 +240,7 @@ impl Message {
         Self::WindowAdjust(ChannelWindowAdjust::new(distant_id, window_adjustment))
     }
 
-    pub fn data(id: DistantChannelId, data: Vec<u8>) -> Self {
+    pub fn data(id: DistantChannelId, data: Bytes) -> Self {
         Self::Data(ChannelData::new(id, data))
     }
 
@@ -479,7 +484,7 @@ pub struct ChannelOpen {
 
 impl ChannelOpen {
     pub const NAME: &'static str = "CHANNEL OPEN";
-    pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 32_768;
+    pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 64 * 1024 * 1024; // 64 MiB
     pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 2 /* maximumPacketSize */;
 
     pub fn new(id: LocalChannelId, maximum_packet_size: u16, destination_url: DestinationUrl) -> Self {
@@ -654,7 +659,7 @@ impl ChannelWindowAdjust {
 #[derive(PartialEq, Eq)]
 pub struct ChannelData {
     pub recipient_channel_id: u32,
-    pub transfer_data: Vec<u8>,
+    pub transfer_data: Bytes,
 }
 
 // We don't want to print `transfer_data` content (usually too big)
@@ -671,7 +676,7 @@ impl ChannelData {
     pub const NAME: &'static str = "CHANNEL DATA";
     pub const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/;
 
-    pub fn new(id: DistantChannelId, data: Vec<u8>) -> Self {
+    pub fn new(id: DistantChannelId, data: Bytes) -> Self {
         ChannelData {
             recipient_channel_id: u32::from(id),
             transfer_data: data,
@@ -684,14 +689,14 @@ impl ChannelData {
 
     pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u32(self.recipient_channel_id);
-        buf.put(self.transfer_data.as_slice());
+        buf.put(self.transfer_data.slice(..));
     }
 
     pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
         ensure_size!(fixed Self in buf);
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
-            transfer_data: buf.to_vec(),
+            transfer_data: buf,
         })
     }
 }

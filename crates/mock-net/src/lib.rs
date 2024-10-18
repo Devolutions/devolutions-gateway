@@ -99,7 +99,7 @@ impl AsyncRead for TcpStream {
 impl AsyncWrite for TcpStream {
     #[inline]
     fn poll_write(
-        self: std::pin::Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut ::core::task::Context<'_>,
         buf: &[u8],
     ) -> ::core::task::Poll<::std::io::Result<usize>> {
@@ -108,7 +108,7 @@ impl AsyncWrite for TcpStream {
 
     #[inline]
     fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut ::core::task::Context<'_>,
     ) -> ::core::task::Poll<::std::io::Result<()>> {
         Pin::new(&mut self.get_mut().0).poll_flush(cx)
@@ -116,7 +116,7 @@ impl AsyncWrite for TcpStream {
 
     #[inline]
     fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut ::core::task::Context<'_>,
     ) -> ::core::task::Poll<::std::io::Result<()>> {
         Pin::new(&mut self.get_mut().0).poll_shutdown(cx)

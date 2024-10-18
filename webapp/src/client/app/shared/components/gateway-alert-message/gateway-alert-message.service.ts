@@ -1,22 +1,20 @@
-import {Injectable} from '@angular/core';
-import {Subject} from 'rxjs';
-import {Message} from 'primeng/api';
+import { Injectable } from '@angular/core';
+import { Message } from 'primeng/api';
+import { Subject } from 'rxjs';
 
 enum MessageSeverity {
   Success = 'success',
   Info = 'info',
   Warning = 'warn',
-  Error = 'error'
+  Error = 'error',
 }
 
 @Injectable()
 export class GatewayAlertMessageService {
-
   private messageSource = new Subject<Message>();
   messageObserver = this.messageSource.asObservable();
 
-  constructor() {
-  }
+  constructor() {}
 
   addSuccess(content: string): void {
     const message: Message = this.buildMessageObject(MessageSeverity.Success, content);
@@ -42,12 +40,12 @@ export class GatewayAlertMessageService {
       severity: severity,
       summary: '',
       detail: content,
-    }
+    };
   }
 
   private addMessage(message: Message): void {
     if (message) {
-      message.detail = !!message.summary ? message.summary : message.detail;
+      message.detail = message.summary ? message.summary : message.detail;
       message.summary = '';
       message.life = 5000;
       this.messageSource.next(message);

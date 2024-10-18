@@ -1,0 +1,308 @@
+name: jetify
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'release version'
+        default: "latest"
+        required: true
+      detours-git-commit:
+          description: 'Detours git commit'
+          default: '4b8c659'
+          required: true
+      sign-nuget:
+        description: 'Sign nuget package'
+        required: true
+        type: boolean
+        default: false
+      skip-publish:
+        description: 'Skip publishing'
+        required: true
+        type: boolean
+        default: false
+      dry-run:
+        description: 'Dry run (simulate)'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-22.04
+    outputs:
+      package-env: ${{ steps.info.outputs.package-env }}
+      package-version: ${{ steps.info.outputs.package-version }}
+      detours-git-commit: ${{ steps.info.outputs.detours-git-commit }}
+      sign-nuget: ${{ steps.info.outputs.sign-nuget }}
+      skip-publish: ${{ steps.info.outputs.skip-publish }}
+      dry-run: ${{ steps.info.outputs.dry-run }}
+
+    steps:
+      - name: Package information
+        id: info
+        shell: pwsh
+        run: |
+          $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
+          $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
+
+          if ('${{ github.event_name }}' -Eq 'schedule') {
+
+          }
+
+          try { $SignNuget = [System.Boolean]::Parse('${{ inputs.sign-nuget }}') } catch { $SignNuget = $false }
+          try { $SkipPublish = [System.Boolean]::Parse('${{ inputs.skip-publish }}') } catch { $SkipPublish = $false }
+          try { $DryRun = [System.Boolean]::Parse('${{ inputs.dry-run }}') } catch { $DryRun = $true }
+
+          $PackageEnv = if ($IsMasterBranch -And -Not $IsScheduledJob) {
+            "publish-prod"
+          } else {
+            "publish-test"
+          }
+
+          if (-Not $IsMasterBranch) {
+            $DryRun = $true # force dry run when not on master branch
+          }
+          if ($IsScheduledJob) {
+            $DryRun = $true # force dry run for scheduled runs
+          }
+
+          $PackageVersion = '${{ inputs.version }}'
+          if ([string]::IsNullOrEmpty($PackageVersion) -or $PackageVersion -eq 'latest') {
+            $PackageVersion = (Get-Date -Format "yyyy.MM.dd")
+          }
+
+          if ($PackageVersion -NotMatch '^\d+\.\d+\.\d+$') {
+            throw "invalid version format: $PackageVersion, expected: 1.2.3"
+          }
+
+          $DetoursGitCommit = '${{ inputs.detours-git-commit }}'
+          if ([string]::IsNullOrEmpty($DetoursGitCommit)) {
+            $DetoursGitCommit = '4b8c659'
+          }
+
+          echo "package-env=$PackageEnv" >> $Env:GITHUB_OUTPUT
+          echo "package-version=$PackageVersion" >> $Env:GITHUB_OUTPUT
+          echo "detours-git-commit=$DetoursGitCommit" >> $Env:GITHUB_OUTPUT
+          echo "sign-nuget=$($SignNuget.ToString().ToLower())" >> $Env:GITHUB_OUTPUT
+          echo "skip-publish=$($SkipPublish.ToString().ToLower())" >> $Env:GITHUB_OUTPUT
+          echo "dry-run=$($DryRun.ToString().ToLower())" >> $Env:GITHUB_OUTPUT
+
+          echo "::notice::Version: $PackageVersion"
+          echo "::notice::DryRun: $DryRun"
+
+  build:
+    name: Build Jetify
+    runs-on: windows-2022
+    needs: [preflight]
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [ x64, arm64 ]
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v4
+
+      - name: Configure runner
+        shell: pwsh
+        run: |
+          Install-Module -Name VsDevShell -Force
+          New-Item .\package -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+
+      - name: Update version
+        shell: pwsh
+        run: |
+          $PackageVersion = '${{ needs.preflight.outputs.package-version }}'
+          $nuspecFilePath = "jetify\nuget\Devolutions.Jetify.nuspec"
+          $nuspecContent = Get-Content -Path $nuspecFilePath
+          $updatedNuspecContent = $nuspecContent -replace '(<version>)(.*?)(</version>)', "`$1$PackageVersion`$3"
+          $updatedNuspecContent | Set-Content -Path $nuspecFilePath
+          Set-Content -Path .\VERSION -Value $PackageVersion
+
+      - name: Restore Detours Cache (${{matrix.arch}})
+        id: cache-detours
+        uses: actions/cache/restore@v4
+        with:
+          path: dependencies/detours
+          key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
+
+      - name: Build Detours (${{matrix.arch}})
+        if: steps.cache-detours.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Enter-VsDevShell ${{matrix.arch}}
+          $GitCommit = '${{ needs.preflight.outputs.detours-git-commit }}'
+          .\jetify\detours.ps1 -GitCommit $GitCommit
+
+      - name: Save Detours Cache (${{matrix.arch}})
+        if: steps.cache-detours.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dependencies/detours
+          key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
+
+      - name: Build Jetify (${{matrix.arch}})
+        shell: pwsh
+        working-directory: jetify
+        run: |
+          $Arch = "${{matrix.arch}}"
+          $BuildDir = "build-$Arch"
+          $PackageVersion = '${{ needs.preflight.outputs.package-version }}'
+          $MsvcArch = @{"x64"="x64";"arm64"="ARM64"}["${{matrix.arch}}"]
+          cmake -G "Visual Studio 17 2022" -A $MsvcArch -B $BuildDir
+          cmake --build $BuildDir --config Release
+          New-Item -ItemType Directory -Path "dependencies/Jetify/$Arch" | Out-Null
+          @('Jetify.dll') | % {
+            Copy-Item "$BuildDir/Release/$_" "dependencies/Jetify/$Arch"
+          }
+          mkdir package
+          Compress-Archive "dependencies\Jetify\$Arch\*" ".\package\Jetify-$PackageVersion-$Arch.zip" -CompressionLevel Optimal
+
+      - name: Upload Jetify (${{matrix.arch}})
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jetify-${{matrix.arch}}
+          path: jetify/package/*.zip
+
+  package:
+    name: Package Jetify
+    runs-on: windows-2022
+    needs: [preflight, build]
+    environment: ${{ needs.preflight.outputs.package-env }}
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v4
+
+      - name: Configure runner
+        shell: pwsh
+        run: |
+          New-Item .\package -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+          New-Item ".\dependencies\Jetify" -ItemType Directory | Out-Null
+
+      - name: Install code signing tools
+        run: |
+          dotnet tool install --global AzureSignTool
+          dotnet tool install --global NuGetKeyVaultSignTool
+          # trust test code signing CA
+          $TestCertsUrl = "https://raw.githubusercontent.com/Devolutions/devolutions-authenticode/master/data/certs"
+          Invoke-WebRequest -Uri "$TestCertsUrl/authenticode-test-ca.crt" -OutFile ".\authenticode-test-ca.crt"
+          Import-Certificate -FilePath ".\authenticode-test-ca.crt" -CertStoreLocation "cert:\LocalMachine\Root"
+          Remove-Item ".\authenticode-test-ca.crt" -ErrorAction SilentlyContinue | Out-Null
+
+      - name: Download native dependencies
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Jetify-*
+          merge-multiple: true
+          path: package
+
+      - name: Create nuget package
+        shell: pwsh
+        run: |
+            Get-Item .\package\*.zip | ForEach-Object {
+                ($Name, $Version, $Arch) = $_.BaseName -Split '-'
+                $NativePath = "jetify\nuget\runtimes\win-$Arch\native"
+                New-Item -ItemType Directory $NativePath -Force | Out-Null
+                Expand-Archive $_ $NativePath -Force
+            }
+            nuget pack jetify/nuget -OutputDirectory package
+
+      - name: Code sign nuget contents
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          $NugetBaseName = $(Get-Item ./package/*.nupkg).BaseName
+          $PackedFile = "./package/${NugetBaseName}.nupkg"
+          $UnpackedDir = "./package/${NugetBaseName}"
+          $OutputDirectory = $(Get-Item $PackedFile).Directory.FullName
+          Expand-Archive -Path $PackedFile -Destination $UnpackedDir -Force
+          $Params = @('sign',
+            '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+            '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+            '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+            '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+            '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+            '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+            '-v')
+          Get-ChildItem "$UnpackedDir" -Include @("*.dll") -Recurse | ForEach-Object {
+            AzureSignTool @Params $_.FullName
+          }
+          Remove-Item $PackedFile -ErrorAction SilentlyContinue | Out-Null
+          Compress-Archive -Path "$UnpackedDir\*" -Destination $PackedFile -CompressionLevel Optimal
+
+      - name: Code sign nuget package
+        if: ${{ fromJSON(needs.preflight.outputs.sign-nuget) == true }}
+        shell: pwsh
+        working-directory: jetify
+        run: |
+          $NugetPackage = (Get-Item ".\package\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
+          $Params = @('sign', $NugetPackage,
+            '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+            '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+            '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+            '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+            '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+            '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+            '-v')
+          & NuGetKeyVaultSignTool @Params
+
+      - name: Upload nuget package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jetify-nupkg
+          path: package/*.nupkg
+
+  publish:
+    name: Publish packages
+    runs-on: ubuntu-22.04
+    needs: [preflight, build, package]
+    environment: ${{ needs.preflight.outputs.package-env }}
+    if: ${{ fromJSON(needs.preflight.outputs.skip-publish) == false }}
+
+    steps:
+      - name: Download nuget package
+        uses: actions/download-artifact@v4
+        with:
+          name: Jetify-nupkg
+          path: package
+
+      - name: Publish to nuget.org
+        shell: pwsh
+        run: |
+          $DryRun = [System.Boolean]::Parse('${{ needs.preflight.outputs.dry-run }}')
+          $NugetPackage = (Get-Item ./package/*.nupkg) | Resolve-Path -Relative
+
+          $PushArgs = @(
+            'nuget', 'push', "$NugetPackage",
+            '--api-key', '${{ secrets.NUGET_API_KEY }}',
+            '--source', 'https://api.nuget.org/v3/index.json',
+            '--skip-duplicate', '--no-symbols'
+          )
+          Write-Host "dotnet $($PushArgs -Join ' ')"
+          if ($DryRun) {
+            Write-Host "Dry Run: skipping nuget.org publishing!"
+          } else {
+            & 'dotnet' $PushArgs
+          }
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: actions
+          ref: v1
+
+      - name: Setup Artifactory
+        uses: ./actions/nuget-artifactory-setup
+        with:
+          artifactory_password: ${{ secrets.ARTIFACTORY_PASSWORD }}
+          artifactory_username: ${{ secrets.ARTIFACTORY_USERNAME }}
+
+      - name: Push
+        uses: ./actions/dotnet-push
+        with:
+          working_directory: package

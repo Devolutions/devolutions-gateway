@@ -30,7 +30,7 @@ pub async fn handle_network_scan(
 ) -> Result<Response, HttpError> {
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
-    let scanner = network_scanner::scanner::NetworkScanner::new(scanner_params).map_err(|e| {
+    let scanner = scanner::NetworkScanner::new(scanner_params).map_err(|e| {
         error!(error = format!("{e:#}"), "Failed to create network scanner");
         HttpError::internal().build(e)
     })?;
@@ -204,7 +204,7 @@ impl NetworkScanResponse {
     security(("netscan_token" = [])),
 ))]
 pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
-    let interfaces = network_scanner::interfaces::get_network_interfaces()
+    let interfaces = interfaces::get_network_interfaces()
         .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
@@ -212,6 +212,13 @@ pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json
         .collect();
 
     Ok(Json(interfaces))
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Serialize)]
+pub struct InterfaceAddress {
+    pub ip: IpAddr,
+    pub prefixlen: u32,
 }
 
 /// Network interface configuration
@@ -224,15 +231,14 @@ pub struct NetworkInterface {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<MacAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub ip_addresses: Vec<IpAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<(String, u32)>))]
-    pub prefixes: Vec<(IpAddr, u32)>,
-    pub operational_status: bool,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
+    pub addresses: Vec<InterfaceAddress>,
+    #[cfg_attr(feature = "openapi", schema(value_type = bool))]
+    pub is_up: bool,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub dns_servers: Vec<IpAddr>,
+    pub nameservers: Vec<IpAddr>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
@@ -241,11 +247,17 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
             name: iface.name,
             description: iface.description,
             mac_address: iface.mac_address,
-            ip_addresses: iface.ip_addresses,
-            prefixes: iface.prefixes,
-            operational_status: iface.operational_status,
+            addresses: iface
+                .addresses
+                .into_iter()
+                .map(|addr| InterfaceAddress {
+                    ip: addr.ip,
+                    prefixlen: addr.prefixlen,
+                })
+                .collect(),
+            is_up: iface.operational_status,
             gateways: iface.gateways,
-            dns_servers: iface.dns_servers,
+            nameservers: iface.dns_servers,
         }
     }
 }

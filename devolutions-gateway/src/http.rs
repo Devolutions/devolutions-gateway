@@ -43,6 +43,7 @@ impl HttpErrorBuilder {
     }
 
     #[inline]
+    #[must_use]
     pub fn with_msg(mut self, msg: &'static str) -> HttpErrorBuilder {
         self.msg = Some(msg);
         self

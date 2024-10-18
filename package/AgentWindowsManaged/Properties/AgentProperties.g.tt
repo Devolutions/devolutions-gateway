@@ -1,0 +1,217 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.ServiceProcess" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.ServiceProcess" #>
+<#@ import namespace="System.Security.Cryptography.X509Certificates" #>
+<#@ output extension=".cs" #>
+
+using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
+using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
+using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
+using System;
+using static DevolutionsAgent.Properties.Constants;
+
+namespace DevolutionsAgent.Properties
+{
+    /// <summary>
+    /// do not modify the contents of this class with the code editor.
+    /// </summary>
+    public partial class Constants
+    {
+<# for (int idx = 0; idx < this.StaticStrings.GetLength(0); idx++) { #> 
+        public const string <#=this.StaticStrings[idx, 0]#> = "<#=this.StaticStrings[idx, 1]#>";
+<# } #>
+
+<# for (int idx = 0; idx < this.Enums.GetLength(0); idx++) { #> 
+        public enum <#=this.Enums[idx].Name #> 
+        {
+    <# foreach (var value in Enum.GetValues(this.Enums[idx])) { #>
+        <#=value#>,
+    <# } #>
+    }
+<# } #>
+    }
+
+    /// <summary>
+    /// do not modify the contents of this class with the code editor.
+    /// </summary>
+    internal partial class AgentProperties
+    {
+<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
+        internal static readonly WixProperty<<#= this.properties[idx].TypeName #>> <#= this.properties[idx].PrivateName #> = new()
+        {
+<# string id = string.IsNullOrEmpty(this.properties[idx].Id) ? this.properties[idx].Name : this.properties[idx].Id; #>
+<# if (this.properties[idx].Public) { id = id.ToUpper(); } #>
+            Id = "P.<#=id#>",
+<# if (this.properties[idx].PropertyType == typeof(string)) { #>
+            Default = "<#= this.properties[idx].Default #>",
+<# } else if (this.properties[idx].PropertyType == typeof(Guid)) { #>
+            Default = new Guid("<#= this.properties[idx].Default.ToString() #>"),
+<# } else { #>
+            Default = <#= this.properties[idx].Default #>,
+<# } #>
+            Name = "<#= this.properties[idx].Name #>",
+            Secure = <#= this.properties[idx].Secure.ToString().ToLower() #>,
+            Hidden = <#= this.properties[idx].Hidden.ToString().ToLower() #>,
+            Public = <#= this.properties[idx].Public.ToString().ToLower() #>
+        };
+
+<# if (!string.IsNullOrEmpty(this.properties[idx].Comment)) { #>
+        /// <summary><#= this.properties[idx].Comment #></summary>
+<# } #>
+        public <#= this.properties[idx].TypeName #> <#= this.properties[idx].Name #>
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(<#= this.properties[idx].PrivateName #>.Id);
+                return WixProperties.GetPropertyValue<<#= this.properties[idx].TypeName #>>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(<#= this.properties[idx].PrivateName #>, value); 
+                }
+            }
+        }
+<# } #> 
+
+        public static IWixProperty[] Properties =
+        {
+<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
+            <#= this.properties[idx].PrivateName #>,
+<# } #> 
+        };
+    }
+}
+
+<#+
+    public class Statics
+    {
+        internal const string HttpProtocol = "http";
+
+        internal const string HttpsProtocol = "https";
+
+        internal const string TcpProtocol = "tcp";
+
+        public enum AuthenticationMode
+        {
+            None,
+            Custom,
+        }
+
+        public enum CertificateMode
+        {
+            External,
+            System
+        }
+
+        public enum CertificateFindType
+        {
+            Thumbprint,
+            SubjectName
+        }
+
+        public enum CustomizeMode
+        {
+            Now,
+            Later,
+        }
+    }
+
+    public string[,] StaticStrings = new[,]
+    {
+        {nameof(Statics.HttpProtocol), Statics.HttpProtocol}, 
+        {nameof(Statics.HttpsProtocol), Statics.HttpsProtocol}, 
+        {nameof(Statics.TcpProtocol), Statics.TcpProtocol}, 
+    };
+
+    public Type[] Enums = new[]
+    {
+        typeof(Statics.AuthenticationMode),
+        typeof(Statics.CertificateMode),
+        typeof(Statics.CertificateFindType),
+        typeof(Statics.CustomizeMode),
+    };
+
+    public abstract class BasePropertyDefinition
+    {
+        public abstract string Comment { get; set; }
+        public abstract bool Hidden { get; set; }
+        public abstract string Id { get; set; }        
+        public abstract string Name { get; set; }
+        public abstract string PrivateName { get; }
+        public abstract bool Public { get; set; }
+        public abstract bool Secure { get; set; }
+        public abstract string TypeName { get; }
+
+        public abstract string Default { get; }
+        public abstract Type PropertyType { get; }
+    }
+
+  public class PropertyDefinition<T> : BasePropertyDefinition
+  {
+    public override string Name { get; set; }
+    public T DefaultValue { get; set; }
+    public override bool Public { get; set; }
+    public override bool Secure { get; set; }
+    public override bool Hidden { get; set; }
+    public override string Id { get; set; }
+    public override string Comment { get; set; }
+    public bool Private => !this.Public;
+
+    public PropertyDefinition(string name, T defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null)
+    {
+        this.Name = name;
+        this.DefaultValue = defaultValue;
+        this.Public = isPublic;
+        this.Secure = secure;
+        this.Hidden = hidden;
+        this.Id = id;
+        this.Comment = comment;
+    }
+
+    public override string Default
+    {
+        get
+        {
+            if (PropertyType == typeof(bool))
+            {
+                return this.DefaultValue.ToString().ToLower();
+            }
+
+            if (PropertyType.IsEnum)
+            {
+                return $"{TypeName}.{this.DefaultValue.ToString()}";
+            }
+
+            return this.DefaultValue.ToString();
+        }
+    }
+
+    public override string PrivateName => char.ToLower(this.Name[0]) + this.Name.Substring(1);
+
+    public override Type PropertyType => typeof(T);
+
+    public override string TypeName => typeof(T).Name;
+  }
+
+  private static uint DefaultHttpPort = 7171;
+
+  BasePropertyDefinition[] properties = {
+    new PropertyDefinition<bool>("ConfigureAgent", false, secure: false, comment: "`true` to configure the Gateway interactively"),
+
+    new PropertyDefinition<bool>("DebugPowerShell", false),
+
+    new PropertyDefinition<Guid>("InstallId", Guid.Empty, isPublic: false, secure: false),
+    new PropertyDefinition<uint>("NetFx45Version", 0, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("FirstInstall", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("Upgrading", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("RemovingForUpgrade", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("Uninstalling", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("Maintenance", false, isPublic: false, secure: false),
+  };             
+#>

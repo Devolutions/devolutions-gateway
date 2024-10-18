@@ -123,7 +123,7 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
                             retry_after = format!("{}s", duration.as_secs()),
                             "a transient error occured"
                         );
-                        tokio::time::sleep(duration).await;
+                        sleep(duration).await;
                     }
                     None => return Err(err),
                 }
@@ -233,7 +233,7 @@ async fn subscriber_task(
             }
             msg = rx.recv() => {
                 let Some(msg) = msg else {
-                    warn!("All senders are dead");
+                    debug!("All senders are dead");
                     break;
                 };
 

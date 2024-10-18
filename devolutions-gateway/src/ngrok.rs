@@ -19,8 +19,6 @@ pub struct NgrokSession {
 
 impl NgrokSession {
     pub async fn connect(conf: &NgrokConf) -> anyhow::Result<Self> {
-        info!("Connecting to ngrok service");
-
         let mut builder = ngrok::Session::builder().authtoken(&conf.auth_token);
 
         if let Some(heartbeat_interval) = conf.heartbeat_interval {
@@ -38,6 +36,8 @@ impl NgrokSession {
         if let Some(server_addr) = &conf.server_addr {
             builder = builder.server_addr(server_addr);
         }
+
+        info!("Connecting to ngrok service");
 
         // Connect the ngrok session
         let session = builder.connect().await.context("connect to ngrok service")?;
@@ -59,6 +59,8 @@ impl NgrokSession {
                     builder = builder.metadata(metadata);
                 }
 
+                let before_cidrs = builder.clone();
+
                 builder = tcp_conf
                     .allow_cidrs
                     .iter()
@@ -68,6 +70,31 @@ impl NgrokSession {
                     .deny_cidrs
                     .iter()
                     .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
+
+                // HACK: Find the subscription plan. This uses ngrok-rs internal API, so it’s not great.
+                // Ideally, we could use the `Session` to find out about the subscription plan without dirty tricks.
+                match builder
+                    .clone()
+                    .forwards_to("Devolutions Gateway Subscription probe")
+                    .listen()
+                    .await
+                {
+                    // https://ngrok.com/docs/errors/err_ngrok_9017/
+                    // "Your account is not authorized to use ip restrictions."
+                    Err(ngrok::session::RpcError::Response(e))
+                        if e.error_code.as_deref() == Some("ERR_NGROK_9017")
+                            || e.error_code.as_deref() == Some("9017") =>
+                    {
+                        info!(
+                            address = tcp_conf.remote_addr,
+                            "Detected a ngrok free plan subscription. IP restriction rules are disabled."
+                        );
+
+                        // Revert the builder to before applying the CIDR rules.
+                        builder = before_cidrs;
+                    }
+                    _ => {}
+                }
 
                 NgrokTunnel {
                     name: name.to_owned(),
@@ -115,8 +142,14 @@ impl NgrokSession {
                 {
                     // https://ngrok.com/docs/errors/err_ngrok_9017/
                     // "Your account is not authorized to use ip restrictions."
-                    Err(ngrok::session::RpcError::Response(e)) if e.error_code.as_deref() == Some("ERR_NGROK_9017") => {
-                        info!("Detected a ngrok free plan subscription. IP restriction rules are disabled.");
+                    Err(ngrok::session::RpcError::Response(e))
+                        if e.error_code.as_deref() == Some("ERR_NGROK_9017")
+                            || e.error_code.as_deref() == Some("9017") =>
+                    {
+                        info!(
+                            domain = http_conf.domain,
+                            "Detected a ngrok free plan subscription. IP restriction rules are disabled."
+                        );
 
                         // Revert the builder to before applying the CIDR rules.
                         builder = before_cidrs;

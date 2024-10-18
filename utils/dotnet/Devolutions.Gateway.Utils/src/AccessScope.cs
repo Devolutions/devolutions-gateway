@@ -22,6 +22,7 @@ public struct AccessScope
     public static AccessScope GatewayHeartbeatRead = new AccessScope("gateway.heartbeat.read");
     public static AccessScope GatewayRecordingDelete = new AccessScope("gateway.recording.delete");
     public static AccessScope GatewayRecordingsRead = new AccessScope("gateway.recordings.read");
+    public static AccessScope GatewayUpdate = new AccessScope("gateway.update");
 
     public override string? ToString()
     {

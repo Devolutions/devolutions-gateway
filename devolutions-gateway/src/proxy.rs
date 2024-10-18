@@ -4,7 +4,7 @@ use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
 use crate::session::{SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
-use camino::Utf8PathBuf;
+
 use futures::future::Either;
 use std::io;
 use std::net::SocketAddr;
@@ -36,25 +36,11 @@ where
     pub async fn select_dissector_and_forward(self) -> anyhow::Result<()> {
         match self.session_info.application_protocol {
             ApplicationProtocol::Known(Protocol::Wayk) => {
-                trace!("WaykDissector will be used to interpret application protocol.");
+                trace!("WaykDissector will be used to interpret application protocol");
                 self.forward_using_dissector(WaykDissector).await
             }
-            // ApplicationProtocol::Known(Protocol::Rdp) => {
-            //     debug!("RdpMessageReader will be used to interpret application protocol");
-            //     self.build_with_message_reader(
-            //         server_transport,
-            //         client_transport,
-            //         Some(Box::new(RdpMessageReader::new(
-            //             HashMap::new(),
-            //             Some(DvcManager::with_allowed_channels(vec![
-            //                 RDP8_GRAPHICS_PIPELINE_NAME.to_string()
-            //             ])),
-            //         ))),
-            //     )
-            //     .await
-            // }
             _ => {
-                trace!("No dissector available for this protocol. Data received will not be split to get application message.");
+                trace!("No dissector available for this protocol. Data received will not be split to get application message");
                 self.forward_using_dissector(DummyDissector).await
             }
         }
@@ -64,23 +50,15 @@ where
     where
         D: Dissector + Send + 'static,
     {
-        if let Some(capture_path) = self.conf.debug.capture_path.as_ref() {
-            let format = time::format_description::parse("[year]-[month]-[day]_[hour]-[minute]-[second]")
+        if let Some(capture_path) = self.conf.debug.capture_path.as_deref() {
+            let format = time::format_description::parse("[year]-[month]-[day]-[hour]-[minute]-[second]")
                 .expect("valid hardcoded format");
-
-            let filename = format!(
-                "{}({})-to-{}({})-at-{}.pcap",
-                self.address_a.ip(),
-                self.address_a.port(),
-                self.address_b.ip(),
-                self.address_b.port(),
-                time::OffsetDateTime::now_utc().format(&format)?
-            );
-            let mut path = Utf8PathBuf::from(capture_path);
-            path.push(filename);
+            let date = time::OffsetDateTime::now_utc().format(&format)?;
+            let pcap_filename = format!("{date}_from_{}_to_{}.pcap", self.address_a, self.address_b,);
+            let pcap_path = capture_path.join(pcap_filename);
 
             let (client_inspector, server_inspector) =
-                PcapInspector::init(self.address_a, self.address_b, path, dissector)?;
+                PcapInspector::init(self.address_a, self.address_b, pcap_path, dissector)?;
 
             let mut a = Interceptor::new(self.transport_a);
             a.inspectors.push(Box::new(client_inspector));
@@ -117,12 +95,9 @@ where
             &self.sessions,
             &self.subscriber_tx,
             self.session_info,
-            notify_kill.clone(),
+            Arc::clone(&notify_kill),
         )
         .await?;
-
-        // NOTE(DGW-86): when recording is required, should we wait for it to start before we forward, or simply spawn
-        // a timer to check if the recording is started within a few seconds?
 
         let kill_notified = notify_kill.notified();
 

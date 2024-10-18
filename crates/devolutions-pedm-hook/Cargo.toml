@@ -1,0 +1,19 @@
+[package]
+name = "devolutions-pedm-hook"
+version = "0.0.0"
+edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Devolutions PEDM AppInfo service hook"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0"
+retour = "0.3"
+win-api-wrappers = { path = "../win-api-wrappers" }
+devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["pedm_client"] }
+tracing = "0.1"
+parking_lot = "0.12"

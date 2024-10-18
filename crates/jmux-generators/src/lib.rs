@@ -46,7 +46,8 @@ pub fn message_window_adjust() -> impl Strategy<Value = Message> {
 }
 
 pub fn message_data() -> impl Strategy<Value = Message> {
-    (distant_channel_id(), vec(any::<u8>(), 0..512)).prop_map(|(distant_id, data)| Message::data(distant_id, data))
+    (distant_channel_id(), vec(any::<u8>(), 0..512))
+        .prop_map(|(distant_id, data)| Message::data(distant_id, Bytes::from(data)))
 }
 
 pub fn message_eof() -> impl Strategy<Value = Message> {

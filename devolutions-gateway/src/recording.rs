@@ -2,12 +2,14 @@ use core::fmt;
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
+use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
+use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
@@ -16,6 +18,7 @@ use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
+use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
@@ -91,14 +94,20 @@ where
 
         debug!(path = %recording_file, "Opening file");
 
-        let res = match fs::OpenOptions::new()
-            .read(false)
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(&recording_file)
-            .await
+        let mut open_options = fs::OpenOptions::new();
+
+        open_options.read(false).write(true).truncate(true).create(true);
+
+        #[cfg(windows)]
         {
+            use std::os::windows::fs::OpenOptionsExt as _;
+
+            const FILE_SHARE_READ: u32 = 1;
+
+            open_options.share_mode(FILE_SHARE_READ);
+        }
+
+        let res = match open_options.open(&recording_file).await {
             Ok(file) => {
                 let mut file = BufWriter::new(file);
 
@@ -162,6 +171,7 @@ struct OnGoingRecording {
     state: OnGoingRecordingState,
     manifest: JrecManifest,
     manifest_path: Utf8PathBuf,
+    session_must_be_recorded: bool,
 }
 
 enum RecordingManagerMessage {
@@ -179,6 +189,10 @@ enum RecordingManagerMessage {
     },
     GetCount {
         channel: oneshot::Sender<usize>,
+    },
+    UpdateRecordingPolicy {
+        id: Uuid,
+        session_must_be_recorded: bool,
     },
 }
 
@@ -199,6 +213,14 @@ impl fmt::Debug for RecordingManagerMessage {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
             RecordingManagerMessage::GetCount { channel: _ } => f.debug_struct("GetCount").finish_non_exhaustive(),
+            RecordingManagerMessage::UpdateRecordingPolicy {
+                id,
+                session_must_be_recorded,
+            } => f
+                .debug_struct("UpdateRecordingPolicy")
+                .field("id", id)
+                .field("session_must_be_recorded", session_must_be_recorded)
+                .finish(),
         }
     }
 }
@@ -252,6 +274,17 @@ impl RecordingMessageSender {
             .context("couldn't send GetCount message")?;
         rx.await.context("couldn't receive ongoing recording count")
     }
+
+    pub async fn update_recording_policy(&self, id: Uuid, session_must_be_recorded: bool) -> anyhow::Result<()> {
+        self.channel
+            .send(RecordingManagerMessage::UpdateRecordingPolicy {
+                id,
+                session_must_be_recorded,
+            })
+            .await
+            .ok()
+            .context("couldn't send UpdateRecordingPolicy message")
+    }
 }
 
 pub struct RecordingMessageReceiver {
@@ -266,7 +299,7 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
 
     let handle = RecordingMessageSender {
         channel: tx,
-        active_recordings: ongoing_recordings.clone(),
+        active_recordings: Arc::clone(&ongoing_recordings),
     };
 
     let receiver = RecordingMessageReceiver {
@@ -310,14 +343,20 @@ pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
     recordings_path: Utf8PathBuf,
+    session_manager_handle: SessionMessageSender,
 }
 
 impl RecordingManagerTask {
-    pub fn new(rx: RecordingMessageReceiver, recordings_path: Utf8PathBuf) -> Self {
+    pub fn new(
+        rx: RecordingMessageReceiver,
+        recordings_path: Utf8PathBuf,
+        session_manager_handle: SessionMessageSender,
+    ) -> Self {
         Self {
             rx,
             ongoing_recordings: HashMap::new(),
             recordings_path,
+            session_manager_handle,
         }
     }
 
@@ -342,7 +381,7 @@ impl RecordingManagerTask {
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
-            let file_name = format!("recording-{next_file_idx}.{file_type}");
+            let file_name = format!("recording-{next_file_idx}.{}", file_type.extension());
             let recording_file = recording_path.join(&file_name);
 
             existing_manifest.files.push(JrecFile {
@@ -364,7 +403,7 @@ impl RecordingManagerTask {
                 .with_context(|| format!("failed to create recording path: {recording_path}"))?;
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
-            let file_name = format!("recording-0.{file_type}");
+            let file_name = format!("recording-0.{}", file_type.extension());
             let recording_file = recording_path.join(&file_name);
 
             let first_file = JrecFile {
@@ -389,12 +428,26 @@ impl RecordingManagerTask {
 
         let active_recording_count = self.rx.active_recordings.insert(id);
 
+        // NOTE: the session associated to this recording is not always running through the Devolutions Gateway.
+        // It is a normal situation when the Devolutions is used solely as a recording server.
+        // In such cases, we can only assume there is no recording policy.
+        let session_must_be_recorded = self
+            .session_manager_handle
+            .get_session_info(id)
+            .await
+            .inspect_err(|error| error!(%error, session.id = %id, "Failed to retrieve session info"))
+            .ok()
+            .flatten()
+            .map(|info| info.recording_policy)
+            .unwrap_or(false);
+
         self.ongoing_recordings.insert(
             id,
             OnGoingRecording {
                 state: OnGoingRecordingState::Connected,
                 manifest,
                 manifest_path,
+                session_must_be_recorded,
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -430,12 +483,27 @@ impl RecordingManagerTask {
 
             ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
 
+            let recording_file_path = ongoing
+                .manifest_path
+                .parent()
+                .expect("a parent")
+                .join(&current_file.file_name);
+
             debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
 
             ongoing
                 .manifest
                 .save_to_file(&ongoing.manifest_path)
                 .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
+
+            if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
+                if cadeau::xmf::is_init() {
+                    debug!(%recording_file_path, "Enqueue video remuxing operation");
+                    tokio::spawn(remux(recording_file_path));
+                } else {
+                    debug!("Video remuxing was skipped because XMF native library is not loaded");
+                }
+            }
 
             Ok(())
         } else {
@@ -453,9 +521,42 @@ impl RecordingManagerTask {
                 OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + DISCONNECTED_TTL_SECS - 1 => {
                     debug!(%id, "Mark recording as terminated");
                     self.rx.active_recordings.remove(id);
-                    self.ongoing_recordings.remove(&id);
 
-                    // TODO(DGW-86): now is a good timing to kill sessions that _must_ be recorded
+                    // Check the recording policy of the associated session and kill it if necessary.
+                    if ongoing.session_must_be_recorded {
+                        tokio::spawn({
+                            let session_manager_handle = self.session_manager_handle.clone();
+
+                            async move {
+                                let result = session_manager_handle.kill_session(id).await;
+
+                                match result {
+                                    Ok(crate::session::KillResult::Success) => {
+                                        warn!(
+                                            session.id = %id,
+                                            reason = "recording policy violated",
+                                            "Session killed",
+                                        );
+                                    }
+                                    Ok(crate::session::KillResult::NotFound) => {
+                                        trace!(
+                                            session.id = %id,
+                                            "Associated session is not running, as expected",
+                                        );
+                                    }
+                                    Err(error) => {
+                                        error!(
+                                            session.id = %id,
+                                            %error,
+                                            "Couldn’t kill session",
+                                        )
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    self.ongoing_recordings.remove(&id);
                 }
                 _ => {
                     trace!(%id, "Recording should not be removed yet");
@@ -494,8 +595,7 @@ async fn recording_manager_task(
     loop {
         tokio::select! {
             () = &mut next_remove_sleep, if !disconnected.is_empty() => {
-                // Will never panic since we check for non-emptiness before entering this block
-                let to_remove = disconnected.pop().unwrap();
+                let to_remove = disconnected.pop().expect("we check for non-emptiness before entering this block");
 
                 manager.handle_remove(to_remove.id);
 
@@ -546,6 +646,16 @@ async fn recording_manager_task(
                     RecordingManagerMessage::GetCount { channel } => {
                         let _ = channel.send(manager.ongoing_recordings.len());
                     }
+                    RecordingManagerMessage::UpdateRecordingPolicy { id, session_must_be_recorded } => {
+                        if let Some(ongoing) = manager.ongoing_recordings.get_mut(&id) {
+                            ongoing.session_must_be_recorded = session_must_be_recorded;
+                            trace!(
+                                session.id = %id,
+                                session_must_be_recorded,
+                                "Updated recording policy for session",
+                            );
+                        }
+                    }
                 }
             }
             _ = shutdown_signal.wait() => {
@@ -556,7 +666,23 @@ async fn recording_manager_task(
 
     debug!("Task is stopping; wait for disconnect messages");
 
-    while let Some(msg) = manager.rx.channel.recv().await {
+    loop {
+        // Here, we await with a timeout because this task holds a handle to the
+        // session manager, but the session manager itself also holds a handle to
+        // the recording manager. As long as the other end doesn’t drop the handle, the
+        // recv future will never resolve. We simply assume there are no leftover messages
+        // to process after one second of inactivity.
+        let msg = match futures::future::select(
+            pin!(manager.rx.channel.recv()),
+            pin!(tokio::time::sleep(std::time::Duration::from_secs(1))),
+        )
+        .await
+        {
+            Either::Left((Some(msg), _)) => msg,
+            Either::Left((None, _)) => break,
+            Either::Right(_) => break,
+        };
+
         debug!(?msg, "Received message");
         if let RecordingManagerMessage::Disconnect { id } = msg {
             if let Err(e) = manager.handle_disconnect(id) {
@@ -569,4 +695,37 @@ async fn recording_manager_task(
     debug!("Task terminated");
 
     Ok(())
+}
+
+pub async fn remux(input_path: Utf8PathBuf) {
+    // CPU-intensive operation potentially lasting much more than 100ms.
+    match tokio::task::spawn_blocking(move || remux_impl(input_path)).await {
+        Err(error) => error!(%error, "Couldn't join the CPU-intensive muxer task"),
+        Ok(Err(error)) => error!(error = format!("{error:#}"), "Remux operation failed"),
+        Ok(Ok(())) => {}
+    }
+
+    return;
+
+    fn remux_impl(input_path: Utf8PathBuf) -> anyhow::Result<()> {
+        let input_file_name = input_path
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("invalid path (not a file): {input_path}"))?;
+
+        let remuxed_file_name = format!("remuxed_{input_file_name}");
+
+        let output_path = input_path
+            .parent()
+            .context("failed to retrieve parent folder")?
+            .join(remuxed_file_name);
+
+        cadeau::xmf::muxer::webm_remux(&input_path, &output_path)
+            .with_context(|| format!("failed to remux file {input_path} to {output_path}"))?;
+
+        std::fs::rename(&output_path, &input_path).context("failed to override remuxed file")?;
+
+        debug!(%input_path, "Successfully remuxed video recording");
+
+        Ok(())
+    }
 }

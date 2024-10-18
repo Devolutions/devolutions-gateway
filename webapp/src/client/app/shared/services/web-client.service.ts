@@ -1,28 +1,29 @@
-import {Injectable} from '@angular/core';
-import {Observable, of, throwError} from "rxjs";
-import {catchError, map, takeUntil} from "rxjs/operators";
-import {v4 as uuidv4} from 'uuid';
+import { Injectable } from '@angular/core';
+import { Observable, of, throwError } from 'rxjs';
+import { catchError, map, takeUntil } from 'rxjs/operators';
+import { v4 as uuidv4 } from 'uuid';
 
-import {ApiService} from "@shared/services/api.service";
-import {UtilsService} from "@shared/services/utils.service";
-import {BaseComponent} from "@shared/bases/base.component";
-import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
-import {ScreenSize} from "@shared/enums/screen-size.enum";
-import {DesktopSize} from "@devolutions/iron-remote-gui";
-import {WebSession} from "@shared/models/web-session.model";
+import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { BaseComponent } from '@shared/bases/base.component';
+import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { WebSession } from '@shared/models/web-session.model';
+import { ApiService } from '@shared/services/api.service';
+import { UtilsService } from '@shared/services/utils.service';
 
+import { JET_KDC_PROXY_URL } from '@gateway/app.constants';
+import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import {
   IronARDConnectionParameters,
-  IronRDPConnectionParameters, IronVNCConnectionParameters,
-  sessionTokenParameters,
+  IronRDPConnectionParameters,
+  IronVNCConnectionParameters,
+  SessionTokenParameters,
   SshConnectionParameters,
-  TelnetConnectionParameters
-} from "@shared/interfaces/connection-params.interfaces";
-import {Protocol, WebClientProtocol} from "@shared/enums/web-client-protocol.enum";
+  TelnetConnectionParameters,
+} from '@shared/interfaces/connection-params.interfaces';
 
 export enum DefaultPowerShellPort {
   SSL = 5986,
-  NON_SSL = 5985
+  NON_SSL = 5985,
 }
 
 export const DefaultRDPPort: number = 3389;
@@ -33,14 +34,15 @@ export const DefaultArdPort: number = 5900;
 
 @Injectable()
 export class WebClientService extends BaseComponent {
-
-  constructor( private apiService: ApiService,
-               protected utils: UtilsService) {
+  constructor(
+    private apiService: ApiService,
+    protected utils: UtilsService,
+  ) {
     super();
   }
 
   //TODO enhance type safety for form data. KAH Feb 15 2024
-  getDesktopSize(submittedFormData: any ): DesktopSize | null {
+  getDesktopSize(submittedFormData): DesktopSize | null {
     if (!submittedFormData?.screenSize) {
       return;
     }
@@ -48,35 +50,75 @@ export class WebClientService extends BaseComponent {
     const screenSizeStr: string = ScreenSize.getEnumKey(submittedFormData.screenSize);
     if (submittedFormData.screenSize >= 2 && submittedFormData.screenSize <= 20) {
       const rawSize: string[] = screenSizeStr?.split('x');
-      return rawSize.length > 1 ? { width: parseInt(rawSize[0]), height: (parseInt(rawSize[1])-WebSession.TOOLBAR_SIZE) } : null;
-
-    } else if (submittedFormData.screenSize === ScreenSize.Custom) {
-      return submittedFormData.customWidth && submittedFormData.customHeight ?
-        { width: submittedFormData.customWidth, height: (submittedFormData.customHeight-WebSession.TOOLBAR_SIZE) } :
-        null;
+      return rawSize.length > 1
+        ? { width: Number.parseInt(rawSize[0]), height: Number.parseInt(rawSize[1]) - WebSession.TOOLBAR_SIZE }
+        : null;
+    }
+    if (submittedFormData.screenSize === ScreenSize.Custom) {
+      return submittedFormData.customWidth && submittedFormData.customHeight
+        ? { width: submittedFormData.customWidth, height: submittedFormData.customHeight - WebSession.TOOLBAR_SIZE }
+        : null;
     }
   }
 
-  fetchToken(tokenParameters: sessionTokenParameters): Observable<string> {
+  fetchToken(tokenParameters: SessionTokenParameters): Observable<string> {
     return this.apiService.generateSessionToken(tokenParameters).pipe(
       takeUntil(this.destroyed$),
-      catchError(err => throwError(err))
+      catchError((err) => throwError(err)),
     );
   }
 
-  fetchProtocolToken(protocol: Protocol, connectionParameters: TelnetConnectionParameters |
-                                            SshConnectionParameters |
-                                            IronRDPConnectionParameters |
-                                            IronVNCConnectionParameters |
-                                            IronARDConnectionParameters): Observable<TelnetConnectionParameters |
-                                                                                      SshConnectionParameters |
-                                                                                      IronRDPConnectionParameters|
-                                                                                      IronVNCConnectionParameters|
-                                                                                      IronARDConnectionParameters> {
+  private getDefaultPort(protocol: Protocol): number {
+    switch (protocol) {
+      case Protocol.RDP:
+        return DefaultRDPPort;
+      case Protocol.Telnet:
+        return DefaultTelnetPort;
+      case Protocol.SSH:
+        return DefaultSshPort;
+      case Protocol.VNC:
+        return DefaultVncPort;
+      case Protocol.ARD:
+        return DefaultArdPort;
+      default:
+        throw new Error(`Getting default port, unsupported protocol: ${protocol}`);
+    }
+  }
+
+  private handleProtocolTokenRequest<
+    T extends
+      | TelnetConnectionParameters
+      | SshConnectionParameters
+      | IronRDPConnectionParameters
+      | IronVNCConnectionParameters
+      | IronARDConnectionParameters,
+  >(protocol: Protocol, connectionParameters: T): Observable<T> {
+    return this.generateProtocolToken(protocol, connectionParameters).pipe(
+      takeUntil(this.destroyed$),
+      map((params) => params as T),
+      catchError((err) => throwError(() => err)),
+    );
+  }
+
+  generateProtocolToken(
+    protocol: Protocol,
+    connectionParameters:
+      | TelnetConnectionParameters
+      | SshConnectionParameters
+      | IronRDPConnectionParameters
+      | IronVNCConnectionParameters
+      | IronARDConnectionParameters,
+  ): Observable<
+    | TelnetConnectionParameters
+    | SshConnectionParameters
+    | IronRDPConnectionParameters
+    | IronVNCConnectionParameters
+    | IronARDConnectionParameters
+  > {
     const protocolStr: string = WebClientProtocol.getEnumKey(protocol).toLowerCase();
 
-    const data: sessionTokenParameters = {
-      content_type: "ASSOCIATION",
+    const data: SessionTokenParameters = {
+      content_type: 'ASSOCIATION',
       protocol: protocolStr,
       destination: `tcp://${connectionParameters.host}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
       lifetime: 60,
@@ -85,71 +127,44 @@ export class WebClientService extends BaseComponent {
 
     return this.fetchToken(data).pipe(
       takeUntil(this.destroyed$),
-      map(token => ({ ...connectionParameters, token })),
-      catchError(err => throwError(err))
+      map((token) => {
+        return { ...connectionParameters, token } as typeof connectionParameters;
+      }),
+      catchError((err) => {
+        return throwError(() => new Error('Failed to fetch protocol token'));
+      }),
     );
-  }
-
-  private getDefaultPort(protocol: Protocol): number {
-    switch(protocol) {
-      case Protocol.RDP: return DefaultRDPPort;
-      case Protocol.Telnet: return DefaultTelnetPort;
-      case Protocol.SSH: return DefaultSshPort;
-      case Protocol.VNC: return DefaultVncPort;
-      case Protocol.ARD: return DefaultArdPort;
-      default: throw new Error(`Getting default port, unsupported protocol: ${protocol}`);
-    }
   }
 
   fetchTelnetToken(connectionParameters: TelnetConnectionParameters): Observable<TelnetConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.Telnet, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters:TelnetConnectionParameters) => connectionParameters),
-      catchError(err => throwError(err))
-    );
+    return this.handleProtocolTokenRequest(Protocol.Telnet, connectionParameters);
   }
 
   fetchSshToken(connectionParameters: SshConnectionParameters): Observable<SshConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.SSH, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters:SshConnectionParameters) => connectionParameters),
-      catchError(err => throwError(err))
-    );
+    return this.handleProtocolTokenRequest(Protocol.SSH, connectionParameters);
   }
 
   fetchRdpToken(connectionParameters: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.RDP, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters:IronRDPConnectionParameters) => connectionParameters),
-      catchError(err => throwError(err))
-    );
+    return this.handleProtocolTokenRequest(Protocol.RDP, connectionParameters);
   }
 
   fetchVncToken(connectionParameters: IronVNCConnectionParameters): Observable<IronVNCConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.VNC, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters:IronVNCConnectionParameters) => connectionParameters),
-      catchError(err => throwError(err))
-    );
+    return this.handleProtocolTokenRequest(Protocol.VNC, connectionParameters);
   }
 
   fetchArdToken(connectionParameters: IronARDConnectionParameters): Observable<IronARDConnectionParameters> {
-    return this.fetchProtocolToken(Protocol.ARD, connectionParameters).pipe(
-      takeUntil(this.destroyed$),
-      map((connectionParameters:IronARDConnectionParameters) => connectionParameters),
-      catchError(err => throwError(err))
-    );
+    return this.handleProtocolTokenRequest(Protocol.ARD, connectionParameters);
   }
 
   fetchNetScanToken(): Observable<string> {
-    const data: sessionTokenParameters = {
-      "content_type": "NETSCAN",
-      "lifetime": 60
+    const data: SessionTokenParameters = {
+      content_type: 'NETSCAN',
+      lifetime: 60,
     };
 
     return this.fetchToken(data).pipe(
       takeUntil(this.destroyed$),
-      catchError(err => throwError(err))
+      catchError((err) => throwError(err)),
     );
   }
 
@@ -159,20 +174,22 @@ export class WebClientService extends BaseComponent {
       return of(connectionParameters);
     }
 
-    const data: sessionTokenParameters = {
-      "content_type": "KDC",
-      "krb_kdc": connectionParameters.kdcUrl,
-      "krb_realm": connectionParameters.domain,
-      "lifetime": 60
+    const data: SessionTokenParameters = {
+      content_type: 'KDC',
+      krb_kdc: connectionParameters.kdcUrl,
+      krb_realm: connectionParameters.domain,
+      lifetime: 60,
     };
 
     return this.fetchToken(data).pipe(
       takeUntil(this.destroyed$),
-      map((token: string): IronRDPConnectionParameters => ({
-        ...connectionParameters,
-        kdcToken: token
-      })),
-      catchError(err => throwError(err))
+      map(
+        (token: string): IronRDPConnectionParameters => ({
+          ...connectionParameters,
+          kdcToken: token,
+        }),
+      ),
+      catchError((err) => throwError(err)),
     );
   }
 
@@ -181,7 +198,7 @@ export class WebClientService extends BaseComponent {
       return of(connectionParameters);
     }
 
-    const currentURL: URL = new URL(WebClientRdpComponent.JET_KDC_PROXY_URL, window.location.href);
+    const currentURL: URL = new URL(JET_KDC_PROXY_URL, window.location.href);
     connectionParameters.kdcProxyUrl = `${currentURL.href}/${connectionParameters.kdcToken}`;
     return of(connectionParameters);
   }

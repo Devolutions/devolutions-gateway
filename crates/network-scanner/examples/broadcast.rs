@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)]
+
 use network_scanner::broadcast::asynchronous::broadcast;
 use network_scanner::ip_utils::get_subnets;
 use network_scanner::task_utils::TaskManager;

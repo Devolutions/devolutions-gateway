@@ -26,6 +26,7 @@ docs/SessionTokenSignRequest.md
 docs/SessionsApi.md
 docs/SubProvisionerKey.md
 docs/Subscriber.md
+docs/UpdateApi.md
 docs/WebAppApi.md
 src/Devolutions.Gateway.Client/Api/ConfigApi.cs
 src/Devolutions.Gateway.Client/Api/DiagnosticsApi.cs
@@ -34,6 +35,7 @@ src/Devolutions.Gateway.Client/Api/HeartbeatApi.cs
 src/Devolutions.Gateway.Client/Api/JrecApi.cs
 src/Devolutions.Gateway.Client/Api/JrlApi.cs
 src/Devolutions.Gateway.Client/Api/SessionsApi.cs
+src/Devolutions.Gateway.Client/Api/UpdateApi.cs
 src/Devolutions.Gateway.Client/Api/WebAppApi.cs
 src/Devolutions.Gateway.Client/Client/ApiClient.cs
 src/Devolutions.Gateway.Client/Client/ApiException.cs

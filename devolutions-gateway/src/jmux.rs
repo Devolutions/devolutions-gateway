@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::JmuxTokenClaims;
+use crate::token::{JmuxTokenClaims, RecordingPolicy};
 
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
@@ -19,6 +19,11 @@ pub async fn handle(
     subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()> {
     use jmux_proxy::{FilteringRule, JmuxConfig};
+
+    match claims.jet_rec {
+        RecordingPolicy::None | RecordingPolicy::Stream => (),
+        RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
+    }
 
     let (reader, writer) = tokio::io::split(stream);
     let reader = Box::new(reader) as ErasedRead;
@@ -44,18 +49,19 @@ pub async fn handle(
 
     let session_id = claims.jet_aid;
 
-    let info = SessionInfo::new(
-        session_id,
-        claims.jet_ap,
-        ConnectionModeDetails::Fwd {
+    let info = SessionInfo::builder()
+        .association_id(session_id)
+        .application_protocol(claims.jet_ap)
+        .details(ConnectionModeDetails::Fwd {
             destination_host: main_destination_host,
-        },
-    )
-    .with_ttl(claims.jet_ttl);
+        })
+        .time_to_live(claims.jet_ttl)
+        .recording_policy(claims.jet_rec)
+        .build();
 
     let notify_kill = Arc::new(Notify::new());
 
-    crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, notify_kill.clone()).await?;
+    crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, Arc::clone(&notify_kill)).await?;
 
     let proxy_fut = JmuxProxy::new(reader, writer).with_config(config).run();
     let proxy_handle = ChildTask::spawn(proxy_fut);

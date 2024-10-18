@@ -1,44 +1,38 @@
 import { Directive } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
+import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { BaseSessionComponent } from '../models/web-session.model';
 import { AnalyticService, ConnectionIdentifier, ProtocolString } from '../services/analytic.service';
 
 @Directive()
-export abstract class WebClientBaseComponent extends BaseComponent {
-
-  static DVL_WARNING_ICON: string = 'dvl-icon-warning';
-
-  hideSpinnerOnly: boolean = false;
+export abstract class WebClientBaseComponent extends BaseSessionComponent {
+  hideSpinnerOnly = false;
   error: string;
 
-  analyticHandle: ConnectionIdentifier
+  analyticHandle: ConnectionIdentifier;
 
-  protected constructor(protected gatewayAlertMessageService: GatewayAlertMessageService, protected analyticService:AnalyticService) {
+  protected constructor(
+    protected gatewayAlertMessageService: GatewayAlertMessageService,
+    protected analyticService: AnalyticService,
+  ) {
     super();
   }
 
   abstract removeWebClientGuiElement(): void;
 
-  protected webClientConnectionSuccess(message?:string): void {
+  //For translation 'ConnectionSuccessful
+  protected webClientConnectionSuccess(message = 'Connection successful'): void {
     this.hideSpinnerOnly = true;
-
-    if (!message) {
-      //For translation 'ConnectionSuccessful
-      message = 'Connection successful';
-    }
     this.gatewayAlertMessageService.addSuccess(message);
     this.analyticHandle = this.analyticService.sendOpenEvent(this.getProtocol());
   }
 
-  protected webClientConnectionFail(message?:string, trace?: string): void {
+  protected webClientConnectionFail(message?: string, trace?: string): void {
     this.hideSpinnerOnly = true;
-
-    if (!message) {
-      //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-      message = 'Connection error: Please verify your connection settings.';
-    }
-    this.gatewayAlertMessageService.addError(message);
-    console.error(message);
+    //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+    const errorMessage = message || 'Connection error: Please verify your connection settings.';
+    this.gatewayAlertMessageService.addError(errorMessage);
+    console.error(errorMessage);
 
     if (trace) {
       console.error(trace);

@@ -1,34 +1,32 @@
-import {Injectable} from '@angular/core';
-import {BehaviorSubject, Observable} from 'rxjs';
-import {WebSession} from "@shared/models/web-session.model";
-
+import { Injectable } from '@angular/core';
+import { SessionType, WebSession } from '@shared/models/web-session.model';
+import { BehaviorSubject, Observable } from 'rxjs';
 
 @Injectable()
 export class MainMenuService {
   isVisible: BehaviorSubject<boolean> = new BehaviorSubject(true);
   isCollapsed: BehaviorSubject<boolean> = new BehaviorSubject(true);
 
+  private mainMenuDataSubject = new BehaviorSubject<WebSession<SessionType>[]>([]);
+  public mainMenuData$ = this.mainMenuDataSubject.asObservable();
 
-  private mainMenuDataSubject: BehaviorSubject<WebSession<any, any>[]> = new BehaviorSubject<WebSession<any, any>[]>([]);
-  public mainMenuData$: Observable<WebSession<any, any>[]> = this.mainMenuDataSubject.asObservable();
-
-  toggle():void {
+  toggle(): void {
     this.isVisible.next(!this.isVisible.getValue());
   }
 
-  show():void {
+  show(): void {
     this.isVisible.next(true);
   }
 
-  hide():void {
+  hide(): void {
     this.isVisible.next(false);
   }
 
-  collapse():void {
+  collapse(): void {
     this.isCollapsed.next(true);
   }
 
-  expand():void {
+  expand(): void {
     this.isCollapsed.next(false);
   }
 }

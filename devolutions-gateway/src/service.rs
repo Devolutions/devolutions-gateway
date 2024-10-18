@@ -1,22 +1,23 @@
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
-use devolutions_gateway::log::{self, LoggerGuard};
+use devolutions_gateway::log::GatewayLog;
 use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
 use devolutions_gateway::DgwState;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
+use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tap::prelude::*;
 use tokio::runtime::{self, Runtime};
 
-pub const SERVICE_NAME: &str = "devolutions-gateway";
-pub const DISPLAY_NAME: &str = "Devolutions Gateway";
-pub const DESCRIPTION: &str = "Devolutions Gateway service";
+pub(crate) const SERVICE_NAME: &str = "devolutions-gateway";
+pub(crate) const DISPLAY_NAME: &str = "Devolutions Gateway";
+pub(crate) const DESCRIPTION: &str = "Devolutions Gateway service";
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 enum GatewayState {
@@ -27,19 +28,19 @@ enum GatewayState {
     },
 }
 
-pub struct GatewayService {
+pub(crate) struct GatewayService {
     conf_handle: ConfHandle,
     state: GatewayState,
     _logger_guard: LoggerGuard,
 }
 
 impl GatewayService {
-    pub fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
+    pub(crate) fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
         let conf = conf_handle.get_conf();
 
-        let logger_guard = log::init(
+        let logger_guard = devolutions_log::init::<GatewayLog>(
             &conf.log_file,
-            conf.verbosity_profile,
+            conf.verbosity_profile.to_log_filter(),
             conf.debug.log_directives.as_deref(),
         )
         .context("failed to setup logger")?;
@@ -65,8 +66,42 @@ impl GatewayService {
             );
         }
 
-        if let Err(e) = devolutions_gateway::tls::sanity::check_default_configuration() {
-            warn!("Anomality detected with TLS configuration: {e:#}");
+        if let Some((cert_subject_name, hostname)) = conf_file
+            .tls_certificate_subject_name
+            .as_deref()
+            .zip(conf_file.hostname.as_deref())
+        {
+            if !devolutions_gateway::utils::wildcard_host_match(cert_subject_name, hostname) {
+                warn!(
+                    %hostname,
+                    %cert_subject_name,
+                    "Hostname doesn’t match the TLS certificate subject name configured; \
+                    not necessarily a problem if it is instead matched by an alternative subject name"
+                )
+            }
+        }
+
+        if let Err(error) = devolutions_gateway::tls::sanity::check_default_configuration() {
+            warn!(
+                error = format!("{error:#}"),
+                "Anomality detected with TLS configuration"
+            );
+        }
+
+        devolutions_gateway::tls::install_default_crypto_provider();
+
+        if let Some(path) = conf.get_lib_xmf_path() {
+            // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
+            let result = unsafe { cadeau::xmf::init(path.as_str()) };
+
+            match result {
+                Ok(_) => info!(%path, "XMF native library loaded and installed"),
+                Err(error) => warn!(
+                    %path,
+                    %error,
+                    "Failed to load XMF native library, video processing features are disabled"
+                ),
+            }
         }
 
         Ok(GatewayService {
@@ -76,7 +111,7 @@ impl GatewayService {
         })
     }
 
-    pub fn start(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn start(&mut self) -> anyhow::Result<()> {
         let runtime = runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -117,7 +152,7 @@ impl GatewayService {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         match std::mem::replace(&mut self.state, GatewayState::Stopped) {
             GatewayState::Stopped => {
                 info!("Attempted to stop gateway service, but it's already stopped");
@@ -172,7 +207,7 @@ struct Tasks {
 
 impl Tasks {
     fn new() -> Self {
-        let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
 
         Self {
             inner: Vec::new(),
@@ -202,12 +237,12 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
-        token_cache: token_cache.clone(),
+        token_cache: Arc::clone(&token_cache),
         jrl,
         sessions: session_manager_handle.clone(),
         subscriber_tx: subscriber_tx.clone(),
         shutdown_signal: tasks.shutdown_signal.clone(),
-        recordings: recording_manager_handle,
+        recordings: recording_manager_handle.clone(),
     };
 
     conf.listeners
@@ -237,12 +272,12 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
 
-    tasks.register(devolutions_gateway::log::LogDeleterTask {
-        prefix: conf.log_file.clone(),
-    });
+    tasks.register(devolutions_log::LogDeleterTask::<GatewayLog>::new(
+        conf.log_file.clone(),
+    ));
 
     tasks.register(devolutions_gateway::subscriber::SubscriberPollingTask {
-        sessions: session_manager_handle,
+        sessions: session_manager_handle.clone(),
         subscriber: subscriber_tx,
     });
 
@@ -252,12 +287,15 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     });
 
     tasks.register(devolutions_gateway::session::SessionManagerTask::new(
+        session_manager_handle.clone(),
         session_manager_rx,
+        recording_manager_handle,
     ));
 
     tasks.register(devolutions_gateway::recording::RecordingManagerTask::new(
         recording_manager_rx,
         conf.recording_path.clone(),
+        session_manager_handle,
     ));
 
     Ok(tasks)

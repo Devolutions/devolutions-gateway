@@ -1,4 +1,4 @@
 export enum LoadingMode {
-  Global,
-  Local
+  Global = 0,
+  Local = 1,
 }

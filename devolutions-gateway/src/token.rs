@@ -128,7 +128,7 @@ impl AccessTokenClaims {
     }
 }
 
-// ----- Known application protocols -----
+// ----- Application protocols -----
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(untagged)]
@@ -262,20 +262,31 @@ pub enum RecordingFileType {
     WebM,
     /// Terminal Playback
     TRP,
+    /// asciinema cast for terminal playback
+    Asciicast,
 }
 
 impl RecordingFileType {
-    pub const fn as_str(self) -> &'static str {
+    pub const fn format_name(self) -> &'static str {
+        match self {
+            RecordingFileType::WebM => "WebM",
+            RecordingFileType::TRP => "TRP",
+            RecordingFileType::Asciicast => "asciicast",
+        }
+    }
+
+    pub const fn extension(self) -> &'static str {
         match self {
             RecordingFileType::WebM => "webm",
             RecordingFileType::TRP => "trp",
+            RecordingFileType::Asciicast => "cast",
         }
     }
 }
 
 impl fmt::Display for RecordingFileType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.format_name())
     }
 }
 
@@ -295,6 +306,20 @@ impl RecordingOperation {
             RecordingOperation::Pull => "pull",
         }
     }
+}
+
+// ----- recording policy ----- //
+
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingPolicy {
+    /// No policy specified, recording is optional
+    #[default]
+    None,
+    /// An external application (e.g.: RDM) must push the recording stream via a separate websocket connection
+    Stream,
+    /// Session must be recorded directly at Devolutions Gateway level
+    Proxy,
 }
 
 // ----- association claims ----- //
@@ -359,7 +384,7 @@ pub struct AssociationTokenClaims {
     pub jet_cm: ConnectionMode,
 
     /// Recording Policy
-    pub jet_rec: bool,
+    pub jet_rec: RecordingPolicy,
 
     /// Filtering Policy
     pub jet_flt: bool,
@@ -410,6 +435,8 @@ pub enum AccessScope {
     RecordingDelete,
     #[serde(rename = "gateway.recordings.read")]
     RecordingsRead,
+    #[serde(rename = "gateway.update")]
+    Update,
 }
 
 #[derive(Clone, Deserialize)]
@@ -450,6 +477,9 @@ pub struct JmuxTokenClaims {
 
     /// Application Protocol (mostly used to find a known default port)
     pub jet_ap: ApplicationProtocol,
+
+    /// Recording Policy
+    pub jet_rec: RecordingPolicy,
 
     /// Max duration
     pub jet_ttl: SessionTtl,
@@ -1159,7 +1189,7 @@ mod serde_impl {
         #[serde(flatten)]
         jet_cm: ConnectionModeHelper,
         #[serde(default)]
-        jet_rec: bool,
+        jet_rec: RecordingPolicy,
         #[serde(default)]
         jet_flt: bool,
         #[serde(default)]
@@ -1177,6 +1207,8 @@ mod serde_impl {
         dst_addl: Vec<SmolStr>,
         #[serde(default)]
         jet_ap: ApplicationProtocol,
+        #[serde(default)]
+        jet_rec: RecordingPolicy,
         jet_aid: Uuid,
         #[serde(default)]
         jet_ttl: SessionTtl,
@@ -1300,6 +1332,7 @@ mod serde_impl {
                     .map(|target| SmolStr::new(target.as_str()))
                     .collect(),
                 jet_ap: self.jet_ap.clone(),
+                jet_rec: self.jet_rec,
                 jet_aid: self.jet_aid,
                 jet_ttl: self.jet_ttl,
                 exp: self.exp,
@@ -1336,6 +1369,7 @@ mod serde_impl {
                 jet_aid: claims.jet_aid,
                 hosts,
                 jet_ap,
+                jet_rec: claims.jet_rec,
                 jet_ttl: claims.jet_ttl,
                 exp: claims.exp,
                 jti: claims.jti,

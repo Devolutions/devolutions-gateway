@@ -15,17 +15,27 @@ public class JmuxClaims : IGatewayClaims
     public Guid SessionId { get; set; }
     [JsonPropertyName("jet_gw_id")]
     public Guid ScopeGatewayId { get; set; }
+    [JsonPropertyName("jet_ttl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SessionTtl? TimeToLive { get; set; }
+    [JsonPropertyName("jet_rec")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RecordingPolicy? RecordingPolicy { get; set; }
 
     public JmuxClaims(
         Guid scopeGatewayId,
         TargetAddr destinationHost,
         ApplicationProtocol applicationProtocol,
-        Guid sessionId)
+        Guid sessionId,
+        SessionTtl? TimeToLive = null,
+        RecordingPolicy? RecordingPolicy = null)
     {
         this.Destination = destinationHost;
         this.ApplicationProtocol = applicationProtocol;
         this.SessionId = sessionId;
         this.ScopeGatewayId = scopeGatewayId;
+        this.TimeToLive = TimeToLive;
+        this.RecordingPolicy = RecordingPolicy;
     }
 
     public void HttpAllowAnyAdditional()

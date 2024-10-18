@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        library: [ dotnet-client, dotnet-subscriber, utils ]
+        library: [ dotnet-client, dotnet-subscriber, utils, pedm-dotnet-client ]
         include:
           - library: dotnet-client
             libpath: ./devolutions-gateway/openapi/dotnet-client
@@ -48,6 +48,8 @@ jobs:
             libpath: ./devolutions-gateway/openapi/dotnet-subscriber
           - library: utils
             libpath: ./utils/dotnet
+          - library: pedm-dotnet-client
+            libpath: ./crates/devolutions-pedm/openapi/dotnet-client
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -62,8 +64,8 @@ jobs:
           & "$Path/build.ps1"
 
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
-          Get-ChildItem -Path $Path -Recurse *.nupkg | ForEach { Copy-Item $_ "./nuget-packages" }
-          Get-ChildItem -Path $Path -Recurse *.snupkg | ForEach { Copy-Item $_ "./nuget-packages" }
+          Get-ChildItem -Path $Path -Recurse -Include '*.nupkg' | ForEach { Copy-Item $_ "./nuget-packages" }
+          Get-ChildItem -Path $Path -Recurse -Include '*.snupkg' | ForEach { Copy-Item $_ "./nuget-packages" }
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
@@ -188,9 +190,25 @@ jobs:
           }
 
       - name: Update Artifactory Cache
-        run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="devolutions-client"
+        run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="gateway-client"
         env:
           GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_WRITE_TOKEN }}
+
+  remove-labels:
+    name: Remove publish-required labels
+    runs-on: ubuntu-latest
+    if: needs.preflight.outputs.dry-run == 'false'
+    needs:
+      - nuget-build
+      - npm-publish
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v4
+
+      - name: Remove labels
+        shell: pwsh
+        run: ./ci/remove-labels.ps1 -Label 'publish-required'
 
   notify:
     name: Notify failure

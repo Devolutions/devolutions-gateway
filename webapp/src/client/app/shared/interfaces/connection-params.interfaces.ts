@@ -1,6 +1,6 @@
-import {DesktopSize} from "@devolutions/iron-remote-gui";
+import { DesktopSize } from '@devolutions/iron-remote-gui';
 
-export interface sessionTokenParameters {
+export interface SessionTokenParameters {
   content_type: string;
   protocol?: string;
   destination?: string;
@@ -18,12 +18,12 @@ export interface IronRDPConnectionParameters {
   port?: number;
   gatewayAddress?: string;
   token?: string;
-  kdcToken?: string
+  kdcToken?: string;
   screenSize?: DesktopSize;
   kdcUrl?: string;
   kdcProxyUrl?: string;
-  preConnectionBlob?:string
-  sessionId?: string
+  preConnectionBlob?: string;
+  sessionId?: string;
 }
 
 export interface IronVNCConnectionParameters {
@@ -34,12 +34,12 @@ export interface IronVNCConnectionParameters {
   port?: number;
   gatewayAddress?: string;
   token?: string;
-  kdcToken?: string
+  kdcToken?: string;
   screenSize?: DesktopSize;
   kdcUrl?: string;
   kdcProxyUrl?: string;
-  preConnectionBlob?:string
-  sessionId?: string
+  preConnectionBlob?: string;
+  sessionId?: string;
 }
 
 export interface IronARDConnectionParameters {
@@ -50,12 +50,12 @@ export interface IronARDConnectionParameters {
   port?: number;
   gatewayAddress?: string;
   token?: string;
-  kdcToken?: string
+  kdcToken?: string;
   screenSize?: DesktopSize;
   kdcUrl?: string;
   kdcProxyUrl?: string;
-  preConnectionBlob?:string
-  sessionId?: string
+  preConnectionBlob?: string;
+  sessionId?: string;
 }
 
 export interface TelnetConnectionParameters {
@@ -63,7 +63,7 @@ export interface TelnetConnectionParameters {
   port: number;
   gatewayAddress?: string;
   token?: string;
-  sessionId?: string
+  sessionId?: string;
 }
 
 export interface SshConnectionParameters {
@@ -73,6 +73,7 @@ export interface SshConnectionParameters {
   password?: string;
   gatewayAddress?: string;
   token?: string;
-  sessionId?: string,
-  privateKey?: string
+  sessionId?: string;
+  privateKey?: string;
+  privateKeyPassphrase?: string;
 }

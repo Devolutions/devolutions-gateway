@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Observable, BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Observable, of } from 'rxjs';
 import { WebFormService } from './web-form.service';
 
 @Injectable({
@@ -38,7 +38,7 @@ export class SshKeyService {
   }
 
   hasValidPrivateKey(): boolean {
-    let value = this.fileReadSubject.getValue();
+    const value = this.fileReadSubject.getValue();
     return value !== null && value.format !== SshKeyFormat.PKCS8_Encrypted;
   }
 
@@ -46,7 +46,7 @@ export class SshKeyService {
     if (file === null) {
       return of({ valid: false, error: 'No file selected' });
     }
-    
+
     if (file.size > 10000) {
       return of({ valid: false, error: 'File size is too large, must be less than 10kb' });
     }
@@ -67,12 +67,6 @@ export class SshKeyService {
             error: 'Invalid key format',
             content: value.content,
           });
-        } else if (value.format == SshKeyFormat.PKCS8_Encrypted) {
-          observer.next({
-            valid: false,
-            error: 'Encrypted key not supported',
-            content: value.content,
-          });
         } else {
           observer.next({ valid: true, content: value.content });
         }
@@ -86,11 +80,8 @@ export class SshKeyService {
 }
 
 function recognizeKeyFormat(keyString): RecognizeKeyFormatResult {
-  let format;
-  if (
-    keyString.includes('-----BEGIN RSA PRIVATE KEY-----') ||
-    keyString.includes('-----BEGIN EC PRIVATE KEY-----')
-  ) {
+  let format: SshKeyFormat;
+  if (keyString.includes('-----BEGIN RSA PRIVATE KEY-----') || keyString.includes('-----BEGIN EC PRIVATE KEY-----')) {
     format = SshKeyFormat.PEM;
   } else if (keyString.includes('-----BEGIN PRIVATE KEY-----')) {
     format = SshKeyFormat.PKCS8_Unencrypted;
@@ -106,11 +97,11 @@ function recognizeKeyFormat(keyString): RecognizeKeyFormatResult {
 }
 
 export enum SshKeyFormat {
-  PEM,
-  PKCS8_Unencrypted,
-  PKCS8_Encrypted,
-  OpenSSH,
-  Unknown,
+  PEM = 0,
+  PKCS8_Unencrypted = 1,
+  PKCS8_Encrypted = 2,
+  OpenSSH = 3,
+  Unknown = 4,
 }
 
 export type ValidateFileResult =

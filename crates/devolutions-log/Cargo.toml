@@ -1,0 +1,31 @@
+[package]
+name = "devolutions-log"
+version = "0.0.0"
+edition = "2021"
+readme = "README.md"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Logging utils library for Devolutions apps"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# In-house
+devolutions-gateway-task = { path = "../devolutions-gateway-task" }
+
+# Error handling
+anyhow = "1.0"
+
+# Utils, misc
+camino = "1.1"
+
+# Async
+async-trait = "0.1"
+tokio = { version = "1.38", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "parking_lot", "smallvec", "local-time", "tracing-log"] }
+tracing-appender = "0.2"

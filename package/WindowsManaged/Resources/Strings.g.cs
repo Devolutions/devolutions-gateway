@@ -173,6 +173,10 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string ViewLogButton = "ViewLogButton";		
 		/// <summary>
+		/// View configuration issues
+		/// </summary>
+		public const string ViewErrorsButton = "ViewErrorsButton";		
+		/// <summary>
 		/// Install Location
 		/// </summary>
 		public const string Group_InstallLocation = "Group_InstallLocation";		

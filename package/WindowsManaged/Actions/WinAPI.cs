@@ -1,5 +1,6 @@
 ﻿using Microsoft.Win32.SafeHandles;
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -11,15 +12,25 @@ internal static class WinAPI
 
     internal static uint CREATE_NO_WINDOW = 0x08000000;
 
-    internal const int EM_SETCUEBANNER = 0x1501;
+    internal const uint DACL_SECURITY_INFORMATION = 0x00000004;
 
+    internal const int EM_SETCUEBANNER = 0x1501;
+    
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+
+    internal const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
 
     internal static uint FILE_SHARE_READ = 0x00000001;
 
     internal static uint FILE_SHARE_WRITE = 0x00000002;
 
-    internal static uint GENERIC_WRITE = 0x40000000;
+    internal static uint FILE_SHARE_DELETE = 0x00000004;
+
+    internal const uint OPEN_EXISTING = 3;
+
+    internal static uint LOGON32_LOGON_SERVICE = 5;
+
+    internal static uint LOGON32_PROVIDER_DEFAULT = 0;
 
     internal static uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x04;
 
@@ -52,6 +63,58 @@ internal static class WinAPI
     internal static int STD_INPUT_HANDLE = -10;
 
     internal static uint WAIT_TIMEOUT = 0x00000102;
+
+    /* Generic access rights */
+
+    internal const uint GENERAL_ALL = 0x10000000;
+
+    internal const uint GENERIC_EXECUTE = 0x20000000;
+
+    internal const uint GENERIC_WRITE = 0x40000000;
+
+    internal const uint GENERIC_READ = 0x80000000;
+
+    /* Standard access rights */
+
+    internal const uint DELETE = 0x00010000;
+
+    internal const uint READ_CONTROL = 0x00020000;
+
+    internal const uint SYNCHRONIZE = 0x00100000;
+
+    internal const uint WRITE_DAC = 0x00040000;
+
+    internal const uint WRITE_OWNER = 0x00080000;
+
+    /* File access rights */
+
+    internal const uint FILE_ADD_FILE = 2;
+
+    internal const uint FILE_ADD_SUBDIRECTORY = 4;
+
+    internal const uint FILE_APPEND_DATA = 4;
+
+    internal const uint FILE_CREATE_PIPE_INSTANCE = 4;
+
+    internal const uint FILE_DELETE_CHILD = 64;
+
+    internal const uint FILE_EXECUTE = 32;
+
+    internal const uint FILE_LIST_DIRECTORY = 1;
+
+    internal const uint FILE_READ_ATTRIBUTES = 128;
+
+    internal const uint FILE_READ_DATA = 1;
+
+    internal const uint FILE_READ_EA = 8;
+
+    internal const uint FILE_TRAVERSE = 32;
+
+    internal const uint FILE_WRITE_ATTRIBUTES = 256;
+
+    internal const uint FILE_WRITE_DATA = 2;
+
+    internal const uint FILE_WRITE_EA = 16;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct QUERY_SERVICE_CONFIG
@@ -89,10 +152,13 @@ internal static class WinAPI
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct SECURITY_ATTRIBUTES
-    {
-        internal uint nLength;
-        internal IntPtr lpSecurityDescriptor;
-        [MarshalAs(UnmanagedType.Bool)] internal bool bInheritHandle;
+    { 
+       internal uint nLength;
+
+       internal IntPtr lpSecurityDescriptor;
+
+       [MarshalAs(UnmanagedType.Bool)] 
+       internal bool bInheritHandle;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -195,6 +261,10 @@ internal static class WinAPI
     [DllImport("advapi32", EntryPoint = "CloseServiceHandle")]
     internal static extern int CloseServiceHandle(IntPtr hSCObject);
 
+    [DllImport("advapi32", SetLastError = true, CharSet = CharSet.Unicode)]
+    internal static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string StringSecurityDescriptor, uint StringSDRevision, out IntPtr SecurityDescriptor, out UIntPtr SecurityDescriptorSize);
+
+
     [DllImport("advapi32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ControlService(IntPtr hService, uint dwControl, IntPtr lpServiceStatus);
@@ -226,8 +296,15 @@ internal static class WinAPI
     [DllImport("kernel32", EntryPoint = "DeleteFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DeleteFile(
-        [MarshalAs(UnmanagedType.LPWStr)] string lpFileName
+        [MarshalAs(UnmanagedType.LPWStr)] 
+        string lpFileName
     );
+
+    [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern bool DuplicateToken(
+        IntPtr token, 
+        uint impersonationLevel, 
+        ref IntPtr DuplicateTokenHandle);
 
     [DllImport("kernel32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -236,7 +313,8 @@ internal static class WinAPI
     [DllImport("Kernel32", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Auto, SetLastError = true)]
     internal static extern uint GetFinalPathNameByHandle(
         IntPtr hFile,
-        [MarshalAs(UnmanagedType.LPTStr)] StringBuilder lpszFilePath,
+        [MarshalAs(UnmanagedType.LPTStr)] 
+        StringBuilder lpszFilePath,
         uint cchFilePath,
         uint dwFlags);
 
@@ -249,6 +327,18 @@ internal static class WinAPI
         [MarshalAs(UnmanagedType.LPWStr)] string lpPrefixString,
         uint uUnique,
         [Out] StringBuilder lpTempFileName);
+    
+    [DllImport("kernel32", SetLastError = true)]
+    internal static extern IntPtr LocalFree(IntPtr hMem);
+
+    [DllImport("advapi32", EntryPoint = "LogonUserW", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern bool LogonUser(
+        string username, 
+        string domain,
+        string password, 
+        uint logonType,
+        uint logonProvider,
+        out IntPtr phToken);
 
     [DllImport("kernel32", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -282,6 +372,9 @@ internal static class WinAPI
         int msg,
         int wParam,
         [MarshalAs(UnmanagedType.LPWStr)] string lParam);
+
+    [DllImport("advapi32", SetLastError = true, CharSet = CharSet.Unicode)]
+    internal static extern bool SetFileSecurityW(string lpFileName, uint SecurityInformation, IntPtr pSecurityDescriptor);
 
     [DllImport("advapi32", EntryPoint = "StartServiceW", SetLastError = true)]
     internal static extern bool StartService(IntPtr hService, uint dwNumServiceArgs, IntPtr lpServiceArgVectors);

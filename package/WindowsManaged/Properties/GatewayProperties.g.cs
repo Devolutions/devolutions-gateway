@@ -810,7 +810,7 @@ namespace DevolutionsGateway.Properties
         internal static readonly WixProperty<AuthenticationMode> authenticationMode = new()
         {
             Id = "P.AUTHENTICATIONMODE",
-            Default = AuthenticationMode.None,
+            Default = AuthenticationMode.Custom,
             Name = "AuthenticationMode",
             Secure = true,
             Hidden = false,
@@ -1044,12 +1044,12 @@ namespace DevolutionsGateway.Properties
  
         internal static readonly WixProperty<Guid> installId = new()
         {
-            Id = "P.InstallId",
+            Id = "P.INSTALLID",
             Default = new Guid("00000000-0000-0000-0000-000000000000"),
             Name = "InstallId",
-            Secure = false,
+            Secure = true,
             Hidden = false,
-            Public = false
+            Public = true
         };
 
         public Guid InstallId
@@ -1064,6 +1064,32 @@ namespace DevolutionsGateway.Properties
                 if (this.runtimeSession is not null)
                 {
                     this.runtimeSession.Set(installId, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<String> userTempPath = new()
+        {
+            Id = "P.USERTEMPPATH",
+            Default = "",
+            Name = "UserTempPath",
+            Secure = true,
+            Hidden = false,
+            Public = true
+        };
+
+        public String UserTempPath
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(userTempPath.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(userTempPath, value); 
                 }
             }
         }
@@ -1305,6 +1331,8 @@ namespace DevolutionsGateway.Properties
             debugPowerShell,
  
             installId,
+ 
+            userTempPath,
  
             netFx45Version,
  

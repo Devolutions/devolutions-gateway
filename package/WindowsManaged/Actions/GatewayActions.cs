@@ -130,9 +130,9 @@ internal static class GatewayActions
     /// <summary>
     /// Set or reset the ACL on %programdata%\Devolutions\Gateway
     /// </summary>
-    private static readonly WixQuietExecAction setProgramDataDirectoryPermissions = new(
-        "cmd.exe",
-        $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\" /S:{Includes.PROGRAM_DATA_SDDL} /C /t",
+    private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
+        new Id($"CA.{nameof(setProgramDataDirectoryPermissions)}"),
+        CustomActions.SetProgramDataDirectoryPermissions,
         Return.ignore,
         When.After, new Step(createProgramDataDirectory.Id),
         Condition.Always,
@@ -145,22 +145,18 @@ internal static class GatewayActions
     /// <summary>
     /// Set or reset the ACL on %programdata%\Devolutions\Gateway\users.txt
     /// </summary>
-    private static readonly WixQuietExecAction setUserDatabasePermissions = new(
-        "cmd.exe",
-        $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\\users.txt\" /S:{Includes.USERS_FILE_SDDL} /C",
-        Return.ignore,
-        When.Before, Step.InstallFinalize,
-        Condition.Always,
-        Sequence.InstallExecuteSequence)
+    private static readonly ElevatedManagedAction setUserDatabasePermissions = new(
+            new Id($"CA.{nameof(setUserDatabasePermissions)}"),
+            CustomActions.SetUsersDatabaseFilePermissions,
+            Return.ignore,
+            When.Before, Step.InstallFinalize,
+            Condition.Always,
+            Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
         Impersonate = false,
     };
 
-    /// <summary>
-    /// </summary>
-    /// <remarks>
-    /// </remarks>
     private static readonly ElevatedManagedAction cleanGatewayConfigIfNeeded = new(
         new Id($"CA.{nameof(cleanGatewayConfigIfNeeded)}"),
         CustomActions.CleanGatewayConfig,
@@ -173,11 +169,7 @@ internal static class GatewayActions
         Impersonate = false,
         UsesProperties = UseProperties(new [] { GatewayProperties.installId })
     };
-
-    /// <summary>
-    /// </summary>
-    /// <remarks>
-    /// </remarks>
+    
     private static readonly ElevatedManagedAction cleanGatewayConfigIfNeededRollback = new(
         new Id($"CA.{nameof(cleanGatewayConfigIfNeededRollback)}"),
         CustomActions.CleanGatewayConfigRollback,
@@ -451,6 +443,19 @@ internal static class GatewayActions
         return action;
     }
 
+    private static readonly ElevatedManagedAction evaluateConfiguration = new(
+        new Id($"CA.{nameof(evaluateConfiguration)}"),
+        CustomActions.EvaluateConfiguration,
+        Return.ignore,
+        When.After, new Step(setUserDatabasePermissions.Id),
+        GatewayProperties.uninstalling.Equal(false),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.installId, GatewayProperties.userTempPath })
+    };
+
     internal static readonly Action[] Actions =
     {
         isFirstInstall,
@@ -484,5 +489,6 @@ internal static class GatewayActions
         configurePublicKey,
         configureWebApp,
         configureWebAppUser,
+        evaluateConfiguration,
     };
 }

@@ -1,39 +1,44 @@
 import {
+  AfterViewInit,
+  ChangeDetectorRef,
   Component,
+  ElementRef,
+  HostListener,
+  OnDestroy,
   OnInit,
+  Type,
   ViewChild,
-  ChangeDetectorRef, Type, OnDestroy, HostListener, ElementRef, AfterViewInit
 } from '@angular/core';
-import {takeUntil} from "rxjs/operators";
-import {TabView} from "primeng/tabview";
+import { TabView } from 'primeng/tabview';
+import { takeUntil } from 'rxjs/operators';
 
-import {WebSession} from "@shared/models/web-session.model";
-import {WebSessionService} from "@shared/services/web-session.service";
+import { SessionDataTypeMap, SessionType, WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
+import { WebSessionService } from '@shared/services/web-session.service';
 
-import {BaseComponent} from "@shared/bases/base.component";
-import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-client-form.component";
+import { BaseComponent } from '@shared/bases/base.component';
 import { MainPanelComponent } from '../main-panel/main-panel.component';
 
 @Component({
   selector: 'web-client-tab-view',
   templateUrl: './tab-view.component.html',
-  styleUrls: ['./tab-view.component.scss']
+  styleUrls: ['./tab-view.component.scss'],
 })
 export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
-
   @ViewChild('tabView') tabView: TabView;
   @ViewChild('sessionsContainer') sessionsContainer: ElementRef;
 
-  webSessionTabs: WebSession<any, any>[] = [];
-  currentTabIndex: number = 0;
+  webSessionTabs: WebSession<SessionType>[] = [];
+  currentTabIndex = 0;
 
-  constructor(private webSessionService: WebSessionService,
-              private readonly cdr: ChangeDetectorRef) {
+  constructor(
+    private webSessionService: WebSessionService,
+    private readonly cdr: ChangeDetectorRef,
+  ) {
     super();
   }
 
   @HostListener('window:beforeunload', ['$event'])
-  unloadNotification($event: any): void {
+  unloadNotification($event): void {
     if (this.webSessionService.hasActiveWebSessions()) {
       $event.preventDefault();
       $event.returnValue = true;
@@ -62,7 +67,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
 
   measureSize(): void {
     const width: number = this.sessionsContainer.nativeElement.offsetWidth;
-    const height: number = this.sessionsContainer.nativeElement.offsetHeight-WebSession.TOOLBAR_SIZE;
+    const height: number = this.sessionsContainer.nativeElement.offsetHeight - WebSession.TOOLBAR_SIZE;
     this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 
@@ -72,27 +77,37 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   }
 
   private loadFormTab(): void {
-    const newSessionTabExists: boolean = this.webSessionService.getWebSessionSnapshot().some(webSession => webSession.name === 'New Session');
-
-    if (!newSessionTabExists) {
-      const newSessionTab: WebSession<Type<MainPanelComponent>, any> = new WebSession('New Session', MainPanelComponent);
+    if (!this.isSessionTabExists('New Session')) {
+      const newSessionTab = this.createNewSessionTab('New Session') as WebSession<keyof SessionDataTypeMap>;
       this.webSessionService.addSession(newSessionTab);
     }
   }
 
+  private isSessionTabExists(tabName: string): boolean {
+    return this.webSessionService.getWebSessionSnapshot().some((webSession) => webSession.name === tabName);
+  }
+
+  private createNewSessionTab(name: string) {
+    return new WebSession(name, MainPanelComponent);
+  }
+
   private subscribeToTabMenuArray(): void {
-    this.webSessionService.getAllWebSessions().pipe(takeUntil(this.destroyed$)).subscribe(
-      (tabs: WebSession<any, any>[]) => {
+    this.webSessionService
+      .getAllWebSessions()
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe((tabs) => {
         this.webSessionTabs = tabs;
         this.cdr.detectChanges();
-    });
+      });
   }
 
   private subscribeToTabActiveIndex(): void {
-    this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe(
-      (tabActiveIndex: number): void => {
+    this.webSessionService
+      .getWebSessionCurrentIndex()
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe((tabActiveIndex: number): void => {
         this.currentTabIndex = tabActiveIndex;
         this.changeTabIndex();
-    })
+      });
   }
 }

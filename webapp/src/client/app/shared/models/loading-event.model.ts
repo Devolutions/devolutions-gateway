@@ -1,7 +1,7 @@
-import {LoadingMode} from '../enums/loading-mode.enum';
+import { LoadingMode } from '../enums/loading-mode.enum';
 
 export interface LoadingEvent {
   isLoading: boolean;
-  receiver: any;
+  receiver: unknown;
   mode: LoadingMode;
 }

@@ -33,6 +33,7 @@ namespace WixSharpSetup.Dialogs
         {
             this.imgPanel = new System.Windows.Forms.Panel();
             this.textPanel = new System.Windows.Forms.Panel();
+            this.ViewErrorsButton = new System.Windows.Forms.LinkLabel();
             this.title = new System.Windows.Forms.Label();
             this.description = new System.Windows.Forms.Label();
             this.image = new System.Windows.Forms.PictureBox();
@@ -64,12 +65,28 @@ namespace WixSharpSetup.Dialogs
             // 
             // textPanel
             // 
+            this.textPanel.Controls.Add(this.ViewErrorsButton);
             this.textPanel.Controls.Add(this.title);
             this.textPanel.Controls.Add(this.description);
             this.textPanel.Location = new System.Drawing.Point(162, 12);
             this.textPanel.Name = "textPanel";
             this.textPanel.Size = new System.Drawing.Size(320, 289);
             this.textPanel.TabIndex = 8;
+            // 
+            // ViewErrorsButton
+            // 
+            this.ViewErrorsButton.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.ViewErrorsButton.AutoSize = true;
+            this.ViewErrorsButton.BackColor = System.Drawing.Color.Transparent;
+            this.ViewErrorsButton.Location = new System.Drawing.Point(4, 276);
+            this.ViewErrorsButton.Name = "ViewErrorsButton";
+            this.ViewErrorsButton.Size = new System.Drawing.Size(94, 13);
+            this.ViewErrorsButton.TabIndex = 10;
+            this.ViewErrorsButton.TabStop = true;
+            this.ViewErrorsButton.Text = "[ViewErrorsButton]";
+            this.ViewErrorsButton.Visible = false;
+            this.ViewErrorsButton.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.ViewErrorsButton_LinkClicked);
             // 
             // title
             // 
@@ -212,6 +229,7 @@ namespace WixSharpSetup.Dialogs
             this.Load += new System.EventHandler(this.OnLoad);
             this.imgPanel.ResumeLayout(false);
             this.textPanel.ResumeLayout(false);
+            this.textPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.image)).EndInit();
             this.bottomPanel.ResumeLayout(false);
             this.bottomPanel.PerformLayout();
@@ -235,5 +253,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Button next;
         private System.Windows.Forms.Button cancel;
         private System.Windows.Forms.Panel textPanel;
+        private System.Windows.Forms.LinkLabel ViewErrorsButton;
     }
 }

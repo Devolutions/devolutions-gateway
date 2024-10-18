@@ -1,3 +1,6 @@
+#![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
+
 use devolutions_gateway::recording::ActiveRecordings;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims, TokenCache};
 use devolutions_gateway_generators::*;
@@ -52,7 +55,7 @@ fn encode_decode_round_trip<C>(
     active_recordings: &ActiveRecordings,
 ) -> anyhow::Result<()>
 where
-    C: serde::ser::Serialize,
+    C: Serialize,
 {
     // DVLS side
     let mut token = CheckedJwtSig::new(JwsAlg::RS256, claims);
@@ -134,7 +137,7 @@ mod as_of_v2022_3_0_0 {
     }
 
     #[derive(Clone, Debug, Serialize)]
-    pub enum DvlsAccessScope {
+    pub(crate) enum DvlsAccessScope {
         #[serde(rename = "gateway.sessions.read")]
         SessionsRead,
         #[serde(rename = "gateway.session.terminate")]

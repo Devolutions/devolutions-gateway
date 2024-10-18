@@ -26,7 +26,7 @@ impl JetTestReq {
         Ok(())
     }
 
-    pub fn from_request(request: &httparse::Request) -> Result<Self, Error> {
+    pub fn from_request(request: &httparse::Request<'_, '_>) -> Result<Self, Error> {
         if request.is_get_method() {
             let version_opt = request
                 .get_header_value(JET_HEADER_VERSION)
@@ -41,7 +41,7 @@ impl JetTestReq {
                         {
                             return Ok(JetTestReq {
                                 version,
-                                host: host.to_string(),
+                                host: host.to_owned(),
                                 association: association_id,
                                 candidate: candidate_id,
                             });
@@ -75,7 +75,7 @@ impl JetTestRsp {
         Ok(())
     }
 
-    pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
+    pub fn from_response(response: &httparse::Response<'_, '_>) -> Result<Self, Error> {
         let code = response
             .code
             .ok_or_else(|| "invalid test response, status code is missing".to_owned())?;

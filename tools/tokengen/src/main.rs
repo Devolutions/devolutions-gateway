@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             jet_ap,
             jet_ttl,
             jet_aid,
+            jet_rec,
         } => {
             let claims = AssociationClaims {
                 exp,
@@ -40,6 +41,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec: if jet_rec {
+                    RecordingPolicy::Stream
+                } else {
+                    RecordingPolicy::None
+                },
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
@@ -62,6 +68,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: ApplicationProtocol::Rdp,
+                jet_rec: RecordingPolicy::None,
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
@@ -74,7 +81,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("ASSOCIATION", serde_json::to_value(claims)?)
         }
-        SubCommand::Rendezvous { jet_ap, jet_aid } => {
+        SubCommand::Rendezvous {
+            jet_ap,
+            jet_aid,
+            jet_rec,
+        } => {
             let claims = AssociationClaims {
                 exp,
                 nbf,
@@ -82,6 +93,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: None,
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec: if jet_rec {
+                    RecordingPolicy::Stream
+                } else {
+                    RecordingPolicy::None
+                },
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
@@ -105,11 +121,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             dst_addl,
             jet_ttl,
             jet_aid,
+            jet_rec,
         } => {
             let claims = JmuxClaims {
                 dst_hst: &dst_hst,
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec: if jet_rec {
+                    RecordingPolicy::Stream
+                } else {
+                    RecordingPolicy::None
+                },
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
@@ -223,12 +245,16 @@ enum SubCommand {
         jet_ttl: Option<u64>,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_rec: bool,
     },
     Rendezvous {
         #[clap(long)]
         jet_ap: Option<ApplicationProtocol>,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_rec: bool,
     },
     RdpTls {
         #[clap(long)]
@@ -258,6 +284,8 @@ enum SubCommand {
         jet_ttl: Option<u64>,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_rec: bool,
     },
     Jrec {
         #[clap(long)]
@@ -287,6 +315,7 @@ struct AssociationClaims<'a> {
     jti: Uuid,
     jet_cm: &'a str,
     jet_ap: ApplicationProtocol,
+    jet_rec: RecordingPolicy,
     jet_aid: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_ttl: Option<u64>,
@@ -320,6 +349,7 @@ struct JmuxClaims<'a> {
     dst_hst: &'a str,
     dst_addl: Vec<&'a str>,
     jet_ap: ApplicationProtocol,
+    jet_rec: RecordingPolicy,
     jet_aid: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_ttl: Option<u64>,
@@ -416,6 +446,17 @@ pub enum ApplicationProtocol {
 pub enum RecordingOperation {
     Push,
     Pull,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingPolicy {
+    #[default]
+    None,
+    /// An external application (e.g.: RDM) must push the recording stream via a separate websocket connection
+    Stream,
+    /// Session must be recorded directly at Devolutions Gateway level
+    Proxy,
 }
 
 macro_rules! impl_from_str {

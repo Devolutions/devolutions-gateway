@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Devolutions.Gateway.Utils.Tests;
 
-public class TestUtils
+public class TokenUtilsTests
 {
     private static readonly string privKeyPemRepr = @"-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDkrPiL/5dmGIT5

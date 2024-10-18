@@ -7,14 +7,13 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.1.5
+  version: 2024.3.2
 paths:
   /jet/config:
     patch:
       tags:
       - Config
       summary: Modifies configuration
-      description: Modifies configuration
       operationId: PatchConfig
       requestBody:
         description: JSON-encoded configuration patch
@@ -43,8 +42,6 @@ paths:
       - Diagnostics
       summary: Retrieves server's clock in order to diagnose clock drifting.
       description: |-
-        Retrieves server's clock in order to diagnose clock drifting.
-
         This route is not secured by access token.
         Indeed, this route is used to retrieve server's clock when diagnosing clock drifting.
         If there is clock drift, token validation will fail because claims such as `nbf` will then
@@ -63,8 +60,6 @@ paths:
       - Diagnostics
       summary: Retrieves a subset of the configuration, for diagnosis purposes.
       description: |-
-        Retrieves a subset of the configuration, for diagnosis purposes.
-
         This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch,
         outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to
         provide configuration auto-filling, in order to assist the end user.
@@ -93,7 +88,6 @@ paths:
       tags:
       - Diagnostics
       summary: Retrieves latest logs.
-      description: Retrieves latest logs.
       operationId: GetLogs
       responses:
         '200':
@@ -118,7 +112,6 @@ paths:
       tags:
       - Health
       summary: Performs a health check
-      description: Performs a health check
       operationId: GetHealth
       responses:
         '200':
@@ -134,7 +127,6 @@ paths:
       tags:
       - Heartbeat
       summary: Performs a heartbeat check
-      description: Performs a heartbeat check
       operationId: GetHeartbeat
       responses:
         '200':
@@ -157,7 +149,6 @@ paths:
       tags:
       - Jrec
       summary: Lists all recordings stored on this instance
-      description: Lists all recordings stored on this instance
       operationId: ListRecordings
       responses:
         '200':
@@ -183,7 +174,6 @@ paths:
       tags:
       - Jrec
       summary: Retrieves a recording file for a given session
-      description: Retrieves a recording file for a given session
       operationId: PullRecordingFile
       parameters:
       - name: id
@@ -223,7 +213,6 @@ paths:
       tags:
       - Jrl
       summary: Updates JRL (Json Revocation List) using a JRL token
-      description: Updates JRL (Json Revocation List) using a JRL token
       operationId: UpdateJrl
       responses:
         '200':
@@ -243,7 +232,6 @@ paths:
       tags:
       - Jrl
       summary: Retrieves current JRL (Json Revocation List) info
-      description: Retrieves current JRL (Json Revocation List) info
       operationId: GetJrlInfo
       responses:
         '200':
@@ -268,7 +256,6 @@ paths:
       tags:
       - Sessions
       summary: Terminate forcefully a running session
-      description: Terminate forcefully a running session
       operationId: TerminateSession
       parameters:
       - name: id
@@ -299,7 +286,6 @@ paths:
       tags:
       - Sessions
       summary: Lists running sessions
-      description: Lists running sessions
       operationId: GetSessions
       responses:
         '200':
@@ -321,12 +307,41 @@ paths:
       security:
       - scope_token:
         - gateway.sessions.read
+  /jet/update:
+    post:
+      tags:
+      - Update
+      summary: Triggers Devolutions Gateway update process.
+      description: |-
+        This is done via updating `Agent/update.json` file, which is then read by Devolutions Agent
+        when changes are detected. If the version written to `update.json` is indeed higher than the
+        currently installed version, Devolutions Agent will proceed with the update process.
+      operationId: Update
+      responses:
+        '200':
+          description: Update request has been processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Agent updater service is malfunctioning
+        '503':
+          description: Agent updater service is unavailable
+      security:
+      - scope_token:
+        - gateway.update
   /jet/webapp/app-token:
     post:
       tags:
       - WebApp
       summary: Requests a web application token using the configured authorization method
-      description: Requests a web application token using the configured authorization method
       operationId: SignAppToken
       requestBody:
         description: JSON-encoded payload specifying the desired claims
@@ -358,7 +373,6 @@ paths:
       tags:
       - WebApp
       summary: Requests a session token using a web application token
-      description: Requests a session token using a web application token
       operationId: SignSessionToken
       requestBody:
         description: JSON-encoded payload specifying the desired claims
@@ -399,6 +413,7 @@ components:
       - gateway.heartbeat.read
       - gateway.recording.delete
       - gateway.recordings.read
+      - gateway.update
     AppTokenContentType:
       type: string
       enum:
@@ -585,7 +600,7 @@ components:
       type: string
       enum:
       - Spki
-      - Rsa
+      - Pkcs1
     SessionInfo:
       type: object
       description: Information about an ongoing Gateway session
@@ -711,6 +726,8 @@ components:
         Url:
           type: string
           description: HTTP URL where notification messages are to be sent
+    UpdateResponse:
+      type: object
   securitySchemes:
     jrec_token:
       type: http

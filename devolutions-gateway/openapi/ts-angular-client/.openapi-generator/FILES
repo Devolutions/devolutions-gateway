@@ -9,6 +9,7 @@ api/heartbeat.service.ts
 api/jrec.service.ts
 api/jrl.service.ts
 api/sessions.service.ts
+api/update.service.ts
 api/webApp.service.ts
 configuration.ts
 encoder.ts

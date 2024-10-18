@@ -1,9 +1,8 @@
 import { Injectable, isDevMode } from '@angular/core';
-import { Protocol } from '../enums/web-client-protocol.enum';
-import { ApiService } from './api.service';
 import { environment } from 'src/environments/environment';
 import { v4 as uuidv4 } from 'uuid';
-import { from } from 'rxjs';
+import { Protocol } from '../enums/web-client-protocol.enum';
+import { ApiService } from './api.service';
 
 @Injectable({
   providedIn: 'root',
@@ -28,7 +27,7 @@ export class AnalyticService {
       connectionType: connectionType,
     });
 
-    let connectionId = uuidv4();
+    const connectionId = uuidv4();
     this.openedConnections.set(connectionId, {
       startTime: new Date(),
       sessionType: connectionType,
@@ -41,13 +40,13 @@ export class AnalyticService {
   }
 
   public sendCloseEvent(connectionId: ConnectionIdentifier): void {
-    let connection = this.openedConnections.get(connectionId.id);
+    const connection = this.openedConnections.get(connectionId.id);
     if (!connection) {
       return;
     }
     this.openedConnections.delete(connectionId.id);
-    let duration = new Date().getTime() - connection.startTime.getTime();
-    let durationInSeconds = duration / 1000;
+    const duration = new Date().getTime() - connection.startTime.getTime();
+    const durationInSeconds = duration / 1000;
 
     this.sendEvent({
       connectionType: connection.sessionType,
@@ -58,8 +57,8 @@ export class AnalyticService {
   sendCloseAllEvents(): void {
     this.openedConnections.forEach((connection, id) => {
       this.openedConnections.delete(id);
-      let duration = new Date().getTime() - connection.startTime.getTime();
-      let durationInSeconds = duration / 1000;
+      const duration = new Date().getTime() - connection.startTime.getTime();
+      const durationInSeconds = duration / 1000;
 
       this.sendEvent({
         connectionType: connection.sessionType,
@@ -68,12 +67,10 @@ export class AnalyticService {
     });
   }
 
-  private sendEvent(
-    connectinoEvent: OpenedConnectionEvent | ClosedConnectionEvent
-  ): void {
-    let host = environment.OpenSearchUrl;
-    let token = environment.OpenSearchToken;
-    let indexName = environment.OpenSearchIndex;
+  private sendEvent(connectinoEvent: OpenedConnectionEvent | ClosedConnectionEvent): void {
+    const host = environment.OpenSearchUrl;
+    const token = environment.OpenSearchToken;
+    const indexName = environment.OpenSearchIndex;
 
     let installId = localStorage.getItem('installId');
     if (!installId) {
@@ -82,7 +79,7 @@ export class AnalyticService {
     }
 
     this.apiService.getVersion().subscribe((version) => {
-      let event: AnalyticEvent = {
+      const event: AnalyticEvent = {
         application: {
           version: version.version,
         },
@@ -96,7 +93,7 @@ export class AnalyticService {
       headers.append('Content-Type', 'application/json');
       headers.append('Authorization', `Basic ${token}`);
 
-      let url = `${host}${indexName}/_doc`;
+      const url = `${host}${indexName}/_doc`;
       const requestOptions: RequestInit = {
         method: 'POST',
         headers: headers,
@@ -142,5 +139,4 @@ interface ClosedConnectionEvent {
   duration: number;
 }
 
-export type AnalyticEvent = AnalyticEventBasic &
-  (OpenedConnectionEvent | ClosedConnectionEvent);
+export type AnalyticEvent = AnalyticEventBasic & (OpenedConnectionEvent | ClosedConnectionEvent);

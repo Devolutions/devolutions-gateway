@@ -1,0 +1,12 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/jetify.dll">
+            <Link>runtimes\win-x64\native\%(Filename)%(Extension)</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/jetify.dll">
+            <Link>runtimes\win-arm64\native\%(Filename)%(Extension)</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+</Project>

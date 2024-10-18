@@ -14,6 +14,7 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Xml;
+using Newtonsoft.Json;
 using WixSharp;
 using WixSharp.CommonTasks;
 using WixSharpSetup.Dialogs;
@@ -93,6 +94,30 @@ internal class Program
             if (!Directory.Exists(path))
             {
                 throw new DirectoryNotFoundException("The web client was not found");
+            }
+
+            return path;
+        }
+    }
+
+    private static string LibXmfPath
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("DGATEWAY_LIB_XMF_PATH");
+
+            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\native-libs\\xmf.dll";
+#else
+                throw new Exception("The environment variable DGATEWAY_LIB_XMF_PATH is not specified or the file does not exist");
+#endif
+            }
+
+            if (!System.IO.File.Exists(path))
+            {
+                throw new FileNotFoundException("The XMF native library was not found");
             }
 
             return path;
@@ -258,6 +283,10 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
+                    new (LibXmfPath)
+                    {
+                        TargetFileName = "xmf.dll",
+                    }
                 },
                 Dirs = new Dir[]
                 {
@@ -281,7 +310,8 @@ internal class Program
                     {
                         Dirs = new Dir[]
                         {
-                            new("client", new Files($@"{DevolutionsWebClientPath}\*.*"))
+                            new("client", new Files($@"{DevolutionsWebClientPath}\*.*")),
+                            new("player", new Files(@"..\..\webapp\player\*.*"))
                         }
                     }
                 }
@@ -290,6 +320,7 @@ internal class Program
         project.ResolveWildCards(true);
 
         project.DefaultRefAssemblies.Add(typeof(ZipArchive).Assembly.Location);
+        project.DefaultRefAssemblies.Add(typeof(JsonSerializer).Assembly.Location);
         project.Actions = GatewayActions.Actions;
         project.RegValues = new RegValue[]
         {
@@ -362,6 +393,12 @@ internal class Program
 
     private static void Project_UIInitialized(SetupEventArgs e)
     {
+        e.Session.Set(GatewayProperties.userTempPath, Path.GetTempPath());
+
+        Guid installId = Guid.NewGuid();
+        e.Session.Set(GatewayProperties.installId, installId);
+        Wizard.Globals["installId"] = installId.ToString();
+
         string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "fr" ? frFR.Key : enUS.Key;
 
         using Stream stream = Assembly.GetExecutingAssembly()

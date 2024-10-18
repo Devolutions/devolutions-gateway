@@ -35,7 +35,7 @@ fn message_type_try_err_on_invalid_bytes() {
 fn header_decode_buffer_too_short_err() {
     let err = Header::decode(Bytes::from_static(&[])).err().unwrap();
     assert_eq!(
-        "Not enough bytes provided to decode HEADER: received 0 bytes, expected 4 bytes",
+        "not enough bytes provided to decode HEADER: received 0 bytes, expected 4 bytes",
         err.to_string()
     );
 }
@@ -152,11 +152,11 @@ pub fn channel_window_adjust() {
 #[test]
 pub fn error_on_oversized_packet() {
     let mut buf = BytesMut::new();
-    let err = Message::data(DistantChannelId::from(1), vec![0; u16::MAX as usize])
+    let err = Message::data(DistantChannelId::from(1), vec![0; u16::MAX as usize].into())
         .encode(&mut buf)
         .err()
         .unwrap();
-    assert_eq!("Packet oversized: max is 65535, got 65543", err.to_string());
+    assert_eq!("packet oversized: max is 65535, got 65543", err.to_string());
 }
 
 #[test]
@@ -171,7 +171,7 @@ pub fn channel_data() {
 
     let msg_example = ChannelData {
         recipient_channel_id: 1,
-        transfer_data: vec![11, 12, 13, 14],
+        transfer_data: vec![11, 12, 13, 14].into(),
     };
 
     check_encode_decode(Message::Data(msg_example), raw_msg);

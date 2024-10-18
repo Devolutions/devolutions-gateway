@@ -12,8 +12,8 @@ pub struct NetBiosPacket<'a> {
     pub data: &'a [u8],
 }
 
-impl<'a> Display for NetBiosPacket<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for NetBiosPacket<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut values = String::new();
         for byte in self.data.iter() {
             values.push_str(&format!("0x{:01$X}, ", byte, 2));
@@ -23,7 +23,7 @@ impl<'a> Display for NetBiosPacket<'a> {
 }
 
 impl<'a> NetBiosPacket<'a> {
-    pub fn from(ip: Ipv4Addr, data: &[u8]) -> NetBiosPacket {
+    pub fn from(ip: Ipv4Addr, data: &'a [u8]) -> NetBiosPacket<'a> {
         NetBiosPacket { ip, data }
     }
 
@@ -34,10 +34,7 @@ impl<'a> NetBiosPacket<'a> {
 
         match String::from_utf8(name_bytes) {
             Ok(name) => String::from(name.trim_end()),
-            Err(_) => {
-                eprintln!("Couldn't decode the name");
-                String::from("N/A")
-            }
+            Err(_) => String::from("N/A"),
         }
     }
 

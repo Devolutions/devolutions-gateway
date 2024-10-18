@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // FIXME: fix warnings
+
 pub mod accept;
 pub mod connect;
 pub mod test;
@@ -13,7 +15,7 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::trace;
 use std::env;
 use std::io::{self, Read};
-use std::sync::Once;
+use std::sync::OnceLock;
 use test::{JetTestReq, JetTestRsp};
 use uuid::Uuid;
 
@@ -30,21 +32,23 @@ const JET_HEADER_INSTANCE: &str = "Jet-Instance";
 const JET_HEADER_HOST: &str = "Host";
 const JET_HEADER_CONNECTION: &str = "Connection";
 
-static mut JET_MSG_MASK: u8 = 0x73;
-static JET_MASK_INIT: Once = Once::new();
+const JET_MSG_DEFAULT_MASK: u8 = 0x73;
 
 pub fn get_mask_value() -> u8 {
-    unsafe {
-        JET_MASK_INIT.call_once(|| {
-            if let Ok(mask) = env::var("JET_MSG_MASK") {
-                let mask = mask.trim_start_matches("0x");
-                if let Ok(mask) = u8::from_str_radix(mask, 16) {
-                    JET_MSG_MASK = mask;
-                }
-            }
-        });
-        JET_MSG_MASK
-    }
+    static JET_MSG_MASK: OnceLock<u8> = OnceLock::new();
+
+    let value = JET_MSG_MASK.get_or_init(|| {
+        if let Some(mask) = env::var("JET_MSG_MASK")
+            .ok()
+            .and_then(|mask| u8::from_str_radix(mask.trim_start_matches("0x"), 16).ok())
+        {
+            mask
+        } else {
+            JET_MSG_DEFAULT_MASK
+        }
+    });
+
+    *value
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +147,7 @@ impl JetMessage {
 
         apply_mask(mask, &mut payload);
 
-        let size = payload.len() as u16 + JET_MSG_HEADER_SIZE as u16;
+        let size = u16::try_from(payload.len()).unwrap() + u16::try_from(JET_MSG_HEADER_SIZE).unwrap();
         stream.write_u32::<LittleEndian>(JET_MSG_SIGNATURE)?;
         stream.write_u16::<BigEndian>(size)?;
         stream.write_u8(flags)?;
@@ -245,7 +249,7 @@ impl From<Error> for io::Error {
 
 impl From<&'static str> for Error {
     fn from(error: &'static str) -> Error {
-        Error::Str(error.to_string())
+        Error::Str(error.to_owned())
     }
 }
 
@@ -268,7 +272,7 @@ impl Error {
 }
 
 impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Internal => write!(f, "Internal error"),
             Error::Version => write!(f, "Version error"),
@@ -339,7 +343,7 @@ mod tests {
                     association: Uuid::from_str("300f1c82-d33b-11e9-bb65-2a2ae2dbcce5").unwrap(),
                     candidate: Uuid::from_str("4c8f409a-c1a2-4cae-bda2-84c590fed618").unwrap(),
                     version: 2,
-                    host: "jet101.wayk.net".to_string()
+                    host: "jet101.wayk.net".to_owned()
                 })
         );
     }

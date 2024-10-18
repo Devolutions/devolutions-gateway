@@ -1,0 +1,42 @@
+[package]
+name = "devolutions-pedm"
+version = "0.0.0"
+edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Devolutions Agent PEDM module"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query", "tracing", "tower-log", "form", "original-uri", "matched-path"] }
+base16ct = { version = "0.2", features = ["std", "alloc"] }
+base64 = "0.22"
+chrono = "0.4"
+digest = "0.10"
+hyper = { version = "1.3", features = ["server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+schemars = "0.8"
+serde = "1.0"
+serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
+tokio = { version = "1.38", features = ["net", "rt-multi-thread"] }
+tower-service = "0.3"
+win-api-wrappers = { path = "../win-api-wrappers" }
+devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["policy"]}
+devolutions-gateway-task = { path = "../devolutions-gateway-task" }
+devolutions-agent-shared = { path = "../devolutions-agent-shared" }
+camino = { version = "1" }
+async-trait = "0.1"
+tracing = "0.1"
+walkdir = "2.5"
+aide = { version = "0.13", features = ["axum", "axum-extra"] }
+tower-http = { version = "0.5", features = ["timeout"] }
+parking_lot = "0.12"
+cfg-if = "1.0"
+
+[lints]
+workspace = true

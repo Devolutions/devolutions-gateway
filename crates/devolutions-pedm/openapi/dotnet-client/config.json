@@ -1,0 +1,17 @@
+{
+  "packageAuthors": "Devolutions Inc.",
+  "packageName": "Devolutions.Pedm.Client",
+  "packageTitle": "Devolutions PEDM REST API Client",
+  "packageVersion": "2024.8.13",
+  "packageDescription": "Client for Devolutions PEDM REST API",
+  "packageGuid": "0eb49e08-5842-4a2e-a5ac-926e6dd65c15",
+  "packageCopyright": "© Devolutions Inc. All rights reserved.",
+  "licenseName": "MIT OR Apache-2.0",
+  "gitHost": "github.com",
+  "gitUserId": "Devolutions",
+  "gitRepoId": "devolutions-gateway",
+  "targetFramework": "net8.0;net48",
+  "excludeTests": true,
+  "library": "httpclient",
+  "netCoreProjectFile": true
+}

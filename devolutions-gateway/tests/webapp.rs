@@ -1,3 +1,6 @@
+#![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
+
 use std::net::SocketAddr;
 
 use anyhow::Context as _;

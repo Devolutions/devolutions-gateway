@@ -12,7 +12,7 @@ use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{ConnectionMode, CurrentJrl, TokenCache};
+use crate::token::{ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::utils;
 
 #[derive(TypedBuilder)]
@@ -73,8 +73,9 @@ where
                 anyhow::bail!("TCP rendezvous not supported");
             }
             ConnectionMode::Fwd { targets, creds: None } => {
-                if claims.jet_rec {
-                    anyhow::bail!("can't meet recording policy");
+                match claims.jet_rec {
+                    RecordingPolicy::None | RecordingPolicy::Stream => (),
+                    RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 
                 trace!("Select and connect to target");
@@ -92,16 +93,16 @@ where
                     .await
                     .context("failed to write leftover bytes")?;
 
-                let info = SessionInfo::new(
-                    claims.jet_aid,
-                    claims.jet_ap,
-                    ConnectionModeDetails::Fwd {
+                let info = SessionInfo::builder()
+                    .association_id(claims.jet_aid)
+                    .application_protocol(claims.jet_ap)
+                    .details(ConnectionModeDetails::Fwd {
                         destination_host: selected_target.clone(),
-                    },
-                )
-                .with_ttl(claims.jet_ttl)
-                .with_recording_policy(claims.jet_rec)
-                .with_filtering_policy(claims.jet_flt);
+                    })
+                    .time_to_live(claims.jet_ttl)
+                    .recording_policy(claims.jet_rec)
+                    .filtering_policy(claims.jet_flt)
+                    .build();
 
                 Proxy::builder()
                     .conf(conf)

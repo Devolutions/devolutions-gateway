@@ -10,6 +10,8 @@ use netlink_packet_route::link::{LinkAttribute, LinkFlag};
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{new_connection, Handle};
 
+use super::InterfaceAddress;
+
 pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
     tokio::spawn(connection);
@@ -59,7 +61,7 @@ pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
 
     let mut routes_v4 = handle.route().get(rtnetlink::IpVersion::V4).execute();
     while let Ok(Some(route)) = routes_v4.try_next().await {
-        let route_info = match RouteInfo::try_from(route) {
+        let info = match RouteInfo::try_from(route) {
             Ok(res) => res,
             Err(e) => {
                 error!(error = format!("{e:#}"), "Failed to parse the route");
@@ -67,18 +69,19 @@ pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             }
         };
 
-        routes_info.push(route_info);
+        routes_info.push(info);
     }
+
     let mut routes_v6 = handle.route().get(rtnetlink::IpVersion::V6).execute();
     while let Ok(Some(route)) = routes_v6.try_next().await {
-        let route_info = match RouteInfo::try_from(route) {
+        let info = match RouteInfo::try_from(route) {
             Ok(res) => res,
             Err(e) => {
                 error!(error = format!("{e:#}"), "Failed to parse route info");
                 continue;
             }
         };
-        routes_info.push(route_info);
+        routes_info.push(info);
     }
 
     let dns_servers = read_resolve_conf()?;
@@ -117,15 +120,10 @@ impl TryFrom<&LinkInfo> for NetworkInterface {
 }
 
 fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Result<NetworkInterface> {
-    let mut ip_addresses: Vec<IpAddr> = Vec::new();
-    let mut prefixes = Vec::new();
+    let mut addresses = Vec::new();
 
     for address_info in &link_info.addresses {
-        match address_info.address {
-            IpAddr::V4(addr) => ip_addresses.push(addr.into()),
-            IpAddr::V6(addr) => ip_addresses.push(addr.into()),
-        }
-        prefixes.push((address_info.address, address_info.prefix_len as u32));
+        addresses.push((address_info.address, u32::from(address_info.prefix_len)));
     }
 
     let gateways = link_info
@@ -138,8 +136,13 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
         name: link_info.name.clone(),
         description: None,
         mac_address: link_info.mac.as_slice().try_into().ok(),
-        ip_addresses,
-        prefixes,
+        addresses: addresses
+            .into_iter()
+            .map(|(addr, prefix)| InterfaceAddress {
+                ip: addr,
+                prefixlen: prefix,
+            })
+            .collect(),
         operational_status: link_info.flags.contains(&LinkFlag::Up),
         gateways,
         dns_servers: link_info.dns_servers.clone(),
@@ -295,7 +298,7 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
             .iter()
             .find_map(|attr| {
                 if let LinkAttribute::Address(mac) = attr {
-                    Some(mac.to_vec())
+                    Some(mac.clone())
                 } else {
                     None
                 }

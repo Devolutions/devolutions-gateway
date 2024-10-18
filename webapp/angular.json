@@ -10,13 +10,15 @@
       "prefix": "app",
       "architect": {
         "build": {
-          "builder": "@angular-devkit/build-angular:browser",
+          "builder": "@angular-devkit/build-angular:application",
           "options": {
             "baseHref": "/jet/webapp/client/",
-            "outputPath": "client",
+            "outputPath": {
+              "base": "client",
+              "browser": ""
+            },
             "preserveSymlinks": true,
             "index": "src/client/index.html",
-            "main": "src/client/main.ts",
             "tsConfig": "src/client/tsconfig.app.json",
             "polyfills": [
               "zone.js"
@@ -56,7 +58,8 @@
               "node_modules/@devolutions/icons/scss/devolutions-icons.scss",
               "node_modules/@angular/cdk/overlay-prebuilt.css"
             ],
-            "scripts": []
+            "scripts": [],
+            "browser": "src/client/main.ts"
           },
           "configurations": {
             "production": {
@@ -79,9 +82,7 @@
               ]
             },
             "development": {
-              "buildOptimizer": false,
               "optimization": false,
-              "vendorChunk": true,
               "extractLicenses": false,
               "sourceMap": true,
               "namedChunks": true,
@@ -99,10 +100,10 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "browserTarget": "gateway-ui:build:production"
+              "buildTarget": "gateway-ui:build:production"
             },
             "development": {
-              "browserTarget": "gateway-ui:build:development"
+              "buildTarget": "gateway-ui:build:development"
             }
           },
           "defaultConfiguration": "development"
@@ -110,7 +111,7 @@
         "extract-i18n": {
           "builder": "@angular-devkit/build-angular:extract-i18n",
           "options": {
-            "browserTarget": "gateway-ui:build"
+            "buildTarget": "gateway-ui:build"
           }
         },
         "test": {

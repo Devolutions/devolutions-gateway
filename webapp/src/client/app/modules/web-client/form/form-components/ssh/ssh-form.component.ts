@@ -1,23 +1,17 @@
-import {
-  AfterViewInit,
-  Component,
-  Injectable,
-  Input,
-  OnDestroy,
-  OnInit,
-} from '@angular/core';
-import { FormControl, FormGroup } from '@angular/forms';
+import { AfterViewInit, Component, Injectable, Input, OnDestroy, OnInit } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 
+import { ChangeDetectorRef } from '@angular/core';
+import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
+import { SSHFormDataInput } from '@gateway/shared/interfaces/forms.interfaces';
+import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
+import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { BaseComponent } from '@shared/bases/base.component';
 import { SelectItem } from 'primeng/api';
-import { WebFormService } from '@gateway/shared/services/web-form.service';
-import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
-import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
 import { Observable, of } from 'rxjs';
-import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
+import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
 
 interface FormInputVisibility {
-  showUsernameInput?: boolean;
   showPasswordInput?: boolean;
   showPrivateKeyInput?: boolean;
 }
@@ -28,24 +22,21 @@ interface FormInputVisibility {
   templateUrl: 'ssh-form.component.html',
   styleUrls: ['ssh-form.component.scss'],
 })
-export class SshFormComponent
-  extends BaseComponent
-  implements OnInit, OnDestroy, AfterViewInit
-{
+export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
   @Input() form: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   authModeOptions: SelectItem[];
 
   formInputVisibility: FormInputVisibility = {
-    showUsernameInput: true,
     showPasswordInput: true,
     showPrivateKeyInput: false,
   };
 
   constructor(
     private formService: WebFormService,
-    private sshKeyService: SshKeyService
+    private sshKeyService: SshKeyService,
+    private ChangeDetectorRef: ChangeDetectorRef,
   ) {
     super();
   }
@@ -69,15 +60,26 @@ export class SshFormComponent
     this.formService.resetCanConnectCallback();
   }
 
-  private addControlsToParentForm(inputFormData?: any): void {
+  private addControlsToParentForm(inputFormData?): void {
     if (this.form) {
-      this.form.addControl(
+      this.clearForm();
+
+      this.formService.addControlToForm(
+        this.form,
         'authMode',
-        new FormControl(
-          inputFormData?.authMode || SshAuthMode.Username_and_Password
-        )
+        inputFormData,
+        true,
+        false,
+        SshAuthMode.Username_and_Password,
       );
+
       this.subscribeToAuthModeChanges();
+    }
+  }
+
+  private clearForm(): void {
+    if (this.form.contains('authMode')) {
+      this.form.removeControl('authMode');
     }
   }
 
@@ -89,8 +91,7 @@ export class SshFormComponent
         next: (authModeOptions) => {
           this.authModeOptions = authModeOptions;
         },
-        error: (error) =>
-          console.error('Error fetching dropdown options', error),
+        error: (error) => console.error('Error fetching dropdown options', error),
       });
   }
 
@@ -100,27 +101,26 @@ export class SshFormComponent
       .valueChanges.pipe(
         takeUntil(this.destroyed$),
         startWith(this.form.get('authMode').value as SshAuthMode),
-        switchMap((authMode) => this.getFormInputVisibility(authMode))
+        switchMap((authMode) => this.getFormInputVisibility(authMode)),
+        tap(() => this.ChangeDetectorRef.detectChanges()),
       )
-      .subscribe(() => {});
+      .subscribe({
+        error: (error) => console.error('Error subscribing to auth mode changes', error),
+      });
   }
 
-  private getFormInputVisibility(
-    authMode: SshAuthMode
-  ): Observable<SshAuthMode> {
+  private getFormInputVisibility(authMode: SshAuthMode): Observable<SshAuthMode> {
     return of(this.formInputVisibility).pipe(
-      tap((visibility) => {
-        visibility.showUsernameInput =
-          authMode === SshAuthMode.Username_and_Password ||
-          authMode === SshAuthMode.Private_Key;
-        visibility.showPasswordInput =
-          authMode === SshAuthMode.Username_and_Password;
-        visibility.showPrivateKeyInput = authMode === SshAuthMode.Private_Key;
+      tap((visibility: FormInputVisibility) => {
+        const authModeAsNumber: number = +authMode;
+
+        visibility.showPasswordInput = authModeAsNumber === SshAuthMode.Username_and_Password;
+
+        visibility.showPrivateKeyInput = authModeAsNumber === SshAuthMode.Private_Key;
       }),
       map(() => {
         return authMode;
-      })
+      }),
     );
   }
-
 }

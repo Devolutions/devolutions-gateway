@@ -7,7 +7,6 @@ use cfg_if::cfg_if;
 use core::fmt;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -15,7 +14,7 @@ use std::io::BufReader;
 use std::sync::Arc;
 use tap::prelude::*;
 use tokio::sync::Notify;
-use tokio_rustls::rustls;
+use tokio_rustls::rustls::pki_types;
 use url::Url;
 use uuid::Uuid;
 
@@ -24,6 +23,7 @@ const PRIVATE_KEY_LABELS: &[&str] = &["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIV
 const WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS: u64 = 28800; // 8 hours
 const WEB_APP_DEFAULT_LOGIN_LIMIT_RATE: u8 = 10;
 const ENV_VAR_DGATEWAY_WEBAPP_PATH: &str = "DGATEWAY_WEBAPP_PATH";
+const ENV_VAR_DGATEWAY_LIB_XMF_PATH: &str = "DGATEWAY_LIB_XMF_PATH";
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -190,11 +190,6 @@ impl Conf {
                     .clone()
                     .context("TLS usage implied, but TLS certificate subject name is missing")?;
 
-                anyhow::ensure!(
-                    crate::utils::wildcard_host_match(&cert_subject_name, &hostname),
-                    "hostname doesn’t match the TLS certificate subject name configured",
-                );
-
                 let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
 
                 let store_name = conf_file
@@ -203,6 +198,7 @@ impl Conf {
                     .unwrap_or_else(|| String::from("My"));
 
                 let cert_source = crate::tls::CertificateSource::SystemStore {
+                    machine_hostname: hostname.clone(),
                     cert_subject_name,
                     store_location,
                     store_name,
@@ -301,6 +297,25 @@ impl Conf {
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
+
+    pub fn get_lib_xmf_path(&self) -> Option<Utf8PathBuf> {
+        if let Ok(path) = env::var(ENV_VAR_DGATEWAY_LIB_XMF_PATH) {
+            return Some(Utf8PathBuf::from(path));
+        };
+
+        if let Some(path) = self.debug.lib_xmf_path.as_deref() {
+            return Some(path.to_owned());
+        }
+
+        if cfg!(target_os = "windows") {
+            let path = env::current_exe().ok()?.parent()?.join("xmf.dll");
+            Utf8PathBuf::from_path_buf(path).ok()
+        } else if cfg!(target_os = "linux") {
+            Some(Utf8PathBuf::from("/usr/share/devolutions-gateway/libxmf.so"))
+        } else {
+            None
+        }
+    }
 }
 
 impl WebAppConf {
@@ -383,7 +398,7 @@ impl WebAppConf {
 
     fn default_system_static_root_path() -> anyhow::Result<std::path::PathBuf> {
         if cfg!(target_os = "windows") {
-            let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
+            let mut exe_path = env::current_exe().context("failed to find service executable location")?;
             exe_path.pop();
             exe_path.push("webapp");
             Ok(exe_path)
@@ -526,6 +541,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
     }
 }
 
+#[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it’s fine to write to stdout.
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
@@ -549,7 +565,10 @@ fn default_hostname() -> Option<String> {
 fn read_pfx_file(
     path: &Utf8Path,
     password: Option<&dto::Password>,
-) -> anyhow::Result<(Vec<rustls::Certificate>, rustls::PrivateKey)> {
+) -> anyhow::Result<(
+    Vec<pki_types::CertificateDer<'static>>,
+    pki_types::PrivateKeyDer<'static>,
+)> {
     use picky::pkcs12::{
         Pfx, Pkcs12AttributeKind, Pkcs12CryptoContext, Pkcs12ParsingParams, SafeBagKind, SafeContentsKind,
     };
@@ -645,26 +664,28 @@ fn read_pfx_file(
     let private_key = private_key.context("leaf private key not found")?.clone();
     let private_key = private_key
         .to_pkcs8()
-        .map(rustls::PrivateKey)
+        .map(|der| pki_types::PrivateKeyDer::Pkcs8(der.into()))
         .context("invalid private key")?;
 
     let certificates = certificates
         .into_iter()
-        .map(|(cert, _)| cert.to_der().map(rustls::Certificate))
+        .map(|(cert, _)| cert.to_der().map(pki_types::CertificateDer::from))
         .collect::<Result<_, _>>()
         .context("invalid certificate")?;
 
     Ok((certificates, private_key))
 }
 
-fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<rustls::Certificate>> {
-    read_rustls_certificate(Some(path), None).transpose().unwrap()
+fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<pki_types::CertificateDer<'static>>> {
+    read_rustls_certificate(Some(path), None)
+        .transpose()
+        .expect("a path is provided, so it’s never None")
 }
 
 fn read_rustls_certificate(
     path: Option<&Utf8Path>,
     data: Option<&dto::ConfData<dto::CertFormat>>,
-) -> anyhow::Result<Option<Vec<rustls::Certificate>>> {
+) -> anyhow::Result<Option<Vec<pki_types::CertificateDer<'static>>>> {
     use picky::pem::{read_pem, PemError};
 
     match (path, data) {
@@ -672,7 +693,7 @@ fn read_rustls_certificate(
             let mut x509_chain_file = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(File::open)
                 .with_context(|| format!("couldn't open file at {path}"))?
-                .pipe(std::io::BufReader::new);
+                .pipe(BufReader::new);
 
             let mut x509_chain = Vec::new();
 
@@ -687,7 +708,7 @@ fn read_rustls_certificate(
                             );
                         }
 
-                        x509_chain.push(rustls::Certificate(pem.into_data().into_owned()));
+                        x509_chain.push(pki_types::CertificateDer::from(pem.into_data().into_owned()));
                     }
                     Err(e @ PemError::HeaderNotFound) => {
                         if x509_chain.is_empty() {
@@ -712,7 +733,7 @@ fn read_rustls_certificate(
             let value = data.decode_value()?;
 
             match data.format {
-                dto::CertFormat::X509 => Ok(Some(vec![rustls::Certificate(value)])),
+                dto::CertFormat::X509 => Ok(Some(vec![pki_types::CertificateDer::from(value)])),
             }
         }
         (None, None) => Ok(None),
@@ -720,7 +741,9 @@ fn read_rustls_certificate(
 }
 
 fn read_pub_key_data(data: &dto::ConfData<dto::PubKeyFormat>) -> anyhow::Result<PublicKey> {
-    read_pub_key(None, Some(data)).transpose().unwrap()
+    read_pub_key(None, Some(data))
+        .transpose()
+        .expect("data is provided, so it’s never None")
 }
 
 fn read_pub_key(
@@ -739,7 +762,7 @@ fn read_pub_key(
 
             match data.format {
                 dto::PubKeyFormat::Spki => PublicKey::from_der(&value).context("bad SPKI"),
-                dto::PubKeyFormat::Rsa => PublicKey::from_pkcs1(&value).context("bad RSA value"),
+                dto::PubKeyFormat::Pkcs1 => PublicKey::from_pkcs1(&value).context("bad RSA value"),
             }
             .map(Some)
         }
@@ -747,36 +770,49 @@ fn read_pub_key(
     }
 }
 
-fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<rustls::PrivateKey> {
-    read_rustls_priv_key(Some(path), None).transpose().unwrap()
+fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<pki_types::PrivateKeyDer<'static>> {
+    read_rustls_priv_key(Some(path), None)
+        .transpose()
+        .expect("path is provided, so it’s never None")
 }
 
 fn read_rustls_priv_key(
     path: Option<&Utf8Path>,
     data: Option<&dto::ConfData<dto::PrivKeyFormat>>,
-) -> anyhow::Result<Option<rustls::PrivateKey>> {
-    let data = match (path, data) {
+) -> anyhow::Result<Option<pki_types::PrivateKeyDer<'static>>> {
+    let private_key = match (path, data) {
         (Some(path), _) => {
-            let pem: Pem = normalize_data_path(path, &get_data_dir())
+            let pem: Pem<'_> = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(std::fs::read_to_string)
                 .with_context(|| format!("couldn't read file at {path}"))?
                 .pipe_deref(str::parse)
                 .context("couldn't parse pem document")?;
 
-            if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
-                anyhow::bail!(
-                    "bad pem label (got {}, expected one of {PRIVATE_KEY_LABELS:?})",
-                    pem.label(),
-                );
+            match pem.label() {
+                "PRIVATE KEY" => pki_types::PrivateKeyDer::Pkcs8(pem.into_data().into_owned().into()),
+                "RSA PRIVATE KEY" => pki_types::PrivateKeyDer::Pkcs1(pem.into_data().into_owned().into()),
+                "EC PRIVATE KEY" => pki_types::PrivateKeyDer::Sec1(pem.into_data().into_owned().into()),
+                _ => {
+                    anyhow::bail!(
+                        "bad pem label (got {}, expected one of {PRIVATE_KEY_LABELS:?})",
+                        pem.label(),
+                    );
+                }
             }
-
-            pem.into_data().into_owned()
         }
-        (None, Some(data)) => data.decode_value()?,
+        (None, Some(data)) => {
+            let value = data.decode_value()?;
+
+            match data.format {
+                dto::PrivKeyFormat::Pkcs8 => pki_types::PrivateKeyDer::Pkcs8(value.into()),
+                dto::PrivKeyFormat::Pkcs1 => pki_types::PrivateKeyDer::Pkcs1(value.into()),
+                dto::PrivKeyFormat::Ec => pki_types::PrivateKeyDer::Sec1(value.into()),
+            }
+        }
         (None, None) => return Ok(None),
     };
 
-    Ok(Some(rustls::PrivateKey(data)))
+    Ok(Some(private_key))
 }
 
 fn read_priv_key(
@@ -795,8 +831,8 @@ fn read_priv_key(
 
             match data.format {
                 dto::PrivKeyFormat::Pkcs8 => PrivateKey::from_pkcs8(&value).context("bad PKCS8"),
+                dto::PrivKeyFormat::Pkcs1 => PrivateKey::from_pkcs1(&value).context("bad RSA value"),
                 dto::PrivKeyFormat::Ec => PrivateKey::from_ec_der(&value).context("bad EC value"),
-                dto::PrivKeyFormat::Rsa => PrivateKey::from_rsa_der(&value).context("bad RSA value"),
             }
             .map(Some)
         }
@@ -807,8 +843,8 @@ fn read_priv_key(
 fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -> anyhow::Result<Vec<ListenerUrls>> {
     fn map_scheme(url: &mut Url) {
         match url.scheme() {
-            "ws" => url.set_scheme("http").unwrap(),
-            "wss" => url.set_scheme("https").unwrap(),
+            "ws" => url.set_scheme("http").expect("http is a valid scheme"),
+            "wss" => url.set_scheme("https").expect("https is a valid scheme"),
             _ => (),
         }
     }
@@ -965,7 +1001,7 @@ pub mod dto {
         pub sogar: Option<SogarConf>,
 
         /// (Unstable) Unsafe debug options for developers
-        #[serde(default, rename = "__debug__", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
 
         // Other unofficial options.
@@ -1035,6 +1071,22 @@ pub mod dto {
         Quiet,
     }
 
+    impl VerbosityProfile {
+        pub fn to_log_filter(self) -> &'static str {
+            match self {
+                VerbosityProfile::Default => "info",
+                VerbosityProfile::Debug => {
+                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace"
+                }
+                VerbosityProfile::Tls => {
+                    "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"
+                }
+                VerbosityProfile::All => "trace",
+                VerbosityProfile::Quiet => "warn",
+            }
+        }
+    }
+
     /// Unsafe debug options that should only ever be used at development stage
     ///
     /// These options might change or get removed without further notice.
@@ -1064,7 +1116,10 @@ pub mod dto {
         /// Providing this option will cause the PCAP interceptor to be attached to each stream.
         pub capture_path: Option<Utf8PathBuf>,
 
-        /// Enable unstable API which may break at any point
+        /// Path to the XMF shared library (Cadeau) for runtime loading.
+        pub lib_xmf_path: Option<Utf8PathBuf>,
+
+        /// Enable unstable features which may break at any point
         #[serde(default)]
         pub enable_unstable: bool,
     }
@@ -1079,6 +1134,7 @@ pub mod dto {
                 override_kdc: None,
                 log_directives: None,
                 capture_path: None,
+                lib_xmf_path: None,
                 enable_unstable: false,
             }
         }
@@ -1163,8 +1219,9 @@ pub mod dto {
     pub enum PrivKeyFormat {
         #[default]
         Pkcs8,
+        #[serde(alias = "Rsa")]
+        Pkcs1,
         Ec,
-        Rsa,
     }
 
     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1172,7 +1229,8 @@ pub mod dto {
     pub enum PubKeyFormat {
         #[default]
         Spki,
-        Rsa,
+        #[serde(alias = "Rsa")]
+        Pkcs1,
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
@@ -1332,10 +1390,10 @@ pub mod dto {
         {
             struct V;
 
-            impl<'de> de::Visitor<'de> for V {
+            impl de::Visitor<'_> for V {
                 type Value = Password;
 
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                     formatter.write_str("a string")
                 }
 

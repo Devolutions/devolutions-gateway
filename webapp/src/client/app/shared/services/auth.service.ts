@@ -1,12 +1,13 @@
-import {Injectable} from '@angular/core';
-import {BehaviorSubject, interval, Observable, of, Subscription} from 'rxjs';
-import {tap, takeUntil, map, catchError, switchMap} from 'rxjs/operators';
+import { Injectable } from '@angular/core';
+import { BehaviorSubject, Observable, Subscription, interval, of, throwError } from 'rxjs';
+import { catchError, map, takeUntil, tap } from 'rxjs/operators';
 
-import {BaseComponent} from "@shared/bases/base.component";
-import {ApiService} from "@shared/services/api.service";
-import {Session} from "@shared/models/session";
-import {NavigationService} from "@shared/services/navigation.service";
-import {WebSessionService} from "@shared/services/web-session.service";
+import { BaseComponent } from '@shared/bases/base.component';
+import { Session } from '@shared/models/session';
+import { ApiService } from '@shared/services/api.service';
+import { NavigationService } from '@shared/services/navigation.service';
+import { WebSessionService } from '@shared/services/web-session.service';
+import { SessionType } from '../models/web-session.model';
 
 @Injectable({
   providedIn: 'root',
@@ -16,7 +17,7 @@ export class AuthService extends BaseComponent {
   private static readonly SESSION_STORAGE_KEY: string = 'session';
   private static readonly AUTO_LOGIN_KEY: string = 'autologin';
 
-  private expirationCheckInterval: number = 60000; // Check every 60 seconds
+  private expirationCheckInterval = 60000; // Check every 60 seconds
   private expirationCheckSubscription: Subscription | null = null;
 
   private sessionSubject: BehaviorSubject<Session | null>;
@@ -24,9 +25,10 @@ export class AuthService extends BaseComponent {
 
   isAutoLoginOn: BehaviorSubject<boolean> = new BehaviorSubject(false);
 
-  constructor(private apiService: ApiService,
-              private webSessionService: WebSessionService,
-              private navigationService: NavigationService
+  constructor(
+    private apiService: ApiService,
+    private webSessionService: WebSessionService,
+    private navigationService: NavigationService,
   ) {
     super();
 
@@ -59,37 +61,36 @@ export class AuthService extends BaseComponent {
         sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(success));
         this.isAutoLoginOn.next(success);
       }),
-      catchError(error => {
+      catchError((error) => {
         sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(false));
         this.isAutoLoginOn.next(false);
-        throw error
+        return throwError(() => error);
       }),
-      map(success => !!success)
+      map((success) => !!success),
     );
   }
 
   login(username?: string, password?: string): Observable<boolean> {
     return this.requestToken(username, password).pipe(
       takeUntil(this.destroyed$),
-      tap(token => {
+      tap((token) => {
         if (token) {
           this.storeToken(username, token);
         }
       }),
-      map(token => !!token),
-      catchError(error => {
-        //console.error('Login error:', error);
-        throw error
-      })
+      map((token) => !!token),
+      catchError((error) => {
+        return throwError(() => error);
+      }),
     );
   }
 
   public logout(): void {
-    this.webSessionService.cleanupWebSessionService();
+    void this.webSessionService.cleanupWebSessionService();
     this.removeAllStorageData();
     this.sessionSubject.next(null);
     this.isAutoLoginOn.next(false);
-    this.navigationService.navigateToLogin();
+    void this.navigationService.navigateToLogin();
   }
 
   public startExpirationCheck(): void {
@@ -112,15 +113,15 @@ export class AuthService extends BaseComponent {
 
   private requestToken(username?: string, password?: string): Observable<string> {
     return this.apiService.generateAppToken(username, password).pipe(
-      catchError(error => {
-        throw error;
-      })
+      catchError((error) => {
+        return throwError(() => error);
+      }),
     );
   }
 
   private initializeAutoLogonStorageData(): void {
     const storedAutoLogonFlag: string = sessionStorage.getItem(AuthService.AUTO_LOGIN_KEY);
-    const storedAutoLogon: boolean = (storedAutoLogonFlag) ? storedAutoLogonFlag !== 'false' : false;
+    const storedAutoLogon: boolean = storedAutoLogonFlag ? storedAutoLogonFlag !== 'false' : false;
     this.isAutoLoginOn.next(storedAutoLogon);
   }
 
@@ -151,9 +152,8 @@ export class AuthService extends BaseComponent {
     if (session && this.isSessionValid(session)) {
       this.sessionSubject.next(session);
       return true;
-    } else {
-      return false;
     }
+    return false;
   }
 
   private getStoredSession(): Session | null {
@@ -182,8 +182,8 @@ export class AuthService extends BaseComponent {
   }
 
   private handleTokenExpiration(): void {
-    this.webSessionService.cleanupWebSessionService();
+    void this.webSessionService.cleanupWebSessionService();
     this.removeAllStorageData();
-    this.navigationService.navigateToLogin();
+    void this.navigationService.navigateToLogin();
   }
 }

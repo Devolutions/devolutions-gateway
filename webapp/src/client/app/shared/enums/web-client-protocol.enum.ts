@@ -1,11 +1,11 @@
-import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
+import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 
 export enum Protocol {
   RDP = 0,
   Telnet = 1,
-  SSH,
-  VNC,
-  ARD
+  SSH = 2,
+  VNC = 3,
+  ARD = 4,
 }
 
 enum Tooltips {
@@ -13,13 +13,12 @@ enum Tooltips {
   'Teletype Network' = 'Telnet',
   'Secure Shell' = 'SSH',
   'Virtual Network Computing' = 'VNC',
-  'Apple Remote Desktop' = 'ARD'
+  'Apple Remote Desktop' = 'ARD',
 }
 
 export type ProtocolControlMap = { [key in Protocol]?: string[] };
 
 namespace WebClientProtocol {
-
   export function getEnumKey(value: Protocol): string {
     return Protocol[value];
   }
@@ -32,7 +31,7 @@ namespace WebClientProtocol {
     }, {});
 
     return Object.keys(Protocol)
-      .filter((key) => isNaN(Number(key)) && typeof Protocol[key as any] === 'number')
+      .filter((key) => Number.isNaN(Number(key)) && typeof Protocol[key] === 'number')
       .map((key) => {
         const label: string = key;
         const value: Protocol = Protocol[key as keyof typeof Protocol];
@@ -58,4 +57,4 @@ namespace WebClientProtocol {
     return protocol === Protocol.ARD;
   }
 }
-export {WebClientProtocol};
+export { WebClientProtocol };

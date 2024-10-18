@@ -2,7 +2,7 @@
   <div *ngIf="currentStatus.isDisabled" class="session-form">
     <web-client-form
       [webSessionId]="webSessionId"
-      [inputFormData]="inputFormData"
+      [inputFormData]="formData"
       [error]="rdpError"
       [isFormExists]="true"></web-client-form>
   </div>
@@ -67,6 +67,6 @@
     </div>
   </div>
 
-  <iron-remote-gui #ironGuiElement scale="fit" flexcenter="true"></iron-remote-gui>
+  <iron-remote-gui #ironGuiElement targetplatform="web" verbose="true" scale="fit"></iron-remote-gui>
 
 </div>

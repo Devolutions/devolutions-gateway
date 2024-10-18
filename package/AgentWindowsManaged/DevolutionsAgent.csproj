@@ -1,0 +1,88 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Build\**" />
+    <Compile Remove="wix\**" />
+    <EmbeddedResource Remove="Build\**" />
+    <EmbeddedResource Remove="wix\**" />
+    <None Remove="*.msi" />
+    <None Remove="*.exe" />
+    <None Remove="*.wxs" />
+    <None Remove="*.wixpdb" />
+    <None Remove="*.wixobj" />
+    <None Remove="Build\**" />
+    <None Remove="wix\**" />
+    <None Remove="Resources\DevolutionsAgent_en-us.wxl" />
+    <None Remove="Resources\DevolutionsAgent_fr-fr.wxl" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\DevolutionsAgent_en-us.wxl" />
+    <EmbeddedResource Include="Resources\DevolutionsAgent_fr-fr.wxl" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.IO.Compression" Version="4.3.0" />
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+    <PackageReference Include="WixSharp" Version="1.25.3" />
+    <PackageReference Include="WixSharp.bin" Version="1.25.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Security" />
+    <Reference Include="System.ServiceProcess">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.5.1\System.ServiceProcess.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Dialogs\VerifyReadyDialog.cs" />
+    <Compile Update="Dialogs\FeaturesDialog.cs" />
+    <Compile Update="Properties\AgentProperties.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>AgentProperties.g.tt</DependentUpon>
+    </Compile>
+    <Compile Update="Properties\AgentProperties.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>AgentProperties.g.tt</DependentUpon>
+    </Compile>
+    <Compile Update="Resources\Strings.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.g.tt</DependentUpon>
+    </Compile>
+    <None Include="Properties\AgentProperties.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>AgentProperties.g.tt</DependentUpon>
+    </None>
+    <None Include="Resources\Strings.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.g.tt</DependentUpon>
+    </None>
+    <None Remove="wix\DevolutionsAgent.g.wxs" />
+    <None Include="wix\$(ProjectName).g.wxs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Properties\AgentProperties.g.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>AgentProperties.g.cs</LastGenOutput>
+    </None>
+    <None Update="Resources\Strings.g.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Strings.g.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+</Project>

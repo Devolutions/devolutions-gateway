@@ -1,4 +1,4 @@
-import {SelectItem} from "primeng/api";
+import { SelectItem } from 'primeng/api';
 
 enum ScreenSize {
   Default = 0,
@@ -22,11 +22,10 @@ enum ScreenSize {
   R2560x2048 = 18,
   R3200x2400 = 19,
   R3840x2400 = 20,
-  Custom = 21
+  Custom = 21,
 }
 
 namespace ScreenSize {
-
   export function getEnumRawKey(value: ScreenSize): string {
     return ScreenSize[value];
   }
@@ -38,7 +37,7 @@ namespace ScreenSize {
 
   export function getSelectItems(): SelectItem[] {
     return Object.keys(ScreenSize)
-      .filter((key) => isNaN(Number(key)) && typeof ScreenSize[key as any] === 'number')
+      .filter((key) => Number.isNaN(Number(key)) && typeof ScreenSize[key] === 'number')
       .map((key) => {
         let label = key;
         if (label.startsWith('R')) {
@@ -49,6 +48,5 @@ namespace ScreenSize {
         return { label, value };
       });
   }
-
 }
-export {ScreenSize};
+export { ScreenSize };

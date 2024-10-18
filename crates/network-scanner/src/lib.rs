@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // FIXME: fix warnings
+
 #[macro_use]
 extern crate tracing;
 
@@ -45,7 +47,8 @@ pub enum ScannerError {
 // TODO: replace with `MaybeUninit::slice_assume_init_ref` once stable.
 // https://github.com/rust-lang/rust/issues/63569
 pub(crate) unsafe fn assume_init(buf: &[MaybeUninit<u8>]) -> &[u8] {
-    &*(buf as *const [MaybeUninit<u8>] as *const [u8])
+    // SAFETY: Preconditions must be upheld by the caller.
+    unsafe { &*(buf as *const [MaybeUninit<u8>] as *const [u8]) }
 }
 
 pub(crate) fn create_echo_request() -> anyhow::Result<(icmp_v4::Icmpv4Packet, Vec<u8>)> {

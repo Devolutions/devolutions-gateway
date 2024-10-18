@@ -6,7 +6,7 @@ use axum::extract::{self, ConnectInfo, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
-use axum::{http, response, Json, Router};
+use axum::{http, Json, Router};
 use axum_extra::headers::{self, HeaderMapExt as _};
 use axum_extra::TypedHeader;
 use picky::key::PrivateKey;
@@ -18,7 +18,7 @@ use crate::config::{WebAppAuth, WebAppConf, WebAppUser};
 use crate::extract::WebAppToken;
 use crate::http::HttpError;
 use crate::target_addr::TargetAddr;
-use crate::token::ApplicationProtocol;
+use crate::token::{ApplicationProtocol, RecordingPolicy};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -119,7 +119,7 @@ pub(crate) async fn sign_app_token(
 
     enum CustomAuthResult {
         Authenticated,
-        SendChallenge(response::Response),
+        SendChallenge(Response),
     }
 
     fn do_custom_auth(
@@ -334,7 +334,7 @@ pub(crate) async fn sign_session_token(
                     targets: nonempty::NonEmpty::new(destination.clone()),
                     creds: None,
                 },
-                jet_rec: false,
+                jet_rec: RecordingPolicy::None,
                 jet_flt: false,
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
@@ -361,6 +361,7 @@ pub(crate) async fn sign_session_token(
             JmuxTokenClaims {
                 jet_aid: session_id,
                 jet_ap: protocol,
+                jet_rec: RecordingPolicy::None,
                 hosts: nonempty::NonEmpty::new(destination.clone()),
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
@@ -454,7 +455,7 @@ pub(crate) async fn sign_session_token(
 async fn get_client<ReqBody>(
     State(DgwState { conf_handle, .. }): State<DgwState>,
     path: Option<extract::Path<String>>,
-    mut request: axum::http::Request<ReqBody>,
+    mut request: http::Request<ReqBody>,
 ) -> Result<Response<tower_http::services::fs::ServeFileSystemResponseBody>, HttpError>
 where
     ReqBody: Send + 'static,
@@ -517,7 +518,7 @@ mod login_rate_limit {
 
     const PERIOD: Duration = Duration::from_secs(60);
 
-    pub fn check(username: String, address: IpAddr, rate_limit: u8) -> Result<(), ()> {
+    pub(crate) fn check(username: String, address: IpAddr, rate_limit: u8) -> Result<(), ()> {
         {
             // Reset if necessary.
 

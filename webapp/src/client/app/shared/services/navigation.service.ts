@@ -1,7 +1,7 @@
-import {ActivatedRoute, NavigationEnd, Router} from '@angular/router';
-import {Injectable} from '@angular/core';
-import {filter, map} from "rxjs/operators";
-import {Observable} from "rxjs";
+import { Injectable } from '@angular/core';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
+import { Observable } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
 
 @Injectable({ providedIn: 'root' })
 export class NavigationService {
@@ -10,9 +10,8 @@ export class NavigationService {
 
   constructor(
     private readonly router: Router,
-    private readonly activatedRoute: ActivatedRoute
-  ) {
-  }
+    private readonly activatedRoute: ActivatedRoute,
+  ) {}
 
   navigateToPath(anyPath: string): Promise<boolean> {
     return this.router.navigateByUrl(anyPath);
@@ -27,7 +26,7 @@ export class NavigationService {
   }
 
   navigateToNewSession(): Promise<boolean> {
-    if(this.isCurrentRouteUrl(NavigationService.SESSION_KEY)) {
+    if (this.isCurrentRouteUrl(NavigationService.SESSION_KEY)) {
       return;
     }
     return this.router.navigateByUrl(NavigationService.SESSION_KEY);
@@ -40,8 +39,8 @@ export class NavigationService {
 
   getRouteChange(): Observable<NavigationEnd> {
     return this.router.events.pipe(
-      filter(value => value instanceof NavigationEnd),
-      map(value => value as NavigationEnd)
+      filter((value) => value instanceof NavigationEnd),
+      map((value) => value as NavigationEnd),
     );
   }
 
@@ -54,5 +53,5 @@ export enum WebClientSection {
   powerShell = 'powershell',
   rdp = 'rdp',
   ssh = 'ssh',
-  telnet = 'telnet'
+  telnet = 'telnet',
 }

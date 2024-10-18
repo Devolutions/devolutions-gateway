@@ -5,19 +5,22 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
-anyhow = "1.0.83"
-crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
-parking_lot = "0.12.2"
-polling = { git = "https://github.com/devolutions/polling.git", rev = "c04e8ee40415cad551fe044457270f4a2d7c491d" }
-socket2 = { version = "0.5.7", features = ["all"] }
-thiserror = "1.0"
-tracing = "0.1.40"
+anyhow = "1"
+crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
+parking_lot = "0.12"
+polling = "3.7"
+socket2 = { version = "0.5", features = ["all"] }
+thiserror = "1"
+tracing = "0.1"
 
 [dev-dependencies]
 tracing-cov-mark = { path = "../tracing-cov-mark" }
-tracing-subscriber = "0.3.18"
-tokio = { version = "1.37.0", features = [
+tracing-subscriber = "0.3"
+tokio = { version = "1.38", features = [
     "rt",
     "sync",
     "macros",

@@ -1,7 +1,12 @@
-use std::sync::Arc;
+// Used by devolutions-gateway binary.
+use ceviche as _;
+
+// Used by tests.
+#[cfg(test)]
+use {devolutions_gateway_generators as _, http_body_util as _, proptest as _, tokio_test as _, tracing_cov_mark as _};
 
 #[macro_use]
-extern crate serde_derive;
+extern crate serde;
 #[macro_use]
 extern crate tracing;
 
@@ -31,6 +36,8 @@ pub mod tls;
 pub mod token;
 pub mod utils;
 pub mod ws;
+
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct DgwState {
@@ -84,6 +91,9 @@ impl DgwState {
 }
 
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {
+    use axum::error_handling::HandleErrorLayer;
+    use std::time::Duration;
+    use tower::timeout::TimeoutLayer;
     use tower::ServiceBuilder;
 
     trace!("Make http service");
@@ -101,6 +111,11 @@ pub fn make_http_service(state: DgwState) -> axum::Router<()> {
                 .layer(axum::middleware::from_fn_with_state(
                     state,
                     middleware::auth::auth_middleware,
-                )),
+                ))
+                // This middleware goes above `TimeoutLayer` because it will receive errors returned by `TimeoutLayer`.
+                .layer(HandleErrorLayer::new(|_: axum::BoxError| async {
+                    hyper::StatusCode::REQUEST_TIMEOUT
+                }))
+                .layer(TimeoutLayer::new(Duration::from_secs(15))),
         )
 }

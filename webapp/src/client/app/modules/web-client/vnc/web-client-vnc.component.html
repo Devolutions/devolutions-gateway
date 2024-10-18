@@ -2,7 +2,7 @@
   <div *ngIf="currentStatus.isDisabled" class="session-form">
     <web-client-form
       [webSessionId]="webSessionId"
-      [inputFormData]="inputFormData"
+      [inputFormData]="formData"
       [error]="clientError"
       [isFormExists]="true"></web-client-form>
   </div>
@@ -67,6 +67,6 @@
     </div>
   </div>
 
-  <iron-remote-gui-vnc #ironGuiElementVnc scale="fit" flexcenter="true"></iron-remote-gui-vnc>
+  <iron-remote-gui-vnc #ironGuiElementVnc targetplatform="web" verbose="true" scale="fit"></iron-remote-gui-vnc>
 
 </div>

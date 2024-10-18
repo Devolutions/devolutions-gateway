@@ -5,7 +5,7 @@ use std::mem::transmute;
 use std::slice::from_raw_parts;
 use std::sync::Arc;
 
-pub type NowPacketParser = usize;
+pub(crate) type NowPacketParser = usize;
 
 pub struct FrameSize {
     pub width: u32,
@@ -23,7 +23,7 @@ pub struct ImageUpdate {
 
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
-pub struct PacketsParsingApi<'a> {
+pub(crate) struct PacketsParsingApi<'a> {
     NowPacketParser_New: Symbol<'a, unsafe extern "C" fn() -> NowPacketParser>,
     NowPacketParser_GetSize: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser, width: *mut u32, height: *mut u32)>,
     NowPacketParser_ParseMessage: Symbol<
@@ -55,7 +55,7 @@ pub struct PacketsParsingApi<'a> {
 
 pub struct PacketsParser {
     api: PacketsParsingApi<'static>,
-    // this field is needed to prove the compiler that info will not outlive the lib
+    // This field is needed to make sure that info will not outlive the lib.
     _lib: Arc<Library>,
     ctx: NowPacketParser,
 }
@@ -66,18 +66,23 @@ impl PacketsParser {
     pub const NOW_UPDATE_MSG_ID: u32 = 66;
 
     pub fn new(lib: Arc<Library>) -> anyhow::Result<Self> {
-        unsafe {
-            let lib_load = PacketsParsingApi::load(&lib).context("failed to load packets parsing API")?;
-            let api = transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib_load);
-            let ctx = (api.NowPacketParser_New)();
+        // SAFETY: We assume the API definition we derived is well-formed and valid.
+        let api = unsafe { PacketsParsingApi::load(&lib).context("failed to load packets parsing API")? };
 
-            Ok(Self { _lib: lib, api, ctx })
-        }
+        // SAFETY: We hold a shared-pointer on the library, so it’s fine to uppercast the lifetime.
+        let api = unsafe { transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(api) };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        let ctx = unsafe { (api.NowPacketParser_New)() };
+
+        Ok(Self { _lib: lib, api, ctx })
     }
 
     pub fn get_size(&self) -> FrameSize {
         let mut width = 0;
         let mut height = 0;
+
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             (self.api.NowPacketParser_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32);
         }
@@ -87,6 +92,8 @@ impl PacketsParser {
 
     pub fn parse_message(&self, buffer: &[u8], len: usize, is_from_server: bool) -> (usize, u32) {
         let mut message_id = 0;
+
+        // SAFETY: FFI call with no outstanding precondition.
         let res = unsafe {
             (self.api.NowPacketParser_ParseMessage)(
                 self.ctx,
@@ -96,10 +103,12 @@ impl PacketsParser {
                 is_from_server,
             )
         };
+
         (res, message_id)
     }
 
     pub fn is_message_constructed(&self, is_from_server: bool) -> bool {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe { (self.api.NowPacketParser_IsMessageConstructed)(self.ctx, is_from_server) }
     }
 
@@ -112,6 +121,7 @@ impl PacketsParser {
         let mut surface_size: u32 = 0;
         let mut image_buff = Vec::new();
 
+        // SAFETY: FFI call with no outstanding precondition.
         let raw_image_buf = unsafe {
             let ptr: *const u8 = (self.api.NowPacketParser_GetImage)(
                 self.ctx,
@@ -140,6 +150,7 @@ impl PacketsParser {
 
 impl Drop for PacketsParser {
     fn drop(&mut self) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             (self.api.NowPacketParser_Free)(self.ctx);
         }

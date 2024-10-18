@@ -9,6 +9,7 @@ use crate::config::Conf;
 use crate::extract::DiagnosticsReadScope;
 use crate::http::HttpError;
 use crate::listener::ListenerUrls;
+use crate::log::GatewayLog;
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -92,11 +93,11 @@ pub(crate) struct ClockDiagnostic {
 }
 
 impl ClockDiagnostic {
-    pub fn now() -> Self {
+    pub(crate) fn now() -> Self {
         let now = time::OffsetDateTime::now_utc();
         Self {
             timestamp_secs: now.unix_timestamp(),
-            timestamp_millis: (now.unix_timestamp_nanos() / 1_000_000) as i64,
+            timestamp_millis: i64::try_from(now.unix_timestamp_nanos() / 1_000_000).expect("never truncated"),
         }
     }
 }
@@ -122,7 +123,7 @@ async fn get_logs(
 ) -> Result<Response, HttpError> {
     let conf = conf_handle.get_conf();
 
-    let latest_log_file_path = crate::log::find_latest_log_file(conf.log_file.as_path())
+    let latest_log_file_path = devolutions_log::find_latest_log_file::<GatewayLog>(conf.log_file.as_path())
         .await
         .map_err(HttpError::internal().with_msg("latest log file not found").err())?;
 

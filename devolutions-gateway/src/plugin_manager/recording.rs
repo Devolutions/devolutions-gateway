@@ -9,12 +9,12 @@ use std::path::PathBuf;
 use std::string::FromUtf8Error;
 use std::sync::Arc;
 
-pub type RecordingContext = usize;
+pub(crate) type RecordingContext = usize;
 const MAX_PATH_LEN: usize = 512;
 
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
-pub struct RecordingApi<'a> {
+pub(crate) struct RecordingApi<'a> {
     NowRecording_New: Symbol<'a, unsafe extern "C" fn() -> RecordingContext>,
     NowRecording_SetSize: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, width: u32, height: u32)>,
     NowRecording_SetFilename: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, filename: *mut c_char)>,
@@ -47,15 +47,20 @@ pub struct Recorder {
 
 impl Recorder {
     pub fn new(lib: Arc<Library>) -> anyhow::Result<Self> {
-        unsafe {
-            let lib_load = RecordingApi::load(&lib).context("failed to load recording API")?;
-            let api = transmute::<RecordingApi<'_>, RecordingApi<'static>>(lib_load);
-            let ctx = (api.NowRecording_New)();
-            Ok(Self { _lib: lib, api, ctx })
-        }
+        // SAFETY: We assume the API definition we derived is well-formed and valid.
+        let api = unsafe { RecordingApi::load(&lib).context("failed to load recording API")? };
+
+        // SAFETY: We hold a shared-pointer on the library, so it’s fine to uppercast the lifetime.
+        let api = unsafe { transmute::<RecordingApi<'_>, RecordingApi<'static>>(api) };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        let ctx = unsafe { (api.NowRecording_New)() };
+
+        Ok(Self { _lib: lib, api, ctx })
     }
 
     pub fn update_recording(&self, mut image_data: ImageUpdate) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             (self.api.NowRecording_Update)(
                 self.ctx,
@@ -70,12 +75,14 @@ impl Recorder {
     }
 
     pub fn set_size(&self, width: u32, height: u32) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             (self.api.NowRecording_SetSize)(self.ctx, width, height);
         }
     }
 
     pub fn set_filename(&self, filename: &str) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             if let Ok(c_str) = CString::new(filename) {
                 (self.api.NowRecording_SetFilename)(self.ctx, c_str.into_raw());
@@ -84,6 +91,7 @@ impl Recorder {
     }
 
     pub fn set_directory(&self, directory: &str) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             if let Ok(c_str) = CString::new(directory) {
                 (self.api.NowRecording_SetDirectory)(self.ctx, c_str.into_raw());
@@ -92,21 +100,27 @@ impl Recorder {
     }
 
     pub fn timeout(&self) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             (self.api.NowRecording_Timeout)(self.ctx);
         }
     }
 
     pub fn get_timeout(&self) -> u32 {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe { (self.api.NowRecording_GetTimeout)(self.ctx) }
     }
 
     pub fn get_filepath(&self) -> Result<PathBuf, FromUtf8Error> {
         let mut path_array = vec![0; MAX_PATH_LEN];
+
+        // SAFETY: FFI call with no outstanding precondition.
         let path_size = unsafe { (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr(), MAX_PATH_LEN) };
 
         if path_size > MAX_PATH_LEN {
             path_array.resize(path_size, 0);
+
+            // SAFETY: FFI call with no outstanding precondition.
             unsafe {
                 (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr(), path_array.len());
             }
@@ -115,6 +129,7 @@ impl Recorder {
         // -1 for the last /0 in the cstr
         path_array.truncate(path_size - 1);
 
+        #[allow(clippy::cast_sign_loss)] // Losing the sign of the value on purpose.
         let str_path = String::from_utf8(path_array.iter().map(|element| *element as u8).collect());
 
         match str_path {
@@ -126,6 +141,7 @@ impl Recorder {
 
 impl Drop for Recorder {
     fn drop(&mut self) {
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             (self.api.NowRecording_Free)(self.ctx);
         }

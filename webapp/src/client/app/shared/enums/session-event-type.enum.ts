@@ -1,7 +1,7 @@
 enum SessionEventType {
   STARTED = 0,
   TERMINATED = 1,
-  ERROR = 2
+  ERROR = 2,
 }
 
 namespace SessionEventType {
@@ -9,4 +9,4 @@ namespace SessionEventType {
     return SessionEventType[value];
   }
 }
-export {SessionEventType};
+export { SessionEventType };

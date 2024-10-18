@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Devolutions.Gateway.Utils.Tests;
 
-public class JsonSerialization
+public class JsonSerializationTests
 {
     static readonly Guid gatewayId = new Guid("ccbaad3f-4627-4666-8bb5-cb6a1a7db815");
     static readonly Guid sessionId = new Guid("3e7c1854-f1eb-42d2-b9cb-9303036e50da");
@@ -23,6 +23,16 @@ public class JsonSerialization
         const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
 
         var claims = new JmuxClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
+    public void JmuxClaimsWithOptionalParameters()
+    {
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":3,"jet_rec":"stream"}""";
+
+        var claims = new JmuxClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(3), RecordingPolicy.Stream);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
@@ -78,6 +88,26 @@ public class JsonSerialization
         const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
 
         var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
+    public void AssociationClaimsWithOptionalParameters()
+    {
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":120,"jet_rec":"proxy"}""";
+
+        var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(120), RecordingPolicy.Proxy);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
+    public void AssociationClaimsWithUnlimitedTtl()
+    {
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":0}""";
+
+        var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, SessionTtl.Unlimited);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }

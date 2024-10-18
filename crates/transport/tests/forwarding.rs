@@ -19,27 +19,12 @@ async fn node(
     port_server: u16,
     server_kind: TransportKind,
 ) -> anyhow::Result<()> {
-    let (mut client_reader, mut client_writer) =
-        tokio::io::split(client_kind.accept(port_node).await.context("accept")?);
+    let mut client_stream = client_kind.accept(port_node).await.context("accept")?;
+    let mut server_stream = server_kind.connect(port_server).await.context("connect")?;
 
-    let (mut server_reader, mut server_writer) =
-        tokio::io::split(server_kind.connect(port_server).await.context("connect")?);
-
-    let client_to_server_fut =
-        transport::forward(&mut client_reader, &mut server_writer).map(|res| res.context("forward to server"));
-    let server_to_client_fut =
-        transport::forward(&mut server_reader, &mut client_writer).map(|res| res.context("forward to client"));
-
-    tokio::try_join!(client_to_server_fut, server_to_client_fut)?;
-
-    client_writer
-        .shutdown()
-        .await
-        .context("shutdown operation on client_writer")?;
-    server_writer
-        .shutdown()
-        .await
-        .context("shutdown operation on server_writer")?;
+    let _ = tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream).await;
+    let _ = client_stream.shutdown().await;
+    let _ = server_stream.shutdown().await;
 
     Ok(())
 }
@@ -71,8 +56,8 @@ fn three_points() {
     )| {
         rt.block_on(async {
             let server_fut = server(&payload.0, node_to_server_kind, port_server).map(|res| res.context("server"));
-            let node_fut = node(port_node, client_to_node_kind, port_server, node_to_server_kind).map(|res| res.context("node"));
             let client_fut = client(&payload.0, client_to_node_kind, port_node).map(|res| res.context("client"));
+            let node_fut = node(port_node, client_to_node_kind, port_server, node_to_server_kind).map(|res| res.context("node"));
             tokio::try_join!(server_fut, node_fut, client_fut).unwrap();
         });
     })

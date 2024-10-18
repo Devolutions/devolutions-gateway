@@ -13,8 +13,6 @@ All URIs are relative to *http://localhost*
 
 Lists all recordings stored on this instance
 
-Lists all recordings stored on this instance
-
 ### Example
 ```csharp
 using System.Collections.Generic;
@@ -102,8 +100,6 @@ This endpoint does not need any parameter.
 <a id="pullrecordingfile"></a>
 # **PullRecordingFile**
 > System.IO.Stream PullRecordingFile (Guid id, string filename)
-
-Retrieves a recording file for a given session
 
 Retrieves a recording file for a given session
 

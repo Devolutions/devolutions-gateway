@@ -1,17 +1,16 @@
-import {UtilsService} from '../utils.service';
+import { UtilsService } from '../utils.service';
 
 export interface ExtractedUsernameDomain {
-  username: string,
-  domain: string
+  username: string;
+  domain: string;
 }
 
 export interface ExtractedHostnamePort {
-  hostname: string,
-  port: number
+  hostname: string;
+  port: number;
 }
 
 export class StringService {
-
   private utils: UtilsService;
 
   constructor(parent: UtilsService) {
@@ -22,7 +21,7 @@ export class StringService {
   extractDomain(fullUsername: string): ExtractedUsernameDomain {
     const extractionData: ExtractedUsernameDomain = {
       username: fullUsername,
-      domain: ''
+      domain: '',
     };
 
     if (fullUsername.includes('\\')) {
@@ -37,7 +36,7 @@ export class StringService {
 
   // const urlWithPort = ensurePort('http://example.com'); // Will add ':88'
   // const urlWithExistingPort = ensurePort('http://example.com:1234'); // Will remain unchanged
-  ensurePort(url: string, defaultPort: string = ':88'): string {
+  ensurePort(url: string, defaultPort = ':88'): string {
     if (!url) {
       return '';
     }
@@ -45,9 +44,8 @@ export class StringService {
 
     if (portRegex.test(url)) {
       return url;
-    } else {
-      return `${url}${defaultPort}`;
     }
+    return `${url}${defaultPort}`;
   }
 
   extractHostnameAndPort(urlString: string, DefaultPort: number): ExtractedHostnamePort {
@@ -57,11 +55,13 @@ export class StringService {
 
     if (match) {
       const hostname: string = match[1];
-      const port: number = match[2] ? parseInt(match[2], 10) : DefaultPort;
+      const port: number = match[2] ? Number.parseInt(match[2], 10) : DefaultPort;
       return { hostname, port };
-    } else {
-      return null;
     }
+    return null;
   }
 
+  replaceNewlinesWithBR(text: string): string {
+    return text.replace(/\n/g, '<br>');
+  }
 }

@@ -1,0 +1,82 @@
+[package]
+name = "devolutions-agent"
+version = "2024.3.3"
+edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Agent companion service for Devolutions Gateway"
+build = "build.rs"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+camino = { version = "1.1", features = ["serde1"] }
+ceviche = "0.6"
+ctrlc = "3.4"
+devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
+devolutions-log = { path = "../crates/devolutions-log" }
+futures = "0.3"
+parking_lot = "0.12"
+rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
+rustls-pemfile = "2.2" # FIXME(@CBenoit): maybe we don’t need this crate
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tap = "1.0"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
+tracing = "0.1"
+
+[dependencies.ironrdp]
+git = "https://github.com/Devolutions/IronRDP"
+rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861"
+default-features = false
+features = [
+    "server", # FIXME(@CBenoit): this is enabling AWS LC unconditionnally.
+    "acceptor",
+]
+
+[dependencies.tokio]
+version = "1.38"
+features = [
+    "signal",
+    "net",
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "parking_lot",
+    "fs",
+    "process",
+]
+
+[target.'cfg(windows)'.dependencies]
+hex = "0.4"
+notify-debouncer-mini = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+sha2 = "0.10"
+smallvec = "1"
+thiserror = "1"
+uuid = { version = "1.10", features = ["v4"] }
+winreg = "0.52"
+devolutions-pedm = { path = "../crates/devolutions-pedm" }
+win-api-wrappers = { path = "../crates/win-api-wrappers" }
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Authorization",
+    "Win32_System_ApplicationInstallationAndServicing",
+    "Win32_System_RemoteDesktop",
+]
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "2.4"

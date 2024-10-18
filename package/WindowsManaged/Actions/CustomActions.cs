@@ -4,23 +4,31 @@ using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Text;
+using Newtonsoft.Json;
 using WixSharp;
 using File = System.IO.File;
+using DevolutionsGateway.Configuration;
+using static DevolutionsGateway.Actions.WinAPI;
+using System.Security.Principal;
 
 namespace DevolutionsGateway.Actions
 {
     public class CustomActions
     {
+        private const string GatewayConfigFile = "gateway.json";
+
         private static readonly string[] ConfigFiles = new[] {
-            "gateway.json", 
+            GatewayConfigFile, 
             "server.crt", 
             "server.key", 
             "provisioner.pem",
@@ -32,6 +40,8 @@ namespace DevolutionsGateway.Actions
         private static string ProgramDataDirectory => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "Devolutions", "Gateway");
+
+        public const string DefaultUsersFile = "users.txt";
 
         [CustomAction]
         public static ActionResult CheckInstalledNetFx45Version(Session session)
@@ -423,6 +433,338 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult EvaluateConfiguration(Session session)
+        {
+            ActionResult result = ActionResult.Success;
+            Dictionary<string, (bool, FileAccess, Exception)> results = new Dictionary<string, (bool, FileAccess, Exception)>();
+
+            uint read = FILE_READ_DATA /* aka FILE_LIST_DIRECTORY */ |
+                        FILE_READ_EA | FILE_EXECUTE /* aka FILE_TRAVERSE */ |
+                        FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
+            uint write = read | FILE_WRITE_DATA /* aka FILE_ADD_FILE */ |
+                         FILE_APPEND_DATA /* aka FILE_ADD_SUBDIRECTORY */ |
+                         FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES;
+            uint modify = write | DELETE;
+
+            // Attempt to open a path with the specified access, as a means to check for permissions
+            bool CanAccess(string path, bool isDirectory, uint desiredAccess)
+            {
+                using SafeFileHandle handle = CreateFile(
+                    path, desiredAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, IntPtr.Zero,
+                    OPEN_EXISTING,
+                    isDirectory ? FILE_FLAG_BACKUP_SEMANTICS : 0,
+                    IntPtr.Zero);
+
+                int lastError = Marshal.GetLastWin32Error();
+
+                if (handle.IsInvalid)
+                {
+                    // ERROR_SUCCESS, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_ACCESS_DENIED
+                    if (!new[] {0, 2, 3, 5}.Contains(lastError))
+                    {
+                        session.Log($"CreateFile failed (error: {lastError})");
+                        throw new Win32Exception(lastError);
+                    }
+                }
+
+                return !handle.IsInvalid;
+            }
+
+            bool CheckAccess(string path, FileAccess desiredAccess, bool isDirectory)
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    return true;
+                }
+
+                if (!Path.IsPathRooted(path))
+                {
+                    path = Path.Combine(ProgramDataDirectory, path);
+                }
+
+                uint accessMask;
+
+                switch (desiredAccess)
+                {
+                    case FileAccess.Write:
+                    {
+                        accessMask = write;
+                        break;
+                    }
+                    case FileAccess.Modify:
+                    {
+                        accessMask = modify;
+                        break;
+                    }
+                    default:
+                    {
+                        accessMask = read;
+                        break;
+                    }
+                }
+                
+                session.Log($"checking effective access {accessMask} to {path}");
+
+                try
+                {
+                    if (CanAccess(path, isDirectory, accessMask))
+                    {
+                        results[path] = (true, desiredAccess, null);
+
+                        return true;
+                    }
+
+                    results[path] = (false, desiredAccess, null);
+
+                    session.Log($"effective access to {path} does not match desired access {accessMask}");
+                    return false;
+
+                }
+                catch (Exception e)
+                {
+                    results[path] = (false, desiredAccess, e);
+
+                    session.Log($"failed to check effective access to {path}: {e.Message}");
+                    return false;
+                }
+            }
+
+            IdentityReference account =
+                new SecurityIdentifier(WellKnownSidType.NetworkServiceSid, null).Translate(typeof(NTAccount));
+
+            try
+            {
+                string[] userDomain = account.Value.Split('\\');
+                Gateway config = null;
+
+                session.Log($"evaluating configuration as {account.Value}");
+
+                using (Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty))
+                {
+                    string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
+
+                    if (!TryReadGatewayConfig(session, configPath, out config, out Exception e))
+                    {
+                        results[configPath] = (false, FileAccess.Read, e);
+                        session.Log("failed to load or parse the configuration file");
+                    }
+
+                    if (!CheckAccess(ProgramDataDirectory, FileAccess.Modify, true))
+                    {
+                        result = ActionResult.Failure;
+                    }
+
+                    List<string> readFiles = new()
+                    {
+                        config.DelegationPrivateKeyFile,
+                        config.ProvisionerPublicKeyFile,
+                        config.ProvisionerPrivateKeyFile,
+                        config.TlsCertificateSource == "External" ? config.TlsCertificateFile : null,
+                        config.TlsCertificateSource == "External" ? config.TlsPrivateKeyFile : null,
+                    };
+
+                    foreach (string readFile in readFiles.Where(x => !string.IsNullOrEmpty(x)))
+                    {
+                        if (!CheckAccess(readFile, FileAccess.Read, false))
+                        {
+                            result = ActionResult.Failure;
+                        }
+                    }
+
+                    List<string> writeFiles = new()
+                    {
+                        (config.WebApp?.Enabled ?? false) && config.WebApp.Authentication == "Custom"
+                            ? config.WebApp.UsersFile
+                            : null,
+                    };
+
+                    foreach (string writeFile in writeFiles.Where(x => !string.IsNullOrEmpty(x)))
+                    {
+                        if (!CheckAccess(writeFile, FileAccess.Write, false))
+                        {
+                            result = ActionResult.Failure;
+                        }
+                    }
+                }
+
+                string jrlFile = config.JrlFile;
+
+                if (!Path.IsPathRooted(jrlFile))
+                {
+                    jrlFile = Path.Combine(ProgramDataDirectory, jrlFile);
+                }
+
+                List<string> modifyFiles = new();
+
+                try
+                {
+                    if (File.Exists(jrlFile))
+                    {
+                        modifyFiles.Add(jrlFile);
+                    }
+                }
+                catch
+                {
+                }
+
+                using (Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty))
+                {
+                    string logDirectory = ProgramDataDirectory;
+                    string logPattern = "gateway.*.log";
+
+                    if (!string.IsNullOrEmpty(config.LogFile))
+                    {
+                        try
+                        {
+                            logDirectory = Path.GetDirectoryName(config.LogFile);
+                            logPattern = $"{Path.GetFileName(config.LogFile)}.*.log";
+
+                            if (!CheckAccess(logDirectory, FileAccess.Modify, true))
+                            {
+                                result = ActionResult.Failure;
+                            }
+
+                        }
+                        catch (Exception e)
+                        {
+                            if (logDirectory is not null)
+                            {
+                                results[logDirectory] = (false, FileAccess.Modify, e);
+                            }
+
+                            session.Log($"unexpected error while checking configuration: {e}");
+                            result = ActionResult.Failure;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(logDirectory))
+                    {
+                        try
+                        {
+                            modifyFiles.AddRange(Directory.GetFiles(logDirectory, logPattern)
+                                .OrderBy(x => new FileInfo(x).CreationTime)
+                                .Take(10));
+                        }
+                        catch (Exception e)
+                        {
+                            session.Log($"unexpected error while checking configuration: {e}");
+                            result = ActionResult.Failure;
+                        }
+                    }
+
+                    foreach (string modifyFile in modifyFiles.Where(x => !string.IsNullOrEmpty(x)))
+                    {
+                        if (!CheckAccess(modifyFile, FileAccess.Modify, false))
+                        {
+                            result = ActionResult.Failure;
+                        }
+                    }
+                }
+
+                string recordingPath = config.RecordingPath;
+
+                if (!Path.IsPathRooted(recordingPath))
+                {
+                    recordingPath = Path.Combine(ProgramDataDirectory, recordingPath);
+                }
+
+                if (Directory.Exists(recordingPath))
+                {
+                    using Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty);
+                    if (!CheckAccess(config.RecordingPath, FileAccess.Modify, true))
+                    {
+                        result = ActionResult.Failure;
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrEmpty(recordingPath))
+                        {
+                            try
+                            {
+                                foreach (string recordingDir in Directory.GetDirectories(recordingPath)
+                                             .OrderBy(x => new DirectoryInfo(x).CreationTime)
+                                             .Take(10))
+                                {
+                                    if (!CheckAccess(recordingDir, FileAccess.Modify, true))
+                                    {
+                                        result = ActionResult.Failure;
+                                    }
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                results[recordingPath] = (false, FileAccess.Modify, e);
+                                session.Log($"unexpected error while checking configuration: {e}");
+                                result = ActionResult.Failure;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                results["Not applicable"] = (false, FileAccess.None, e);
+                session.Log($"unexpected error while checking configuration: {e}");
+                result = ActionResult.Failure;
+            }
+            
+            try
+            {
+                if (result == ActionResult.Failure)
+                {
+                    StringBuilder builder = new StringBuilder();
+
+                    builder.AppendLine("<html>");
+                    builder.AppendLine("<head></head>");
+                    builder.AppendLine("<body>");
+                    builder.AppendLine("<table style=\"width:100%\">");
+
+                    builder.Append("<tr>");
+                    builder.Append("<th>Path</th>");
+                    builder.Append("<th>Account</th>");
+                    builder.Append("<th>Access</th>");
+                    builder.Append("<th>Success</th>");
+                    builder.Append("<th>Error</th>");
+                    builder.Append("</tr>");
+
+                    foreach (string key in results.Keys)
+                    {
+                        builder.AppendLine("<tr>");
+                        builder.Append($"<td>{key}</td>");
+                        builder.Append($"<td>{account.Value}</td>");
+                        builder.Append($"<td>{results[key].Item2.AsString()}</td>");
+                        builder.Append($"<td>{results[key].Item1}</td>");
+                        builder.Append($"<td>{results[key].Item3}</td>");
+                        builder.AppendLine("</tr>");
+                    }
+
+                    builder.AppendLine("</table>");
+                    builder.AppendLine("</body>");
+                    builder.AppendLine("</html>");
+
+                    string tempPath = session.Get(GatewayProperties.userTempPath);
+
+                    if (string.IsNullOrEmpty(tempPath))
+                    {
+                        tempPath = Path.GetTempPath();
+                    }
+
+                    string reportPath = Path.Combine(tempPath, $"{session.Get(GatewayProperties.installId)}.{Includes.ERROR_REPORT_FILENAME}");
+
+                    session.Log($"writing configuration issues to {reportPath}");
+
+                    File.WriteAllText(reportPath, builder.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"unexpected error while writing results: {e}");
+            }
+
+            return result;
+        }
+
+        [CustomAction]
         public static ActionResult GetInstallDirFromRegistry(Session session)
         {
             try
@@ -629,8 +971,42 @@ namespace DevolutionsGateway.Actions
         [CustomAction]
         public static ActionResult SetInstallId(Session session)
         {
-            session.Set(GatewayProperties.installId, Guid.NewGuid());
+            if (session.Get(GatewayProperties.installId) == Guid.Empty)
+            {
+                session.Set(GatewayProperties.installId, Guid.NewGuid());
+            }
+
             return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult SetProgramDataDirectoryPermissions(Session session)
+        {
+            try
+            {
+                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult SetUsersDatabaseFilePermissions(Session session)
+        {
+            try
+            {
+                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, DefaultUsersFile), Includes.USERS_FILE_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
         }
 
         [CustomAction]
@@ -834,7 +1210,7 @@ namespace DevolutionsGateway.Actions
                     {
                         string tempFilePath = tempFilePathBuilder.ToString().TrimStart('\\', '?');
 
-                        using FileStream fileStream = new(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        using FileStream fileStream = new(tempFilePath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite);
                         using StreamReader streamReader = new(fileStream);
                         result = streamReader.ReadToEnd();
                     }
@@ -875,6 +1251,35 @@ namespace DevolutionsGateway.Actions
         private static string FormatPowerShellCommand(Session session, string command)
         {
             return $"\"{session.Property(GatewayProperties.powerShellPath.Id)}\" -ep Bypass -Command \"& Import-Module '{session.Property(GatewayProperties.InstallDir)}PowerShell\\Modules\\DevolutionsGateway'; {command}\"";
+        }
+        
+        public static void SetFileSecurity(Session session, string path, string sddl)
+        {
+            const uint sdRevision = 1;
+            IntPtr pSd = new IntPtr();
+            UIntPtr pSzSd = new UIntPtr();
+           
+            try
+            {
+                if (!WinAPI.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, sdRevision, out pSd, out pSzSd))
+                {
+                    session.Log($"ConvertStringSecurityDescriptorToSecurityDescriptorW failed (error: {Marshal.GetLastWin32Error()})");
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+
+                if (!WinAPI.SetFileSecurityW(path, WinAPI.DACL_SECURITY_INFORMATION, pSd))
+                {
+                    session.Log($"SetFileSecurityW failed (error: {Marshal.GetLastWin32Error()})");
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+            }
+            finally
+            {
+                if (pSd != IntPtr.Zero)
+                {
+                    WinAPI.LocalFree(pSd);
+                }
+            }
         }
 
         private static bool TryGetGatewayStartupType(Session session, out ServiceStartMode startMode)
@@ -947,6 +1352,41 @@ namespace DevolutionsGateway.Actions
             }
 
             return Version.TryParse(version, out powerShellVersion);
+        }
+
+        internal static bool TryReadGatewayConfig(ILogger logger, string path, out Gateway gatewayConfig, out Exception error)
+        {
+            gatewayConfig = new Gateway();
+
+            if (!File.Exists(path))
+            {
+                error = new FileNotFoundException(path);
+                return false;
+            }
+
+            try
+            {
+                using StreamReader reader = new StreamReader(path);
+                using JsonReader jsonReader = new JsonTextReader(reader);
+
+                JsonSerializer serializer = new JsonSerializer();
+                gatewayConfig = serializer.Deserialize<Gateway>(jsonReader);
+
+                error = null;
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                logger.Log($"failed to load configuration file at {path}: {e}");
+                error = e;
+                return false;
+            }
+        }
+
+        internal static bool TryReadGatewayConfig(Session session, string path, out Gateway gatewayConfig, out Exception error)
+        {
+            return TryReadGatewayConfig(LogDelegate.WithSession(session), path, out gatewayConfig, out error);
         }
     }
 }

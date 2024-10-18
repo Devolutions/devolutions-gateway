@@ -5,10 +5,13 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [features]
 default = []
 named_tasks = ["tokio/tracing"]
 
 [dependencies]
-tokio = { version = "1.37", features = ["sync", "rt", "tracing"] }
+tokio = { version = "1.38", features = ["sync", "rt", "tracing"] }
 async-trait = "0.1"

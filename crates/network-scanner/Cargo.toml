@@ -4,32 +4,34 @@ version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lints]
+workspace = true
 
 [dependencies]
-anyhow = "1.0.83"
-crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
-dns-lookup = "2.0.4"
-mdns-sd = "0.10.5"
-network-interface = "1.1"
+anyhow = "1"
+crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
+dns-lookup = "2.0"
+mdns-sd = "0.11"
+network-interface = "2.0"
 network-scanner-net = { path = "../network-scanner-net" }
 network-scanner-proto = { path = "../network-scanner-proto" }
-parking_lot = "0.12.2"
-socket2 = "0.5.7"
-thiserror = "1.0"
-tokio = { version = "1.37.0", features = ["rt", "sync", "time", "fs"] }
-tracing = "0.1.40"
-typed-builder = "0.18"
-serde = "1.0"
+parking_lot = "0.12"
+socket2 = "0.5"
+thiserror = "1"
+tokio = { version = "1.38", features = ["rt", "sync", "time", "fs"] }
+tracing = "0.1"
+typed-builder = "0.19"
+serde = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-ipconfig = "0.3.2"
+ipconfig = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-futures-util = "0.3.30"
-netlink-packet-route = "0.19.0"
-rtnetlink = "0.14.1"
+futures-util = "0.3"
+netlink-packet-route = "0.19"
+rtnetlink = "0.14"
 
 [dev-dependencies]
-tokio = { version = "1.37.0", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }
-tracing-subscriber = "0.3.18"
+tokio = { version = "1.38", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }
+tracing-subscriber = "0.3"

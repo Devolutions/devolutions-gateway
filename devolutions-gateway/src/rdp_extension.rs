@@ -47,7 +47,7 @@ fn authorize(
 }
 
 async fn send_clean_path_response(
-    stream: &mut (dyn tokio::io::AsyncWrite + Unpin + Send),
+    stream: &mut (dyn AsyncWrite + Unpin + Send),
     rd_clean_path_rsp: &RDCleanPathPdu,
 ) -> anyhow::Result<()> {
     let rd_clean_path_rsp = rd_clean_path_rsp
@@ -71,7 +71,7 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
                 std::cmp::Ordering::Equal => break,
                 std::cmp::Ordering::Greater => {
                     return Err(io::Error::new(
-                        io::ErrorKind::Other,
+                        ErrorKind::Other,
                         "no leftover is expected when reading cleanpath PDU",
                     ));
                 }
@@ -82,14 +82,14 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
 
         if n == 0 {
             return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
+                ErrorKind::UnexpectedEof,
                 "EOF when reading RDCleanPathPdu",
             ));
         }
     }
 
     let rdcleanpath = RDCleanPathPdu::from_der(&buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("bad RDCleanPathPdu: {e}")))?;
+        .map_err(|e| io::Error::new(ErrorKind::InvalidInput, format!("bad RDCleanPathPdu: {e}")))?;
 
     Ok(rdcleanpath)
 }
@@ -294,7 +294,7 @@ pub async fn handle(
         .peer_certificates()
         .context("no peer certificate found in TLS transport")?
         .iter()
-        .map(|cert| cert.0.clone());
+        .map(|cert| cert.to_vec());
 
     trace!("Sending RDCleanPath response");
 
@@ -305,14 +305,15 @@ pub async fn handle(
 
     // Start actual RDP session
 
-    let info = SessionInfo::new(
-        claims.jet_aid,
-        claims.jet_ap,
-        ConnectionModeDetails::Fwd {
+    let info = SessionInfo::builder()
+        .association_id(claims.jet_aid)
+        .application_protocol(claims.jet_ap)
+        .details(ConnectionModeDetails::Fwd {
             destination_host: destination.clone(),
-        },
-    )
-    .with_ttl(claims.jet_ttl);
+        })
+        .time_to_live(claims.jet_ttl)
+        .recording_policy(claims.jet_rec)
+        .build();
 
     info!("RDP-TLS forwarding");
 
@@ -352,7 +353,7 @@ fn io_to_rdcleanpath_err(err: &io::Error) -> RDCleanPathPdu {
         .get_ref()
         .and_then(|e| e.downcast_ref::<tokio_rustls::rustls::Error>())
     {
-        RDCleanPathPdu::new_tls_error(tls_alert.get_u8())
+        RDCleanPathPdu::new_tls_error(u8::from(*tls_alert))
     } else {
         RDCleanPathPdu::new_wsa_error(WsaError::from(err).as_u16())
     }
@@ -461,7 +462,7 @@ enum WsaError {
 }
 
 impl WsaError {
-    pub fn as_u16(self) -> u16 {
+    pub(crate) fn as_u16(self) -> u16 {
         self as u16
     }
 }

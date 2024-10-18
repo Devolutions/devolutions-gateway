@@ -24,6 +24,7 @@ jobs:
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
       jetsocat-build-matrix: ${{ steps.setup-matrix.outputs.jetsocat-build-matrix }}
       gateway-build-matrix: ${{ steps.setup-matrix.outputs.gateway-build-matrix }}
+      agent-build-matrix: ${{ steps.setup-matrix.outputs.agent-build-matrix }}
 
     steps:
       - name: Setup matrix
@@ -52,10 +53,25 @@ jobs:
           echo "gateway-build-matrix=$GatewayMatrix" >> $Env:GITHUB_OUTPUT
 
           $Jobs = @()
+
+          $Platforms | ForEach-Object {
+              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'linux' { 'ubuntu-20.04' } }
+              foreach ($Arch in $Archs) {
+                  $Jobs += @{
+                      arch = $Arch
+                      os = $_
+                      runner = $Runner }
+              }
+          }
+
+          $AgentMatrix = ConvertTo-JSON $Jobs -Compress
+          echo "agent-build-matrix=$AgentMatrix" >> $Env:GITHUB_OUTPUT
+
+          $Jobs = @()
           $Platforms += 'macos'
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-11' } 'linux' { 'ubuntu-20.04' } }
+              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-12' } 'linux' { 'ubuntu-20.04' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -116,8 +132,8 @@ jobs:
           name: version
           path: VERSION
 
-  test:
-      name: test [${{ matrix.os }} ${{ matrix.arch }}]
+  tests:
+      name: tests [${{ matrix.os }} ${{ matrix.arch }}]
       runs-on: ${{ matrix.runner }}
       needs: preflight
       strategy:
@@ -142,9 +158,11 @@ jobs:
             sudo apt-get update
             sudo apt-get -o Acquire::Retries=3 install libsystemd-dev
 
-        - name: Test
+        - name: Tests
           shell: pwsh
-          run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+          env:
+            AWS_LC_SYS_NO_ASM: true
+          run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
 
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
@@ -166,6 +184,12 @@ jobs:
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools
 
+          # We need a newer version of GCC because aws-lc-rs rejects versions affected
+          # by this bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+          # These lines can be safely removed once we switch to ubuntu-22.04 runner.
+          sudo apt install gcc-10
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 60
+
       - name: Configure Linux (arm) runner
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
@@ -174,18 +198,29 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
           echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
 
-      - name: Fix ring dependency for Windows ARM64
+      - name: Configure Windows runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # NASM is required by aws-lc-rs (used as rustls crypto backend)
+          choco install nasm
+
+          # We need to add the NASM binary folder to the PATH manually.
+          Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # libclang / LLVM is a requirement for AWS LC.
+          # https://aws.github.io/aws-lc-rs/requirements/windows.html#libclang--llvm
+          $VSINSTALLDIR = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
+          Write-Output "LIBCLANG_PATH=$VSINSTALLDIR\VC\Tools\Llvm\x64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
+          Install-Module VsDevShell -Force
+
+      - name: Configure Windows (arm) runner
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         shell: pwsh
         run: |
           rustup target add aarch64-pc-windows-msvc
-          'ring = { git = "https://github.com/awakecoding/ring", branch = "0.16.20_alpha" }' | % {
-            Add-Content -Path "./Cargo.toml" -Value $_
-          }
-          $VSINSTALLDIR = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
-          $VCINSTALLDIR = Join-Path $VSINSTALLDIR "VC"
-          $LLVM_ROOT = Join-Path $VCINSTALLDIR "Tools\Llvm\x64"
-          echo "PATH=$Env:PATH;${LLVM_ROOT}\bin" >> $Env:GITHUB_ENV
 
       - name: Configure macOS (arm) runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
@@ -211,7 +246,7 @@ jobs:
           $Env:JETSOCAT_EXECUTABLE = Join-Path $TargetOutputPath $ExecutableFileName
           $Env:CARGO_PACKAGE = "jetsocat"
 
-          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+          ./ci/tlk.ps1 build -Product jetsocat -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
           echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
 
@@ -318,7 +353,17 @@ jobs:
       - name: Build
         shell: pwsh
         working-directory: webapp
-        run: ng build
+        run: npm run build
+
+      - name: Check webapp
+        shell: pwsh
+        working-directory: webapp
+        run: npm run check
+      
+      - name: check recording player
+        shell: pwsh
+        working-directory: webapp
+        run: npm run player:check
 
       - uses: actions/upload-artifact@v4
         with:
@@ -329,7 +374,7 @@ jobs:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: [preflight, devolutions-gateway-web-ui]
-    if: always()
+    if: always() # The webapp can’t be build without secrets that we don’t provide for PRs coming from forks.
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
@@ -346,6 +391,13 @@ jobs:
         with:
           name: webapp-client
           path: webapp/client
+
+      - name: Download Cadeau
+        shell: pwsh
+        run: |
+          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
+          $Arch = @{'x86_64'='x64';'arm64'='arm64'}['${{ matrix.arch }}']
+          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Load dynamic variables
         id: load-variables
@@ -379,6 +431,12 @@ jobs:
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
 
+          # We need a newer version of GCC because aws-lc-rs rejects versions affected
+          # by this bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+          # These lines can be safely removed once we switch to ubuntu-22.04 runner.
+          sudo apt install gcc-10
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 60
+
       - name: Configure Linux (arm) runner
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
@@ -387,14 +445,21 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
           echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
 
-      # WiX is installed on Windows runners but not in the PATH
       - name: Configure Windows runner
         if: matrix.os == 'windows'
         run: |
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
           choco install wixtoolset --version 3.14.0 --allow-downgrade --force
-          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # WiX is installed on Windows runners but not in the PATH
+          Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # NASM is required by aws-lc-rs (used as rustls crypto backend)
+          choco install nasm
+
+          # We need to add the NASM binary folder to the PATH manually.
+          Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build
         shell: pwsh
@@ -402,7 +467,7 @@ jobs:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
           CARGO_PACKAGE: devolutions-gateway
-        run: ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+        run: ./ci/tlk.ps1 build -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Build PowerShell module
         if: matrix.os == 'windows'
@@ -424,10 +489,14 @@ jobs:
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
             $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
+            $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
+          } else {
+            $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "libxmf.so" | Resolve-Path
           }
+
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
-            
-          ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+          ./ci/tlk.ps1 package -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -439,6 +508,7 @@ jobs:
     name: devolutions gateway merge artifacts
     runs-on: ubuntu-latest
     needs: [preflight, devolutions-gateway]
+    if: always() # The job is skipped for PRs coming from forks because the devolutions-gateway job would have been skipped (if always() wasn’t used). Another GitHub action oddity.
 
     steps:
       - name: Merge Artifacts
@@ -448,12 +518,230 @@ jobs:
           pattern: devolutions-gateway-*
           delete-merged: true
 
+  devolutions-agent:
+    name: devolutions-agent [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    needs: [preflight]
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.preflight.outputs.agent-build-matrix) }}
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Load dynamic variables
+        id: load-variables
+        shell: pwsh
+        run: |
+          $PackageVersion = "${{ needs.preflight.outputs.version }}"
+          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $SymbolsPath = Join-Path $Env:RUNNER_TEMP "symbols"
+          New-Item -ItemType Directory $SymbolsPath
+
+          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
+          $ExecutableFileName = "DevolutionsAgent_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $ExecutableFileName = "$($ExecutableFileName).exe"
+            $PackageFileName = "DevolutionsAgent-${{ matrix.arch }}-${PackageVersion}.msi"
+            $DAgentPackage = Join-Path $TargetOutputPath $PackageFileName
+
+            echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
+
+            $DAgentPedmDesktopExecutable = Join-Path $TargetOutputPath "DevolutionsPedmDesktop.exe"
+            echo "dagent-pedm-desktop-executable=$DAgentPedmDesktopExecutable" >> $Env:GITHUB_OUTPUT
+
+            $DAgentPedmShellExtDll = Join-Path $TargetOutputPath "DevolutionsPedmShellExt.dll"
+            echo "dagent-pedm-shell-ext-dll=$DAgentPedmShellExtDll" >> $Env:GITHUB_OUTPUT
+
+            $DAgentPedmShellExtMsix = Join-Path $TargetOutputPath "DevolutionsPedmShellExt.msix"
+            echo "dagent-pedm-shell-ext-msix=$DAgentPedmShellExtMsix" >> $Env:GITHUB_OUTPUT
+
+            $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
+            echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
+          }
+
+          $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
+          echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
+          echo "symbols-path=$SymbolsPath" >> $Env:GITHUB_OUTPUT
+          echo "target-output-path=$TargetOutputPath" >> $Env:GITHUB_OUTPUT
+          echo "dagent-executable=$DAgentExecutable" >> $Env:GITHUB_OUTPUT
+
+      - name: Configure Linux runner
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
+
+          # We need a newer version of GCC because aws-lc-rs rejects versions affected
+          # by this bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+          # These lines can be safely removed once we switch to ubuntu-22.04 runner.
+          sudo apt install gcc-10
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 60
+
+      - name: Configure Linux (arm) runner
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get -o Acquire::Retries=3 install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+          rustup target add aarch64-unknown-linux-gnu
+          echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
+
+      - name: Configure Windows runner
+        if: matrix.os == 'windows'
+        run: |
+          # https://github.com/actions/runner-images/issues/9667
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+
+          # Devolutions PEDM needs MakeAppx.exe
+          Write-Output "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # WiX is installed on Windows runners but not in the PATH
+          Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # NASM is required by aws-lc-rs (used as rustls crypto backend)
+          choco install nasm
+
+          # We need to add the NASM binary folder to the PATH manually.
+          Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure Windows (arm) runner
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+
+      - name: Add msbuild to PATH
+        if: matrix.os == 'windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
+          CARGO_PACKAGE: devolutions-agent
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
+            $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
+            $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
+          }
+
+          ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+      - name: Package
+        shell: pwsh
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
+            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
+            $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
+            $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
+          }
+
+          ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+      - name: Upload artifacts
+        if: matrix.arch != 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: devolutions-agent-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.load-variables.outputs.staging-path }}
+
+  devolutions-agent-merge:
+    name: devolutions agent merge artifacts
+    runs-on: ubuntu-latest
+    needs: [preflight, devolutions-agent]
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: devolutions-agent
+          pattern: devolutions-agent-*
+          delete-merged: true
+
+  dotnet-utils-tests:
+      name: .NET utils tests
+      runs-on: windows-2022
+      needs: preflight
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
+
+        - name: Tests
+          shell: pwsh
+          run: |
+            Set-PSDebug -Trace 1
+            dotnet test utils/dotnet/GatewayUtils.sln
+
+  powershell-tests:
+      name: PowerShell module tests
+      runs-on: windows-2022
+      needs: preflight
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
+
+        - name: Install Pester module
+          id: prepare
+          shell: pwsh
+          run: Install-Module Pester -RequiredVersion 5.6.0
+
+        - name: Build module
+          shell: pwsh
+          run: |
+            ./powershell/build.ps1
+
+        - name: Pester
+          shell: pwsh
+          run: |
+            ./powershell/run-tests.ps1
+
+  success:
+    name: Success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - tests
+      - jetsocat-lipo
+      - devolutions-gateway
+      - devolutions-gateway-merge
+      - devolutions-agent-merge
+      - dotnet-utils-tests
+      - powershell-tests
+
+    steps:
+      - name: Check success
+        shell: pwsh
+        run: |
+          $results = '${{ toJSON(needs.*.result) }}' | ConvertFrom-Json
+          $succeeded = $($results | Where { $_ -Ne "success" }).Count -Eq 0
+          exit $(if ($succeeded) { 0 } else { 1 })
+
   upload-git-log:
     name: Upload git-log output
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
-      - preflight
+      - success
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -462,11 +750,11 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 10
 
-      - name: Generate git log
+      - name: Generate git-log.txt
         shell: pwsh
         run: git log --max-count=10 > ./git-log.txt
 
-      - name: Upload artifacts
+      - name: Upload git-log.txt
         uses: actions/upload-artifact@v4
         with:
           name: git-log
@@ -477,11 +765,7 @@ jobs:
     runs-on: ubuntu-20.04
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
-      - preflight
-      - devolutions-gateway
-      - devolutions-gateway-merge
-      - jetsocat
-      - jetsocat-lipo
+      - preflight # required for needs.preflight.outputs
       - upload-git-log
 
     steps:
@@ -516,6 +800,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: devolutions-gateway
+          path: ${{ runner.temp }}/artifacts_raw
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: devolutions-agent
           path: ${{ runner.temp }}/artifacts_raw
 
       - uses: actions/download-artifact@v4
@@ -568,46 +857,3 @@ jobs:
           destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.timestamp.outputs.timestamp }}-${{ steps.prepare.outputs.short-ref }}
           remote: prereleases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
-
-  dotnet-utils-tests:
-      name: dotnet utils tests
-      runs-on: windows-2022
-      needs: preflight
-
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v4
-          with:
-            ref: ${{ needs.preflight.outputs.ref }}
-
-        - name: Test
-          shell: pwsh
-          run: |
-            Set-PSDebug -Trace 1
-            dotnet test utils/dotnet/GatewayUtils.sln
-
-  powershell-tests:
-      name: PowerShell module tests
-      runs-on: windows-2022
-      needs: preflight
-
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v4
-          with:
-            ref: ${{ needs.preflight.outputs.ref }}
-
-        - name: Install Pester module
-          id: prepare
-          shell: pwsh
-          run: Install-Module Pester -Force
-
-        - name: Build module
-          shell: pwsh
-          run: |
-            ./powershell/build.ps1
-
-        - name: Pester
-          shell: pwsh
-          run: |
-            ./powershell/run-tests.ps1

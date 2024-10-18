@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="en-us" Codepage="1252" Language="1033" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+        <!-- metadata -->
+                <String Id="Language">1033</String>
+                <String Id="ProductDescription">System-wide service for extending Devolutions Gateway functionality.</String>
+                <String Id="VendorFullName">Devolutions Inc.</String>
+                <String Id="VendorName">Devolutions</String>
+                    <!-- messages -->
+                <String Id="Dotnet462IsRequired">The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
+                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
+                <String Id="NewerInstalled">A newer version of this product is already installed.</String>
+                <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
+                <String Id="ThereIsAProblemWithTheEnteredData">There is a problem with the entered data. Please correct the issue and try again.</String>
+                <String Id="x64VersionRequired">You need to install the 64-bit version of this product on 64-bit Windows.</String>
+                <String Id="x86VersionRequired">You need to install the 32-bit version of this product on 32-bit Windows.</String>
+                    <!-- buttons -->
+                <String Id="SearchButton">Search</String>
+                <String Id="ViewButton">View</String>
+                <String Id="ViewLogButton">View Log</String>
+                    <!-- propertyGroups -->
+                <String Id="Group_InstallLocation">Install Location</String>
+                    <!-- properties -->
+                <String Id="Property_Directory">Directory</String>
+                    <!-- static -->
+                <String Id="UACPromptLabel">Please wait for UAC prompt to appear.
+
+If it appears minimized then active it from the taskbar.</String>
+                    <!-- filters -->
+                <String Id="Filter_AllFiles">All Files</String>
+                    <!-- dialogs.static -->
+                <String Id="AgentDlg_Title">[ProductName] Setup</String>
+                    <!-- dialogs.browse -->
+                <String Id="BrowseDlgDescription">Browse to the destination folder</String>
+                <String Id="BrowseDlgTitle">Change destination folder</String>
+                    <!-- dialogs.installDir -->
+                <String Id="InstallDirDlgDescription">Click Next to install to the default folder or click Change to choose another.</String>
+                <String Id="InstallDirDlgTitle">Destination Folder</String>
+                    <!-- dialogs.progress -->
+                <String Id="ProgressDlgTitleChanging">Changing [ProductName]</String>
+                <String Id="ProgressDlgTitleInstalling">Installing [ProductName]</String>
+                <String Id="ProgressDlgTitleRemoving">Removing [ProductName]</String>
+                <String Id="ProgressDlgTitleRepairing">Repairing [ProductName]</String>
+                <String Id="ProgressDlgTitleUpdating">Updating [ProductName]</String>
+                    <!-- dialogs.verifyReady -->
+                <String Id="VerifyReadyDlgChangeTitle">Ready to change [ProductName]</String>
+                <String Id="VerifyReadyDlgInstallTitle">Ready to install [ProductName]</String>
+                <String Id="VerifyReadyDlgRemoveTitle">Ready to remove [ProductName]</String>
+                <String Id="VerifyReadyDlgRepairTitle">Ready to repair [ProductName]</String>
+                <String Id="VerifyReadyDlgUpdateTitle">Ready to update [ProductName]</String>
+                    <!-- dialogs.welcome -->
+                <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
+                    </WixLocalization>

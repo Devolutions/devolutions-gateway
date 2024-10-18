@@ -1,13 +1,12 @@
 import { Injectable } from '@angular/core';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class StorageService {
+  constructor() {}
 
-  constructor() { }
-
-  setItem(key: string, value: any): void {
+  setItem<T>(key: string, value: T): void {
     try {
       const jsonString: string = JSON.stringify(value);
       localStorage.setItem(key, jsonString);
@@ -19,7 +18,7 @@ export class StorageService {
   getItem<T>(key: string): T | null {
     try {
       const jsonString: string = localStorage.getItem(key);
-      return jsonString ? JSON.parse(jsonString) as T : null;
+      return jsonString ? (JSON.parse(jsonString) as T) : null;
     } catch (error) {
       console.error('Error getting item from localStorage', error);
       return null;

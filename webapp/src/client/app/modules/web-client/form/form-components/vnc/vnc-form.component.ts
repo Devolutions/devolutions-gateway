@@ -1,12 +1,12 @@
-import {ChangeDetectorRef, Component, Input, OnInit} from '@angular/core';
-import {FormControl, FormGroup} from "@angular/forms";
+import { ChangeDetectorRef, Component, Input, OnInit } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 
-import {BaseComponent} from "@shared/bases/base.component";
-import {SelectItem} from "primeng/api";
-import {map, startWith, switchMap, takeUntil, tap} from "rxjs/operators";
-import {WebFormService} from "@shared/services/web-form.service";
-import {Observable, of} from "rxjs";
-import { VncAuthMode as AuthMode } from '@shared/enums/web-client-auth-mode.enum';
+import { BaseComponent } from '@shared/bases/base.component';
+import { VncAuthMode } from '@shared/enums/web-client-auth-mode.enum';
+import { WebFormService } from '@shared/services/web-form.service';
+import { SelectItem } from 'primeng/api';
+import { Observable, of } from 'rxjs';
+import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
 
 interface FormInputVisibility {
   showUsernameInput?: boolean;
@@ -16,22 +16,23 @@ interface FormInputVisibility {
 @Component({
   selector: 'vnc-form',
   templateUrl: 'vnc-form.component.html',
-  styleUrls: ['vnc-form.component.scss']
+  styleUrls: ['vnc-form.component.scss'],
 })
-export class VncFormComponent extends BaseComponent implements  OnInit {
-
+export class VncFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
-  @Input() inputFormData: any;
+  @Input() inputFormData;
 
   authModeOptions: SelectItem[];
 
   formInputVisibility: FormInputVisibility = {
     showUsernameInput: true,
-    showPasswordInput: true
+    showPasswordInput: true,
   };
 
-  constructor(private formService: WebFormService,
-              private cdr: ChangeDetectorRef) {
+  constructor(
+    private formService: WebFormService,
+    private cdr: ChangeDetectorRef,
+  ) {
     super();
   }
 
@@ -40,10 +41,19 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
     this.initializeFormOptions();
   }
 
-  private addControlsToParentForm(inputFormData?: any): void {
+  private addControlsToParentForm(inputFormData?): void {
     if (this.form) {
-      this.form.addControl('authMode', new FormControl(inputFormData?.authMode || AuthMode.VNC_Password));
+      this.clearForm();
+
+      this.formService.addControlToForm(this.form, 'authMode', inputFormData, true, false, VncAuthMode.VNC_Password);
+
       this.subscribeToAuthModeChanges();
+    }
+  }
+
+  private clearForm(): void {
+    if (this.form.contains('authMode')) {
+      this.form.removeControl('authMode');
     }
   }
 
@@ -56,40 +66,43 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
   }
 
   private initializeFormOptions(): void {
-    this.formService.getAuthModeOptions('vnc').pipe(
-      takeUntil(this.destroyed$)
-    ).subscribe({
-      next: (authModeOptions) => {
-        this.authModeOptions = authModeOptions;
-      },
-      error: (error) => console.error('Error fetching dropdown options', error)
-    });
+    this.formService
+      .getAuthModeOptions('vnc')
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe({
+        next: (authModeOptions) => {
+          this.authModeOptions = authModeOptions;
+        },
+        error: (error) => console.error('Error fetching dropdown options', error),
+      });
   }
 
   private subscribeToAuthModeChanges(): void {
-    this.form.get('authMode').valueChanges.pipe(
-      startWith(this.form.get('authMode').value as AuthMode),
-      takeUntil(this.destroyed$),
-      switchMap((authMode) => this.getFormInputVisibility(authMode))
-    ).subscribe(() => {
-      this.formService.detectFormChanges(this.cdr);
-    });
+    this.form
+      .get('authMode')
+      .valueChanges.pipe(
+        takeUntil(this.destroyed$),
+        startWith(this.form.get('authMode').value as VncAuthMode),
+        switchMap((authMode) => this.getFormInputVisibility(authMode)),
+      )
+      .subscribe({
+        error: (error) => console.error('Error subscribing to auth mode changes', error),
+      });
   }
 
-  private getFormInputVisibility(authMode: AuthMode): Observable<AuthMode> {
+  private getFormInputVisibility(authMode: VncAuthMode): Observable<VncAuthMode> {
     return of(this.formInputVisibility).pipe(
-      tap((visibility) => {
-        if (authMode === 0) {
-          visibility.showUsernameInput = false;
-          visibility.showPasswordInput = false;
-        } else {
-          visibility.showUsernameInput = authMode === AuthMode.Username_and_Password;
-          visibility.showPasswordInput = [AuthMode.VNC_Password, AuthMode.Username_and_Password].includes(authMode);
-        }
+      tap((visibility: FormInputVisibility) => {
+        const authModeAsNumber: number = +authMode;
+
+        visibility.showUsernameInput = authModeAsNumber === VncAuthMode.Username_and_Password;
+        visibility.showPasswordInput = [VncAuthMode.VNC_Password, VncAuthMode.Username_and_Password].includes(
+          authModeAsNumber,
+        );
       }),
       map(() => {
         return authMode;
-      })
+      }),
     );
   }
 }

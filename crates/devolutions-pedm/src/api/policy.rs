@@ -1,0 +1,271 @@
+use aide::axum::routing::{get, put};
+use aide::axum::ApiRouter;
+use axum::extract::Path;
+use axum::{Extension, Json};
+use devolutions_pedm_shared::policy::{Id, Profile, Rule, User};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+use crate::error::Error;
+use crate::policy;
+
+use super::NamedPipeConnectInfo;
+
+async fn get_profiles(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Result<Json<Vec<Id>>, Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let policy = policy::policy().read();
+
+    Ok(Json(policy.profiles().map(|p| p.id.clone()).collect()))
+}
+
+async fn post_profiles(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Json(profile): Json<Profile>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.add_profile(profile)?;
+
+    Ok(())
+}
+
+async fn get_profiles_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+) -> Result<Json<Profile>, Error> {
+    let policy = policy::policy().read();
+
+    let profile = if named_pipe_info.token.is_elevated()? {
+        policy.profile(&id.id).ok_or(Error::NotFound)?
+    } else {
+        policy
+            .user_profile(&named_pipe_info.user, &id.id)
+            .ok_or(Error::AccessDenied)?
+    };
+
+    Ok(Json(profile.clone()))
+}
+
+async fn put_profiles_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+    Json(profile): Json<Profile>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.replace_profile(&id.id, profile)?;
+
+    Ok(())
+}
+
+async fn delete_profiles_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.remove_profile(&id.id)?;
+
+    Ok(())
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "PascalCase")]
+struct GetProfilesMeResponse {
+    pub(crate) active: Option<Id>,
+    pub(crate) available: Vec<Id>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct PathIdParameter {
+    pub(crate) id: Id,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "PascalCase")]
+struct OptionalId {
+    pub(crate) id: Option<Id>,
+}
+
+async fn get_me(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+) -> Result<Json<GetProfilesMeResponse>, Error> {
+    info!(user = ?named_pipe_info.user, "Querying profiles for user");
+    let policy = policy::policy().read();
+
+    Ok(Json(GetProfilesMeResponse {
+        active: policy.user_current_profile(&named_pipe_info.user).map(|p| p.id.clone()),
+        available: policy
+            .user_profiles(&named_pipe_info.user)
+            .into_iter()
+            .map(|p| p.id.clone())
+            .collect(),
+    }))
+}
+
+async fn put_me(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Json(id): Json<OptionalId>,
+) -> Result<(), Error> {
+    let mut policy = policy::policy().write();
+
+    policy.set_user_current_profile(named_pipe_info.user, id.id)?;
+
+    Ok(())
+}
+
+async fn get_rules(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Result<Json<Vec<Id>>, Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let policy = policy::policy().read();
+
+    Ok(Json(policy.rules().map(|x| x.id.clone()).collect()))
+}
+
+async fn get_rules_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+) -> Result<Json<Rule>, Error> {
+    let policy = policy::policy().read();
+
+    // If we are not elevated, check that user has access to rule.
+    if !named_pipe_info.token.is_elevated()?
+        && policy
+            .user_profiles(&named_pipe_info.user)
+            .iter()
+            .all(|p| !p.rules.contains(&id.id))
+    {
+        return Err(Error::AccessDenied);
+    }
+
+    Ok(Json(policy.rule(&id.id).ok_or(Error::NotFound)?.clone()))
+}
+
+async fn put_rules_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+    Json(rule): Json<Rule>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.replace_rule(&id.id, rule)?;
+
+    Ok(())
+}
+
+async fn delete_rules_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.remove_rule(&id.id)?;
+
+    Ok(())
+}
+
+async fn post_rules(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Json(rule): Json<Rule>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.add_rule(rule)?;
+
+    Ok(())
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "PascalCase")]
+struct Assignment {
+    pub(crate) profile: Profile,
+    pub(crate) users: Vec<User>,
+}
+
+async fn get_assignments(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+) -> Result<Json<Vec<Assignment>>, Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let policy = policy::policy().read();
+
+    let assignments = policy
+        .assignments()
+        .iter()
+        .filter_map(|(id, users)| {
+            let profile = policy.profile(id)?;
+
+            Some(Assignment {
+                profile: profile.clone(),
+                users: users.clone(),
+            })
+        })
+        .collect();
+
+    Ok(Json(assignments))
+}
+
+async fn put_assignments_id(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    Path(id): Path<PathIdParameter>,
+    Json(users): Json<Vec<User>>,
+) -> Result<(), Error> {
+    if !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
+    }
+
+    let mut policy = policy::policy().write();
+
+    policy.set_assignments(id.id, users)?;
+
+    Ok(())
+}
+
+pub(crate) fn policy_router() -> ApiRouter {
+    ApiRouter::new()
+        .api_route("/me", get(get_me).put(put_me))
+        .api_route("/profiles", get(get_profiles).post(post_profiles))
+        .api_route(
+            "/profiles/:id",
+            get(get_profiles_id).put(put_profiles_id).delete(delete_profiles_id),
+        )
+        .api_route("/rules", get(get_rules).post(post_rules))
+        .api_route(
+            "/rules/:id",
+            get(get_rules_id).put(put_rules_id).delete(delete_rules_id),
+        )
+        .api_route("/assignments", get(get_assignments))
+        .api_route("/assignments/:id", put(put_assignments_id))
+}

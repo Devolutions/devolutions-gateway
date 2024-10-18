@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)]
+
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::atomic::AtomicU32;
@@ -48,10 +50,7 @@ async fn tcp_client() -> anyhow::Result<()> {
         socket_arr.push(socket);
     }
 
-    fn connect_and_write_something(
-        mut socket: AsyncRawSocket,
-        addr: std::net::SocketAddr,
-    ) -> JoinHandle<anyhow::Result<()>> {
+    fn connect_and_write_something(mut socket: AsyncRawSocket, addr: SocketAddr) -> JoinHandle<anyhow::Result<()>> {
         tokio::task::spawn(async move {
             let addr: SockAddr = addr.into();
             socket.connect(&addr).await?;

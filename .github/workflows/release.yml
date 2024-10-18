@@ -129,7 +129,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway -n native-libs --repo $Env:GITHUB_REPOSITORY
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
@@ -159,6 +159,16 @@ jobs:
           if ($Env:RUNNER_OS -eq "Linux") {
             Invoke-Expression "chmod +x $TargetPath"
           }
+
+          $XmfFileName = "libxmf.so"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $XmfFileName = "xmf.dll"
+          }
+
+          $XmfSourcePath = Get-ChildItem -Recurse -Filter $XmfFileName -File -Path native-libs
+          $XmfTargetPath = Join-Path $PkgDir $XmfFileName
+          Copy-Item $XmfSourcePath $XmfTargetPath
 
           $WebAppArchive = Get-ChildItem -Recurse -Filter "devolutions_gateway_webapp_*.tar.gz" | Select-Object -First 1
           $TargetPath = Join-Path $PkgDir "webapp" "client"
@@ -210,7 +220,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n devolutions-agent -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
 
       - name: Manage artifacts
         shell: pwsh
@@ -225,7 +235,7 @@ jobs:
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $HashPath = 'checksums'
-          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md','*.pdb' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
           echo "::group::checksums"
@@ -293,8 +303,8 @@ jobs:
             }
           }
 
-  onedrive:
-    name: OneDrive
+  onedrive-gateway:
+    name: OneDrive (Devolutions Gateway)
     runs-on: ubuntu-20.04
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
@@ -334,9 +344,11 @@ jobs:
           echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
+
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.msi"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
-          # Note that at this point the deb package is already named using the ".0" suffix, so we don’t rename.
+
+          # Note that at this point the deb package is already named using the ".0" suffix.
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
 
       - name: Upload to OneDrive
@@ -349,3 +361,82 @@ jobs:
           destination_path: /Gateway/${{ steps.prepare.outputs.version }}
           remote: releases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
+
+  onedrive-agent:
+    name: OneDrive (Devolutions Agent)
+    runs-on: ubuntu-20.04
+    needs: preflight
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+
+    steps:
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          ref: v1
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      ## Devolutions Toolbox is required for OneDrive uploading
+
+      - name: Install Devolutions Toolbox
+        uses: ./.github/workflows/toolbox-install
+        with:
+          github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+
+      - name: Download artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent --repo $Env:GITHUB_REPOSITORY
+
+      - name: Prepare upload
+        id: prepare
+        shell: pwsh
+        run: |
+          $destinationFolder = "${{ runner.temp }}/artifacts"
+          $version="${{ needs.preflight.outputs.version }}"
+          # Note that ".0" is appended here (required by release tooling downstream)
+          $versionFull="$version.0"
+
+          echo "version=${versionFull}" >> $Env:GITHUB_OUTPUT
+          echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
+
+          New-Item -Path "$destinationFolder" -ItemType "directory"
+
+          Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.msi"
+          Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.symbols.zip"
+
+          # Note that at this point the deb package is already named using the ".0" suffix.
+          Move-Item -Path "./linux/x86_64/devolutions-agent_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
+
+      - name: Upload to OneDrive
+        uses: ./.github/workflows/onedrive-upload
+        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
+        with:
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+          conflict_behavior: fail
+          destination_path: /Agent/${{ steps.prepare.outputs.version }}
+          remote: releases
+          source_path: ${{ steps.prepare.outputs.files-to-upload }}
+
+  remove-labels:
+    name: Remove release-required labels
+    runs-on: ubuntu-latest
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    needs:
+      - containers
+      - github-release
+      - psgallery-release
+      - onedrive-gateway
+      - onedrive-agent
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v4
+
+      - name: Remove labels
+        shell: pwsh
+        run: ./ci/remove-labels.ps1 -Label 'release-required'
+
