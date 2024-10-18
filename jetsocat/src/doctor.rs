@@ -579,7 +579,7 @@ mod native_tls_checks {
 
             if let Some(io_error) = source_error.downcast_ref::<std::io::Error>() {
                 if let Some(code) = io_error.raw_os_error() {
-                    if os_error_look_up(ctx, code) {
+                    if os_error_look_up(ctx, hostname, code) {
                         break;
                     }
                 }
@@ -587,14 +587,14 @@ mod native_tls_checks {
 
             let formatted_error = source_error.to_string();
 
-            if str_look_up(ctx, &formatted_error) {
+            if str_look_up(ctx, hostname, &formatted_error) {
                 break;
             }
 
             dyn_error = source_error.source();
         }
 
-        fn os_error_look_up(ctx: &mut DiagnosticCtx, code: i32) -> bool {
+        fn os_error_look_up(ctx: &mut DiagnosticCtx, hostname: &str, code: i32) -> bool {
             match code {
                 -2146762481 => {
                     help::cert_invalid_hostname(ctx, hostname);
@@ -612,7 +612,7 @@ mod native_tls_checks {
             }
         }
 
-        fn str_look_up(ctx: &mut DiagnosticCtx, s: &str) -> bool {
+        fn str_look_up(ctx: &mut DiagnosticCtx, hostname: &str, s: &str) -> bool {
             if s.contains("CN name does not match the passed value") {
                 help::cert_invalid_hostname(ctx, hostname);
                 true
