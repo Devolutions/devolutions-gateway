@@ -570,7 +570,7 @@ mod native_tls_checks {
     /// Parses Windows (schannel) error messages and convert them into a helpful diagnostic error
     #[cfg(target_os = "windows")]
     fn parse_tls_connect_error_string(ctx: &mut DiagnosticCtx, error: &native_tls::Error, hostname: &str) {
-        let mut dyn_error: Option<&dyn std::error::Error> = Some(&error);
+        let mut dyn_error: Option<&dyn std::error::Error> = Some(error);
 
         loop {
             let Some(source_error) = dyn_error.take() else {
