@@ -570,23 +570,49 @@ mod native_tls_checks {
     /// Parses Windows (schannel) error messages and convert them into a helpful diagnostic error
     #[cfg(target_os = "windows")]
     fn parse_tls_connect_error_string(ctx: &mut DiagnosticCtx, error: &native_tls::Error, hostname: &str) {
-        let os_error_look_up = |code: i32| match code {
-            -2146762481 => {
-                help::cert_invalid_hostname(ctx, hostname);
-                true
-            }
-            -2146762487 => {
-                help::cert_unknown_issuer(ctx);
-                true
-            }
-            -2146762495 => {
-                help::cert_is_expired(ctx);
-                true
-            }
-            _ => false,
-        };
+        let mut dyn_error: Option<&dyn std::error::Error> = Some(&error);
 
-        let str_look_up = |s: &str| -> bool {
+        loop {
+            let Some(source_error) = dyn_error.take() else {
+                break;
+            };
+
+            if let Some(io_error) = source_error.downcast_ref::<std::io::Error>() {
+                if let Some(code) = io_error.raw_os_error() {
+                    if os_error_look_up(ctx, code) {
+                        break;
+                    }
+                }
+            }
+
+            let formatted_error = source_error.to_string();
+
+            if str_look_up(ctx, &formatted_error) {
+                break;
+            }
+
+            dyn_error = source_error.source();
+        }
+
+        fn os_error_look_up(ctx: &mut DiagnosticCtx, code: i32) -> bool {
+            match code {
+                -2146762481 => {
+                    help::cert_invalid_hostname(ctx, hostname);
+                    true
+                }
+                -2146762487 => {
+                    help::cert_unknown_issuer(ctx);
+                    true
+                }
+                -2146762495 => {
+                    help::cert_is_expired(ctx);
+                    true
+                }
+                _ => false,
+            }
+        }
+
+        fn str_look_up(ctx: &mut DiagnosticCtx, s: &str) -> bool {
             if s.contains("CN name does not match the passed value") {
                 help::cert_invalid_hostname(ctx, hostname);
                 true
@@ -599,30 +625,6 @@ mod native_tls_checks {
             } else {
                 false
             }
-        };
-
-        let mut dyn_error: Option<&dyn std::error::Error> = Some(&error);
-
-        loop {
-            let Some(source_error) = dyn_error.take() else {
-                break;
-            };
-
-            if let Some(io_error) = source_error.downcast_ref::<std::io::Error>() {
-                if let Some(code) = io_error.raw_os_error() {
-                    if os_error_look_up(code) {
-                        break;
-                    }
-                }
-            }
-
-            let formatted_error = source_error.to_string();
-
-            if str_look_up(&formatted_error) {
-                break;
-            }
-
-            dyn_error = source_error.source();
         }
     }
 
