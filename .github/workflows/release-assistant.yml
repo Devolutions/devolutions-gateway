@@ -4,8 +4,9 @@ on:
   pull_request:
     branches: [ master ]
     types: [ opened, labeled ]
+  workflow_dispatch:
   schedule:
-    - cron: '49 3 * * 1' # 3:49 AM UTC every Monday
+    - cron: '49 1 * * 1' # 1:49 AM UTC every Monday
 
 jobs:
   create-comment:
@@ -38,7 +39,7 @@ jobs:
   notify-slack:
     name: Notify Slack
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
 
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ARCHITECTURE }}
@@ -64,11 +65,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          Set-PSDebug -Trace 1
+
           $blockerCount = ./ci/pr-count-for-label.ps1 -Label '${{ matrix.blocker-label }}'
 
           if ($blockerCount -ne 0)
           {
-            echo "notify=no" >> "$GITHUB_OUTPUT"
+            Write-Out "notify=no" >> $Env:GITHUB_OUTPUT
           }
           else
           {
@@ -76,11 +79,11 @@ jobs:
 
             if ($requiredCount -ne 0)
             {
-              echo "notify=yes" >> "$GITHUB_OUTPUT"
+              Write-Out "notify=yes" >> $Env:GITHUB_OUTPUT
             }
             else
             {
-              echo "notify=no" >> "$GITHUB_OUTPUT"
+              Write-Out "notify=no" >> $Env:GITHUB_OUTPUT
             }
           }
 
