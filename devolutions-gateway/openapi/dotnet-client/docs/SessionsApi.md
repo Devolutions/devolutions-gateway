@@ -17,6 +17,7 @@ Lists running sessions
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -32,7 +33,10 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new SessionsApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new SessionsApi(httpClient, config, httpClientHandler);
 
             try
             {
@@ -108,6 +112,7 @@ Terminate forcefully a running session
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -123,7 +128,10 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new SessionsApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new SessionsApi(httpClient, config, httpClientHandler);
             var id = "id_example";  // Guid | Session / association ID of the session to terminate
 
             try

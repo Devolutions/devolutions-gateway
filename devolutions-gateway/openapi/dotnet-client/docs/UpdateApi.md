@@ -18,6 +18,7 @@ This is done via updating `Agent/update.json` file, which is then read by Devolu
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -33,7 +34,10 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new UpdateApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new UpdateApi(httpClient, config, httpClientHandler);
 
             try
             {

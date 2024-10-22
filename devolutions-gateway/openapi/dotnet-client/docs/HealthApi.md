@@ -16,6 +16,7 @@ Performs a health check
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -28,7 +29,10 @@ namespace Example
         {
             Configuration config = new Configuration();
             config.BasePath = "http://localhost";
-            var apiInstance = new HealthApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new HealthApi(httpClient, config, httpClientHandler);
 
             try
             {
