@@ -71,7 +71,7 @@ jobs:
 
           if ($blockerCount -ne 0)
           {
-            Write-Out "notify=no" >> $Env:GITHUB_OUTPUT
+            Write-Output "notify=no" >> $Env:GITHUB_OUTPUT
           }
           else
           {
@@ -79,11 +79,11 @@ jobs:
 
             if ($requiredCount -ne 0)
             {
-              Write-Out "notify=yes" >> $Env:GITHUB_OUTPUT
+              Write-Output "notify=yes" >> $Env:GITHUB_OUTPUT
             }
             else
             {
-              Write-Out "notify=no" >> $Env:GITHUB_OUTPUT
+              Write-Output "notify=no" >> $Env:GITHUB_OUTPUT
             }
           }
 
