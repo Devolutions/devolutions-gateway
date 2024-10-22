@@ -8,10 +8,9 @@ pub use recording::Recorder;
 use anyhow::Context as _;
 use camino::Utf8Path;
 use dlopen::symbor::Library;
-use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use plugin_info::{PluginCapabilities, PluginInformation};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::config::Conf;
 
@@ -25,9 +24,8 @@ pub struct PluginManager {
     libs: Vec<Plugin>,
 }
 
-lazy_static! {
-    pub static ref PLUGIN_MANAGER: Mutex<PluginManager> = Mutex::new(PluginManager { libs: Vec::new() });
-}
+pub static PLUGIN_MANAGER: LazyLock<Mutex<PluginManager>> =
+    LazyLock::new(|| Mutex::new(PluginManager { libs: Vec::new() }));
 
 impl PluginManager {
     pub fn get_recording_plugin(&self) -> Option<Recorder> {

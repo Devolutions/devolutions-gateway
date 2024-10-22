@@ -4,13 +4,13 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
+use std::sync::LazyLock;
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
 use tokio::sync::{mpsc, Mutex, Notify};
 
-lazy_static::lazy_static! {
-    static ref LISTENERS: Mutex<HashMap<SocketAddr, mpsc::Sender<DuplexStream>>> = Mutex::new(HashMap::new());
-    static ref NEW_LISTENER: Notify = Notify::new();
-}
+static LISTENERS: LazyLock<Mutex<HashMap<SocketAddr, mpsc::Sender<DuplexStream>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEW_LISTENER: LazyLock<Notify> = LazyLock::new(|| Notify::new());
 
 #[derive(Debug)]
 pub struct TcpListener(

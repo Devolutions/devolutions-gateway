@@ -503,18 +503,16 @@ fn ensure_enabled(conf: &crate::config::Conf) -> Result<(), HttpError> {
 mod login_rate_limit {
     use std::collections::HashMap;
     use std::net::IpAddr;
+    use std::sync::LazyLock;
     use std::time::Duration;
 
-    use lazy_static::lazy_static;
     use parking_lot::Mutex;
     use std::time::Instant;
 
     type LoginAttempts = Mutex<HashMap<(String, IpAddr), u8>>;
 
-    lazy_static! {
-        static ref LOGIN_ATTEMPTS: LoginAttempts = Mutex::new(HashMap::new());
-        static ref LAST_RESET: Mutex<Instant> = Mutex::new(Instant::now());
-    }
+    static LOGIN_ATTEMPTS: LazyLock<LoginAttempts> = LazyLock::new(|| Mutex::new(HashMap::new()));
+    static LAST_RESET: LazyLock<Mutex<Instant>> = LazyLock::new(|| Mutex::new(Instant::now()));
 
     const PERIOD: Duration = Duration::from_secs(60);
 

@@ -1,5 +1,5 @@
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::Context as _;
 use tokio::net::TcpStream;
@@ -8,31 +8,29 @@ use tokio_rustls::rustls::{self, pki_types};
 
 static DEFAULT_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 
-lazy_static::lazy_static! {
-    // rustls doc says:
-    //
-    // > Making one of these can be expensive, and should be once per process rather than once per connection.
-    //
-    // source: https://docs.rs/rustls/0.21.1/rustls/client/struct.ClientConfig.html
-    //
-    // We’ll reuse the same TLS client config for all proxy-based TLS connections.
-    // (TlsConnector is just a wrapper around the config providing the `connect` method.)
-    static ref TLS_CONNECTOR: tokio_rustls::TlsConnector = {
-        let mut config = rustls::client::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
-            .with_no_client_auth();
+// rustls doc says:
+//
+// > Making one of these can be expensive, and should be once per process rather than once per connection.
+//
+// source: https://docs.rs/rustls/0.21.1/rustls/client/struct.ClientConfig.html
+//
+// We’ll reuse the same TLS client config for all proxy-based TLS connections.
+// (TlsConnector is just a wrapper around the config providing the `connect` method.)
+static TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
+    let mut config = rustls::client::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
+        .with_no_client_auth();
 
-        // Disable TLS resumption because it’s not supported by some services such as CredSSP.
-        //
-        // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
-        //
-        // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
-        config.resumption = rustls::client::Resumption::disabled();
+    // Disable TLS resumption because it’s not supported by some services such as CredSSP.
+    //
+    // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
+    //
+    // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
+    config.resumption = rustls::client::Resumption::disabled();
 
-        tokio_rustls::TlsConnector::from(Arc::new(config))
-    };
-}
+    tokio_rustls::TlsConnector::from(Arc::new(config))
+});
 
 pub async fn connect(dns_name: &str, stream: TcpStream) -> io::Result<TlsStream<TcpStream>> {
     use tokio::io::AsyncWriteExt as _;
