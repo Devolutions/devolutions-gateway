@@ -43,8 +43,8 @@ src/Devolutions.Gateway.Client/Client/ApiResponse.cs
 src/Devolutions.Gateway.Client/Client/ClientUtils.cs
 src/Devolutions.Gateway.Client/Client/Configuration.cs
 src/Devolutions.Gateway.Client/Client/ExceptionFactory.cs
+src/Devolutions.Gateway.Client/Client/FileParameter.cs
 src/Devolutions.Gateway.Client/Client/GlobalConfiguration.cs
-src/Devolutions.Gateway.Client/Client/HttpMethod.cs
 src/Devolutions.Gateway.Client/Client/IApiAccessor.cs
 src/Devolutions.Gateway.Client/Client/IAsynchronousClient.cs
 src/Devolutions.Gateway.Client/Client/IReadableConfiguration.cs
@@ -53,6 +53,7 @@ src/Devolutions.Gateway.Client/Client/Multimap.cs
 src/Devolutions.Gateway.Client/Client/OpenAPIDateConverter.cs
 src/Devolutions.Gateway.Client/Client/RequestOptions.cs
 src/Devolutions.Gateway.Client/Client/RetryConfiguration.cs
+src/Devolutions.Gateway.Client/Client/WebRequestPathBuilder.cs
 src/Devolutions.Gateway.Client/Devolutions.Gateway.Client.csproj
 src/Devolutions.Gateway.Client/Model/AbstractOpenAPISchema.cs
 src/Devolutions.Gateway.Client/Model/AccessScope.cs

@@ -17,6 +17,7 @@ Lists all recordings stored on this instance
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -32,7 +33,10 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new JrecApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
 
             try
             {
@@ -99,7 +103,7 @@ This endpoint does not need any parameter.
 
 <a id="pullrecordingfile"></a>
 # **PullRecordingFile**
-> System.IO.Stream PullRecordingFile (Guid id, string filename)
+> FileParameter PullRecordingFile (Guid id, string filename)
 
 Retrieves a recording file for a given session
 
@@ -107,6 +111,7 @@ Retrieves a recording file for a given session
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -122,14 +127,17 @@ namespace Example
             // Configure Bearer token for authorization: jrec_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new JrecApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
             var id = "id_example";  // Guid | Recorded session ID
             var filename = "filename_example";  // string | Name of recording file to retrieve
 
             try
             {
                 // Retrieves a recording file for a given session
-                System.IO.Stream result = apiInstance.PullRecordingFile(id, filename);
+                FileParameter result = apiInstance.PullRecordingFile(id, filename);
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
@@ -150,7 +158,7 @@ This returns an ApiResponse object which contains the response data, status code
 try
 {
     // Retrieves a recording file for a given session
-    ApiResponse<System.IO.Stream> response = apiInstance.PullRecordingFileWithHttpInfo(id, filename);
+    ApiResponse<FileParameter> response = apiInstance.PullRecordingFileWithHttpInfo(id, filename);
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
@@ -172,7 +180,7 @@ catch (ApiException e)
 
 ### Return type
 
-**System.IO.Stream**
+[**FileParameter**](FileParameter.md)
 
 ### Authorization
 

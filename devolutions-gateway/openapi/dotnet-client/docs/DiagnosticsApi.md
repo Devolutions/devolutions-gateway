@@ -20,6 +20,7 @@ This route is not secured by access token. Indeed, this route is used to retriev
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -32,7 +33,10 @@ namespace Example
         {
             Configuration config = new Configuration();
             config.BasePath = "http://localhost";
-            var apiInstance = new DiagnosticsApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DiagnosticsApi(httpClient, config, httpClientHandler);
 
             try
             {
@@ -106,6 +110,7 @@ This route primary function is to help with configuration diagnosis (e.g.: ID mi
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -121,7 +126,10 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new DiagnosticsApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DiagnosticsApi(httpClient, config, httpClientHandler);
 
             try
             {
@@ -196,6 +204,7 @@ Retrieves latest logs.
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -211,7 +220,10 @@ namespace Example
             // Configure Bearer token for authorization: scope_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new DiagnosticsApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DiagnosticsApi(httpClient, config, httpClientHandler);
 
             try
             {

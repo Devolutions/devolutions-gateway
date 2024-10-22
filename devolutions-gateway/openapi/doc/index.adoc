@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2024.3.2
+2024.3.3
 :toc: left
 :numbered:
 :toclevels: 4

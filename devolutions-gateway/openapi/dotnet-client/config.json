@@ -2,7 +2,7 @@
   "packageAuthors": "Devolutions Inc.",
   "packageName": "Devolutions.Gateway.Client",
   "packageTitle": "Devolutions Gateway REST API Client",
-  "packageVersion": "2024.9.1",
+  "packageVersion": "2024.10.22",
   "packageDescription": "Client for Devolutions Gateway REST API",
   "packageGuid": "EF1E8A60-F71D-4F02-A779-B113740FF5CC",
   "packageCopyright": "© Devolutions Inc. All rights reserved.",
@@ -10,6 +10,7 @@
   "gitHost": "github.com",
   "gitUserId": "Devolutions",
   "gitRepoId": "devolutions-gateway",
-  "targetFramework": "net6.0",
+  "targetFramework": "net8.0",
+  "library": "httpclient",
   "excludeTests": true
 }

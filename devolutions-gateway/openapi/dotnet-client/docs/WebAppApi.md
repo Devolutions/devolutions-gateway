@@ -17,6 +17,7 @@ Requests a web application token using the configured authorization method
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -33,7 +34,10 @@ namespace Example
             config.Username = "YOUR_USERNAME";
             config.Password = "YOUR_PASSWORD";
 
-            var apiInstance = new WebAppApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new WebAppApi(httpClient, config, httpClientHandler);
             var appTokenSignRequest = new AppTokenSignRequest(); // AppTokenSignRequest | JSON-encoded payload specifying the desired claims
 
             try
@@ -114,6 +118,7 @@ Requests a session token using a web application token
 ```csharp
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Devolutions.Gateway.Client.Api;
 using Devolutions.Gateway.Client.Client;
 using Devolutions.Gateway.Client.Model;
@@ -129,7 +134,10 @@ namespace Example
             // Configure Bearer token for authorization: web_app_token
             config.AccessToken = "YOUR_BEARER_TOKEN";
 
-            var apiInstance = new WebAppApi(config);
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new WebAppApi(httpClient, config, httpClientHandler);
             var sessionTokenSignRequest = new SessionTokenSignRequest(); // SessionTokenSignRequest | JSON-encoded payload specifying the desired claims
 
             try
