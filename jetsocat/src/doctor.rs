@@ -132,7 +132,11 @@ impl Diagnostic {
                     let mut c = s.chars();
                     match c.next() {
                         None => String::new(),
-                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        Some(f) => {
+                            let mut s: String = f.to_uppercase().collect();
+                            s.push_str(c.as_str());
+                            s
+                        }
                     }
                 }
             }
