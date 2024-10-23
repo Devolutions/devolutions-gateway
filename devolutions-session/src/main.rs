@@ -21,13 +21,17 @@ fn main() -> anyhow::Result<()> {
 
     let config = ConfHandle::init().context("Failed to initialize configuration")?;
 
-    let _logger_guard = init_log(config.clone());
-
     info!("Starting Devolutions Session");
+
+    #[cfg(not(windows))]
+    let _logger_guard = init_log(config);
 
     // TMP: Copy-paste from MSRDPEX project for testing purposes.
     #[cfg(windows)]
-    loop_dvc(config);
+    {
+        let _logger_guard = init_log(config.clone());
+        loop_dvc(config);
+    }
 
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
