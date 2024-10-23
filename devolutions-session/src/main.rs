@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
 
     let config = ConfHandle::init().context("Failed to initialize configuration")?;
 
-    let _logger_guard = init_log(config.clone());
+    let _logger_guard = init_log(config);
 
     info!("Starting Devolutions Session");
 
