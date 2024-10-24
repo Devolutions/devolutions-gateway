@@ -10,7 +10,7 @@ namespace DevolutionsPedmDesktop
         {
             InitializeComponent();
 
-            appView.ExePath = path;
+            appView.ExePath = path.TrimStart(new char[] {'\\', '?'});
             _pipe = pipe;
         }
 
