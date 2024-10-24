@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use chrono::Local;
 use devolutions_pedm_shared::policy::{ElevationResult, User};
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use walkdir::WalkDir;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Security::WinBuiltinUsersSid;
