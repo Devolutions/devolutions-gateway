@@ -132,7 +132,11 @@ impl Diagnostic {
                     let mut c = s.chars();
                     match c.next() {
                         None => String::new(),
-                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        Some(f) => {
+                            let mut s: String = f.to_uppercase().collect();
+                            s.push_str(c.as_str());
+                            s
+                        }
                     }
                 }
             }
@@ -437,15 +441,16 @@ mod rustls_checks {
             now,
             ring_crypto_provider.signature_verification_algorithms.all,
         )
-        .inspect_err(|error| match error {
-            Error::InvalidCertificate(cert_error) => match cert_error {
-                rustls::CertificateError::Expired => help::cert_is_expired(ctx),
-                rustls::CertificateError::NotValidYet => help::cert_is_not_yet_valid(ctx),
-                rustls::CertificateError::UnknownIssuer => help::cert_unknown_issuer(ctx),
-                rustls::CertificateError::InvalidPurpose => help::cert_invalid_purpose(ctx),
-                _ => (),
-            },
-            _ => (),
+        .inspect_err(|error| {
+            if let Error::InvalidCertificate(cert_error) = error {
+                match cert_error {
+                    rustls::CertificateError::Expired => help::cert_is_expired(ctx),
+                    rustls::CertificateError::NotValidYet => help::cert_is_not_yet_valid(ctx),
+                    rustls::CertificateError::UnknownIssuer => help::cert_unknown_issuer(ctx),
+                    rustls::CertificateError::InvalidPurpose => help::cert_invalid_purpose(ctx),
+                    _ => (),
+                }
+            }
         })
         .context("failed to verify certification chain")?;
 

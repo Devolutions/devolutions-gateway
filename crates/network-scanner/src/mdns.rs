@@ -100,8 +100,9 @@ pub fn mdns_query_scan(
                 while let Ok(service_event) = receiver.recv_async().await {
                     debug!(?service_event);
                     if let ServiceEvent::ServiceResolved(msg) = service_event {
+                        let fullname = msg.get_fullname();
                         let (device_name, protocol) =
-                            parse_fullname(msg.get_fullname()).unwrap_or((msg.get_fullname().to_owned(), None));
+                            parse_fullname(fullname).unwrap_or_else(|| (fullname.to_owned(), None));
 
                         let port = msg.get_port();
 
