@@ -10,7 +10,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use camino::Utf8PathBuf;
 use devolutions_pedm_shared::policy::{
-    Application, Certificate, Configuration, ElevationRequest, Filter, Id, Identifiable, Profile, Signature,
+    Application, Certificate, Configuration, ElevationRequest, Id, Identifiable, Profile, Signature,
     Signer, User,
 };
 use parking_lot::RwLock;
@@ -21,7 +21,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tracing::{error, warn};
+use tracing::error;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, TOKEN_QUERY};
@@ -34,7 +34,7 @@ use anyhow::{anyhow, bail, Result};
 use crate::desktop::launch_consent;
 use crate::error::Error;
 use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHasher};
-use crate::{config, elevations};
+use crate::config;
 use devolutions_pedm_shared::policy;
 
 pub(crate) struct IdList<T: Identifiable> {
@@ -93,10 +93,6 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         self.data.values()
-    }
-
-    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
-        self.data.values_mut()
     }
 
     pub(crate) fn contains(&self, id: &Id) -> bool {
