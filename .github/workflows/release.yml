@@ -438,5 +438,7 @@ jobs:
 
       - name: Remove labels
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./ci/remove-labels.ps1 -Label 'release-required'
 
