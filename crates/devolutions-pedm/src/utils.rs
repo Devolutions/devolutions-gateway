@@ -98,7 +98,7 @@ pub(crate) fn file_hash(path: &Path) -> Result<Hash> {
     Ok(hasher.finalize())
 }
 
-pub(crate) fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Result<()> {
+pub(crate) fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> Result<()> {
     // FIXME: Underlying behaviour of security primitives must be corrected before this can work
     // let owner = Sid::from_well_known(WinLocalSystemSid, None)?;
 
@@ -129,7 +129,7 @@ pub(crate) fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Resul
     //         None,
     //     )?;
     // } else {
-    //     create_directory(
+    //     create_directory_with_security_attributes(
     //         dir,
     //         &SecurityAttributes {
     //             security_descriptor: Some(SecurityDescriptor {
@@ -141,6 +141,10 @@ pub(crate) fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Resul
     //         },
     //     )?;
     // }
+
+    if !dir.exists() {
+        create_directory(dir)?;
+    }
 
     Ok(())
 }
