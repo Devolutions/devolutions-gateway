@@ -99,47 +99,48 @@ pub(crate) fn file_hash(path: &Path) -> Result<Hash> {
 }
 
 pub(crate) fn ensure_protected_directory(dir: &Path, readers: Vec<Sid>) -> Result<()> {
-    let owner = Sid::from_well_known(WinLocalSystemSid, None)?;
+    // FIXME: Underlying behaviour of security primitives must be corrected before this can work
+    // let owner = Sid::from_well_known(WinLocalSystemSid, None)?;
 
-    let mut aces = vec![Ace {
-        flags: OBJECT_INHERIT_ACE,
-        access_mask: GENERIC_ALL.0,
-        data: AceType::AccessAllowed(owner.clone()),
-    }];
+    // let mut aces = vec![Ace {
+    //     flags: OBJECT_INHERIT_ACE,
+    //     access_mask: GENERIC_ALL.0,
+    //     data: AceType::AccessAllowed(owner.clone()),
+    // }];
 
-    aces.extend(readers.into_iter().map(|sid| Ace {
-        flags: OBJECT_INHERIT_ACE,
-        access_mask: GENERIC_READ.0,
-        data: AceType::AccessAllowed(sid),
-    }));
+    // aces.extend(readers.into_iter().map(|sid| Ace {
+    //     flags: OBJECT_INHERIT_ACE,
+    //     access_mask: GENERIC_READ.0,
+    //     data: AceType::AccessAllowed(sid),
+    // }));
 
-    let dacl = InheritableAcl {
-        kind: InheritableAclKind::Protected,
-        acl: Acl::with_aces(aces),
-    };
+    // let dacl = InheritableAcl {
+    //     kind: InheritableAclKind::Protected,
+    //     acl: Acl::with_aces(aces),
+    // };
 
-    if dir.exists() {
-        set_named_security_info(
-            &dir.to_string_lossy(),
-            SE_FILE_OBJECT,
-            Some(&owner),
-            None,
-            Some(&dacl),
-            None,
-        )?;
-    } else {
-        create_directory(
-            dir,
-            &SecurityAttributes {
-                security_descriptor: Some(SecurityDescriptor {
-                    owner: Some(owner),
-                    dacl: Some(dacl),
-                    ..Default::default()
-                }),
-                inherit_handle: false,
-            },
-        )?;
-    }
+    // if dir.exists() {
+    //     set_named_security_info(
+    //         &dir.to_string_lossy(),
+    //         SE_FILE_OBJECT,
+    //         Some(&owner),
+    //         None,
+    //         Some(&dacl),
+    //         None,
+    //     )?;
+    // } else {
+    //     create_directory(
+    //         dir,
+    //         &SecurityAttributes {
+    //             security_descriptor: Some(SecurityDescriptor {
+    //                 owner: Some(owner),
+    //                 dacl: Some(dacl),
+    //                 ..Default::default()
+    //             }),
+    //             inherit_handle: false,
+    //         },
+    //     )?;
+    // }
 
     Ok(())
 }
