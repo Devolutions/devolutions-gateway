@@ -10,8 +10,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use camino::Utf8PathBuf;
 use devolutions_pedm_shared::policy::{
-    Application, Certificate, Configuration, ElevationRequest, Id, Identifiable, Profile, Signature,
-    Signer, User,
+    Application, Certificate, Configuration, ElevationRequest, Id, Identifiable, Profile, Signature, Signer, User,
 };
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
@@ -31,10 +30,10 @@ use win_api_wrappers::utils::CommandLine;
 
 use anyhow::{anyhow, bail, Result};
 
+use crate::config;
 use crate::desktop::launch_consent;
 use crate::error::Error;
 use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHasher};
-use crate::config;
 use devolutions_pedm_shared::policy;
 
 pub(crate) struct IdList<T: Identifiable> {
