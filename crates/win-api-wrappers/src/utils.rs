@@ -587,7 +587,16 @@ impl Link {
     }
 }
 
-pub fn create_directory(path: &Path, security_attributes: &SecurityAttributes) -> Result<()> {
+pub fn create_directory(path: &Path) -> Result<(), Error> {
+    let path = WideString::from(path);
+
+    // SAFETY: `path` is NUL terminated.
+    unsafe { CreateDirectoryW(path.as_pcwstr(), None) }?;
+
+    Ok(())
+}
+
+pub fn create_directory_with_security_attributes(path: &Path, security_attributes: &SecurityAttributes) -> Result<()> {
     let path = WideString::from(path);
 
     let security_attributes = RawSecurityAttributes::try_from(security_attributes)?;

@@ -271,22 +271,6 @@ impl ElevationRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub struct Rule {
-    pub id: Id,
-    pub name: String,
-    pub target: ApplicationFilter,
-    pub asker: Option<ApplicationFilter>,
-    pub elevation_kind: ElevationKind,
-}
-
-impl Identifiable for Rule {
-    fn id(&self) -> &Id {
-        &self.id
-    }
-}
-
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[repr(i32)]
 #[serde(rename_all = "PascalCase")]
@@ -365,7 +349,6 @@ pub struct Profile {
     pub elevation_settings: ElevationConfigurations,
     pub default_elevation_kind: ElevationKind,
     pub prompt_secure_desktop: bool,
-    pub rules: Vec<Id>,
 }
 
 impl Identifiable for Profile {
@@ -383,7 +366,6 @@ impl Default for Profile {
             elevation_settings: ElevationConfigurations::default(),
             default_elevation_kind: ElevationKind::Deny,
             prompt_secure_desktop: true,
-            rules: vec![],
         }
     }
 }

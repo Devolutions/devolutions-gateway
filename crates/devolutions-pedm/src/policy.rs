@@ -1,8 +1,7 @@
 //! Module in charge of loading, saving and overall management of the PEDM policy.
 //!
-//! The policy works in 3 layers:
-//! - Rules: Each rule specifies what process can launch which other process in administrator mode with some more settings.
-//! - Profiles: Each profile specifies which type of elevation should be done as well as which rules are valid for that profile.
+//! The policy works in 2 layers:
+//! - Profiles: Each profile specifies which type of elevation should be done.
 //! - Assignments: A mapping between users on the machine and the profiles available to them.
 //!
 //! The policy is stored under `%ProgramData%\Devolutions\Agent\pedm\policy\`, and is only accessible by `NT AUTHORITY\SYSTEM`.
@@ -11,7 +10,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use camino::Utf8PathBuf;
 use devolutions_pedm_shared::policy::{
-    Application, Certificate, Configuration, ElevationRequest, Filter, Id, Identifiable, Profile, Rule, Signature,
+    Application, Certificate, Configuration, ElevationRequest, Filter, Id, Identifiable, Profile, Signature,
     Signer, User,
 };
 use parking_lot::RwLock;
@@ -148,7 +147,6 @@ pub(crate) struct Policy {
     config_path: PathBuf,
     config: Configuration,
     profiles: IdList<Profile>,
-    rules: IdList<Rule>,
     current_profiles: HashMap<User, Id>,
 }
 
@@ -158,7 +156,6 @@ impl Policy {
             config_path: policy_config_path().into_std_path_buf(),
             config: Configuration::default(),
             profiles: IdList::new(policy_profiles_path().into_std_path_buf()),
-            rules: IdList::new(policy_rules_path().into_std_path_buf()),
             current_profiles: HashMap::new(),
         };
 
@@ -169,7 +166,6 @@ impl Policy {
 
         ensure_protected_directory(policy_path().as_std_path(), vec![])?;
         ensure_protected_directory(policy.profiles.path(), vec![])?;
-        ensure_protected_directory(policy.rules.path(), vec![])?;
 
         if !policy.config_path.exists() {
             let config = Configuration::default();
@@ -191,7 +187,6 @@ impl Policy {
     pub(crate) fn load(&mut self) -> Result<()> {
         self.load_config();
         self.profiles.load()?;
-        self.rules.load()?;
         Ok(())
     }
 
@@ -288,67 +283,10 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn replace_rule(&mut self, old_id: &Id, rule: Rule) -> Result<()> {
-        if !self.rules.contains(old_id) {
-            bail!(Error::NotFound);
-        } else if old_id != &rule.id && self.rules.contains(&rule.id) {
-            bail!(Error::InvalidParameter);
-        }
-
-        let profile_ids = self
-            .profiles
-            .iter()
-            .filter(|p| p.rules.contains(old_id))
-            .map(|p| p.id().clone())
-            .collect::<Vec<_>>();
-
-        self.remove_rule(old_id)?;
-
-        let new_id = rule.id.clone();
-        self.add_rule(rule)?;
-
-        for profile_id in profile_ids {
-            let mut profile = self
-                .profile(&profile_id)
-                .cloned()
-                .ok_or_else(|| anyhow!(Error::NotFound))?;
-
-            profile.rules.push(new_id.clone());
-
-            self.replace_profile(&profile_id, profile)?;
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn remove_profile(&mut self, id: &Id) -> Result<()> {
         self.profiles.remove(id)?;
 
         self.config.assignments.remove(id);
-
-        Ok(())
-    }
-
-    pub(crate) fn rule(&self, id: &Id) -> Option<&Rule> {
-        self.rules.get(id)
-    }
-
-    pub(crate) fn rules(&self) -> impl Iterator<Item = &Rule> + '_ {
-        self.rules.iter()
-    }
-
-    pub(crate) fn add_rule(&mut self, rule: Rule) -> Result<()> {
-        self.rules.add(rule)
-    }
-
-    pub(crate) fn remove_rule(&mut self, id: &Id) -> Result<()> {
-        self.rules.remove(id)?;
-
-        for prof in self.profiles.iter_mut() {
-            if let Some(index) = prof.rules.iter().position(|x| x == id) {
-                prof.rules.remove(index);
-            }
-        }
 
         Ok(())
     }
@@ -382,40 +320,12 @@ impl Policy {
         Ok(())
     }
 
-    fn rule_for_request(&self, profile: &Profile, request: &ElevationRequest) -> Option<&Rule> {
-        for rule_id in &profile.rules {
-            match self.rules.get(rule_id) {
-                Some(rule) => {
-                    if !rule.target.is_match(&request.target)
-                        || rule.asker.as_ref().is_some_and(|x| !x.is_match(&request.asker))
-                    {
-                        continue;
-                    }
-
-                    return Some(rule);
-                }
-                None => {
-                    warn!(%profile.id, %rule_id, "Profile assigned to non existent rule");
-                }
-            };
-        }
-
-        None
-    }
-
     pub(crate) fn validate(&self, session_id: u32, request: &ElevationRequest) -> Result<()> {
         let profile = self
             .user_current_profile(&request.asker.user)
             .ok_or_else(|| anyhow!(Error::AccessDenied))?;
 
-        let rule = self
-            .rule_for_request(profile, request)
-            .ok_or_else(|| anyhow!(Error::AccessDenied))?;
-
-        let mut elevation_type = rule.elevation_kind;
-        if elevations::is_elevated(&request.asker.user) {
-            elevation_type = policy::ElevationKind::Confirm
-        }
+        let elevation_type = profile.default_elevation_kind;
 
         match elevation_type {
             policy::ElevationKind::AutoApprove => Ok(()),
@@ -451,12 +361,6 @@ fn policy_config_path() -> Utf8PathBuf {
 fn policy_profiles_path() -> Utf8PathBuf {
     let mut dir = policy_path();
     dir.push("profiles");
-    dir
-}
-
-fn policy_rules_path() -> Utf8PathBuf {
-    let mut dir = policy_path();
-    dir.push("rules");
     dir
 }
 
