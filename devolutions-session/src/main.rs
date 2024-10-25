@@ -17,10 +17,10 @@ use std::sync::mpsc;
 fn main() -> anyhow::Result<()> {
     // Ensure per-user data dir exists.
 
-    std::fs::create_dir_all(get_data_dir()).context("Failed to create data directory")?;
+    std::fs::create_dir_all(get_data_dir()).context("failed to create data directory")?;
 
     let conf = ConfHandle::init()
-        .context("Failed to initialize configuration")?
+        .context("failed to initialize configuration")?
         .get_conf();
 
     let _logger_guard = init_log(&conf);

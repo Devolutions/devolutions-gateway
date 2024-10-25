@@ -123,7 +123,7 @@ fn main() -> anyhow::Result<()> {
                     .context("failed to register service")?;
             } else {
                 let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
-                let mut service = GatewayService::load(conf_handle).context("Service loading failed")?;
+                let mut service = GatewayService::load(conf_handle).context("service loading failed")?;
 
                 service
                     .start()

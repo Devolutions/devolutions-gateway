@@ -169,7 +169,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     install_package(&ctx, &package_path)
         .await
-        .context("Failed to install package")?;
+        .context("failed to install package")?;
 
     info!(%product, "Product updated to v{target_version}!");
 
