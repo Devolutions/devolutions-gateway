@@ -36,7 +36,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   
   Here is a `jetsocat-bench.nu` run against master:
 
-- _player_: start recording when tab is open ([#1024](https://github.com/Devolutions/devolutions-gateway/issues/1024)) ([6506b08ee2](https://github.com/Devolutions/devolutions-gateway/commit/6506b08ee2e604867bc73c46c08b6b42ba716745)) ([RDMW-16402](https://devolutions.atlassian.net/browse/RDMW-16402)) 
+- _dgw_: start the recording player immediately when tab is open ([#1024](https://github.com/Devolutions/devolutions-gateway/issues/1024)) ([6506b08ee2](https://github.com/Devolutions/devolutions-gateway/commit/6506b08ee2e604867bc73c46c08b6b42ba716745)) ([RDMW-16402](https://devolutions.atlassian.net/browse/RDMW-16402)) 
 
 ## 2024.3.2 (2024-08-20)
 
