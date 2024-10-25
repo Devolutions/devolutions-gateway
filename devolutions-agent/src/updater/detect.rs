@@ -8,7 +8,7 @@ use crate::updater::{Product, UpdaterError};
 const GATEWAY_UPDATE_CODE: &str = "{db3903d6-c451-4393-bd80-eb9f45b90214}";
 
 /// Get the installed version of a product.
-pub fn get_installed_product_version(product: Product) -> Result<Option<DateVersion>, UpdaterError> {
+pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<DateVersion>, UpdaterError> {
     match product {
         Product::Gateway => get_instaled_product_version_winreg(GATEWAY_UPDATE_CODE),
     }

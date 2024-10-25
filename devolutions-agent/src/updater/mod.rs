@@ -28,8 +28,8 @@ use package::{install_package, validate_package};
 use productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use security::set_file_dacl;
 
-pub use error::UpdaterError;
-pub use product::Product;
+pub(crate) use error::UpdaterError;
+pub(crate) use product::Product;
 
 const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
 
@@ -48,12 +48,12 @@ struct UpdateOrder {
     hash: String,
 }
 
-pub struct UpdaterTask {
+pub(crate) struct UpdaterTask {
     conf_handle: ConfHandle,
 }
 
 impl UpdaterTask {
-    pub fn new(conf_handle: ConfHandle) -> Self {
+    pub(crate) fn new(conf_handle: ConfHandle) -> Self {
         Self { conf_handle }
     }
 }

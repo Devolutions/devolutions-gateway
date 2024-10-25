@@ -7,7 +7,7 @@ use crate::updater::productinfo::GATEWAY_PRODUCT_ID;
 
 /// Product IDs to track updates for
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Product {
+pub(crate) enum Product {
     Gateway,
 }
 
@@ -31,19 +31,19 @@ impl FromStr for Product {
 }
 
 impl Product {
-    pub fn get_update_info(self, update_json: &UpdateJson) -> Option<ProductUpdateInfo> {
+    pub(crate) fn get_update_info(self, update_json: &UpdateJson) -> Option<ProductUpdateInfo> {
         match self {
             Product::Gateway => update_json.gateway.clone(),
         }
     }
 
-    pub const fn get_productinfo_id(self) -> &'static str {
+    pub(crate) const fn get_productinfo_id(self) -> &'static str {
         match self {
             Product::Gateway => GATEWAY_PRODUCT_ID,
         }
     }
 
-    pub const fn get_package_extension(self) -> &'static str {
+    pub(crate) const fn get_package_extension(self) -> &'static str {
         match self {
             Product::Gateway => "msi",
         }

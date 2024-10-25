@@ -6,13 +6,13 @@ use std::str::FromStr;
 use crate::updater::UpdaterError;
 
 #[derive(Debug, Clone, Default)]
-pub struct ProductInfo {
+pub(crate) struct ProductInfo {
     pub version: String,
     pub hash: String,
     pub url: String,
 }
 
-pub struct ProductInfoDb {
+pub(crate) struct ProductInfoDb {
     pub records: HashMap<String, ProductInfo>,
 }
 
@@ -51,7 +51,7 @@ impl FromStr for ProductInfoDb {
 
 impl ProductInfoDb {
     /// Get product information by product ID
-    pub fn get(&self, product_id: &str) -> Option<&ProductInfo> {
+    pub(crate) fn get(&self, product_id: &str) -> Option<&ProductInfo> {
         self.records.get(product_id)
     }
 }

@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::updater::Product;
 
 #[derive(Debug, Error)]
-pub enum UpdaterError {
+pub(crate) enum UpdaterError {
     #[error("queried `{product}` artifact hash has invalid format: `{hash}`")]
     HashEncoding { product: Product, hash: String },
     #[error("integrity check for downloaded `{product}` artifact has failed, expected hash: `{expected_hash}`, actual hash: `{actual_hash}`")]

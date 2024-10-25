@@ -13,7 +13,7 @@ const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
     "8db5a43bb8afe4d2ffb92da9007d8997a4cc4e13",
 ];
 
-pub async fn install_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
+pub(crate) async fn install_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
     match ctx.product {
         Product::Gateway => install_msi(ctx, path).await,
     }
@@ -100,7 +100,7 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
     Ok(())
 }
 
-pub fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
+pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
     match ctx.product {
         Product::Gateway => validate_msi(ctx, path),
     }

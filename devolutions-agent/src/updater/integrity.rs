@@ -5,7 +5,7 @@ use sha2::{Digest as _, Sha256};
 use crate::updater::{UpdaterCtx, UpdaterError};
 
 /// Validate the hash of downloaded artifact (Hash should be provided in encoded hex string).
-pub fn validate_artifact_hash(ctx: &UpdaterCtx, data: &[u8], hash: &str) -> Result<(), UpdaterError> {
+pub(crate) fn validate_artifact_hash(ctx: &UpdaterCtx, data: &[u8], hash: &str) -> Result<(), UpdaterError> {
     let expected_hash_bytes = hex::decode(hash).map_err(|_| UpdaterError::HashEncoding {
         product: ctx.product,
         hash: hash.to_owned(),
