@@ -4,8 +4,105 @@ All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
+| [**DeleteRecording**](JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Lists all recordings stored on this instance |
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
+
+<a id="deleterecording"></a>
+# **DeleteRecording**
+> void DeleteRecording (Guid id)
+
+Lists all recordings stored on this instance
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class DeleteRecordingExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
+            var id = "id_example";  // Guid | Recorded session ID
+
+            try
+            {
+                // Lists all recordings stored on this instance
+                apiInstance.DeleteRecording(id);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling JrecApi.DeleteRecording: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the DeleteRecordingWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Lists all recordings stored on this instance
+    apiInstance.DeleteRecordingWithHttpInfo(id);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling JrecApi.DeleteRecordingWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **id** | **Guid** | Recorded session ID |  |
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[scope_token](../README.md#scope_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: Not defined
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Recording matching the ID in the path has been deleted |  -  |
+| **400** | Bad request |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
+| **406** | The recording is still ongoing and can&#39;t be deleted yet |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 <a id="listrecordings"></a>
 # **ListRecordings**

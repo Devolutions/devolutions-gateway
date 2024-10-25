@@ -523,6 +523,105 @@ endif::internal-generation[]
 === Jrec
 
 
+[.deleteRecording]
+==== deleteRecording
+
+`DELETE /jet/jrec/delete/{id}`
+
+Lists all recordings stored on this instance
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/jrec/delete/\{id\}/DELETE/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| id
+| Recorded session ID 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+
+
+-
+
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Recording matching the ID in the path has been deleted
+|  <<>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 406
+| The recording is still ongoing and can&#39;t be deleted yet
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/delete/\{id\}/DELETE/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.listRecordings]
 ==== listRecordings
 
