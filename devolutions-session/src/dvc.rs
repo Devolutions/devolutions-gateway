@@ -1,6 +1,5 @@
 //! WIP: This file is copied from MSRDPEX project
 
-use crate::config::Conf;
 use windows::core::PCSTR;
 use windows::Win32::Foundation::{
     DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_IO_PENDING, HANDLE, WIN32_ERROR,
@@ -15,16 +14,10 @@ use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 
 const CHANNEL_PDU_LENGTH: usize = 1024;
 
-pub fn loop_dvc(conf: &Conf) {
-    if !conf.debug.enable_unstable {
-        debug!("DVC loop is disabled");
-        return;
-    }
-
+pub fn loop_dvc() {
     info!("Starting DVC loop");
 
-    let channel_name = "DvcSample";
-    match open_virtual_channel(channel_name) {
+    match open_virtual_channel("DvcSample") {
         Ok(h_file) => {
             info!("Virtual channel opened");
 
