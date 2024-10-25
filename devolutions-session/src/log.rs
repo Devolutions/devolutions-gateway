@@ -1,4 +1,4 @@
-use crate::config::ConfHandle;
+use crate::config::Conf;
 use devolutions_log::{LoggerGuard, StaticLogConfig};
 
 pub(crate) struct SessionLog;
@@ -9,9 +9,7 @@ impl StaticLogConfig for SessionLog {
     const LOG_FILE_PREFIX: &'static str = "session";
 }
 
-pub fn init_log(config: ConfHandle) -> LoggerGuard {
-    let conf = config.get_conf();
-
+pub fn init_log(conf: &Conf) -> LoggerGuard {
     devolutions_log::init::<SessionLog>(
         &conf.log_file,
         conf.verbosity_profile.to_log_filter(),

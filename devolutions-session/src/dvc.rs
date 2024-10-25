@@ -1,6 +1,6 @@
 //! WIP: This file is copied from MSRDPEX project
 
-use crate::config::ConfHandle;
+use crate::config::Conf;
 use windows::core::PCSTR;
 use windows::Win32::Foundation::{
     DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_IO_PENDING, HANDLE, WIN32_ERROR,
@@ -15,8 +15,8 @@ use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 
 const CHANNEL_PDU_LENGTH: usize = 1024;
 
-pub fn loop_dvc(config: ConfHandle) {
-    if !config.get_conf().debug.enable_unstable {
+pub fn loop_dvc(conf: &Conf) {
+    if !conf.debug.enable_unstable {
         debug!("DVC loop is disabled");
         return;
     }
