@@ -332,7 +332,7 @@ impl Id {
         let pat = Regex::new(ID_PATTERN)?;
 
         pat.is_match(&id)
-            .then(|| Id(id))
+            .then_some(Id(id))
             .ok_or_else(|| anyhow::anyhow!("Invalid ID"))
     }
 }
