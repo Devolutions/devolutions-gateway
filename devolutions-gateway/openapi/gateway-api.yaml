@@ -144,6 +144,34 @@ paths:
       security:
       - scope_token:
         - gateway.heartbeat.read
+  /jet/jrec/delete/{id}:
+    delete:
+      tags:
+      - Jrec
+      summary: Lists all recordings stored on this instance
+      operationId: DeleteRecording
+      parameters:
+      - name: id
+        in: path
+        description: Recorded session ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Recording matching the ID in the path has been deleted
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '406':
+          description: The recording is still ongoing and can't be deleted yet
+      security:
+      - scope_token:
+        - gateway.recording.delete
   /jet/jrec/list:
     get:
       tags:

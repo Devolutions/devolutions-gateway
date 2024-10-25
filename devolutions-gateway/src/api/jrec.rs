@@ -101,6 +101,9 @@ async fn handle_jrec_push(
     operation_id = "DeleteRecording",
     tag = "Jrec",
     path = "/jet/jrec/delete/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Recorded session ID"),
+    ),
     responses(
         (status = 200, description = "Recording matching the ID in the path has been deleted"),
         (status = 400, description = "Bad request"),
