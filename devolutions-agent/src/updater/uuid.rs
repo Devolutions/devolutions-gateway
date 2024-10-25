@@ -14,7 +14,7 @@ const UUID_ALPHABET: &[char] = &[
 /// for upgrade code table.
 ///
 /// e.g.: `{82318d3c-811f-4d5d-9a82-b7c31b076755}` => `C3D81328F118D5D4A9287B3CB1707655`
-pub fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
+pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
     const IGNORED_CHARS: &[char] = &['-', '{', '}'];
 
     let hex_chars = uuid
@@ -48,7 +48,7 @@ pub fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
 /// Converts reversed hex UUID back to standard Windows Registry format (upper case letters).
 ///
 /// e.g.: `C3D81328F118D5D4A9287B3CB1707655` => `{82318d3c-811f-4d5d-9a82-b7c31b076755}`
-pub fn reversed_hex_to_uuid(mut hex: &str) -> Result<String, UpdaterError> {
+pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<String, UpdaterError> {
     if hex.len() != 32 || hex.chars().any(|ch| !UUID_ALPHABET.contains(&ch)) {
         return Err(UpdaterError::Uuid { uuid: hex.to_string() });
     }

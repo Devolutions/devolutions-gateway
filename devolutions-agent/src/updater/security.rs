@@ -12,10 +12,10 @@ use crate::updater::UpdaterError;
 /// - NETWORK SERVICE: Write, Read (Allow Devolutions Gateway service to update the file)
 /// - Administrators: Full control
 /// - Users: Read
-pub const UPDATE_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;NS)(A;;FA;;;BA)(A;;FR;;;BU)";
+pub(crate) const UPDATE_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;NS)(A;;FA;;;BA)(A;;FR;;;BU)";
 
 /// Set DACL (Discretionary Access Control List) on a specified file.
-pub fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError> {
+pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError> {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, FALSE, HLOCAL};
     use windows::Win32::Security::Authorization::{
