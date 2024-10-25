@@ -71,7 +71,7 @@ impl Task for UpdaterTask {
         let update_file_path = init_update_json().await?;
 
         let file_change_notification = Arc::new(tokio::sync::Notify::new());
-        let file_change_tx = file_change_notification.clone();
+        let file_change_tx = Arc::clone(&file_change_notification);
 
         let mut notify_debouncer =
             notify_debouncer_mini::new_debouncer(UPDATE_JSON_WATCH_INTERVAL, move |result| match result {
