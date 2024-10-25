@@ -29,7 +29,13 @@ fn main() -> anyhow::Result<()> {
 
     // TMP: Copy-paste from MSRDPEX project for testing purposes.
     #[cfg(windows)]
-    loop_dvc(&conf);
+    {
+        if conf.debug.enable_unstable {
+            loop_dvc();
+        } else {
+            debug!("DVC loop is disabled");
+        }
+    }
 
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
