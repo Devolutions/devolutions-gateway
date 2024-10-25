@@ -211,7 +211,7 @@ void (empty response body)
 
 <a id="listrecordings"></a>
 # **ListRecordings**
-> List&lt;Guid&gt; ListRecordings ()
+> List&lt;Guid&gt; ListRecordings (bool active)
 
 Lists all recordings stored on this instance
 
@@ -239,11 +239,12 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
+            var active = true;  // bool | When true, only the active recordings are returned
 
             try
             {
                 // Lists all recordings stored on this instance
-                List<Guid> result = apiInstance.ListRecordings();
+                List<Guid> result = apiInstance.ListRecordings(active);
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
@@ -264,7 +265,7 @@ This returns an ApiResponse object which contains the response data, status code
 try
 {
     // Lists all recordings stored on this instance
-    ApiResponse<List<Guid>> response = apiInstance.ListRecordingsWithHttpInfo();
+    ApiResponse<List<Guid>> response = apiInstance.ListRecordingsWithHttpInfo(active);
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
@@ -278,7 +279,11 @@ catch (ApiException e)
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **active** | **bool** | When true, only the active recordings are returned |  |
+
 ### Return type
 
 **List<Guid>**
