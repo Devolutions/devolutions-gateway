@@ -1,4 +1,9 @@
-export function handleWebm(recordingInfo, gatewayAccessUrl, sessionId, token) {
+/**
+ * Handles the playback of WebM videos using the provided gateway API.
+ *
+ * @param {GatewayAccessApi} gatewayApi - The API to access the gateway for video streaming.
+ */
+export function handleWebm(gatewayApi) {
   const videoPlayer = document.createElement('video');
   videoPlayer.id = 'videoPlayer';
   videoPlayer.controls = true;
@@ -14,10 +19,11 @@ export function handleWebm(recordingInfo, gatewayAccessUrl, sessionId, token) {
   document.body.appendChild(videoPlayer);
 
   let currentIndex = 0;
+  const { recordingInfo } = gatewayApi.info();
   const maxIndex = recordingInfo.files.length - 1;
 
   const setVideoSource = (index) => {
-    const videoSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[index].fileName}?token=${token}`;
+    const videoSrc = gatewayApi.staticRecordingUrl(recordingInfo.files[index].fileName);
     videoSrcElement.setAttribute('src', videoSrc);
     videoPlayer.load();
     videoPlayer.play();

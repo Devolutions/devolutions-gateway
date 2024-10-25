@@ -1,9 +1,15 @@
 import { ensureNoSameTimeCues } from '../cast-parser.js';
 import { createTerminalDiv, loadFile } from './index.js';
 
-export async function handleCast(recordingInfo, gatewayAccessUrl, sessionId, token) {
+/**
+ * Handles the playback of CAST files using the provided gateway API.
+ *
+ * @param {GatewayAccessApi} gatewayApi - The API to access the gateway for video streaming.
+ */
+export async function handleCast(gatewayApi) {
   const terminalDiv = createTerminalDiv();
-  const castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
+  // const castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
+  const castSrc = gatewayApi.staticRecordingUrl(gatewayApi.recordingInfo.files[0].fileName);
 
   try {
     const castFileContent = await loadFile(castSrc);

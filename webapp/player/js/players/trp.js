@@ -2,9 +2,16 @@ import { createTerminalDiv, loadFile, overrideFetch, restoreFetch } from './inde
 
 import { convertTRPtoCast } from '../trp-decoder.js';
 
-export async function handleTrp(recordingInfo, gatewayAccessUrl, sessionId, token) {
+/**
+ * Handles the playback of TRP files using the provided gateway API.
+ *
+ * @param {GatewayAccessApi} gatewayApi - The API to access the gateway for video streaming.
+ */
+
+export async function handleTrp(gatewayApi) {
   const terminalDiv = createTerminalDiv();
-  const trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
+  // const trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
+  const trpSrc = gatewayApi.staticRecordingUrl(gatewayApi.recordingInfo.files[0].fileName);
 
   try {
     const trpFileContent = await loadFile(trpSrc);

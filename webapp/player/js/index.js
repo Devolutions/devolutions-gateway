@@ -1,14 +1,41 @@
+import { GatewayAccessApi } from './gateway.js';
 import { getPlayer } from './players/index.js';
+import { getShadowPlayer } from './streamers/index.js';
 
 async function main() {
-  const { sessionId, token, gatewayAccessUrl } = getSessionDetails();
-  const videoSrcInfo = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/recording.json?token=${token}`;
+  const { sessionId, token, gatewayAccessUrl, isActive } = getSessionDetails();
 
+  const getewayAccessApi = GatewayAccessApi.builder()
+    .gatewayAccessUrl(gatewayAccessUrl)
+    .token(token)
+    .sessionId(sessionId)
+    .build();
+
+  // shawdow session
+  if (isActive) {
+    await playSessionShadowing(getewayAccessApi);
+  } else {
+    await playStaticRecording(getewayAccessApi);
+  }
+}
+
+async function playSessionShadowing(gatewayAccessApi) {
   try {
-    const recordingInfo = await fetchRecordingInfo(videoSrcInfo);
+    const recordingInfo = await gatewayAccessApi.fetchRecordingInfo();
     const fileType = getFileType(recordingInfo);
 
-    getPlayer(fileType).play(recordingInfo, gatewayAccessUrl, sessionId, token);
+    getShadowPlayer(fileType).play(gatewayAccessApi);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function playStaticRecording(gatewayAccessApi) {
+  try {
+    const recordingInfo = await gatewayAccessApi.fetchRecordingInfo();
+    const fileType = getFileType(recordingInfo);
+
+    getPlayer(fileType).play(gatewayAccessApi);
   } catch (error) {
     console.error(error);
   }
@@ -19,15 +46,8 @@ function getSessionDetails() {
   const sessionId = windowURL.searchParams.get('sessionId');
   const token = windowURL.searchParams.get('token');
   const gatewayAccessUrl = windowURL.toString().split('/jet/jrec')[0];
-  return { sessionId, token, gatewayAccessUrl };
-}
-
-async function fetchRecordingInfo(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed. Returned status of ${response.status}`);
-  }
-  return response.json();
+  const isActive = windowURL.searchParams.get('isActive') || false;
+  return { sessionId, token, gatewayAccessUrl, isActive };
 }
 
 function getFileType(recordingInfo) {
