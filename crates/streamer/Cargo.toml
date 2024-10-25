@@ -1,0 +1,22 @@
+[package]
+name = "streamer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.91"
+futures-util = { version = "0.3.31", features = ["sink"] }
+pin-project-lite = "0.2.14"
+tokio = { version = "1.41.0", features = [
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "sync"
+] }
+tokio-util = { version = "0.7.12", features = ["codec"] }
+tracing = "0.1.40"
+webm-iterable = { version = "0.6.2", features = ["futures"] }
+devolutions-gateway-task = { path = "../devolutions-gateway-task" }
+
+[lints]
+workspace = true

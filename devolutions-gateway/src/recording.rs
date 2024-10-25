@@ -12,6 +12,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
+use streamer::streamer::signal_when_flush::SignalWriter;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::{fs, io};
@@ -107,14 +108,27 @@ where
             open_options.share_mode(FILE_SHARE_READ);
         }
 
+        debug!(path = %recording_file, "File opened");
+
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
-                let mut file = BufWriter::new(file);
+                // Wrap SignalWriter inside a BufWriter to reduce the number of flushes
+                let (file, mut flush_signal) = SignalWriter::new(file);
+                // larger buffer size to reduce the number of flushes
+                let mut file = BufWriter::with_capacity(1024 * 100, file);
 
                 let shutdown_signal = shutdown_signal.wait();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
+                let recording_clone = recordings.clone();
 
-                tokio::select! {
+                let signal_loop = tokio::spawn(async move {
+                    while let Some(_) = flush_signal.recv().await {
+                        recording_clone.new_chunk_appended(session_id)?;
+                    }
+                    Ok::<_, anyhow::Error>(())
+                });
+
+                let res = tokio::select! {
                     res = copy_fut => {
                         res.context("JREC streaming to file").map(|_| ())
                     },
@@ -122,10 +136,16 @@ where
                         trace!("Received shutdown signal");
                         client_stream.shutdown().await.context("shutdown")
                     },
-                }
+                };
+
+                signal_loop.abort();
+
+                res
             }
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
+
+        info!(?res, "Recording finished");
 
         recordings.disconnect(session_id).await.context("disconnect")?;
 
@@ -147,6 +167,11 @@ pub struct ActiveRecordings(Mutex<HashSet<Uuid>>);
 impl ActiveRecordings {
     pub fn contains(&self, id: Uuid) -> bool {
         self.0.lock().contains(&id)
+    }
+
+    // get the list of active recordings without locking the mutex
+    pub fn copy_set(&self) -> HashSet<Uuid> {
+        self.0.lock().clone()
     }
 
     fn insert(&self, id: Uuid) -> usize {
@@ -228,6 +253,7 @@ impl fmt::Debug for RecordingManagerMessage {
 #[derive(Clone, Debug)]
 pub struct RecordingMessageSender {
     channel: mpsc::Sender<RecordingManagerMessage>,
+    flush_map: Arc<Mutex<HashMap<Uuid, Vec<oneshot::Sender<()>>>>>,
     pub active_recordings: Arc<ActiveRecordings>,
 }
 
@@ -285,6 +311,28 @@ impl RecordingMessageSender {
             .ok()
             .context("couldn't send UpdateRecordingPolicy message")
     }
+
+    pub(crate) fn on_new_chunk_appended(&self, recording_id: Uuid, tx: oneshot::Sender<()>) -> anyhow::Result<()> {
+        let mut lock = self.flush_map.lock();
+        let senders = lock.entry(recording_id);
+        let senders = senders.or_insert_with(Vec::new);
+        senders.push(tx);
+        Ok(())
+    }
+
+    pub(crate) fn new_chunk_appended(&self, recording_id: Uuid) -> anyhow::Result<()> {
+        let senders = { self.flush_map.lock().remove(&recording_id) };
+
+        let Some(senders) = senders else {
+            return Ok(());
+        };
+
+        for tx in senders {
+            let _ = tx.send(());
+        }
+
+        Ok(())
+    }
 }
 
 pub struct RecordingMessageReceiver {
@@ -299,6 +347,7 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
 
     let handle = RecordingMessageSender {
         channel: tx,
+        flush_map: Arc::new(Mutex::new(HashMap::new())),
         active_recordings: Arc::clone(&ongoing_recordings),
     };
 
@@ -655,7 +704,7 @@ async fn recording_manager_task(
                                 "Updated recording policy for session",
                             );
                         }
-                    }
+                    },
                 }
             }
             _ = shutdown_signal.wait() => {

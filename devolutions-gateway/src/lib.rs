@@ -36,6 +36,7 @@ pub mod tls;
 pub mod token;
 pub mod utils;
 pub mod ws;
+pub mod streaming;
 
 use std::sync::Arc;
 

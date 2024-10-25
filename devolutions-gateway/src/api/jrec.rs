@@ -25,6 +25,8 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/delete/:id", delete(jrec_delete))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
+        .route("/list/realtime", get(list_realtime_recordings))
+        .route("/realtime/:id/:filename", get(stream_recording))
         .route("/play", get(get_player))
         .route("/play/*path", get(get_player))
         .with_state(state)
@@ -194,6 +196,14 @@ pub(crate) async fn list_recordings(
     }
 }
 
+pub(crate) async fn list_realtime_recordings(
+    State(DgwState { recordings, .. }): State<DgwState>,
+    _scope: RecordingsReadScope,
+) -> Result<Json<Vec<Uuid>>, HttpError> {
+    let recordings = recordings.active_recordings.copy_set().into_iter().collect();
+    Ok(Json(recordings))
+}
+
 /// Retrieves a recording file for a given session
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
@@ -284,4 +294,38 @@ where
         Ok(response) => Ok(response),
         Err(never) => match never {},
     }
+}
+
+async fn stream_recording(
+    State(DgwState {
+        recordings,
+        shutdown_signal,
+        conf_handle,
+        ..
+    }): State<DgwState>,
+    extract::Path((id, filename)): extract::Path<(Uuid, String)>,
+    JrecToken(claims): JrecToken,
+    ws: WebSocketUpgrade,
+) -> Result<Response, HttpError> {
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return Err(HttpError::bad_request().msg("invalid file name"));
+    }
+
+    if id != claims.jet_aid {
+        return Err(HttpError::forbidden().msg("not allowed to read this recording"));
+    }
+
+    let path = conf_handle
+        .get_conf()
+        .recording_path
+        .join(id.to_string())
+        .join(filename);
+
+    if !path.exists() || !path.is_file() {
+        return Err(HttpError::not_found().msg("requested file does not exist"));
+    }
+
+    crate::streaming::stream_file(path, ws, shutdown_signal, recordings, id)
+        .await
+        .map_err(HttpError::internal().err())
 }
