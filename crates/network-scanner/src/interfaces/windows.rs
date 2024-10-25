@@ -23,7 +23,7 @@ impl From<ipconfig::Adapter> for NetworkInterface {
                 .prefixes()
                 .iter()
                 .map(|(ip, prefix)| super::InterfaceAddress {
-                    ip: ip.clone(),
+                    ip: *ip,
                     prefixlen: *prefix,
                 })
                 .collect(),
