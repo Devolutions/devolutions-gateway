@@ -25,8 +25,6 @@ pub struct Profile {
     pub name: Option<String>,
     #[serde(rename = "PromptSecureDesktop", skip_serializing_if = "Option::is_none")]
     pub prompt_secure_desktop: Option<bool>,
-    #[serde(rename = "Rules", skip_serializing_if = "Option::is_none")]
-    pub rules: Option<Vec<String>>,
 }
 
 impl Profile {
@@ -38,7 +36,6 @@ impl Profile {
             id: None,
             name: None,
             prompt_secure_desktop: None,
-            rules: None,
         }
     }
 }

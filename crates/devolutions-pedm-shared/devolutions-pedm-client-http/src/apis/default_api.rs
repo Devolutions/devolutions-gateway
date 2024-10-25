@@ -64,11 +64,6 @@ pub trait DefaultApi {
         profile: models::Profile,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn policy_profiles_post(&self, profile: models::Profile) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn policy_rules_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<String>, Error>>>>;
-    fn policy_rules_id_delete(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn policy_rules_id_get(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<models::Rule, Error>>>>;
-    fn policy_rules_id_put(&self, id: &str, rule: models::Rule) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn policy_rules_post(&self, rule: models::Rule) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn revoke_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn status_get(&self) -> Pin<Box<dyn Future<Output = Result<models::StatusResponse, Error>>>>;
 }
@@ -210,33 +205,6 @@ where
     fn policy_rules_id_delete(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::DELETE, "/policy/rules/{id}".to_string());
         req = req.with_path_param("id".to_string(), id.to_string());
-        req = req.returns_nothing();
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn policy_rules_id_get(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<models::Rule, Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::GET, "/policy/rules/{id}".to_string());
-        req = req.with_path_param("id".to_string(), id.to_string());
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn policy_rules_id_put(&self, id: &str, rule: models::Rule) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::PUT, "/policy/rules/{id}".to_string());
-        req = req.with_path_param("id".to_string(), id.to_string());
-        req = req.with_body_param(rule);
-        req = req.returns_nothing();
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn policy_rules_post(&self, rule: models::Rule) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::POST, "/policy/rules".to_string());
-        req = req.with_body_param(rule);
         req = req.returns_nothing();
 
         req.execute(self.configuration.borrow())

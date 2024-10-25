@@ -44,8 +44,6 @@ pub mod path_id_parameter;
 pub use self::path_id_parameter::PathIdParameter;
 pub mod profile;
 pub use self::profile::Profile;
-pub mod rule;
-pub use self::rule::Rule;
 pub mod session_elevation_configuration;
 pub use self::session_elevation_configuration::SessionElevationConfiguration;
 pub mod session_elevation_status;
