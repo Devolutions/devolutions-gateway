@@ -491,7 +491,7 @@ impl ForwardArgs {
         let common = CommonArgs::parse(FORWARD_SUBCOMMAND, c)?;
 
         let repeat_count =
-            usize::try_from(c.int_flag("repeat-count").unwrap_or(0)).context("Bad repeat-count value")?;
+            usize::try_from(c.int_flag("repeat-count").unwrap_or(0)).context("bad repeat-count value")?;
 
         let mut args = c.args.iter();
 
