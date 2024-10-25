@@ -31,13 +31,13 @@ pub mod rdp_extension;
 pub mod rdp_pcb;
 pub mod recording;
 pub mod session;
+pub mod streaming;
 pub mod subscriber;
 pub mod target_addr;
 pub mod tls;
 pub mod token;
 pub mod utils;
 pub mod ws;
-pub mod streaming;
 
 use std::sync::Arc;
 
