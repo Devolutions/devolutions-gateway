@@ -19,19 +19,17 @@ fn main() -> anyhow::Result<()> {
 
     std::fs::create_dir_all(get_data_dir()).context("Failed to create data directory")?;
 
-    let config = ConfHandle::init().context("Failed to initialize configuration")?;
+    let conf = ConfHandle::init()
+        .context("Failed to initialize configuration")?
+        .get_conf();
+
+    let _logger_guard = init_log(&conf);
 
     info!("Starting Devolutions Session");
 
-    #[cfg(not(windows))]
-    let _logger_guard = init_log(config);
-
     // TMP: Copy-paste from MSRDPEX project for testing purposes.
     #[cfg(windows)]
-    {
-        let _logger_guard = init_log(config.clone());
-        loop_dvc(config);
-    }
+    loop_dvc(&conf);
 
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
