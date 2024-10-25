@@ -4,16 +4,60 @@ version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
+default-run = "tokengen"
 
 [workspace]
 resolver = "2"
 members = ["."]
 
 [dependencies]
-picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose"] }
+picky = { version = "7.0.0-rc.8", default-features = false, features = [
+    "jose"
+] }
 clap = { version = "3.0", features = ["derive"] }
 humantime = "2.1"
 serde = "1.0"
 serde_json = "1.0"
 uuid = { version = "1.1", features = ["v4", "serde"] }
 tap = "1.0"
+
+[features]
+server = [
+    "axum",
+    "tokio",
+    "tower",
+
+    "tracing",
+    "tracing-subscriber"
+]
+
+[dependencies.tracing]
+version = "0.1"
+optional = true
+
+[dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+optional = true
+
+[dependencies.tower-http]
+version = "0.6.1"
+features = ["cors", "trace"]
+
+[dependencies.tower]
+version = "0.5.1"
+optional = true
+
+[dependencies.axum]
+version = "0.7.7"
+optional = true
+
+[dependencies.tokio]
+version = "1.41.0"
+features = ["fs", "io-util", "net", "rt", "rt-multi-thread"]
+optional = true
+
+[[bin]]
+name = "server"
+path = "src/bin/server/main.rs"
+required-features = ["server"]
