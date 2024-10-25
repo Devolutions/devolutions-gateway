@@ -221,101 +221,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '200':
           description: no content
-  /policy/rules:
-    get:
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Id'
-    post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Rule'
-        required: true
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
-  /policy/rules/{id}:
-    get:
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          $ref: '#/components/schemas/Id'
-        style: simple
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Rule'
-    put:
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          $ref: '#/components/schemas/Id'
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Rule'
-        required: true
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
-    delete:
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          $ref: '#/components/schemas/Id'
-        style: simple
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
   /policy/assignments:
     get:
       responses:
@@ -385,29 +290,6 @@ components:
           $ref: '#/components/schemas/User'
         WorkingDirectory:
           type: string
-    ApplicationFilter:
-      type: object
-      required:
-      - Path
-      properties:
-        CommandLine:
-          type: array
-          items:
-            $ref: '#/components/schemas/StringFilter'
-          nullable: true
-        Hashes:
-          type: array
-          items:
-            $ref: '#/components/schemas/HashFilter'
-          nullable: true
-        Path:
-          $ref: '#/components/schemas/PathFilter'
-        Signature:
-          $ref: '#/components/schemas/SignatureFilter'
-          nullable: true
-        WorkingDirectory:
-          $ref: '#/components/schemas/PathFilter'
-          nullable: true
     Assignment:
       type: object
       required:
@@ -551,15 +433,6 @@ components:
           type: string
         Sha256:
           type: string
-    HashFilter:
-      type: object
-      properties:
-        Sha1:
-          type: string
-          nullable: true
-        Sha256:
-          type: string
-          nullable: true
     Id:
       type: string
     LaunchPayload:
@@ -603,22 +476,6 @@ components:
         Id:
           $ref: '#/components/schemas/Id'
           nullable: true
-    PathFilter:
-      type: object
-      required:
-      - Data
-      - Kind
-      properties:
-        Data:
-          type: string
-        Kind:
-          $ref: '#/components/schemas/PathFilterKind'
-    PathFilterKind:
-      type: string
-      enum:
-      - Equals
-      - FileName
-      - Wildcard
     PathIdParameter:
       type: object
       required:
@@ -652,30 +509,6 @@ components:
         PromptSecureDesktop:
           default: true
           type: boolean
-        Rules:
-          default: []
-          type: array
-          items:
-            $ref: '#/components/schemas/Id'
-    Rule:
-      type: object
-      required:
-      - ElevationKind
-      - Id
-      - Name
-      - Target
-      properties:
-        Asker:
-          $ref: '#/components/schemas/ApplicationFilter'
-          nullable: true
-        ElevationKind:
-          $ref: '#/components/schemas/ElevationKind'
-        Id:
-          $ref: '#/components/schemas/Id'
-        Name:
-          type: string
-        Target:
-          $ref: '#/components/schemas/ApplicationFilter'
     SessionElevationConfiguration:
       type: object
       required:
@@ -705,13 +538,6 @@ components:
           nullable: true
         Status:
           $ref: '#/components/schemas/AuthenticodeSignatureStatus'
-    SignatureFilter:
-      type: object
-      required:
-      - CheckAuthenticode
-      properties:
-        CheckAuthenticode:
-          type: boolean
     Signer:
       type: object
       required:
@@ -792,24 +618,6 @@ components:
           $ref: '#/components/schemas/SessionElevationStatus'
         Temporary:
           $ref: '#/components/schemas/TemporaryElevationStatus'
-    StringFilter:
-      type: object
-      required:
-      - Data
-      - Kind
-      properties:
-        Data:
-          type: string
-        Kind:
-          $ref: '#/components/schemas/StringFilterKind'
-    StringFilterKind:
-      type: string
-      enum:
-      - Equals
-      - Regex
-      - StartsWith
-      - EndsWith
-      - Contains
     TemporaryElevationConfiguration:
       type: object
       required:

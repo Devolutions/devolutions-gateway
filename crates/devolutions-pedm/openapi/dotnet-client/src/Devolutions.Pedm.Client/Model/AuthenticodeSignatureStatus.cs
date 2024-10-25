@@ -68,4 +68,31 @@ namespace Devolutions.Pedm.Client.Model
         NotTrusted = 6
     }
 
+    public static class AuthenticodeSignatureStatusExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this AuthenticodeSignatureStatus variant)
+        {
+            switch (variant)
+            {
+                case AuthenticodeSignatureStatus.Valid:
+                    return "Valid";
+                case AuthenticodeSignatureStatus.Incompatible:
+                    return "Incompatible";
+                case AuthenticodeSignatureStatus.NotSigned:
+                    return "NotSigned";
+                case AuthenticodeSignatureStatus.HashMismatch:
+                    return "HashMismatch";
+                case AuthenticodeSignatureStatus.NotSupportedFileFormat:
+                    return "NotSupportedFileFormat";
+                case AuthenticodeSignatureStatus.NotTrusted:
+                    return "NotTrusted";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }

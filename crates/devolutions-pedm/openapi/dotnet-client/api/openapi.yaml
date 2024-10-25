@@ -226,104 +226,6 @@ paths:
           description: ""
         "200":
           description: no content
-  /policy/rules:
-    get:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          content:
-            application/json:
-              schema:
-                items:
-                  $ref: '#/components/schemas/Id'
-                type: array
-          description: ""
-    post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Rule'
-        required: true
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
-  /policy/rules/{id}:
-    delete:
-      parameters:
-      - explode: false
-        in: path
-        name: id
-        required: true
-        schema:
-          $ref: '#/components/schemas/Id'
-        style: simple
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
-    get:
-      parameters:
-      - explode: false
-        in: path
-        name: id
-        required: true
-        schema:
-          $ref: '#/components/schemas/Id'
-        style: simple
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Rule'
-          description: ""
-    put:
-      parameters:
-      - explode: false
-        in: path
-        name: id
-        required: true
-        schema:
-          $ref: '#/components/schemas/Id'
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Rule'
-        required: true
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
   /policy/assignments:
     get:
       responses:
@@ -432,45 +334,6 @@ components:
       - Signature
       - User
       - WorkingDirectory
-    ApplicationFilter:
-      example:
-        Path:
-          Kind: Equals
-          Data: Data
-        WorkingDirectory:
-          Kind: Equals
-          Data: Data
-        CommandLine:
-        - Kind: Equals
-          Data: Data
-        - Kind: Equals
-          Data: Data
-        Hashes:
-        - Sha1: Sha1
-          Sha256: Sha256
-        - Sha1: Sha1
-          Sha256: Sha256
-        Signature:
-          CheckAuthenticode: true
-      properties:
-        CommandLine:
-          items:
-            $ref: '#/components/schemas/StringFilter'
-          type: array
-          nullable: true
-        Hashes:
-          items:
-            $ref: '#/components/schemas/HashFilter'
-          type: array
-          nullable: true
-        Path:
-          $ref: '#/components/schemas/PathFilter'
-        Signature:
-          $ref: '#/components/schemas/SignatureFilter'
-        WorkingDirectory:
-          $ref: '#/components/schemas/PathFilter'
-      required:
-      - Path
     Assignment:
       example:
         Users:
@@ -493,9 +356,6 @@ components:
             Session:
               Enabled: true
           ElevationMethod: LocalAdmin
-          Rules:
-          - null
-          - null
           Name: Unnamed profile
       properties:
         Profile:
@@ -821,17 +681,6 @@ components:
       required:
       - Sha1
       - Sha256
-    HashFilter:
-      example:
-        Sha1: Sha1
-        Sha256: Sha256
-      properties:
-        Sha1:
-          type: string
-          nullable: true
-        Sha256:
-          type: string
-          nullable: true
     Id:
       type: string
     LaunchPayload:
@@ -893,24 +742,6 @@ components:
       properties:
         Id:
           type: string
-    PathFilter:
-      example:
-        Kind: Equals
-        Data: Data
-      properties:
-        Data:
-          type: string
-        Kind:
-          $ref: '#/components/schemas/PathFilterKind'
-      required:
-      - Data
-      - Kind
-    PathFilterKind:
-      enum:
-      - Equals
-      - FileName
-      - Wildcard
-      type: string
     PathIdParameter:
       properties:
         id:
@@ -929,9 +760,6 @@ components:
           Session:
             Enabled: true
         ElevationMethod: LocalAdmin
-        Rules:
-        - null
-        - null
         Name: Unnamed profile
       properties:
         DefaultElevationKind:
@@ -948,70 +776,6 @@ components:
         PromptSecureDesktop:
           default: true
           type: boolean
-        Rules:
-          default: []
-          items:
-            $ref: '#/components/schemas/Id'
-          type: array
-    Rule:
-      example:
-        Target:
-          Path:
-            Kind: Equals
-            Data: Data
-          WorkingDirectory:
-            Kind: Equals
-            Data: Data
-          CommandLine:
-          - Kind: Equals
-            Data: Data
-          - Kind: Equals
-            Data: Data
-          Hashes:
-          - Sha1: Sha1
-            Sha256: Sha256
-          - Sha1: Sha1
-            Sha256: Sha256
-          Signature:
-            CheckAuthenticode: true
-        ElevationKind: AutoApprove
-        Id: Id
-        Asker:
-          Path:
-            Kind: Equals
-            Data: Data
-          WorkingDirectory:
-            Kind: Equals
-            Data: Data
-          CommandLine:
-          - Kind: Equals
-            Data: Data
-          - Kind: Equals
-            Data: Data
-          Hashes:
-          - Sha1: Sha1
-            Sha256: Sha256
-          - Sha1: Sha1
-            Sha256: Sha256
-          Signature:
-            CheckAuthenticode: true
-        Name: Name
-      properties:
-        Asker:
-          $ref: '#/components/schemas/ApplicationFilter'
-        ElevationKind:
-          $ref: '#/components/schemas/ElevationKind'
-        Id:
-          type: string
-        Name:
-          type: string
-        Target:
-          $ref: '#/components/schemas/ApplicationFilter'
-      required:
-      - ElevationKind
-      - Id
-      - Name
-      - Target
     SessionElevationConfiguration:
       example:
         Enabled: true
@@ -1066,14 +830,6 @@ components:
           $ref: '#/components/schemas/AuthenticodeSignatureStatus'
       required:
       - Status
-    SignatureFilter:
-      example:
-        CheckAuthenticode: true
-      properties:
-        CheckAuthenticode:
-          type: boolean
-      required:
-      - CheckAuthenticode
     Signer:
       example:
         Issuer: Issuer
@@ -1174,26 +930,6 @@ components:
       - Elevated
       - Session
       - Temporary
-    StringFilter:
-      example:
-        Kind: Equals
-        Data: Data
-      properties:
-        Data:
-          type: string
-        Kind:
-          $ref: '#/components/schemas/StringFilterKind'
-      required:
-      - Data
-      - Kind
-    StringFilterKind:
-      enum:
-      - Equals
-      - Regex
-      - StartsWith
-      - EndsWith
-      - Contains
-      type: string
     TemporaryElevationConfiguration:
       example:
         MaximumSeconds: 0
