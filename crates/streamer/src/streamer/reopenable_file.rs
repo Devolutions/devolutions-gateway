@@ -19,7 +19,7 @@ impl ReOpenableFile {
         open_option.read(true);
         #[cfg(windows)]
         {
-            use os::windows::fs::OpenOptionsExt;
+            use std::os::windows::fs::OpenOptionsExt;
             open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ);
         }
 
@@ -50,7 +50,7 @@ impl Reopenable for ReOpenableFile {
         #[cfg(windows)]
         {
             use std::os::windows::fs::OpenOptionsExt;
-            open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ)
+            open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ);
         }
 
         let inner = open_option.open(&self.file_path)?;
