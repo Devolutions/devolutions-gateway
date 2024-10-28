@@ -4,7 +4,7 @@ All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
-| [**DeleteRecording**](JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Lists all recordings stored on this instance |
+| [**DeleteRecording**](JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Deletes a recording stored on this instance |
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
 
@@ -12,7 +12,7 @@ All URIs are relative to *http://localhost*
 # **DeleteRecording**
 > void DeleteRecording (Guid id)
 
-Lists all recordings stored on this instance
+Deletes a recording stored on this instance
 
 ### Example
 ```csharp
@@ -42,7 +42,7 @@ namespace Example
 
             try
             {
-                // Lists all recordings stored on this instance
+                // Deletes a recording stored on this instance
                 apiInstance.DeleteRecording(id);
             }
             catch (ApiException  e)
@@ -62,7 +62,7 @@ This returns an ApiResponse object which contains the response data, status code
 ```csharp
 try
 {
-    // Lists all recordings stored on this instance
+    // Deletes a recording stored on this instance
     apiInstance.DeleteRecordingWithHttpInfo(id);
 }
 catch (ApiException e)
