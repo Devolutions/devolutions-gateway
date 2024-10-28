@@ -11,7 +11,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-tokio = { version = "1.38", features = ["sync"] }
+tokio = { version = "1.41", features = ["sync"] }
 windows-core = "0.58" # necessary because of macro resolving `windows::core`. Must match `win-api-wrappers` version.
 devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["pedm_client", "desktop"] }
 win-api-wrappers = { path = "../win-api-wrappers" }
