@@ -27,8 +27,8 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
-        .route("/list/realtime", get(list_realtime_recordings))
-        .route("/realtime/:id/:filename", get(stream_recording))
+        .route("/list-active", get(list_active_recordings))
+        .route("/shadow/:id/:filename", get(shadow_recording))
         .route("/play", get(get_player))
         .route("/play/*path", get(get_player))
         .with_state(state)
@@ -378,7 +378,7 @@ pub(crate) async fn list_recordings(
     }
 }
 
-pub(crate) async fn list_realtime_recordings(
+pub(crate) async fn list_active_recordings(
     State(DgwState { recordings, .. }): State<DgwState>,
     _scope: RecordingsReadScope,
 ) -> Result<Json<Vec<Uuid>>, HttpError> {
@@ -478,7 +478,7 @@ where
     }
 }
 
-async fn stream_recording(
+async fn shadow_recording(
     State(DgwState {
         recordings,
         shutdown_signal,
