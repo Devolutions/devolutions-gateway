@@ -71,7 +71,7 @@ jobs:
           $Platforms += 'macos'
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-12' } 'linux' { 'ubuntu-20.04' } }
+              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-14' } 'linux' { 'ubuntu-20.04' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -222,11 +222,11 @@ jobs:
         run: |
           rustup target add aarch64-pc-windows-msvc
 
-      - name: Configure macOS (arm) runner
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+      - name: Configure macOS (intel) runner
+        if: matrix.os == 'macos' && matrix.arch == 'x86_64'
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
-          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
 
       - name: Build
         id: build
