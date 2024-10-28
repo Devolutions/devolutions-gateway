@@ -122,7 +122,7 @@ where
                 let recording_clone = recordings.clone();
 
                 let signal_loop = tokio::spawn(async move {
-                    while let Some(_) = flush_signal.recv().await {
+                    while flush_signal.recv().await.is_some() {
                         recording_clone.new_chunk_appended(session_id)?;
                     }
                     Ok::<_, anyhow::Error>(())
@@ -315,7 +315,7 @@ impl RecordingMessageSender {
     pub(crate) fn on_new_chunk_appended(&self, recording_id: Uuid, tx: oneshot::Sender<()>) -> anyhow::Result<()> {
         let mut lock = self.flush_map.lock();
         let senders = lock.entry(recording_id);
-        let senders = senders.or_insert_with(Vec::new);
+        let senders = senders.or_default();
         senders.push(tx);
         Ok(())
     }
