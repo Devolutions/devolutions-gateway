@@ -57,7 +57,7 @@ impl codec::Decoder for ProtocolCodeC {
             return Ok(None); // Wait for more data
         }
 
-        if src.len() < 1 {
+        if src.is_empty() {
             return Ok(None); // Not enough data yet to decode a type code
         }
 

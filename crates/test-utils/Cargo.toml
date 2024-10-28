@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 transport = { path = "../transport" }
-tokio = { version = "1.41", features = ["io-util"] }
+tokio = { version = "1.38", features = ["io-util"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 proptest = "1.5"

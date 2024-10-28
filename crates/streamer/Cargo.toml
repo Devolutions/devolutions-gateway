@@ -1,12 +1,13 @@
 [package]
 name = "streamer"
-version = "0.1.0"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
+publish = false
 
 [dependencies]
 anyhow = "1.0.91"
 futures-util = { version = "0.3.31", features = ["sink"] }
-pin-project-lite = "0.2.14"
 tokio = { version = "1.41.0", features = [
     "io-util",
     "rt",
