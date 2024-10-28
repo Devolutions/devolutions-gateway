@@ -1,5 +1,3 @@
-use std::sync::{atomic::AtomicBool, Arc};
-
 use anyhow::Context;
 use axum::{body::Body, response::Response};
 use streamer::streamer::{reopenable_file::ReOpenableFile, webm_stream};
@@ -15,7 +13,7 @@ pub(crate) async fn stream_file(
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
     // 1.identify the file type
-    if !(path.extension() == Some(RecordingFileType::WebM.extension())) {
+    if path.extension() != Some(RecordingFileType::WebM.extension()) {
         return Err(anyhow::anyhow!("Invalid file type"));
     }
     // 2.if the file is actively being recorded, then proceed
