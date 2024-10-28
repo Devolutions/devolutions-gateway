@@ -1,5 +1,3 @@
-// server.rs
-
 use axum::{
     extract::{Extension, Json},
     routing::post,
@@ -14,9 +12,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use tokengen::{
-    generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs,
-};
+use crate::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};
 
 pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>) -> Router {
     Router::new()
@@ -34,8 +30,7 @@ pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>) -> Router {
 
 pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn Error>> {
     // 1. It goes to DGATEWAY_CONFIG_PATH
-    let config_dir = env::var("DGATEWAY_CONFIG_PATH")
-        .expect("DGATEWAY_CONFIG_PATH environment variable not set");
+    let config_dir = env::var("DGATEWAY_CONFIG_PATH").expect("DGATEWAY_CONFIG_PATH environment variable not set");
 
     // 2. It finds gateway.json
     let gateway_json_path = Path::new(&config_dir).join("gateway.json");
@@ -55,10 +50,7 @@ pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn E
     // 5. If it's relative, it's relative to the location of gateway.json
     let provisioner_key_path = PathBuf::from(provisioner_private_key_file);
     let provisioner_key_path = if provisioner_key_path.is_relative() {
-        gateway_json_path
-            .parent()
-            .unwrap()
-            .join(provisioner_key_path)
+        gateway_json_path.parent().unwrap().join(provisioner_key_path)
     } else {
         provisioner_key_path
     };
@@ -219,12 +211,7 @@ pub(crate) async fn netscan_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
     Json(request): Json<NetScanRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
-    handle_subcommand(
-        provisioner_key_path,
-        request.common,
-        SubCommandArgs::NetScan {},
-    )
-    .await
+    handle_subcommand(provisioner_key_path, request.common, SubCommandArgs::NetScan {}).await
 }
 
 // Common function to handle subcommands

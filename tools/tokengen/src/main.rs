@@ -1,8 +1,6 @@
-// main.rs
-
 use clap::{Parser, Subcommand};
-use std::error::Error;
 use std::path::PathBuf;
+use std::{error::Error, path::Path};
 use uuid::Uuid;
 
 use tokengen::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};
@@ -10,8 +8,42 @@ use tokengen::{generate_token, ApplicationProtocol, RecordingOperation, SubComma
 fn main() -> Result<(), Box<dyn Error>> {
     let app = App::parse();
 
-    let subcommand = match app.subcmd {
-        SubCommand::Forward {
+    match app.subcmd {
+        SubCommand::Sign {
+            validity_duration,
+            provisioner_key,
+            delegation_key,
+            kid,
+            jet_gw_id,
+            subcmd,
+        } => {
+            sign(
+                &validity_duration,
+                &provisioner_key,
+                delegation_key,
+                kid,
+                jet_gw_id,
+                subcmd,
+            )?;
+        }
+        SubCommand::Server { port } => {
+            tokio::runtime::Runtime::new()?.block_on(tokengen::server::start_server(port))?
+        }
+    }
+
+    Ok(())
+}
+
+fn sign(
+    validity_duration: &str,
+    provisioner_key: &Path,
+    delegation_key: Option<PathBuf>,
+    kid: Option<String>,
+    jet_gw_id: Option<Uuid>,
+    subcmd: SignSubCommand,
+) -> Result<(), Box<dyn Error>> {
+    let subcommand = match subcmd {
+        SignSubCommand::Forward {
             dst_hst,
             jet_ap,
             jet_ttl,
@@ -24,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             jet_aid,
             jet_rec,
         },
-        SubCommand::Rendezvous {
+        SignSubCommand::Rendezvous {
             jet_ap,
             jet_aid,
             jet_rec,
@@ -33,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             jet_aid,
             jet_rec,
         },
-        SubCommand::RdpTls {
+        SignSubCommand::RdpTls {
             dst_hst,
             prx_usr,
             prx_pwd,
@@ -48,8 +80,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             dst_pwd,
             jet_aid,
         },
-        SubCommand::Scope { scope } => SubCommandArgs::Scope { scope },
-        SubCommand::Jmux {
+        SignSubCommand::Scope { scope } => SubCommandArgs::Scope { scope },
+        SignSubCommand::Jmux {
             jet_ap,
             dst_hst,
             dst_addl,
@@ -64,22 +96,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             jet_aid,
             jet_rec,
         },
-        SubCommand::Jrec { jet_rop, jet_aid } => SubCommandArgs::Jrec { jet_rop, jet_aid },
-        SubCommand::Kdc { krb_realm, krb_kdc } => SubCommandArgs::Kdc { krb_realm, krb_kdc },
-        SubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
-        SubCommand::NetScan {} => SubCommandArgs::NetScan {},
+        SignSubCommand::Jrec { jet_rop, jet_aid } => SubCommandArgs::Jrec { jet_rop, jet_aid },
+        SignSubCommand::Kdc { krb_realm, krb_kdc } => SubCommandArgs::Kdc { krb_realm, krb_kdc },
+        SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
+        SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
     };
 
-    let result = generate_token(
-        &app.provisioner_key,
-        &app.validity_duration,
-        app.kid,
-        app.delegation_key.as_deref(),
-        app.jet_gw_id,
+    generate_token(
+        provisioner_key,
+        validity_duration,
+        kid.to_owned(),
+        delegation_key.as_deref(),
+        jet_gw_id,
         subcommand,
     )?;
-
-    println!("{}", result);
 
     Ok(())
 }
@@ -88,24 +118,37 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[derive(Parser)]
 struct App {
-    #[clap(long, default_value = "15m")]
-    validity_duration: String,
-    /// Path to provisioner private key
-    #[clap(long)]
-    provisioner_key: PathBuf,
-    /// Path to delegation public key
-    #[clap(long)]
-    delegation_key: Option<PathBuf>,
-    #[clap(long)]
-    kid: Option<String>,
-    #[clap(long)]
-    jet_gw_id: Option<Uuid>,
     #[clap(subcommand)]
     subcmd: SubCommand,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum SubCommand {
+    Sign {
+        #[clap(long, default_value = "15m")]
+        validity_duration: String,
+        /// Path to provisioner private key
+        #[clap(long)]
+        provisioner_key: PathBuf,
+        /// Path to delegation public key
+        #[clap(long)]
+        delegation_key: Option<PathBuf>,
+        #[clap(long)]
+        kid: Option<String>,
+        #[clap(long)]
+        jet_gw_id: Option<Uuid>,
+        #[clap(subcommand)]
+        subcmd: SignSubCommand,
+    },
+    Server {
+        #[clap(short, default_value = "8080")]
+        port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+enum SignSubCommand {
     Forward {
         #[clap(long)]
         dst_hst: String,

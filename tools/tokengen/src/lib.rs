@@ -1,4 +1,4 @@
-// lib.rs
+pub mod server;
 
 use picky::jose::jwe::{Jwe, JweAlg, JweEnc};
 use picky::jose::jws::JwsAlg;
@@ -233,8 +233,6 @@ pub enum SubCommandArgs {
     },
     NetScan {},
 }
-
-// --- Token Generation Function --- //
 
 pub fn generate_token(
     provisioner_key_path: &std::path::Path,

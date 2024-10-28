@@ -1,20 +1,16 @@
-// This Server binary is intended to be used as a standalone server for the provisioner key
-// Primarily for development and testing purposes
-#[cfg(feature = "server")]
-pub mod server;
+mod server_impl;
 
-#[cfg(feature = "server")]
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use axum::http::Method;
-    use server::{create_router, get_provisioner_key_path};
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use tower_http::trace::TraceLayer;
-    use tracing::info;
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
+use axum::http::Method;
+use server_impl::{create_router, get_provisioner_key_path};
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tower_http::trace::TraceLayer;
+use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
+pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -42,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(TraceLayer::new_for_http());
 
     // Run the app with hyper on localhost:8080
-    let addr = "127.0.0.1:8080";
+    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     let listner = tokio::net::TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
     axum::serve(listner, app).await?;
