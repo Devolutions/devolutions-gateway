@@ -29,25 +29,19 @@ pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>) -> Router {
 }
 
 pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn Error>> {
-    // 1. It goes to DGATEWAY_CONFIG_PATH
     let config_dir = env::var("DGATEWAY_CONFIG_PATH").expect("DGATEWAY_CONFIG_PATH environment variable not set");
 
-    // 2. It finds gateway.json
     let gateway_json_path = Path::new(&config_dir).join("gateway.json");
 
-    // 3. It finds the path ProvisionerPrivateKeyFile in gateway.json
-    // Read and parse gateway.json
     let gateway_json_contents = tokio::fs::read_to_string(&gateway_json_path).await?;
     let gateway_config: serde_json::Value = serde_json::from_str(&gateway_json_contents)?;
 
-    // 4. Get ProvisionerPrivateKeyFile from gateway.json
     let provisioner_private_key_file = gateway_config
         .get("ProvisionerPrivateKeyFile")
         .ok_or("ProvisionerPrivateKeyFile not found in gateway.json")?
         .as_str()
         .ok_or("ProvisionerPrivateKeyFile is not a string")?;
 
-    // 5. If it's relative, it's relative to the location of gateway.json
     let provisioner_key_path = PathBuf::from(provisioner_private_key_file);
     let provisioner_key_path = if provisioner_key_path.is_relative() {
         gateway_json_path.parent().unwrap().join(provisioner_key_path)
@@ -57,8 +51,6 @@ pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn E
 
     Ok(Arc::new(provisioner_key_path))
 }
-
-// Define the structures for the client request and response
 
 #[derive(Deserialize)]
 pub(crate) struct CommonRequest {
@@ -76,8 +68,6 @@ pub(crate) struct CommonRequest {
 pub(crate) struct TokenResponse {
     token: String,
 }
-
-// Handler functions for each subcommand
 
 pub(crate) async fn forward_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
@@ -214,7 +204,6 @@ pub(crate) async fn netscan_handler(
     handle_subcommand(provisioner_key_path, request.common, SubCommandArgs::NetScan {}).await
 }
 
-// Common function to handle subcommands
 async fn handle_subcommand(
     provisioner_key_path: Arc<PathBuf>,
     common: CommonRequest,
@@ -237,8 +226,6 @@ async fn handle_subcommand(
 
     Ok(Json(TokenResponse { token }))
 }
-
-// Define request structures for each command
 
 #[derive(Deserialize)]
 pub(crate) struct ForwardRequest {
