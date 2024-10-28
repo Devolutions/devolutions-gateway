@@ -95,7 +95,7 @@ async fn handle_jrec_push(
     }
 }
 
-/// Lists all recordings stored on this instance
+/// Deletes a recording stored on this instance
 #[cfg_attr(feature = "openapi", utoipa::path(
     delete,
     operation_id = "DeleteRecording",

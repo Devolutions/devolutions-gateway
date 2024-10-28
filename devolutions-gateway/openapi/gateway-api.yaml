@@ -148,7 +148,7 @@ paths:
     delete:
       tags:
       - Jrec
-      summary: Lists all recordings stored on this instance
+      summary: Deletes a recording stored on this instance
       operationId: DeleteRecording
       parameters:
       - name: id

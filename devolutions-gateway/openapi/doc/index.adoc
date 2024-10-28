@@ -528,7 +528,7 @@ endif::internal-generation[]
 
 `DELETE /jet/jrec/delete/{id}`
 
-Lists all recordings stored on this instance
+Deletes a recording stored on this instance
 
 ===== Description
 

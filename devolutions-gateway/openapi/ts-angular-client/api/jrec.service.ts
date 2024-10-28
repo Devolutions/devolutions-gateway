@@ -89,7 +89,7 @@ export class JrecService {
     }
 
     /**
-     * Lists all recordings stored on this instance
+     * Deletes a recording stored on this instance
      * @param id Recorded session ID
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.

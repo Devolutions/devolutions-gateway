@@ -29,7 +29,7 @@ namespace Devolutions.Gateway.Client.Api
     {
         #region Synchronous Operations
         /// <summary>
-        /// Lists all recordings stored on this instance
+        /// Deletes a recording stored on this instance
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Recorded session ID</param>
@@ -37,7 +37,7 @@ namespace Devolutions.Gateway.Client.Api
         void DeleteRecording(Guid id);
 
         /// <summary>
-        /// Lists all recordings stored on this instance
+        /// Deletes a recording stored on this instance
         /// </summary>
         /// <remarks>
         /// 
@@ -92,7 +92,7 @@ namespace Devolutions.Gateway.Client.Api
     {
         #region Asynchronous Operations
         /// <summary>
-        /// Lists all recordings stored on this instance
+        /// Deletes a recording stored on this instance
         /// </summary>
         /// <remarks>
         /// 
@@ -104,7 +104,7 @@ namespace Devolutions.Gateway.Client.Api
         System.Threading.Tasks.Task DeleteRecordingAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
-        /// Lists all recordings stored on this instance
+        /// Deletes a recording stored on this instance
         /// </summary>
         /// <remarks>
         /// 
@@ -374,7 +374,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists all recordings stored on this instance 
+        /// Deletes a recording stored on this instance 
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Recorded session ID</param>
@@ -385,7 +385,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists all recordings stored on this instance 
+        /// Deletes a recording stored on this instance 
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Recorded session ID</param>
@@ -429,7 +429,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists all recordings stored on this instance 
+        /// Deletes a recording stored on this instance 
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Recorded session ID</param>
@@ -441,7 +441,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists all recordings stored on this instance 
+        /// Deletes a recording stored on this instance 
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Recorded session ID</param>
