@@ -1,9 +1,11 @@
-use std::{io::Seek, os::windows::fs::OpenOptionsExt, path::PathBuf};
-
 use std::io::{self, Read};
+use std::{io::Seek, path::PathBuf};
 
 use crate::traits::Reopenable;
+
+#[cfg(windows)]
 const FILE_SHARE_WRITE: u32 = 0x00000002;
+#[cfg(windows)]
 const FILE_SHARE_READ: u32 = 0x00000001;
 
 pub struct ReOpenableFile {
@@ -13,11 +15,16 @@ pub struct ReOpenableFile {
 
 impl ReOpenableFile {
     pub fn open(file_path: impl Into<PathBuf>) -> io::Result<Self> {
+        let mut open_option = std::fs::OpenOptions::new();
+        open_option.read(true);
+        #[cfg(windows)]
+        {
+            use os::windows::fs::OpenOptionsExt;
+            open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ);
+        }
+
         let file_path: PathBuf = file_path.into();
-        let inner = std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ)
-            .open(&file_path)?;
+        let inner = open_option.open(&file_path)?;
 
         Ok(Self { inner, file_path })
     }
@@ -37,10 +44,18 @@ impl Seek for ReOpenableFile {
 
 impl Reopenable for ReOpenableFile {
     fn reopen(&mut self) -> io::Result<()> {
-        self.inner = std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ)
-            .open(&self.file_path)?;
+        let mut open_option = std::fs::OpenOptions::new();
+        open_option.read(true);
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ)
+        }
+
+        let inner = open_option.open(&self.file_path)?;
+
+        self.inner = inner;
         Ok(())
     }
 }
