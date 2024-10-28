@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use anyhow::Context;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, warn};
 use webm_iterable::{
     matroska_spec::{Master, MatroskaSpec},
     WebmWriter, WriteOptions,
@@ -48,7 +48,7 @@ where
     pub fn write(&mut self, tag: &MatroskaSpec) -> anyhow::Result<WriteResult> {
         let have_cluster_start_at_0 = self
             .cluster_buffer
-            .get(0)
+            .first()
             .map_or(false, |t| matches!(t, MatroskaSpec::Cluster(Master::Start)));
         let incoming_tag_is_cluster_end = matches!(tag, MatroskaSpec::Cluster(Master::End));
         let cluster_buffer_is_empty = self.cluster_buffer.is_empty();

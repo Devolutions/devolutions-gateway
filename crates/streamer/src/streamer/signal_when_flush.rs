@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, task::Poll};
+use std::{future::Future, task::Poll};
 
 use tracing::{debug, warn};
 

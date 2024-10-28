@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.91"
 futures-util = { version = "0.3.31", features = ["sink"] }
-pin-project-lite = "0.2.14"
 tokio = { version = "1.41.0", features = [
     "io-util",
     "rt",

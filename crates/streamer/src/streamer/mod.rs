@@ -1,14 +1,9 @@
-use std::{
-    sync::{atomic::AtomicBool, Arc},
-    thread::sleep,
-};
-
 use channel_writer::ChannelWriter;
 use futures_util::SinkExt;
-use protocol::{ProtocolCodeC, ServerMessage};
+use protocol::ProtocolCodeC;
 use timed_tag_writer::ControlledTagWriter;
 use tokio_util::codec::Framed;
-use tracing::{debug, info, instrument, warn, Instrument};
+use tracing::{info, warn, Instrument};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Master, MatroskaSpec},
@@ -77,7 +72,7 @@ pub fn webm_stream(
     // ChannelWriter is a writer that writes to a channel
     let (writer, receiver) = ChannelWriter::new();
 
-    spawn_sending_task(framed, receiver, codec, shutdown_signal.clone());
+    spawn_sending_task(framed, receiver, codec, shutdown_signal);
 
     // ControlledTagWriter will not write to underlying writer unless the data is valid
     let mut writer = ControlledTagWriter::new(writer);
@@ -94,7 +89,7 @@ pub fn webm_stream(
         let tag = match tag {
             Ok(tag) => tag,
             Err(TagIteratorError::ReadError { .. }) => anyhow::bail!("Read error"),
-            Err(e) => {
+            Err(_) => {
                 let res = when_new_chunk_appended().blocking_recv();
 
                 if res.is_err() {
@@ -112,7 +107,7 @@ pub fn webm_stream(
 
         if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
             // The last_emitted_tag_offset is relative to where it starts reading
-            last_cluster_postion = webm_itr.last_emitted_tag_offset() + last_cluster_postion;
+            last_cluster_postion += webm_itr.last_emitted_tag_offset();
         }
 
         writer.write(&tag)?;
@@ -150,7 +145,7 @@ fn spawn_sending_task<W>(
                         Some(Ok(protocol::ClientMessage::Start)) => {
                             info!("Start message received");
                             ws_frame.send(protocol::ServerMessage::MetaData {
-                                codec: codec.as_ref().map(|c| c.as_str().try_into().ok()).flatten().unwrap_or(protocol::Codec::Vp8)
+                                codec: codec.as_ref().and_then(|c| c.as_str().try_into().ok()).unwrap_or(protocol::Codec::Vp8)
                             }).await?;
                         },
                         Some(Ok(protocol::ClientMessage::Pull)) => {

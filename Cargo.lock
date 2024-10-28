@@ -4798,7 +4798,6 @@ dependencies = [
  "anyhow",
  "devolutions-gateway-task",
  "futures-util",
- "pin-project-lite 0.2.14",
  "tokio 1.41.0",
  "tokio-util",
  "tracing",

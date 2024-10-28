@@ -17,24 +17,24 @@ default = []
 openapi = ["dep:utoipa"]
 
 [dependencies]
+
 # In-house
 transport = { path = "../crates/transport" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
-ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861", features = [
-    "std"
-] }
+ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861", features = ["std"] }
 ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861" }
-streamer = { path = "../crates/streamer" }
 ceviche = "0.6.1"
 picky-krb = "0.9"
 network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
+
 # Utils, misc
 hostname = "0.4"
 camino = { version = "1.1", features = ["serde1"] }
@@ -45,99 +45,66 @@ bytes = "1.6"
 cfg-if = "1.0"
 url = { version = "2.5", features = ["serde"] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
-time = { version = "0.3", default-features = false, features = [
-    "std",
-    "serde",
-    "formatting"
-] }
+time = { version = "0.3", default-features = false, features = ["std", "serde", "formatting"] }
 parking_lot = "0.12"
 anyhow = "1.0"
 thiserror = "1"
 typed-builder = "0.19"
 backoff = "0.4"
 sysinfo = "0.30"
+
 # Security, crypto…
-picky = { version = "7.0.0-rc.9", default-features = false, features = [
-    "jose",
-    "x509",
-    "pkcs12"
-] }
+picky = { version = "7.0.0-rc.9", default-features = false, features = ["jose", "x509", "pkcs12"] }
 zeroize = { version = "1.8", features = ["derive"] }
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
+
 # Logging
 tracing = "0.1"
+
 # Async, futures…
-tokio = { version = "1.38", features = [
-    "signal",
-    "net",
-    "io-util",
-    "time",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "parking_lot",
-    "fs"
-] }
-tokio-rustls = { version = "0.26", default-features = false, features = [
-    "logging",
-    "tls12",
-    "ring"
-] }
-reqwest = { version = "0.12", default-features = false, features = [
-    "rustls-tls-native-roots",
-    "json"
-] }
+tokio = { version = "1.38", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
 futures = "0.3"
 async-trait = "0.1"
 tower = { version = "0.5", features = ["timeout"] }
 ngrok = "0.13"
+
 # HTTP
 hyper = "1.4"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
-axum = { version = "0.7", default-features = false, features = [
-    "http1",
-    "json",
-    "ws",
-    "query",
-    "tracing",
-    "tower-log"
-] }
-axum-extra = { version = "0.9", features = [
-    "query",
-    "async-read-body",
-    "typed-header"
-] }
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log"] }
+axum-extra = { version = "0.9", features = ["query", "async-read-body", "typed-header"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 tungstenite = "0.24" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
+
 # OpenAPI generator
-utoipa = { version = "4.2", default-features = false, features = [
-    "uuid",
-    "time"
-], optional = true }
+utoipa = { version = "4.2", default-features = false, features = ["uuid", "time"], optional = true }
+
 # Safe pin projection
 pin-project-lite = "0.2"
+
 # Native plugins
 # QUESTION: now that we have Cadeau integrated, should we remove this feature?
 # FIXME: these libraries are considered unmaintained. We could use dlopen2 (to audit).
 dlopen = "0.1"
 dlopen_derive = "0.1"
+
 # Video processing for session recording
 cadeau = { version = "0.4", features = ["dlopen"] }
+
 # Dependencies required for PCAP support
 # QUESTION: should we keep that built-in?
 pcap-file = "2.0"
 etherparse = "0.15"
+
 # For KDC proxy
 portpicker = "0.1"
+streamer = { version = "0.1.0", path = "../crates/streamer" }
 
 [target.'cfg(windows)'.dependencies]
-rustls-cng = { version = "0.5", default-features = false, features = [
-    "logging",
-    "tls12",
-    "ring"
-] }
+rustls-cng = { version = "0.5", default-features = false, features = ["logging", "tls12", "ring"] }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
