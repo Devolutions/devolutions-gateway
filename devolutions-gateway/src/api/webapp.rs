@@ -285,7 +285,6 @@ pub(crate) struct SessionTokenSignRequest {
         ("web_app_token" = []),
     ),
 ))]
-
 pub(crate) async fn sign_session_token(
     State(DgwState { conf_handle, .. }): State<DgwState>,
     WebAppToken(web_app_token): WebAppToken,
