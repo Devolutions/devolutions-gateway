@@ -36,7 +36,7 @@ pub(crate) async fn stream_file(
                     .expect("Failed to send on_appended message"); // early development
                 rx
             })
-            .with_context(|| format!("webm_stream failed"))?;
+            .context("webm_stream failed")?;
             Ok::<_, anyhow::Error>(())
         })
         .await;
