@@ -23,7 +23,7 @@ pub(crate) async fn stream_file(
         return Err(anyhow::anyhow!("File is not being recorded"));
     };
 
-    let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("Failed to open file: {:?}", path))?;
+    let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
 
     let upgrade_result = ws.on_upgrade(move |socket| async move {
         let websocket_stream = websocket_compat(socket);
