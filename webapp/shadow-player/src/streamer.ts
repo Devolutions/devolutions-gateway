@@ -1,7 +1,7 @@
 import { ReactiveSourceBuffer } from './sourceBuffer';
 import { ServerWebSocket } from './websocket';
 
-export class WebmStreamPlayer extends HTMLElement {
+export class ShadowPlayer extends HTMLElement {
   shadowRoot: ShadowRoot | null = null;
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
@@ -41,7 +41,7 @@ export class WebmStreamPlayer extends HTMLElement {
   }
 
   syncAttributes() {
-    for (const attr of WebmStreamPlayer.observedAttributes) {
+    for (const attr of ShadowPlayer.observedAttributes) {
       const value = this.getAttribute(attr);
       if (attr === 'src' && value !== null) {
         this.srcChange(value);
@@ -70,7 +70,6 @@ export class WebmStreamPlayer extends HTMLElement {
   private async handleSourceOpen(mediaSource: MediaSource) {
     const websocket = new ServerWebSocket(this._src as string);
     let reactiveSourceBuffer: ReactiveSourceBuffer | null = null;
-    let websocketClosed = false;
 
     websocket.onopen(() => {
       websocket.send({ type: 'start' });
@@ -96,7 +95,6 @@ export class WebmStreamPlayer extends HTMLElement {
     });
 
     websocket.onclose(() => {
-      websocketClosed = true;
       if (reactiveSourceBuffer) {
         mediaSource.endOfStream();
       }
@@ -115,4 +113,4 @@ export class WebmStreamPlayer extends HTMLElement {
   }
 }
 
-customElements.define('webm-stream-player', WebmStreamPlayer);
+customElements.define('shawdow-player', ShadowPlayer);
