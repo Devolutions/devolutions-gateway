@@ -1,21 +1,21 @@
-import { handleWebm } from "./webm.js";
-import { handleTrp } from "./trp.js";
-import { handleCast } from "./cast.js";
+import { handleCast } from './cast.js';
+import { handleTrp } from './trp.js';
+import { handleWebm } from './webm.js';
 
 export const getPlayer = (fileType) => {
   const player = {
     play: () => {},
   };
 
-  if (fileType === "webm") {
+  if (fileType === 'webm') {
     player.play = handleWebm;
   }
 
-  if (fileType === "trp") {
+  if (fileType === 'trp') {
     player.play = handleTrp;
   }
 
-  if (fileType === "cast") {
+  if (fileType === 'cast') {
     player.play = handleCast;
   }
 
@@ -38,8 +38,8 @@ export function restoreFetch() {
 }
 
 export function createTerminalDiv() {
-  const terminalDiv = document.createElement("div");
-  terminalDiv.setAttribute("id", "terminal");
+  const terminalDiv = document.createElement('div');
+  terminalDiv.setAttribute('id', 'terminal');
   document.body.appendChild(terminalDiv);
   return terminalDiv;
 }

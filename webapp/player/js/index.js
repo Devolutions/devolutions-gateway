@@ -1,4 +1,4 @@
-import { getPlayer } from "./players/index.js";
+import { getPlayer } from './players/index.js';
 
 async function main() {
   const { sessionId, token, gatewayAccessUrl } = getSessionDetails();
@@ -16,9 +16,9 @@ async function main() {
 
 function getSessionDetails() {
   const windowURL = new URL(window.location.href);
-  const sessionId = windowURL.searchParams.get("sessionId");
-  const token = windowURL.searchParams.get("token");
-  const gatewayAccessUrl = windowURL.toString().split("/jet/jrec")[0];
+  const sessionId = windowURL.searchParams.get('sessionId');
+  const token = windowURL.searchParams.get('token');
+  const gatewayAccessUrl = windowURL.toString().split('/jet/jrec')[0];
   return { sessionId, token, gatewayAccessUrl };
 }
 
@@ -31,7 +31,7 @@ async function fetchRecordingInfo(url) {
 }
 
 function getFileType(recordingInfo) {
-  return recordingInfo.files[0].fileName.split(".")[1];
+  return recordingInfo.files[0].fileName.split('.')[1];
 }
 
 main();

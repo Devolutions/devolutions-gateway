@@ -1,27 +1,15 @@
-import {
-  createTerminalDiv,
-  overrideFetch,
-  restoreFetch,
-  loadFile,
-} from "./index.js";
+import { createTerminalDiv, loadFile, overrideFetch, restoreFetch } from './index.js';
 
-import { convertTRPtoCast } from "../trp-decoder.js";
+import { convertTRPtoCast } from '../trp-decoder.js';
 
-export async function handleTrp(
-  recordingInfo,
-  gatewayAccessUrl,
-  sessionId,
-  token
-) {
+export async function handleTrp(recordingInfo, gatewayAccessUrl, sessionId, token) {
   const terminalDiv = createTerminalDiv();
   const trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
 
   try {
     const trpFileContent = await loadFile(trpSrc);
     const castFileContent = convertTRPtoCast(trpFileContent);
-    const objectUrl = URL.createObjectURL(
-      new Blob([castFileContent], { type: "text/plain" })
-    );
+    const objectUrl = URL.createObjectURL(new Blob([castFileContent], { type: 'text/plain' }));
 
     overrideFetch(objectUrl, castFileContent);
     const player = new XtermPlayer.XtermPlayer(objectUrl, terminalDiv);
