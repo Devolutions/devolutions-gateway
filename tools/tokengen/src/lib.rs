@@ -236,7 +236,7 @@ pub enum SubCommandArgs {
 
 pub fn generate_token(
     provisioner_key_path: &std::path::Path,
-    validity_duration: &str,
+    validity_duration: std::time::Duration,
     kid: Option<String>,
     delegation_key_path: Option<&std::path::Path>,
     jet_gw_id: Option<Uuid>,
@@ -246,7 +246,6 @@ pub fn generate_token(
         .pipe_deref(str::parse::<Pem>)?
         .pipe_ref(PrivateKey::from_pem)?;
 
-    let validity_duration = humantime::parse_duration(validity_duration)?;
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
     let nbf = i64::try_from(now.as_secs()).unwrap();
     let exp = i64::try_from((now + validity_duration).as_secs()).unwrap();

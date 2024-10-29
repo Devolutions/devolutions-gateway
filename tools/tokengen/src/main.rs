@@ -102,6 +102,7 @@ fn sign(
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
     };
 
+    let validity_duration = humantime::parse_duration(validity_duration)?;
     generate_token(
         provisioner_key,
         validity_duration,

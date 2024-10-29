@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};
 
-pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>) -> Router {
+pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>, delegation_key_path: Option<PathBuf>) -> Router {
     Router::new()
         .route("/forward", post(forward_handler))
         .route("/rendezvous", post(rendezvous_handler))
@@ -26,6 +26,29 @@ pub(crate) fn create_router(provisioner_key_path: Arc<PathBuf>) -> Router {
         .route("/jrl", post(jrl_handler))
         .route("/netscan", post(netscan_handler))
         .layer(Extension(provisioner_key_path))
+        .layer(Extension(delegation_key_path))
+}
+
+pub(crate) async fn get_delegate_key_path() -> Result<Option<PathBuf>, Box<dyn Error>> {
+    let config_dir = env::var("DGATEWAY_CONFIG_PATH").expect("DGATEWAY_CONFIG_PATH environment variable not set");
+
+    let gateway_json_path = Path::new(&config_dir).join("gateway.json");
+
+    let gateway_json_contents = tokio::fs::read_to_string(&gateway_json_path).await?;
+    let gateway_config: serde_json::Value = serde_json::from_str(&gateway_json_contents)?;
+
+    let delegate_private_key_file = gateway_config.get("DelegationPrivateKeyFile ").and_then(|v| v.as_str());
+
+    let delegate_key_path = delegate_private_key_file.map(PathBuf::from);
+    let delegate_key_path = delegate_key_path.map(|p| {
+        if p.is_relative() {
+            gateway_json_path.parent().unwrap().join(p)
+        } else {
+            p
+        }
+    });
+
+    Ok(delegate_key_path)
 }
 
 pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn Error>> {
@@ -55,11 +78,9 @@ pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn E
 #[derive(Deserialize)]
 pub(crate) struct CommonRequest {
     #[serde(default)]
-    validity_duration: Option<String>,
+    validity_duration: Option<u64>,
     #[serde(default)]
     kid: Option<String>,
-    #[serde(default)]
-    delegation_key_path: Option<String>,
     #[serde(default)]
     jet_gw_id: Option<Uuid>,
 }
@@ -71,10 +92,12 @@ pub(crate) struct TokenResponse {
 
 pub(crate) async fn forward_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<ForwardRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Forward {
             dst_hst: request.dst_hst,
@@ -89,10 +112,12 @@ pub(crate) async fn forward_handler(
 
 pub(crate) async fn rendezvous_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<RendezvousRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Rendezvous {
             jet_ap: request.jet_ap,
@@ -105,10 +130,12 @@ pub(crate) async fn rendezvous_handler(
 
 pub(crate) async fn rdp_tls_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<RdpTlsRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::RdpTls {
             dst_hst: request.dst_hst,
@@ -124,10 +151,12 @@ pub(crate) async fn rdp_tls_handler(
 
 pub(crate) async fn scope_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<ScopeRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Scope { scope: request.scope },
     )
@@ -136,10 +165,12 @@ pub(crate) async fn scope_handler(
 
 pub(crate) async fn jmux_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<JmuxRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Jmux {
             jet_ap: request.jet_ap,
@@ -155,10 +186,12 @@ pub(crate) async fn jmux_handler(
 
 pub(crate) async fn jrec_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<JrecRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Jrec {
             jet_rop: request.jet_rop,
@@ -170,10 +203,12 @@ pub(crate) async fn jrec_handler(
 
 pub(crate) async fn kdc_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<KdcRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Kdc {
             krb_realm: request.krb_realm,
@@ -185,10 +220,12 @@ pub(crate) async fn kdc_handler(
 
 pub(crate) async fn jrl_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<JrlRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
     handle_subcommand(
         provisioner_key_path,
+        delegation_key_path,
         request.common,
         SubCommandArgs::Jrl {
             revoked_jti_list: request.jti,
@@ -199,24 +236,34 @@ pub(crate) async fn jrl_handler(
 
 pub(crate) async fn netscan_handler(
     Extension(provisioner_key_path): Extension<Arc<PathBuf>>,
+    Extension(delegation_key_path): Extension<Option<PathBuf>>,
     Json(request): Json<NetScanRequest>,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
-    handle_subcommand(provisioner_key_path, request.common, SubCommandArgs::NetScan {}).await
+    handle_subcommand(
+        provisioner_key_path,
+        delegation_key_path,
+        request.common,
+        SubCommandArgs::NetScan {},
+    )
+    .await
 }
 
 async fn handle_subcommand(
     provisioner_key_path: Arc<PathBuf>,
+    delegation_key_path: Option<PathBuf>,
     common: CommonRequest,
     subcommand: SubCommandArgs,
 ) -> Result<Json<TokenResponse>, (axum::http::StatusCode, String)> {
-    let validity_duration = common.validity_duration.unwrap_or_else(|| "15m".to_string());
+    let validity_duration = common
+        .validity_duration
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(std::time::Duration::from_secs(3600));
     let kid = common.kid;
-    let delegation_key_path = common.delegation_key_path.map(PathBuf::from);
     let jet_gw_id = common.jet_gw_id;
 
     let token = generate_token(
         provisioner_key_path.as_ref(),
-        &validity_duration,
+        validity_duration,
         kid,
         delegation_key_path.as_deref(),
         jet_gw_id,

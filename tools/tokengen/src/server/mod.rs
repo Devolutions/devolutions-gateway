@@ -1,7 +1,7 @@
 mod server_impl;
 
 use axum::http::Method;
-use server_impl::{create_router, get_provisioner_key_path};
+use server_impl::{create_router, get_delegate_key_path, get_provisioner_key_path};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,9 +26,10 @@ pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 
     // Read the provisioner key path from the configuration
     let provisioner_key_path: Arc<PathBuf> = get_provisioner_key_path().await?;
+    let delegate_key_path = get_delegate_key_path().await?;
 
     // Create the router with subcommand routes
-    let app = create_router(provisioner_key_path)
+    let app = create_router(provisioner_key_path, delegate_key_path)
         .layer(
             tower_http::cors::CorsLayer::new()
                 .allow_methods([Method::POST, Method::OPTIONS, Method::GET])
