@@ -378,6 +378,19 @@ pub(crate) async fn list_recordings(
     }
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "ListActiveRecordings",
+    tag = "Jrec",
+    path = "/jet/jrec/list-active",
+    responses(
+        (status = 200, description = "List of active recordings on this Gateway instance", body = [Uuid]),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("scope_token" = ["gateway.recordings.read"])),
+))]
 pub(crate) async fn list_active_recordings(
     State(DgwState { recordings, .. }): State<DgwState>,
     _scope: RecordingsReadScope,
