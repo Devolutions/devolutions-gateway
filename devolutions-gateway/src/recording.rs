@@ -170,7 +170,7 @@ impl ActiveRecordings {
         self.0.lock().contains(&id)
     }
 
-    // get the list of active recordings without locking the mutex
+    /// Get the list of active recordings without locking the mutex
     pub fn copy_set(&self) -> HashSet<Uuid> {
         self.0.lock().clone()
     }
