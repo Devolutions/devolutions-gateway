@@ -113,7 +113,7 @@ where
 
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
-                // Wrap SignalWriter inside a BufWriter to reduce the number of flushes
+                // Wrap SignalWriter inside a BufWriter to reduce the number of flushes.
                 let (file, mut flush_signal) = SignalWriter::new(file);
                 // larger buffer size to reduce the number of flushes
                 let mut file = BufWriter::with_capacity(1024 * 100, file);
