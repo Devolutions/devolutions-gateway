@@ -119,13 +119,14 @@ where
 
                 let shutdown_signal = shutdown_signal.wait();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
-                let recording_clone = recordings.clone();
-
-                let signal_loop = tokio::spawn(async move {
-                    while flush_signal.recv().await.is_some() {
-                        recording_clone.new_chunk_appended(session_id)?;
+                let signal_loop = tokio::spawn({
+                    let recordings = recordings.clone();
+                    async move {
+                        while flush_signal.recv().await.is_some() {
+                            recordings.new_chunk_appended(session_id)?;
+                        }
+                        Ok::<_, anyhow::Error>(())
                     }
-                    Ok::<_, anyhow::Error>(())
                 });
 
                 let res = tokio::select! {
