@@ -31,7 +31,6 @@ use win_api_wrappers::utils::CommandLine;
 use anyhow::{anyhow, bail, Result};
 
 use crate::config;
-use crate::desktop::launch_consent;
 use crate::error::Error;
 use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHasher};
 use devolutions_pedm_shared::policy;
@@ -324,17 +323,7 @@ impl Policy {
 
         match elevation_type {
             policy::ElevationKind::AutoApprove => Ok(()),
-            policy::ElevationKind::Confirm => {
-                if !launch_consent(
-                    session_id,
-                    &Sid::try_from(request.asker.user.account_sid.as_str())?,
-                    &request.target.path,
-                )? {
-                    bail!(Error::Cancelled);
-                }
-
-                Ok(())
-            }
+            policy::ElevationKind::Confirm => bail!(Error::InvalidParameter),
             policy::ElevationKind::ReasonApproval => bail!(Error::InvalidParameter),
             policy::ElevationKind::Deny => bail!(Error::AccessDenied),
         }

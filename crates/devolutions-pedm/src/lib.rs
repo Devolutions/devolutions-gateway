@@ -5,7 +5,6 @@ cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
         pub mod api;
         mod config;
-        mod desktop;
         mod elevations;
         mod elevator;
         mod error;

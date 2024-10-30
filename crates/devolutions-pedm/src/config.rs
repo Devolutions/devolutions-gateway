@@ -5,7 +5,7 @@ use camino::Utf8PathBuf;
 use win_api_wrappers::process::Module;
 use win_api_wrappers::raw::Win32::Foundation::LUID;
 
-pub(crate) static PEDM_DESKTOP_RELPATH: &str = r"desktop/DevolutionsPedmDesktop.exe";
+pub(crate) static PEDM_DESKTOP_RELPATH: &str = r"desktop/DevolutionsDesktopAgent.exe";
 
 pub(crate) static PIPE_NAME: &str = r"\\.\pipe\DevolutionsPEDM";
 
