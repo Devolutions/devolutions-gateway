@@ -54,7 +54,7 @@ where
             let format = time::format_description::parse("[year]-[month]-[day]-[hour]-[minute]-[second]")
                 .expect("valid hardcoded format");
             let date = time::OffsetDateTime::now_utc().format(&format)?;
-            let pcap_filename = format!("{date}_from_{}_to_{}.pcap", self.address_a, self.address_b,);
+            let pcap_filename = format!("{date}_from_{}_to_{}.pcap", self.address_a, self.address_b);
             let pcap_path = capture_path.join(pcap_filename);
 
             let (client_inspector, server_inspector) =

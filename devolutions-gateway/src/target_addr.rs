@@ -138,6 +138,13 @@ impl TargetAddr {
 
         &self.serialization.as_str()[(lo, hi)]
     }
+
+    pub fn to_uri_with_path_and_query(
+        &self,
+        path_and_query: &str,
+    ) -> Result<axum::http::Uri, axum::http::uri::InvalidUri> {
+        format!("{}{}", self.serialization, path_and_query).parse()
+    }
 }
 
 fn target_addr_parse_impl(

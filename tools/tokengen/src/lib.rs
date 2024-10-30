@@ -51,6 +51,21 @@ pub struct ScopeClaims<'a> {
 }
 
 #[derive(Clone, Serialize)]
+pub struct BridgeTokenClaims<'a> {
+    pub exp: i64,
+    pub nbf: i64,
+    pub jti: Uuid,
+    pub target_host: &'a str,
+    pub jet_aid: Uuid,
+    pub jet_ap: ApplicationProtocol,
+    pub jet_rec: RecordingPolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_ttl: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_gw_id: Option<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
 pub struct JmuxClaims<'a> {
     pub dst_hst: &'a str,
     pub dst_addl: Vec<&'a str>,
@@ -173,7 +188,7 @@ macro_rules! impl_from_str {
             type Err = serde_json::Error;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                // Not the most elegant / performant solution, but it's DRY and good enough for a small tool like this one
+                // Not the most elegant / performant solution, but it's DRY and good enough for a small tool like this one.
                 let json_s = format!("\"{s}\"");
                 serde_json::from_str(&json_s)
             }
@@ -211,6 +226,13 @@ pub enum SubCommandArgs {
     },
     Scope {
         scope: String,
+    },
+    Bridge {
+        target_host: String,
+        jet_aid: Option<Uuid>,
+        jet_ap: Option<ApplicationProtocol>,
+        jet_rec: bool,
+        jet_ttl: Option<u64>,
     },
     Jmux {
         jet_ap: Option<ApplicationProtocol>,
@@ -340,6 +362,30 @@ pub fn generate_token(
                 jet_gw_id,
             };
             ("SCOPE", serde_json::to_value(claims)?)
+        }
+        SubCommandArgs::Bridge {
+            target_host,
+            jet_aid,
+            jet_ap,
+            jet_rec,
+            jet_ttl,
+        } => {
+            let claims = BridgeTokenClaims {
+                exp,
+                nbf,
+                jti,
+                target_host: &target_host,
+                jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec: if jet_rec {
+                    RecordingPolicy::Stream
+                } else {
+                    RecordingPolicy::None
+                },
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
+                jet_ttl,
+                jet_gw_id,
+            };
+            ("BRIDGE", serde_json::to_value(claims)?)
         }
         SubCommandArgs::Jmux {
             jet_ap,

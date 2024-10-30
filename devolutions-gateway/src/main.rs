@@ -8,12 +8,12 @@ use rustls_cng as _;
 use utoipa as _;
 use {
     argon2 as _, async_trait as _, axum as _, axum_extra as _, backoff as _, bytes as _, camino as _,
-    devolutions_agent_shared as _, dlopen as _, dlopen_derive as _, etherparse as _, hostname as _, hyper as _,
-    hyper_util as _, ironrdp_pdu as _, ironrdp_rdcleanpath as _, jmux_proxy as _, multibase as _, network_scanner as _,
-    ngrok as _, nonempty as _, pcap_file as _, picky as _, picky_krb as _, pin_project_lite as _, portpicker as _,
-    reqwest as _, serde as _, serde_urlencoded as _, smol_str as _, sysinfo as _, thiserror as _, time as _,
-    tokio_rustls as _, tower as _, tower_http as _, transport as _, tungstenite as _, typed_builder as _, url as _,
-    uuid as _, zeroize as _,
+    devolutions_agent_shared as _, dlopen as _, dlopen_derive as _, etherparse as _, hostname as _,
+    http_body_util as _, hyper as _, hyper_util as _, ironrdp_pdu as _, ironrdp_rdcleanpath as _, jmux_proxy as _,
+    multibase as _, network_scanner as _, ngrok as _, nonempty as _, pcap_file as _, picky as _, picky_krb as _,
+    pin_project_lite as _, portpicker as _, reqwest as _, serde as _, serde_urlencoded as _, smol_str as _,
+    sysinfo as _, thiserror as _, time as _, tokio_rustls as _, tokio_tungstenite as _, tower as _, tower_http as _,
+    transport as _, tungstenite as _, typed_builder as _, url as _, uuid as _, zeroize as _,
 };
 
 // Used by tests.
