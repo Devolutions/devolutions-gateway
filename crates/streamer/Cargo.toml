@@ -1,7 +1,9 @@
 [package]
 name = "streamer"
-version = "0.1.0"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
+publish = false
 
 [dependencies]
 anyhow = "1.0.91"
