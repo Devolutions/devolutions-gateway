@@ -134,6 +134,7 @@ mod as_of_v2022_3_0_0 {
         scope: DvlsAccessScope,
         nbf: i64,
         exp: i64,
+        jti: Uuid,
     }
 
     #[derive(Clone, Debug, Serialize)]
@@ -165,12 +166,13 @@ mod as_of_v2022_3_0_0 {
     }
 
     fn dvls_scope_claims(now: i64) -> impl Strategy<Value = DvlsScopeClaims> {
-        (dvls_access_scope(), uuid_typed()).prop_map(move |(scope, jet_gw_id)| DvlsScopeClaims {
+        (dvls_access_scope(), uuid_typed(), uuid_typed()).prop_map(move |(scope, jet_gw_id, jti)| DvlsScopeClaims {
             ty: TYPE_SCOPE,
             jet_gw_id,
             scope,
             nbf: now,
             exp: now + 1000,
+            jti,
         })
     }
 
@@ -203,7 +205,7 @@ mod as_of_v2022_3_0_0 {
     struct DvlsAssociationClaims {
         #[serde(rename = "type")]
         ty: &'static str,
-        jet_aid: String,
+        jet_aid: Uuid,
         jet_ap: String,
         jet_cm: &'static str,
         jet_gw_id: Uuid,
@@ -212,7 +214,7 @@ mod as_of_v2022_3_0_0 {
         dst_alt: Vec<String>,
         nbf: i64,
         exp: i64,
-        jti: String,
+        jti: Uuid,
     }
 
     fn dvls_host() -> impl Strategy<Value = String> {
@@ -231,12 +233,12 @@ mod as_of_v2022_3_0_0 {
         fn dvls_association_claims(
             now: i64
         )(
-            jet_aid in uuid_str(),
+            jet_aid in uuid_typed(),
             jet_ap in dvls_application_protocol_assoc(),
             jet_gw_id in uuid_typed(),
             dst_hst in dvls_host(),
             dst_alt in dvls_alternate_hosts(),
-            jti in uuid_str(),
+            jti in uuid_typed(),
         ) -> DvlsAssociationClaims {
             DvlsAssociationClaims {
                 ty: TYPE_ASSOCIATION,
@@ -284,11 +286,11 @@ mod as_of_v2022_3_0_0 {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         dst_addl: Vec<String>,
         jet_ap: String,
-        jet_aid: String,
+        jet_aid: Uuid,
         jet_gw_id: Uuid,
         nbf: i64,
         exp: i64,
-        jti: String,
+        jti: Uuid,
     }
 
     fn dvls_application_protocol_jmux() -> impl Strategy<Value = String> {
@@ -299,12 +301,12 @@ mod as_of_v2022_3_0_0 {
         fn dvls_jmux_claims(
             now: i64
         )(
-            jet_aid in uuid_str(),
+            jet_aid in uuid_typed(),
             jet_ap in dvls_application_protocol_jmux(),
             jet_gw_id in uuid_typed(),
             dst_hst in dvls_host(),
             dst_addl in dvls_alternate_hosts(),
-            jti in uuid_str(),
+            jti in uuid_typed(),
         ) -> DvlsJmuxClaims {
             DvlsJmuxClaims {
                 dst_hst,
@@ -351,7 +353,7 @@ mod as_of_v2022_3_0_0 {
         jet_gw_id: Uuid,
         nbf: i64,
         exp: i64,
-        jti: String,
+        jti: Uuid,
     }
 
     fn dvls_krb_realm() -> impl Strategy<Value = String> {
@@ -369,7 +371,7 @@ mod as_of_v2022_3_0_0 {
             krb_kdc in dvls_krb_kdc(),
             krb_realm in dvls_krb_realm(),
             jet_gw_id in uuid_typed(),
-            jti in uuid_str(),
+            jti in uuid_typed(),
         ) -> DvlsKdcClaims {
             DvlsKdcClaims {
                 krb_kdc,
@@ -411,7 +413,7 @@ mod as_of_v2022_3_0_0 {
         jrl: DvlsJrl,
         jet_gw_id: Uuid,
         iat: i64,
-        jti: String,
+        jti: Uuid,
     }
 
     prop_compose! {
@@ -420,7 +422,7 @@ mod as_of_v2022_3_0_0 {
         )(
             jrl in dvls_jrl(),
             jet_gw_id in uuid_typed(),
-            jti in uuid_str(),
+            jti in uuid_typed(),
         ) -> DvlsJrlClaims {
             DvlsJrlClaims {
                 jrl,
@@ -497,7 +499,7 @@ mod as_of_v2022_2_0_0 {
         dst_alt: Vec<String>,
         nbf: i64,
         exp: i64,
-        jti: String,
+        jti: Uuid,
     }
 
     fn dvls_host() -> impl Strategy<Value = String> {
@@ -520,7 +522,7 @@ mod as_of_v2022_2_0_0 {
             jet_ap in dvls_application_protocol_assoc(),
             dst_hst in dvls_host(),
             dst_alt in dvls_alternate_hosts(),
-            jti in uuid_str(),
+            jti in uuid_typed(),
         ) -> DvlsAssociationClaims {
             DvlsAssociationClaims {
                 ty: TYPE_ASSOCIATION,
@@ -569,7 +571,7 @@ mod as_of_v2022_2_0_0 {
         jet_aid: String,
         nbf: i64,
         exp: i64,
-        jti: String,
+        jti: Uuid,
     }
 
     fn dvls_application_protocol_jmux() -> impl Strategy<Value = String> {
@@ -584,7 +586,7 @@ mod as_of_v2022_2_0_0 {
             jet_ap in dvls_application_protocol_jmux(),
             dst_hst in dvls_host(),
             dst_addl in dvls_alternate_hosts(),
-            jti in uuid_str(),
+            jti in uuid_typed(),
         ) -> DvlsJmuxClaims {
             DvlsJmuxClaims {
                 dst_hst,
@@ -644,7 +646,7 @@ mod as_of_v2021_2_13_0 {
     struct DvlsAssociationClaims {
         #[serde(rename = "type")]
         ty: &'static str,
-        jet_aid: String,
+        jet_aid: Uuid,
         jet_ap: String,
         jet_cm: &'static str,
         dst_hst: String,
@@ -652,6 +654,7 @@ mod as_of_v2021_2_13_0 {
         dst_alt: Vec<String>,
         nbf: i64,
         exp: i64,
+        jti: Uuid,
     }
 
     fn dvls_host() -> impl Strategy<Value = String> {
@@ -670,10 +673,11 @@ mod as_of_v2021_2_13_0 {
         fn dvls_association_claims(
             now: i64
         )(
-            jet_aid in uuid_str(),
+            jet_aid in uuid_typed(),
             jet_ap in dvls_application_protocol(),
             dst_hst in dvls_host(),
             dst_alt in dvls_alternate_hosts(),
+            jti in uuid_typed(),
         ) -> DvlsAssociationClaims {
             DvlsAssociationClaims {
                 ty: TYPE_ASSOCIATION,
@@ -684,6 +688,7 @@ mod as_of_v2021_2_13_0 {
                 dst_alt,
                 nbf: now,
                 exp: now + 1000,
+                jti,
             }
         }
     }
@@ -752,6 +757,7 @@ mod as_of_v2021_2_4 {
         scope: String,
         nbf: i64,
         exp: i64,
+        jti: Uuid,
     }
 
     fn dvls_access_scope() -> impl Strategy<Value = String> {
@@ -761,12 +767,14 @@ mod as_of_v2021_2_4 {
     prop_compose! {
         fn dvls_scope_claims(now: i64)(
             scope in dvls_access_scope(),
+            jti in uuid_typed(),
         ) -> DvlsScopeClaims {
             DvlsScopeClaims {
                 ty: TYPE_SCOPE,
                 scope,
                 nbf: now,
                 exp: now + 1000,
+                jti,
             }
         }
     }
@@ -782,66 +790,6 @@ mod as_of_v2021_2_4 {
         now: i64,
     ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
-            encode_decode_round_trip(
-                &pub_key,
-                &priv_key,
-                claims,
-                None,
-                None,
-                &token_cache,
-                &jrl,
-                &active_recordings,
-            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
-        });
-    }
-}
-
-mod as_of_v2021_1_7_0 {
-    use super::*;
-
-    const JET_CM: &str = "fwd";
-    const JET_AP: &str = "rdp";
-
-    #[derive(Serialize, Debug)]
-    struct DvlsAssociationClaims {
-        jet_ap: &'static str,
-        jet_cm: &'static str,
-        dst_hst: String,
-        nbf: i64,
-        exp: i64,
-    }
-
-    fn dvls_host() -> impl Strategy<Value = String> {
-        "[a-z]{1,10}\\.[a-z]{1,5}:[0-9]{3,4}"
-    }
-
-    prop_compose! {
-        fn dvls_association_claims(
-            now: i64
-        )(
-            dst_hst in dvls_host(),
-        ) -> DvlsAssociationClaims {
-            DvlsAssociationClaims {
-                jet_ap: JET_AP,
-                jet_cm: JET_CM,
-                dst_hst,
-                nbf: now,
-                exp: now + 1000,
-            }
-        }
-    }
-
-    /// Make sure current Gateway is able to validate association tokens provided by DVLS
-    #[rstest]
-    fn association_token_validation(
-        token_cache: TokenCache,
-        jrl: Mutex<JrlTokenClaims>,
-        active_recordings: ActiveRecordings,
-        priv_key: PrivateKey,
-        pub_key: PublicKey,
-        now: i64,
-    ) {
-        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
             encode_decode_round_trip(
                 &pub_key,
                 &priv_key,
