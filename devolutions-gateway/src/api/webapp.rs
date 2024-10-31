@@ -338,7 +338,7 @@ pub(crate) async fn sign_session_token(
                 jet_flt: false,
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
-                jti: Some(jti),
+                jti,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

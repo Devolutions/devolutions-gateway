@@ -399,9 +399,7 @@ pub struct AssociationTokenClaims {
     pub exp: i64,
 
     /// Unique ID for this token
-    ///
-    /// DVLS up to 2022.1.9 do not generate this claim.
-    pub jti: Option<Uuid>,
+    pub jti: Uuid,
 }
 
 impl AssociationTokenClaims {
@@ -447,9 +445,7 @@ pub struct ScopeTokenClaims {
     exp: i64,
 
     /// JWT "JWT ID" claim, the unique ID for this token
-    ///
-    /// DVLS up to 2022.1.9 do not generate this claim.
-    jti: Option<Uuid>,
+    jti: Uuid,
 }
 
 // ----- bridge claims ----- //
@@ -951,20 +947,12 @@ fn validate_token_impl(
     match claims {
         // Mitigate replay attacks for RDP associations by rejecting token reuse from a different
         // source address IP (RDP requires multiple connections, so we can't just reject everything)
-        AccessTokenClaims::Association(
-            AssociationTokenClaims {
-                jti: Some(id),
-                exp,
-                jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
-                ..
-            }
-            | AssociationTokenClaims {
-                jet_aid: id,
-                exp,
-                jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
-                ..
-            },
-        ) => {
+        AccessTokenClaims::Association(AssociationTokenClaims {
+            jti: id,
+            exp,
+            jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
+            ..
+        }) => {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
             match token_cache.lock().entry(id) {
@@ -993,10 +981,9 @@ fn validate_token_impl(
         }
 
         // All other tokens can't be reused even if source IP is identical
-        AccessTokenClaims::Association(AssociationTokenClaims { jti: Some(id), exp, .. })
-        | AccessTokenClaims::Association(AssociationTokenClaims { jet_aid: id, exp, .. })
-        | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
+        AccessTokenClaims::Association(AssociationTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
@@ -1052,9 +1039,6 @@ fn validate_token_impl(
             jet_rop: RecordingOperation::Pull,
             ..
         }) => {}
-
-        // No mitigation if token has no ID (might be disallowed in the future)
-        AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
 
         // KDC tokens may be long-lived and reusing them is allowed
         AccessTokenClaims::Kdc(_) => {}
@@ -1195,7 +1179,7 @@ mod serde_impl {
         #[serde(default)]
         jet_ttl: SessionTtl,
         exp: i64,
-        jti: Option<Uuid>, // DVLS up to 2022.1.9 do not generate this claim.
+        jti: Uuid,
     }
 
     #[derive(Serialize, Deserialize)]
