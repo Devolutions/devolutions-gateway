@@ -622,6 +622,83 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.listActiveRecordings]
+==== listActiveRecordings
+
+`GET /jet/jrec/list-active`
+
+
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/jrec/list-active/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+
+===== Return Type
+
+
+<<List>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| List of active recordings on this Gateway instance
+| List[<<UUID>>] 
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/list-active/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.listRecordings]
 ==== listRecordings
 

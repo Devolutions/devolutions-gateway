@@ -148,6 +148,7 @@ Class | Method | HTTP request | Description
 *HealthApi* | [**GetHealth**](docs/HealthApi.md#gethealth) | **GET** /jet/health | Performs a health check
 *HeartbeatApi* | [**GetHeartbeat**](docs/HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a heartbeat check
 *JrecApi* | [**DeleteRecording**](docs/JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Deletes a recording stored on this instance
+*JrecApi* | [**ListActiveRecordings**](docs/JrecApi.md#listactiverecordings) | **GET** /jet/jrec/list-active | 
 *JrecApi* | [**ListRecordings**](docs/JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance
 *JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
