@@ -39,17 +39,15 @@ pub(crate) async fn stream_file(
         })
         .await;
 
-        let res = match streaming_result {
-            Ok(res) => res,
+        match streaming_result {
             Err(e) => {
-                error!("Error while streaming file on join: {:?}", e);
-                return;
+                error!(?e, "streaming file task join failed");
             }
+            Ok(Err(e)) => {
+                error!(?e, "streaming file failed");
+            }
+            _ => {}
         };
-
-        if let Err(e) = res {
-            error!("Error while streaming file: {:?}", e);
-        }
     });
 
     Ok(upgrade_result)
