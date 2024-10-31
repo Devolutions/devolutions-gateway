@@ -1,14 +1,13 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::Context as _;
 use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
-use axum::routing::{self, get};
 use axum::Router;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{field, Instrument};
+use tracing::{field, Instrument as _};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
@@ -22,7 +21,7 @@ use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, 
 use crate::{utils, DgwState};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    use routing::MethodFilter;
+    use axum::routing::{self, get, MethodFilter};
 
     let router = Router::new()
         .route("/tcp/:id", get(fwd_tcp))
@@ -340,9 +339,10 @@ async fn fwd_http(
     // 4. Forward the request.
 
     let response = if matches!(request.uri().scheme_str(), Some("ws" | "wss")) {
-        // 4.a Perform the WebSocket upgrade.
+        // 4.a Prepare the WebSocket upgrade.
 
-        // We are discarding the original body. There is no HTTP body when performing a WebSocket upgrade.
+        // We are discarding the original body.
+        // There is no HTTP body when performing a WebSocket upgrade.
         let (mut parts, _) = request.into_parts();
 
         let client_ws = WebSocketUpgrade::from_request_parts(&mut parts, &state).await.map_err(
@@ -356,6 +356,7 @@ async fn fwd_http(
         let request = axum::http::Request::from_parts(parts, ());
         let request_uri = request.uri().clone();
 
+        // TODO: Manually configure the TlsConnector and take the `dangerous_tls` parameter into account.
         let (server_ws, server_ws_response) = connect_async(request).await.map_err(
             HttpError::bad_gateway()
                 .with_msg("WebSocket connection to target server")
@@ -363,7 +364,7 @@ async fn fwd_http(
         )?;
         let server_stream = tokio_tungstenite_websocket_compat(server_ws);
 
-        debug!(?server_ws_response, "Connected to target server");
+        debug!(?server_ws_response, %dangerous_tls, "Connected to target server");
 
         // 4.c Start WebSocket forwarding.
 
@@ -421,7 +422,7 @@ async fn fwd_http(
 
         debug!(?request);
 
-        info!(target = %request.url(), "Forward HTTP request");
+        info!(target = %request.url(), %dangerous_tls, "Forward HTTP request");
 
         let client = if dangerous_tls { &*DANGEROUS_CLIENT } else { &*CLIENT };
 
