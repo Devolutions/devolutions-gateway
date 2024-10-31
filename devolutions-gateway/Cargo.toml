@@ -29,6 +29,7 @@ ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/I
 ceviche = "0.6.1"
 picky-krb = "0.9"
 network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
+streamer = { path = "../crates/streamer" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -101,7 +102,6 @@ etherparse = "0.15"
 
 # For KDC proxy
 portpicker = "0.1"
-streamer = { version = "0.1.0", path = "../crates/streamer" }
 
 [target.'cfg(windows)'.dependencies]
 rustls-cng = { version = "0.5", default-features = false, features = ["logging", "tls12", "ring"] }

@@ -197,6 +197,30 @@ paths:
       security:
       - scope_token:
         - gateway.recordings.read
+  /jet/jrec/list-active:
+    get:
+      tags:
+      - Jrec
+      operationId: ListActiveRecordings
+      responses:
+        '200':
+          description: List of active recordings on this Gateway instance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      security:
+      - scope_token:
+        - gateway.recordings.read
   /jet/jrec/pull/{id}/{filename}:
     get:
       tags:
