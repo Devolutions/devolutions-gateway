@@ -18,6 +18,7 @@ use uuid::Uuid;
         crate::api::jrl::get_jrl_info,
         crate::api::jrec::jrec_delete,
         crate::api::jrec::list_recordings,
+        crate::api::jrec::list_active_recordings,
         crate::api::jrec::pull_recording_file,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,

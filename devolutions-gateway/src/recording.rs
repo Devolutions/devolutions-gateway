@@ -24,6 +24,7 @@ use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
 const DISCONNECTED_TTL_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
+const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,17 +114,23 @@ where
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
                 // Wrap SignalWriter inside a BufWriter to reduce the number of flushes.
-                let (file, mut flush_signal) = SignalWriter::new(file);
+                let (file, flush_signal) = SignalWriter::new(file);
                 // larger buffer size to reduce the number of flushes
-                let mut file = BufWriter::with_capacity(1024 * 100, file);
-
-                let shutdown_signal = shutdown_signal.wait();
+                let mut file = BufWriter::with_capacity(BUFFER_WRITER_SIZE, file);
+                let mut shutdown_signal_clone = shutdown_signal.clone();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
                 let signal_loop = tokio::spawn({
                     let recordings = recordings.clone();
                     async move {
-                        while flush_signal.recv().await.is_some() {
-                            recordings.new_chunk_appended(session_id)?;
+                        loop {
+                            tokio::select! {
+                                _ = flush_signal.notified() => {
+                                    recordings.new_chunk_appended(session_id)?;
+                                },
+                                _ = shutdown_signal_clone.wait() => {
+                                    break;
+                                },
+                            }
                         }
                         Ok::<_, anyhow::Error>(())
                     }
@@ -133,7 +140,7 @@ where
                     res = copy_fut => {
                         res.context("JREC streaming to file").map(|_| ())
                     },
-                    _ = shutdown_signal => {
+                    _ = shutdown_signal.wait() => {
                         trace!("Received shutdown signal");
                         client_stream.shutdown().await.context("shutdown")
                     },
@@ -313,7 +320,7 @@ impl RecordingMessageSender {
             .context("couldn't send UpdateRecordingPolicy message")
     }
 
-    pub(crate) fn on_new_chunk_appended(&self, recording_id: Uuid, tx: oneshot::Sender<()>) -> anyhow::Result<()> {
+    pub(crate) fn add_new_chunk_listener(&self, recording_id: Uuid, tx: oneshot::Sender<()>) -> anyhow::Result<()> {
         let mut lock = self.flush_map.lock();
         let senders = lock.entry(recording_id);
         let senders = senders.or_default();

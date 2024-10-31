@@ -15,7 +15,7 @@ pub mod reopenable_file;
 pub mod signal_when_flush;
 pub mod timed_tag_writer;
 
-use crate::traits::Reopenable;
+use crate::reopenable::Reopenable;
 
 pub fn webm_stream(
     output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static, // A websocket usually

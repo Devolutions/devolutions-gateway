@@ -30,7 +30,7 @@ pub(crate) async fn stream_file(
             webm_stream(websocket_stream, streaming_file, shutdown_signal, move || {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 recordings
-                    .on_new_chunk_appended(recording_id, tx)
+                    .add_new_chunk_listener(recording_id, tx)
                     .expect("Failed to send on_appended message"); // early development
                 rx
             })
