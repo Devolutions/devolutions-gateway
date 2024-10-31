@@ -1,7 +1,7 @@
 use std::io::{self, Read};
 use std::{io::Seek, path::PathBuf};
 
-use crate::traits::Reopenable;
+use crate::reopenable::Reopenable;
 
 #[cfg(windows)]
 const FILE_SHARE_WRITE: u32 = 0x00000002;

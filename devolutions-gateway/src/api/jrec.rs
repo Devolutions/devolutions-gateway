@@ -21,17 +21,23 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    Router::new()
+    let router = Router::new()
         .route("/push/:id", get(jrec_push))
         .route("/delete/:id", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
-        .route("/list-active", get(list_active_recordings))
-        .route("/shadow/:id/:filename", get(shadow_recording))
         .route("/play", get(get_player))
-        .route("/play/*path", get(get_player))
-        .with_state(state)
+        .route("/play/*path", get(get_player));
+
+    if state.conf_handle.get_conf().debug.enable_unstable {
+        router
+            .route("/list-active", get(list_active_recordings))
+            .route("/shadow/:id/:filename", get(shadow_recording))
+    } else {
+        router
+    }
+    .with_state(state)
 }
 
 #[derive(Deserialize)]

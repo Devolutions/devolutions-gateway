@@ -1,16 +1,15 @@
-use std::{future::Future, task::Poll};
-
-use tracing::{debug, warn};
+use std::{sync::Arc, task::Poll};
 
 pub struct SignalWriter<W> {
     writer: W,
-    sender: tokio::sync::mpsc::Sender<()>,
+    notify: Arc<tokio::sync::Notify>,
 }
 
 impl<W> SignalWriter<W> {
-    pub fn new(writer: W) -> (Self, tokio::sync::mpsc::Receiver<()>) {
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        (Self { writer, sender }, receiver)
+    pub fn new(writer: W) -> (Self, Arc<tokio::sync::Notify>) {
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let clone = notify.clone();
+        (Self { writer, notify }, clone)
     }
 }
 
@@ -34,17 +33,7 @@ where
             return Poll::Pending;
         };
 
-        let send_future = self.sender.send(());
-        match Box::pin(send_future).as_mut().poll(cx) {
-            Poll::Ready(Err(e)) => {
-                debug!("error sending signal: {}", e);
-            }
-            Poll::Pending => {
-                warn!("flushed but failed to send signal");
-            }
-            _ => {}
-        };
-
+        self.notify.notify_waiters();
         Poll::Ready(res)
     }
 
