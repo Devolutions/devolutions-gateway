@@ -362,6 +362,7 @@ fn token_cache(
             .validate(&token);
 
         let can_reuse = matches!(claims, TokenClaims::Kdc(_))
+            || matches!(claims, TokenClaims::Bridge(_))
             || same_ip
                 && matches!(
                     claims,
