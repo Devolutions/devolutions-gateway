@@ -375,7 +375,13 @@ pub fn generate_token(
                 nbf,
                 jti,
                 target_host: &target_host,
-                jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_ap: jet_ap.unwrap_or_else(|| {
+                    if target_host.starts_with("https") {
+                        ApplicationProtocol::Https
+                    } else {
+                        ApplicationProtocol::Http
+                    }
+                }),
                 jet_rec: if jet_rec {
                     RecordingPolicy::Stream
                 } else {
