@@ -93,6 +93,7 @@
     }
   },
   "required": ["Listeners"],
+  "additionalProperties": true,
   "definitions": {
     "ConfDataPubKeyFormat": {
       "type": "object",
@@ -107,7 +108,8 @@
           "$ref": "#/definitions/DataEncoding"
         }
       },
-      "required": ["Value"]
+      "required": ["Value"],
+      "additionalProperties": false
     },
     "ConfDataPrivKeyFormat": {
       "type": "object",
@@ -122,7 +124,8 @@
           "$ref": "#/definitions/DataEncoding"
         }
       },
-      "required": ["Value"]
+      "required": ["Value"],
+      "additionalProperties": false
     },
     "DataEncoding": {
       "type": "string",
@@ -155,7 +158,8 @@
           "$ref": "#/definitions/DataEncoding"
         }
       },
-      "required": ["Id", "Value"]
+      "required": ["Id", "Value"],
+      "additionalProperties": false
     },
     "CertSource": {
       "type": "string",
@@ -179,7 +183,8 @@
           "format": "uri"
         }
       },
-      "required": ["InternalUrl", "ExternalUrl"]
+      "required": ["InternalUrl", "ExternalUrl"],
+      "additionalProperties": false
     },
     "Subscriber": {
       "type": "object",
@@ -192,7 +197,8 @@
           "type": "string"
         }
       },
-      "required": ["Url", "Token"]
+      "required": ["Url", "Token"],
+      "additionalProperties": false
     },
     "NgrokConf": {
       "type": "object",
@@ -219,15 +225,15 @@
           }
         }
       },
-      "required": ["AuthToken"]
+      "required": ["AuthToken"],
+      "additionalProperties": false
     },
     "NgrokTunnelConf": {
-      "type": "object",
       "oneOf": [
         {
           "type": "object",
           "properties": {
-            "Proto": {
+            "proto": {
               "type": "string",
               "enum": ["tcp"]
             },
@@ -252,12 +258,13 @@
               "default": []
             }
           },
-          "required": ["Proto", "RemoteAddr"]
+          "required": ["proto", "RemoteAddr"],
+          "additionalProperties": false
         },
         {
           "type": "object",
           "properties": {
-            "Proto": {
+            "proto": {
               "type": "string",
               "enum": ["http"]
             },
@@ -288,7 +295,8 @@
               "default": []
             }
           },
-          "required": ["Proto", "Domain"]
+          "required": ["proto", "Domain"],
+          "additionalProperties": false
         }
       ]
     },
@@ -313,7 +321,7 @@
         },
         "LoginLimitRate": {
           "type": "integer",
-          "description": "Maximum number of login requests per minute",
+          "description": "The maximum number of login requests per minute",
           "default": 10
         },
         "UsersFile": {
@@ -323,7 +331,8 @@
           "type": "string"
         }
       },
-      "required": ["Enabled", "Authentication"]
+      "required": ["Enabled", "Authentication"],
+      "additionalProperties": false
     },
     "WebAppAuth": {
       "type": "string",
@@ -376,7 +385,8 @@
           "type": "integer"
         }
       },
-      "required": ["RegistryUrl", "Username", "Password", "ImageName"]
+      "required": ["RegistryUrl", "Username", "Password", "ImageName"],
+      "additionalProperties": false
     },
     "SogarUser": {
       "type": "object",
@@ -390,7 +400,8 @@
         "Permission": {
           "$ref": "#/definitions/SogarPermission"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "SogarPermission": {
       "type": "string",
@@ -399,31 +410,32 @@
     "DebugConf": {
       "type": "object",
       "properties": {
-        "DumpTokens": {
+        "dump_tokens": {
           "type": "boolean",
           "default": false
         },
-        "DisableTokenValidation": {
+        "disable_token_validation": {
           "type": "boolean",
           "default": false
         },
-        "OverrideKdc": {
+        "override_kdc": {
           "$ref": "#/definitions/TargetAddr"
         },
-        "LogDirectives": {
+        "log_directives": {
           "type": "string"
         },
-        "CapturePath": {
+        "capture_path": {
           "type": "string"
         },
-        "LibXmfPath": {
+        "lib_xmf_path": {
           "type": "string"
         },
-        "EnableUnstable": {
+        "enable_unstable": {
           "type": "boolean",
           "default": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "TargetAddr": {
       "type": "string"
