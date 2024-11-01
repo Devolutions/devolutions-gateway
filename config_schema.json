@@ -1,0 +1,229 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Devolutions Gateway Configuration",
+  "description": "JSON schema for configuring Devolutions Gateway",
+  "type": "object",
+  "properties": {
+    "Id": {
+      "type": "string",
+      "description": "UUID for this Gateway instance."
+    },
+    "Hostname": {
+      "type": "string",
+      "description": "Hostname for this Gateway instance, used in external URLs."
+    },
+    "ProvisionerPublicKeyFile": {
+      "type": "string",
+      "description": "Path to the provisioner public key."
+    },
+    "ProvisionerPrivateKeyFile": {
+      "type": "string",
+      "description": "Path to the provisioner private key."
+    },
+    "SubProvisionerPublicKey": {
+      "type": "object",
+      "properties": {
+        "Id": {
+          "type": "string",
+          "description": "UUID for the subkey."
+        },
+        "Value": {
+          "type": "string",
+          "description": "Binary-to-text-encoded key data."
+        },
+        "Format": {
+          "type": "string",
+          "enum": ["Spki", "Pkcs1"],
+          "default": "Spki",
+          "description": "Format of the key data."
+        },
+        "Encoding": {
+          "type": "string",
+          "enum": ["Multibase", "Base64", "Base64Pad", "Base64Url", "Base64UrlPad"],
+          "default": "Multibase",
+          "description": "Binary-to-text encoding for the key data."
+        }
+      },
+      "required": ["Id", "Value"]
+    },
+    "DelegationPrivateKeyFile": {
+      "type": "string",
+      "description": "Path to the delegation private key."
+    },
+    "TlsCertificateSource": {
+      "type": "string",
+      "enum": ["External", "System"],
+      "default": "External",
+      "description": "Source of the TLS certificate."
+    },
+    "TlsCertificateSubjectName": {
+      "type": "string",
+      "description": "Subject name for system-sourced TLS certificates."
+    },
+    "TlsCertificateStoreName": {
+      "type": "string",
+      "default": "My",
+      "description": "Certificate Store name for system-sourced TLS certificates."
+    },
+    "TlsCertificateStoreLocation": {
+      "type": "string",
+      "enum": ["CurrentUser", "CurrentService", "LocalMachine"],
+      "default": "CurrentUser",
+      "description": "Location of the system certificate store."
+    },
+    "TlsCertificateFile": {
+      "type": "string",
+      "description": "Path to the TLS certificate file."
+    },
+    "TlsPrivateKeyFile": {
+      "type": "string",
+      "description": "Path to the TLS private key file."
+    },
+    "TlsPrivateKeyPassword": {
+      "type": "string",
+      "description": "Password for decrypting the TLS private key (if applicable)."
+    },
+    "Listeners": {
+      "type": "array",
+      "description": "Array of listener configurations.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "InternalUrl": {
+            "type": "string",
+            "description": "Internal URL for this listener."
+          },
+          "ExternalUrl": {
+            "type": "string",
+            "description": "External URL for this listener."
+          }
+        },
+        "required": ["InternalUrl"]
+      }
+    },
+    "Subscriber": {
+      "type": "object",
+      "properties": {
+        "Url": {
+          "type": "string",
+          "description": "URL for notifications."
+        },
+        "Token": {
+          "type": "string",
+          "description": "Bearer token for HTTP requests."
+        }
+      }
+    },
+    "RecordingPath": {
+      "type": "string",
+      "description": "Path for storing recordings."
+    },
+    "Ngrok": {
+      "type": "object",
+      "properties": {
+        "AuthToken": {
+          "type": "string",
+          "description": "Authentication token for ngrok."
+        },
+        "HeartbeatInterval": {
+          "type": "integer",
+          "description": "Interval for heartbeats to ngrok servers in seconds."
+        },
+        "HeartbeatTolerance": {
+          "type": "integer",
+          "description": "Tolerance for heartbeat response time in seconds."
+        },
+        "Metadata": {
+          "type": "string",
+          "description": "User-defined metadata for ngrok sessions."
+        },
+        "ServerAddr": {
+          "type": "string",
+          "description": "ngrok server URL."
+        },
+        "Tunnels": {
+          "type": "object",
+          "description": "Map of ngrok tunnels.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "AllowCidrs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Array of allowed CIDRs."
+              },
+              "DenyCidrs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Array of denied CIDRs."
+              },
+              "Metadata": {
+                "type": "string",
+                "description": "Metadata for ngrok tunnel."
+              },
+              "Proto": {
+                "type": "string",
+                "enum": ["http", "tcp"],
+                "description": "Protocol for the tunnel."
+              },
+              "Domain": {
+                "type": "string",
+                "description": "Domain registered in ngrok."
+              },
+              "CircuitBreaker": {
+                "type": "number",
+                "description": "Circuit breaker threshold for HTTP tunnels."
+              },
+              "Compression": {
+                "type": "boolean",
+                "description": "Enable HTTP response compression."
+              },
+              "RemoteAddr": {
+                "type": "string",
+                "description": "Bind address for TCP tunnels."
+              }
+            },
+            "required": ["Proto"]
+          }
+        }
+      }
+    },
+    "WebApp": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean",
+          "description": "Enable standalone web application."
+        },
+        "Authentication": {
+          "type": "string",
+          "enum": ["Custom", "None"],
+          "description": "Authentication method for web app access."
+        },
+        "AppTokenMaximumLifetime": {
+          "type": "integer",
+          "description": "Maximum lifetime for web app tokens in seconds."
+        },
+        "LoginLimitRate": {
+          "type": "integer",
+          "description": "Max login attempts per minute."
+        },
+        "UsersFile": {
+          "type": "string",
+          "description": "Path to users file for 'Custom' auth."
+        },
+        "StaticRootPath": {
+          "type": "string",
+          "description": "Path to static files for web app."
+        }
+      }
+    },
+    "VerbosityProfile": {
+      "type": "string",
+      "enum": ["Default", "Debug", "Tls", "All", "Quiet"],
+      "default": "Default",
+      "description": "Logging verbosity profile."
+    }
+  },
+  "required": ["Id", "Hostname"]
+}
