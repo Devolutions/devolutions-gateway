@@ -912,9 +912,9 @@ For example: 'a.b.c' is matched by '*.b.c', but is not matched by '*.c' (the wil
         ));
 
         ctx.attach_link(
-            "Public key certificate",
+            "Learn more about public key certificates",
             "https://en.wikipedia.org/wiki/Public_key_certificate",
-            "more information on certificate structure, types such as Wildcard certificates, certificate authorities, and so on",
+            "Wikipedia page with more information on certificate structure, types such as Wildcard certificates, certificate authorities, and so on",
         );
     }
 
@@ -927,9 +927,9 @@ Please ensure the following:
 If none of the above applies, you could be facing a Man-in-the-Middle (MITM) attack.".to_owned());
 
         ctx.attach_link(
-            "Man-in-the-middle attack",
+            "What is a man-in-the-middle attack?",
             "https://en.wikipedia.org/wiki/Man-in-the-middle_attack",
-            "more information on MITM attacks",
+            "Wikipedia page with more information on MITM attacks",
         );
     }
 
@@ -970,9 +970,9 @@ You need to generate a separate certificate valid for server authentication."
             .expect("writing to a String will typially not cause any error (unless OOM)");
 
         ctx.attach_link(
-            "x509.io Certificates Viewer",
+            "View certificate details on x509.io",
             href,
-            "view the extracted certification chain using x509.io certificates viewer in the browser",
+            "View the extracted certification chain using x509.io certificates viewer in the browser",
         );
 
         fn write_x509_io_link<C>(mut out: impl fmt::Write, certs: C) -> fmt::Result
