@@ -19,17 +19,17 @@ openapi = ["dep:utoipa"]
 [dependencies]
 
 # In-house
-transport = { path = "../crates/transport" }
-jmux-proxy = { path = "../crates/jmux-proxy" }
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
+jmux-proxy = { path = "../crates/jmux-proxy" }
+network-scanner = { path = "../crates/network-scanner" }
+streamer = { path = "../crates/streamer" }
+transport = { path = "../crates/transport" }
 ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861", features = ["std"] }
 ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861" }
 ceviche = "0.6.1"
 picky-krb = "0.9"
-network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
-streamer = { path = "../crates/streamer" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

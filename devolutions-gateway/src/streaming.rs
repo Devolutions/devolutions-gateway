@@ -12,26 +12,28 @@ pub(crate) async fn stream_file(
     recordings: crate::recording::RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
-    // 1.identify the file type
+    // 1. Identify the file type.
     if path.extension() != Some(RecordingFileType::WebM.extension()) {
-        return Err(anyhow::anyhow!("Invalid file type"));
+        return Err(anyhow::anyhow!("invalid file type"));
     }
-    // 2.if the file is actively being recorded, then proceed
+
+    // 2. If the file is actively being recorded, then proceed.
     let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(recording_id).await else {
-        return Err(anyhow::anyhow!("File is not being recorded"));
+        return Err(anyhow::anyhow!("file is not being recorded"));
     };
 
     let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
 
     let upgrade_result = ws.on_upgrade(move |socket| async move {
         let websocket_stream = websocket_compat(socket);
-        // Spawn blocking because webm_stream is blocking
+
+        // Spawn blocking because webm_stream is blocking.
         let streaming_result = tokio::task::spawn_blocking(move || {
             webm_stream(websocket_stream, streaming_file, shutdown_signal, move || {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 recordings
                     .add_new_chunk_listener(recording_id, tx)
-                    .expect("Failed to send on_appended message"); // early development
+                    .expect("failed to send on_appended message"); // early development
                 rx
             })
             .context("webm_stream failed")?;

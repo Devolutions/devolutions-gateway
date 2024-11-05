@@ -24,7 +24,7 @@ use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
 const DISCONNECTED_TTL_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
-const BUFFER_WRITER_SIZE: usize = 64 * 1024;
+const WRITER_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,14 +109,18 @@ where
             open_options.share_mode(FILE_SHARE_READ);
         }
 
-        debug!(path = %recording_file, "File opened");
-
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
+                debug!(path = %recording_file, "File opened");
+
+                // FIXME: Store and provide "Notify" instead of the logic using an adhoc task.
+                // FIXME: For now, do not use the SignalWriter when enable_unstable = false.
+
                 // Wrap SignalWriter inside a BufWriter to reduce the number of flushes.
-                let (file, flush_signal) = SignalWriter::new(file);
-                // larger buffer size to reduce the number of flushes
-                let mut file = BufWriter::with_capacity(BUFFER_WRITER_SIZE, file);
+                let file = SignalWriter::new(file);
+                let flush_notify = Arc::clone(&file.notify);
+                // Larger buffer size to reduce the number of flushes.
+                let mut file = BufWriter::with_capacity(WRITER_BUFFER_SIZE, file);
                 let mut shutdown_signal_clone = shutdown_signal.clone();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
                 let signal_loop = tokio::spawn({
@@ -124,7 +128,7 @@ where
                     async move {
                         loop {
                             tokio::select! {
-                                _ = flush_signal.notified() => {
+                                _ = flush_notify.notified() => {
                                     recordings.new_chunk_appended(session_id)?;
                                 },
                                 _ = shutdown_signal_clone.wait() => {
@@ -177,8 +181,8 @@ impl ActiveRecordings {
         self.0.lock().contains(&id)
     }
 
-    /// Get the list of active recordings without locking the mutex
-    pub fn copy_set(&self) -> HashSet<Uuid> {
+    /// Returns a copy of the internal HashSet
+    pub fn cloned(&self) -> HashSet<Uuid> {
         self.0.lock().clone()
     }
 

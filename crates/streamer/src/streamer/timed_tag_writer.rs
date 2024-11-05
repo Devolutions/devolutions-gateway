@@ -1,7 +1,6 @@
 use std::sync::Mutex;
 
 use anyhow::Context;
-use tracing::{debug, warn};
 use webm_iterable::{
     matroska_spec::{Master, MatroskaSpec},
     WebmWriter, WriteOptions,
@@ -39,12 +38,12 @@ where
     /// EMBL header -> Segment(Master::Start) -> Tracks -> Cluster(Master::Start) -> Timestamp -> Blocks (SimpleBlock or Block) -> Cluster(Master::End)
     ///                                                            ↑                                         ↓ (cluster start)        ↓
     ///                                                            ↑-----------------------------------------↲------------------------↲
-    /// This function will write the incoming tags to achive these three things
+    /// This function will write the incoming tags to achieve the following:
     /// 1. The Timestamp tag is adjusted with the time_offset, which is the first Timestamp tag value
     /// 2. We make sure when Cluster(Master::Start) is received with another Cluster(Master::Start) in the buffer, we clear the buffer (i.e) enforce the order
     /// 3. We make sure to write Segment(Master::Start) with unknown size, since this is streamed data
     ///
-    #[tracing::instrument(skip(self, tag), level = "debug")]
+    #[instrument(skip(self, tag), level = "debug")]
     pub fn write(&mut self, tag: &MatroskaSpec) -> anyhow::Result<WriteResult> {
         let have_cluster_start_at_0 = self
             .cluster_buffer
@@ -57,24 +56,19 @@ where
 
         let tag_name = mastroka_spec_name(tag);
 
-        // Keeping the cluster buffer in order
+        // Keeping the cluster buffer in order.
         if incoming_tag_is_cluster_start && have_cluster_start_at_0 {
             debug!(
                 ?tag_name,
-                "current tag is Cluster start and cluster buffer is not empty, clearing buffer"
+                "Current tag is Cluster start and cluster buffer is not empty, clearing buffer"
             );
             self.cluster_buffer.clear();
         }
 
-        // Handle the Timestamp tag with offset adjustment
+        // Handle the Timestamp tag with offset adjustment.
         if let MatroskaSpec::Timestamp(timestamp) = *tag {
-            let mut time_offset_lock = self.time_offset.lock().expect("Mutex poisoned");
-            let time_offset = if let Some(time_offset) = time_offset_lock.as_ref() {
-                *time_offset
-            } else {
-                time_offset_lock.replace(timestamp);
-                timestamp
-            };
+            let mut time_offset = self.time_offset.lock().unwrap_or_else(|e| e.into_inner());
+            let time_offset = *time_offset.get_or_insert(timestamp);
 
             let adjusted_timestamp = timestamp.saturating_sub(time_offset);
 
@@ -95,13 +89,13 @@ where
         if have_cluster_start_at_0 && incoming_tag_is_cluster_end {
             debug!(
                 ?tag_name,
-                "current tag is Cluster end and cluster buffer is not empty, writing buffer"
+                "Current tag is Cluster end and cluster buffer is not empty, writing buffer"
             );
             self.cluster_buffer.push(tag.clone());
             for buffered_tag in self.cluster_buffer.drain(..) {
                 self.writer
                     .write(&buffered_tag)
-                    .with_context(|| format!("Failed to write buffered tag: {}", mastroka_spec_name(&buffered_tag)))?;
+                    .with_context(|| format!("failed to write buffered tag: {}", mastroka_spec_name(&buffered_tag)))?;
             }
 
             return Ok(WriteResult::Written);
@@ -110,7 +104,7 @@ where
         if cluster_buffer_is_empty && incoming_tag_is_cluster_start {
             debug!(
                 ?tag_name,
-                "current tag is Cluster start and cluster buffer is empty, writing tag"
+                "Current tag is Cluster start and cluster buffer is empty, writing tag"
             );
             self.cluster_buffer.push(tag.clone());
             return Ok(WriteResult::Buffered);
@@ -132,7 +126,7 @@ where
         debug!(?tag_name, "Writing tag");
         self.writer
             .write(tag)
-            .with_context(|| format!("Failed to write tag: {}", tag_name))?;
+            .with_context(|| format!("failed to write tag: {}", tag_name))?;
 
         Ok(WriteResult::Written)
     }

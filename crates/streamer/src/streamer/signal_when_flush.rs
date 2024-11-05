@@ -2,14 +2,13 @@ use std::{sync::Arc, task::Poll};
 
 pub struct SignalWriter<W> {
     writer: W,
-    notify: Arc<tokio::sync::Notify>,
+    pub notify: Arc<tokio::sync::Notify>,
 }
 
 impl<W> SignalWriter<W> {
-    pub fn new(writer: W) -> (Self, Arc<tokio::sync::Notify>) {
+    pub fn new(writer: W) -> Self {
         let notify = Arc::new(tokio::sync::Notify::new());
-        let clone = notify.clone();
-        (Self { writer, notify }, clone)
+        Self { writer, notify }
     }
 }
 

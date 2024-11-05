@@ -1,9 +1,9 @@
 use channel_writer::ChannelWriter;
-use futures_util::SinkExt;
+use futures_util::SinkExt as _;
 use protocol::ProtocolCodeC;
 use timed_tag_writer::ControlledTagWriter;
 use tokio_util::codec::Framed;
-use tracing::{info, warn, Instrument};
+use tracing::Instrument as _;
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Master, MatroskaSpec},
@@ -18,17 +18,18 @@ pub mod timed_tag_writer;
 use crate::reopenable::Reopenable;
 
 pub fn webm_stream(
-    output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static, // A websocket usually
-    input_stream: impl std::io::Read + Reopenable,                                             // A file usually
+    output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static,
+    input_stream: impl std::io::Read + Reopenable,
     shutdown_signal: devolutions_gateway_task::ShutdownSignal,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    warn!("Starting webm_stream");
+    debug!("Starting webm_stream");
+
     let mut webm_itr = webm_iterable::WebmIterator::new(input_stream, &[]);
     let mut headers = vec![];
     let mut first_cluster_position = None;
 
-    // we extract all the headers before the first cluster
+    // We extract all the headers before the first cluster.
     while let Some(tag) = webm_itr.next() {
         let tag = tag?;
         if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
@@ -40,15 +41,15 @@ pub fn webm_stream(
     }
 
     let Some(mut last_cluster_postion) = first_cluster_position else {
-        // Think Twice, is this senario possible?
-        return Err(anyhow::anyhow!("No cluster found"));
+        // Think twice, is this senario possible?
+        return Err(anyhow::anyhow!("no cluster found"));
     };
 
     warn!(last_cluster_postion, "First cluster position");
 
     let mut codec: Option<String> = None;
 
-    // we run to the last cluster, skipping everything that has been played
+    // We run to the last cluster, skipping everything that has been played.
     while let Some(tag) = webm_itr.next() {
         if let Err(TagIteratorError::UnexpectedEOF { .. }) = tag {
             break;
@@ -69,12 +70,12 @@ pub fn webm_stream(
 
     let framed = Framed::new(output_stream, ProtocolCodeC);
 
-    // ChannelWriter is a writer that writes to a channel
+    // ChannelWriter is a writer that writes to a channel.
     let (writer, receiver) = ChannelWriter::new();
 
     spawn_sending_task(framed, receiver, codec, shutdown_signal);
 
-    // ControlledTagWriter will not write to underlying writer unless the data is valid
+    // ControlledTagWriter will not write to underlying writer unless the data is valid.
     let mut writer = ControlledTagWriter::new(writer);
     warn!(?headers, "Headers sent");
     for header in headers {
@@ -106,7 +107,7 @@ pub fn webm_stream(
         };
 
         if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
-            // The last_emitted_tag_offset is relative to where it starts reading
+            // The last_emitted_tag_offset is relative to where it starts reading.
             last_cluster_postion += webm_itr.last_emitted_tag_offset();
         }
 
@@ -138,8 +139,8 @@ fn spawn_sending_task<W>(
                         None => {
                             break;
                         },
-                        Some(Err(e)) => {
-                            warn!("Error while receiving data: {:?}", e);
+                        Some(Err(error)) => {
+                            warn!(%error, "Error while receiving data");
                             break;
                         },
                         Some(Ok(protocol::ClientMessage::Start)) => {
@@ -166,13 +167,13 @@ fn spawn_sending_task<W>(
 
         Ok::<_, anyhow::Error>(())
     }
-    .instrument(tracing::span!(tracing::Level::INFO, "Streaming WebM task"));
+    .instrument(span!(tracing::Level::INFO, "Streaming WebM task"));
 
     tokio::spawn(async move {
         let task_result = task.await;
 
         if let Err(e) = task_result {
-            tracing::error!("Error while sending data: {:?}", e);
+            error!("Error while sending data: {:?}", e);
         }
     });
 }
