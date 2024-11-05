@@ -56,4 +56,27 @@ namespace Devolutions.Pedm.Client.Model
         Deny = 4
     }
 
+    public static class ElevationKindExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this ElevationKind variant)
+        {
+            switch (variant)
+            {
+                case ElevationKind.AutoApprove:
+                    return "AutoApprove";
+                case ElevationKind.Confirm:
+                    return "Confirm";
+                case ElevationKind.ReasonApproval:
+                    return "ReasonApproval";
+                case ElevationKind.Deny:
+                    return "Deny";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }

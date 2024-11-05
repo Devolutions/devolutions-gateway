@@ -62,7 +62,7 @@ struct RawNamedPipeConnectInfo {
 impl Connected<&NamedPipeServer> for RawNamedPipeConnectInfo {
     fn connect_info(target: &NamedPipeServer) -> Self {
         let handle = HANDLE(target.as_raw_handle().cast());
-        let handle = Handle::new_borrowed(handle).expect("the handled held by NamedPipeServer is valid");
+        let handle = Handle::new_borrowed(handle).expect("the handle held by NamedPipeServer is valid");
         Self { handle }
     }
 }

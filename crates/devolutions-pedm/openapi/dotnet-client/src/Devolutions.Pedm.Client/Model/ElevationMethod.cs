@@ -44,4 +44,23 @@ namespace Devolutions.Pedm.Client.Model
         VirtualAccount = 2
     }
 
+    public static class ElevationMethodExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this ElevationMethod variant)
+        {
+            switch (variant)
+            {
+                case ElevationMethod.LocalAdmin:
+                    return "LocalAdmin";
+                case ElevationMethod.VirtualAccount:
+                    return "VirtualAccount";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }

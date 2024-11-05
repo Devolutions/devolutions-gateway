@@ -7,6 +7,7 @@ use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
 use windows_registry::LOCAL_MACHINE;
 
 pub fn install_dir() -> Result<PathBuf> {
+    // TODO: lookup from registry only works when installed by MSI
     Ok(PathBuf::from_str(
         &LOCAL_MACHINE
             .open(r"SOFTWARE\Devolutions\Agent")?
@@ -17,7 +18,8 @@ pub fn install_dir() -> Result<PathBuf> {
 pub fn desktop_exe() -> Result<PathBuf> {
     let mut exe = install_dir()?;
 
-    exe.push("desktop/DevolutionsPedmDesktop.exe");
+    exe.push("desktop");
+    exe.push("DevolutionsDesktopAgent.exe");
 
     Ok(exe)
 }
@@ -28,6 +30,7 @@ pub enum DesktopMode {
 
 pub fn launch(mode: &DesktopMode) -> Result<()> {
     let mut base_command = Command::new(desktop_exe()?);
+    base_command.arg(desktop_exe()?);
     base_command.arg(
         Process::current_process()
             .token(TOKEN_QUERY)?

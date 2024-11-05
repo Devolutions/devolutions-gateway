@@ -39,11 +39,6 @@ Class | Method | HTTP request | Description
 *DefaultApi* | [**policy_profiles_id_get**](docs/DefaultApi.md#policy_profiles_id_get) | **Get** /policy/profiles/{id} | 
 *DefaultApi* | [**policy_profiles_id_put**](docs/DefaultApi.md#policy_profiles_id_put) | **Put** /policy/profiles/{id} | 
 *DefaultApi* | [**policy_profiles_post**](docs/DefaultApi.md#policy_profiles_post) | **Post** /policy/profiles | 
-*DefaultApi* | [**policy_rules_get**](docs/DefaultApi.md#policy_rules_get) | **Get** /policy/rules | 
-*DefaultApi* | [**policy_rules_id_delete**](docs/DefaultApi.md#policy_rules_id_delete) | **Delete** /policy/rules/{id} | 
-*DefaultApi* | [**policy_rules_id_get**](docs/DefaultApi.md#policy_rules_id_get) | **Get** /policy/rules/{id} | 
-*DefaultApi* | [**policy_rules_id_put**](docs/DefaultApi.md#policy_rules_id_put) | **Put** /policy/rules/{id} | 
-*DefaultApi* | [**policy_rules_post**](docs/DefaultApi.md#policy_rules_post) | **Post** /policy/rules | 
 *DefaultApi* | [**revoke_post**](docs/DefaultApi.md#revoke_post) | **Post** /revoke | 
 *DefaultApi* | [**status_get**](docs/DefaultApi.md#status_get) | **Get** /status | 
 
@@ -51,7 +46,6 @@ Class | Method | HTTP request | Description
 ## Documentation For Models
 
  - [Application](docs/Application.md)
- - [ApplicationFilter](docs/ApplicationFilter.md)
  - [Assignment](docs/Assignment.md)
  - [AuthenticodeSignatureStatus](docs/AuthenticodeSignatureStatus.md)
  - [Certificate](docs/Certificate.md)
@@ -65,24 +59,17 @@ Class | Method | HTTP request | Description
  - [ErrorResponse](docs/ErrorResponse.md)
  - [GetProfilesMeResponse](docs/GetProfilesMeResponse.md)
  - [Hash](docs/Hash.md)
- - [HashFilter](docs/HashFilter.md)
  - [LaunchPayload](docs/LaunchPayload.md)
  - [LaunchResponse](docs/LaunchResponse.md)
  - [OptionalId](docs/OptionalId.md)
- - [PathFilter](docs/PathFilter.md)
- - [PathFilterKind](docs/PathFilterKind.md)
  - [PathIdParameter](docs/PathIdParameter.md)
  - [Profile](docs/Profile.md)
- - [Rule](docs/Rule.md)
  - [SessionElevationConfiguration](docs/SessionElevationConfiguration.md)
  - [SessionElevationStatus](docs/SessionElevationStatus.md)
  - [Signature](docs/Signature.md)
- - [SignatureFilter](docs/SignatureFilter.md)
  - [Signer](docs/Signer.md)
  - [StartupInfoDto](docs/StartupInfoDto.md)
  - [StatusResponse](docs/StatusResponse.md)
- - [StringFilter](docs/StringFilter.md)
- - [StringFilterKind](docs/StringFilterKind.md)
  - [TemporaryElevationConfiguration](docs/TemporaryElevationConfiguration.md)
  - [TemporaryElevationStatus](docs/TemporaryElevationStatus.md)
  - [User](docs/User.md)

@@ -244,17 +244,24 @@ impl TryFrom<&Sid> for RawSid {
                 .size()
         ];
 
-        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-        // SAFETY: Buffer is valid and can fit `SID` and all sub authorites.
-        let sid = unsafe { &mut *buf.as_mut_ptr().cast::<SID>() };
+        let sid = buf.as_mut_ptr().cast::<SID>();
 
-        sid.IdentifierAuthority = value.identifier_identity;
-        sid.Revision = value.revision;
-        sid.SubAuthorityCount = value.sub_authority.len().try_into()?;
+        // SAFETY: Aligment is valid for these `write`s.
+        unsafe {
+            ptr::addr_of_mut!((*sid).IdentifierAuthority).write(value.identifier_identity);
+            ptr::addr_of_mut!((*sid).Revision).write(value.revision);
+            ptr::addr_of_mut!((*sid).SubAuthorityCount).write(value.sub_authority.len().try_into()?);
+        }
 
         for (i, v) in value.sub_authority.iter().enumerate() {
             // SAFETY: `SubAuthority` is a VLA and we have previously correctly sized it.
-            unsafe { *sid.SubAuthority.get_unchecked_mut(i) = *v };
+            //   We need to use `write_unaligned`, because we are effectively writing into a [u8] buffer
+            //   using a pointer with alignment 1, while aligment 4 is required when writing u32 values.
+            unsafe {
+                (ptr::addr_of_mut!((*sid).SubAuthority) as *mut u32)
+                    .offset(i as isize)
+                    .write_unaligned(*v)
+            };
         }
 
         Ok(Self { buf })

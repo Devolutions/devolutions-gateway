@@ -58,15 +58,22 @@ impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
                 .size()
         ];
 
-        // SAFETY: `buf` is at least as big as `TOKEN_PRIVILEGES` and its privileges.
-        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-        let privileges = unsafe { &mut *buf.as_mut_ptr().cast::<TOKEN_PRIVILEGES>() };
+        let privileges = buf.as_mut_ptr().cast::<TOKEN_PRIVILEGES>();
 
-        privileges.PrivilegeCount = value.0.len().try_into()?;
+        // SAFETY: Aligment is valid for these `write`s.
+        unsafe {
+            std::ptr::addr_of_mut!((*privileges).PrivilegeCount).write(value.0.len().try_into()?);
+        }
 
         for (i, v) in value.0.iter().enumerate() {
             // SAFETY: `Privileges` is a VLA and we have previously correctly sized it.
-            unsafe { *privileges.Privileges.get_unchecked_mut(i) = *v };
+            //   We need to use `write_unaligned`, because we are effectively writing into a [u8] buffer
+            //   using a pointer with alignment 1, while aligment 8 is required when writing isize values on a 64-bit system.
+            unsafe {
+                (std::ptr::addr_of_mut!((*privileges).Privileges) as *mut LUID_AND_ATTRIBUTES)
+                    .offset(i as isize)
+                    .write_unaligned(*v)
+            };
         }
 
         Ok(Self(buf))

@@ -52,8 +52,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="id">id.</param>
         /// <param name="name">name (default to &quot;Unnamed profile&quot;).</param>
         /// <param name="promptSecureDesktop">promptSecureDesktop (default to true).</param>
-        /// <param name="rules">rules.</param>
-        public Profile(ElevationKind? defaultElevationKind = default(ElevationKind?), ElevationMethod? elevationMethod = default(ElevationMethod?), ElevationConfigurations elevationSettings = default(ElevationConfigurations), string id = default(string), string name = @"Unnamed profile", bool promptSecureDesktop = true, List<string> rules = default(List<string>))
+        public Profile(ElevationKind? defaultElevationKind = default(ElevationKind?), ElevationMethod? elevationMethod = default(ElevationMethod?), ElevationConfigurations elevationSettings = default(ElevationConfigurations), string id = default(string), string name = @"Unnamed profile", bool promptSecureDesktop = true)
         {
             this.DefaultElevationKind = defaultElevationKind;
             this.ElevationMethod = elevationMethod;
@@ -62,7 +61,6 @@ namespace Devolutions.Pedm.Client.Model
             // use default value if no "name" provided
             this.Name = name ?? @"Unnamed profile";
             this.PromptSecureDesktop = promptSecureDesktop;
-            this.Rules = rules;
         }
 
         /// <summary>
@@ -90,12 +88,6 @@ namespace Devolutions.Pedm.Client.Model
         public bool PromptSecureDesktop { get; set; }
 
         /// <summary>
-        /// Gets or Sets Rules
-        /// </summary>
-        [DataMember(Name = "Rules", EmitDefaultValue = false)]
-        public List<string> Rules { get; set; }
-
-        /// <summary>
         /// Returns the string presentation of the object
         /// </summary>
         /// <returns>String presentation of the object</returns>
@@ -109,7 +101,6 @@ namespace Devolutions.Pedm.Client.Model
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Name: ").Append(Name).Append("\n");
             sb.Append("  PromptSecureDesktop: ").Append(PromptSecureDesktop).Append("\n");
-            sb.Append("  Rules: ").Append(Rules).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }

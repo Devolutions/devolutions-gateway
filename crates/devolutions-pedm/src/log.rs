@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use chrono::Local;
 use devolutions_pedm_shared::policy::{ElevationResult, User};
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use walkdir::WalkDir;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Security::WinBuiltinUsersSid;
@@ -39,10 +39,12 @@ pub(crate) fn log_elevation(res: &ElevationResult) -> Result<()> {
 
     log_path.push(cur_time.format("%Y_%m_%d.json").to_string());
 
-    let mut file = OpenOptions::new().append(true).create(true).open(log_path)?;
+    // FIXME: Depending on log rotation, the log file may not exist
+    // TODO: Log to a local database rather than a file
+    //let mut file = OpenOptions::new().append(true).create(true).open(log_path)?;
 
-    file.write_all(serde_json::to_string(res)?.as_bytes())?;
-    file.write_all(b"\n")?;
+    //file.write_all(serde_json::to_string(res)?.as_bytes())?;
+    //file.write_all(b"\n")?;
 
     Ok(())
 }

@@ -62,4 +62,29 @@ namespace Devolutions.Pedm.Client.Model
         Cancelled = 5
     }
 
+    public static class ErrorExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this Error variant)
+        {
+            switch (variant)
+            {
+                case Error.AccessDenied:
+                    return "AccessDenied";
+                case Error.NotFound:
+                    return "NotFound";
+                case Error.InvalidParameter:
+                    return "InvalidParameter";
+                case Error.Internal:
+                    return "Internal";
+                case Error.Cancelled:
+                    return "Cancelled";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }

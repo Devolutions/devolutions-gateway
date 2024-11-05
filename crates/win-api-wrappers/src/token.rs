@@ -570,15 +570,22 @@ impl TryFrom<&TokenGroups> for RawTokenGroups {
                 .size()
         ];
 
-        // SAFETY: `buf` is at least as big as `TOKEN_GROUPS` and its groups.
-        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-        let groups = unsafe { &mut *buf.as_mut_ptr().cast::<TOKEN_GROUPS>() };
+        let groups = buf.as_mut_ptr().cast::<TOKEN_GROUPS>();
 
-        groups.GroupCount = value.0.len().try_into()?;
+        // SAFETY: Aligment is valid for these `write`s.
+        unsafe {
+            ptr::addr_of_mut!((*groups).GroupCount).write(value.0.len().try_into()?);
+        }
 
         for (i, v) in raw_sid_and_attributes.iter().enumerate() {
             // SAFETY: `Groups` is a VLA and we have previously correctly sized it.
-            unsafe { *groups.Groups.get_unchecked_mut(i) = *v.as_raw() };
+            //   We need to use `write_unaligned`, because we are effectively writing into a [u8] buffer
+            //   using a pointer with alignment 1, while aligment 8 is required when writing isize values on a 64-bit system.
+            unsafe {
+                (ptr::addr_of_mut!((*groups).Groups) as *mut SID_AND_ATTRIBUTES)
+                    .offset(i as isize)
+                    .write_unaligned(*v.as_raw())
+            };
         }
 
         Ok(Self {
