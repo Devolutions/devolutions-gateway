@@ -25,7 +25,7 @@ pub enum AceType {
 
 impl AceType {
     pub fn kind(&self) -> u8 {
-        // ACE type is actually encoded on a u8 even though the type in windows crate is u32.
+        // Values for ACE types actually always fit in a u8 even though the type in windows crate is u32.
         #[allow(clippy::cast_possible_truncation)]
         match self {
             AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as u8,
