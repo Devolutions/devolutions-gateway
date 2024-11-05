@@ -1,3 +1,5 @@
+#![allow(non_snake_case)] // WinAPI naming.
+
 use std::ffi::{c_void, OsString};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
@@ -287,7 +289,6 @@ enum ChannelCommand {
 }
 
 #[no_mangle]
-#[allow(non_snake_case)]
 extern "system" fn DllMain(_dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
     match call_reason {
         DLL_PROCESS_ATTACH => {
@@ -336,7 +337,6 @@ impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
 }
 
 #[no_mangle]
-#[allow(non_snake_case)]
 extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, out: *mut *mut c_void) -> HRESULT {
     // SAFETY: We assume the argument is the correct type according to the doc.
     let class_id = unsafe { class_id.as_ref() };

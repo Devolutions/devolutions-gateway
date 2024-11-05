@@ -22,8 +22,8 @@ use win_api_wrappers::utils::{create_directory, CommandLine};
 
 use anyhow::Result;
 
-// WinAPI is verbose, so are we.
-#[allow(clippy::too_many_arguments)]
+// WinAPI's functions have many arguments, we wrap the same way.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn start_process(
     token: &Token,
     executable_path: Option<&Path>,

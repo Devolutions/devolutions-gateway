@@ -24,7 +24,7 @@ use crate::undoc::{
     TOKEN_SECURITY_ATTRIBUTE_TYPE_OCTET_STRING, TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING,
     TOKEN_SECURITY_ATTRIBUTE_TYPE_UINT64, TOKEN_SECURITY_ATTRIBUTE_V1, TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
 };
-use crate::utils::{size_of_u32, WideString};
+use crate::utils::{u32size_of, WideString};
 use crate::{create_impersonation_context, Error};
 use windows::Win32::Foundation::{
     ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, HANDLE,
@@ -79,7 +79,7 @@ impl Token {
     }
 
     // Wrapper around `NtCreateToken`, which has a lot of arguments.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_token(
         authentication_id: &LUID,
         expiration_time: i64,
@@ -93,14 +93,14 @@ impl Token {
     ) -> Result<Self> {
         // See https://github.com/decoder-it/CreateTokenExample/blob/master/StopZillaCreateToken.cpp#L344
         let sqos = SECURITY_QUALITY_OF_SERVICE {
-            Length: size_of_u32::<SECURITY_QUALITY_OF_SERVICE>(),
+            Length: u32size_of::<SECURITY_QUALITY_OF_SERVICE>(),
             ImpersonationLevel: SecurityImpersonation,
             ContextTrackingMode: SECURITY_DYNAMIC_TRACKING.0,
             EffectiveOnly: false.into(),
         };
 
         let object_attributes = OBJECT_ATTRIBUTES {
-            Length: size_of_u32::<OBJECT_ATTRIBUTES>(),
+            Length: u32size_of::<OBJECT_ATTRIBUTES>(),
             SecurityQualityOfService: &sqos as *const _ as *const c_void,
             ..Default::default()
         };
@@ -241,7 +241,7 @@ impl Token {
                 self.handle.raw(),
                 info_class,
                 Some(info.as_mut_ptr().cast()),
-                size_of_u32::<T>(),
+                u32size_of::<T>(),
                 &mut return_length,
             )
         }?;
@@ -257,7 +257,7 @@ impl Token {
                 self.handle.raw(),
                 info_class,
                 value as *const _ as *const _,
-                size_of_u32::<T>(),
+                u32size_of::<T>(),
             )?;
         }
 
@@ -480,7 +480,9 @@ impl Token {
     }
 
     pub fn logon_sid(&self) -> Result<Sid> {
-        #[allow(clippy::cast_sign_loss)]
+        // Here, losing the sign is fine, because we want to make a bitwise comparison (g.attributes & SE_GROUP_LOGON_ID).
+        // TODO: Use `cast_unsigned` / `cast_signed` when stabilized: https://github.com/rust-lang/rust/issues/125882
+        #[expect(clippy::cast_sign_loss)]
         Ok(self
             .groups()?
             .0
@@ -569,7 +571,7 @@ impl TryFrom<&TokenGroups> for RawTokenGroups {
         ];
 
         // SAFETY: `buf` is at least as big as `TOKEN_GROUPS` and its groups.
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         let groups = unsafe { &mut *buf.as_mut_ptr().cast::<TOKEN_GROUPS>() };
 
         groups.GroupCount = value.0.len().try_into()?;

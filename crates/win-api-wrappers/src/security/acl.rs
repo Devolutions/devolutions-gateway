@@ -5,7 +5,7 @@ use std::{ptr, slice};
 use anyhow::{bail, Result};
 
 use crate::identity::sid::{RawSid, Sid};
-use crate::utils::{size_of_u32, WideString};
+use crate::utils::{u32size_of, WideString};
 use crate::Error;
 use windows::Win32::Foundation::{ERROR_INVALID_DATA, ERROR_INVALID_VARIANT, E_POINTER};
 use windows::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_OBJECT_TYPE};
@@ -25,8 +25,9 @@ pub enum AceType {
 
 impl AceType {
     pub fn kind(&self) -> u8 {
+        // Values for ACE types actually always fit in a u8 even though the type in windows crate is u32.
+        #[expect(clippy::cast_possible_truncation)]
         match self {
-            #[allow(clippy::cast_possible_truncation)]
             AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as u8,
         }
     }
@@ -75,7 +76,7 @@ impl Ace {
 
         let mut ptr = buf.as_mut_ptr();
 
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER>` big.
         unsafe {
             ptr.cast::<ACE_HEADER>().write(header)
@@ -84,7 +85,7 @@ impl Ace {
         // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
         ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
 
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32>` big.
         unsafe {
             ptr.cast::<u32>().write(self.access_mask)
@@ -116,7 +117,7 @@ impl Ace {
         ptr = unsafe { ptr.byte_add(mem::size_of::<ACE_HEADER>()) };
 
         // SAFETY: Assume that the header is followed by a 4 byte access mask.
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         let access_mask = unsafe { ptr.cast::<u32>().read() };
 
         // SAFETY: Assume buffer is big enough to fit Ace data.
@@ -293,7 +294,7 @@ impl Default for SecurityDescriptor {
     fn default() -> Self {
         Self {
             // This is a constant =1.
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             revision: SECURITY_DESCRIPTOR_REVISION as u8,
             owner: None,
             group: None,
@@ -449,7 +450,7 @@ impl TryFrom<&SecurityAttributes> for RawSecurityAttributes {
             .transpose()?;
 
         let raw = SECURITY_ATTRIBUTES {
-            nLength: size_of_u32::<SECURITY_ATTRIBUTES>(),
+            nLength: u32size_of::<SECURITY_ATTRIBUTES>(),
             lpSecurityDescriptor: security_descriptor
                 .as_mut()
                 .map_or_else(ptr::null_mut, |x| x.as_raw_mut() as *mut _ as *mut _),

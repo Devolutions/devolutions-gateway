@@ -73,7 +73,7 @@ impl Sid {
 
         buf.truncate(out_size as usize);
 
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: We can safely dereference since this is our buffer. We assume the data in the buffer is a SID.
         Ok(Self::from(unsafe { &*buf.as_ptr().cast::<SID>() }))
     }
@@ -165,7 +165,7 @@ impl RawSid {
     }
 
     pub fn as_raw(&self) -> &SID {
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: Dereferencing is possible since it is our buffer.
         // We assume our buffer is well constructed and valid.
         unsafe {
@@ -244,7 +244,7 @@ impl TryFrom<&Sid> for RawSid {
                 .size()
         ];
 
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: Buffer is valid and can fit `SID` and all sub authorites.
         let sid = unsafe { &mut *buf.as_mut_ptr().cast::<SID>() };
 

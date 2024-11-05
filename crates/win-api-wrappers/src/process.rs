@@ -40,7 +40,7 @@ use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLE
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
 use super::security::privilege::ScopedPrivileges;
-use super::utils::{size_of_u32, ComContext};
+use super::utils::{u32size_of, ComContext};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
@@ -225,7 +225,7 @@ impl Process {
                 self.handle.raw(),
                 ProcessBasicInformation,
                 &mut basic_info as *mut _ as *mut _,
-                size_of_u32::<PROCESS_BASIC_INFORMATION>(),
+                u32size_of::<PROCESS_BASIC_INFORMATION>(),
                 None,
             )
         }?;
@@ -334,7 +334,7 @@ pub fn shell_execute(
     let verb = WideString::from(verb);
 
     let mut exec_info = SHELLEXECUTEINFOW {
-        cbSize: size_of_u32::<SHELLEXECUTEINFOW>(),
+        cbSize: u32size_of::<SHELLEXECUTEINFOW>(),
         fMask: SEE_MASK_NOCLOSEPROCESS,
         lpFile: path.as_pcwstr(),
         lpParameters: command_line.as_pcwstr(),
@@ -450,9 +450,9 @@ impl StartupInfo {
         Ok(STARTUPINFOEXW {
             StartupInfo: STARTUPINFOW {
                 cb: if self.attribute_list.is_some() {
-                    size_of_u32::<STARTUPINFOEXW>()
+                    u32size_of::<STARTUPINFOEXW>()
                 } else {
-                    size_of_u32::<STARTUPINFOW>()
+                    u32size_of::<STARTUPINFOW>()
                 },
                 lpReserved: self.reserved.as_pwstr(),
                 lpDesktop: self.desktop.as_pwstr(),
@@ -536,8 +536,8 @@ impl Module {
 
         // SAFETY: No preconditions. Both handle and symbol are valid.
         match unsafe { GetProcAddress(self.handle, symbol.as_pcstr()) } {
-            // Function pointer is wanted.
-            #[allow(clippy::fn_to_numeric_cast_any)]
+            // This cast is intended. See also: https://github.com/rust-lang/rust-clippy/issues/12638
+            #[expect(clippy::fn_to_numeric_cast_any)]
             Some(func) => Ok(func as *const c_void),
             None => Err(windows::core::Error::from_win32()),
         }
@@ -675,7 +675,7 @@ impl Drop for ProcessEnvironment {
 }
 
 // Goal is to wrap `CreateProcessAsUserW`, which has a lot of arguments.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn create_process_as_user(
     token: Option<&Token>,
     application_name: Option<&Path>,
@@ -777,7 +777,7 @@ fn serialize_environment(environment: &HashMap<String, String>) -> Result<Vec<u1
 
 /// Starts new process in the specified session. Note that this function requires the current
 /// process to have `SYSTEM`-level permissions. Use with caution.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn create_process_in_session(
     session_id: u32,
     application_name: Option<&Path>,

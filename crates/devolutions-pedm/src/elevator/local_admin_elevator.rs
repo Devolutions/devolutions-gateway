@@ -30,7 +30,7 @@ impl LocalAdminElevator {
         };
 
         // Wrapping is what we want.
-        #[allow(clippy::cast_possible_wrap)]
+        #[expect(clippy::cast_possible_wrap)]
         source
             .SourceName
             .iter_mut()
@@ -50,19 +50,19 @@ impl Elevator for LocalAdminElevator {
         let mut groups = token.groups()?;
         groups.0.push(SidAndAttributes {
             sid: Sid::from_well_known(WinLocalAccountAndAdministratorSid, None)?,
-            #[allow(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
         });
 
         groups.0.push(SidAndAttributes {
             sid: owner_sid.clone(),
-            #[allow(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY | SE_GROUP_OWNER) as u32,
         });
 
         groups.0.push(SidAndAttributes {
             sid: Sid::from_well_known(WinHighLabelSid, None)?,
-            #[allow(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
         });
 
