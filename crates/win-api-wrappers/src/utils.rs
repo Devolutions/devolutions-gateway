@@ -778,7 +778,7 @@ pub fn nul_slice_wide_str(slice: &[u16]) -> &[u16] {
 /// Like [`std::mem::size_of`], but returns a u32 instead.
 ///
 /// Typically fine since we rarely work with structs whose size in memory is bigger than u32::MAX.
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 pub(crate) const fn u32size_of<T>() -> u32 {
     mem::size_of::<T>() as u32
 }

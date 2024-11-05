@@ -26,7 +26,7 @@ pub enum AceType {
 impl AceType {
     pub fn kind(&self) -> u8 {
         // Values for ACE types actually always fit in a u8 even though the type in windows crate is u32.
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         match self {
             AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as u8,
         }
@@ -294,7 +294,7 @@ impl Default for SecurityDescriptor {
     fn default() -> Self {
         Self {
             // This is a constant =1.
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             revision: SECURITY_DESCRIPTOR_REVISION as u8,
             owner: None,
             group: None,

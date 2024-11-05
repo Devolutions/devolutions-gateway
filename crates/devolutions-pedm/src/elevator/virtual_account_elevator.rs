@@ -58,24 +58,24 @@ impl VirtualAccountElevator {
             // Needed for the virtual account to access the user's desktop and window station.
             SidAndAttributes {
                 sid: token.logon_sid()?,
-                #[allow(clippy::cast_sign_loss)]
+                #[expect(clippy::cast_sign_loss)]
                 attributes: (SE_GROUP_LOGON_ID | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY)
                     as u32, // 0xc0000007
             },
             SidAndAttributes {
                 sid: Sid::from_well_known(WinLocalSid, None)?, // S-1-2-0
-                #[allow(clippy::cast_sign_loss)]
+                #[expect(clippy::cast_sign_loss)]
                 attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
             },
             SidAndAttributes {
                 sid: Sid::from_well_known(WinBuiltinAdministratorsSid, None)?, // S-1-5-32-544
-                #[allow(clippy::cast_sign_loss)]
+                #[expect(clippy::cast_sign_loss)]
                 attributes: (SE_GROUP_OWNER | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY)
                     as u32, // 0xf
             },
             SidAndAttributes {
                 sid: virtual_account.domain_sid,
-                #[allow(clippy::cast_sign_loss)]
+                #[expect(clippy::cast_sign_loss)]
                 attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
             },
         ];

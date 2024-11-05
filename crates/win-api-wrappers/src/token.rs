@@ -79,7 +79,7 @@ impl Token {
     }
 
     // Wrapper around `NtCreateToken`, which has a lot of arguments.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_token(
         authentication_id: &LUID,
         expiration_time: i64,
@@ -482,7 +482,7 @@ impl Token {
     pub fn logon_sid(&self) -> Result<Sid> {
         // Here, losing the sign is fine, because we want to make a bitwise comparison (g.attributes & SE_GROUP_LOGON_ID).
         // TODO: Use `cast_unsigned` / `cast_signed` when stabilized: https://github.com/rust-lang/rust/issues/125882
-        #[allow(clippy::cast_sign_loss)]
+        #[expect(clippy::cast_sign_loss)]
         Ok(self
             .groups()?
             .0
