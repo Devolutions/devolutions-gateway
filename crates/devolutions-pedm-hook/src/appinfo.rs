@@ -16,14 +16,12 @@ use win_api_wrappers::rpc::RpcServerInterfacePointer;
 
 /// https://github.com/hfiref0x/UACME/blob/master/Source/Akagi/appinfo/appinfo.idl
 #[repr(C)]
-#[allow(non_snake_case, non_camel_case_types)]
 pub struct MONITOR_POINT {
     pub MonitorLeft: u32,
     pub MonitorRight: u32,
 }
 
 #[repr(C)]
-#[allow(non_snake_case, non_camel_case_types)]
 pub struct APP_STARTUP_INFO {
     pub Title: PCWSTR,
     pub X: u32,
@@ -39,7 +37,6 @@ pub struct APP_STARTUP_INFO {
 }
 
 #[repr(C)]
-#[allow(non_snake_case, non_camel_case_types)]
 pub struct APP_PROCESS_INFORMATION {
     pub ProcessHandle: HANDLE,
     pub ThreadHandle: HANDLE,

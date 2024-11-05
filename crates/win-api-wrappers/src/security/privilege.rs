@@ -38,7 +38,7 @@ impl TryFrom<&TOKEN_PRIVILEGES> for TokenPrivileges {
 impl RawTokenPrivileges {
     pub fn as_raw(&self) -> &TOKEN_PRIVILEGES {
         // SAFETY: It is safe to dereference since it is our buffer.
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         unsafe {
             &*self.0.as_ptr().cast::<TOKEN_PRIVILEGES>()
         }
@@ -59,7 +59,7 @@ impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
         ];
 
         // SAFETY: `buf` is at least as big as `TOKEN_PRIVILEGES` and its privileges.
-        #[allow(clippy::cast_ptr_alignment)]
+        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         let privileges = unsafe { &mut *buf.as_mut_ptr().cast::<TOKEN_PRIVILEGES>() };
 
         privileges.PrivilegeCount = value.0.len().try_into()?;

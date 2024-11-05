@@ -10,7 +10,7 @@ use crate::undoc::{
     LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT,
     LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
 };
-use crate::utils::{size_of_u32, WideString};
+use crate::utils::{u32size_of, WideString};
 use crate::Error;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_INVALID_SID, MAX_PATH, WIN32_ERROR};
@@ -190,7 +190,7 @@ impl ProfileInfo {
             token,
             username: WideString::from(username),
             raw: PROFILEINFOW {
-                dwSize: size_of_u32::<PROFILEINFOW>(),
+                dwSize: u32size_of::<PROFILEINFOW>(),
                 dwFlags: PI_NOUI,
                 ..Default::default()
             },

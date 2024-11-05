@@ -459,7 +459,7 @@ impl<'a> ProcessIdIterator<'a> {
             snapshot,
             is_first: true,
             entry: PROCESSENTRY32 {
-                dwSize: size_of_u32::<PROCESSENTRY32>(),
+                dwSize: u32size_of::<PROCESSENTRY32>(),
                 ..Default::default()
             },
         }
@@ -775,7 +775,10 @@ pub fn nul_slice_wide_str(slice: &[u16]) -> &[u16] {
     &slice[..last_idx]
 }
 
+/// Like [`std::mem::size_of`], but returns a u32 instead.
+///
+/// Typically fine since we rarely work with structs whose size in memory is bigger than u32::MAX.
 #[allow(clippy::cast_possible_truncation)]
-pub(crate) const fn size_of_u32<T>() -> u32 {
+pub(crate) const fn u32size_of<T>() -> u32 {
     mem::size_of::<T>() as u32
 }

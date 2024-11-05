@@ -19,7 +19,6 @@ use crate::Error;
 
 use anyhow::{bail, Result};
 
-#[allow(non_camel_case_types)]
 pub type RPC_BINDING_HANDLE = *mut c_void;
 
 pub struct RpcBindingHandle(pub RPC_BINDING_HANDLE);

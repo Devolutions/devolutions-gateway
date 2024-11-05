@@ -1,6 +1,8 @@
 #[cfg(target_os = "windows")]
 #[path = ""]
 mod lib_win {
+    #![allow(non_snake_case, non_camel_case_types)] // WinAPI naming.
+
     pub mod appinfo;
     pub mod hook;
 
@@ -78,8 +80,7 @@ mod lib_win {
     }
 
     #[no_mangle]
-    #[allow(non_snake_case, unused_variables)]
-    extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
+    extern "system" fn DllMain(_dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
         let status = match call_reason {
             DLL_PROCESS_ATTACH => {
                 thread::spawn(|| match hook() {

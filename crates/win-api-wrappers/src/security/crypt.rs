@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 
-use crate::utils::{nul_slice_wide_str, size_of_u32, slice_from_ptr, SafeWindowsString, WideString};
+use crate::utils::{nul_slice_wide_str, slice_from_ptr, u32size_of, SafeWindowsString, WideString};
 use crate::Error;
 use windows::core::HRESULT;
 use windows::Win32::Foundation::{
@@ -70,21 +70,21 @@ pub fn win_verify_trust(path: &Path, catalog_info: Option<CatalogInfo>) -> Resul
 
     let mut wintrust_info = match &catalog_info {
         Some((catalog_info_path, catalog_info_member)) => WintrustInfo::Catalog(WINTRUST_CATALOG_INFO {
-            cbStruct: size_of_u32::<WINTRUST_CATALOG_INFO>(),
+            cbStruct: u32size_of::<WINTRUST_CATALOG_INFO>(),
             pcwszCatalogFilePath: catalog_info_path.as_pcwstr(),
             pcwszMemberFilePath: path.as_pcwstr(),
             pcwszMemberTag: catalog_info_member.as_pcwstr(),
             ..Default::default()
         }),
         None => WintrustInfo::File(WINTRUST_FILE_INFO {
-            cbStruct: size_of_u32::<WINTRUST_FILE_INFO>(),
+            cbStruct: u32size_of::<WINTRUST_FILE_INFO>(),
             pcwszFilePath: path.as_pcwstr(),
             ..Default::default()
         }),
     };
 
     let mut win_trust_data = WINTRUST_DATA {
-        cbStruct: size_of_u32::<WINTRUST_DATA>(),
+        cbStruct: u32size_of::<WINTRUST_DATA>(),
         dwUIChoice: WTD_UI_NONE,
         fdwRevocationChecks: WTD_REVOKE_WHOLECHAIN,
         dwUnionChoice: match &wintrust_info {
@@ -245,7 +245,7 @@ impl Iterator for CatalogIterator<'_> {
             self.cur = Some(HANDLE(new_ctx as *mut c_void));
 
             let mut info = CATALOG_INFO {
-                cbStruct: size_of_u32::<CATALOG_INFO>(),
+                cbStruct: u32size_of::<CATALOG_INFO>(),
                 ..Default::default()
             };
 
@@ -558,7 +558,7 @@ pub fn cert_ctx_eku(ctx: &CERT_CONTEXT) -> Result<Vec<String>> {
     }
 
     // SAFETY: We assume `CertGetEnhancedKeyUsage` actually wrote a valid `CTL_USAGE`.
-    #[allow(clippy::cast_ptr_alignment)]
+    #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
     let ctl_usage = unsafe { raw_buf.as_ptr().cast::<CTL_USAGE>().read() };
 
     Ok(

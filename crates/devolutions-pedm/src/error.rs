@@ -63,7 +63,7 @@ impl From<Error> for ErrorResponse {
         let win32_error = match kind {
             Error::AccessDenied => ERROR_ACCESS_DISABLED_BY_POLICY.0,
             Error::InvalidParameter | Error::NotFound => ERROR_INVALID_PARAMETER.0,
-            #[allow(clippy::cast_sign_loss)]
+            #[allow(clippy::cast_sign_loss)] // E_UNEXPECTED fits in a u32.
             Error::Internal => E_UNEXPECTED.0 as u32,
             Error::Cancelled => ERROR_CANCELLED.0,
         };
