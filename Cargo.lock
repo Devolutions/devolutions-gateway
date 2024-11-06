@@ -2009,7 +2009,7 @@ dependencies = [
  "hyper 1.5.0",
  "hyper-util",
  "rustls 0.23.15",
- "rustls-native-certs 0.8.0",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio 1.41.0",
  "tokio-rustls",
@@ -2404,7 +2404,7 @@ dependencies = [
  "proxy-types",
  "proxy_cfg",
  "rustls 0.23.15",
- "rustls-native-certs 0.8.0",
+ "rustls-native-certs",
  "rustls-pemfile 2.2.0",
  "seahorse",
  "sysinfo",
@@ -4035,7 +4035,7 @@ dependencies = [
  "pin-project-lite 0.2.14",
  "quinn",
  "rustls 0.23.15",
- "rustls-native-certs 0.8.0",
+ "rustls-native-certs",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -4264,19 +4264,6 @@ dependencies = [
  "rustls 0.23.15",
  "sha2",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "rustls-native-certs"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
-dependencies = [
- "openssl-probe",
- "rustls-pemfile 2.2.0",
- "rustls-pki-types",
- "schannel",
- "security-framework",
 ]
 
 [[package]]
@@ -5121,7 +5108,7 @@ dependencies = [
  "log",
  "native-tls",
  "rustls 0.23.15",
- "rustls-native-certs 0.8.0",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio 1.41.0",
  "tokio-native-tls",
@@ -5467,7 +5454,6 @@ dependencies = [
  "native-tls",
  "rand",
  "rustls 0.23.15",
- "rustls-native-certs 0.7.3",
  "rustls-pki-types",
  "sha1",
  "thiserror",

@@ -77,9 +77,8 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log"] }
 axum-extra = { version = "0.9", features = ["query", "async-read-body", "typed-header"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
-# Should be the same version as `axum` (we perform error downcasting for better error reporting)
-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
-tokio-tungstenite = "0.24" # Should use the same version of tungstenite as `axum`
+tungstenite = "0.24" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] } # Should use the same version of tungstenite as `axum`
 http-body-util = "0.1"
 
 # OpenAPI generator
