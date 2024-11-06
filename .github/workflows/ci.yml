@@ -164,6 +164,27 @@ jobs:
             AWS_LC_SYS_NO_ASM: true
           run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
 
+  check-dependencies:
+    name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
+    runs-on: ubuntu-latest
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        banned: [ aws-lc-rs ]
+        target: [ x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc ]
+        package: [ devolutions-gateway, jetsocat ]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Check
+        shell: pwsh
+        run: ./ci/check-crate-is-not-in-the-tree.ps1 -Package '${{ matrix.package }}' -UnwantedDependency '${{ matrix.banned }}' -Target '${{ matrix.target }}'
+
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
@@ -721,6 +742,7 @@ jobs:
     if: always()
     needs:
       - tests
+      - check-dependencies
       - jetsocat-lipo
       - devolutions-gateway
       - devolutions-gateway-merge
