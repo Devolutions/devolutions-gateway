@@ -6,6 +6,7 @@ use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::Router;
+use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{field, Instrument as _};
 use typed_builder::TypedBuilder;
@@ -267,7 +268,8 @@ async fn fwd_http(
     use core::str::FromStr;
     use http_body_util::BodyExt as _; // into_data_stream
     use std::sync::LazyLock;
-    use tokio_tungstenite::connect_async;
+    use tokio_rustls::rustls;
+    use tokio_tungstenite::connect_async_tls_with_config;
 
     // Default HTTP client for typical usage.
     static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
@@ -280,6 +282,15 @@ async fn fwd_http(
             .danger_accept_invalid_certs(true)
             .build()
             .expect("parameters known to be valid only")
+    });
+
+    static DANGEROUS_TLS_CONNECTOR: LazyLock<tokio_tungstenite::Connector> = LazyLock::new(|| {
+        rustls::client::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(crate::tls::danger::NoCertificateVerification))
+            .with_no_client_auth()
+            .pipe(Arc::new)
+            .pipe(tokio_tungstenite::Connector::Rustls)
     });
 
     const REQUEST_TARGET_PARAM: Parameter<String> =
@@ -299,7 +310,7 @@ async fn fwd_http(
         return Err(HttpError::forbidden().msg("wrong session ID"));
     }
 
-    // 1. Extract the requested target.
+    // 1. Extract parameters from the request.
 
     let query = request.uri().query().unwrap_or_default();
     let mut query_params = serde_urlencoded::from_str::<QueryParams>(query)
@@ -356,12 +367,20 @@ async fn fwd_http(
         let request = axum::http::Request::from_parts(parts, ());
         let request_uri = request.uri().clone();
 
-        // TODO: Manually configure the TlsConnector and take the `dangerous_tls` parameter into account.
-        let (server_ws, server_ws_response) = connect_async(request).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("WebSocket connection to target server")
-                .err(),
-        )?;
+        let tls_connector = if dangerous_tls {
+            Some(DANGEROUS_TLS_CONNECTOR.clone())
+        } else {
+            None
+        };
+
+        let (server_ws, server_ws_response) = connect_async_tls_with_config(request, None, false, tls_connector)
+            .await
+            .map_err(
+                HttpError::bad_gateway()
+                    .with_msg("WebSocket connection to target server")
+                    .err(),
+            )?;
+
         let server_stream = tokio_tungstenite_websocket_compat(server_ws);
 
         debug!(?server_ws_response, %dangerous_tls, "Connected to target server");
