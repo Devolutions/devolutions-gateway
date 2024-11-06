@@ -451,7 +451,7 @@ async fn fwd_http(
         let response = client.execute(request).await.map_err(HttpError::bad_gateway().err())?;
 
         if let Err(error) = response.error_for_status_ref() {
-            info!(%error, host = claims.target_host.host(), "Service responded with an failure HTTP status code");
+            info!(%error, host = claims.target_host.host(), "Service responded with a failure HTTP status code");
         }
 
         // 4.b Convert the response into the expected type and return it.
