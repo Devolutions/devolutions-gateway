@@ -117,6 +117,8 @@ fn main() -> anyhow::Result<()> {
             println!("{conf_file_json}");
         }
         CliAction::Run { service_mode } => {
+            devolutions_gateway::tls::install_default_crypto_provider();
+
             if service_mode {
                 service_controller()
                     .register(service_main_wrapper)
