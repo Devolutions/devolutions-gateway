@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using DevolutionsAgent.Dialogs;
@@ -30,46 +29,24 @@ public partial class FeaturesDialog : AgentDialog
         if (drawTextOnlyProp.IsNotEmpty())
         {
             if (string.Compare(drawTextOnlyProp, "false", true) == 0)
+            {
                 drawTextOnly = false;
+            }
         }
         else
         {
             float dpi = CreateGraphics().DpiY;
+
             if (dpi == 96) // the checkbox custom drawing is only compatible with 96 DPI
+            {
                 drawTextOnly = false;
+            }
         }
 
         ReadOnlyTreeNode.Behavior.AttachTo(featuresTree, drawTextOnly);
 
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
         BuildFeaturesHierarchy();
-
-        ResetLayout();
-    }
-
-    void ResetLayout()
-    {
-        // The form controls are properly anchored and will be correctly resized on parent form
-        // resizing. However the initial sizing by WinForm runtime doesn't a do good job with DPI
-        // other than 96. Thus manual resizing is the only reliable option apart from going WPF.
-
-        float ratio = (float)banner.Image.Width / (float)banner.Image.Height;
-        topPanel.Height = (int)(banner.Width / ratio);
-        topBorder.Top = topPanel.Height + 1;
-
-        var upShift = (int)(next.Height * 2.3) - bottomPanel.Height;
-        bottomPanel.Top -= upShift;
-        bottomPanel.Height += upShift;
-
-        middlePanel.Top = topBorder.Bottom + 5;
-        middlePanel.Height = (bottomPanel.Top - 5) - middlePanel.Top;
-
-        featuresTree.Width = (int)((middlePanel.Width / 3.0) * 1.75);
-
-        descriptionPanel.Left = featuresTree.Right + 10;
-        descriptionPanel.Width = middlePanel.Width - descriptionPanel.Left - 10;
-
-        featuresTree.Nodes[0].EnsureVisible();
     }
 
     /// <summary>
@@ -82,7 +59,7 @@ public partial class FeaturesDialog : AgentDialog
     /// </summary>
     public static List<string> InitialUserSelectedItems { get; private set; }
 
-    void BuildFeaturesHierarchy()
+    private void BuildFeaturesHierarchy()
     {
         features = Runtime.Session.Features;
 
@@ -110,7 +87,9 @@ public partial class FeaturesDialog : AgentDialog
             item.View = view;
 
             if (item.Parent != null && item.Display != FeatureDisplay.hidden)
+            {
                 (item.Parent.View as TreeNode).Nodes.Add(view); //link child view to parent view
+            }
 
             // even if the item is hidden process all its children so the correct hierarchy is established
 
@@ -123,10 +102,14 @@ public partial class FeaturesDialog : AgentDialog
                     });
 
             if (UserSelectedItems != null)
+            {
                 view.Checked = UserSelectedItems.Contains((view.Tag as FeatureItem).Name);
+            }
 
             if (item.Display == FeatureDisplay.expand)
+            {
                 view.Expand();
+            }
         }
 
         //add views to the treeView control
@@ -143,7 +126,7 @@ public partial class FeaturesDialog : AgentDialog
         isAutoCheckingActive = true;
     }
 
-    void SaveUserSelection()
+    private void SaveUserSelection()
     {
         UserSelectedItems = features.Where(x => x.IsViewChecked())
                                     .Select(x => x.Name)
@@ -151,12 +134,12 @@ public partial class FeaturesDialog : AgentDialog
                                     .ToList();
     }
 
-    void featuresTree_AfterSelect(object sender, TreeViewEventArgs e)
+    private void featuresTree_AfterSelect(object sender, TreeViewEventArgs e)
     {
         description.Text = e.Node.FeatureItem().Description.LocalizeWith(Runtime.Localize);
     }
 
-    void featuresTree_AfterCheck(object sender, TreeViewEventArgs e)
+    private void featuresTree_AfterCheck(object sender, TreeViewEventArgs e)
     {
         if (isAutoCheckingActive)
         {
@@ -186,7 +169,7 @@ public partial class FeaturesDialog : AgentDialog
         }
     }
 
-    void reset_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+    private void reset_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
         isAutoCheckingActive = false;
         features.ForEach(f => f.ResetViewChecked());
