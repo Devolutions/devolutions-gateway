@@ -149,6 +149,11 @@ impl ActiveRecordings {
         self.0.lock().contains(&id)
     }
 
+    /// Returns a copy of the internal HashSet
+    pub fn cloned(&self) -> HashSet<Uuid> {
+        self.0.lock().clone()
+    }
+
     fn insert(&self, id: Uuid) -> usize {
         let mut guard = self.0.lock();
         guard.insert(id);
