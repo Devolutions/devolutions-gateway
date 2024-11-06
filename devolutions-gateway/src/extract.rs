@@ -5,8 +5,8 @@ use axum::Extension;
 
 use crate::http::HttpError;
 use crate::token::{
-    AccessScope, AccessTokenClaims, AssociationTokenClaims, JmuxTokenClaims, JrecTokenClaims, JrlTokenClaims,
-    ScopeTokenClaims, WebAppTokenClaims,
+    AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, JmuxTokenClaims, JrecTokenClaims,
+    JrlTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
 };
 
 #[derive(Clone)]
@@ -347,6 +347,25 @@ where
             Ok(Self)
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected NETSCAN)"))
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct BridgeToken(pub BridgeTokenClaims);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for BridgeToken
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if let AccessTokenClaims::Bridge(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
+            Ok(Self(claims))
+        } else {
+            Err(HttpError::forbidden().msg("token not allowed (expected BRIDGE)"))
         }
     }
 }

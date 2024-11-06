@@ -234,18 +234,31 @@ pub fn any_scope_claims(now: i64, validity_duration: i64) -> impl Strategy<Value
 #[derive(Debug, Clone, Serialize)]
 pub struct BridgeClaims {
     pub target_host: TargetAddr,
+    pub jet_aid: Uuid,
+    pub jet_ap: ApplicationProtocol,
+    pub jet_rec: RecordingPolicy,
     pub nbf: i64,
     pub exp: i64,
     pub jti: Uuid,
 }
 
 pub fn any_bridge_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = BridgeClaims> {
-    (target_addr(), uuid_typed()).prop_map(move |(target_host, jti)| BridgeClaims {
-        target_host,
-        jti,
-        nbf: now,
-        exp: now + validity_duration,
-    })
+    (
+        target_addr(),
+        uuid_typed(),
+        application_protocol(),
+        recording_policy(),
+        uuid_typed(),
+    )
+        .prop_map(move |(target_host, jet_aid, jet_ap, jet_rec, jti)| BridgeClaims {
+            target_host,
+            jet_aid,
+            jet_ap,
+            jet_rec,
+            nbf: now,
+            exp: now + validity_duration,
+            jti,
+        })
 }
 
 #[derive(Debug, Clone, Serialize)]

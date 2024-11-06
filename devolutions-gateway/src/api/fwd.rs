@@ -5,15 +5,15 @@ use anyhow::Context as _;
 use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
-use axum::routing::get;
 use axum::Router;
+use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{field, Instrument as _};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
 use crate::config::Conf;
-use crate::extract::AssociationToken;
+use crate::extract::{AssociationToken, BridgeToken};
 use crate::http::HttpError;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
@@ -22,10 +22,27 @@ use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, 
 use crate::{utils, DgwState};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    Router::new()
+    use axum::routing::{self, get, MethodFilter};
+
+    let router = Router::new()
         .route("/tcp/:id", get(fwd_tcp))
-        .route("/tls/:id", get(fwd_tls))
-        .with_state(state)
+        .route("/tls/:id", get(fwd_tls));
+
+    let router = if state.conf_handle.get_conf().debug.enable_unstable {
+        let method_filter = MethodFilter::DELETE
+            .or(MethodFilter::GET)
+            .or(MethodFilter::HEAD)
+            .or(MethodFilter::PATCH)
+            .or(MethodFilter::POST)
+            .or(MethodFilter::PUT)
+            .or(MethodFilter::TRACE);
+
+        router.route("/http/:id", routing::on(method_filter, fwd_http))
+    } else {
+        router
+    };
+
+    router.with_state(state)
 }
 
 async fn fwd_tcp(
@@ -235,5 +252,293 @@ where
                 .await
                 .context("encountered a failure during plain tcp traffic proxying")
         }
+    }
+}
+
+async fn fwd_http(
+    State(state): State<DgwState>,
+    BridgeToken(claims): BridgeToken,
+    extract::Path(session_id): extract::Path<Uuid>,
+    ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
+    mut request: axum::http::Request<axum::body::Body>,
+) -> Result<Response, HttpError> {
+    use axum::extract::FromRequestParts as _; // from_request_parts
+    use axum::http::header;
+    use axum::http::Response;
+    use core::str::FromStr;
+    use http_body_util::BodyExt as _; // into_data_stream
+    use std::sync::LazyLock;
+    use tokio_rustls::rustls;
+    use tokio_tungstenite::connect_async_tls_with_config;
+
+    // Default HTTP client for typical usage.
+    static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+    // Dangerous HTTP client, only to be used when absolutely necessary.
+    // E.g.: VMware services are often using untrusted self-signed certificates.
+    static DANGEROUS_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_hostnames(true)
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("parameters known to be valid only")
+    });
+
+    static DANGEROUS_TLS_CONNECTOR: LazyLock<tokio_tungstenite::Connector> = LazyLock::new(|| {
+        rustls::client::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(crate::tls::danger::NoCertificateVerification))
+            .with_no_client_auth()
+            .pipe(Arc::new)
+            .pipe(tokio_tungstenite::Connector::Rustls)
+    });
+
+    const REQUEST_TARGET_PARAM: Parameter<String> =
+        Parameter::new("Dgw-Request-Target", |params| params.request_target.take());
+
+    const DANGEROUS_TLS_PARAM: Parameter<bool> =
+        Parameter::new("Dgw-Dangerous-Tls", |params| params.dangerous_tls.take());
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct QueryParams {
+        request_target: Option<String>,
+        dangerous_tls: Option<bool>, // QUESTION: Maybe we should bake this parameter into the Bridge token.
+    }
+
+    if session_id != claims.jet_aid {
+        return Err(HttpError::forbidden().msg("wrong session ID"));
+    }
+
+    // 1. Extract parameters from the request.
+
+    let query = request.uri().query().unwrap_or_default();
+    let mut query_params = serde_urlencoded::from_str::<QueryParams>(query)
+        .map_err(HttpError::bad_request().with_msg("invalid query params").err())?;
+
+    let dangerous_tls = DANGEROUS_TLS_PARAM
+        .extract_opt(&mut query_params, request.headers_mut())?
+        .unwrap_or(false);
+
+    // <METHOD> <TARGET>
+    let request_target = REQUEST_TARGET_PARAM.extract(&mut query_params, request.headers_mut())?;
+
+    debug!(%request_target, %dangerous_tls, "HTTP forwarding request");
+
+    // 2. Compute the target URI from the Request-Target parameter and the token claim.
+
+    // <TARGET>
+    let request_target = request_target
+        .split(' ')
+        .next_back()
+        .expect("split always returns at least one element");
+
+    let target_uri = claims.target_host.to_uri_with_path_and_query(request_target).map_err(
+        HttpError::bad_request()
+            .with_msg("Request-Target header has an invalid value")
+            .err(),
+    )?;
+
+    // 3. Modify the request with the target server information.
+
+    *request.uri_mut() = target_uri;
+
+    let host_value =
+        header::HeaderValue::from_str(claims.target_host.host()).map_err(HttpError::bad_request().err())?;
+    request.headers_mut().insert(header::HOST, host_value);
+
+    // 4. Forward the request.
+
+    let response = if matches!(request.uri().scheme_str(), Some("ws" | "wss")) {
+        // 4.a Prepare the WebSocket upgrade.
+
+        // We are discarding the original body.
+        // There is no HTTP body when performing a WebSocket upgrade.
+        let (mut parts, _) = request.into_parts();
+
+        let client_ws = WebSocketUpgrade::from_request_parts(&mut parts, &state).await.map_err(
+            HttpError::bad_request()
+                .with_msg("failed to initiate the websocket upgrade")
+                .err(),
+        )?;
+
+        // 4.b Open a WebSocket connection to the target.
+
+        let request = axum::http::Request::from_parts(parts, ());
+        let request_uri = request.uri().clone();
+
+        let tls_connector = if dangerous_tls {
+            Some(DANGEROUS_TLS_CONNECTOR.clone())
+        } else {
+            None
+        };
+
+        let (server_ws, server_ws_response) = connect_async_tls_with_config(request, None, false, tls_connector)
+            .await
+            .map_err(
+                HttpError::bad_gateway()
+                    .with_msg("WebSocket connection to target server")
+                    .err(),
+            )?;
+
+        let server_stream = tokio_tungstenite_websocket_compat(server_ws);
+
+        debug!(?server_ws_response, %dangerous_tls, "Connected to target server");
+
+        // 4.c Start WebSocket forwarding.
+
+        let span = tracing::Span::current();
+        let conf = state.conf_handle.get_conf();
+        let sessions = state.sessions;
+        let subscriber_tx = state.subscriber_tx;
+
+        client_ws.on_upgrade(move |client_ws| {
+            let client_stream = crate::ws::websocket_compat(client_ws);
+            let client_addr = source_addr;
+
+            async move {
+                info!(target = %request_uri, "WebSocket-WebSocket forwarding");
+
+                let info = SessionInfo::builder()
+                    .association_id(claims.jet_aid)
+                    .application_protocol(claims.jet_ap)
+                    .details(ConnectionModeDetails::Fwd {
+                        destination_host: claims.target_host,
+                    })
+                    .time_to_live(claims.jet_ttl)
+                    .recording_policy(claims.jet_rec)
+                    .build();
+
+                // NOTE: We don’t really use this address for anything else other than pcap recording, so it’s fine to use a placeholder for now.
+                let server_addr = "8.8.8.8:8888".parse().expect("valid hardcoded value");
+
+                let result = Proxy::builder()
+                    .conf(conf)
+                    .session_info(info)
+                    .address_a(client_addr)
+                    .transport_a(client_stream)
+                    .address_b(server_addr)
+                    .transport_b(server_stream)
+                    .sessions(sessions)
+                    .subscriber_tx(subscriber_tx)
+                    .build()
+                    .select_dissector_and_forward()
+                    .instrument(span.clone())
+                    .await
+                    .context("encountered a failure during WebSocket traffic proxying");
+
+                if let Err(error) = result {
+                    span.in_scope(|| {
+                        error!(error = format!("{error:#}"), "WebSocket forwarding failure");
+                    });
+                }
+            }
+        })
+    } else {
+        // 4.a Plain HTTP request forwarding using reqwest.
+
+        let (parts, body) = request.into_parts();
+        let body = reqwest::Body::wrap_stream(body.into_data_stream());
+        let request = axum::http::Request::from_parts(parts, body);
+        let request = reqwest::Request::try_from(request).map_err(HttpError::internal().err())?;
+
+        debug!(?request);
+
+        info!(target = %request.url(), %dangerous_tls, "Forward HTTP request");
+
+        let client = if dangerous_tls { &*DANGEROUS_CLIENT } else { &*CLIENT };
+
+        let response = client.execute(request).await.map_err(HttpError::bad_gateway().err())?;
+
+        if let Err(error) = response.error_for_status_ref() {
+            info!(%error, host = claims.target_host.host(), "Service responded with an failure HTTP status code");
+        }
+
+        // 4.b Convert the response into the expected type and return it.
+
+        let response = Response::from(response);
+        let (parts, body) = response.into_parts();
+        let body = axum::body::Body::from_stream(body.into_data_stream());
+        Response::from_parts(parts, body)
+    };
+
+    return Ok(response);
+
+    // -- local helpers -- //
+
+    struct Parameter<T>
+    where
+        T: FromStr,
+    {
+        header_name: &'static str,
+        query_params_extractor: fn(&mut QueryParams) -> Option<T>,
+    }
+
+    impl<T> Parameter<T>
+    where
+        T: FromStr,
+        T::Err: core::fmt::Display,
+    {
+        const fn new(header_name: &'static str, query_params_extractor: fn(&mut QueryParams) -> Option<T>) -> Self {
+            Self {
+                header_name,
+                query_params_extractor,
+            }
+        }
+
+        fn extract_opt(
+            &self,
+            query_params: &mut QueryParams,
+            headers: &mut axum::http::HeaderMap,
+        ) -> Result<Option<T>, HttpError> {
+            let value = if let Some(value) = (self.query_params_extractor)(query_params) {
+                value
+            } else if let Some(value) = headers.remove(self.header_name) {
+                let value = value
+                    .to_str()
+                    .with_context(|| format!("invalid UTF-16 value for header {}", self.header_name))
+                    .map_err(HttpError::bad_request().err())?;
+                T::from_str(value)
+                    .map_err(|e| format!("failed to parse header {}: {}", self.header_name, e))
+                    .map_err(HttpError::bad_request().err())?
+            } else {
+                return Ok(None);
+            };
+
+            Ok(Some(value))
+        }
+
+        fn extract(&self, query_params: &mut QueryParams, headers: &mut axum::http::HeaderMap) -> Result<T, HttpError> {
+            let value = self.extract_opt(query_params, headers)?;
+            let value = value
+                .with_context(|| format!("query param or header missing for {}", self.header_name))
+                .map_err(HttpError::bad_request().err())?;
+            Ok(value)
+        }
+    }
+
+    fn tokio_tungstenite_websocket_compat<S>(stream: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
+    where
+        S: futures::Stream<Item = Result<tungstenite::Message, tungstenite::Error>>
+            + futures::Sink<tungstenite::Message, Error = tungstenite::Error>
+            + Unpin
+            + Send
+            + 'static,
+    {
+        use futures::{SinkExt as _, StreamExt as _};
+
+        let compat = stream
+            .map(|item| {
+                item.map(|msg| match msg {
+                    tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
+                    tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
+                    tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
+                    tungstenite::Message::Close(_) => transport::WsMessage::Close,
+                    tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+                })
+            })
+            .with(|item| core::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+
+        transport::WsStream::new(compat)
     }
 }

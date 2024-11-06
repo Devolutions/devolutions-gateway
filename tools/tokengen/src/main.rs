@@ -81,6 +81,19 @@ fn sign(
             jet_aid,
         },
         SignSubCommand::Scope { scope } => SubCommandArgs::Scope { scope },
+        SignSubCommand::Bridge {
+            target_host,
+            jet_aid,
+            jet_ap,
+            jet_rec,
+            jet_ttl,
+        } => SubCommandArgs::Bridge {
+            target_host,
+            jet_aid,
+            jet_ap,
+            jet_rec,
+            jet_ttl,
+        },
         SignSubCommand::Jmux {
             jet_ap,
             dst_hst,
@@ -103,7 +116,8 @@ fn sign(
     };
 
     let validity_duration = humantime::parse_duration(validity_duration)?;
-    generate_token(
+
+    let result = generate_token(
         provisioner_key,
         validity_duration,
         kid.to_owned(),
@@ -111,6 +125,8 @@ fn sign(
         jet_gw_id,
         subcommand,
     )?;
+
+    println!("{result}");
 
     Ok(())
 }
@@ -186,6 +202,18 @@ enum SignSubCommand {
     },
     Scope {
         scope: String,
+    },
+    Bridge {
+        #[clap(long)]
+        target_host: String,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_ap: Option<ApplicationProtocol>,
+        #[clap(long)]
+        jet_rec: bool,
+        #[clap(long)]
+        jet_ttl: Option<u64>,
     },
     Jmux {
         #[clap(long)]

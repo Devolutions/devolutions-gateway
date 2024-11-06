@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 28144969b0e528f8251db5e960c28e7d7d5572e01acb4803442794da1a6fd2c0 # shrinks to scope_dw_id = None, use_subkey = false, claims = Bridge(BridgeClaims { target_host: TargetAddr { serialization: "tcp://bhvyrbkl.xwj:5960", scheme_end: 3, host_start: 6, host_end: 18, host_internal: Domain, port: 5960 }, nbf: 1730393500, exp: 1730403292, jti: 92768525-5113-2224-4867-980717311108 })
+cc eaae5af628a2c2b4f970865703c2a1df20e64dc0ff4f82e45661539092121e12 # shrinks to same_ip = false, claims = Bridge(BridgeClaims { target_host: TargetAddr { serialization: "tcp://vbmwyphds.lu:1810", scheme_end: 3, host_start: 6, host_end: 18, host_internal: Domain, port: 1810 }, nbf: 1730393500, exp: 1730405465, jti: 75353433-7931-5293-0704-962950113675 })
+cc fefa2894e11ed08b2eaf3966dfb5913f941a364149f4ad2854a7d4899bea1834 # shrinks to items = [RevocableItem { claim_to_revoke: None, claims: Object {"exp": Number(1730403958), "jti": String("02498981-4258-6884-1970-328704169839"), "nbf": Number(1730393500), "target_host": String("tcp://cxg.sm:147")}, token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkJSSURHRSJ9.eyJ0YXJnZXRfaG9zdCI6InRjcDovL2N4Zy5zbToxNDciLCJuYmYiOjE3MzAzOTM1MDAsImV4cCI6MTczMDQwMzk1OCwianRpIjoiMDI0OTg5ODEtNDI1OC02ODg0LTE5NzAtMzI4NzA0MTY5ODM5In0.EceCpsMRvSjsE4vmlH49knvGFVDScOkJRUlXvaPWCpmhi-zX2ww1mai8F1U6AWnnfMdIJRmOZUbNTyhv8ExpaMEIcK5rN1GHG2IjcUKOlPAi14sqhDEdum511Itye55cAlG62_WPMg6O7cxvN_c5OUnx24iMdFDIK_aF3czaZU_k-CKVw18dn5NsdMpNwsrEeOqiElgUlrUM8zS7bOIis8fpldDGaiJ0XxVXWFCKnRzzTZFNXgKUDINUpadc2klxBUk50x9_FI1MIbCIp--HUQICwgdoCGkK4ueceber8iygN6PVoDyJPkuXs5k8vh4QcqjsEjnbQD1My5ThVYXbFA" }]

@@ -22,6 +22,7 @@ pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
+const BRIDGE_TOKEN_MAX_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 12; // 12 hours
 
 pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
@@ -450,22 +451,35 @@ pub struct ScopeTokenClaims {
 
 // ----- bridge claims ----- //
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone)]
 pub struct BridgeTokenClaims {
+    /// Remote server address we are allowed to connect to
     pub target_host: TargetAddr,
 
-    /// JWT expiration time claim.
-    exp: i64,
+    /// Association ID (= Session ID)
+    pub jet_aid: Uuid,
 
-    /// JWT "JWT ID" claim, the unique ID for this token
-    jti: Uuid,
+    /// Application protocol
+    pub jet_ap: ApplicationProtocol,
+
+    /// Recording Policy
+    pub jet_rec: RecordingPolicy,
+
+    /// Max duration
+    pub jet_ttl: SessionTtl,
+
+    /// JWT "Not Before" claim
+    nbf: i64,
+
+    /// JWT "Expiration Time" claim
+    exp: i64,
 }
 
 // ----- jmux claims ----- //
 
 #[derive(Clone)]
 pub struct JmuxTokenClaims {
-    /// Jet Association ID (= Session ID)
+    /// Association ID (= Session ID)
     pub jet_aid: Uuid,
 
     /// Authorized hosts
@@ -708,8 +722,6 @@ pub enum TokenError {
     },
     #[error("subkey can't be used to sign a {content_type:?} token")]
     ContentTypeNotAllowedForSubkey { content_type: ContentType },
-    #[error("invalid `nbf` and `exp` claims for subkey-signed token")]
-    InvalidValidityForSubkey,
     #[error("claim `{name}` is malformed")]
     MalformedClaim { name: &'static str, source: anyhow::Error },
     #[error("gateway ID scope mismatch")]
@@ -727,6 +739,10 @@ pub enum TokenError {
     UnexpectedReplay { reason: &'static str },
     #[error("JSON Revocation List")]
     OldJrl,
+    #[error("lifetime defined by `nbf` and `exp` claims is too long for subkey-signed token")]
+    SubkeySignedAndTooLongLifetime,
+    #[error("lifetime defined by `nbf` and `exp` claims is too long")]
+    TooLongLifetime,
 }
 
 #[derive(typed_builder::TypedBuilder)]
@@ -891,7 +907,7 @@ fn validate_token_impl(
             .into_iter()
             .any(|(nbf, exp)| exp - nbf > MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS)
         {
-            return Err(TokenError::InvalidValidityForSubkey);
+            return Err(TokenError::SubkeySignedAndTooLongLifetime);
         }
     }
 
@@ -982,7 +998,6 @@ fn validate_token_impl(
 
         // All other tokens can't be reused even if source IP is identical
         AccessTokenClaims::Association(AssociationTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
@@ -1034,13 +1049,21 @@ fn validate_token_impl(
             }
         },
 
-        // JREC pull tokens can be re-used at will until they are expired
+        // JREC pull tokens can be re-used at will until they are expired.
         AccessTokenClaims::Jrec(JrecTokenClaims {
             jet_rop: RecordingOperation::Pull,
             ..
         }) => {}
 
-        // KDC tokens may be long-lived and reusing them is allowed
+        // BRIDGE tokens can be re-used at will until they are expired.
+        // As a safeguard, they must include the claims `nbf` and `exp`, and the interval must not be too big.
+        AccessTokenClaims::Bridge(BridgeTokenClaims { nbf, exp, .. }) => {
+            if exp - nbf > BRIDGE_TOKEN_MAX_TOKEN_VALIDITY_DURATION_SECS {
+                return Err(TokenError::TooLongLifetime);
+            }
+        }
+
+        // KDC tokens may be long-lived and reusing them is allowed.
         AccessTokenClaims::Kdc(_) => {}
 
         // JRL token must be more recent than the current revocation list
@@ -1182,6 +1205,20 @@ mod serde_impl {
         jti: Uuid,
     }
 
+    #[derive(Deserialize)]
+    struct BridgeTokenClaimsHelper {
+        target_host: SmolStr,
+        jet_aid: Uuid,
+        #[serde(default)]
+        jet_ap: ApplicationProtocol,
+        #[serde(default)]
+        jet_rec: RecordingPolicy,
+        #[serde(default)]
+        jet_ttl: SessionTtl,
+        nbf: i64,
+        exp: i64,
+    }
+
     #[derive(Serialize, Deserialize)]
     struct JmuxClaimsHelper {
         // Main target host
@@ -1299,6 +1336,45 @@ mod serde_impl {
                 exp: claims.exp,
                 jti: claims.jti,
             })
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for BridgeTokenClaims {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            use crate::target_addr::BadTargetAddr;
+
+            let claims = BridgeTokenClaimsHelper::deserialize(deserializer)?;
+
+            let target_host = parse_target_address(&claims.target_host, &claims.jet_ap).map_err(de::Error::custom)?;
+
+            return Ok(Self {
+                target_host,
+                jet_aid: claims.jet_aid,
+                jet_ap: claims.jet_ap,
+                jet_rec: claims.jet_rec,
+                jet_ttl: claims.jet_ttl,
+                nbf: claims.nbf,
+                exp: claims.exp,
+            });
+
+            // -- local helper -- //
+
+            fn parse_target_address(s: &str, jet_ap: &ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
+                const PORT_HTTP: u16 = 80;
+                const PORT_HTTPS: u16 = 443;
+                const DEFAULT_SCHEME: &str = "http";
+
+                let default_port = match s.split("://").next() {
+                    Some("http" | "ws") => PORT_HTTP,
+                    Some("https" | "wss") => PORT_HTTPS,
+                    Some(_) | None => jet_ap.known_default_port().unwrap_or(PORT_HTTP),
+                };
+
+                TargetAddr::parse_with_default_scheme(s, DEFAULT_SCHEME, default_port)
+            }
         }
     }
 

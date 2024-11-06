@@ -98,6 +98,7 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, HttpError> {
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct TokenQueryParam<'a> {
         token: &'a str,
     }
