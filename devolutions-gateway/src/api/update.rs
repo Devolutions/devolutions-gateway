@@ -24,7 +24,7 @@ pub(crate) struct UpdateResponse {}
 /// currently installed version, Devolutions Agent will proceed with the update process.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
-    operation_id = "Update",
+    operation_id = "TriggerUpdate",
     tag = "Update",
     path = "/jet/update",
     responses(

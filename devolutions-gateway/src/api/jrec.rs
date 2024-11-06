@@ -8,6 +8,7 @@ use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
+use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::ShutdownSignal;
 use hyper::StatusCode;
 use tracing::Instrument as _;
@@ -23,6 +24,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/push/:id", get(jrec_push))
         .route("/delete/:id", delete(jrec_delete))
+        .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
         .route("/play", get(get_player))
@@ -109,6 +111,7 @@ async fn handle_jrec_push(
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "The specified recording was not found"),
         (status = 406, description = "The recording is still ongoing and can't be deleted yet"),
     ),
     security(("scope_token" = ["gateway.recording.delete"])),
@@ -122,24 +125,117 @@ async fn jrec_delete(
     _scope: RecordingDeleteScope,
     extract::Path(session_id): extract::Path<Uuid>,
 ) -> Result<(), HttpError> {
-    let state = recordings
-        .get_state(session_id)
-        .await
-        .map_err(HttpError::internal().with_msg("failed recording listing").err())?;
+    let is_active = recordings.active_recordings.contains(session_id);
 
-    if state.is_some() {
+    if is_active {
         return Err(
-            HttpErrorBuilder::new(StatusCode::CONFLICT).msg("Attempted to delete a recording for an ongoing session")
+            HttpErrorBuilder::new(StatusCode::CONFLICT).msg("attempted to delete a recording for an ongoing session")
         );
     }
 
     let recording_path = conf_handle.get_conf().recording_path.join(session_id.to_string());
 
-    debug!(%recording_path, "Delete recording");
+    if !recording_path.exists() {
+        return Err(HttpErrorBuilder::new(StatusCode::NOT_FOUND)
+            .msg("attempted to delete a recording not found on this instance"));
+    }
 
-    tokio::fs::remove_dir_all(recording_path)
+    delete_recording(&recording_path)
         .await
         .map_err(HttpError::internal().with_msg("failed to delete recording").err())?;
+
+    Ok(())
+}
+
+/// Mass-deletes recordings stored on this instance
+///
+/// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests
+/// to avoid timing out during the validation of the preconditions.
+///
+/// The preconditions are:
+/// - No recording to delete is in active state.
+/// - The associated folder for each of the recording to delete must exist on this instance.
+#[cfg_attr(feature = "openapi", utoipa::path(
+    delete,
+    operation_id = "DeleteManyRecordings",
+    tag = "Jrec",
+    path = "/jet/jrec/delete",
+    request_body(content = Vec<Uuid>, description = "JSON-encoded list of session IDs", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Mass recording deletion task was successfully started"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "One of the recordings specified in the body was not found"),
+        (status = 406, description = "A recording is still ongoing and can't be deleted yet (nothing is deleted)"),
+    ),
+    security(("scope_token" = ["gateway.recording.delete"])),
+))]
+async fn jrec_delete_many(
+    State(DgwState {
+        conf_handle,
+        recordings,
+        ..
+    }): State<DgwState>,
+    _scope: RecordingDeleteScope,
+    Json(delete_list): Json<Vec<Uuid>>,
+) -> Result<(), HttpError> {
+    // When deleting many many recordings, this synchronous block may take more than 250ms to execute.
+    let join_handle = tokio::task::spawn_blocking(move || {
+        let active_recordings = recordings.active_recordings.cloned();
+
+        let conflict = delete_list.iter().any(|id| active_recordings.contains(id));
+
+        if conflict {
+            return Err(HttpErrorBuilder::new(StatusCode::CONFLICT)
+                .msg("attempted to delete a recording for an ongoing session"));
+        }
+
+        let conf = conf_handle.get_conf();
+
+        let recording_paths: Vec<Utf8PathBuf> = delete_list
+            .iter()
+            .map(|session_id| conf.recording_path.join(session_id.to_string()))
+            .collect();
+
+        for (path, session_id) in recording_paths.iter().zip(delete_list.iter()) {
+            if !path.exists() {
+                return Err(HttpError::not_found()
+                    .with_msg("attempted to delete a recording not found on this instance")
+                    .err()(format!(
+                    "folder {path} for session {session_id} does not exist"
+                )));
+            }
+        }
+
+        Ok((delete_list, recording_paths))
+    });
+
+    let (delete_list, recording_paths) = join_handle.await.map_err(HttpError::internal().err())??;
+
+    // FIXME: It would be better to have a job queue for this kind of things in case the service is killed.
+    tokio::spawn({
+        async move {
+            for (path, session_id) in recording_paths.into_iter().zip(delete_list.into_iter()) {
+                if let Err(error) = delete_recording(&path).await {
+                    error!(
+                        error = format!("{error:#}"),
+                        "Failed to delete recording for session {session_id}"
+                    );
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
+    info!(%recording_path, "Delete recording");
+
+    tokio::fs::remove_dir_all(&recording_path)
+        .await
+        .with_context(|| format!("failed to remove folder {recording_path}"))?;
 
     Ok(())
 }
