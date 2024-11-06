@@ -8,8 +8,7 @@ use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
-use cadeau::xmf::recorder::RecorderBuilder;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::ShutdownSignal;
 use hyper::StatusCode;
 use tracing::Instrument as _;
@@ -148,7 +147,14 @@ async fn jrec_delete(
     Ok(())
 }
 
-/// Deletes multiple recording stored on this instance
+/// Mass-deletes recordings stored on this instance
+///
+/// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests
+/// to avoid timing out during the validation of the preconditions.
+///
+/// The preconditions are:
+/// - No recording to delete is in active state.
+/// - The associated folder for each of the recording to delete must exist on this instance.
 #[cfg_attr(feature = "openapi", utoipa::path(
     delete,
     operation_id = "DeleteManyRecordings",
@@ -174,32 +180,38 @@ async fn jrec_delete_many(
     _scope: RecordingDeleteScope,
     Json(delete_list): Json<Vec<Uuid>>,
 ) -> Result<(), HttpError> {
-    let active_recordings = recordings.active_recordings.cloned();
+    // When deleting many many recordings, this synchronous block may take more than 250ms to execute.
+    let join_handle = tokio::task::spawn_blocking(move || {
+        let active_recordings = recordings.active_recordings.cloned();
 
-    let conflict = delete_list.iter().any(|id| active_recordings.contains(id));
+        let conflict = delete_list.iter().any(|id| active_recordings.contains(id));
 
-    if conflict {
-        return Err(
-            HttpErrorBuilder::new(StatusCode::CONFLICT).msg("attempted to delete a recording for an ongoing session")
-        );
-    }
-
-    let conf = conf_handle.get_conf();
-
-    let recording_paths: Vec<_> = delete_list
-        .iter()
-        .map(|session_id| conf.recording_path.join(session_id.to_string()))
-        .collect();
-
-    for (path, session_id) in recording_paths.iter().zip(delete_list.iter()) {
-        if !path.exists() {
-            return Err(HttpErrorBuilder::new(StatusCode::NOT_FOUND)
-                .with_msg("attempted to delete a recording not found on this instance")
-                .err()(format!(
-                "folder {path} for session {session_id} does not exist"
-            )));
+        if conflict {
+            return Err(HttpErrorBuilder::new(StatusCode::CONFLICT)
+                .msg("attempted to delete a recording for an ongoing session"));
         }
-    }
+
+        let conf = conf_handle.get_conf();
+
+        let recording_paths: Vec<Utf8PathBuf> = delete_list
+            .iter()
+            .map(|session_id| conf.recording_path.join(session_id.to_string()))
+            .collect();
+
+        for (path, session_id) in recording_paths.iter().zip(delete_list.iter()) {
+            if !path.exists() {
+                return Err(HttpError::not_found()
+                    .with_msg("attempted to delete a recording not found on this instance")
+                    .err()(format!(
+                    "folder {path} for session {session_id} does not exist"
+                )));
+            }
+        }
+
+        Ok((delete_list, recording_paths))
+    });
+
+    let (delete_list, recording_paths) = join_handle.await.map_err(HttpError::internal().err())??;
 
     // FIXME: It would be better to have a job queue for this kind of things in case the service is killed.
     tokio::spawn({
