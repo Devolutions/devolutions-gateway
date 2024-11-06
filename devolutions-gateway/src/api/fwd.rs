@@ -409,12 +409,15 @@ async fn fwd_http(
                     .recording_policy(claims.jet_rec)
                     .build();
 
+                // NOTE: We don’t really use this address for anything else other than pcap recording, so it’s fine to use a placeholder for now.
+                let server_addr = "8.8.8.8:8888".parse().expect("valid hardcoded value");
+
                 let result = Proxy::builder()
                     .conf(conf)
                     .session_info(info)
                     .address_a(client_addr)
                     .transport_a(client_stream)
-                    .address_b("8.8.8.8:8888".parse().expect("valid hardcoded value")) // NOTE: We don’t really use this address for anything else other than pcap recording, so it’s fine to use a placeholder for now.
+                    .address_b(server_addr)
                     .transport_b(server_stream)
                     .sessions(sessions)
                     .subscriber_tx(subscriber_tx)
@@ -461,7 +464,7 @@ async fn fwd_http(
 
     return Ok(response);
 
-    // * Helpers //
+    // -- local helpers -- //
 
     struct Parameter<T>
     where
