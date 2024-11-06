@@ -2,7 +2,9 @@ using DevolutionsAgent.Actions;
 using DevolutionsAgent.Dialogs;
 using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
+
 using Microsoft.Deployment.WindowsInstaller;
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -14,11 +16,11 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Xml;
+
 using WixSharp;
-using WixSharp.Bootstrapper;
 using WixSharp.CommonTasks;
 using WixSharpSetup.Dialogs;
-using Action = WixSharp.Action;
+
 using Assembly = System.Reflection.Assembly;
 using CompressionLevel = WixSharp.CompressionLevel;
 using File = WixSharp.File;
@@ -29,95 +31,65 @@ internal class Program
 {
     private const string PackageName = "DevolutionsAgent";
 
-    private static string DevolutionsAgentExePath
-    {
-        get
-        {
-            string path = Environment.GetEnvironmentVariable("DAGENT_EXECUTABLE");
-
-            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
-            {
-#if DEBUG
-                path = "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutionsagent.exe";
-#else
-                throw new Exception("The environment variable DAGENT_EXECUTABLE is not specified or the file does not exist");
-#endif
-            }
-
-            if (!System.IO.File.Exists(path))
-            {
-                throw new FileNotFoundException("The agent executable was not found", path);
-            }
-
-            return path;
-        }
-    }
-
-    private static string TargetOutputPath
-    {
-        get
-        {
-            string path = Environment.GetEnvironmentVariable("TARGET_OUTPUT_PATH");
-
-            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
-            {
-#if DEBUG
-                path = "..\\..\\target\\x86_64-pc-windows-msvc\\release\\";
-#else
-                throw new Exception("The environment variable TARGET_OUTPUT_PATH is not specified or the directory does not exist");
-#endif
-            }
-
-            if (!Directory.Exists(path))
-            {
-                throw new FileNotFoundException("The target output path was not found", path);
-            }
-
-            return path;
-        }
-    }
-
-    private static string DevolutionsAgentPedmDesktopExecutable
-    {
-        get
-        {
-            string path = Environment.GetEnvironmentVariable("DAGENT_PEDM_DESKTOP_EXECUTABLE");
-
-            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
-            {
-#if DEBUG
-                path = "..\\..\\crates\\devolutions-pedm\\DevolutionsPedmDesktop\\bin\\Release\\net8.0-windows\\DevolutionsPedmDesktop.exe";
-#else
-                throw new Exception("The environment variable DAGENT_PEDM_DESKTOP_EXECUTABLE is not specified or the file does not exist");
-#endif
-            }
-
-            if (!System.IO.File.Exists(path))
-            {
-                throw new FileNotFoundException("The agent PEDM desktop executable was not found", path);
-            }
-
-            return path;
-        }
-    }
-
-    private static string ResolveArtifact(string varName, string error)
+    /// <param name="defaultPath">Used for development builds only</param>
+    private static string ResolveDirectory(string varName, string defaultPath = null)
     {
         string path = Environment.GetEnvironmentVariable(varName);
 
-        if (!System.IO.File.Exists(path))
+        if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
         {
-            throw new FileNotFoundException(error, path);
+#if DEBUG
+            path = defaultPath;
+#else
+            throw new FileNotFoundException($"The environment variable {varName} is not specified or the directory does not exist");
+#endif
+        }
+
+        if (!Directory.Exists(path))
+        {
+            throw new DirectoryNotFoundException($"The directory for {varName} was not found");
         }
 
         return path;
     }
 
-    private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "The PEDM shell extension DLL was not found");
+    /// <param name="defaultPath">Used for development builds only</param>
+    private static string ResolveArtifact(string varName, string defaultPath = null)
+    {
+        string path = Environment.GetEnvironmentVariable(varName);
 
-    private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "The PEDM shell extension MSIX was not found");
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+        {
+#if DEBUG
+            path = defaultPath;
+#else
+            throw new FileNotFoundException($"The environment variable {varName} is not specified or the file does not exist");
+#endif
+        }
 
-    private static string DevolutionsSession => ResolveArtifact("DAGENT_SESSION_EXECUTABLE", "The Devolutions Session executable was not found");
+        if (!System.IO.File.Exists(path))
+        {
+            throw new FileNotFoundException($"The file for {varName} was not found", path);
+        }
+
+        return path;
+    }
+
+    private static string DevolutionsAgentExePath => ResolveArtifact("DAGENT_EXECUTABLE", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions-agent.exe");
+
+    private static string DevolutionsDesktopAgentPath
+    {
+        // ReSharper disable once ArrangeAccessorOwnerBody
+        get => ResolveDirectory("DAGENT_DESKTOP_AGENT_OUTPUT_PATH", "..\\..\\dotnet\\DesktopAgent\\bin\\Release\\");
+    }
+
+    private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions_pedm_shell_ext.dll");
+
+    private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\DevolutionsPedmShellExt.msix");
+
+    private static string DevolutionsSession => ResolveArtifact("DAGENT_SESSION_EXECUTABLE", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions-session.exe");
+
+    private static string TargetOutputPath => ResolveDirectory("TARGET_OUTPUT_PATH", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\");
 
     private static Version DevolutionsAgentVersion
     {
@@ -285,13 +257,7 @@ internal class Program
                 },
                 Dirs = new[]
                 {
-                    new Dir(Includes.PEDM_FEATURE, "desktop")
-                    {
-                        Files = new File[]
-                        {
-                            new (Includes.PEDM_FEATURE, DevolutionsAgentPedmDesktopExecutable),
-                        }
-                    }
+                    new Dir(Includes.PEDM_FEATURE, "desktop", new Files($"{DevolutionsDesktopAgentPath}\\*.*"))
                 }
             })),
         };
@@ -412,7 +378,6 @@ internal class Program
 
         Version thisVersion = e.Session.QueryProductVersion();
         Version installedVersion = Helpers.AppSearch.InstalledVersion;
-
 
         if (thisVersion < installedVersion)
         {

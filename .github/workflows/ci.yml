@@ -572,8 +572,8 @@ jobs:
 
             echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
 
-            $DAgentPedmDesktopExecutable = Join-Path $TargetOutputPath "DevolutionsPedmDesktop.exe"
-            echo "dagent-pedm-desktop-executable=$DAgentPedmDesktopExecutable" >> $Env:GITHUB_OUTPUT
+            $DAgentDesktopAgentOutputPath = Join-Path $TargetOutputPath "DesktopAgent"
+            echo "dagent-desktop-agent-output-path=$DAgentDesktopAgentOutputPath" >> $Env:GITHUB_OUTPUT
 
             $DAgentPedmShellExtDll = Join-Path $TargetOutputPath "DevolutionsPedmShellExt.dll"
             echo "dagent-pedm-shell-ext-dll=$DAgentPedmShellExtDll" >> $Env:GITHUB_OUTPUT
@@ -648,7 +648,7 @@ jobs:
           CARGO_PACKAGE: devolutions-agent
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
-            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = "${{ steps.load-variables.outputs.dagent-desktop-agent-output-path }}"
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
@@ -665,7 +665,7 @@ jobs:
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
-            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = "${{ steps.load-variables.outputs.dagent-desktop-agent-output-path }}"
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"

@@ -489,15 +489,17 @@ class TlkRecipe
         }
 
         if ($this.Product -Eq "agent" -And $this.Target.IsWindows()) {
-            & './crates/devolutions-pedm/DevolutionsPedmDesktop/build.ps1' | Out-Host
+            if (Test-Path Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH) {
+                & './dotnet/DesktopAgent/build.ps1' | Out-Host
+                $DesktopAgentOutputPath = $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH
+                Remove-Item -Path "$DesktopAgentOutputPath" -Recurse -Force -ErrorAction SilentlyContinue
+                New-Item -Path "$DesktopAgentOutputPath" -ItemType 'Directory' -Force | Out-Null
 
-            if (Test-Path Env:DAGENT_PEDM_DESKTOP_EXECUTABLE) {
-                $builtDesktopExe = Get-ChildItem -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select-Object -First 1
-                $builtDesktopPdb = Get-ChildItem -Recurse -Include 'DevolutionsPedmDesktop.pdb' | Select-Object -First 1
+                $BuiltDesktop = Get-ChildItem -Path "./dotnet/DesktopAgent/bin/Release/*" -Recurse -Include *.dll,*.exe,*.pdb
 
-                Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
-                Copy-Item -Path $builtDesktopPdb -Destination $(Get-DestinationSymbolFile $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE $this.Target)
-
+                foreach ($File in $BuiltDesktop) {
+                    Copy-Item $File.FullName -Destination $DesktopAgentOutputPath
+                }
             }
 
             if (Test-Path Env:DAGENT_SESSION_EXECUTABLE) {

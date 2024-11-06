@@ -228,7 +228,7 @@ jobs:
           $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
             'devolutions-agent' { 'DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
-              'DevolutionsPedmShellExt.msix', 'DevolutionsPedmDesktop.exe' }
+              'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe' }
             'jetsocat' { 'jetsocat_*' }
           }
           $ExcludePattern = "*.pdb"
@@ -300,6 +300,15 @@ jobs:
           name: native-libs
           path: native-libs
 
+      - name: Zip debug symbol files
+        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+
+          Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Compress-Archive -DestinationPath "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
+          Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Remove-Item | Out-Null
+
       - name: Regenerate Gateway MSI
         if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
         shell: pwsh
@@ -322,7 +331,7 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
-          $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select -First 1
+          $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
           $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
@@ -425,19 +434,6 @@ jobs:
               }
             }
           }
-
-      - name: Zip debug symbol files
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-
-          Get-ChildItem -Path $PackageRoot -Recurse
-
-          Compress-Archive "$PackageRoot\windows\x86_64\*.pdb" "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
-          Remove-Item "$PackageRoot\windows\x86_64\*.pdb" | Out-Null
-
-          Get-ChildItem -Path $PackageRoot -Recurse
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
