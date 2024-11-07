@@ -39,6 +39,7 @@ use uuid::Uuid;
         crate::api::config::SubProvisionerKey,
         crate::api::config::ConfigPatch,
         crate::api::jrl::JrlInfo,
+        crate::api::jrec::DeleteManyResult,
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
