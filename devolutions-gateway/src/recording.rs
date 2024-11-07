@@ -504,6 +504,7 @@ impl RecordingManagerTask {
             if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
                 if cadeau::xmf::is_init() {
                     debug!(%recording_file_path, "Enqueue video remuxing operation");
+                    // FIXME: It would be better to have a job queue for this kind of things in case the service is killed.
                     tokio::spawn(remux(recording_file_path));
                 } else {
                     debug!("Video remuxing was skipped because XMF native library is not loaded");
