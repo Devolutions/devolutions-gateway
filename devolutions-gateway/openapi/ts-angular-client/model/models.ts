@@ -6,6 +6,7 @@ export * from './configDiagnostic';
 export * from './configPatch';
 export * from './connectionMode';
 export * from './dataEncoding';
+export * from './deleteManyResult';
 export * from './heartbeat';
 export * from './identity';
 export * from './jrlInfo';
