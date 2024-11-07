@@ -144,6 +144,53 @@ paths:
       security:
       - scope_token:
         - gateway.heartbeat.read
+  /jet/jrec/delete:
+    delete:
+      tags:
+      - Jrec
+      summary: Mass-deletes recordings stored on this instance
+      description: |-
+        If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests
+        to avoid timing out during the processing of the request.
+
+        The request processing consist in
+        1) checking if one of the recording is active,
+        2) counting the number of recordings not found on this instance.
+
+        When a recording is not found on this instance, a counter is incremented.
+        This number is returned as part of the response.
+        You may use this information to detect anomalies on your side.
+        For instance, this suggests the list of recordings on your side is out of date,
+        and you may want re-index.
+      operationId: DeleteManyRecordings
+      requestBody:
+        description: JSON-encoded list of session IDs
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                format: uuid
+        required: true
+      responses:
+        '200':
+          description: Mass recording deletion task was successfully started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteManyResult'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '406':
+          description: A recording is still ongoing and can't be deleted yet (nothing is deleted)
+      security:
+      - scope_token:
+        - gateway.recording.delete
   /jet/jrec/delete/{id}:
     delete:
       tags:
@@ -167,6 +214,8 @@ paths:
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
+        '404':
+          description: The specified recording was not found
         '406':
           description: The recording is still ongoing and can't be deleted yet
       security:
@@ -344,7 +393,7 @@ paths:
         This is done via updating `Agent/update.json` file, which is then read by Devolutions Agent
         when changes are detected. If the version written to `update.json` is indeed higher than the
         currently installed version, Devolutions Agent will proceed with the update process.
-      operationId: Update
+      operationId: TriggerUpdate
       responses:
         '200':
           description: Update request has been processed successfully
@@ -534,6 +583,20 @@ components:
       - Base64Pad
       - Base64Url
       - Base64UrlPad
+    DeleteManyResult:
+      type: object
+      required:
+      - found_count
+      - not_found_count
+      properties:
+        found_count:
+          type: integer
+          description: Number of recordings found
+          minimum: 0
+        not_found_count:
+          type: integer
+          description: Number of recordings not found
+          minimum: 0
     Heartbeat:
       type: object
       required:

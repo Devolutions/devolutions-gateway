@@ -523,6 +523,107 @@ endif::internal-generation[]
 === Jrec
 
 
+[.deleteManyRecordings]
+==== deleteManyRecordings
+
+`DELETE /jet/jrec/delete`
+
+Mass-deletes recordings stored on this instance
+
+===== Description
+
+If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+
+
+// markup not found, no include::{specDir}jet/jrec/delete/DELETE/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| UUID
+| JSON-encoded list of session IDs <<UUID>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<DeleteManyResult>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Mass recording deletion task was successfully started
+|  <<DeleteManyResult>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 406
+| A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted)
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/delete/DELETE/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.deleteRecording]
 ==== deleteRecording
 
@@ -603,6 +704,11 @@ Deletes a recording stored on this instance
 
 | 403
 | Insufficient permissions
+|  <<>>
+
+
+| 404
+| The specified recording was not found
 |  <<>>
 
 
@@ -1164,8 +1270,8 @@ endif::internal-generation[]
 === Update
 
 
-[.update]
-==== update
+[.triggerUpdate]
+==== triggerUpdate
 
 `POST /jet/update`
 
@@ -1692,6 +1798,35 @@ Service configuration diagnostic
 | Base64UrlPad
 
 |===
+
+
+[#DeleteManyResult]
+=== _DeleteManyResult_ 
+
+
+
+
+[.fields-DeleteManyResult]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| found_count
+| X
+| 
+|   Integer  
+| Number of recordings found
+|     
+
+| not_found_count
+| X
+| 
+|   Integer  
+| Number of recordings not found
+|     
+
+|===
+
 
 
 [#Heartbeat]

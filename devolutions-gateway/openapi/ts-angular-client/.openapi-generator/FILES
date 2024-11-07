@@ -22,6 +22,7 @@ model/configDiagnostic.ts
 model/configPatch.ts
 model/connectionMode.ts
 model/dataEncoding.ts
+model/deleteManyResult.ts
 model/heartbeat.ts
 model/identity.ts
 model/jrlInfo.ts

@@ -29,6 +29,27 @@ namespace Devolutions.Gateway.Client.Api
     {
         #region Synchronous Operations
         /// <summary>
+        /// Mass-deletes recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <returns>DeleteManyResult</returns>
+        DeleteManyResult DeleteManyRecordings(List<Guid> requestBody);
+
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <returns>ApiResponse of DeleteManyResult</returns>
+        ApiResponse<DeleteManyResult> DeleteManyRecordingsWithHttpInfo(List<Guid> requestBody);
+        /// <summary>
         /// Deletes a recording stored on this instance
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
@@ -91,6 +112,29 @@ namespace Devolutions.Gateway.Client.Api
     public interface IJrecApiAsync : IApiAccessor
     {
         #region Asynchronous Operations
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of DeleteManyResult</returns>
+        System.Threading.Tasks.Task<DeleteManyResult> DeleteManyRecordingsAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance
+        /// </summary>
+        /// <remarks>
+        /// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (DeleteManyResult)</returns>
+        System.Threading.Tasks.Task<ApiResponse<DeleteManyResult>> DeleteManyRecordingsWithHttpInfoAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Deletes a recording stored on this instance
         /// </summary>
@@ -371,6 +415,135 @@ namespace Devolutions.Gateway.Client.Api
                 return _exceptionFactory;
             }
             set { _exceptionFactory = value; }
+        }
+
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <returns>DeleteManyResult</returns>
+        public DeleteManyResult DeleteManyRecordings(List<Guid> requestBody)
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult> localVarResponse = DeleteManyRecordingsWithHttpInfo(requestBody);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <returns>ApiResponse of DeleteManyResult</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult> DeleteManyRecordingsWithHttpInfo(List<Guid> requestBody)
+        {
+            // verify the required parameter 'requestBody' is set
+            if (requestBody == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'requestBody' when calling JrecApi->DeleteManyRecordings");
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+                "application/json"
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.Data = requestBody;
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+            var localVarResponse = this.Client.Delete<DeleteManyResult>("/jet/jrec/delete", localVarRequestOptions, this.Configuration);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("DeleteManyRecordings", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of DeleteManyResult</returns>
+        public async System.Threading.Tasks.Task<DeleteManyResult> DeleteManyRecordingsAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult> localVarResponse = await DeleteManyRecordingsWithHttpInfoAsync(requestBody, cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Mass-deletes recordings stored on this instance If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="requestBody">JSON-encoded list of session IDs</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (DeleteManyResult)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<DeleteManyResult>> DeleteManyRecordingsWithHttpInfoAsync(List<Guid> requestBody, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            // verify the required parameter 'requestBody' is set
+            if (requestBody == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'requestBody' when calling JrecApi->DeleteManyRecordings");
+
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+                "application/json"
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.Data = requestBody;
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+
+            var localVarResponse = await this.AsynchronousClient.DeleteAsync<DeleteManyResult>("/jet/jrec/delete", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("DeleteManyRecordings", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
         }
 
         /// <summary>

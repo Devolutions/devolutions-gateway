@@ -4,11 +4,11 @@ All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
-| [**Update**](UpdateApi.md#update) | **POST** /jet/update | Triggers Devolutions Gateway update process. |
+| [**TriggerUpdate**](UpdateApi.md#triggerupdate) | **POST** /jet/update | Triggers Devolutions Gateway update process. |
 
-<a id="update"></a>
-# **Update**
-> Object Update ()
+<a id="triggerupdate"></a>
+# **TriggerUpdate**
+> Object TriggerUpdate ()
 
 Triggers Devolutions Gateway update process.
 
@@ -25,7 +25,7 @@ using Devolutions.Gateway.Client.Model;
 
 namespace Example
 {
-    public class UpdateExample
+    public class TriggerUpdateExample
     {
         public static void Main()
         {
@@ -42,12 +42,12 @@ namespace Example
             try
             {
                 // Triggers Devolutions Gateway update process.
-                Object result = apiInstance.Update();
+                Object result = apiInstance.TriggerUpdate();
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
             {
-                Debug.Print("Exception when calling UpdateApi.Update: " + e.Message);
+                Debug.Print("Exception when calling UpdateApi.TriggerUpdate: " + e.Message);
                 Debug.Print("Status Code: " + e.ErrorCode);
                 Debug.Print(e.StackTrace);
             }
@@ -56,21 +56,21 @@ namespace Example
 }
 ```
 
-#### Using the UpdateWithHttpInfo variant
+#### Using the TriggerUpdateWithHttpInfo variant
 This returns an ApiResponse object which contains the response data, status code and headers.
 
 ```csharp
 try
 {
     // Triggers Devolutions Gateway update process.
-    ApiResponse<Object> response = apiInstance.UpdateWithHttpInfo();
+    ApiResponse<Object> response = apiInstance.TriggerUpdateWithHttpInfo();
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
 }
 catch (ApiException e)
 {
-    Debug.Print("Exception when calling UpdateApi.UpdateWithHttpInfo: " + e.Message);
+    Debug.Print("Exception when calling UpdateApi.TriggerUpdateWithHttpInfo: " + e.Message);
     Debug.Print("Status Code: " + e.ErrorCode);
     Debug.Print(e.StackTrace);
 }

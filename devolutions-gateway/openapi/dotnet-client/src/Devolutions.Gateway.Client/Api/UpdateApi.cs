@@ -35,7 +35,7 @@ namespace Devolutions.Gateway.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <returns>Object</returns>
-        Object Update();
+        Object TriggerUpdate();
 
         /// <summary>
         /// Triggers Devolutions Gateway update process.
@@ -45,7 +45,7 @@ namespace Devolutions.Gateway.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <returns>ApiResponse of Object</returns>
-        ApiResponse<Object> UpdateWithHttpInfo();
+        ApiResponse<Object> TriggerUpdateWithHttpInfo();
         #endregion Synchronous Operations
     }
 
@@ -64,7 +64,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Object</returns>
-        System.Threading.Tasks.Task<Object> UpdateAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<Object> TriggerUpdateAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
 
         /// <summary>
         /// Triggers Devolutions Gateway update process.
@@ -75,7 +75,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Object)</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> UpdateWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ApiResponse<Object>> TriggerUpdateWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -294,9 +294,9 @@ namespace Devolutions.Gateway.Client.Api
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <returns>Object</returns>
-        public Object Update()
+        public Object TriggerUpdate()
         {
-            Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = UpdateWithHttpInfo();
+            Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = TriggerUpdateWithHttpInfo();
             return localVarResponse.Data;
         }
 
@@ -305,7 +305,7 @@ namespace Devolutions.Gateway.Client.Api
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <returns>ApiResponse of Object</returns>
-        public Devolutions.Gateway.Client.Client.ApiResponse<Object> UpdateWithHttpInfo()
+        public Devolutions.Gateway.Client.Client.ApiResponse<Object> TriggerUpdateWithHttpInfo()
         {
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
 
@@ -336,7 +336,7 @@ namespace Devolutions.Gateway.Client.Api
 
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("Update", localVarResponse);
+                Exception _exception = this.ExceptionFactory("TriggerUpdate", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 
@@ -349,9 +349,9 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Object</returns>
-        public async System.Threading.Tasks.Task<Object> UpdateAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Object> TriggerUpdateAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
-            Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = await UpdateWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
+            Devolutions.Gateway.Client.Client.ApiResponse<Object> localVarResponse = await TriggerUpdateWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
         }
 
@@ -361,7 +361,7 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Object)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> UpdateWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Object>> TriggerUpdateWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -395,7 +395,7 @@ namespace Devolutions.Gateway.Client.Api
 
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("Update", localVarResponse);
+                Exception _exception = this.ExceptionFactory("TriggerUpdate", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 

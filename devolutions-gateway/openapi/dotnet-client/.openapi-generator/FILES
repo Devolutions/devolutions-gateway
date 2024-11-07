@@ -10,6 +10,7 @@ docs/ConfigDiagnostic.md
 docs/ConfigPatch.md
 docs/ConnectionMode.md
 docs/DataEncoding.md
+docs/DeleteManyResult.md
 docs/DiagnosticsApi.md
 docs/HealthApi.md
 docs/Heartbeat.md
@@ -64,6 +65,7 @@ src/Devolutions.Gateway.Client/Model/ConfigDiagnostic.cs
 src/Devolutions.Gateway.Client/Model/ConfigPatch.cs
 src/Devolutions.Gateway.Client/Model/ConnectionMode.cs
 src/Devolutions.Gateway.Client/Model/DataEncoding.cs
+src/Devolutions.Gateway.Client/Model/DeleteManyResult.cs
 src/Devolutions.Gateway.Client/Model/Heartbeat.cs
 src/Devolutions.Gateway.Client/Model/Identity.cs
 src/Devolutions.Gateway.Client/Model/JrlInfo.cs
