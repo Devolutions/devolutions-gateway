@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 use std::fmt::Debug;
-use std::mem::{self};
 
 use anyhow::{bail, Result};
 
@@ -32,7 +31,7 @@ impl Thread {
     pub fn get_by_id(id: u32, desired_access: THREAD_ACCESS_RIGHTS) -> Result<Self> {
         // SAFETY: No preconditions.
         let handle = unsafe { OpenThread(desired_access, false, id)? };
-        // SAFETY: The handle is owned by us, we opened the ressource above.
+        // SAFETY: The handle is owned by us, we opened the resource above.
         let handle = unsafe { Handle::new_owned(handle)? };
 
         Ok(Self::from(handle))
@@ -172,9 +171,9 @@ impl ThreadAttributeType<'_> {
 
     pub fn size(&self) -> usize {
         match self {
-            ThreadAttributeType::ParentProcess(_) => mem::size_of::<HANDLE>(),
-            ThreadAttributeType::ExtendedFlags(_) => mem::size_of::<u32>(),
-            ThreadAttributeType::HandleList(h) => mem::size_of::<HANDLE>() * h.len(),
+            ThreadAttributeType::ParentProcess(_) => size_of::<HANDLE>(),
+            ThreadAttributeType::ExtendedFlags(_) => size_of::<u32>(),
+            ThreadAttributeType::HandleList(h) => size_of::<HANDLE>() * h.len(),
         }
     }
 }

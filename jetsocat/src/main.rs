@@ -23,9 +23,10 @@ use {proptest as _, test_utils as _};
 extern crate tracing;
 
 use anyhow::Context as _;
+use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
-use jetsocat::{listener::ListenerMode, DoctorOutputFormat};
+use jetsocat::DoctorOutputFormat;
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use std::env;

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::{c_void, OsString};
 use std::fmt::Debug;
-use std::mem::{self};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::{ptr, slice};
@@ -30,8 +29,8 @@ use windows::Win32::System::LibraryLoader::{
     GetModuleFileNameW, GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
 };
 use windows::Win32::System::Threading::{
-    CreateProcessAsUserW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
-    QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
+    CreateProcessAsUserW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess, GetProcessId, OpenProcess,
+    OpenProcessToken, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, PEB,
     PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
     PROCESS_TERMINATE, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS,
@@ -122,7 +121,7 @@ impl Process {
         let thread = self.create_thread(
             // SAFETY: `LoadLibraryW` fits the type. It takes one argument that is the name of the library.
             Some(unsafe {
-                mem::transmute::<*const c_void, unsafe extern "system" fn(*mut c_void) -> u32>(load_library)
+                core::mem::transmute::<*const c_void, unsafe extern "system" fn(*mut c_void) -> u32>(load_library)
             }),
             Some(allocation.address),
         )?;
@@ -152,7 +151,7 @@ impl Process {
             )?
         };
 
-        // SAFETY: The handle is owned by us, we opened the ressource above.
+        // SAFETY: The handle is owned by us, we opened the resource above.
         let handle = unsafe { Handle::new_owned(handle) }?;
 
         Ok(Thread::from(handle))
@@ -242,6 +241,11 @@ impl Process {
         })
     }
 
+    pub fn pid(&self) -> u32 {
+        // SAFETY: Safe to call with a valid process handle.
+        unsafe { GetProcessId(self.handle.raw()) }
+    }
+
     /// Reads process memory at a specified address into a buffer.
     /// The buffer is not read.
     /// Returns the number of bytes read.
@@ -266,13 +270,13 @@ impl Process {
         Ok(bytes_read)
     }
 
-    /// Reads a stucture from process memory at a specified address.
+    /// Reads a structure from process memory at a specified address.
     ///
     /// # Safety
     ///
     /// - `address` must point to a valid and correctly sized instance of the structure.
     pub unsafe fn read_struct<T: Sized>(&self, address: *const c_void) -> Result<T> {
-        let mut buf = vec![0; mem::size_of::<T>()];
+        let mut buf = vec![0; size_of::<T>()];
 
         // SAFETY: Based on the security requirements of the function, the `address` should
         // point to a valid and correctly sized instance of `T`.
@@ -286,7 +290,7 @@ impl Process {
         }
     }
 
-    /// Reads a continous array of a structure from process memory at a specified address.
+    /// Reads a continuous array of a structure from process memory at a specified address.
     ///
     /// # Safety
     ///
@@ -301,10 +305,10 @@ impl Process {
         // However, we assume that the data will be alined as `Vec` wants.
         let data = unsafe { data.align_to_mut::<u8>().1 };
 
-        // SAFETY: `read_memory` does not read `data`, so we can safely pass an unitialized buffer.
+        // SAFETY: `read_memory` does not read `data`, so we can safely pass an uninitialized buffer.
         let read_bytes = unsafe { self.read_memory(address.cast(), data) }?;
 
-        if count * mem::size_of::<T>() == read_bytes {
+        if count * size_of::<T>() == read_bytes {
             // SAFETY: Buffer can hold `count` items and was filled up to that point.
             unsafe { buf.set_len(count) };
 
@@ -380,7 +384,7 @@ impl Peb<'_> {
         let image_path_name = unsafe {
             self.process.read_array(
                 raw_params.ImagePathName.Buffer.as_ptr(),
-                raw_params.ImagePathName.Length as usize / mem::size_of::<u16>(),
+                raw_params.ImagePathName.Length as usize / size_of::<u16>(),
             )?
         };
 
@@ -388,7 +392,7 @@ impl Peb<'_> {
         let command_line = unsafe {
             self.process.read_array(
                 raw_params.CommandLine.Buffer.as_ptr(),
-                raw_params.CommandLine.Length as usize / mem::size_of::<u16>(),
+                raw_params.CommandLine.Length as usize / size_of::<u16>(),
             )?
         };
 
@@ -396,7 +400,7 @@ impl Peb<'_> {
         let desktop = unsafe {
             self.process.read_array(
                 raw_params.DesktopInfo.Buffer.as_ptr(),
-                raw_params.DesktopInfo.Length as usize / mem::size_of::<u16>(),
+                raw_params.DesktopInfo.Length as usize / size_of::<u16>(),
             )?
         };
 
@@ -404,7 +408,7 @@ impl Peb<'_> {
         let working_directory = unsafe {
             self.process.read_array(
                 raw_params.CurrentDirectory.DosPath.Buffer.as_ptr(),
-                raw_params.CurrentDirectory.DosPath.Length as usize / mem::size_of::<u16>(),
+                raw_params.CurrentDirectory.DosPath.Length as usize / size_of::<u16>(),
             )?
         };
 
@@ -579,8 +583,8 @@ impl ProcessEntry32Iterator {
         };
 
         // SAFETY: It is safe to zero out the structure as it is a simple POD type.
-        let mut process_entry: PROCESSENTRY32W = unsafe { mem::zeroed() };
-        process_entry.dwSize = mem::size_of::<PROCESSENTRY32W>()
+        let mut process_entry: PROCESSENTRY32W = unsafe { core::mem::zeroed() };
+        process_entry.dwSize = size_of::<PROCESSENTRY32W>()
             .try_into()
             .expect("BUG: PROCESSENTRY32W size always fits in u32");
 
@@ -700,7 +704,7 @@ pub fn create_process_as_user(
             // SAFETY: As per `CreateEnvironmentBlock` documentation: We must specify
             // `CREATE_UNICODE_ENVIRONMENT` and call `DestroyEnvironmentBlock` after
             // `CreateProcessAsUser` call.
-            // - `CREATE_UNICODE_ENVIRONMENT` is always set unconditionaly.
+            // - `CREATE_UNICODE_ENVIRONMENT` is always set unconditionally.
             // - `DestroyEnvironmentBlock` is called in the `ProcessEnvironment` destructor.
             //
             // Therefore, all preconditions are met to safely call `CreateEnvironmentBlock`.
@@ -742,10 +746,10 @@ pub fn create_process_as_user(
         )
     }?;
 
-    // SAFETY: The handle is owned by us, we opened the ressource above.
+    // SAFETY: The handle is owned by us, we opened the resource above.
     let process = unsafe { Handle::new_owned(raw_process_information.hProcess).map(Process::from)? };
 
-    // SAFETY: The handle is owned by us, we opened the ressource above.
+    // SAFETY: The handle is owned by us, we opened the resource above.
     let thread = unsafe { Handle::new_owned(raw_process_information.hThread).map(Thread::from)? };
 
     Ok(ProcessInformation {

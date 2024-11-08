@@ -822,8 +822,7 @@ mod native_tls_checks {
         fn openssl_check_chain(ctx: &mut DiagnosticCtx, server_certificates: &[X509]) -> anyhow::Result<()> {
             use openssl::ssl::{SslConnector, SslMethod};
             use openssl::stack::Stack;
-            use openssl::x509::X509StoreContext;
-            use openssl::x509::X509VerifyResult;
+            use openssl::x509::{X509StoreContext, X509VerifyResult};
 
             output!(ctx.out, "-> Create SSL context")?;
 
