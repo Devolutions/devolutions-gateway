@@ -2,6 +2,8 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2024.3.4 (2024-11-8)
+
 ### Features
 
 - _jetsocat_: make doctor returns links to x509.io ([#1059](https://github.com/Devolutions/devolutions-gateway/issues/1059)) ([ce68fdd1d3](https://github.com/Devolutions/devolutions-gateway/commit/ce68fdd1d3b5257654df7f38743a0d875677960b)) 
