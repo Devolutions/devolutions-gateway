@@ -14,13 +14,13 @@ workspace = true
 [features]
 default = ["dvc"]
 dvc = [
-    "async-trait",
-    "windows",
-    "now-proto-pdu",
-    "ironrdp",
-    "tempfile",
-    "thiserror",
-    "win-api-wrappers",
+    "dep:async-trait",
+    "dep:windows",
+    "dep:now-proto-pdu",
+    "dep:ironrdp",
+    "dep:tempfile",
+    "dep:thiserror",
+    "dep:win-api-wrappers",
 ]
 
 [dependencies]

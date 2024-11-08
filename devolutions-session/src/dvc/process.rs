@@ -339,7 +339,7 @@ impl WinApiProcessCtx {
                     };
 
                     if let Err(err) = overlapped_result {
-                        // SAFETY: No_preconditions.
+                        // SAFETY: No preconditions.
                         match unsafe { GetLastError() } {
                             ERROR_HANDLE_EOF | ERROR_BROKEN_PIPE => {
                                 // EOF on stdout pipe, close it and send EOF message to message_tx

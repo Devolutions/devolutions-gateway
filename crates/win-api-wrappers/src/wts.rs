@@ -1,5 +1,9 @@
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::System::RemoteDesktop::{WTSFreeMemory, WTSVirtualChannelClose};
+use windows::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
+use windows::Win32::System::RemoteDesktop::{WTSFreeMemory, WTSVirtualChannelClose, WTSVirtualChannelOpenEx, WTSVirtualChannelQuery, WTSVirtualFileHandle, WTS_CHANNEL_OPTION_DYNAMIC, WTS_CURRENT_SESSION};
+use windows::Win32::System::Threading::GetCurrentProcess;
+use windows::core::Owned;
+
+use crate::utils::AnsiString;
 
 /// RAII wrapper for WTS virtual channel handle.
 pub struct WTSVirtualChannel(HANDLE);
@@ -9,6 +13,70 @@ impl WTSVirtualChannel {
     /// `handle` must be a valid handle returned from `WTSVirtualChannelOpenEx`.
     pub unsafe fn new(handle: HANDLE) -> Self {
         Self(handle)
+    }
+
+    pub fn open_dvc(name: &str) -> anyhow::Result<Self> {
+        let channel_name = AnsiString::from(name);
+
+        #[allow(clippy::undocumented_unsafe_blocks)] // false positive
+        // SAFETY: Channel name is always a valid pointer to a null-terminated string.
+        let raw_wts_handle = unsafe {
+            WTSVirtualChannelOpenEx(
+                WTS_CURRENT_SESSION,
+                channel_name.as_pcstr(),
+                WTS_CHANNEL_OPTION_DYNAMIC
+            )
+        }?;
+
+        // SAFETY: `WTSVirtualChannelOpenEx` always returns a valid handle on success.
+        Ok(unsafe { Self::new(raw_wts_handle) })
+    }
+
+    pub fn query_file_handle(&self) -> anyhow::Result<Owned<HANDLE>> {
+        let mut channel_file_handle_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
+        let mut len: u32 = 0;
+
+        // SAFETY: It is safe to call `WTSVirtualChannelQuery` with valid channel and
+        // destination pointers.
+        unsafe {
+            WTSVirtualChannelQuery(
+                self.0,
+                WTSVirtualFileHandle,
+                &mut channel_file_handle_ptr as *mut _,
+                &mut len,
+            )
+        }?;
+
+        // SAFETY: `channel_file_handle_ptr` is always a valid pointer to a handle on success.
+        let channel_file_handle_ptr = unsafe { WTSMemory::new(channel_file_handle_ptr) };
+
+        if len != u32::try_from(size_of::<HANDLE>()).expect("HANDLE always fits into u32") {
+            return Err(anyhow::anyhow!("Failed to query DVC channel file handle"));
+        }
+
+        let mut raw_handle = HANDLE::default();
+
+        // SAFETY: `GetCurrentProcess` is always safe to call.
+        let current_process = unsafe { GetCurrentProcess() };
+
+        // SAFETY: `lptargetprocesshandle` is valid and points to `raw_handle` declared above,
+        // therefore it is safe to call.
+        unsafe {
+            DuplicateHandle(
+                current_process,
+                channel_file_handle_ptr.as_handle(),
+                current_process,
+                &mut raw_handle,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )?;
+        };
+
+        // SAFETY: Handle returned from `DuplicateHandle` is always valid if the function succeeds.
+        let owned_handle = unsafe { Owned::new(raw_handle) };
+
+        Ok(owned_handle)
     }
 
     pub fn raw(&self) -> HANDLE {
@@ -35,7 +103,7 @@ impl WTSMemory {
         Self(ptr)
     }
 
-    pub fn raw(&self) -> *mut core::ffi::c_void {
+    pub fn as_mut_ptr(&self) -> *mut core::ffi::c_void {
         self.0
     }
 

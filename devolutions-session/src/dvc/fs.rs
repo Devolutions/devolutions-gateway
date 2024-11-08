@@ -1,4 +1,3 @@
-use std::os::windows::io::{AsHandle, AsRawHandle};
 use std::path::PathBuf;
 
 use windows::core::PCWSTR;
@@ -6,7 +5,7 @@ use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBO
 
 use win_api_wrappers::utils::WideString;
 
-/// Guard for created temporary file. (File is removed on drop)
+/// Guard for created temporary file. Associated file is deleted on drop.
 pub struct TmpFileGuard(PathBuf);
 
 impl TmpFileGuard {

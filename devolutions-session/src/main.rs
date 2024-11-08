@@ -113,6 +113,7 @@ async fn spawn_tasks(_config: &Conf) -> anyhow::Result<Tasks> {
 struct Tasks {
     inner: Vec<ChildTask<anyhow::Result<()>>>,
     shutdown_handle: ShutdownHandle,
+    // NOTE: Currently unused on non-windows platforms; kept for future use.
     #[allow(dead_code)]
     shutdown_signal: ShutdownSignal,
 }
@@ -128,6 +129,7 @@ impl Tasks {
         }
     }
 
+    // NOTE: Currently unused on non-windows platforms; kept for future use.
     #[allow(dead_code)]
     fn register<T>(&mut self, task: T)
     where

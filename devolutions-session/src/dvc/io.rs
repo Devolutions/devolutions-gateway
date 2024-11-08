@@ -1,21 +1,15 @@
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
-use windows::core::{Owned, PCSTR};
-use windows::Win32::Foundation::{
-    DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_IO_PENDING, HANDLE, WAIT_EVENT, WAIT_OBJECT_0,
-};
+use windows::Win32::Foundation::{GetLastError, ERROR_IO_PENDING, WAIT_EVENT, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::RemoteDesktop::{
-    WTSVirtualChannelOpenEx, WTSVirtualChannelQuery, WTSVirtualFileHandle, CHANNEL_CHUNK_LENGTH, CHANNEL_PDU_HEADER,
-    WTS_CHANNEL_OPTION_DYNAMIC, WTS_CURRENT_SESSION,
-};
-use windows::Win32::System::Threading::{GetCurrentProcess, WaitForMultipleObjects, INFINITE};
+use windows::Win32::System::RemoteDesktop::{CHANNEL_CHUNK_LENGTH, CHANNEL_PDU_HEADER};
+use windows::Win32::System::Threading::{WaitForMultipleObjects, INFINITE};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 
 use now_proto_pdu::NowMessage;
 use win_api_wrappers::event::Event;
 use win_api_wrappers::utils::Pipe;
-use win_api_wrappers::wts::{WTSMemory, WTSVirtualChannel};
+use win_api_wrappers::wts::WTSVirtualChannel;
 
 use crate::dvc::channel::WinapiSignaledReceiver;
 use crate::dvc::now_message_dissector::NowMessageDissector;
@@ -28,7 +22,13 @@ pub fn run_dvc_io(
     read_tx: Sender<NowMessage>,
     stop_event: Event,
 ) -> Result<(), anyhow::Error> {
-    let channel_file = open_agent_dvc_channel_impl()?;
+    trace!("Opening DVC channel");
+    let wts = WTSVirtualChannel::open_dvc(DVC_CHANNEL_NAME)?;
+
+    trace!("Querying DVC channel");
+    let channel_file = wts.query_file_handle()?;
+
+    trace!("DVC channel opened");
 
     let mut pdu_chunk_buffer = [0u8; CHANNEL_CHUNK_LENGTH as usize];
     let mut overlapped = OVERLAPPED::default();
@@ -136,70 +136,6 @@ pub fn run_dvc_io(
             }
         };
     }
-}
-
-fn open_agent_dvc_channel_impl() -> anyhow::Result<Owned<HANDLE>> {
-    let channel_name_wide = PCSTR::from_raw(DVC_CHANNEL_NAME.as_ptr());
-
-    trace!("Opening DVC channel");
-
-    #[allow(clippy::undocumented_unsafe_blocks)] // false positive
-    // SAFETY: No preconditions.
-    let raw_wts_handle =
-        unsafe { WTSVirtualChannelOpenEx(WTS_CURRENT_SESSION, channel_name_wide, WTS_CHANNEL_OPTION_DYNAMIC) }?;
-
-    // SAFETY: `WTSVirtualChannelOpenEx` always returns a valid handle on success.
-    let wts = unsafe { WTSVirtualChannel::new(raw_wts_handle) };
-
-    let mut channel_file_handle_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
-
-    let mut len: u32 = 0;
-
-    trace!("Querying DVC channel");
-
-    // SAFETY: It is safe to call `WTSVirtualChannelQuery` with valid channel and
-    // destination pointers.
-    unsafe {
-        WTSVirtualChannelQuery(
-            wts.raw(),
-            WTSVirtualFileHandle,
-            &mut channel_file_handle_ptr as *mut _,
-            &mut len,
-        )
-    }?;
-
-    // SAFETY: `channel_file_handle_ptr` is always a valid pointer to a handle on success.
-    let channel_file_handle_ptr = unsafe { WTSMemory::new(channel_file_handle_ptr) };
-
-    if len != u32::try_from(size_of::<HANDLE>()).expect("HANDLE always fits into u32") {
-        return Err(anyhow::anyhow!("Failed to query DVC channel file handle"));
-    }
-
-    let mut raw_handle = HANDLE::default();
-
-    // SAFETY: `GetCurrentProcess` is always safe to call.
-    let current_process = unsafe { GetCurrentProcess() };
-
-    // SAFETY: `lptargetprocesshandle` is valid and points to `raw_handle` declared above,
-    // therefore it is safe to call.
-    unsafe {
-        DuplicateHandle(
-            current_process,
-            channel_file_handle_ptr.as_handle(),
-            current_process,
-            &mut raw_handle,
-            0,
-            false,
-            DUPLICATE_SAME_ACCESS,
-        )?;
-    };
-
-    info!("DVC channel opened");
-
-    // SAFETY: `DuplicateHandle` is always safe to call.
-    let new_handle = unsafe { Owned::new(raw_handle) };
-
-    Ok(new_handle)
 }
 
 pub fn ensure_overlapped_io_result(result: windows::core::Result<()>) -> Result<(), windows::core::Error> {
