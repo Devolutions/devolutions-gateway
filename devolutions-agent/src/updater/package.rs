@@ -88,7 +88,7 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
             *token_handle,
             TokenElevation,
             Some(&mut token_elevation as *mut _ as _),
-            std::mem::size_of::<TOKEN_ELEVATION>().try_into().unwrap(),
+            size_of::<TOKEN_ELEVATION>().try_into().unwrap(),
             &mut return_size as _,
         )
     };
