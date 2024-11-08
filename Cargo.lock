@@ -1052,6 +1052,7 @@ dependencies = [
  "devolutions-log",
  "dlopen",
  "dlopen_derive",
+ "dunce",
  "embed-resource",
  "etherparse",
  "futures",

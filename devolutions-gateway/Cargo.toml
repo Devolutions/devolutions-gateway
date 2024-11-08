@@ -52,6 +52,7 @@ thiserror = "1"
 typed-builder = "0.19"
 backoff = "0.4"
 sysinfo = "0.30"
+dunce = "1.0"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.9", default-features = false, features = ["jose", "x509", "pkcs12"] }
