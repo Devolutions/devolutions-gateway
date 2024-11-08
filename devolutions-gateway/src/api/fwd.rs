@@ -263,8 +263,7 @@ async fn fwd_http(
     mut request: axum::http::Request<axum::body::Body>,
 ) -> Result<Response, HttpError> {
     use axum::extract::FromRequestParts as _; // from_request_parts
-    use axum::http::header;
-    use axum::http::Response;
+    use axum::http::{header, Response};
     use core::str::FromStr;
     use http_body_util::BodyExt as _; // into_data_stream
     use std::sync::LazyLock;
