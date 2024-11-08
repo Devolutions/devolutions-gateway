@@ -21,7 +21,6 @@ impl WTSVirtualChannel {
     pub fn open_dvc(name: &str) -> anyhow::Result<Self> {
         let channel_name = AnsiString::from(name);
 
-        #[allow(clippy::undocumented_unsafe_blocks)] // false positive
         // SAFETY: Channel name is always a valid pointer to a null-terminated string.
         let raw_wts_handle = unsafe {
             WTSVirtualChannelOpenEx(WTS_CURRENT_SESSION, channel_name.as_pcstr(), WTS_CHANNEL_OPTION_DYNAMIC)
@@ -94,11 +93,11 @@ struct WTSMemory(*mut core::ffi::c_void);
 impl WTSMemory {
     /// # Safety
     /// `ptr` must be a valid pointer to a handle returned from `WTSVirtualChannelQuery`.
-    pub(crate) unsafe fn new(ptr: *mut core::ffi::c_void) -> Self {
+    unsafe fn new(ptr: *mut core::ffi::c_void) -> Self {
         Self(ptr)
     }
 
-    pub(crate) fn as_handle(&self) -> HANDLE {
+    fn as_handle(&self) -> HANDLE {
         if self.0.is_null() {
             return HANDLE::default();
         }

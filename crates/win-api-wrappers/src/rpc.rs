@@ -115,7 +115,6 @@ pub struct RpcServerInterfacePointer {
     pub raw: &'static RPC_SERVER_INTERFACE,
 }
 
-// SAFETY: RpcServerInterfacePointer could be sent between threads.
 unsafe impl Send for RpcServerInterfacePointer {}
 
 impl RpcServerInterfacePointer {
