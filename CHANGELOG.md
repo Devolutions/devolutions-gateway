@@ -18,11 +18,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   A new endpoint not taking any parameter via the request path.
   Instead, a list of session IDs is provided in the request body.
 
-### Bug Fixes
-
-- _dgw_: the recording policy wasn't set for RDP via web ([#1044](https://github.com/Devolutions/devolutions-gateway/issues/1044)) ([01fb589311](https://github.com/Devolutions/devolutions-gateway/commit/01fb589311fb25cf6e5c5f27e4b7a55708af5ae7)) 
-
-- _dgw_: support for .cast files that have two slices with the same timestamp in recording player ([#1054](https://github.com/Devolutions/devolutions-gateway/issues/1054)) ([8ed5163f3a](https://github.com/Devolutions/devolutions-gateway/commit/8ed5163f3a6cf64d789cc43734f10503db88705f)) 
+### Improvements
 
 - _dgw_: disallow SCOPE tokens missing the jti claim ([#1082](https://github.com/Devolutions/devolutions-gateway/issues/1082)) ([78396b5e14](https://github.com/Devolutions/devolutions-gateway/commit/78396b5e14e4fe463c15ef09cf1fb902ef751658)) 
 
@@ -30,6 +26,12 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   This version is almost three years old, and already completely phased
   out, as such it’s more than reasonable to stop supporting this kind
   of token.
+
+### Bug Fixes
+
+- _dgw_: the recording policy wasn't set for RDP via web ([#1044](https://github.com/Devolutions/devolutions-gateway/issues/1044)) ([01fb589311](https://github.com/Devolutions/devolutions-gateway/commit/01fb589311fb25cf6e5c5f27e4b7a55708af5ae7)) 
+
+- _dgw_: support for .cast files that have two slices with the same timestamp in recording player ([#1054](https://github.com/Devolutions/devolutions-gateway/issues/1054)) ([8ed5163f3a](https://github.com/Devolutions/devolutions-gateway/commit/8ed5163f3a6cf64d789cc43734f10503db88705f)) 
 
 - _dgw_: allow any header to be set in browser JavaScript HTTP requests ([#1083](https://github.com/Devolutions/devolutions-gateway/issues/1083)) ([0a7c80898a](https://github.com/Devolutions/devolutions-gateway/commit/0a7c80898a998827ba42831b6adaa07b70f974ef)) 
 
