@@ -78,13 +78,12 @@ pub(super) async fn get_heartbeat(
     let (recording_storage_total_space, recording_storage_available_space) = if sysinfo::IS_SUPPORTED_SYSTEM {
         trace!("System is supporting listing storage disks");
 
-        let recording_path = conf
-            .recording_path
-            .canonicalize()
+        let recording_path = dunce::canonicalize(&conf.recording_path)
             .unwrap_or_else(|_| conf.recording_path.clone().into_std_path_buf());
 
         let disks = Disks::new_with_refreshed_list();
 
+        debug!(recording_path = %recording_path.display(), "Search mount point for path");
         debug!(?disks, "Found disks");
 
         let mut recording_disk = None;
