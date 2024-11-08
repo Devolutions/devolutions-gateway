@@ -1,7 +1,10 @@
-use windows::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
-use windows::Win32::System::RemoteDesktop::{WTSFreeMemory, WTSVirtualChannelClose, WTSVirtualChannelOpenEx, WTSVirtualChannelQuery, WTSVirtualFileHandle, WTS_CHANNEL_OPTION_DYNAMIC, WTS_CURRENT_SESSION};
-use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::core::Owned;
+use windows::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
+use windows::Win32::System::RemoteDesktop::{
+    WTSFreeMemory, WTSVirtualChannelClose, WTSVirtualChannelOpenEx, WTSVirtualChannelQuery, WTSVirtualFileHandle,
+    WTS_CHANNEL_OPTION_DYNAMIC, WTS_CURRENT_SESSION,
+};
+use windows::Win32::System::Threading::GetCurrentProcess;
 
 use crate::utils::AnsiString;
 
@@ -21,11 +24,7 @@ impl WTSVirtualChannel {
         #[allow(clippy::undocumented_unsafe_blocks)] // false positive
         // SAFETY: Channel name is always a valid pointer to a null-terminated string.
         let raw_wts_handle = unsafe {
-            WTSVirtualChannelOpenEx(
-                WTS_CURRENT_SESSION,
-                channel_name.as_pcstr(),
-                WTS_CHANNEL_OPTION_DYNAMIC
-            )
+            WTSVirtualChannelOpenEx(WTS_CURRENT_SESSION, channel_name.as_pcstr(), WTS_CHANNEL_OPTION_DYNAMIC)
         }?;
 
         // SAFETY: `WTSVirtualChannelOpenEx` always returns a valid handle on success.
@@ -78,10 +77,6 @@ impl WTSVirtualChannel {
 
         Ok(owned_handle)
     }
-
-    pub fn raw(&self) -> HANDLE {
-        self.0
-    }
 }
 
 impl Drop for WTSVirtualChannel {
@@ -94,20 +89,16 @@ impl Drop for WTSVirtualChannel {
 }
 
 /// RAII wrapper for WTS memory handle.
-pub struct WTSMemory(*mut core::ffi::c_void);
+struct WTSMemory(*mut core::ffi::c_void);
 
 impl WTSMemory {
     /// # Safety
     /// `ptr` must be a valid pointer to a handle returned from `WTSVirtualChannelQuery`.
-    pub unsafe fn new(ptr: *mut core::ffi::c_void) -> Self {
+    pub(crate) unsafe fn new(ptr: *mut core::ffi::c_void) -> Self {
         Self(ptr)
     }
 
-    pub fn as_mut_ptr(&self) -> *mut core::ffi::c_void {
-        self.0
-    }
-
-    pub fn as_handle(&self) -> HANDLE {
+    pub(crate) fn as_handle(&self) -> HANDLE {
         if self.0.is_null() {
             return HANDLE::default();
         }

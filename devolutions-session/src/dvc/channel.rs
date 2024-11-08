@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::event::Event;
 use windows::Win32::Foundation::HANDLE;
-use windows::Win32::System::Threading::SetEvent;
 
 const IO_CHANNEL_SIZE: usize = 100;
 
@@ -21,20 +20,16 @@ impl<T: Send + Sync + Debug + 'static> WinapiSignaledSender<T> {
         // DVC IO loop is controlled by WinAPI events signaling, therefore we need to fire event to
         // notify DVC IO loop about new incoming message.
 
-        // SAFETY: No preconditions.
-        unsafe {
-            SetEvent(self.event.raw())?;
-        }
+        self.event.set()?;
+
         Ok(())
     }
 
     pub fn blocking_send(&self, message: T) -> anyhow::Result<()> {
         self.tx.blocking_send(message)?;
 
-        // SAFETY: No preconditions.
-        unsafe {
-            SetEvent(self.event.raw())?;
-        }
+        self.event.set()?;
+
         Ok(())
     }
 }
