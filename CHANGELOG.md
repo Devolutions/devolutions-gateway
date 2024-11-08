@@ -2,6 +2,53 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2024.3.4 (2024-11-8)
+
+### Features
+
+- _jetsocat_: make doctor returns links to x509.io ([#1059](https://github.com/Devolutions/devolutions-gateway/issues/1059)) ([ce68fdd1d3](https://github.com/Devolutions/devolutions-gateway/commit/ce68fdd1d3b5257654df7f38743a0d875677960b)) 
+
+  Returns a link to x509.io Certificate Viewer in order to inspect the
+  certification chain conveniently.
+
+- _dgw_: shadowing player web-component ([#1075](https://github.com/Devolutions/devolutions-gateway/issues/1075)) ([5169f60622](https://github.com/Devolutions/devolutions-gateway/commit/5169f6062231b92b87236ec38b6987f18659dfdf)) 
+
+- _dgw_: /jet/jrec/delete endpoint for mass deletion ([#1093](https://github.com/Devolutions/devolutions-gateway/issues/1093)) ([341d455f6c](https://github.com/Devolutions/devolutions-gateway/commit/341d455f6c3440f6e98f75fa70e765a0fa59dffe)) ([DGW-219](https://devolutions.atlassian.net/browse/DGW-219)) 
+
+  A new endpoint not taking any parameter via the request path.
+  Instead, a list of session IDs is provided in the request body.
+
+### Improvements
+
+- _dgw_: disallow SCOPE tokens missing the jti claim ([#1082](https://github.com/Devolutions/devolutions-gateway/issues/1082)) ([78396b5e14](https://github.com/Devolutions/devolutions-gateway/commit/78396b5e14e4fe463c15ef09cf1fb902ef751658)) 
+
+  DVLS generates this claim since its version 2022.1.9.
+  This version is almost three years old, and already completely phased
+  out, as such it’s more than reasonable to stop supporting this kind
+  of token.
+
+### Bug Fixes
+
+- _dgw_: the recording policy wasn't set for RDP via web ([#1044](https://github.com/Devolutions/devolutions-gateway/issues/1044)) ([01fb589311](https://github.com/Devolutions/devolutions-gateway/commit/01fb589311fb25cf6e5c5f27e4b7a55708af5ae7)) 
+
+- _dgw_: support for .cast files that have two slices with the same timestamp in recording player ([#1054](https://github.com/Devolutions/devolutions-gateway/issues/1054)) ([8ed5163f3a](https://github.com/Devolutions/devolutions-gateway/commit/8ed5163f3a6cf64d789cc43734f10503db88705f)) 
+
+- _dgw_: allow any header to be set in browser JavaScript HTTP requests ([#1083](https://github.com/Devolutions/devolutions-gateway/issues/1083)) ([0a7c80898a](https://github.com/Devolutions/devolutions-gateway/commit/0a7c80898a998827ba42831b6adaa07b70f974ef)) 
+
+  We don’t expose any header particularly sensitive from the Devolutions
+  Gateway, and the future HTTP bridge will always require a token which
+  is only issued on a per-need basis. In fact, in such cases we actually
+  want to allow virtually any header to be used for web-based integration
+  of various web services (e.g.: VMware dashboard).
+  The restriction imposed by the token requirement is strong enough.
+
+- _dgw_: better custom recording paths handling in heartbeat endpoint ([#1097](https://github.com/Devolutions/devolutions-gateway/issues/1097)) ([c1d047c190](https://github.com/Devolutions/devolutions-gateway/commit/c1d047c1907c95cc2b2198b66f623ddbd8cc66bd)) ([DGW-218](https://devolutions.atlassian.net/browse/DGW-218)) 
+
+  On Windows, the std::fs::canonicalize function returns
+  Windows NT UNC paths, but our code detecting the mount point does not
+  understand that.
+  We use dunce to handle that for us instead.
+
 ## 2024.3.3 (2024-10-02)
 
 ### Features
