@@ -10,6 +10,7 @@ mod lib_win {
     pub mod event;
     pub mod handle;
     pub mod identity;
+    pub mod netmgmt;
     pub mod process;
     pub mod security;
     pub mod session;
