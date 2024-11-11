@@ -77,7 +77,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
     }
   }
 
-  private handleAutoLoginError(error): Observable<boolean> {
+  private handleAutoLoginError(error: HttpErrorResponse): Observable<boolean> {
     if (error?.status !== 401) {
       console.error('Auto login:', error);
       this.addMessages([
