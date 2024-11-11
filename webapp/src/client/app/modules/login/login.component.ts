@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit } from '@angular/core';
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 
@@ -76,8 +77,8 @@ export class LoginComponent extends BaseComponent implements OnInit {
     }
   }
 
-  private handleAutoLoginError(error): Observable<boolean> {
-    if (error.status && error.status !== '401') {
+  private handleAutoLoginError(error: HttpErrorResponse): Observable<boolean> {
+    if (error?.status !== 401) {
       console.error('Auto login:', error);
       this.addMessages([
         {
