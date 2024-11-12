@@ -80,6 +80,13 @@ fn generate_usage() -> String {
 }
 
 pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
+    // Install the default crypto provider when rustls is used.
+    #[cfg(feature = "rustls")]
+    if rustls::crypto::ring::default_provider().install_default().is_err() {
+        let installed_provider = rustls::crypto::CryptoProvider::get_default();
+        debug!(?installed_provider, "default crypto provider is already installed");
+    }
+
     let rt = runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
