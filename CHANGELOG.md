@@ -2,6 +2,12 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2024.3.5 (2024-11-12)
+
+### Bug Fixes
+
+- _webapp_: the initial 401 error is shown when it should not ([#1102](https://github.com/Devolutions/devolutions-gateway/issues/1102)) ([b54a666776](https://github.com/Devolutions/devolutions-gateway/commit/b54a666776420106bb694d08700e7ae234b9ab51)) ([DGW-226](https://devolutions.atlassian.net/browse/DGW-226)) 
+
 ## 2024.3.4 (2024-11-8)
 
 ### Features
