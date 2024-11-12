@@ -8,7 +8,7 @@ All URIs are relative to *http://localhost*
 
 <a id="triggerupdate"></a>
 # **TriggerUpdate**
-> Object TriggerUpdate ()
+> Object TriggerUpdate (string version)
 
 Triggers Devolutions Gateway update process.
 
@@ -38,11 +38,12 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new UpdateApi(httpClient, config, httpClientHandler);
+            var version = "version_example";  // string | The version to install; use 'latest' for the latest version, or 'w.x.y.z' for a specific version
 
             try
             {
                 // Triggers Devolutions Gateway update process.
-                Object result = apiInstance.TriggerUpdate();
+                Object result = apiInstance.TriggerUpdate(version);
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
@@ -63,7 +64,7 @@ This returns an ApiResponse object which contains the response data, status code
 try
 {
     // Triggers Devolutions Gateway update process.
-    ApiResponse<Object> response = apiInstance.TriggerUpdateWithHttpInfo();
+    ApiResponse<Object> response = apiInstance.TriggerUpdateWithHttpInfo(version);
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
@@ -77,7 +78,11 @@ catch (ApiException e)
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **version** | **string** | The version to install; use &#39;latest&#39; for the latest version, or &#39;w.x.y.z&#39; for a specific version |  |
+
 ### Return type
 
 **Object**
