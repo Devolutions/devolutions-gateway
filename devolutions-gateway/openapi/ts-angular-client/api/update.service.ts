@@ -91,13 +91,23 @@ export class UpdateService {
     /**
      * Triggers Devolutions Gateway update process.
      * This is done via updating &#x60;Agent/update.json&#x60; file, which is then read by Devolutions Agent when changes are detected. If the version written to &#x60;update.json&#x60; is indeed higher than the currently installed version, Devolutions Agent will proceed with the update process.
+     * @param version The version to install; use \&#39;latest\&#39; for the latest version, or \&#39;w.x.y.z\&#39; for a specific version
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public triggerUpdate(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<object>;
-    public triggerUpdate(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<object>>;
-    public triggerUpdate(observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<object>>;
-    public triggerUpdate(observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public triggerUpdate(version: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<object>;
+    public triggerUpdate(version: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<object>>;
+    public triggerUpdate(version: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<object>>;
+    public triggerUpdate(version: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+        if (version === null || version === undefined) {
+            throw new Error('Required parameter version was null or undefined when calling triggerUpdate.');
+        }
+
+        let localVarQueryParameters = new HttpParams({encoder: this.encoder});
+        if (version !== undefined && version !== null) {
+          localVarQueryParameters = this.addToHttpParams(localVarQueryParameters,
+            <any>version, 'version');
+        }
 
         let localVarHeaders = this.defaultHeaders;
 
@@ -146,6 +156,7 @@ export class UpdateService {
         return this.httpClient.request<object>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
+                params: localVarQueryParameters,
                 responseType: <any>responseType_,
                 withCredentials: this.configuration.withCredentials,
                 headers: localVarHeaders,

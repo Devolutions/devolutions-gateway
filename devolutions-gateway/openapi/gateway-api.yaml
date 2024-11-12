@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.3.3
+  version: 2024.3.4
 paths:
   /jet/config:
     patch:
@@ -394,6 +394,13 @@ paths:
         when changes are detected. If the version written to `update.json` is indeed higher than the
         currently installed version, Devolutions Agent will proceed with the update process.
       operationId: TriggerUpdate
+      parameters:
+      - name: version
+        in: query
+        description: The version to install; use 'latest' for the latest version, or 'w.x.y.z' for a specific version
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: Update request has been processed successfully

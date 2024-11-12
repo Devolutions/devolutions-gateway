@@ -27,6 +27,9 @@ pub(crate) struct UpdateResponse {}
     operation_id = "TriggerUpdate",
     tag = "Update",
     path = "/jet/update",
+    params(
+        ("version" = String, Query, description = "The version to install; use 'latest' for the latest version, or 'w.x.y.z' for a specific version"),
+    ),
     responses(
         (status = 200, description = "Update request has been processed successfully", body = UpdateResponse),
         (status = 400, description = "Bad request"),

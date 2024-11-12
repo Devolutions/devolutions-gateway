@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2024.3.3
+2024.3.4
 :toc: left
 :numbered:
 :toclevels: 4
@@ -1295,6 +1295,26 @@ This is done via updating `Agent/update.json` file, which is then read by Devolu
 | `scope_token`
 | http
 | bearer
+|===
+
+===== Parameters
+
+
+
+
+
+====== Query Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| version
+| The version to install; use 'latest' for the latest version, or 'w.x.y.z' for a specific version 
+| X
+| null
+| 
+
 |===
 
 
