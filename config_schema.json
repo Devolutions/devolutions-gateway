@@ -17,16 +17,14 @@
       "description": "Path to the provisioner public key which is used to verify tokens without any specific restriction."
     },
     "ProvisionerPublicKeyData": {
-      "$ref": "#/definitions/ConfDataPubKeyFormat",
-      "description": "Provisioner public key data in a specific format and encoding."
+      "$ref": "#/definitions/ConfDataPubKeyFormat"
     },
     "ProvisionerPrivateKeyFile": {
       "type": "string",
       "description": "Path to the provisioner private key which is used to generate session tokens when using the standalone web application."
     },
     "ProvisionerPrivateKeyData": {
-      "$ref": "#/definitions/ConfDataPrivKeyFormat",
-      "description": "Provisioner private key data in a specific format and encoding."
+      "$ref": "#/definitions/ConfDataPrivKeyFormat"
     },
     "SubProvisionerPublicKey": {
       "$ref": "#/definitions/SubProvisionerKeyConf",
@@ -37,8 +35,7 @@
       "description": "Path to the delegation private key which is used to decipher sensitive data from tokens."
     },
     "DelegationPrivateKeyData": {
-      "$ref": "#/definitions/ConfDataPrivKeyFormat",
-      "description": "Delegation private key data in a specific format and encoding."
+      "$ref": "#/definitions/ConfDataPrivKeyFormat"
     },
     "TlsCertificateSource": {
       "$ref": "#/definitions/CertSource",
