@@ -11,7 +11,7 @@
                 [icon]="button.icon"
                 iconPos="left"></p-button>
 
-      <div class="separator"></div>
+      <div class="separator" *ngIf="!last"></div>
 
     </ng-container>
   </div>
@@ -31,7 +31,7 @@
                 [icon]="button.icon"
                 iconPos="left"></p-button>
 
-      <div class="separator"></div>
+      <div class="separator" *ngIf="!last"></div>
 
     </ng-container>
   </div>
@@ -43,7 +43,7 @@
                 [icon]="button.icon"
                 iconPos="left"></p-button>
 
-      <div class="separator" *ngIf="rightButtons.length > 1"></div>
+      <div class="separator" *ngIf="rightButtons.length > 1 && !last"></div>
 
     </ng-container>
   </div>

@@ -7,59 +7,12 @@
       [isFormExists]="true"></web-client-form>
   </div>
 
-  <div #sessionToolbar
-       id="sessionToolbar"
-       *ngIf="!isFullScreenMode || (isFullScreenMode && showToolbarDiv)"
-       [ngClass]="isFullScreenMode?'session-toolbar-layer':''"
-       class="session-toolbar">
-
-    <div class="session-toolbar-left-group">
-      <p-button
-        (onClick)="sendWindowsKey()"
-        label="Start"
-        icon="dvl-icon dvl-icon-windows"
-        iconPos="left"></p-button>
-
-      <div class="separator"></div>
-
-      <p-button
-        (onClick)="sendCtrlAltDel()"
-        label="Ctrl+Alt+Del"
-        icon="dvl-icon dvl-icon-admin"
-        iconPos="left"></p-button>
-    </div>
-
-    <div class="session-toolbar-middle-group">
-      <p-button
-        (onClick)="scaleTo(screenScale.Full)"
-        label="Full Screen"
-        icon="dvl-icon dvl-icon-fullscreen"
-        iconPos="left"></p-button>
-
-      <div class="separator"></div>
-
-      <p-button
-        (onClick)="scaleTo(screenScale.Fit)"
-        label="Fit to Screen"
-        icon="dvl-icon dvl-icon-minimize"
-        iconPos="left"></p-button>
-
-      <div class="separator"></div>
-      <p-button
-        (onClick)="scaleTo(screenScale.Real)"
-        label="Actual Size"
-        icon="dvl-icon dvl-icon-screen"
-        iconPos="left"></p-button>
-    </div>
-
-    <div class="session-toolbar-right-group">
-      <p-button (onClick)="startTerminationProcess()"
-                styleClass="other"
-                label="Close Session"
-                icon="dvl-icon dvl-icon-close"
-                iconPos="left"></p-button>
-    </div>
-  </div>
+  <session-toolbar
+    [sessionContainerParent]="sessionContainerElement"
+    [leftButtons]="leftToolbarButtons"
+    [middleButtons]="middleToolbarButtons"
+    [rightButtons]="rightToolbarButtons">
+  </session-toolbar>
 
   <div class="loading-info-container" *ngIf="loading">
     <div class="loading-info">
