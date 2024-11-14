@@ -60,7 +60,6 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.21.2",
-    "@biomejs/cli-linux-x64": "1.9.3"
     "@biomejs/cli-linux-x64": "1.9.3",
     "@biomejs/cli-win32-x64": "1.9.3"
   }
