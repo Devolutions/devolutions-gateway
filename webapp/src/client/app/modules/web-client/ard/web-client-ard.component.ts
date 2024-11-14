@@ -68,20 +68,20 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     {
       label: 'Fit to Screen',
       icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(this.screenScale.Fit)
+      action: () => this.scaleTo(this.screenScale.Fit),
     },
     {
       label: 'Actual Size',
       icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(this.screenScale.Real)
-    }
+      action: () => this.scaleTo(this.screenScale.Real),
+    },
   ];
 
   rightToolbarButtons = [
     {
       label: 'Close Session',
       icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess()
+      action: () => this.startTerminationProcess(),
     },
   ];
 
