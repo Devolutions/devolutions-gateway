@@ -64,6 +64,40 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   showToolbarDiv = true;
   loading = true;
 
+  leftToolbarButtons = [
+    {
+      label: 'Start',
+      icon: 'dvl-icon dvl-icon-windows',
+      action: () => this.sendWindowsKey(),
+    },
+    {
+      label: 'Ctrl+Alt+Del',
+      icon: 'dvl-icon dvl-icon-admin',
+      action: () => this.sendCtrlAltDel(),
+    },
+  ];
+
+  middleToolbarButtons = [
+    {
+      label: 'Fit to Screen',
+      icon: 'dvl-icon dvl-icon-minimize',
+      action: () => this.scaleTo(this.screenScale.Fit),
+    },
+    {
+      label: 'Actual Size',
+      icon: 'dvl-icon dvl-icon-screen',
+      action: () => this.scaleTo(this.screenScale.Real),
+    },
+  ];
+
+  rightToolbarButtons = [
+    {
+      label: 'Close Session',
+      icon: 'dvl-icon dvl-icon-close',
+      action: () => this.startTerminationProcess(),
+    },
+  ];
+
   protected removeElement: Subject<unknown> = new Subject();
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
