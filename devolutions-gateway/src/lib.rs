@@ -20,6 +20,7 @@ pub mod generic_client;
 pub mod http;
 pub mod interceptor;
 pub mod jmux;
+pub mod job_queue;
 pub mod listener;
 pub mod log;
 pub mod middleware;
@@ -48,6 +49,7 @@ pub struct DgwState {
     pub subscriber_tx: subscriber::SubscriberSender,
     pub shutdown_signal: devolutions_gateway_task::ShutdownSignal,
     pub recordings: recording::RecordingMessageSender,
+    pub job_queue_handle: job_queue::JobQueueHandle,
 }
 
 #[doc(hidden)]
@@ -55,6 +57,7 @@ pub struct MockHandles {
     pub session_manager_rx: session::SessionMessageReceiver,
     pub recording_manager_rx: recording::RecordingMessageReceiver,
     pub subscriber_rx: subscriber::SubscriberReceiver,
+    pub job_queue_rx: job_queue::JobQueueReceiver,
     pub shutdown_handle: devolutions_gateway_task::ShutdownHandle,
 }
 
@@ -68,6 +71,7 @@ impl DgwState {
         let (recording_manager_handle, recording_manager_rx) = recording::recording_message_channel();
         let (subscriber_tx, subscriber_rx) = subscriber::subscriber_channel();
         let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
 
         let state = Self {
             conf_handle,
@@ -77,12 +81,14 @@ impl DgwState {
             subscriber_tx,
             shutdown_signal,
             recordings: recording_manager_handle,
+            job_queue_handle,
         };
 
         let handles = MockHandles {
             session_manager_rx,
             recording_manager_rx,
             subscriber_rx,
+            job_queue_rx,
             shutdown_handle,
         };
 

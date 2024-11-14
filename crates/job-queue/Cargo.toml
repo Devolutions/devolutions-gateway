@@ -1,0 +1,15 @@
+[package]
+name = "job-queue"
+version = "0.0.0"
+edition = "2021"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+uuid = "1.11"
+anyhow = "1"
+async-trait = "0.1"
+tracing = "0.1"

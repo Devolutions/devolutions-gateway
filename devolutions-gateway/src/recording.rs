@@ -18,6 +18,7 @@ use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
+use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
@@ -349,6 +350,7 @@ pub struct RecordingManagerTask {
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
     recordings_path: Utf8PathBuf,
     session_manager_handle: SessionMessageSender,
+    job_queue_handle: JobQueueHandle,
 }
 
 impl RecordingManagerTask {
@@ -356,12 +358,14 @@ impl RecordingManagerTask {
         rx: RecordingMessageReceiver,
         recordings_path: Utf8PathBuf,
         session_manager_handle: SessionMessageSender,
+        job_queue_handle: JobQueueHandle,
     ) -> Self {
         Self {
             rx,
             ongoing_recordings: HashMap::new(),
             recordings_path,
             session_manager_handle,
+            job_queue_handle,
         }
     }
 
@@ -469,7 +473,7 @@ impl RecordingManagerTask {
         Ok(recording_file)
     }
 
-    fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
+    async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
         if let Some(ongoing) = self.ongoing_recordings.get_mut(&id) {
             if !matches!(ongoing.state, OnGoingRecordingState::Connected) {
                 anyhow::bail!("a recording not connected can’t be disconnected (there is probably a bug)");
@@ -504,8 +508,13 @@ impl RecordingManagerTask {
             if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
                 if cadeau::xmf::is_init() {
                     debug!(%recording_file_path, "Enqueue video remuxing operation");
-                    // FIXME: It would be better to have a job queue for this kind of things in case the service is killed.
-                    tokio::spawn(remux(recording_file_path));
+
+                    let _ = self
+                        .job_queue_handle
+                        .enqueue(RemuxJob {
+                            input_path: recording_file_path,
+                        })
+                        .await;
                 } else {
                     debug!("Video remuxing was skipped because XMF native library is not loaded");
                 }
@@ -628,7 +637,7 @@ async fn recording_manager_task(
                         }
                     },
                     RecordingManagerMessage::Disconnect { id } => {
-                        if let Err(e) = manager.handle_disconnect(id) {
+                        if let Err(e) = manager.handle_disconnect(id).await {
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
@@ -691,7 +700,7 @@ async fn recording_manager_task(
 
         debug!(?msg, "Received message");
         if let RecordingManagerMessage::Disconnect { id } = msg {
-            if let Err(e) = manager.handle_disconnect(id) {
+            if let Err(e) = manager.handle_disconnect(id).await {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
             manager.ongoing_recordings.remove(&id);
@@ -703,7 +712,32 @@ async fn recording_manager_task(
     Ok(())
 }
 
-pub async fn remux(input_path: Utf8PathBuf) {
+#[derive(Deserialize, Serialize)]
+pub struct RemuxJob {
+    input_path: Utf8PathBuf,
+}
+
+impl RemuxJob {
+    pub const NAME: &'static str = "remux";
+}
+
+#[async_trait]
+impl job_queue::Job for RemuxJob {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn write_json(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self).context("failed to serialize RemuxAction")
+    }
+
+    async fn run(&mut self) -> anyhow::Result<()> {
+        remux(core::mem::take(&mut self.input_path)).await;
+        Ok(())
+    }
+}
+
+async fn remux(input_path: Utf8PathBuf) {
     // CPU-intensive operation potentially lasting much more than 100ms.
     match tokio::task::spawn_blocking(move || remux_impl(input_path)).await {
         Err(error) => error!(%error, "Couldn't join the CPU-intensive muxer task"),
