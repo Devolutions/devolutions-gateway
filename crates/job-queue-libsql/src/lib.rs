@@ -159,8 +159,8 @@ impl JobQueue for LibSqlJobQueue {
             (id, instance_id, failed_attempts, status, name, def)
             VALUES (:id, :instance_id, :failed_attempts, :status, :name, jsonb(:def))";
 
-        // UUID v4 provides no other information than randomness which cause fragmentation.
-        // Reduce index fragmentation by using ULID instead.
+        // UUID v4 only provides randomness, which leads to fragmentation.
+        // We use ULID instead to reduce index fragmentation.
         // https://github.com/ulid/spec
         let id = Uuid::from(Ulid::new());
 
