@@ -7,8 +7,8 @@ use axum::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
 use job_queue_libsql::libsql;
+use time::OffsetDateTime;
 use tokio::sync::{mpsc, Notify};
-use uuid::Uuid;
 
 pub struct JobQueueCtx {
     notify_runner: Arc<Notify>,
@@ -18,10 +18,15 @@ pub struct JobQueueCtx {
     pub job_queue_handle: JobQueueHandle,
 }
 
-#[derive(Clone)]
-pub struct JobQueueHandle(mpsc::Sender<Box<dyn Job>>);
+pub struct JobMessage {
+    pub job: Box<dyn Job>,
+    pub schedule_for: Option<OffsetDateTime>,
+}
 
-pub type JobQueueReceiver = mpsc::Receiver<Box<dyn Job>>;
+#[derive(Clone)]
+pub struct JobQueueHandle(mpsc::Sender<JobMessage>);
+
+pub type JobQueueReceiver = mpsc::Receiver<JobMessage>;
 
 pub struct JobQueueTask {
     queue: DynJobQueue,
@@ -35,7 +40,7 @@ pub struct JobRunnerTask {
 }
 
 impl JobQueueCtx {
-    pub async fn init(gateway_id: Uuid, database_path: &Path) -> anyhow::Result<Self> {
+    pub async fn init(database_path: &Path) -> anyhow::Result<Self> {
         let notify_runner = Arc::new(Notify::new());
 
         let runner_waker = RunnerWaker::new({
@@ -51,14 +56,13 @@ impl JobQueueCtx {
         let conn = database.connect().context("open database connection")?;
 
         let queue = job_queue_libsql::LibSqlJobQueue::builder()
-            .instance_id(gateway_id)
             .runner_waker(runner_waker.clone())
             .conn(conn)
             .build();
 
         let queue = Arc::new(queue);
 
-        queue.migrate().await.context("database migration")?;
+        queue.setup().await.context("database migration")?;
 
         queue
             .reset_claimed_jobs()
@@ -86,11 +90,45 @@ impl JobQueueHandle {
     }
 
     pub fn blocking_enqueue<T: Job + 'static>(&self, job: T) -> anyhow::Result<()> {
-        self.0.blocking_send(Box::new(job)).context("couldn't enqueue job")
+        self.0
+            .blocking_send(JobMessage {
+                job: Box::new(job),
+                schedule_for: None,
+            })
+            .context("couldn't enqueue job")
     }
 
     pub async fn enqueue<T: Job + 'static>(&self, job: T) -> anyhow::Result<()> {
-        self.0.send(Box::new(job)).await.context("couldn't enqueue job")
+        self.0
+            .send(JobMessage {
+                job: Box::new(job),
+                schedule_for: None,
+            })
+            .await
+            .context("couldn't enqueue job")
+    }
+
+    pub async fn blocking_schedule<T: Job + 'static>(
+        &self,
+        job: T,
+        schedule_for: OffsetDateTime,
+    ) -> anyhow::Result<()> {
+        self.0
+            .blocking_send(JobMessage {
+                job: Box::new(job),
+                schedule_for: Some(schedule_for),
+            })
+            .context("couldn't enqueue job")
+    }
+
+    pub async fn schedule<T: Job + 'static>(&self, job: T, schedule_for: OffsetDateTime) -> anyhow::Result<()> {
+        self.0
+            .send(JobMessage {
+                job: Box::new(job),
+                schedule_for: Some(schedule_for),
+            })
+            .await
+            .context("couldn't enqueue job")
     }
 }
 
@@ -125,8 +163,8 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
 
     loop {
         tokio::select! {
-            job = job_queue_rx.recv() => {
-                let Some(job) = job else {
+            msg = job_queue_rx.recv() => {
+                let Some(msg) = msg else {
                     debug!("All senders are dead");
                     break;
                 };
@@ -136,7 +174,7 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
 
                     async move {
                         for _ in 0..5 {
-                            match queue.push_job(&job).await {
+                            match queue.push_job(&msg.job, msg.schedule_for).await {
                                 Ok(()) => break,
                                 Err(e) => {
                                     warn!(error = format!("{e:#}"), "Failed to push job");
@@ -200,9 +238,23 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
     let sleep =
         |duration: Duration| (Box::new(tokio::time::sleep(duration)) as Box<dyn Future<Output = ()> + Send>).into();
 
-    let wait_notified = move || {
+    let wait_notified = {
         let notify_runner = Arc::clone(&notify_runner);
-        (Box::new(async move { notify_runner.notified().await }) as Box<dyn Future<Output = ()> + Send>).into()
+        move || {
+            let notify_runner = Arc::clone(&notify_runner);
+            (Box::new(async move { notify_runner.notified().await }) as Box<dyn Future<Output = ()> + Send>).into()
+        }
+    };
+
+    let wait_notified_timeout = move |timeout: Duration| {
+        let notify_runner = Arc::clone(&notify_runner);
+        (Box::new(async move {
+            tokio::select! {
+                () = notify_runner.notified() => {}
+                () = tokio::time::sleep(timeout) => {}
+            }
+        }) as Box<dyn Future<Output = ()> + Send>)
+            .into()
     };
 
     let runner = JobRunner {
@@ -211,8 +263,9 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         spawn: &spawn,
         sleep: &sleep,
         wait_notified: &wait_notified,
+        wait_notified_timeout: &wait_notified_timeout,
         waker: runner_waker,
-        max_batch_size: 3,
+        max_batch_size: 16,
     };
 
     tokio::select! {

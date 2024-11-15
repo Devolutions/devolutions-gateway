@@ -232,12 +232,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let (recording_manager_handle, recording_manager_rx) = recording_message_channel();
     let (subscriber_tx, subscriber_rx) = subscriber_channel();
     let mut tasks = Tasks::new();
-    let job_queue_ctx = devolutions_gateway::job_queue::JobQueueCtx::init(
-        conf.id.unwrap_or_else(uuid::Uuid::max), // FIXME: make Gateway ID non optional.
-        conf.job_queue_database.as_std_path(),
-    )
-    .await
-    .context("failed to initialize job queue context")?;
+    let job_queue_ctx = devolutions_gateway::job_queue::JobQueueCtx::init(conf.job_queue_database.as_std_path())
+        .await
+        .context("failed to initialize job queue context")?;
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),

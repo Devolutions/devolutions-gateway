@@ -9,7 +9,8 @@ publish = false
 workspace = true
 
 [dependencies]
-uuid = "1.11"
 anyhow = "1"
 async-trait = "0.1"
+time = { version = "0.3", default-features = false }
 tracing = "0.1"
+uuid = "1.11"

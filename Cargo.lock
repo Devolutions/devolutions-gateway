@@ -1175,6 +1175,7 @@ dependencies = [
  "pin-project-lite 0.2.15",
  "portpicker",
  "proptest",
+ "rand",
  "reqwest",
  "rstest",
  "rustls-cng",
@@ -2922,6 +2923,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "time",
  "tracing",
  "uuid",
 ]
@@ -2935,6 +2937,7 @@ dependencies = [
  "job-queue",
  "libsql",
  "serde",
+ "time",
  "tracing",
  "typed-builder",
  "ulid",

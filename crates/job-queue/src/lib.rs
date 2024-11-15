@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub type DynJob = Box<dyn Job>;
@@ -30,10 +31,10 @@ pub trait JobReader: Send + Sync {
 
 #[async_trait]
 pub trait JobQueue: Send + Sync {
-    /// Performs migrations as required
+    /// Performs initial setup required before actually using the queue
     ///
     /// This function should be called first, before using any of the other functions.
-    async fn migrate(&self) -> anyhow::Result<()>;
+    async fn setup(&self) -> anyhow::Result<()>;
 
     /// Resets the status for the jobs claimed
     ///
@@ -43,7 +44,7 @@ pub trait JobQueue: Send + Sync {
     /// Pushes a new job into the queue
     ///
     /// This function should ideally call `RunnerWaker::wake()` once the job is enqueued.
-    async fn push_job(&self, job: &DynJob) -> anyhow::Result<()>;
+    async fn push_job(&self, job: &DynJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()>;
 
     /// Fetches at most `number_of_jobs` from the queue
     async fn claim_jobs(&self, reader: &dyn JobReader, number_of_jobs: usize) -> anyhow::Result<Vec<JobCtx>>;
@@ -54,14 +55,18 @@ pub trait JobQueue: Send + Sync {
     /// Marks a job as failed
     ///
     /// Failed jobs are re-queued to be tried again later.
-    async fn fail_job(&self, job_id: Uuid) -> anyhow::Result<()>;
+    async fn fail_job(&self, job_id: Uuid, schedule_for: OffsetDateTime) -> anyhow::Result<()>;
 
     /// Removes jobs which can't be retried
     async fn clear_failed(&self) -> anyhow::Result<()>;
+
+    /// Retrieves the closest future scheduled date
+    async fn next_scheduled_date(&self) -> anyhow::Result<Option<OffsetDateTime>>;
 }
 
 pub struct JobCtx {
     pub id: Uuid,
+    pub failed_attempts: u32,
     pub job: DynJob,
 }
 
@@ -88,6 +93,7 @@ pub struct JobRunner<'a> {
     pub spawn: &'a (dyn Fn(JobCtx, SpawnCallback) + Sync),
     pub sleep: &'a (dyn Fn(std::time::Duration) -> DynFuture + Sync),
     pub wait_notified: &'a (dyn Fn() -> DynFuture + Sync),
+    pub wait_notified_timeout: &'a (dyn Fn(std::time::Duration) -> DynFuture + Sync),
     pub waker: RunnerWaker,
     pub max_batch_size: usize,
 }
@@ -106,6 +112,7 @@ impl JobRunner<'_> {
             sleep,
             waker,
             wait_notified,
+            wait_notified_timeout,
             max_batch_size,
         } = self;
 
@@ -118,18 +125,16 @@ impl JobRunner<'_> {
                 Ok(jobs) => jobs,
                 Err(e) => {
                     error!(error = format!("{e:#}"), "Failed to pull jobs");
-                    (sleep)(Duration::from_secs(10)).await;
+                    (sleep)(Duration::from_secs(30)).await;
                     continue;
                 }
             };
 
-            let number_of_jobs = jobs.len();
-            if number_of_jobs > 0 {
-                trace!(number_of_jobs, "Fetched jobs");
-            }
+            trace!(number_of_jobs = jobs.len(), "Fetched jobs");
 
             for job in jobs {
                 let job_id = job.id;
+                let failed_attempts = job.failed_attempts;
 
                 let callback = Box::new({
                     let queue = Arc::clone(&queue);
@@ -147,7 +152,10 @@ impl JobRunner<'_> {
                                 Err(e) => {
                                     warn!(error = format!("{e:#}"), %job_id, "Job failed");
 
-                                    if let Err(e) = queue.fail_job(job_id).await {
+                                    let schedule_for =
+                                        OffsetDateTime::now_utc() + (1 << failed_attempts) * Duration::from_secs(30);
+
+                                    if let Err(e) = queue.fail_job(job_id, schedule_for).await {
                                         error!(error = format!("{e:#}"), "Failed to mark job as failed")
                                     }
                                 }
@@ -166,10 +174,33 @@ impl JobRunner<'_> {
                 running_count.fetch_add(1, Ordering::SeqCst);
             }
 
+            let next_scheduled = if running_count.load(Ordering::SeqCst) < max_batch_size {
+                queue
+                    .next_scheduled_date()
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|date| date.unix_timestamp() - OffsetDateTime::now_utc().unix_timestamp())
+                    .inspect(|next_scheduled| trace!("Next task in {next_scheduled} seconds"))
+            } else {
+                None
+            };
+
+            let before_wait = Instant::now();
+
             // Wait for something to happen.
             // This could be a notification that a new job has been pushed, or that a running job is terminated.
-            let before_wait = Instant::now();
-            (wait_notified)().await;
+            if let Some(timeout) = next_scheduled {
+                // If the next task was scheduled in < 0 seconds, skip the wait step.
+                // This happens because there is a delay between the moment the jobs to run are claimed, and the moment
+                // we check for the next closest scheduled job.
+                if let Ok(timeout) = u64::try_from(timeout) {
+                    (wait_notified_timeout)(Duration::from_secs(timeout)).await;
+                }
+            } else {
+                (wait_notified)().await;
+            }
+
             let elapsed = before_wait.elapsed();
 
             // Make sure we wait a little bit to avoid overloading the database.
