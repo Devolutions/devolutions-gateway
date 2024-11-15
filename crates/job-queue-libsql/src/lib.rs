@@ -42,40 +42,49 @@ enum JobStatus {
 impl LibSqlJobQueue {
     async fn apply_pragmas(&self) -> anyhow::Result<()> {
         // Inspiration was taken from https://briandouglas.ie/sqlite-defaults/
-        const PRAGMAS: &[&str] = &[
-            // https://www.sqlite.org/pragma.html#pragma_journal_mode
-            // Use a write-ahead log instead of a rollback journal to implement transactions.
-            "PRAGMA journal_mode = WAL",
-            // https://www.sqlite.org/pragma.html#pragma_synchronous
-            // TLDR: journal_mode WAL + synchronous NORMAL is a good combination.
-            // WAL mode is safe from corruption with synchronous=NORMAL
-            // The synchronous=NORMAL setting is a good choice for most applications running in WAL mode.
-            "PRAGMA synchronous = NORMAL",
-            // https://www.sqlite.org/pragma.html#pragma_busy_timeout
-            // Prevents SQLITE_BUSY errors by giving a timeout to wait for a locked resource before
-            // returning an error, useful for handling multiple concurrent accesses.
-            // 15 seconds is a good value for a backend application like a job queue.
-            "PRAGMA busy_timeout = 15000",
-            // https://www.sqlite.org/pragma.html#pragma_cache_size
-            // Reduce the number of disks reads by allowing more data to be cached in memory (3MB).
-            "PRAGMA cache_size = -3000",
-            // https://www.sqlite.org/pragma.html#pragma_auto_vacuum
-            // Reclaims disk space gradually as rows are deleted, instead of performing a full vacuum,
-            // reducing performance impact during database operations.
-            "PRAGMA auto_vacuum = INCREMENTAL",
-            // https://www.sqlite.org/pragma.html#pragma_temp_store
-            // Store temporary tables and data in memory for better performance
-            "PRAGMA temp_store = MEMORY",
-        ];
+        const PRAGMAS: &str = "
+            -- https://www.sqlite.org/pragma.html#pragma_journal_mode
+            -- Use a write-ahead log instead of a rollback journal to implement transactions.
+            PRAGMA journal_mode = WAL;
 
-        for sql_query in PRAGMAS {
-            trace!(%sql_query, "PRAGMA query");
+            -- https://www.sqlite.org/pragma.html#pragma_synchronous
+            -- TLDR: journal_mode WAL + synchronous NORMAL is a good combination.
+            -- WAL mode is safe from corruption with synchronous=NORMAL
+            -- The synchronous=NORMAL setting is a good choice for most applications running in WAL mode.
+            PRAGMA synchronous = NORMAL;
 
-            let mut rows = self
-                .conn
-                .query(sql_query, ())
-                .await
-                .context("failed to execute SQL query")?;
+            -- https://www.sqlite.org/pragma.html#pragma_busy_timeout
+            -- Prevents SQLITE_BUSY errors by giving a timeout to wait for a locked resource before
+            -- returning an error, useful for handling multiple concurrent accesses.
+            -- 15 seconds is a good value for a backend application like a job queue.
+            PRAGMA busy_timeout = 15000;
+
+            -- https://www.sqlite.org/pragma.html#pragma_cache_size
+            -- Reduce the number of disks reads by allowing more data to be cached in memory (3MB).
+            PRAGMA cache_size = -3000;
+
+            -- https://www.sqlite.org/pragma.html#pragma_auto_vacuum
+            -- Reclaims disk space gradually as rows are deleted, instead of performing a full vacuum,
+            -- reducing performance impact during database operations.
+            PRAGMA auto_vacuum = INCREMENTAL;
+
+            -- https://www.sqlite.org/pragma.html#pragma_temp_store
+            -- Store temporary tables and data in memory for better performance
+            PRAGMA temp_store = MEMORY;
+        ";
+
+        trace!(sql_query = %PRAGMAS, "PRAGMAs query");
+
+        let mut batch_rows = self
+            .conn
+            .execute_batch(PRAGMAS)
+            .await
+            .context("failed to batch execute SQL query")?;
+
+        while let Some(rows) = batch_rows.next_stmt_row() {
+            let Some(mut rows) = rows else {
+                continue;
+            };
 
             while let Ok(Some(row)) = rows.next().await {
                 trace!(?row, "PRAGMA row");
@@ -100,7 +109,7 @@ impl LibSqlJobQueue {
                     trace!(migration_id, %sql_query, "Apply migration");
 
                     self.conn
-                        .execute(sql_query, ())
+                        .execute_batch(sql_query)
                         .await
                         .with_context(|| format!("failed to execute migration {}", migration_id))?;
 
@@ -396,6 +405,7 @@ impl JobQueue for LibSqlJobQueue {
 
 // Typically, migrations should not be modified once released, and we should only be appending to this list.
 const MIGRATIONS: &[&str] = &[
+    // Migration 0
     "CREATE TABLE job_queue (
         id TEXT NOT NULL PRIMARY KEY,
         created_at INT NOT NULL DEFAULT (unixepoch()),
@@ -405,10 +415,12 @@ const MIGRATIONS: &[&str] = &[
         status INT NOT NULL,
         name TEXT NOT NULL,
         def BLOB NOT NULL
-    ) STRICT",
-    "CREATE TRIGGER update_job_updated_at_on_update AFTER UPDATE ON job_queue
+    ) STRICT;
+
+    CREATE TRIGGER update_job_updated_at_on_update AFTER UPDATE ON job_queue
     BEGIN
         UPDATE job_queue SET updated_at = unixepoch() WHERE id == NEW.id;
-    END",
-    "CREATE INDEX idx_scheduled_for ON job_queue(scheduled_for)",
+    END;
+
+    CREATE INDEX idx_scheduled_for ON job_queue(scheduled_for);",
 ];
