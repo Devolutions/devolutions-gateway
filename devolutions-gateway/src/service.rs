@@ -232,6 +232,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let (recording_manager_handle, recording_manager_rx) = recording_message_channel();
     let (subscriber_tx, subscriber_rx) = subscriber_channel();
     let mut tasks = Tasks::new();
+    let job_queue_ctx = devolutions_gateway::job_queue::JobQueueCtx::init(conf.job_queue_database.as_std_path())
+        .await
+        .context("failed to initialize job queue context")?;
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -241,6 +244,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         subscriber_tx: subscriber_tx.clone(),
         shutdown_signal: tasks.shutdown_signal.clone(),
         recordings: recording_manager_handle.clone(),
+        job_queue_handle: job_queue_ctx.job_queue_handle.clone(),
     };
 
     conf.listeners
@@ -294,7 +298,12 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         recording_manager_rx,
         conf.recording_path.clone(),
         session_manager_handle,
+        job_queue_ctx.job_queue_handle.clone(),
     ));
+
+    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
+
+    tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
 
     Ok(tasks)
 }

@@ -24,6 +24,8 @@ jmux-proxy = { path = "../crates/jmux-proxy" }
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
+job-queue = { path = "../crates/job-queue" }
+job-queue-libsql = { path = "../crates/job-queue-libsql" }
 ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf", features = ["std"] }
 ironrdp-core = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf", features = ["std"] }
 ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf" }

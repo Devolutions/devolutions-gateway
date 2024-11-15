@@ -158,8 +158,8 @@ pub(crate) struct DeleteManyResult {
 
 /// Mass-deletes recordings stored on this instance
 ///
-/// If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests
-/// to avoid timing out during the processing of the request.
+/// If you try to delete more than 50,000 recordings at once, you should split the list into multiple requests.
+/// Bigger payloads will be rejected with 413 Payload Too Large.
 ///
 /// The request processing consist in
 /// 1) checking if one of the recording is active,
@@ -182,6 +182,7 @@ pub(crate) struct DeleteManyResult {
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 406, description = "A recording is still ongoing and can't be deleted yet (nothing is deleted)"),
+        (status = 413, description = "Request payload is too large"),
     ),
     security(("scope_token" = ["gateway.recording.delete"])),
 ))]
@@ -189,6 +190,7 @@ async fn jrec_delete_many(
     State(DgwState {
         conf_handle,
         recordings,
+        job_queue_handle,
         ..
     }): State<DgwState>,
     _scope: RecordingDeleteScope,
@@ -196,38 +198,36 @@ async fn jrec_delete_many(
 ) -> Result<Json<DeleteManyResult>, HttpError> {
     use std::collections::HashSet;
 
-    const BLOCKING_THRESHOLD: usize = 100_000;
+    const THRESHOLD: usize = 50_000;
+    const CHUNK_SIZE: usize = 1_000;
+
+    if delete_list.len() > THRESHOLD {
+        return Err(HttpErrorBuilder::new(StatusCode::PAYLOAD_TOO_LARGE).msg("delete list is too big"));
+    }
 
     let recording_path = conf_handle.get_conf().recording_path.clone();
     let active_recordings = recordings.active_recordings.cloned();
 
-    // When deleting many many recordings, check_preconditions may take more than 250ms to execute.
-    // For this reason, we defensively spawn a blocking task.
+    // Given the threshold of 50,000, it's high unlikely that check_preconditions takes more than 250ms to execute.
+    // It typically takes between 50ms and 100ms depending on the hardware.
     let ProcessResult {
         not_found_count,
         found_count,
         recording_paths,
-    } = if delete_list.len() > BLOCKING_THRESHOLD {
-        let join_handle =
-            tokio::task::spawn_blocking(move || process_request(delete_list, &recording_path, &active_recordings));
-        join_handle.await.map_err(HttpError::internal().err())??
-    } else {
-        process_request(delete_list, &recording_path, &active_recordings)?
-    };
+    } = process_request(delete_list, &recording_path, &active_recordings)?;
 
-    // FIXME: It would be better to have a job queue for this kind of things in case the service is killed.
-    tokio::spawn({
-        async move {
-            for (session_id, path) in recording_paths {
-                if let Err(error) = delete_recording(&path).await {
-                    error!(
-                        error = format!("{error:#}"),
-                        "Failed to delete recording for session {session_id}"
-                    );
-                }
-            }
-        }
-    });
+    for chunk in recording_paths.chunks(CHUNK_SIZE) {
+        job_queue_handle
+            .enqueue(DeleteRecordingsJob {
+                recording_paths: chunk.to_vec(),
+            })
+            .await
+            .map_err(
+                HttpError::internal()
+                    .with_msg("couldn't enqueue the deletion task")
+                    .err(),
+            )?;
+    }
 
     let delete_many_result = DeleteManyResult {
         found_count,
@@ -280,6 +280,39 @@ async fn jrec_delete_many(
         };
 
         Ok(result)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DeleteRecordingsJob {
+    recording_paths: Vec<(Uuid, Utf8PathBuf)>,
+}
+
+impl DeleteRecordingsJob {
+    pub const NAME: &'static str = "delete-recordings";
+}
+
+#[axum::async_trait]
+impl job_queue::Job for DeleteRecordingsJob {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn write_json(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self).context("failed to serialize RemuxAction")
+    }
+
+    async fn run(&mut self) -> anyhow::Result<()> {
+        for (session_id, path) in core::mem::take(&mut self.recording_paths) {
+            if let Err(error) = delete_recording(&path).await {
+                debug!(
+                    error = format!("{error:#}"),
+                    "Failed to delete recording for session {session_id}"
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 

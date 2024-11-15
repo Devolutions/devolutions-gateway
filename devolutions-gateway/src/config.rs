@@ -72,6 +72,7 @@ pub struct Conf {
     pub listeners: Vec<ListenerUrls>,
     pub subscriber: Option<dto::Subscriber>,
     pub log_file: Utf8PathBuf,
+    pub job_queue_database: Utf8PathBuf,
     pub tls: Option<Tls>,
     pub provisioner_public_key: PublicKey,
     pub provisioner_private_key: Option<PrivateKey>,
@@ -221,6 +222,12 @@ impl Conf {
             .unwrap_or_else(|| Utf8PathBuf::from("gateway"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
+        let job_queue_database = conf_file
+            .job_queue_database
+            .clone()
+            .unwrap_or_else(|| Utf8PathBuf::from("job_queue.db"))
+            .pipe_ref(|path| normalize_data_path(path, &data_dir));
+
         let jrl_file = conf_file
             .jrl_file
             .clone()
@@ -277,6 +284,7 @@ impl Conf {
             listeners,
             subscriber: conf_file.subscriber.clone(),
             log_file,
+            job_queue_database,
             tls,
             provisioner_public_key,
             provisioner_private_key,
@@ -1000,6 +1008,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub sogar: Option<SogarConf>,
 
+        /// (Unstable) Path to the SQLite database file for the job queue
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub job_queue_database: Option<Utf8PathBuf>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -1049,6 +1061,7 @@ pub mod dto {
                 recording_path: None,
                 web_app: None,
                 sogar: None,
+                job_queue_database: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }
@@ -1076,7 +1089,7 @@ pub mod dto {
             match self {
                 VerbosityProfile::Default => "info",
                 VerbosityProfile::Debug => {
-                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace"
+                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace,job_queue=trace,job_queue_libsql=trace"
                 }
                 VerbosityProfile::Tls => {
                     "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"
