@@ -62,7 +62,7 @@ impl JobQueueCtx {
 
         let queue = Arc::new(queue);
 
-        queue.setup().await.context("database migration")?;
+        queue.setup().await.context("queue setup")?;
 
         queue
             .reset_claimed_jobs()
