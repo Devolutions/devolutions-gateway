@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::RecordingMessageSender;
+use crate::recording::{ActiveRecordings, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
@@ -214,7 +214,7 @@ async fn jrec_delete_many(
     }
 
     let recording_path = conf_handle.get_conf().recording_path.clone();
-    let active_recordings = recordings.active_recordings.cloned();
+    let active_recordings = recordings.active_recordings.clone();
 
     // Given the threshold of 50,000, it's high unlikely that check_preconditions takes more than 250ms to execute.
     // It typically takes between 50ms and 100ms depending on the hardware.
@@ -253,9 +253,9 @@ async fn jrec_delete_many(
     fn process_request(
         delete_list: Vec<Uuid>,
         recording_path: &Utf8Path,
-        active_recordings: &HashSet<Uuid>,
+        active_recordings: &ActiveRecordings,
     ) -> Result<ProcessResult, HttpError> {
-        let conflict = delete_list.iter().any(|id| active_recordings.contains(id));
+        let conflict = delete_list.iter().any(|id| active_recordings.contains(*id));
 
         if conflict {
             return Err(HttpErrorBuilder::new(StatusCode::CONFLICT)
