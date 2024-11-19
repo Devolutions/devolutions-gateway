@@ -282,7 +282,7 @@ mod openssl {
 
         let success = certificate_names
             .into_iter()
-            .any(|certificate_name| wildcard_host_match(&certificate_name, subject_name_to_verify));
+            .any(|certificate_name| crate::doctor::wildcard_host_match(&certificate_name, subject_name_to_verify));
 
         if !success {
             help::cert_invalid_hostname(ctx, subject_name_to_verify);
@@ -291,20 +291,7 @@ mod openssl {
             );
         }
 
-        return Ok(());
-
-        fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
-            let mut expected_it = wildcard_host.rsplit('.');
-            let mut actual_it = actual_host.rsplit('.');
-            loop {
-                match (expected_it.next(), actual_it.next()) {
-                    (Some(expected), Some(actual)) if expected.eq_ignore_ascii_case(actual) => {}
-                    (Some("*"), Some(_)) => {}
-                    (None, None) => return true,
-                    _ => return false,
-                }
-            }
-        }
+        Ok(())
     }
 
     fn openssl_check_chain(ctx: &mut DiagnosticCtx, server_certificates: &[X509]) -> anyhow::Result<()> {
