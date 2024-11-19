@@ -972,7 +972,7 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub listeners: Vec<ListenerConf>,
 
-        /// Subscriber API
+        /// Subscriber API configuration
         #[serde(skip_serializing_if = "Option::is_none")]
         pub subscriber: Option<Subscriber>,
 

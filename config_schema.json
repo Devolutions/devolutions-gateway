@@ -1,122 +1,129 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Devolutions/devolutions-gateway/tree/master/docs/config_schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Devolutions Gateway Configuration",
+  "description": "A configuration for a Devolutions Gateway instance",
   "type": "object",
   "properties": {
     "Id": {
+      "description": "This Gateway's UUID",
       "type": "string",
-      "format": "uuid",
-      "description": "This Gateway's UUID."
+      "format": "uuid"
     },
     "Hostname": {
-      "type": "string",
-      "description": "This Gateway's hostname (used when inferring external URLs)."
+      "description": "This Gateway's hostname (used when inferring external URLs)",
+      "type": "string"
     },
     "ProvisionerPublicKeyFile": {
-      "type": "string",
-      "description": "Path to the provisioner public key which is used to verify tokens without any specific restriction."
+      "description": "Path to the provisioner public key which is used to verify tokens without any specific restriction",
+      "type": "string"
     },
     "ProvisionerPublicKeyData": {
+      "description": "Same as ProvisionerPublicKeyFile, but with inlined data",
       "$ref": "#/definitions/ConfDataPubKeyFormat"
     },
     "ProvisionerPrivateKeyFile": {
-      "type": "string",
-      "description": "Path to the provisioner private key which is used to generate session tokens when using the standalone web application."
+      "description": "Path to the provisioner private key which is used to generate session tokens when using the standalone web application",
+      "type": "string"
     },
     "ProvisionerPrivateKeyData": {
+      "description": "Same as ProvisionerPrivateKeyFile, but with inlined data",
       "$ref": "#/definitions/ConfDataPrivKeyFormat"
     },
     "SubProvisionerPublicKey": {
-      "$ref": "#/definitions/SubProvisionerKeyConf",
-      "description": "A JSON object describing the sub provisioner public key which may only be used to verify tokens when establishing a session."
+      "description": "A JSON object describing the sub provisioner public key which may only be used to verify tokens when establishing a session",
+      "$ref": "#/definitions/SubProvisionerKeyConf"
     },
     "DelegationPrivateKeyFile": {
-      "type": "string",
-      "description": "Path to the delegation private key which is used to decipher sensitive data from tokens."
+      "description": "Path to the delegation private key which is used to decipher sensitive data from tokens",
+      "type": "string"
     },
     "DelegationPrivateKeyData": {
+      "description": "Same as DelegationPrivateKeyFile, but with inlined data",
       "$ref": "#/definitions/ConfDataPrivKeyFormat"
     },
     "TlsCertificateSource": {
-      "$ref": "#/definitions/CertSource",
-      "description": "Source for the TLS certificate."
+      "description": "Source for the TLS certificate",
+      "$ref": "#/definitions/CertSource"
     },
     "TlsCertificateFile": {
-      "type": "string",
-      "description": "Path to the certificate to use for TLS."
+      "description": "Path to the certificate to use for TLS",
+      "type": "string"
     },
     "TlsPrivateKeyFile": {
-      "type": "string",
-      "description": "Path to the private key to use for TLS."
+      "description": "Path to the private key to use for TLS",
+      "type": "string"
     },
     "TlsPrivateKeyPassword": {
-      "type": "string",
-      "description": "Password to use for decrypting the TLS private key."
+      "description": "Password to use for decrypting the TLS private key",
+      "type": "string"
     },
     "TlsCertificateSubjectName": {
-      "type": "string",
-      "description": "Subject name of the certificate to use for TLS when using system source."
+      "description": "Subject name of the certificate to use for TLS when using system source",
+      "type": "string"
     },
     "TlsCertificateStoreName": {
-      "type": "string",
-      "description": "Name of the System Certificate Store to use for TLS (default is 'My')."
+      "description": "Name of the System Certificate Store to use for TLS (default is 'My')",
+      "type": "string"
     },
     "TlsCertificateStoreLocation": {
-      "$ref": "#/definitions/CertStoreLocation",
-      "description": "Location of the System Certificate Store to use for TLS."
+      "description": "Location of the System Certificate Store to use for TLS",
+      "$ref": "#/definitions/CertStoreLocation"
     },
     "Listeners": {
+      "description": "Listeners to launch at startup",
       "type": "array",
       "items": {
         "$ref": "#/definitions/ListenerConf"
-      },
-      "description": "Array of listener URLs."
+      }
     },
     "Subscriber": {
-      "$ref": "#/definitions/Subscriber",
-      "description": "Subscriber API configuration."
+      "description": "Subscriber API configuration",
+      "$ref": "#/definitions/Subscriber"
     },
     "RecordingPath": {
-      "type": "string",
-      "description": "Path to the recordings folder."
+      "description": "Path to the recordings folder",
+      "type": "string"
     },
     "Ngrok": {
-      "$ref": "#/definitions/NgrokConf",
-      "description": "JSON object describing the ngrok configuration for ingress listeners."
+      "description": "Ngrok configuration for ingress listeners (closely maps https://ngrok.com/docs/ngrok-agent/config/)",
+      "$ref": "#/definitions/NgrokConf"
     },
     "VerbosityProfile": {
-      "$ref": "#/definitions/VerbosityProfile",
-      "description": "Logging verbosity profile (pre-defined tracing directives)."
+      "description": "Logging verbosity profile (pre-defined tracing directives)",
+      "$ref": "#/definitions/VerbosityProfile"
     },
     "WebApp": {
-      "$ref": "#/definitions/WebAppConf",
-      "description": "JSON object describing the standalone web application configuration."
+      "description": "Web application configuration for standalone mode",
+      "$ref": "#/definitions/WebAppConf"
     },
     "LogFile": {
-      "type": "string",
-      "description": "Path to the log file."
+      "description": "(Unstable) Folder and prefix for log files",
+      "type": "string"
     },
     "JrlFile": {
-      "type": "string",
-      "description": "Path to the JRL file."
+      "description": "(Unstable) Path to the JRL file",
+      "type": "string"
     },
     "Plugins": {
+      "description": "(Unstable) Plugin paths to load at startup",
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "description": "Array of plugin paths."
+      }
     },
     "Sogar": {
-      "$ref": "#/definitions/SogarConf",
-      "description": "Sogar configuration."
+      "description": "(Unstable) Sogar (generic OCI registry)",
+      "$ref": "#/definitions/SogarConf"
     },
     "__debug__": {
-      "$ref": "#/definitions/DebugConf",
-      "description": "Debug configuration."
+      "description": "(Unstable) Unsafe debug options for developers",
+      "$ref": "#/definitions/DebugConf"
     }
   },
-  "required": ["Listeners"],
+  "required": [
+    "Listeners"
+  ],
   "additionalProperties": true,
   "definitions": {
     "ConfDataPubKeyFormat": {
@@ -135,7 +142,9 @@
           "description": "The binary-to-text encoding used for the key data."
         }
       },
-      "required": ["Value"],
+      "required": [
+        "Value"
+      ],
       "additionalProperties": false
     },
     "ConfDataPrivKeyFormat": {
@@ -154,24 +163,39 @@
           "description": "The binary-to-text encoding used for the key data."
         }
       },
-      "required": ["Value"],
+      "required": [
+        "Value"
+      ],
       "additionalProperties": false
     },
     "DataEncoding": {
       "type": "string",
-      "enum": ["Multibase", "Base64", "Base64Pad", "Base64Url", "Base64UrlPad"],
+      "enum": [
+        "Multibase",
+        "Base64",
+        "Base64Pad",
+        "Base64Url",
+        "Base64UrlPad"
+      ],
       "default": "Multibase",
       "description": "The binary-to-text encoding used for the key data."
     },
     "PubKeyFormat": {
       "type": "string",
-      "enum": ["Spki", "Pkcs1"],
+      "enum": [
+        "Spki",
+        "Pkcs1"
+      ],
       "default": "Spki",
       "description": "The format used for the key data."
     },
     "PrivKeyFormat": {
       "type": "string",
-      "enum": ["Pkcs8", "Pkcs1", "Ec"],
+      "enum": [
+        "Pkcs8",
+        "Pkcs1",
+        "Ec"
+      ],
       "default": "Pkcs8",
       "description": "The format used for the key data."
     },
@@ -195,18 +219,28 @@
           "description": "The binary-to-text encoding used for the key data."
         }
       },
-      "required": ["Id", "Value"],
+      "required": [
+        "Id",
+        "Value"
+      ],
       "additionalProperties": false
     },
     "CertSource": {
       "type": "string",
-      "enum": ["External", "System"],
+      "enum": [
+        "External",
+        "System"
+      ],
       "default": "External",
       "description": "Source for the TLS certificate."
     },
     "CertStoreLocation": {
       "type": "string",
-      "enum": ["CurrentUser", "CurrentService", "LocalMachine"],
+      "enum": [
+        "CurrentUser",
+        "CurrentService",
+        "LocalMachine"
+      ],
       "default": "CurrentUser",
       "description": "Location of the System Certificate Store to use for TLS."
     },
@@ -224,7 +258,10 @@
           "description": "External URL for this listener."
         }
       },
-      "required": ["InternalUrl", "ExternalUrl"],
+      "required": [
+        "InternalUrl",
+        "ExternalUrl"
+      ],
       "additionalProperties": false
     },
     "Subscriber": {
@@ -240,7 +277,10 @@
           "description": "Bearer token to use when making HTTP requests."
         }
       },
-      "required": ["Url", "Token"],
+      "required": [
+        "Url",
+        "Token"
+      ],
       "additionalProperties": false
     },
     "NgrokConf": {
@@ -274,7 +314,9 @@
           "description": "A map of ngrok tunnels. The key is the name of the tunnel and value is a JSON object whose schema depends on tunnel protocol."
         }
       },
-      "required": ["AuthToken"],
+      "required": [
+        "AuthToken"
+      ],
       "additionalProperties": false
     },
     "NgrokTunnelConf": {
@@ -284,7 +326,9 @@
           "properties": {
             "proto": {
               "type": "string",
-              "enum": ["tcp"],
+              "enum": [
+                "tcp"
+              ],
               "description": "MUST be set to 'tcp'."
             },
             "RemoteAddr": {
@@ -312,7 +356,10 @@
               "description": "Array of CIDRs, rejects connections that match the given CIDRs and allows all other CIDRs."
             }
           },
-          "required": ["proto", "RemoteAddr"],
+          "required": [
+            "proto",
+            "RemoteAddr"
+          ],
           "additionalProperties": false
         },
         {
@@ -320,7 +367,9 @@
           "properties": {
             "proto": {
               "type": "string",
-              "enum": ["http"],
+              "enum": [
+                "http"
+              ],
               "description": "MUST be set to 'http'."
             },
             "Domain": {
@@ -356,14 +405,23 @@
               "description": "Array of CIDRs, rejects connections that match the given CIDRs and allows all other CIDRs."
             }
           },
-          "required": ["proto", "Domain"],
+          "required": [
+            "proto",
+            "Domain"
+          ],
           "additionalProperties": false
         }
       ]
     },
     "VerbosityProfile": {
       "type": "string",
-      "enum": ["Default", "Debug", "Tls", "All", "Quiet"],
+      "enum": [
+        "Default",
+        "Debug",
+        "Tls",
+        "All",
+        "Quiet"
+      ],
       "default": "Default",
       "description": "Logging verbosity profile (pre-defined tracing directives)."
     },
@@ -397,12 +455,18 @@
           "description": "Path to the static files for the standalone web application. This is an advanced option which should typically not be changed."
         }
       },
-      "required": ["Enabled", "Authentication"],
+      "required": [
+        "Enabled",
+        "Authentication"
+      ],
       "additionalProperties": false
     },
     "WebAppAuth": {
       "type": "string",
-      "enum": ["Custom", "None"],
+      "enum": [
+        "Custom",
+        "None"
+      ],
       "description": "The authentication method for accessing the web application."
     },
     "SogarConf": {
@@ -463,7 +527,12 @@
           "description": "Time to keep files."
         }
       },
-      "required": ["RegistryUrl", "Username", "Password", "ImageName"],
+      "required": [
+        "RegistryUrl",
+        "Username",
+        "Password",
+        "ImageName"
+      ],
       "additionalProperties": false
     },
     "SogarUser": {
@@ -486,7 +555,10 @@
     },
     "SogarPermission": {
       "type": "string",
-      "enum": ["Push", "Pull"],
+      "enum": [
+        "Push",
+        "Pull"
+      ],
       "description": "Permission type."
     },
     "DebugConf": {
