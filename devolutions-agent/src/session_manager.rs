@@ -13,8 +13,8 @@ use camino::Utf8PathBuf;
 use win_api_wrappers::process::{
     create_process_in_session, is_process_running_in_session, terminate_process_by_name_in_session, StartupInfo,
 };
-use win_api_wrappers::session::session_has_logged_in_user;
 use win_api_wrappers::utils::{CommandLine, WideString};
+use win_api_wrappers::wts::session_has_logged_in_user;
 use windows::Win32::System::Threading::{
     CREATE_NEW_CONSOLE, CREATE_UNICODE_ENVIRONMENT, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW,
 };
