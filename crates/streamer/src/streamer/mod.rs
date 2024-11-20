@@ -1,7 +1,7 @@
 use channel_writer::ChannelWriter;
 use futures_util::SinkExt;
 use protocol::ProtocolCodeC;
-use timed_tag_writer::ControlledTagWriter;
+use tag_writers::{EncodeWriterConfig, EncodedWriteResult, HeaderWriter};
 use tokio_util::codec::Framed;
 use tracing::{info, warn, Instrument};
 use webm_iterable::{
@@ -9,18 +9,23 @@ use webm_iterable::{
     matroska_spec::{Master, MatroskaSpec},
 };
 
+pub mod block_tag;
 pub mod channel_writer;
 pub mod protocol;
 pub mod reopenable_file;
 pub mod signal_when_flush;
-pub mod timed_tag_writer;
+pub mod tag_writers;
 
 use crate::reopenable::Reopenable;
+
+pub trait Signal: Send + 'static {
+    fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send;
+}
 
 pub fn webm_stream(
     output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static, // A websocket usually
     input_stream: impl std::io::Read + Reopenable,                                             // A file usually
-    shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    shutdown_signal: impl Signal,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     warn!("Starting webm_stream");
@@ -75,42 +80,50 @@ pub fn webm_stream(
     spawn_sending_task(framed, receiver, codec, shutdown_signal);
 
     // ControlledTagWriter will not write to underlying writer unless the data is valid
-    let mut writer = ControlledTagWriter::new(writer);
+    let mut header_writer = HeaderWriter::new(writer);
     warn!(?headers, "Headers sent");
-    for header in headers {
-        writer.write(&header)?;
+    for header in &headers {
+        header_writer.write(header)?;
     }
 
-    let mut input_stream = webm_itr.into_inner();
-    input_stream.reopen()?;
-    input_stream.seek(std::io::SeekFrom::Start(last_cluster_postion as u64))?;
-    let mut webm_itr = webm_iterable::WebmIterator::new(input_stream, &[]);
-    while let Some(tag) = webm_itr.next() {
-        let tag = match tag {
-            Ok(tag) => tag,
-            Err(TagIteratorError::ReadError { .. }) => anyhow::bail!("Read error"),
-            Err(_) => {
-                let res = when_new_chunk_appended().blocking_recv();
+    // We startint muxing the last cluster
+    reseek(&mut webm_itr, last_cluster_postion)?;
+    let encode_writer_config = EncodeWriterConfig::try_from(headers.as_slice())?;
+    let mut encode_writer = header_writer.into_encoded_writer(encode_writer_config)?;
 
-                if res.is_err() {
+    let mut last_tag_position = last_cluster_postion;
+    loop {
+        match next_tag(&mut webm_itr, &mut last_tag_position)? {
+            NextTagResult::Tag(matroska_spec) => {
+                if let EncodedWriteResult::Finished = encode_writer.write(matroska_spec)? {
                     break;
                 }
-
-                let mut input_stream = webm_itr.into_inner();
-                input_stream.reopen()?;
-                input_stream.seek(std::io::SeekFrom::Start(last_cluster_postion as u64))?;
-                webm_itr = webm_iterable::WebmIterator::new(input_stream, &[]);
-
-                continue;
+            }
+            NextTagResult::TryAgain => {
+                reseek(&mut webm_itr, last_cluster_postion)?;
+                when_new_chunk_appended().blocking_recv()?;
+            }
+            NextTagResult::End => {
+                anyhow::bail!("Unexpected end of file");
             }
         };
+    }
 
-        if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
-            // The last_emitted_tag_offset is relative to where it starts reading
-            last_cluster_postion += webm_itr.last_emitted_tag_offset();
-        }
+    let mut timed_writer = encode_writer.into_timed_tag_writer();
 
-        writer.write(&tag)?;
+    loop {
+        match next_tag(&mut webm_itr, &mut last_tag_position)? {
+            NextTagResult::Tag(matroska_spec) => {
+                timed_writer.write(matroska_spec)?;
+            }
+            NextTagResult::TryAgain => {
+                reseek(&mut webm_itr, last_cluster_postion)?;
+                when_new_chunk_appended().blocking_recv()?;
+            }
+            NextTagResult::End => {
+                break;
+            }
+        };
     }
 
     Ok(())
@@ -120,7 +133,7 @@ fn spawn_sending_task<W>(
     mut ws_frame: Framed<W, ProtocolCodeC>,
     mut chunk_receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
     codec: Option<String>,
-    mut shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    mut shutdown_signal: impl Signal,
 ) where
     W: tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static,
 {
@@ -175,4 +188,41 @@ fn spawn_sending_task<W>(
             tracing::error!("Error while sending data: {:?}", e);
         }
     });
+}
+
+fn reseek(
+    webm_itr: &mut webm_iterable::WebmIterator<impl std::io::Read + Reopenable>,
+    last_cluster_postion: usize,
+) -> anyhow::Result<()> {
+    webm_itr.get_mut().reopen()?;
+    webm_itr
+        .get_mut()
+        .seek(std::io::SeekFrom::Start(last_cluster_postion as u64))?;
+    Ok(())
+}
+
+enum NextTagResult {
+    Tag(MatroskaSpec),
+    TryAgain,
+    End,
+}
+
+fn next_tag(
+    webm_itr: &mut webm_iterable::WebmIterator<impl std::io::Read + Reopenable>,
+    last_cluster_postion: &mut usize,
+) -> anyhow::Result<NextTagResult> {
+    let Some(tag) = webm_itr.next() else {
+        return Ok(NextTagResult::End);
+    };
+
+    let tag = match tag {
+        Ok(tag) => tag,
+        Err(TagIteratorError::ReadError { .. }) => anyhow::bail!("Read error"),
+        Err(_) => {
+            return Ok(NextTagResult::TryAgain);
+        }
+    };
+
+    *last_cluster_postion += webm_itr.last_emitted_tag_offset();
+    Ok(NextTagResult::Tag(tag))
 }
