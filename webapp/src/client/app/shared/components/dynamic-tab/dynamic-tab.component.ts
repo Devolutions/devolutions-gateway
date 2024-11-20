@@ -11,11 +11,16 @@ import {
   ViewContainerRef,
 } from '@angular/core';
 
+import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
+import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
+import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { SessionType, WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
+import { SessionType, WebSession } from '@shared/models/web-session.model';
+import { ComponentListenerService } from '@shared/services/component-listener.service';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { distinctUntilChanged, take, takeUntil, tap } from 'rxjs/operators';
 
 @Component({
   selector: 'web-client-dynamic-tab',
@@ -25,13 +30,13 @@ import { WebSessionService } from '@shared/services/web-session.service';
 export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
   @Input() webSessionTab: WebSession<T>;
   @ViewChild('dynamicComponentContainer', { read: ViewContainerRef }) container: ViewContainerRef;
-  @Output() isDynamicTabInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
   @Output() componentRefSizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   constructor(
     private cdr: ChangeDetectorRef,
     private webSessionService: WebSessionService,
     private dynamicComponentService: DynamicComponentService,
+    private componentListenerService: ComponentListenerService,
   ) {
     super();
   }
@@ -55,11 +60,38 @@ export class DynamicTabComponent<T extends SessionType> extends BaseComponent im
 
     const componentRef = this.dynamicComponentService.createComponent(this.container, this.webSessionTab);
 
+    if ('webComponentReady' in componentRef.instance) {
+      if (componentRef.instance instanceof WebClientTelnetComponent) {
+        this.componentListenerService
+          .onTelnetInitialized()
+          .pipe(takeUntil(this.destroyed$), take(1))
+          .subscribe((event) => {
+            (componentRef.instance as WebComponentReady).webComponentReady(event as CustomEvent, this.webSessionTab.id);
+          });
+      } else if (componentRef.instance instanceof WebClientSshComponent) {
+        this.componentListenerService
+          .onSshInitialized()
+          .pipe(takeUntil(this.destroyed$), take(1))
+          .subscribe((event) => {
+            (componentRef.instance as WebComponentReady).webComponentReady(event as CustomEvent, this.webSessionTab.id);
+          });
+      }
+    }
+
     this.cdr.detectChanges();
 
-    componentRef.instance.componentStatus.subscribe((status: ComponentStatus) => this.onComponentDisabled(status));
+    componentRef.instance.componentStatus
+      .pipe(takeUntil(this.destroyed$), distinctUntilChanged())
+      .subscribe((status: ComponentStatus) => {
+        this.webSessionTab.status = status;
+        if (status.isDisabled) {
+          this.onComponentDisabled(status);
+        }
+      });
 
-    componentRef.instance?.sizeChange?.subscribe(() => this.componentRefSizeChange.emit());
+    componentRef.instance?.sizeChange
+      ?.pipe(takeUntil(this.destroyed$))
+      .subscribe(() => this.componentRefSizeChange.emit());
 
     this.webSessionTab.componentRef = componentRef;
   }

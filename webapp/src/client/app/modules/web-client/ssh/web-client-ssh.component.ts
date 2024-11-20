@@ -14,7 +14,7 @@ import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { WebClientBaseComponent, WebComponentReady } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
@@ -34,11 +34,12 @@ import { AnalyticService, ProtocolString } from '@gateway/shared/services/analyt
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 
 @Component({
+  selector: 'gateway-web-client-ssh',
   templateUrl: 'web-client-ssh.component.html',
   styleUrls: ['web-client-ssh.component.scss'],
   providers: [MessageService],
 })
-export class WebClientSshComponent extends WebClientBaseComponent implements OnInit, OnDestroy {
+export class WebClientSshComponent extends WebClientBaseComponent implements WebComponentReady, OnInit, OnDestroy {
   @Input() webSessionId: string;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -46,10 +47,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   @ViewChild('sessionSshContainer') sessionContainerElement: ElementRef;
   @ViewChild('webSSHGuiTerminal') webGuiTerminal: ElementRef;
 
-  currentStatus: ComponentStatus;
   formData: SSHFormDataInput;
   clientError: string;
-  loading = true;
 
   rightToolbarButtons = [
     { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
@@ -73,9 +72,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   ngOnInit(): void {
     sshLoggingService.setLevel(LoggingLevel.DEBUG);
     this.removeWebClientGuiElement();
-    this.initializeStatus();
-
-    this.initiateRemoteClientListener();
   }
 
   ngOnDestroy(): void {
@@ -89,6 +85,16 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     super.ngOnDestroy();
   }
 
+  webComponentReady(event: CustomEvent, webSessionId: string): void {
+    if (this.currentStatus.isInitialized || webSessionId !== this.webSessionId) {
+      return;
+    }
+
+    this.remoteTerminal = event.detail.sshTerminal;
+    this.initSessionEventHandler();
+    this.startConnectionProcess();
+  }
+
   startTerminationProcess(): void {
     this.currentStatus.isDisabledByUser = true;
     this.handleSessionEndedOrError(TerminalConnectionStatus.failed);
@@ -100,7 +106,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     if (!this.currentStatus.isInitialized) {
       return;
     }
-    this.currentStatus.isInitialized = false;
     void this.remoteTerminal.close();
   }
 
@@ -126,30 +131,19 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   private initializeStatus(): void {
     this.currentStatus = {
       id: this.webSessionId,
-      isInitialized: false,
+      isInitialized: true,
       isDisabled: false,
       isDisabledByUser: false,
     };
   }
 
   private disableComponentStatus(): void {
+    if (this.currentStatus.isDisabled) {
+      return;
+    }
+
     this.currentStatus.isDisabled = true;
     this.componentStatus.emit(this.currentStatus);
-  }
-
-  private initiateRemoteClientListener(): void {
-    this.remoteTerminalEventListener = this.renderer.listen('window', 'sshInitialized', (event) => {
-      if (this.currentStatus.isInitialized) {
-        return;
-      }
-      this.webComponentReady(event);
-    });
-  }
-
-  private webComponentReady(event): void {
-    this.remoteTerminal = event.detail.sshTerminal;
-    this.initSessionEventHandler();
-    this.startConnectionProcess();
   }
 
   private startConnectionProcess(): void {
@@ -197,6 +191,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
   private getFormData(): Observable<void> {
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
+      takeUntil(this.destroyed$),
       map((currentWebSession) => {
         this.formData = currentWebSession.data as SSHFormDataInput;
       }),
@@ -248,7 +243,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
   private handleSessionStarted(): void {
     this.handleClientConnectStarted();
-    this.currentStatus.isInitialized = true;
+    this.initializeStatus();
   }
 
   private handleSessionEndedOrError(status: TerminalConnectionStatus): void {
@@ -267,7 +262,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     this.clientError = this.getMessage(status);
 
     const icon: string = status !== TerminalConnectionStatus.connected ? DVL_WARNING_ICON : DVL_SSH_ICON;
-
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
@@ -285,7 +279,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     this.clientError = typeof error === 'string' ? error : this.getMessage(error);
     console.error(error);
     this.disableComponentStatus();
-
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 

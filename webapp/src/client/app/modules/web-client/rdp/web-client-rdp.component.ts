@@ -56,12 +56,10 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
 
   screenScale = ScreenScale;
-  currentStatus: ComponentStatus;
   formData: RdpFormDataInput;
   rdpError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
-  loading = true;
 
   leftToolbarButtons = [
     {
@@ -124,7 +122,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-    this.initializeStatus();
   }
 
   ngAfterViewInit(): void {
@@ -184,7 +181,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   private initializeStatus(): void {
     this.currentStatus = {
       id: this.webSessionId,
-      isInitialized: false,
+      isInitialized: true,
       isDisabled: false,
       isDisabledByUser: false,
     };
@@ -381,7 +378,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   private handleSessionStarted(event: SessionEvent): void {
     this.handleIronRDPConnectStarted();
-    this.currentStatus.isInitialized = true;
+    this.initializeStatus();
   }
 
   private handleSessionEndedOrError(event: SessionEvent): void {
