@@ -57,10 +57,6 @@ impl codec::Decoder for ProtocolCodeC {
             return Ok(None); // Wait for more data
         }
 
-        if src.is_empty() {
-            return Ok(None); // Not enough data yet to decode a type code
-        }
-
         let type_code = src.get_u8();
         let message = match type_code {
             0 => ClientMessage::Start,

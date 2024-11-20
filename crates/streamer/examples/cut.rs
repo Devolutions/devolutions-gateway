@@ -1,11 +1,19 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::unwrap_used)]
 
-use std::{env, path::Path, process::exit};
+use std::{env, path::Path, pin::Pin, process::exit};
 
 use anyhow::Context;
 use cadeau::xmf;
-use streamer::streamer::webm_stream;
+use streamer::streamer::{
+    protocol::{ClientMessage, Codec, ProtocolCodeC, ServerMessage},
+    webm_stream,
+};
+use tokio::io::AsyncWriteExt;
+use tokio_util::{
+    bytes::{self, Buf, BufMut},
+    codec::{self, Framed},
+};
 use tracing::error;
 
 pub struct TokioSignal {
@@ -15,6 +23,105 @@ pub struct TokioSignal {
 impl streamer::streamer::Signal for TokioSignal {
     async fn wait(&mut self) {
         let _ = self.signal.changed().await;
+    }
+}
+
+#[derive(Debug)]
+pub enum OwnedServerMessage {
+    Chunk(Vec<u8>),
+    // leave for future extension (e.g. audio metadata, size, etc.)
+    MetaData { codec: Codec },
+}
+
+pub struct ReversedProtocolCodeC;
+
+impl codec::Decoder for ReversedProtocolCodeC {
+    type Item = OwnedServerMessage;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if src.is_empty() {
+            return Ok(None); // Wait for more data
+        }
+
+        let type_code = src.get_u8();
+        let message = match type_code {
+            0 => {
+                // Decode a chunk
+                if src.is_empty() {
+                    return Ok(None); // Wait for the rest of the chunk
+                }
+                let chunk = src.split_to(src.len()); // Take the remaining bytes as the chunk
+                OwnedServerMessage::Chunk(chunk.to_vec())
+            }
+            1 => {
+                // Decode metadata
+                if src.is_empty() {
+                    return Ok(None); // Wait for the rest of the metadata
+                }
+                let json = String::from_utf8(src.to_vec())
+                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
+                let codec = if json.contains("vp8") {
+                    Codec::Vp8
+                } else if json.contains("vp9") {
+                    Codec::Vp9
+                } else {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "unknown codec in metadata",
+                    ));
+                };
+                OwnedServerMessage::MetaData { codec }
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid message type",
+                ))
+            }
+        };
+
+        Ok(Some(message))
+    }
+}
+
+struct WebsocketMimic {
+    frame: Framed<tokio::fs::File, ReversedProtocolCodeC>,
+    started: bool,
+}
+
+impl tokio::io::AsyncRead for WebsocketMimic {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if self.started {
+            buf.put_u8(1);
+        } else {
+            buf.put_u8(0);
+            self.get_mut().started = true;
+        }
+
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+impl tokio::io::AsyncWrite for WebsocketMimic {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        self.get_mut().frame.
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        todo!()
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        todo!()
     }
 }
 
@@ -46,14 +153,24 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let input_file = streamer::ReOpenableFile::open(args.input_path)?;
-    let output_file = tokio::fs::File::create(&args.output_path).await?;
+    let output_file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(args.output_path)
+        .await?;
 
-    let (tx, rx) = tokio::sync::watch::channel(());
+    let websocket_mimic = WebsocketMimic {
+        frame: Framed::new(output_file, ReversedProtocolCodeC),
+        started: false,
+    };
+
+    let (_tx, rx) = tokio::sync::watch::channel(());
 
     let shutdown_signal = TokioSignal { signal: rx };
 
     tokio::task::spawn_blocking(move || {
-        webm_stream(output_file, input_file, shutdown_signal, || {
+        webm_stream(websocket_mimic, input_file, shutdown_signal, || {
             let (tx, rx) = tokio::sync::oneshot::channel();
             tx.send(()).unwrap();
             rx
