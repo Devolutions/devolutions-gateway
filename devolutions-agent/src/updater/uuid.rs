@@ -62,13 +62,13 @@ pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<String, UpdaterError
     formatted.push('{');
 
     // Hyphen pattern is not same as reversing pattern blocks.
-    const HYPEN_PATTERN: &[usize] = &[1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0];
+    const HYPHEN_PATTERN: &[usize] = &[1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0];
 
-    for (pattern, hypen) in UUID_REVERSING_PATTERN.iter().zip(HYPEN_PATTERN) {
+    for (pattern, hyphen) in UUID_REVERSING_PATTERN.iter().zip(HYPHEN_PATTERN) {
         let (part, rest) = hex.split_at(*pattern);
         formatted.extend(part.chars().rev());
 
-        if *hypen == 1 {
+        if *hyphen == 1 {
             formatted.push('-');
         }
         hex = rest;

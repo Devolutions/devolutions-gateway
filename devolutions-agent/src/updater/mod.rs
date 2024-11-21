@@ -210,13 +210,13 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     trace!(%product, %detected_version, "Detected installed product version");
 
-    let is_target_version_same_as_insatlled = match target_version {
+    let is_target_version_same_as_installed = match target_version {
         VersionSpecification::Latest => false,
         VersionSpecification::Specific(target) => target == detected_version,
     };
 
     // Early exit without checking remote database.
-    if is_target_version_same_as_insatlled {
+    if is_target_version_same_as_installed {
         info!(%product, %detected_version, "Product is up to date, skipping update");
         return Ok(None);
     }

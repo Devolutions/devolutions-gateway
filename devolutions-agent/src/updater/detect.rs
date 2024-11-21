@@ -10,12 +10,12 @@ const GATEWAY_UPDATE_CODE: &str = "{db3903d6-c451-4393-bd80-eb9f45b90214}";
 /// Get the installed version of a product.
 pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<DateVersion>, UpdaterError> {
     match product {
-        Product::Gateway => get_instaled_product_version_winreg(GATEWAY_UPDATE_CODE),
+        Product::Gateway => get_installed_product_version_winreg(GATEWAY_UPDATE_CODE),
     }
 }
 
 /// Get the installed version of a product using Windows registry.
-fn get_instaled_product_version_winreg(update_code: &str) -> Result<Option<DateVersion>, UpdaterError> {
+fn get_installed_product_version_winreg(update_code: &str) -> Result<Option<DateVersion>, UpdaterError> {
     let reversed_hex_uuid = uuid_to_reversed_hex(update_code)?;
 
     const REG_CURRENT_VERSION: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion";
