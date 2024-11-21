@@ -15,7 +15,7 @@ pub(crate) async fn download_binary(url: &str) -> Result<Vec<u8>, UpdaterError> 
         .and_then(|response| response.bytes())
         .map_err(|source| UpdaterError::FileDownload {
             source,
-            file_path: url.to_string(),
+            file_path: url.to_owned(),
         })
         .await?;
     Ok(body.to_vec())
@@ -55,12 +55,14 @@ pub(crate) fn remove_file_on_reboot(file_path: &Utf8Path) -> Result<(), UpdaterE
 
 #[cfg(windows)]
 pub(crate) fn remove_file_on_reboot_impl(file_path: &Utf8Path) -> Result<(), UpdaterError> {
-    use windows::core::HSTRING;
+    use win_api_wrappers::utils::WideString;
     use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
 
-    let hstring_file_path = HSTRING::from(file_path.as_str());
+    let wide_file_path = WideString::from(file_path.as_str());
 
-    let move_result = unsafe { MoveFileExW(&hstring_file_path, None, MOVEFILE_DELAY_UNTIL_REBOOT) };
+    // SAFETY: `wide_file_path` is a valid null-terminated UTF-16 string, therefore the function is
+    // safe to call.
+    let move_result = unsafe { MoveFileExW(wide_file_path.as_pcwstr(), None, MOVEFILE_DELAY_UNTIL_REBOOT) };
 
     if let Err(error) = move_result {
         warn!(%error, %file_path, "Failed to mark file for deletion on reboot");

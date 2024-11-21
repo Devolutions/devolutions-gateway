@@ -6,6 +6,7 @@ use camino::Utf8Path;
 
 use crate::updater::io::remove_file_on_reboot;
 use crate::updater::{Product, UpdaterCtx, UpdaterError};
+use win_api_wrappers::utils::WideString;
 
 /// List of allowed thumbprints for Devolutions code signing certificates
 const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
@@ -87,9 +88,11 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
         GetTokenInformation(
             *token_handle,
             TokenElevation,
-            Some(&mut token_elevation as *mut _ as _),
-            size_of::<TOKEN_ELEVATION>().try_into().unwrap(),
-            &mut return_size as _,
+            Some(&mut token_elevation as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
+            size_of::<TOKEN_ELEVATION>()
+                .try_into()
+                .expect("Unreachable: TOKEN_ELEVATION size always fits into u32"),
+            &mut return_size as *mut u32,
         )
     };
 
@@ -107,7 +110,6 @@ pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), 
 }
 
 fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
-    use windows::core::HSTRING;
     use windows::Win32::Security::Cryptography::{
         CertFreeCertificateContext, CryptHashCertificate, CALG_SHA1, CERT_CONTEXT,
     };
@@ -128,16 +130,16 @@ fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
         }
     }
 
-    let msi_path_hstring = HSTRING::from(path.as_str());
+    let wide_msi_path = WideString::from(path.as_str());
     let mut cert_context = OwnedCertContext(std::ptr::null_mut());
 
-    // SAFETY: `msi_path_hstring` is a valid reference-counted UTF16 string, and `cert_context` is
-    // initialized and will be freed on drop.
+    // SAFETY: `wide_msi_path` is a valid null-terminated UTF-16 string, and `cert_context`
+    // validity is ensured by `OwnedCertContext`, therefore the function is safe to call.
     let result = unsafe {
         MsiGetFileSignatureInformationW(
-            &msi_path_hstring,
+            wide_msi_path.as_pcwstr(),
             MSI_INVALID_HASH_IS_FATAL, // Validate signature
-            &mut cert_context.0 as _,
+            &mut cert_context.0 as *mut *mut CERT_CONTEXT,
             None,
             None,
         )
@@ -157,19 +159,33 @@ fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
         });
     }
 
-    let mut calculated_cert_sha1 = [0u8; 20];
-    let mut calculated_cert_sha1_size = calculated_cert_sha1.len() as u32;
+    const SHA1_HASH_SIZE: u8 = 20;
+    let mut calculated_cert_sha1 = [0u8; SHA1_HASH_SIZE as usize];
+    let mut calculated_cert_sha1_size = u32::from(SHA1_HASH_SIZE);
 
-    // SAFETY: cert_context.0.pbCertEncoded is a valid pointer to the certificate bytes retrieved
-    // via `MsiGetFileSignatureInformationW` call and validated above.
+    // SAFETY: `cert_context.0` validity is checked above.
+    let cert_data = unsafe { (*cert_context.0).pbCertEncoded };
+    // SAFETY: `cert_context.0` validity is checked above.
+    let cert_len = unsafe { (*cert_context.0).cbCertEncoded };
+    // SAFETY: `cert_context` valid throughout the function, (ensured by the `OwnedCertContext`).
+    // therefore is is safe to construct a slice from it.
+    let encoded_slice = unsafe {
+        core::slice::from_raw_parts(
+            cert_data,
+            usize::try_from(cert_len).expect("BUG: Invalid certificate length"),
+        )
+    };
+
+    // SAFETY: `encoded_slice` validity is ensured by `OwnedCertContext`, and `calculated_cert_sha1`
+    // and `calculated_cert_sha1_size` are valid pointers, therefore the function is safe to call.
     unsafe {
         CryptHashCertificate(
             None,
             CALG_SHA1,
             0,
-            core::slice::from_raw_parts((*cert_context.0).pbCertEncoded, (*cert_context.0).cbCertEncoded as _),
-            Some(&mut calculated_cert_sha1 as _),
-            &mut calculated_cert_sha1_size as _,
+            encoded_slice,
+            Some(&mut calculated_cert_sha1 as *mut u8),
+            &mut calculated_cert_sha1_size as *mut u32,
         )
     }
     .map_err(|_| UpdaterError::MsiCertHash {

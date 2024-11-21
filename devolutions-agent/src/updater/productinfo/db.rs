@@ -8,7 +8,7 @@ use crate::updater::UpdaterError;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProductInfo {
     pub version: String,
-    pub hash: String,
+    pub hash: Option<String>,
     pub url: String,
 }
 
@@ -31,13 +31,13 @@ impl FromStr for ProductInfoDb {
             let (product_id, property) = key.split_once('.').ok_or(UpdaterError::ProductInfo)?;
 
             let entry = records
-                .entry(product_id.to_string())
+                .entry(product_id.to_owned())
                 .or_insert_with(ProductInfo::default);
 
             match property {
-                "Version" => entry.version = value.to_string(),
-                "Url" => entry.url = value.to_string(),
-                "hash" => entry.hash = value.to_string(),
+                "Version" => entry.version = value.to_owned(),
+                "Url" => entry.url = value.to_owned(),
+                "hash" => entry.hash = Some(value.to_owned()),
                 _ => {
                     trace!(%product_id, %property, "Unknown productinfo property");
                     continue;
@@ -71,8 +71,8 @@ mod tests {
             "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi"
         );
         assert_eq!(
-            db.get("Gatewaybin").unwrap().hash,
-            "BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35"
+            db.get("Gatewaybin").unwrap().hash.as_deref(),
+            Some("BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35")
         );
 
         assert_eq!(db.get("GatewaybinBeta").unwrap().version, "2024.2.1.0");
@@ -81,8 +81,8 @@ mod tests {
             "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi"
         );
         assert_eq!(
-            db.get("GatewaybinBeta").unwrap().hash,
-            "BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35"
+            db.get("GatewaybinBeta").unwrap().hash.as_deref(),
+            Some("BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35")
         );
 
         assert_eq!(db.get("GatewaybinDebX64").unwrap().version, "2024.2.1.0");
@@ -91,8 +91,8 @@ mod tests {
             "https://cdn.devolutions.net/download/devolutions-gateway_2024.2.1.0_amd64.deb"
         );
         assert_eq!(
-            db.get("GatewaybinDebX64").unwrap().hash,
-            "72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA"
+            db.get("GatewaybinDebX64").unwrap().hash.as_deref(),
+            Some("72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA")
         );
 
         assert_eq!(db.get("GatewaybinDebX64Beta").unwrap().version, "2024.2.1.0");
@@ -101,8 +101,8 @@ mod tests {
             "https://cdn.devolutions.net/download/devolutions-gateway_2024.2.1.0_amd64.deb"
         );
         assert_eq!(
-            db.get("GatewaybinDebX64Beta").unwrap().hash,
-            "72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA"
+            db.get("GatewaybinDebX64Beta").unwrap().hash.as_deref(),
+            Some("72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA")
         );
 
         assert_eq!(db.get("DevoCLIbin").unwrap().version, "2023.3.0.0");
@@ -110,6 +110,6 @@ mod tests {
             db.get("DevoCLIbin").unwrap().url,
             "https://cdn.devolutions.net/download/DevoCLI.2023.3.0.0.zip"
         );
-        assert_eq!(db.get("DevoCLIbin").unwrap().hash, "");
+        assert_eq!(db.get("DevoCLIbin").unwrap().hash, None);
     }
 }

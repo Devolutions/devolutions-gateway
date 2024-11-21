@@ -39,7 +39,7 @@ pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
     }
 
     if reversed_hex.len() != 32 || reversed_hex.chars().any(|ch| !UUID_ALPHABET.contains(&ch)) {
-        return Err(UpdaterError::Uuid { uuid: uuid.to_string() });
+        return Err(UpdaterError::Uuid { uuid: uuid.to_owned() });
     }
 
     Ok(reversed_hex)
@@ -50,7 +50,7 @@ pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
 /// e.g.: `C3D81328F118D5D4A9287B3CB1707655` => `{82318d3c-811f-4d5d-9a82-b7c31b076755}`
 pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<String, UpdaterError> {
     if hex.len() != 32 || hex.chars().any(|ch| !UUID_ALPHABET.contains(&ch)) {
-        return Err(UpdaterError::Uuid { uuid: hex.to_string() });
+        return Err(UpdaterError::Uuid { uuid: hex.to_owned() });
     }
 
     const FORMATTED_UUID_LEN: usize = UUID_CHARS

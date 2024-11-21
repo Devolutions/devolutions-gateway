@@ -45,7 +45,7 @@ struct UpdaterCtx {
 struct UpdateOrder {
     target_version: DateVersion,
     package_url: String,
-    hash: String,
+    hash: Option<String>,
 }
 
 pub(crate) struct UpdaterTask {
@@ -158,7 +158,9 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     let ctx = UpdaterCtx { product, conf };
 
-    validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+    if let Some(hash) = hash {
+        validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+    }
 
     validate_package(&ctx, &package_path).context("failed to validate package contents")?;
 
@@ -208,12 +210,13 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     trace!(%product, %detected_version, "Detected installed product version");
 
-    let is_target_version_newer = match target_version {
-        VersionSpecification::Latest => true,
-        VersionSpecification::Specific(target) => target > detected_version,
+    let is_target_version_same_as_insatlled = match target_version {
+        VersionSpecification::Latest => false,
+        VersionSpecification::Specific(target) => target == detected_version,
     };
 
-    if !is_target_version_newer {
+    // Early exit without checking remote database.
+    if is_target_version_same_as_insatlled {
         info!(%product, %detected_version, "Product is up to date, skipping update");
         return Ok(None);
     }
@@ -240,9 +243,37 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
             }
         }
         VersionSpecification::Specific(version) => {
-            if version != remote_version {
-                warn!(%product, %version, "Product uptate target version does not match available version on devolutions.net, skipping update");
+            if version == detected_version {
+                info!(%product, %detected_version, "Product is up to date, skipping update");
                 return Ok(None);
+            }
+
+            // If the target version is not available on devolutions.net, try to guess the requested
+            // version MSI URL by modifying the detected version.
+            //
+            // TODO(@pacmancoder): This is a temporary workaround until we have improved productinfo
+            // database with multiple version information.
+            if version != remote_version {
+                let modified_url = try_modify_product_url_version(&product_info.url, remote_version, version)?;
+
+                // Quick check if the modified URL points to existing resource.
+                let response = reqwest::Client::builder().build()?.head(&modified_url).send().await?;
+                if !response.status().is_success() {
+                    warn!(
+                        %product,
+                        %version,
+                        %modified_url,
+                        "Modified product URL does not exist, skipping update"
+                    );
+                    return Ok(None);
+                }
+
+                // Target MSI found, proceed with update.
+                return Ok(Some(UpdateOrder {
+                    target_version: version,
+                    package_url: modified_url,
+                    hash: None,
+                }));
             }
         }
     }
@@ -281,4 +312,55 @@ async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
     }
 
     Ok(update_file_path)
+}
+
+/// Change the version in the URL to the target version.
+///
+/// Fails if the URL does not contain the original version.
+///
+/// Example:
+/// - Original version: 2024.3.3.0
+/// - Target version: 2024.4.0.0
+/// - Original URL: https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.3.3.0.msi
+/// - Modified URL: https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.4.0.0.msi
+fn try_modify_product_url_version(
+    url: &str,
+    original_version: DateVersion,
+    version: DateVersion,
+) -> anyhow::Result<String> {
+    let new_url = url.replace(&original_version.to_string(), &version.to_string());
+
+    if new_url == url {
+        return Err(anyhow!("Product URL has unexpected format, version cannot be modified"));
+    }
+
+    Ok(new_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_try_modify_product_url_version() {
+        let url = "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.3.3.0.msi";
+        let original_version = DateVersion {
+            year: 2024,
+            month: 3,
+            day: 3,
+            revision: 0,
+        };
+        let target_version = DateVersion {
+            year: 2024,
+            month: 4,
+            day: 0,
+            revision: 0,
+        };
+
+        let new_url = try_modify_product_url_version(url, original_version, target_version).unwrap();
+        assert_eq!(
+            new_url,
+            "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.4.0.0.msi"
+        );
+    }
 }
