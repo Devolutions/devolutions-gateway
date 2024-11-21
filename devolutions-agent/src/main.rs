@@ -4,10 +4,14 @@
 // Used by devolutions-agent library.
 use {
     anyhow as _, async_trait as _, camino as _, devolutions_agent_shared as _, devolutions_gateway_task as _,
-    devolutions_log as _, devolutions_pedm as _, futures as _, hex as _, ironrdp as _, notify_debouncer_mini as _,
-    parking_lot as _, rand as _, reqwest as _, rustls_pemfile as _, serde as _, serde_json as _, sha2 as _,
-    smallvec as _, tap as _, thiserror as _, tokio as _, tokio_rustls as _, uuid as _, win_api_wrappers as _,
-    windows as _, winreg as _,
+    devolutions_log as _, futures as _, ironrdp as _, parking_lot as _, rand as _, rustls_pemfile as _, serde as _,
+    serde_json as _, tap as _, tokio as _, tokio_rustls as _,
+};
+
+#[cfg(windows)]
+use {
+    devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, smallvec as _,
+    thiserror as _, uuid as _, win_api_wrappers as _, windows as _, winreg as _,
 };
 
 #[macro_use]
