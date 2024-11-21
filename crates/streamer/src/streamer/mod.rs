@@ -3,10 +3,12 @@ use futures_util::SinkExt;
 use protocol::ProtocolCodeC;
 use tag_writers::{EncodeWriterConfig, EncodedWriteResult, HeaderWriter};
 use tokio_util::codec::Framed;
-use tracing::{info, warn, Instrument};
+use tracing::{debug, info, trace, warn, Instrument};
+use webm::WebmPostionedIterator;
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Master, MatroskaSpec},
+    WebmIterator,
 };
 
 pub mod block_tag;
@@ -15,6 +17,7 @@ pub mod protocol;
 pub mod reopenable_file;
 pub mod signal_when_flush;
 pub mod tag_writers;
+pub mod webm;
 
 use crate::reopenable::Reopenable;
 
@@ -29,30 +32,20 @@ pub fn webm_stream(
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     warn!("Starting webm_stream");
-    let mut webm_itr = webm_iterable::WebmIterator::new(input_stream, &[]);
+    let mut webm_itr = WebmPostionedIterator::new(WebmIterator::new(input_stream, &[]));
     let mut headers = vec![];
-    let mut first_cluster_position = None;
 
     // we extract all the headers before the first cluster
     while let Some(tag) = webm_itr.next() {
         let tag = tag?;
         if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
-            first_cluster_position = Some(webm_itr.last_emitted_tag_offset());
             break;
         }
 
         headers.push(tag);
     }
 
-    let Some(mut last_cluster_postion) = first_cluster_position else {
-        // Think Twice, is this senario possible?
-        return Err(anyhow::anyhow!("No cluster found"));
-    };
-
-    warn!(last_cluster_postion, "First cluster position");
-
     let mut codec: Option<String> = None;
-
     // we run to the last cluster, skipping everything that has been played
     while let Some(tag) = webm_itr.next() {
         if let Err(TagIteratorError::UnexpectedEOF { .. }) = tag {
@@ -64,13 +57,7 @@ pub fn webm_stream(
         if let MatroskaSpec::CodecID(codec_string) = &tag {
             codec = Some(codec_string.to_owned());
         }
-
-        if matches!(tag, MatroskaSpec::Cluster(Master::End)) {
-            last_cluster_postion = webm_itr.last_emitted_tag_offset();
-        }
     }
-
-    warn!(last_cluster_postion, "Last cluster position");
 
     let framed = Framed::new(output_stream, ProtocolCodeC);
 
@@ -81,49 +68,63 @@ pub fn webm_stream(
 
     // ControlledTagWriter will not write to underlying writer unless the data is valid
     let mut header_writer = HeaderWriter::new(writer);
-    warn!(?headers, "Headers sent");
+    info!(?headers, "Headers sent");
     for header in &headers {
         header_writer.write(header)?;
     }
 
     // We startint muxing the last cluster
-    reseek(&mut webm_itr, last_cluster_postion)?;
+    webm_itr.rollback_to_last_cluster_start()?;
     let encode_writer_config = EncodeWriterConfig::try_from(headers.as_slice())?;
     let mut encode_writer = header_writer.into_encoded_writer(encode_writer_config)?;
 
-    let mut last_tag_position = last_cluster_postion;
     loop {
-        match next_tag(&mut webm_itr, &mut last_tag_position)? {
-            NextTagResult::Tag(matroska_spec) => {
-                if let EncodedWriteResult::Finished = encode_writer.write(matroska_spec)? {
+        match webm_itr.next() {
+            Some(Err(TagIteratorError::ReadError { source })) => {
+                // if source.kind() == std::io::ErrorKind::UnexpectedEof {
+                //     when_new_chunk_appended().blocking_recv()?;
+                //     webm_itr.rollback_to_last_successful_tag()?;
+                //     webm_itr.skip(1)?;
+                // } else {
+                    return Err(source.into());
+                // }
+            }
+            None | Some(Err(_)) => {
+                when_new_chunk_appended().blocking_recv()?;
+                webm_itr.rollback_to_last_successful_tag()?;
+                webm_itr.skip(1)?;
+            }
+            Some(Ok(tag)) => {
+                if let EncodedWriteResult::Finished = encode_writer.write(tag)? {
                     break;
                 }
             }
-            NextTagResult::TryAgain => {
-                reseek(&mut webm_itr, last_cluster_postion)?;
-                when_new_chunk_appended().blocking_recv()?;
-            }
-            NextTagResult::End => {
-                anyhow::bail!("Unexpected end of file");
-            }
-        };
+        }
     }
 
     let mut timed_writer = encode_writer.into_timed_tag_writer();
+    debug!("Start timed writing");
 
     loop {
-        match next_tag(&mut webm_itr, &mut last_tag_position)? {
-            NextTagResult::Tag(matroska_spec) => {
-                timed_writer.write(matroska_spec)?;
+        match webm_itr.next() {
+            Some(Err(TagIteratorError::ReadError { source })) => {
+                // if source.kind() == std::io::ErrorKind::UnexpectedEof {
+                //     when_new_chunk_appended().blocking_recv()?;
+                //     webm_itr.rollback_to_last_successful_tag()?;
+                //     webm_itr.skip(1)?;
+                // } else {
+                    return Err(source.into());
+                // }
             }
-            NextTagResult::TryAgain => {
-                reseek(&mut webm_itr, last_cluster_postion)?;
+            None | Some(Err(_)) => {
                 when_new_chunk_appended().blocking_recv()?;
+                webm_itr.rollback_to_last_successful_tag()?;
+                webm_itr.skip(1)?;
             }
-            NextTagResult::End => {
-                break;
+            Some(Ok(tag)) => {
+                timed_writer.write(tag)?;
             }
-        };
+        }
     }
 
     Ok(())
@@ -190,15 +191,14 @@ fn spawn_sending_task<W>(
     });
 }
 
-fn reseek(
-    webm_itr: &mut webm_iterable::WebmIterator<impl std::io::Read + Reopenable>,
+fn reseek<R: std::io::Read + Reopenable>(
+    webm_itr: WebmIterator<R>,
     last_cluster_postion: usize,
-) -> anyhow::Result<()> {
-    webm_itr.get_mut().reopen()?;
-    webm_itr
-        .get_mut()
-        .seek(std::io::SeekFrom::Start(last_cluster_postion as u64))?;
-    Ok(())
+) -> anyhow::Result<WebmIterator<R>> {
+    let mut inner = webm_itr.into_inner();
+    inner.reopen()?;
+    inner.seek(std::io::SeekFrom::Start(last_cluster_postion as u64))?;
+    Ok(WebmIterator::new(inner, &[MatroskaSpec::BlockGroup(Master::Start)]))
 }
 
 enum NextTagResult {
@@ -207,22 +207,24 @@ enum NextTagResult {
     End,
 }
 
-fn next_tag(
-    webm_itr: &mut webm_iterable::WebmIterator<impl std::io::Read + Reopenable>,
-    last_cluster_postion: &mut usize,
-) -> anyhow::Result<NextTagResult> {
+fn next_tag(webm_itr: &mut WebmIterator<impl std::io::Read + Reopenable>) -> anyhow::Result<NextTagResult> {
     let Some(tag) = webm_itr.next() else {
-        return Ok(NextTagResult::End);
+        return Ok(NextTagResult::TryAgain);
     };
 
     let tag = match tag {
         Ok(tag) => tag,
-        Err(TagIteratorError::ReadError { .. }) => anyhow::bail!("Read error"),
+        Err(TagIteratorError::ReadError { source }) => match source.kind() {
+            std::io::ErrorKind::UnexpectedEof => {
+                return Ok(NextTagResult::End);
+            }
+            _ => {
+                return Err(source.into());
+            }
+        },
         Err(_) => {
             return Ok(NextTagResult::TryAgain);
         }
     };
-
-    *last_cluster_postion += webm_itr.last_emitted_tag_offset();
     Ok(NextTagResult::Tag(tag))
 }

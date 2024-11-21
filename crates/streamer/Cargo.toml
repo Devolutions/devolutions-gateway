@@ -31,6 +31,10 @@ tokio = { version = "1.41", features = [
     "macros",
     "fs"
 ] }
+axum = { version = "0.7.9", features = ["ws"] }
+tokio-tungstenite = "0.24.0"
+futures = "0.3.31"
+transport = { path = "../transport" }
 
 [lints]
 workspace = true

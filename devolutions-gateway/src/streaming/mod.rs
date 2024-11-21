@@ -5,6 +5,14 @@ use uuid::Uuid;
 
 use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
+struct ShutdownSignal(devolutions_gateway_task::ShutdownSignal);
+
+impl streamer::streamer::Signal for ShutdownSignal {
+    fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send {
+        self.0.wait()
+    }
+}
+
 pub(crate) async fn stream_file(
     path: camino::Utf8PathBuf,
     ws: axum::extract::WebSocketUpgrade,
@@ -27,13 +35,18 @@ pub(crate) async fn stream_file(
         let websocket_stream = websocket_compat(socket);
         // Spawn blocking because webm_stream is blocking
         let streaming_result = tokio::task::spawn_blocking(move || {
-            webm_stream(websocket_stream, streaming_file, shutdown_signal, move || {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                recordings
-                    .add_new_chunk_listener(recording_id, tx)
-                    .expect("Failed to send on_appended message"); // early development
-                rx
-            })
+            webm_stream(
+                websocket_stream,
+                streaming_file,
+                ShutdownSignal(shutdown_signal),
+                move || {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    recordings
+                        .add_new_chunk_listener(recording_id, tx)
+                        .expect("Failed to send on_appended message"); // early development
+                    rx
+                },
+            )
             .context("webm_stream failed")?;
             Ok::<_, anyhow::Error>(())
         })

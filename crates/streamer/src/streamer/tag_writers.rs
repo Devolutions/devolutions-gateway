@@ -1,13 +1,9 @@
-
 use anyhow::Context;
-use cadeau::xmf::vpx::{
-        decoder::VpxDecoder,
-        encoder::{VpxEncoder},
-        VpxCodec,
-    };
+use cadeau::xmf::vpx::{decoder::VpxDecoder, encoder::VpxEncoder, VpxCodec};
+use tracing::{debug, instrument};
 use webm_iterable::{
     matroska_spec::{Master, MatroskaSpec, SimpleBlock},
-    WebmWriter,
+    WebmWriter, WriteOptions,
 };
 
 use crate::debug::mastroka_spec_name;
@@ -15,6 +11,16 @@ use crate::debug::mastroka_spec_name;
 use super::block_tag::VideoBlock;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
+
+fn write_unknown_sized_element<T>(
+    writer: &mut WebmWriter<T>,
+    tag: &MatroskaSpec,
+) -> Result<(), webm_iterable::errors::TagWriterError>
+where
+    T: std::io::Write,
+{
+    writer.write_advanced(tag, WriteOptions::is_unknown_sized_element())
+}
 
 pub enum WriteResult {
     Written,
@@ -39,9 +45,12 @@ where
     }
 
     pub fn write(&mut self, tag: &MatroskaSpec) -> anyhow::Result<WriteResult> {
-        self.writer
-            .write(tag)
-            .with_context(|| format!("Failed to write tag: {}", mastroka_spec_name(tag)))?;
+        if let MatroskaSpec::Segment(Master::Start) = tag {
+            write_unknown_sized_element(&mut self.writer, tag)
+        } else {
+            self.writer.write(tag)
+        }
+        .with_context(|| format!("Failed to write tag: {}", mastroka_spec_name(tag)))?;
 
         Ok(WriteResult::Written)
     }
@@ -126,41 +135,54 @@ impl<T> EncodedWriter<T>
 where
     T: std::io::Write,
 {
+    #[instrument(skip(self, tag))]
     pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<EncodedWriteResult> {
+        let tag_name = mastroka_spec_name(&tag);
+        debug!(tag_name, "Encoding tag");
+
         if self.ended {
             anyhow::bail!("Cannot write after end");
         }
 
-        if let MatroskaSpec::Timestamp(cluster_timestamp) = tag {
-            if self.cluster_timestamp.is_some() {
-                anyhow::bail!("Time offset already set");
+        match tag {
+            MatroskaSpec::Timestamp(cluster_timestamp) => {
+                if self.cluster_timestamp.is_some() {
+                    anyhow::bail!("Time offset already set");
+                }
+                self.cluster_timestamp = Some(cluster_timestamp);
+                return Ok(EncodedWriteResult::Continue);
             }
-            self.cluster_timestamp = Some(cluster_timestamp);
-        };
-
-        if let MatroskaSpec::Cluster(Master::End) = tag {
-            self.ended = true;
-
-            return Ok(EncodedWriteResult::Finished);
+            MatroskaSpec::Cluster(_) => {
+                if self.cluster_timestamp.is_some() {
+                    self.ended = true;
+                    return Ok(EncodedWriteResult::Finished);
+                }
+                return Ok(EncodedWriteResult::Continue);
+            }
+            MatroskaSpec::BlockGroup(Master::Full(_)) | MatroskaSpec::SimpleBlock(_) => {}
+            MatroskaSpec::BlockGroup(Master::End) | MatroskaSpec::BlockGroup(Master::Start) => {
+                // If this happens, check the webm iterator cache tag parameter on new function
+                anyhow::bail!("BlockGroup start and end tags are not supported");
+            }
+            _ => {
+                debug!(tag_name, "Skipping tag");
+                return Ok(EncodedWriteResult::Continue);
+            }
         }
 
-        if !matches!(tag, MatroskaSpec::BlockGroup(_)) || !matches!(tag, MatroskaSpec::SimpleBlock(_)) {
-            return Ok(EncodedWriteResult::Continue);
-        }
+        let cluster_timestamp = self.cluster_timestamp.context("No cluster timestamp set")?;
 
-        let Some(cluster_timestamp) = self.cluster_timestamp else {
-            anyhow::bail!("No cluster timestamp set");
-        };
-
-        let Some(curent_block) = self.current_block.take() else {
+        let Some(current_block) = self.current_block.take() else {
             self.current_block = Some(tag);
             return Ok(EncodedWriteResult::Continue);
         };
 
-        let current_video_block = VideoBlock::new(&curent_block, cluster_timestamp)?;
+        let current_video_block = VideoBlock::new(&current_block, cluster_timestamp)?;
         let next_video_block = VideoBlock::new(&tag, cluster_timestamp)?;
 
         self.process_video_block(&current_video_block, Some(&next_video_block))?;
+
+        self.current_block = Some(tag);
 
         Ok(EncodedWriteResult::Continue)
     }
@@ -175,13 +197,9 @@ where
         let image = self.deocder.next_frame()?;
         let duration = match next_video_block {
             Some(next_video_block) => {
-                
                 next_video_block.absolute_timestamp()? - current_video_block.absolute_timestamp()?
             }
-            None => {
-                
-                17
-            }
+            None => 17,
         };
 
         let pts = current_video_block.absolute_timestamp()?;
@@ -192,6 +210,7 @@ where
             0
         };
 
+        debug!(?pts, ?duration, "Encoding frame");
         self.encoder
             .encode_frame(&image, pts.try_into()?, duration.try_into()?, flags)?;
 
@@ -227,10 +246,11 @@ where
         );
 
         if self.cut_block_hit && !self.cut_block_processed {
-            self.writer.write(&MatroskaSpec::Cluster(Master::Start))?;
-            self.cluster_timestamp = Some(0);
+            let cluster_start = MatroskaSpec::Cluster(Master::Start);
+            write_unknown_sized_element(&mut self.writer, &cluster_start)?;
         }
 
+        debug!(?block_to_write, "Writing block");
         self.writer.write(&MatroskaSpec::from(block_to_write))?;
 
         Ok(())
@@ -328,7 +348,11 @@ where
             _ => tag,
         };
 
-        self.writer.write(&tag)?;
+        if let MatroskaSpec::Cluster(Master::Start) = tag {
+            write_unknown_sized_element(&mut self.writer, &tag)
+        } else {
+            self.writer.write(&tag)
+        }?;
 
         Ok(())
     }
