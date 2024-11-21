@@ -1,15 +1,27 @@
 import { Directive } from '@angular/core';
-import { BaseComponent } from '@shared/bases/base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { ComponentStatus } from '@shared/models/component-status.model';
 import { BaseSessionComponent } from '../models/web-session.model';
 import { AnalyticService, ConnectionIdentifier, ProtocolString } from '../services/analytic.service';
+
+export interface WebComponentReady {
+  webComponentReady(event: Event, webSessionId: string): void;
+}
 
 @Directive()
 export abstract class WebClientBaseComponent extends BaseSessionComponent {
   hideSpinnerOnly = false;
   error: string;
+  loading = true;
 
   analyticHandle: ConnectionIdentifier;
+
+  currentStatus: ComponentStatus = {
+    id: undefined,
+    isInitialized: false,
+    isDisabled: false,
+    isDisabledByUser: false,
+  };
 
   protected constructor(
     protected gatewayAlertMessageService: GatewayAlertMessageService,

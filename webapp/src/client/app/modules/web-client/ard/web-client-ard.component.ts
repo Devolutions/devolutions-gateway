@@ -57,12 +57,10 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   @ViewChild('ironGuiElementVnc') ironGuiElement: ElementRef;
 
   screenScale = ScreenScale;
-  currentStatus: ComponentStatus;
   formData: ArdFormDataInput;
   ardError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
-  loading = true;
 
   middleToolbarButtons = [
     {
@@ -111,7 +109,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-    this.initializeStatus();
   }
 
   ngAfterViewInit(): void {
@@ -159,7 +156,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   private initializeStatus(): void {
     this.currentStatus = {
       id: this.webSessionId,
-      isInitialized: false,
+      isInitialized: true,
       isDisabled: false,
       isDisabledByUser: false,
     };
@@ -354,7 +351,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   private handleSessionStarted(event: SessionEvent): void {
     this.handleIronRDPConnectStarted();
-    this.currentStatus.isInitialized = true;
+    this.initializeStatus();
   }
 
   private handleSessionEndedOrError(event: SessionEvent): void {

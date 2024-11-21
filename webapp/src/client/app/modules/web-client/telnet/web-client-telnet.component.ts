@@ -46,10 +46,8 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   @ViewChild('sessionTelnetContainer') sessionContainerElement: ElementRef;
   @ViewChild('webTelnetGuiTerminal') webGuiTerminal: ElementRef;
 
-  currentStatus: ComponentStatus;
   formData: TelnetFormDataInput;
   clientError: string;
-  loading = true;
 
   rightToolbarButtons = [
     { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
@@ -73,9 +71,6 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   ngOnInit(): void {
     telnetLoggingService.setLevel(LoggingLevel.FATAL);
     this.removeWebClientGuiElement();
-    this.initializeStatus();
-
-    this.initiateRemoteClientListener();
   }
 
   ngOnDestroy(): void {
@@ -87,6 +82,16 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     }
 
     super.ngOnDestroy();
+  }
+
+  webComponentReady(event: CustomEvent, webSessionId: string): void {
+    if (this.currentStatus.isInitialized || webSessionId !== this.webSessionId) {
+      return;
+    }
+
+    this.remoteTerminal = event.detail.telnetTerminal;
+    this.initSessionEventHandler();
+    this.startConnectionProcess();
   }
 
   startTerminationProcess(): void {
@@ -125,30 +130,19 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   private initializeStatus(): void {
     this.currentStatus = {
       id: this.webSessionId,
-      isInitialized: false,
+      isInitialized: true,
       isDisabled: false,
       isDisabledByUser: false,
     };
   }
 
   private disableComponentStatus(): void {
+    if (this.currentStatus.isDisabled) {
+      return;
+    }
+
     this.currentStatus.isDisabled = true;
     this.componentStatus.emit(this.currentStatus);
-  }
-
-  private initiateRemoteClientListener(): void {
-    this.remoteTerminalEventListener = this.renderer.listen('window', 'telnetInitialized', (event) => {
-      if (this.currentStatus.isInitialized) {
-        return;
-      }
-      this.webComponentReady(event);
-    });
-  }
-
-  private webComponentReady(event): void {
-    this.remoteTerminal = event.detail.telnetTerminal;
-    this.initSessionEventHandler();
-    this.startConnectionProcess();
   }
 
   private startConnectionProcess(): void {
@@ -241,8 +235,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
   private handleSessionStarted(): void {
     this.handleClientConnectStarted();
-    this.currentStatus.isInitialized = true;
-    super.webClientConnectionSuccess();
+    this.initializeStatus();
   }
 
   private handleSessionEndedOrError(status: TerminalConnectionStatus): void {
@@ -272,6 +265,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   private handleClientConnectStarted(): void {
     this.loading = false;
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_TELNET_ICON);
+    super.webClientConnectionSuccess();
   }
 
   private handleTelnetError(error: string): void {

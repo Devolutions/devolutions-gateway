@@ -1,10 +1,10 @@
-import { ComponentRef, Injectable, Type } from '@angular/core';
+import { Injectable, Type } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { BehaviorSubject, Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
-  BaseSessionComponent,
   CanSendTerminateSessionCmd,
+  ComponentForSession,
   ConnectionSessionType,
   SessionType,
 } from './../models/web-session.model';
@@ -18,7 +18,7 @@ import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
-import { WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
+import { WebSession } from '@shared/models/web-session.model';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
@@ -85,7 +85,8 @@ export class WebSessionService {
     // WebSession's type now corresponds to the mapped component type
     const webSession = new WebSession<ConnectionSessionType>(
       submittedData.hostname,
-      sessionComponent,
+      // use a type assertion to help TypeScript recognize the type match
+      sessionComponent as Type<ComponentForSession<ConnectionSessionType>>,
       submittedData,
       iconName,
     );
