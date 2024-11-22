@@ -3,7 +3,6 @@ use super::security::privilege::ScopedPrivileges;
 use super::utils::WideString;
 
 use anyhow::anyhow;
-
 use windows::core::Owned;
 use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, ERROR_NO_TOKEN, HANDLE};
 use windows::Win32::Security::{SE_TCB_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
@@ -20,78 +19,77 @@ use crate::ui::MessageBoxResult;
 use crate::utils::{AnsiString, SafeWindowsString};
 
 /// RAII wrapper for WTS virtual channel handle.
-pub struct WTSVirtualChannel(HANDLE);
+pub struct WtsVirtualChannel(HANDLE);
 
-impl WTSVirtualChannel {
+impl WtsVirtualChannel {
     /// # Safety
-    /// `handle` must be a valid handle returned from `WTSVirtualChannelOpenEx`.
-    pub unsafe fn new(handle: HANDLE) -> Self {
+    ///
+    /// `handle` must be a valid handle returned by `WTSVirtualChannelOpenEx`.
+    unsafe fn new(handle: HANDLE) -> Self {
         Self(handle)
     }
 
     pub fn open_dvc(name: &str) -> anyhow::Result<Self> {
         let channel_name = AnsiString::from(name);
 
-        // SAFETY: Channel name is always a valid pointer to a null-terminated string.
-        let raw_wts_handle = unsafe {
-            WTSVirtualChannelOpenEx(WTS_CURRENT_SESSION, channel_name.as_pcstr(), WTS_CHANNEL_OPTION_DYNAMIC)
-        }?;
+        // SAFETY: `channel_name.as_pcstr()` is always a valid pointer to a null-terminated string.
+        let wts_handle = unsafe {
+            WTSVirtualChannelOpenEx(WTS_CURRENT_SESSION, channel_name.as_pcstr(), WTS_CHANNEL_OPTION_DYNAMIC)?
+        };
 
         // SAFETY: `WTSVirtualChannelOpenEx` always returns a valid handle on success.
-        Ok(unsafe { Self::new(raw_wts_handle) })
+        let channel = unsafe { Self::new(wts_handle) };
+
+        Ok(channel)
     }
 
     pub fn query_file_handle(&self) -> anyhow::Result<Owned<HANDLE>> {
-        let mut channel_file_handle_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
+        let mut channel_file_handle = core::ptr::null_mut();
         let mut len: u32 = 0;
 
-        // SAFETY: It is safe to call `WTSVirtualChannelQuery` with valid channel and
-        // destination pointers.
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
-            WTSVirtualChannelQuery(
-                self.0,
-                WTSVirtualFileHandle,
-                &mut channel_file_handle_ptr as *mut _,
-                &mut len,
-            )
-        }?;
-
-        // SAFETY: `channel_file_handle_ptr` is always a valid pointer to a handle on success.
-        let channel_file_handle_ptr = unsafe { WTSMemoryHandle::from_raw(channel_file_handle_ptr) };
-
-        if len != u32::try_from(size_of::<HANDLE>()).expect("HANDLE always fits into u32") {
-            return Err(anyhow::anyhow!("Failed to query DVC channel file handle"));
+            WTSVirtualChannelQuery(self.0, WTSVirtualFileHandle, &mut channel_file_handle, &mut len)?;
         }
 
-        let mut raw_handle = HANDLE::default();
+        if len != u32::try_from(size_of::<HANDLE>()).expect("HANDLE always fits into u32") {
+            anyhow::bail!("WTSVirtualChannelQuery (WTSVirtualFileHandle) returned something unexpected");
+        }
 
-        // SAFETY: `GetCurrentProcess` is always safe to call.
+        // SAFETY: On success, `WTSVirtualChannelQuery` sets a pointer to a HANDLE which must be freed with `WTSFreeMemory`.
+        let channel_file_handle = unsafe { WtsMemory::from_raw(channel_file_handle.cast::<HANDLE>()) };
+
+        // SAFETY: `WTSVirtualChannelQuery` called with `WTSVirtualFileHandle` virtual class will always place a pointer to a HANDLE.
+        let channel_file_handle = unsafe { *channel_file_handle.as_ptr() };
+
+        // SAFETY: FFI call with no outstanding precondition.
         let current_process = unsafe { GetCurrentProcess() };
 
-        // SAFETY: `lptargetprocesshandle` is valid and points to `raw_handle` declared above,
-        // therefore it is safe to call.
+        let mut duplicated_handle = HANDLE::default();
+
+        // SAFETY: FFI call with no outstanding precondition.
         unsafe {
             DuplicateHandle(
                 current_process,
-                channel_file_handle_ptr.as_handle(),
+                channel_file_handle,
                 current_process,
-                &mut raw_handle,
+                &mut duplicated_handle,
                 0,
                 false,
                 DUPLICATE_SAME_ACCESS,
             )?;
-        };
+        }
 
-        // SAFETY: Handle returned from `DuplicateHandle` is always valid if the function succeeds.
-        let owned_handle = unsafe { Owned::new(raw_handle) };
+        // SAFETY: Handle returned by `DuplicateHandle` on success is always valid and owned.
+        let duplicated_handle = unsafe { Owned::new(duplicated_handle) };
 
-        Ok(owned_handle)
+        Ok(duplicated_handle)
     }
 }
 
-impl Drop for WTSVirtualChannel {
+impl Drop for WtsVirtualChannel {
     fn drop(&mut self) {
-        // SAFETY: `Ok` value returned from `WTSVirtualChannelOpenEx` is always a valid handle.
+        // SAFETY: self.0 is a valid handle per construction.
         if let Err(error) = unsafe { WTSVirtualChannelClose(self.0) } {
             error!(%error, "Failed to close WTS virtual channel handle");
         }
@@ -143,40 +141,45 @@ pub struct WTSSessionInfo {
 impl WTSSessionInfo {
     /// # Safety
     ///
-    /// - The `pWinStationName` pointer needs to be valid for reads up until and including the next `\0`.
+    /// - The `wts_session.pWinStationName` pointer must be valid for reads up until and including the next `\0`.
     unsafe fn new(wts_session: &WTS_SESSION_INFOW) -> anyhow::Result<Self> {
+        // SAFETY: Same preconditions as the current function.
+        let win_station_name = unsafe { wts_session.pWinStationName.to_string()? };
+
         Ok(Self {
             session_id: wts_session.SessionId,
-            win_station_name: unsafe { wts_session.pWinStationName.to_string()? },
+            win_station_name,
             state: wts_session.State.try_into()?,
         })
     }
 }
 
 pub fn get_sessions() -> anyhow::Result<Vec<WTSSessionInfo>> {
-    let mut sessions_ptr: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
-    let mut len = 0u32;
+    let mut sessions: *mut WTS_SESSION_INFOW = core::ptr::null_mut();
+    let mut count = 0u32;
 
-    // SAFETY: All buffers are valid.
+    // SAFETY: FFI call with no outstanding precondition.
     unsafe {
-        WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &mut sessions_ptr, &mut len)?;
+        WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &mut sessions, &mut count)?;
     };
 
-    // SAFETY: `sessions_ptr` is always a valid pointer on success.
-    // `sessions_ptr` must be freed by `WTSFreeMemory`.
-    let sessions_ptr = unsafe { WTSMemory::from_raw(sessions_ptr.cast()) };
+    // SAFETY: The pointer placed into `sessions` by `WTSEnumerateSessionsW` must be freed by `WTSFreeMemory`.
+    let sessions = unsafe { WtsMemory::from_raw(sessions) };
 
-    // SAFETY: Verify that all the safety preconditions of from_raw_parts are uphold: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html#safety
-    let sessions_slice: &[WTS_SESSION_INFOW] =
-        unsafe { std::slice::from_raw_parts(sessions_ptr.0 as *mut u8 as *mut WTS_SESSION_INFOW, len as usize) };
+    // SAFETY:
+    // - `WTSEnumerateSessionsW` returns a pointer valid for `count` reads of `WTS_SESSION_INFOW`.
+    // - `WTSEnumerateSessionsW` is also returning a pointer properly aligned.
+    // - We ensure the memory referenced by the slice is not mutated by shadowing the variable.
+    // - There are never so many sessions that `count * mem::size_of::<WTS_SESSION_INFOW>()` overflows `isize`.
+    let sessions = unsafe { sessions.cast_slice(count as usize) };
 
-    let mut sessions = Vec::<WTSSessionInfo>::with_capacity(sessions_slice.len());
-    for session in sessions_slice {
-        // SAFETY: `session` is valid
-        unsafe {
-            sessions.push(WTSSessionInfo::new(session)?);
-        }
-    }
+    let sessions = sessions
+        .iter()
+        .map(|session| {
+            // SAFETY: `session` is a `WTS_SESSION_INFOW` initialized by `WTSEnumerateSessionsW` that we trust to be valid.
+            unsafe { WTSSessionInfo::new(session) }
+        })
+        .collect::<Result<Vec<WTSSessionInfo>, _>>()?;
 
     Ok(sessions)
 }
@@ -205,9 +208,9 @@ pub fn send_message_to_session(
     let message = WideString::from(message);
     let mut result: MESSAGEBOX_RESULT = MESSAGEBOX_RESULT::default();
 
-    // SAFETY: All buffers are valid.
-    // WideString constructed by us and will always have a `Some` value for the underlying buffer.
-    // WideString holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
+    // SAFETY:
+    // - `title` and `message` constructed by us and will always have a `Some` value for the underlying buffer.
+    // - `title` and `message` are holding a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
     unsafe {
         WTSSendMessageW(
             WTS_CURRENT_SERVER_HANDLE,
@@ -229,30 +232,26 @@ pub fn send_message_to_session(
 }
 
 fn query_session_information_string(session_id: u32, info_class: WTS_INFO_CLASS) -> anyhow::Result<String> {
-    let mut string_ptr = windows::core::PWSTR::null();
+    use windows::core::PWSTR;
+
+    let mut string = PWSTR::null();
     let mut len: u32 = 0u32;
 
     matches!(info_class, WTSUserName | WTSDomainName)
         .then(|| 0)
         .ok_or_else(|| anyhow!("info_class is an unsupported WTS_INFO_CLASS: {}", info_class.0))?;
 
-    // SAFETY: All buffers are valid.
-    // `string_ptr` must be freed by `WTSFreeMemory`.
-    // Passing a `PWSTR` is correct only in the case that `info_class` represents a string result
+    // SAFETY: Passing a `PWSTR` is correct in the case where `info_class` represents a string result.
     unsafe {
-        WTSQuerySessionInformationW(
-            WTS_CURRENT_SERVER_HANDLE,
-            session_id,
-            info_class,
-            &mut string_ptr,
-            &mut len,
-        )?;
+        WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, session_id, info_class, &mut string, &mut len)?;
     }
 
-    // SAFETY: `string_ptr` is always a valid pointer on success.
-    let _ = unsafe { WTSMemory::from_raw(string_ptr.0.cast()) };
+    // SAFETY: On success, WTSQuerySessionInformationW places a valid pointer which must be freed by `WTSFreeMemory`.
+    let _guard = unsafe { WtsMemory::from_raw(string.as_ptr()) };
 
-    Ok(string_ptr.to_string_safe()?)
+    let string = string.to_string_safe()?;
+
+    Ok(string)
 }
 
 /// Returns true if a user is logged in the provided session.
@@ -261,85 +260,33 @@ pub fn session_has_logged_in_user(session_id: u32) -> anyhow::Result<bool> {
     let mut _priv_tcb = ScopedPrivileges::enter(&mut current_process_token, &[SE_TCB_NAME])?;
     let mut handle = HANDLE::default();
 
-    // SAFETY: `WTSQueryUserToken` is safe to call with a valid session id and handle memory ptr.
-    match unsafe { WTSQueryUserToken(session_id, &mut handle as *mut _) } {
-        Err(err) if err.code() == ERROR_NO_TOKEN.to_hresult() => Ok(false),
-        Err(err) => Err(err.into()),
+    // SAFETY: FFI call with no outstanding precondition.
+    let res = unsafe { WTSQueryUserToken(session_id, &mut handle) };
+
+    match res {
         Ok(()) => {
             // Close handle immediately.
-            // SAFETY: `CloseHandle` is safe to call with a valid handle.
+
+            // SAFETY: On success, `handle` is a valid handle to an open object.
             unsafe { CloseHandle(handle).expect("BUG: WTSQueryUserToken should return a valid handle") };
+
             Ok(true)
         }
+        Err(err) if err.code() == ERROR_NO_TOKEN.to_hresult() => Ok(false),
+        Err(err) => Err(err.into()),
     }
 }
 
-/// RAII wrapper for WTS memory handle.
-struct WTSMemoryHandle {
-    inner: WTSMemory,
-}
+struct WtsFreeMemory;
 
-impl WTSMemoryHandle {
-    /// Constructs a WTSMemoryHandle from a raw pointer to a handle.
-    ///
+impl crate::memory::FreeMemory for WtsFreeMemory {
     /// # Safety
     ///
-    /// - `ptr` must be a valid pointer to memory allocated by Remote Desktop Services.
-    /// - `ptr` must be a valid pointer to a handle
-    /// - `ptr` must be freed by `WTSFreeMemory`.
-    unsafe fn from_raw(ptr: *mut core::ffi::c_void) -> Self {
-        unsafe {
-            Self {
-                inner: WTSMemory::from_raw(ptr),
-            }
-        }
-    }
-
-    fn as_handle(&self) -> HANDLE {
-        if self.inner.0.is_null() {
-            return HANDLE::default();
-        }
-
-        // SAFETY: `self.0` is always a valid pointer to a handle if constructed properly,
-        // therefore it is safe to dereference it.
-        HANDLE(unsafe { *(self.inner.0 as *mut *mut std::ffi::c_void) })
+    /// `ptr` is a pointer which must be freed by `WTSFreeMemory`
+    unsafe fn free(ptr: *mut core::ffi::c_void) {
+        // SAFETY: Per invariant on `ptr`, WTSFreeMemory must be called on it for releasing the memory.
+        unsafe { WTSFreeMemory(ptr) };
     }
 }
 
-impl Default for WTSMemoryHandle {
-    fn default() -> Self {
-        unsafe { Self::from_raw(std::ptr::null_mut()) }
-    }
-}
-
-/// RAII wrapper for WTS memory.
-struct WTSMemory(*mut core::ffi::c_void);
-
-impl WTSMemory {
-    /// Constructs a WTSMemory from a raw pointer.
-    ///
-    /// # Safety
-    ///
-    /// - `ptr` must be a valid pointer to memory allocated by Remote Desktop Services.
-    /// - `ptr` must be freed by `WTSFreeMemory`.
-    unsafe fn from_raw(ptr: *mut core::ffi::c_void) -> Self {
-        Self(ptr)
-    }
-}
-
-impl Drop for WTSMemory {
-    fn drop(&mut self) {
-        if self.0.is_null() {
-            return;
-        }
-
-        // SAFETY: FFI call with no outstanding precondition.
-        unsafe { WTSFreeMemory(self.0) }
-    }
-}
-
-impl Default for WTSMemory {
-    fn default() -> Self {
-        Self(std::ptr::null_mut())
-    }
-}
+type WtsMemory<T = core::ffi::c_void> = crate::memory::MemoryWrapper<WtsFreeMemory, T>;

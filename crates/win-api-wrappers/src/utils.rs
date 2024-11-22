@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::ffi::{c_void, OsStr, OsString};
 use std::fmt::Debug;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::mem::MaybeUninit;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{ptr, slice};
 
-use anyhow::{bail, Result};
+use anyhow::bail;
 use uuid::Uuid;
 use windows::core::{Interface, PCSTR, PCWSTR, PSTR, PWSTR};
 use windows::Win32::Foundation::{
@@ -49,15 +49,18 @@ use crate::token::Token;
 use crate::Error;
 
 pub trait SafeWindowsString {
-    fn to_string_safe(&self) -> Result<String>;
-    fn to_os_string_safe(&self) -> Result<OsString>;
-    fn to_path_safe(&self) -> Result<PathBuf>;
+    fn to_string_safe(&self) -> anyhow::Result<String>;
+    fn to_os_string_safe(&self) -> anyhow::Result<OsString>;
+    fn to_path_safe(&self) -> anyhow::Result<PathBuf>;
 }
 
+// FIXME: All of this is unsound.
+// `to_string()` do not only requires the pointer to be non-null.
+// It requires the pointer to be valid for reads up until and including the next `\0`.
 macro_rules! impl_safe_win_string {
     ($t:ty) => {
         impl SafeWindowsString for $t {
-            fn to_string_safe(&self) -> Result<String> {
+            fn to_string_safe(&self) -> anyhow::Result<String> {
                 if self.is_null() {
                     bail!(Error::from_hresult(E_POINTER))
                 } else {
@@ -66,11 +69,11 @@ macro_rules! impl_safe_win_string {
                 }
             }
 
-            fn to_os_string_safe(&self) -> Result<OsString> {
+            fn to_os_string_safe(&self) -> anyhow::Result<OsString> {
                 self.to_string_safe().map(|s| s.into())
             }
 
-            fn to_path_safe(&self) -> Result<PathBuf> {
+            fn to_path_safe(&self) -> anyhow::Result<PathBuf> {
                 self.to_os_string_safe().map(|x| x.into())
             }
         }
@@ -112,7 +115,7 @@ impl<T: ?Sized + AsRef<OsStr>> From<&T> for AnsiString {
 impl FromStr for AnsiString {
     type Err = core::convert::Infallible;
 
-    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut buf = s.as_bytes().to_vec();
         buf.push(0);
         Ok(Self(Some(buf)))
@@ -134,6 +137,8 @@ where
     }
 }
 
+// FIXME: Wrapping the inner buffer with an Option is resulting in an error prone API.
+// E.g.: it’s not obvious that we must check the return value of `as_pcwsts` for null.
 #[derive(Default, Debug)]
 pub struct WideString(pub Option<Vec<u16>>);
 
@@ -152,7 +157,7 @@ impl WideString {
             .unwrap_or_else(PWSTR::null)
     }
 
-    pub fn as_unicode_string(&self) -> Result<UNICODE_STRING> {
+    pub fn as_unicode_string(&self) -> anyhow::Result<UNICODE_STRING> {
         Ok(UNICODE_STRING {
             Length: self
                 .0
@@ -183,7 +188,7 @@ impl<T: ?Sized + AsRef<OsStr>> From<&T> for WideString {
 impl FromStr for WideString {
     type Err = core::convert::Infallible;
 
-    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut buf = s.encode_utf16().collect::<Vec<_>>();
         buf.push(0);
         Ok(Self(Some(buf)))
@@ -306,7 +311,7 @@ pub struct Allocation<'a> {
 }
 
 impl<'a> Allocation<'a> {
-    pub fn try_new(process: &'a Process, size: usize) -> Result<Self> {
+    pub fn try_new(process: &'a Process, size: usize) -> anyhow::Result<Self> {
         // SAFETY: No preconditions. We assume caller needs the allocation in RW only.
         let address = unsafe {
             VirtualAllocEx(
@@ -342,7 +347,7 @@ pub unsafe fn set_memory_protection(
     addr: *const c_void,
     size: usize,
     prot: PAGE_PROTECTION_FLAGS,
-) -> Result<PAGE_PROTECTION_FLAGS> {
+) -> anyhow::Result<PAGE_PROTECTION_FLAGS> {
     let mut old_prot = Default::default();
 
     // SAFETY: `addr` is valid by safety of function. No preconditions.
@@ -351,7 +356,7 @@ pub unsafe fn set_memory_protection(
     Ok(old_prot)
 }
 
-pub fn environment_block(token: Option<&Token>, inherit: bool) -> Result<HashMap<String, String>> {
+pub fn environment_block(token: Option<&Token>, inherit: bool) -> anyhow::Result<HashMap<String, String>> {
     let mut blocks = Vec::new();
 
     let mut raw_blocks: *const u16 = ptr::null_mut();
@@ -442,7 +447,7 @@ pub fn expand_environment(src: &str, environment: &HashMap<String, String>) -> S
     expanded
 }
 
-pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>) -> Result<PathBuf> {
+pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from_str(&expand_environment(
         src.as_os_str()
             .to_str()
@@ -493,7 +498,7 @@ impl Iterator for ProcessIdIterator<'_> {
 }
 
 impl Snapshot {
-    pub fn new(flags: CREATE_TOOLHELP_SNAPSHOT_FLAGS, process_id: Option<u32>) -> Result<Self> {
+    pub fn new(flags: CREATE_TOOLHELP_SNAPSHOT_FLAGS, process_id: Option<u32>) -> anyhow::Result<Self> {
         // SAFETY: No preconditions. Flags or process ID cannot create scenarios where unsafe behavior happens.
         let handle = unsafe { CreateToolhelp32Snapshot(flags, process_id.unwrap_or(0))? };
         // SAFETY: We created the handle just above and are responsibles for closing it ourselves.
@@ -510,7 +515,7 @@ impl Snapshot {
 pub struct ComContext;
 
 impl ComContext {
-    pub fn try_new(coinit: COINIT) -> Result<Self> {
+    pub fn try_new(coinit: COINIT) -> anyhow::Result<Self> {
         // SAFETY: Must not be called from `DllMain`. Can be called multiple times on a thread.
         unsafe { CoInitializeEx(None, coinit) }.ok()?;
 
@@ -534,9 +539,9 @@ impl Link {
         Self { path: path.to_owned() }
     }
 
-    fn with_instance<F, T>(&self, f: F) -> Result<T>
+    fn with_instance<F, T>(&self, f: F) -> anyhow::Result<T>
     where
-        F: FnOnce(&IShellLinkW) -> Result<T>,
+        F: FnOnce(&IShellLinkW) -> anyhow::Result<T>,
     {
         let _ctx = ComContext::try_new(COINIT_MULTITHREADED)?;
 
@@ -561,7 +566,7 @@ impl Link {
         f(&inst)
     }
 
-    pub fn target_path(&self) -> Result<PathBuf> {
+    pub fn target_path(&self) -> anyhow::Result<PathBuf> {
         self.with_instance(|link| {
             let mut target = vec![0; MAX_PATH as usize];
 
@@ -572,7 +577,7 @@ impl Link {
         })
     }
 
-    pub fn target_args(&self) -> Result<String> {
+    pub fn target_args(&self) -> anyhow::Result<String> {
         self.with_instance(|link| {
             let mut target = vec![0; std::cmp::max(INFOTIPSIZE as usize, MAX_PATH as usize)];
 
@@ -583,7 +588,7 @@ impl Link {
         })
     }
 
-    pub fn target_working_directory(&self) -> Result<PathBuf> {
+    pub fn target_working_directory(&self) -> anyhow::Result<PathBuf> {
         self.with_instance(|link| {
             let mut target = vec![0; MAX_PATH as usize];
 
@@ -604,7 +609,10 @@ pub fn create_directory(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn create_directory_with_security_attributes(path: &Path, security_attributes: &SecurityAttributes) -> Result<()> {
+pub fn create_directory_with_security_attributes(
+    path: &Path,
+    security_attributes: &SecurityAttributes,
+) -> anyhow::Result<()> {
     let path = WideString::from(path);
 
     let security_attributes = RawSecurityAttributes::try_from(security_attributes)?;
@@ -621,7 +629,7 @@ pub struct Pipe {
 
 impl Pipe {
     /// Creates an anonymous pipe. Returns (rx, tx)
-    pub fn new_anonymous(security_attributes: Option<&SecurityAttributes>, size: u32) -> Result<(Self, Self)> {
+    pub fn new_anonymous(security_attributes: Option<&SecurityAttributes>, size: u32) -> anyhow::Result<(Self, Self)> {
         let (mut rx, mut tx) = (HANDLE::default(), HANDLE::default());
 
         let security_attributes = security_attributes.map(RawSecurityAttributes::try_from).transpose()?;
@@ -646,7 +654,7 @@ impl Pipe {
     }
 
     /// Creates anonymous synchronous pipe for stdin.
-    pub fn new_sync_stdin_redirection_pipe() -> Result<(Self, Self)> {
+    pub fn new_sync_stdin_redirection_pipe() -> anyhow::Result<(Self, Self)> {
         let security_attributes = SecurityAttributes {
             security_descriptor: None,
             inherit_handle: true,
@@ -667,7 +675,7 @@ impl Pipe {
     ///
     /// NOTE: This method creates a **named** pipe with a random generated name. Named pipe is
     /// required for async io, as anonymous pipes do not support async io.
-    pub fn new_async_stdout_redirection_pipe() -> Result<(Self, Self)> {
+    pub fn new_async_stdout_redirection_pipe() -> anyhow::Result<(Self, Self)> {
         const PIPE_INSTANCES: u32 = 1;
         const PIPE_BUFFER_SIZE_HINT: u32 = 4 * 1024;
         const PIPE_PREFIX: &str = r"\\.\pipe\devolutions";
@@ -736,7 +744,7 @@ impl Pipe {
     }
 
     /// Peeks the contents of the pipe in `data`, while returning the amount of bytes available on the pipe.
-    pub fn peek(&self, data: Option<&mut [u8]>) -> Result<u32> {
+    pub fn peek(&self, data: Option<&mut [u8]>) -> anyhow::Result<u32> {
         let mut available = 0;
         let size = data
             .as_ref()
@@ -759,11 +767,11 @@ impl Pipe {
         Ok(available)
     }
 
-    pub fn impersonate_client(&self) -> Result<NamedPipeImpersonation<'_>> {
+    pub fn impersonate_client(&self) -> anyhow::Result<NamedPipeImpersonation<'_>> {
         NamedPipeImpersonation::try_new(self)
     }
 
-    pub fn client_primary_token(&self) -> Result<Token> {
+    pub fn client_primary_token(&self) -> anyhow::Result<Token> {
         let _ctx = self.impersonate_client()?;
 
         Thread::current().token(TOKEN_ALL_ACCESS, true)?.duplicate(
@@ -774,7 +782,7 @@ impl Pipe {
         )
     }
 
-    pub fn client_process_id(&self) -> Result<u32> {
+    pub fn client_process_id(&self) -> anyhow::Result<u32> {
         let mut pid = 0u32;
 
         // SAFETY: Only precondition is for the handle to be created by `CreateNamedPipe`. Will fail otherwise.
@@ -785,7 +793,7 @@ impl Pipe {
 }
 
 impl Read for Pipe {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut read_bytes = 0;
 
         // SAFETY: No preconditions. Will only fail if handle does not have GENERIC_READ.
@@ -798,7 +806,7 @@ impl Read for Pipe {
 }
 
 impl Write for Pipe {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut written_bytes = 0;
 
         // SAFETY: No preconditions. Will only fail if handle does not have GENERIC_WRITE.
@@ -809,7 +817,7 @@ impl Write for Pipe {
         Ok(written_bytes as usize)
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         // SAFETY: No preconditions. Will only fail if handle does not have GENERIC_WRITE.
         unsafe {
             FlushFileBuffers(self.handle.raw())?;
@@ -833,7 +841,7 @@ macro_rules! create_impersonation_context {
         }
 
         impl<'a> $name<'a> {
-            fn try_new(handle: &'a $underlying) -> Result<Self> {
+            fn try_new(handle: &'a $underlying) -> anyhow::Result<Self> {
                 // SAFETY: No preconditions and handle is valid.
                 unsafe { $impersonate(handle.handle().raw()) }?;
 
