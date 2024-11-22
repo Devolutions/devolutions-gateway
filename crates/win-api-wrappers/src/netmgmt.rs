@@ -11,7 +11,7 @@ use crate::utils::WideString;
 use crate::Error;
 
 pub fn add_local_group_member(group_name: &str, security_identifier: &Sid) -> anyhow::Result<()> {
-    // SAFETY: It is safe to zero out the structure as it is a simple POD type.
+    // SAFETY: The structure is a simple POD type.
     let mut group_info = unsafe { core::mem::zeroed::<LOCALGROUP_MEMBERS_INFO_0>() };
 
     let group_name = WideString::from(group_name);
@@ -19,8 +19,7 @@ pub fn add_local_group_member(group_name: &str, security_identifier: &Sid) -> an
     let user_sid = RawSid::try_from(security_identifier)?;
     group_info.lgrmi0_sid = user_sid.as_psid();
 
-    // SAFETY: All buffers are valid.
-    // WideString holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
+    // SAFETY: group_name holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
     let rc =
         unsafe { NetLocalGroupAddMembers(None, group_name.as_pcwstr(), 0, &group_info as *const _ as *const u8, 1) };
 
@@ -32,7 +31,7 @@ pub fn add_local_group_member(group_name: &str, security_identifier: &Sid) -> an
 }
 
 pub fn remove_local_group_member(group_name: &str, security_identifier: &Sid) -> anyhow::Result<()> {
-    // SAFETY: It is safe to zero out the structure as it is a simple POD type.
+    // SAFETY: The structure is a simple POD type.
     let mut group_info = unsafe { core::mem::zeroed::<LOCALGROUP_MEMBERS_INFO_0>() };
 
     let group_name = WideString::from(group_name);
@@ -40,8 +39,7 @@ pub fn remove_local_group_member(group_name: &str, security_identifier: &Sid) ->
     let user_sid = RawSid::try_from(security_identifier)?;
     group_info.lgrmi0_sid = user_sid.as_psid();
 
-    // SAFETY: All buffers are valid.
-    // WideString holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
+    // SAFETY: group name holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
     let rc =
         unsafe { NetLocalGroupDelMembers(None, group_name.as_pcwstr(), 0, &group_info as *const _ as *const u8, 1) };
 
@@ -60,74 +58,61 @@ pub fn get_local_admin_group_members() -> anyhow::Result<Vec<Sid>> {
 
 pub fn get_local_group_members(group_name: String) -> anyhow::Result<Vec<Sid>> {
     let group_name = WideString::from(group_name);
-    let group_members_ptr: *mut LOCALGROUP_MEMBERS_INFO_0 = std::ptr::null_mut();
-    let mut entries_read = 0;
+    let mut group_members: *mut u8 = std::ptr::null_mut();
+    let mut number_of_entries_read = 0;
     let mut total_entries = 0;
 
-    // SAFETY: All buffers are valid.
-    // WideString holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
-    // Specifying `MAX_PREFERRED_LENGTH` allocates the required amount of memory for the data, and
-    // the function will not return `ERROR_MORE_DATA`
-    unsafe {
-        let rc = NetLocalGroupGetMembers(
+    // SAFETY:
+    // - group_name holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
+    // - Specifying `MAX_PREFERRED_LENGTH` allocates the required amount of memory for the data, and the function will not return `ERROR_MORE_DATA`.
+    let ret = unsafe {
+        NetLocalGroupGetMembers(
             None,
             group_name.as_pcwstr(),
             0,
-            &mut group_members_ptr.cast(),
+            &mut group_members,
             MAX_PREFERRED_LENGTH,
-            &mut entries_read,
+            &mut number_of_entries_read,
             &mut total_entries,
             None,
-        );
-
-        if rc != NERR_Success {
-            bail!(Error::from_win32(WIN32_ERROR(rc)))
-        }
-    };
-
-    // SAFETY: `group_members_ptr` is always a valid pointer on success.
-    // `group_members_ptr` must be freed by `NetApiBufferFree`.
-    let group_members_ptr = unsafe { NetMgmtMemory::new(group_members_ptr.cast()) };
-
-    // SAFETY: Verify that all the safety preconditions of from_raw_parts are uphold: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html#safety
-    let group_members_slice = unsafe {
-        std::slice::from_raw_parts(
-            group_members_ptr.0 as *const u8 as *const LOCALGROUP_MEMBERS_INFO_0,
-            entries_read as usize,
         )
     };
 
-    let mut group_members = Vec::<Sid>::with_capacity(group_members_slice.len());
-    for member in group_members_slice {
-        group_members.push(Sid::try_from(member.lgrmi0_sid)?);
+    if ret != NERR_Success {
+        bail!(Error::from_win32(WIN32_ERROR(ret)))
     }
+
+    // SAFETY:
+    // - `NetLocalGroupGetMembers` sets `group_members` to a valid pointer on success.
+    // - `group_members` must be freed by `NetApiBufferFree`.
+    // - For level = 0, bufptr will be set to a pointer to a LOCALGROUP_MEMBERS_INFO_0.
+    let group_members = unsafe { NetMgmtMemory::from_raw(group_members.cast::<LOCALGROUP_MEMBERS_INFO_0>()) };
+
+    // SAFETY:
+    // - `NetLocalGroupGetMembers` returns a pointer valid for `number_of_entries_read` reads of `LOCALGROUP_MEMBERS_INFO_0`.
+    // - `NetLocalGroupGetMembers` is also returning a pointer properly aligned.
+    // - We ensure the memory referenced by the slice is not mutated by shadowing the variable.
+    // - There are never so many entries that `number_of_entries_read * mem::size_of::<LOCALGROUP_MEMBERS_INFO_0>()` overflows `isize`.
+    let group_members = unsafe { group_members.cast_slice(number_of_entries_read as usize) };
+
+    let group_members = group_members
+        .iter()
+        .map(|member| Sid::try_from(member.lgrmi0_sid))
+        .collect::<Result<Vec<Sid>, _>>()?;
 
     Ok(group_members)
 }
 
-/// RAII wrapper for Network Management memory.
-struct NetMgmtMemory(*mut core::ffi::c_void);
+struct NetMgmtFreeMemory;
 
-impl NetMgmtMemory {
-    // SAFETY: `ptr` must be a valid pointer to memory allocated by Network Management.
-    unsafe fn new(ptr: *mut core::ffi::c_void) -> Self {
-        Self(ptr)
+impl crate::memory::FreeMemory for NetMgmtFreeMemory {
+    /// # Safety
+    ///
+    /// `ptr` is a pointer which must be freed by `NetApiBufferFree`
+    unsafe fn free(ptr: *mut core::ffi::c_void) {
+        // SAFETY: Per invariant on `ptr`, NetApiBufferFree must be called on it for releasing the memory.
+        unsafe { NetApiBufferFree(Some(ptr)) };
     }
 }
 
-impl Drop for NetMgmtMemory {
-    fn drop(&mut self) {
-        if self.0.is_null() {
-            return;
-        }
-
-        // SAFETY: FFI call with no outstanding precondition.
-        unsafe { NetApiBufferFree(Some(self.0)) };
-    }
-}
-
-impl Default for NetMgmtMemory {
-    fn default() -> Self {
-        Self(std::ptr::null_mut())
-    }
-}
+type NetMgmtMemory<T = core::ffi::c_void> = crate::memory::MemoryWrapper<NetMgmtFreeMemory, T>;

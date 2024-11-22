@@ -9,7 +9,7 @@ use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use now_proto_pdu::NowMessage;
 use win_api_wrappers::event::Event;
 use win_api_wrappers::utils::Pipe;
-use win_api_wrappers::wts::WTSVirtualChannel;
+use win_api_wrappers::wts::WtsVirtualChannel;
 
 use crate::dvc::channel::WinapiSignaledReceiver;
 use crate::dvc::now_message_dissector::NowMessageDissector;
@@ -23,7 +23,7 @@ pub fn run_dvc_io(
     stop_event: Event,
 ) -> Result<(), anyhow::Error> {
     trace!("Opening DVC channel");
-    let wts = WTSVirtualChannel::open_dvc(DVC_CHANNEL_NAME)?;
+    let wts = WtsVirtualChannel::open_dvc(DVC_CHANNEL_NAME)?;
 
     trace!("Querying DVC channel");
     let channel_file = wts.query_file_handle()?;
