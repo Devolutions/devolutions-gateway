@@ -86,7 +86,7 @@ pub fn get_local_group_members(group_name: String) -> anyhow::Result<Vec<Sid>> {
     // - `NetLocalGroupGetMembers` sets `group_members` to a valid pointer on success.
     // - `group_members` must be freed by `NetApiBufferFree`.
     // - For level = 0, bufptr will be set to a pointer to a LOCALGROUP_MEMBERS_INFO_0.
-    let group_members = unsafe { NetMgmtMemory::from_raw(group_members.cast::<LOCALGROUP_MEMBERS_INFO_0>()) };
+    let group_members = unsafe { NetmgmtMemory::from_raw(group_members.cast::<LOCALGROUP_MEMBERS_INFO_0>()) };
 
     // SAFETY:
     // - `NetLocalGroupGetMembers` returns a pointer valid for `number_of_entries_read` reads of `LOCALGROUP_MEMBERS_INFO_0`.
@@ -103,9 +103,9 @@ pub fn get_local_group_members(group_name: String) -> anyhow::Result<Vec<Sid>> {
     Ok(group_members)
 }
 
-struct NetMgmtFreeMemory;
+struct NetmgmtFreeMemory;
 
-impl crate::memory::FreeMemory for NetMgmtFreeMemory {
+impl crate::memory::FreeMemory for NetmgmtFreeMemory {
     /// # Safety
     ///
     /// `ptr` is a pointer which must be freed by `NetApiBufferFree`
@@ -115,4 +115,4 @@ impl crate::memory::FreeMemory for NetMgmtFreeMemory {
     }
 }
 
-type NetMgmtMemory<T = core::ffi::c_void> = crate::memory::MemoryWrapper<NetMgmtFreeMemory, T>;
+type NetmgmtMemory<T = core::ffi::c_void> = crate::memory::MemoryWrapper<NetmgmtFreeMemory, T>;
