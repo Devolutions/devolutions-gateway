@@ -1,9 +1,14 @@
 // Define the message types
-export type ServerMessage = ChunkMessage | MetaDataMessage;
+export type ServerMessage = ChunkMessage | MetaDataMessage | ErrorMessage;
 
 export interface ChunkMessage {
   type: 'chunk';
   data: Uint8Array;
+}
+
+export interface ErrorMessage {
+  type: 'error';
+  error: 'UnexpectedError' | 'UnexpectedEOF';
 }
 
 export interface MetaDataMessage {
@@ -38,6 +43,17 @@ export function parseServerMessage(buffer: ArrayBuffer): ServerMessage {
     return {
       type: 'metadata',
       codec: json.codec === 'vp8' ? 'vp8' : 'vp9',
+    };
+  }
+
+  if (typeCode === 2) {
+    // Metadata message (JSON)
+    const jsonString = new TextDecoder().decode(new Uint8Array(buffer, 1)); // Decode the rest as a string
+    const json = JSON.parse(jsonString);
+
+    return {
+      type: 'error',
+      error: json.error,
     };
   }
   throw new Error('Unknown message type');

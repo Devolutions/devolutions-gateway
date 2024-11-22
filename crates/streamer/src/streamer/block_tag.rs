@@ -1,24 +1,41 @@
-use std::num::TryFromIntError;
 
 use anyhow::Context;
+use std::fmt;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 #[derive(Clone)]
-pub enum BlockTag<'a> {
-    SimpleBlock(&'a [u8]),
-    BlockGroup(&'a [MatroskaSpec]),
+pub enum BlockTag {
+    SimpleBlock(Vec<u8>),
+    BlockGroup(Vec<MatroskaSpec>),
 }
 
 #[derive(Clone)]
-pub struct VideoBlock<'a> {
-    pub(crate) cluster_timestamp: u64,
+pub struct VideoBlock {
+    pub(crate) cluster_timestamp: Option<u64>,
     pub(crate) timestamp: i16,
     pub(crate) is_key_frame: bool,
-    pub(crate) block_tag: BlockTag<'a>,
+    pub(crate) block_tag: BlockTag,
 }
 
-impl<'a> VideoBlock<'a> {
-    pub fn new(tag: &'a MatroskaSpec, cluster_timestamp: u64) -> anyhow::Result<Self> {
+impl fmt::Debug for VideoBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VideoBlock")
+            .field("cluster_timestamp", &self.cluster_timestamp)
+            .field("timestamp", &self.timestamp)
+            .field("is_key_frame", &self.is_key_frame)
+            .field(
+                "block_tag",
+                &match self.block_tag {
+                    BlockTag::SimpleBlock(_) => "SimpleBlock",
+                    BlockTag::BlockGroup(_) => "BlockGroup",
+                },
+            )
+            .finish()
+    }
+}
+
+impl VideoBlock {
+    pub fn new(tag: MatroskaSpec, cluster_timestamp: Option<u64>) -> anyhow::Result<Self> {
         let result = match tag {
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let block = children
@@ -44,7 +61,7 @@ impl<'a> VideoBlock<'a> {
                 }
             }
             MatroskaSpec::SimpleBlock(data) => {
-                let simple_block = SimpleBlock::try_from(data)?;
+                let simple_block = SimpleBlock::try_from(&data)?;
                 Self {
                     cluster_timestamp,
                     timestamp: simple_block.timestamp,
@@ -58,14 +75,21 @@ impl<'a> VideoBlock<'a> {
         Ok(result)
     }
 
-    pub fn absolute_timestamp(&self) -> Result<u64, TryFromIntError> {
+    pub fn absolute_timestamp(&self) -> anyhow::Result<u64> {
         let timestamp = u64::try_from(self.timestamp)?;
-        Ok(self.cluster_timestamp + timestamp)
+        Ok(self
+            .cluster_timestamp
+            .with_context(|| format!("Cluster timestamp not found for timestamp: {}", self.timestamp))?
+            + timestamp)
+    }
+
+    pub fn timestamp(&self) -> i16 {
+        self.timestamp
     }
 
     // We only handle non-lacing frames for now
     pub fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
-        let frame: Vec<_> = match self.block_tag {
+        let frame: Vec<_> = match &self.block_tag {
             BlockTag::SimpleBlock(data) => {
                 let simple_block = SimpleBlock::try_from(data).unwrap();
                 simple_block

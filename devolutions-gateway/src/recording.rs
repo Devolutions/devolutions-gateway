@@ -12,7 +12,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
-use streamer::streamer::signal_when_flush::SignalWriter;
+use streamer::streamer::signal_writer::SignalWriter;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::{fs, io};

@@ -1,15 +1,18 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::unwrap_used)]
 
-use std::{env, path::Path, process::exit, thread};
+use std::{env, path::Path, process::exit};
 
 use anyhow::Context;
 use cadeau::xmf;
 use local_websocket::create_local_websocket;
-use streamer::{streamer::webm_stream, ReOpenableFile};
+use streamer::{
+    streamer::{webm_stream, StreamingConfig},
+    ReOpenableFile,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::watch::{Receiver, Sender},
+    sync::watch::Sender,
 };
 use tracing::{error, info};
 
@@ -48,13 +51,15 @@ async fn main() -> anyhow::Result<()> {
         exit(1);
     }
 
+    // SAFETY: Just pray at this point
     unsafe {
         xmf::init(args.lib_xmf_path)?;
     }
 
     let input_path = Path::new(args.input_path);
     let (eof_sender, eof_receiver) = tokio::sync::watch::channel(());
-    let intermidiate_file = get_slowly_written_file(input_path, eof_sender).await?;
+    let (file_written_sender, file_written_receiver) = tokio::sync::broadcast::channel(1);
+    let intermidiate_file = get_slowly_written_file(input_path, eof_sender, file_written_sender).await?;
 
     let (client, server) = create_local_websocket().await;
     let output_file = tokio::fs::OpenOptions::new()
@@ -69,12 +74,22 @@ async fn main() -> anyhow::Result<()> {
     let shutdown_signal = TokioSignal { signal: eof_receiver };
 
     tokio::task::spawn_blocking(move || {
-        webm_stream(server, intermidiate_file, shutdown_signal, || {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            tx.send(()).unwrap();
-            thread::sleep(std::time::Duration::from_millis(300));
-            rx
-        })?;
+        webm_stream(
+            server,
+            intermidiate_file,
+            shutdown_signal,
+            StreamingConfig { encoder_threads: 1 },
+            || {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let mut file_written_receiver = file_written_receiver.resubscribe();
+                tokio::spawn(async move {
+                    if file_written_receiver.recv().await.is_ok() {
+                        let _ = tx.send(());
+                    }
+                });
+                rx
+            },
+        )?;
 
         Ok::<_, anyhow::Error>(())
     })
@@ -83,7 +98,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_slowly_written_file(input_path: &Path, eof_signal: Sender<()>) -> anyhow::Result<ReOpenableFile> {
+async fn get_slowly_written_file(
+    input_path: &Path,
+    eof_signal: Sender<()>,
+    file_written_sender: tokio::sync::broadcast::Sender<()>,
+) -> anyhow::Result<ReOpenableFile> {
     let input_file_name = input_path
         .file_name()
         .context("no file name")?
@@ -102,6 +121,7 @@ async fn get_slowly_written_file(input_path: &Path, eof_signal: Sender<()>) -> a
     let mut temp_file = tokio::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .share_mode(0x00000002 | 0x00000001)
         .open(&temp_file_path)
         .await?;
@@ -110,25 +130,25 @@ async fn get_slowly_written_file(input_path: &Path, eof_signal: Sender<()>) -> a
         let mut input_file = input_file;
 
         // write initial 500KB to simulate already written data
-        let mut buf = [0; 1024];
+        let mut buf = [0; 10240];
         let mut size = 0;
-        while size < 500 * 1024 {
+        while size < 1_750_000 {
             let n = input_file.read(&mut buf).await?;
             temp_file.write_all(&buf[..n]).await?;
 
             size += n;
         }
-
+        info!("Jump to 175000");
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         // then slowily write the rest
         loop {
             let n = input_file.read(&mut buf).await?;
             if n == 0 {
                 break;
             }
-
-            // debug!(size, "write to temp file");
             size += n;
             temp_file.write_all(&buf[..n]).await?;
+            file_written_sender.send(()).unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
 
@@ -149,7 +169,7 @@ struct Args<'a> {
     output_path: &'a str,
 }
 
-const HELP: &str = "Usage: cut -i <input> -o <output> --lib-xmf <libxmf.so> -c <start_time>";
+const HELP: &str = "Usage: cut -i <input> -o <output> --lib-xmf <libxmf.so> ";
 
 fn parse_arg<'a>(mut value: &[&'a str]) -> anyhow::Result<Args<'a>> {
     let mut arg = Args::default();

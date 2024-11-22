@@ -1,21 +1,19 @@
 use anyhow::Context;
 use cadeau::xmf::vpx::{decoder::VpxDecoder, encoder::VpxEncoder, VpxCodec};
-use tracing::{debug, instrument};
+use tracing::{instrument, trace, warn};
 use webm_iterable::{
+    errors::TagWriterError,
     matroska_spec::{Master, MatroskaSpec, SimpleBlock},
     WebmWriter, WriteOptions,
 };
 
 use crate::debug::mastroka_spec_name;
 
-use super::block_tag::VideoBlock;
+use super::{block_tag::VideoBlock, StreamingConfig};
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
 
-fn write_unknown_sized_element<T>(
-    writer: &mut WebmWriter<T>,
-    tag: &MatroskaSpec,
-) -> Result<(), webm_iterable::errors::TagWriterError>
+fn write_unknown_sized_element<T>(writer: &mut WebmWriter<T>, tag: &MatroskaSpec) -> Result<(), TagWriterError>
 where
     T: std::io::Write,
 {
@@ -55,8 +53,8 @@ where
         Ok(WriteResult::Written)
     }
 
-    pub fn into_encoded_writer(self, config: EncodeWriterConfig) -> anyhow::Result<EncodedWriter<T>> {
-        let encoded_writer = EncodedWriter::new(config, self)?;
+    pub fn into_encoded_writer(self, config: EncodeWriterConfig) -> anyhow::Result<CutCusterWriter<T>> {
+        let encoded_writer = CutCusterWriter::new(config, self)?;
         Ok(encoded_writer)
     }
 }
@@ -69,24 +67,46 @@ pub enum EncodeNext {
     ClusterEnd,
 }
 
-pub struct EncodedWriter<T>
+enum CutBlockState {
+    HaventMet,
+    AtCutBlock,
+    // All time here are in unit of millsecond
+    // |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
+    //                                        ￪                                    ￪
+    // (absolute timeline)             cut_block_absolute_time            last_block_absolute_time
+    //                                        ￪                                    ↓
+    //                            |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
+    //                                        ￪                          ￪                               ￪
+    // (relative timeline)             last_cluster_relative_time        ￪                          last_cluster_relative_time
+    //                                        ￪--------------------------￪                               ￪
+    //                                        ￪                     block timestamp                      ￪
+    //                                        ￪  (relative to it's cluster)                              ￪
+    //                                        ￪----------------------------------------------------------￪
+    //                                             (relative to the cut_block_absolute_time)        last_cluster_relative_time
+    //
+    //
+    Met {
+        cut_block_absolute_time: u64,
+        // This is the cluster timestamp for the last cluster::timestamp we wrote
+        // last_cluster_relative_time + cut_block_absolute_time = the absolute time of original video
+        last_cluster_relative_time: u64,
+    },
+}
+
+pub struct CutCusterWriter<T>
 where
     T: std::io::Write,
 {
     writer: WebmWriter<T>,
+    // This is cluster timestamp of the original video, used to construct absolute timeline
     cluster_timestamp: Option<u64>,
     ended: bool,
     encoder: VpxEncoder,
     deocder: VpxDecoder,
-    // This is either a BlockGroup(Master::full) or a SimpleBlock
-    current_block: Option<MatroskaSpec>,
-    cut_block_hit: bool,
-    cut_block_processed: bool,
-
-    cut_block_time_offset: Option<u64>,
+    cut_block_state: CutBlockState,
 }
 
-impl<T> EncodedWriter<T>
+impl<T> CutCusterWriter<T>
 where
     T: std::io::Write,
 {
@@ -100,11 +120,12 @@ where
 
         let encoder = VpxEncoder::builder()
             .timebase_num(1)
-            .timebase_den(i32::try_from(config.timebase)?)
+            .timebase_den(1000)
             .codec(config.codec)
             .width(config.width as u32)
             .height(config.height as u32)
             .threads(config.threads)
+            .bitrate(256 * 1024)
             .build()?;
 
         let HeaderWriter { writer } = writer;
@@ -114,50 +135,31 @@ where
             ended: false,
             encoder,
             deocder,
-            current_block: None,
-            cut_block_hit: false,
-            cut_block_processed: false,
-            cut_block_time_offset: None,
+            cut_block_state: CutBlockState::HaventMet,
         })
-    }
-
-    pub fn into_timed_tag_writer(self) -> TimedTagWriter<T> {
-        TimedTagWriter::new(self)
     }
 }
 
-pub enum EncodedWriteResult {
+pub enum WriterResult {
     Finished,
     Continue,
 }
 
-impl<T> EncodedWriter<T>
+impl<T> CutCusterWriter<T>
 where
     T: std::io::Write,
 {
     #[instrument(skip(self, tag))]
-    pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<EncodedWriteResult> {
-        let tag_name = mastroka_spec_name(&tag);
-        debug!(tag_name, "Encoding tag");
+    pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
 
         if self.ended {
             anyhow::bail!("Cannot write after end");
         }
 
         match tag {
-            MatroskaSpec::Timestamp(cluster_timestamp) => {
-                if self.cluster_timestamp.is_some() {
-                    anyhow::bail!("Time offset already set");
-                }
-                self.cluster_timestamp = Some(cluster_timestamp);
-                return Ok(EncodedWriteResult::Continue);
-            }
-            MatroskaSpec::Cluster(_) => {
-                if self.cluster_timestamp.is_some() {
-                    self.ended = true;
-                    return Ok(EncodedWriteResult::Finished);
-                }
-                return Ok(EncodedWriteResult::Continue);
+            MatroskaSpec::Timestamp(timestamp) => {
+                self.cluster_timestamp = Some(timestamp);
+                return Ok(WriterResult::Continue);
             }
             MatroskaSpec::BlockGroup(Master::Full(_)) | MatroskaSpec::SimpleBlock(_) => {}
             MatroskaSpec::BlockGroup(Master::End) | MatroskaSpec::BlockGroup(Master::Start) => {
@@ -165,121 +167,168 @@ where
                 anyhow::bail!("BlockGroup start and end tags are not supported");
             }
             _ => {
-                debug!(tag_name, "Skipping tag");
-                return Ok(EncodedWriteResult::Continue);
+                return Ok(WriterResult::Continue);
             }
         }
 
-        let cluster_timestamp = self.cluster_timestamp.context("No cluster timestamp set")?;
+        let video_block = VideoBlock::new(tag, self.cluster_timestamp)?;
 
-        let Some(current_block) = self.current_block.take() else {
-            self.current_block = Some(tag);
-            return Ok(EncodedWriteResult::Continue);
-        };
+        self.process_current_block(&video_block)?;
 
-        let current_video_block = VideoBlock::new(&current_block, cluster_timestamp)?;
-        let next_video_block = VideoBlock::new(&tag, cluster_timestamp)?;
-
-        self.process_video_block(&current_video_block, Some(&next_video_block))?;
-
-        self.current_block = Some(tag);
-
-        Ok(EncodedWriteResult::Continue)
+        Ok(WriterResult::Continue)
     }
 
-    fn process_video_block(
-        &mut self,
-        current_video_block: &VideoBlock<'_>,
-        next_video_block: Option<&VideoBlock<'_>>,
-    ) -> anyhow::Result<()> {
-        let frame = current_video_block.get_frame()?;
+    fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Vec<u8>> {
+        let frame = video_block.get_frame()?;
         self.deocder.decode(&frame)?;
-        let image = self.deocder.next_frame()?;
-        let duration = match next_video_block {
-            Some(next_video_block) => {
-                next_video_block.absolute_timestamp()? - current_video_block.absolute_timestamp()?
+        {
+            let image = self.deocder.next_frame()?;
+            self.encoder.encode_frame(
+                &image,
+                video_block.timestamp.into(),
+                30,
+                if is_key_frame { VPX_EFLAG_FORCE_KF } else { 0 },
+            )?;
+        }
+        let frame: Vec<u8> = self.encoder.next_frame()?.unwrap();
+
+        Ok(frame)
+    }
+
+    fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
+        let frame = self.reencode(current_video_block, true)?;
+        let block = match self.cut_block_state {
+            CutBlockState::HaventMet => {
+                return Ok(());
             }
-            None => 17,
+            CutBlockState::AtCutBlock => {
+                self.start_new_cluster(0)?;
+                self.cut_block_state = CutBlockState::Met {
+                    cut_block_absolute_time: current_video_block.absolute_timestamp()?,
+                    last_cluster_relative_time: 0,
+                };
+                let block = SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true);
+                block
+            }
+            CutBlockState::Met {
+                cut_block_absolute_time,
+                ..
+            } => {
+                let current_block_absolute_time = current_video_block.absolute_timestamp()?;
+                let cluster_relative_timestamp = current_block_absolute_time - cut_block_absolute_time;
+                if self.should_write_new_cluster(current_block_absolute_time) {
+                    self.start_new_cluster(cluster_relative_timestamp)?;
+
+                    self.cut_block_state = CutBlockState::Met {
+                        cut_block_absolute_time,
+                        last_cluster_relative_time: cluster_relative_timestamp,
+                    };
+                }
+                let relative_timestamp = current_video_block.absolute_timestamp()?
+                    - cut_block_absolute_time
+                    - self.last_cluster_relative_time().unwrap();
+
+                trace!(
+                    relative_timestamp,
+                    relative_timestamp,
+                    cut_block_absolute_time,
+                    current_block_absolute_timestamp = current_video_block.absolute_timestamp()?,
+                    last_cluster_relative_time = self.last_cluster_relative_time().unwrap()
+                );
+                let timestamp = i16::try_from(relative_timestamp)?;
+
+                let block = SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true);
+                block
+            }
         };
 
-        let pts = current_video_block.absolute_timestamp()?;
-
-        let flags = if self.cut_block_processed || self.cut_block_hit {
-            VPX_EFLAG_FORCE_KF
-        } else {
-            0
-        };
-
-        debug!(?pts, ?duration, "Encoding frame");
-        self.encoder
-            .encode_frame(&image, pts.try_into()?, duration.try_into()?, flags)?;
-
-        let frame = self.encoder.next_frame()?;
-
-        // We hit the cut block
-        if self.cut_block_hit && !self.cut_block_processed {
-            self.cut_block_time_offset = Some(current_video_block.absolute_timestamp()?);
-            self.cut_block_processed = true;
-        }
-
-        // haven't hit the cut block yet, just return
-        if !self.cut_block_processed {
-            return Ok(());
-        }
-
-        let Some(cut_block_time_offset) = self.cut_block_time_offset else {
-            anyhow::bail!("Cut block time offset not set");
-        };
-
-        let Some(frame) = frame else {
-            return Ok(());
-        };
-
-        let block_to_write = SimpleBlock::new_uncheked(
-            &frame,
-            1, // tracks in not necessarily 1, todo: fix this
-            (current_video_block.absolute_timestamp()? - cut_block_time_offset).try_into()?,
-            false,
-            None,
-            false,
-            true,
-        );
-
-        if self.cut_block_hit && !self.cut_block_processed {
-            let cluster_start = MatroskaSpec::Cluster(Master::Start);
-            write_unknown_sized_element(&mut self.writer, &cluster_start)?;
-        }
-
-        debug!(?block_to_write, "Writing block");
-        self.writer.write(&MatroskaSpec::from(block_to_write))?;
-
+        self.write_block(block)?;
         Ok(())
     }
 
+    fn write_block(&mut self, block: SimpleBlock<'_>) -> anyhow::Result<()> {
+        let block: MatroskaSpec = block.into();
+        self.writer.write(&block)?;
+        Ok(())
+    }
+
+    fn start_new_cluster(&mut self, time: u64) -> anyhow::Result<()> {
+        if time != 0 {
+            self.writer.write(&MatroskaSpec::Cluster(Master::End))?;
+        }
+        let cluster_start = MatroskaSpec::Cluster(Master::Start);
+        let timestamp = MatroskaSpec::Timestamp(time);
+        write_unknown_sized_element(&mut self.writer, &cluster_start)?;
+        self.writer.write(&timestamp)?;
+        self.update_cluster_time(time);
+        Ok(())
+    }
+
+    fn last_cluster_relative_time(&self) -> Option<u64> {
+        if let CutBlockState::Met {
+            last_cluster_relative_time,
+            ..
+        } = &self.cut_block_state
+        {
+            return Some(*last_cluster_relative_time);
+        }
+
+        None
+    }
+
+    fn update_cluster_time(&mut self, time: u64) {
+        if let CutBlockState::Met {
+            ref mut last_cluster_relative_time,
+            ..
+        } = &mut self.cut_block_state
+        {
+            // Update the field directly using the mutable reference
+            *last_cluster_relative_time = time;
+        }
+    }
+
+    fn should_write_new_cluster(&self, block_absolute_time: u64) -> bool {
+        // When i16 cannot fit the time difference anymore, we need to start a new cluster
+        if let CutBlockState::Met {
+            cut_block_absolute_time,
+            last_cluster_relative_time,
+            ..
+        } = self.cut_block_state
+        {
+            // the block time relative to last_cluster_relative_time
+            if block_absolute_time - (cut_block_absolute_time + last_cluster_relative_time)
+                // i16::Max can always convert to u64
+                > u64::try_from(i16::MAX).unwrap()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn mark_cut_block_hit(&mut self) {
-        self.cut_block_hit = true;
+        self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }
 
 #[derive(Debug)]
 pub struct EncodeWriterConfig {
-    threads: u32,
-    width: u64,
-    height: u64,
-    codec: VpxCodec,
-    timebase: u64,
+    pub threads: u32,
+    pub width: u64,
+    pub height: u64,
+    pub codec: VpxCodec,
 }
 
 pub type Headers<'a> = &'a [MatroskaSpec];
 
-impl TryFrom<Headers<'_>> for EncodeWriterConfig {
+impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
     type Error = anyhow::Error;
 
-    fn try_from(value: Headers<'_>) -> Result<Self, Self::Error> {
+    fn try_from(value: (Headers<'_>, &StreamingConfig)) -> Result<Self, Self::Error> {
+        let (value, config) = value;
         let mut width = None;
         let mut height = None;
         let mut codec = None;
-        let mut timebase = None;
 
         for header in value {
             match header {
@@ -292,9 +341,6 @@ impl TryFrom<Headers<'_>> for EncodeWriterConfig {
                         anyhow::bail!("Unknown codec: {}", codec_id);
                     }
                 },
-                MatroskaSpec::TimestampScale(scale) => {
-                    timebase = Some(*scale);
-                }
                 MatroskaSpec::PixelWidth(w) => {
                     width = Some(*w);
                 }
@@ -306,54 +352,12 @@ impl TryFrom<Headers<'_>> for EncodeWriterConfig {
         }
 
         let config = EncodeWriterConfig {
-            threads: 4, // To be determined
+            threads: config.encoder_threads,
             width: width.ok_or(anyhow::anyhow!("No width specified"))?,
             height: height.ok_or(anyhow::anyhow!("No height specified"))?,
             codec: codec.ok_or(anyhow::anyhow!("No codec specified"))?,
-            timebase: timebase.ok_or(anyhow::anyhow!("No timebase specified"))?,
         };
 
         Ok(config)
-    }
-}
-
-pub struct TimedTagWriter<T>
-where
-    T: std::io::Write,
-{
-    writer: WebmWriter<T>,
-    time_offset: u64,
-}
-
-impl<T> TimedTagWriter<T>
-where
-    T: std::io::Write,
-{
-    fn new(encoded_writer: EncodedWriter<T>) -> Self {
-        let EncodedWriter {
-            writer,
-            cut_block_time_offset,
-            ..
-        } = encoded_writer;
-
-        Self {
-            writer,
-            time_offset: cut_block_time_offset.unwrap_or(0),
-        }
-    }
-
-    pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<()> {
-        let tag = match tag {
-            MatroskaSpec::Timestamp(timestamp) => MatroskaSpec::Timestamp(timestamp - self.time_offset),
-            _ => tag,
-        };
-
-        if let MatroskaSpec::Cluster(Master::Start) = tag {
-            write_unknown_sized_element(&mut self.writer, &tag)
-        } else {
-            self.writer.write(&tag)
-        }?;
-
-        Ok(())
     }
 }

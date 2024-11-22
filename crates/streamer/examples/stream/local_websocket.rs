@@ -53,9 +53,9 @@ pub(crate) async fn create_local_websocket() -> (WebSocketClient, impl AsyncRead
     let app = Router::new().route(
         "/ws",
         get({
-            let ws_tx = ws_tx.clone();
+            let ws_tx = Arc::clone(&ws_tx);
             move |ws: WebSocketUpgrade| {
-                let ws_tx = ws_tx.clone();
+                let ws_tx = Arc::clone(&ws_tx);
                 async move {
                     ws.on_upgrade(move |socket| async move {
                         {

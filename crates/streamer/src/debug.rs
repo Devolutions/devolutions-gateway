@@ -1,6 +1,7 @@
 use webm_iterable::matroska_spec::{Master, MatroskaSpec};
 
-pub(crate) fn mastroka_spec_name(spec: &MatroskaSpec) -> &'static str {
+
+pub fn mastroka_spec_name(spec: &MatroskaSpec) -> &'static str {
     match spec {
         MatroskaSpec::Ebml(Master::Start) => "Ebml Start",
         MatroskaSpec::Ebml(Master::End) => "Ebml End",

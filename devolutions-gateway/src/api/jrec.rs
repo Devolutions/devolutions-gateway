@@ -31,9 +31,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/play/*path", get(get_player));
 
     if state.conf_handle.get_conf().debug.enable_unstable {
-        router
-            .route("/list-active", get(list_active_recordings))
-            .route("/shadow/:id/:filename", get(shadow_recording))
+        router.route("/shadow/:id/:filename", get(shadow_recording))
     } else {
         router
     }
@@ -44,6 +42,12 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JrecListQueryParam {
+    active: Option<bool>,
 }
 
 async fn jrec_push(
@@ -204,8 +208,6 @@ async fn jrec_delete_many(
     _scope: RecordingDeleteScope,
     Json(delete_list): Json<Vec<Uuid>>,
 ) -> Result<Json<DeleteManyResult>, HttpError> {
-    use std::collections::HashSet;
-
     const THRESHOLD: usize = 50_000;
     const CHUNK_SIZE: usize = 1_000;
 
@@ -349,9 +351,20 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
     security(("scope_token" = ["gateway.recordings.read"])),
 ))]
 pub(crate) async fn list_recordings(
-    State(DgwState { conf_handle, .. }): State<DgwState>,
+    State(DgwState {
+        conf_handle,
+        recordings,
+        ..
+    }): State<DgwState>,
+    Query(query): Query<JrecListQueryParam>,
     _scope: RecordingsReadScope,
 ) -> Result<Json<Vec<Uuid>>, HttpError> {
+    if let Some(active) = query.active {
+        if active {
+            return list_active_recordings(recordings).await;
+        }
+    }
+
     let conf = conf_handle.get_conf();
     let recording_path = conf.recording_path.as_std_path();
 
@@ -384,23 +397,7 @@ pub(crate) async fn list_recordings(
     }
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(
-    get,
-    operation_id = "ListActiveRecordings",
-    tag = "Jrec",
-    path = "/jet/jrec/list-active",
-    responses(
-        (status = 200, description = "List of active recordings on this Gateway instance", body = [Uuid]),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-    ),
-    security(("scope_token" = ["gateway.recordings.read"])),
-))]
-pub(crate) async fn list_active_recordings(
-    State(DgwState { recordings, .. }): State<DgwState>,
-    _scope: RecordingsReadScope,
-) -> Result<Json<Vec<Uuid>>, HttpError> {
+async fn list_active_recordings(recordings: RecordingMessageSender) -> Result<Json<Vec<Uuid>>, HttpError> {
     let recordings = recordings.active_recordings.copy_set().into_iter().collect();
     Ok(Json(recordings))
 }

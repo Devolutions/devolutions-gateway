@@ -39,7 +39,7 @@
       font-size: 18px;
     }
 
-    .refresh-button {
+    .refresh-button, .download-button {
       padding: 8px 12px;
       background-color: #007bff;
       color: #fff;
@@ -48,7 +48,7 @@
       cursor: pointer;
     }
 
-    .refresh-button:hover {
+    .refresh-button:hover, .download-button:hover {
       background-color: #0056b3;
     }
 
@@ -108,7 +108,10 @@
     <div class="sidebar">
       <div class="sidebar-header">
         <h2>Streaming Files</h2>
-        <button class="refresh-button" id="refreshButton">Refresh</button>
+        <div>
+          <button class="refresh-button" id="refreshButton">Refresh</button>
+          <button class="download-button" id="downloadButton">Download</button>
+        </div>
       </div>
       <div class="file-list" id="fileList">
         <!-- File items will be populated here -->

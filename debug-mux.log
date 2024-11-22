@@ -1,0 +1,200 @@
+[2m2024-11-23T02:18:47.312882Z[0m [32m INFO[0m [2mmuxer[0m[2m:[0m [2m130:[0m Initial 20KB written
+[2m2024-11-23T02:18:47.314814Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Ebml Start")) [3mlast_tag_postion[0m[2m=[0m0 [3minner_offset[0m[2m=[0m0
+[2m2024-11-23T02:18:47.314895Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Ebml Version")) [3mlast_tag_postion[0m[2m=[0m5 [3minner_offset[0m[2m=[0m5
+[2m2024-11-23T02:18:47.314942Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Ebml Read Version")) [3mlast_tag_postion[0m[2m=[0m9 [3minner_offset[0m[2m=[0m9
+[2m2024-11-23T02:18:47.314957Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Ebml Max Id Length")) [3mlast_tag_postion[0m[2m=[0m13 [3minner_offset[0m[2m=[0m13
+[2m2024-11-23T02:18:47.314969Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Ebml Max Size Length")) [3mlast_tag_postion[0m[2m=[0m17 [3minner_offset[0m[2m=[0m17
+[2m2024-11-23T02:18:47.314988Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Doc Type")) [3mlast_tag_postion[0m[2m=[0m21 [3minner_offset[0m[2m=[0m21
+[2m2024-11-23T02:18:47.315040Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Doc Type Version")) [3mlast_tag_postion[0m[2m=[0m28 [3minner_offset[0m[2m=[0m28
+[2m2024-11-23T02:18:47.315058Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Doc Type Read Version")) [3mlast_tag_postion[0m[2m=[0m32 [3minner_offset[0m[2m=[0m32
+[2m2024-11-23T02:18:47.315080Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Ebml End")) [3mlast_tag_postion[0m[2m=[0m0 [3minner_offset[0m[2m=[0m0
+[2m2024-11-23T02:18:47.315335Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Segment Start")) [3mlast_tag_postion[0m[2m=[0m36 [3minner_offset[0m[2m=[0m36
+[2m2024-11-23T02:18:47.315388Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Info Start")) [3mlast_tag_postion[0m[2m=[0m48 [3minner_offset[0m[2m=[0m48
+[2m2024-11-23T02:18:47.315415Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Timestamp Scale")) [3mlast_tag_postion[0m[2m=[0m53 [3minner_offset[0m[2m=[0m53
+[2m2024-11-23T02:18:47.315443Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Muxing App")) [3mlast_tag_postion[0m[2m=[0m60 [3minner_offset[0m[2m=[0m60
+[2m2024-11-23T02:18:47.315467Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Writing App")) [3mlast_tag_postion[0m[2m=[0m69 [3minner_offset[0m[2m=[0m69
+[2m2024-11-23T02:18:47.315485Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Info End")) [3mlast_tag_postion[0m[2m=[0m48 [3minner_offset[0m[2m=[0m48
+[2m2024-11-23T02:18:47.315527Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Tracks Start")) [3mlast_tag_postion[0m[2m=[0m78 [3minner_offset[0m[2m=[0m78
+[2m2024-11-23T02:18:47.315543Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Track Entry Start")) [3mlast_tag_postion[0m[2m=[0m83 [3minner_offset[0m[2m=[0m83
+[2m2024-11-23T02:18:47.315566Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Track Number")) [3mlast_tag_postion[0m[2m=[0m85 [3minner_offset[0m[2m=[0m85
+[2m2024-11-23T02:18:47.315583Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Track UID")) [3mlast_tag_postion[0m[2m=[0m88 [3minner_offset[0m[2m=[0m88
+[2m2024-11-23T02:18:47.315598Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Track Type")) [3mlast_tag_postion[0m[2m=[0m98 [3minner_offset[0m[2m=[0m98
+[2m2024-11-23T02:18:47.315611Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Max Block Addition ID")) [3mlast_tag_postion[0m[2m=[0m101 [3minner_offset[0m[2m=[0m101
+[2m2024-11-23T02:18:47.315625Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Codec ID")) [3mlast_tag_postion[0m[2m=[0m105 [3minner_offset[0m[2m=[0m105
+[2m2024-11-23T02:18:47.315641Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Video Start")) [3mlast_tag_postion[0m[2m=[0m112 [3minner_offset[0m[2m=[0m112
+[2m2024-11-23T02:18:47.315655Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Pixel Width")) [3mlast_tag_postion[0m[2m=[0m114 [3minner_offset[0m[2m=[0m114
+[2m2024-11-23T02:18:47.315674Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Pixel Height")) [3mlast_tag_postion[0m[2m=[0m118 [3minner_offset[0m[2m=[0m118
+[2m2024-11-23T02:18:47.315703Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Alpha Mode")) [3mlast_tag_postion[0m[2m=[0m122 [3minner_offset[0m[2m=[0m122
+[2m2024-11-23T02:18:47.315723Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Video End")) [3mlast_tag_postion[0m[2m=[0m112 [3minner_offset[0m[2m=[0m112
+[2m2024-11-23T02:18:47.315740Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Track Entry End")) [3mlast_tag_postion[0m[2m=[0m83 [3minner_offset[0m[2m=[0m83
+[2m2024-11-23T02:18:47.315753Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Tracks End")) [3mlast_tag_postion[0m[2m=[0m78 [3minner_offset[0m[2m=[0m78
+[2m2024-11-23T02:18:47.315793Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Cluster Start")) [3mlast_tag_postion[0m[2m=[0m126 [3minner_offset[0m[2m=[0m126
+[2m2024-11-23T02:18:47.320318Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 126
+[2m2024-11-23T02:18:47.334499Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Cluster Start")) [3mlast_tag_postion[0m[2m=[0m126 [3minner_offset[0m[2m=[0m0
+[2m2024-11-23T02:18:47.334554Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Cluster Start"
+[2m2024-11-23T02:18:47.334580Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Timestamp")) [3mlast_tag_postion[0m[2m=[0m138 [3minner_offset[0m[2m=[0m12
+[2m2024-11-23T02:18:47.334591Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Timestamp"
+[2m2024-11-23T02:18:47.334811Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m144 [3minner_offset[0m[2m=[0m18
+[2m2024-11-23T02:18:47.334905Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:47.352654Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Cluster Start"
+[2m2024-11-23T02:18:47.352701Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Timestamp"
+[2m2024-11-23T02:18:47.352769Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:47.352825Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m4069 [3minner_offset[0m[2m=[0m3943
+[2m2024-11-23T02:18:47.352881Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:47.369028Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:47.369159Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m11737 [3minner_offset[0m[2m=[0m11611
+[2m2024-11-23T02:18:47.369221Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:47.395058Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:47.395311Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m17364 [3minner_offset[0m[2m=[0m17238
+[2m2024-11-23T02:18:47.395444Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:47.409852Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:47.409959Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.327989Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 17361
+[2m2024-11-23T02:18:48.328139Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m17364 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.328211Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m17361
+[2m2024-11-23T02:18:48.328235Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.437409Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 17361
+[2m2024-11-23T02:18:48.437897Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m17364 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.438093Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m17361
+[2m2024-11-23T02:18:48.438160Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m18073 [3minner_offset[0m[2m=[0m712
+[2m2024-11-23T02:18:48.438235Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:48.453415Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:48.453520Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.546040Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 18070
+[2m2024-11-23T02:18:48.546156Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m18073 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.546198Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m18070
+[2m2024-11-23T02:18:48.546209Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.652687Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 18070
+[2m2024-11-23T02:18:48.652787Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m18073 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.652830Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m18070
+[2m2024-11-23T02:18:48.652843Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.762743Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 18070
+[2m2024-11-23T02:18:48.762849Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m18073 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.762889Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m18070
+[2m2024-11-23T02:18:48.762902Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.873108Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 18070
+[2m2024-11-23T02:18:48.873670Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m18073 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.873835Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m18070
+[2m2024-11-23T02:18:48.873876Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m33346 [3minner_offset[0m[2m=[0m15276
+[2m2024-11-23T02:18:48.873970Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:48.917065Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:48.917200Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m74525 [3minner_offset[0m[2m=[0m56455
+[2m2024-11-23T02:18:48.917246Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:48.946131Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:48.946255Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:48.979881Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 74522
+[2m2024-11-23T02:18:48.979982Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m74525 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:48.980020Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m74522
+[2m2024-11-23T02:18:48.980034Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.088398Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 74522
+[2m2024-11-23T02:18:49.088506Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m74525 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:49.088551Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m74522
+[2m2024-11-23T02:18:49.088565Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m78588 [3minner_offset[0m[2m=[0m4066
+[2m2024-11-23T02:18:49.088611Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:49.110549Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:49.110770Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.199428Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 78584
+[2m2024-11-23T02:18:49.199868Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m78588 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:49.200039Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m78584
+[2m2024-11-23T02:18:49.200096Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.307513Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 78584
+[2m2024-11-23T02:18:49.307655Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m78588 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:49.307719Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m78584
+[2m2024-11-23T02:18:49.307734Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m96651 [3minner_offset[0m[2m=[0m18067
+[2m2024-11-23T02:18:49.307769Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:49.331329Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:49.331485Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.418079Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 96648
+[2m2024-11-23T02:18:49.418357Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m96651 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:49.418468Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m96648
+[2m2024-11-23T02:18:49.418502Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.527219Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 96648
+[2m2024-11-23T02:18:49.527427Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m96651 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:49.527493Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m96648
+[2m2024-11-23T02:18:49.527512Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m112795 [3minner_offset[0m[2m=[0m16147
+[2m2024-11-23T02:18:49.527572Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:49.553238Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:49.553384Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m133279 [3minner_offset[0m[2m=[0m36631
+[2m2024-11-23T02:18:49.553434Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:49.575318Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:49.575514Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.637445Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 133276
+[2m2024-11-23T02:18:49.637652Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m133279 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:49.637722Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m133276
+[2m2024-11-23T02:18:49.637754Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.747732Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 133276
+[2m2024-11-23T02:18:49.747913Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m133279 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:49.747963Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m133276
+[2m2024-11-23T02:18:49.747979Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m135890 [3minner_offset[0m[2m=[0m2614
+[2m2024-11-23T02:18:49.748017Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:49.769191Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:49.769328Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.866454Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 135886
+[2m2024-11-23T02:18:49.866598Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m135890 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:49.866644Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m135886
+[2m2024-11-23T02:18:49.866657Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:49.963488Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 135886
+[2m2024-11-23T02:18:49.963927Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m135890 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:49.964093Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m135886
+[2m2024-11-23T02:18:49.964138Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m154436 [3minner_offset[0m[2m=[0m18550
+[2m2024-11-23T02:18:49.964283Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:49.999168Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:49.999316Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.076611Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 154432
+[2m2024-11-23T02:18:50.076925Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m154436 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:50.077215Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m154432
+[2m2024-11-23T02:18:50.077287Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m183561 [3minner_offset[0m[2m=[0m29129
+[2m2024-11-23T02:18:50.077387Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:50.112000Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:50.112202Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.182741Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 183558
+[2m2024-11-23T02:18:50.182949Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m183561 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:50.183016Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m183558
+[2m2024-11-23T02:18:50.183039Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.334488Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 183558
+[2m2024-11-23T02:18:50.334949Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m183561 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:50.335134Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m183558
+[2m2024-11-23T02:18:50.335194Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m189597 [3minner_offset[0m[2m=[0m6039
+[2m2024-11-23T02:18:50.335370Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:50.374587Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:50.374810Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.402940Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 189593
+[2m2024-11-23T02:18:50.403231Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m189597 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:50.403345Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m189593
+[2m2024-11-23T02:18:50.403383Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.511630Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 189593
+[2m2024-11-23T02:18:50.512059Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m189597 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:50.512221Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m189593
+[2m2024-11-23T02:18:50.512257Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m214351 [3minner_offset[0m[2m=[0m24758
+[2m2024-11-23T02:18:50.512385Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:50.535378Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:50.535554Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.621228Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 214347
+[2m2024-11-23T02:18:50.621605Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m214351 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:50.621749Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m214347
+[2m2024-11-23T02:18:50.621797Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.728499Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 214347
+[2m2024-11-23T02:18:50.728788Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m214351 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:50.728936Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m214347
+[2m2024-11-23T02:18:50.728970Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.837645Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 214347
+[2m2024-11-23T02:18:50.838082Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m214351 [3minner_offset[0m[2m=[0m4
+[2m2024-11-23T02:18:50.838251Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m214347
+[2m2024-11-23T02:18:50.838288Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m232049 [3minner_offset[0m[2m=[0m17702
+[2m2024-11-23T02:18:50.838421Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:50.867623Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:50.867779Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m262758 [3minner_offset[0m[2m=[0m48411
+[2m2024-11-23T02:18:50.867824Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:50.890148Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:50.890292Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:50.944391Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 262755
+[2m2024-11-23T02:18:50.944857Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m262758 [3minner_offset[0m[2m=[0m3
+[2m2024-11-23T02:18:50.944996Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m114:[0m [3mskip_tag[0m[2m=[0m"Block Group Full" [3mskip_location[0m[2m=[0m262755
+[2m2024-11-23T02:18:50.945046Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m264795 [3minner_offset[0m[2m=[0m2040
+[2m2024-11-23T02:18:50.945155Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:50.979297Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:50.979474Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m64:[0m [3mtag_from_inner[0m[2m=[0mSome(Ok("Block Group Full")) [3mlast_tag_postion[0m[2m=[0m270464 [3minner_offset[0m[2m=[0m7709
+[2m2024-11-23T02:18:50.979524Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m54:[0m Incoming tag [3mmanaged_income_tag[0m[2m=[0m"Block Group Full"
+[2m2024-11-23T02:18:51.005597Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m71:[0m Writing tag [3mwrite_tag[0m[2m=[0m"Simple Block"
+[2m2024-11-23T02:18:51.005801Z[0m [32m INFO[0m [2mstreamer::muxer[0m[2m:[0m [2m58:[0m try again
+[2m2024-11-23T02:18:51.052675Z[0m [32m INFO[0m [2mstreamer::streamer::iter[0m[2m:[0m [2m94:[0m Rollback to last successful tag at position: 270463

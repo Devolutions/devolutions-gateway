@@ -39,6 +39,8 @@ pub(crate) async fn stream_file(
                 websocket_stream,
                 streaming_file,
                 ShutdownSignal(shutdown_signal),
+                // Question: Do we need to make it configurable
+                streamer::streamer::StreamingConfig { encoder_threads: 4 },
                 move || {
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     recordings

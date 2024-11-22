@@ -34,7 +34,7 @@ pub(crate) async fn get_delegate_key_path() -> Result<Option<PathBuf>, Box<dyn E
 
     let gateway_json_path = Path::new(&config_dir).join("gateway.json");
 
-    let gateway_json_contents = tokio::fs::read_to_string(&gateway_json_path).await?;
+    let gateway_json_contents: String = tokio::fs::read_to_string(&gateway_json_path).await?;
     let gateway_config: serde_json::Value = serde_json::from_str(&gateway_json_contents)?;
 
     let delegate_private_key_file = gateway_config.get("DelegationPrivateKeyFile ").and_then(|v| v.as_str());
@@ -56,7 +56,7 @@ pub(crate) async fn get_provisioner_key_path() -> Result<Arc<PathBuf>, Box<dyn E
 
     let gateway_json_path = Path::new(&config_dir).join("gateway.json");
 
-    let gateway_json_contents = tokio::fs::read_to_string(&gateway_json_path).await?;
+    let gateway_json_contents:String = tokio::fs::read_to_string(&gateway_json_path).await?;
     let gateway_config: serde_json::Value = serde_json::from_str(&gateway_json_contents)?;
 
     let provisioner_private_key_file = gateway_config

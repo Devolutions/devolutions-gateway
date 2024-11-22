@@ -7,4 +7,10 @@ export async function playStream(id: string) {
 
   const videoElement = document.getElementById('shadowPlayer') as ShadowPlayer;
   videoElement.srcChange(websocketUrl);
+  videoElement.play()
+}
+
+export function download() {
+  const videoElement = document.getElementById('shadowPlayer') as ShadowPlayer;
+  videoElement.downloadBUfferAsFile();
 }

@@ -37,6 +37,7 @@ pub enum ServerMessage<'a> {
     Chunk(&'a [u8]),
     // leave for future extension (e.g. audio metadata, size, etc.)
     MetaData { codec: Codec },
+    Error(UserFriendlyError),
 }
 
 #[derive(Debug)]
@@ -73,6 +74,21 @@ impl codec::Decoder for ProtocolCodeC {
     }
 }
 
+#[derive(Debug)]
+pub enum UserFriendlyError {
+    UnexpectedError,
+    UnexpectedEOF,
+}
+
+impl UserFriendlyError {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UserFriendlyError::UnexpectedError => "UnexpectedError",
+            UserFriendlyError::UnexpectedEOF => "UnexpectedEOF",
+        }
+    }
+}
+
 impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
     type Error = std::io::Error;
 
@@ -80,6 +96,7 @@ impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
         let type_code = match item {
             ServerMessage::Chunk(_) => 0,
             ServerMessage::MetaData { .. } => 1,
+            ServerMessage::Error { .. } => 2,
         };
 
         dst.put_u8(type_code);
@@ -90,6 +107,10 @@ impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
             }
             ServerMessage::MetaData { codec } => {
                 let json = format!("{{\"codec\":\"{}\"}}", codec);
+                dst.put(json.as_bytes());
+            }
+            ServerMessage::Error(err) => {
+                let json = format!("{{\"error\":\"{}\"}}", err.as_str());
                 dst.put(json.as_bytes());
             }
         }

@@ -1,6 +1,6 @@
 
 import { listRealtimeRecordings } from './apiClient';
-import { playStream } from './paly';
+import { download, playStream } from './play';
 
 // Function to populate the file list
 async function populateFileList() {
@@ -52,3 +52,4 @@ export const getElementNotNull = (id: string) => {
 };
 
 getElementNotNull('refreshButton').onclick = refreshList;
+getElementNotNull('downloadButton').onclick = download;
