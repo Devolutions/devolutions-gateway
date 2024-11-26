@@ -6,17 +6,23 @@ edition = "2021"
 publish = false
 
 [dependencies]
-anyhow = "1.0.91"
-futures-util = { version = "0.3.31", features = ["sink"] }
-tokio = { version = "1.41", features = ["io-util", "rt", "rt-multi-thread", "sync", "macros"] }
-tokio-util = { version = "0.7.12", features = ["codec"] }
-tracing = "0.1.40"
+anyhow = "1.0"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio = { version = "1.41", features = [
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros"
+] }
+tokio-util = { version = "0.7", features = ["codec"] }
+tracing = "0.1"
 webm-iterable = { version = "0.6", features = ["futures"] }
 cadeau = { version = "0.4", features = ["dlopen"] }
-thiserror = "2.0.3"
+thiserror = "2"
 
 [dev-dependencies]
-tracing-subscriber = "0.3.18"
+tracing-subscriber = "0.3"
 tokio = { version = "1.41", features = [
     "io-util",
     "rt",
@@ -25,9 +31,9 @@ tokio = { version = "1.41", features = [
     "macros",
     "fs"
 ] }
-axum = { version = "0.7.9", features = ["ws"] }
-tokio-tungstenite = "0.24.0"
-futures = "0.3.31"
+axum = { version = "0.7", features = ["ws"] }
+futures = "0.3"
+tokio-tungstenite = "0.24"
 transport = { path = "../transport" }
 
 [lints]
