@@ -1,4 +1,3 @@
-
 use anyhow::Context;
 use std::fmt;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};

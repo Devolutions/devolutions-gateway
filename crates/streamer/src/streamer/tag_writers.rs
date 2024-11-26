@@ -151,7 +151,6 @@ where
 {
     #[instrument(skip(self, tag))]
     pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
-
         if self.ended {
             anyhow::bail!("Cannot write after end");
         }
