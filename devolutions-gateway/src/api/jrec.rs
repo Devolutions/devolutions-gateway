@@ -46,7 +46,7 @@ struct JrecPushQueryParam {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecListQueryParam {
+pub(crate) struct JrecListQueryParam {
     active: Option<bool>,
 }
 
