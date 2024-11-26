@@ -11,13 +11,13 @@ use webm_iterable::{
     WebmIterator,
 };
 
-pub mod block_tag;
-pub mod channel_writer;
-pub mod iter;
-pub mod protocol;
-pub mod reopenable_file;
-pub mod signal_writer;
-pub mod tag_writers;
+pub(crate) mod block_tag;
+pub(crate) mod channel_writer;
+pub(crate) mod iter;
+pub(crate) mod protocol;
+pub(crate) mod reopenable_file;
+pub(crate) mod signal_writer;
+pub(crate) mod tag_writers;
 
 use crate::{debug::mastroka_spec_name, reopenable::Reopenable};
 

@@ -7,8 +7,7 @@ use anyhow::Context;
 use cadeau::xmf;
 use local_websocket::create_local_websocket;
 use streamer::{
-    streamer::{webm_stream, StreamingConfig},
-    ReOpenableFile,
+    ReOpenableFile, {webm_stream, StreamingConfig},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -20,7 +19,7 @@ pub struct TokioSignal {
     signal: tokio::sync::watch::Receiver<()>,
 }
 
-impl streamer::streamer::Signal for TokioSignal {
+impl streamer::Signal for TokioSignal {
     async fn wait(&mut self) {
         let _ = self.signal.changed().await;
     }

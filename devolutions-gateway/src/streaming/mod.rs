@@ -1,13 +1,13 @@
 use anyhow::Context;
 use axum::{body::Body, response::Response};
-use streamer::streamer::{reopenable_file::ReOpenableFile, webm_stream};
+use streamer::{webm_stream, ReOpenableFile};
 use uuid::Uuid;
 
 use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
 struct ShutdownSignal(devolutions_gateway_task::ShutdownSignal);
 
-impl streamer::streamer::Signal for ShutdownSignal {
+impl streamer::Signal for ShutdownSignal {
     fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send {
         self.0.wait()
     }
@@ -40,7 +40,7 @@ pub(crate) async fn stream_file(
                 streaming_file,
                 ShutdownSignal(shutdown_signal),
                 // Question: Do we need to make it configurable
-                streamer::streamer::StreamingConfig { encoder_threads: 4 },
+                streamer::StreamingConfig { encoder_threads: 4 },
                 move || {
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     recordings
