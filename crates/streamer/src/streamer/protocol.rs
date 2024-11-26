@@ -4,7 +4,7 @@ use tokio_util::{
 };
 
 #[derive(Debug)]
-pub enum Codec {
+pub(crate) enum Codec {
     Vp8,
     Vp9,
 }
@@ -33,7 +33,7 @@ impl std::fmt::Display for Codec {
 }
 
 #[derive(Debug)]
-pub enum ServerMessage<'a> {
+pub(crate) enum ServerMessage<'a> {
     Chunk(&'a [u8]),
     // leave for future extension (e.g. audio metadata, size, etc.)
     MetaData { codec: Codec },
@@ -41,13 +41,13 @@ pub enum ServerMessage<'a> {
 }
 
 #[derive(Debug)]
-pub enum ClientMessage {
+pub(crate) enum ClientMessage {
     // leave for future extension (e.g. audio metadata, size, etc.)
     Start,
     Pull,
 }
 
-pub struct ProtocolCodeC;
+pub(crate) struct ProtocolCodeC;
 
 impl codec::Decoder for ProtocolCodeC {
     type Item = ClientMessage;
@@ -75,13 +75,13 @@ impl codec::Decoder for ProtocolCodeC {
 }
 
 #[derive(Debug)]
-pub enum UserFriendlyError {
+pub(crate) enum UserFriendlyError {
     UnexpectedError,
     UnexpectedEOF,
 }
 
 impl UserFriendlyError {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             UserFriendlyError::UnexpectedError => "UnexpectedError",
             UserFriendlyError::UnexpectedEOF => "UnexpectedEOF",

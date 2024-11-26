@@ -20,12 +20,7 @@ where
     writer.write_advanced(tag, WriteOptions::is_unknown_sized_element())
 }
 
-pub enum WriteResult {
-    Written,
-    Buffered,
-}
-
-pub struct HeaderWriter<T>
+pub(crate) struct HeaderWriter<T>
 where
     T: std::io::Write,
 {
@@ -36,13 +31,13 @@ impl<T> HeaderWriter<T>
 where
     T: std::io::Write,
 {
-    pub fn new(writer: T) -> Self {
+    pub(crate) fn new(writer: T) -> Self {
         Self {
             writer: WebmWriter::new(writer),
         }
     }
 
-    pub fn write(&mut self, tag: &MatroskaSpec) -> anyhow::Result<WriteResult> {
+    pub(crate) fn write(&mut self, tag: &MatroskaSpec) -> anyhow::Result<()> {
         if let MatroskaSpec::Segment(Master::Start) = tag {
             write_unknown_sized_element(&mut self.writer, tag)
         } else {
@@ -50,21 +45,13 @@ where
         }
         .with_context(|| format!("Failed to write tag: {}", mastroka_spec_name(tag)))?;
 
-        Ok(WriteResult::Written)
+        Ok(())
     }
 
-    pub fn into_encoded_writer(self, config: EncodeWriterConfig) -> anyhow::Result<CutCusterWriter<T>> {
+    pub(crate) fn into_encoded_writer(self, config: EncodeWriterConfig) -> anyhow::Result<CutCusterWriter<T>> {
         let encoded_writer = CutCusterWriter::new(config, self)?;
         Ok(encoded_writer)
     }
-}
-
-#[derive(Debug)]
-pub enum EncodeNext {
-    ClusterStart,
-    Timestamp,
-    BlockGroup,
-    ClusterEnd,
 }
 
 enum CutBlockState {
@@ -93,14 +80,13 @@ enum CutBlockState {
     },
 }
 
-pub struct CutCusterWriter<T>
+pub(crate) struct CutCusterWriter<T>
 where
     T: std::io::Write,
 {
     writer: WebmWriter<T>,
     // This is cluster timestamp of the original video, used to construct absolute timeline
     cluster_timestamp: Option<u64>,
-    ended: bool,
     encoder: VpxEncoder,
     decoder: VpxDecoder,
     cut_block_state: CutBlockState,
@@ -132,7 +118,6 @@ where
         Ok(Self {
             writer,
             cluster_timestamp: None,
-            ended: false,
             encoder,
             decoder,
             cut_block_state: CutBlockState::HaventMet,
@@ -140,8 +125,7 @@ where
     }
 }
 
-pub enum WriterResult {
-    Finished,
+pub(crate) enum WriterResult {
     Continue,
 }
 
@@ -151,10 +135,6 @@ where
 {
     #[instrument(skip(self, tag))]
     pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
-        if self.ended {
-            anyhow::bail!("Cannot write after end");
-        }
-
         match tag {
             MatroskaSpec::Timestamp(timestamp) => {
                 self.cluster_timestamp = Some(timestamp);
@@ -305,20 +285,20 @@ where
         false
     }
 
-    pub fn mark_cut_block_hit(&mut self) {
+    pub(crate) fn mark_cut_block_hit(&mut self) {
         self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }
 
 #[derive(Debug)]
-pub struct EncodeWriterConfig {
+pub(crate) struct EncodeWriterConfig {
     pub threads: u32,
     pub width: u64,
     pub height: u64,
     pub codec: VpxCodec,
 }
 
-pub type Headers<'a> = &'a [MatroskaSpec];
+pub(crate) type Headers<'a> = &'a [MatroskaSpec];
 
 impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
     type Error = anyhow::Error;

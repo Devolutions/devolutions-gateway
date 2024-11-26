@@ -15,7 +15,7 @@ use crate::reopenable::Reopenable;
 use super::mastroka_spec_name;
 
 #[derive(Debug, Clone, Copy)]
-pub enum LastKeyFrameInfo {
+pub(crate) enum LastKeyFrameInfo {
     NotMet {
         cluster_start_position: Option<usize>,
         cluster_timestamp: Option<u64>,
@@ -27,7 +27,7 @@ pub enum LastKeyFrameInfo {
     },
 }
 
-pub struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
+pub(crate) struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
     inner: Option<WebmIterator<R>>,
     // The absolute position of the last tag emitted
     last_tag_position: usize,
@@ -48,13 +48,11 @@ pub struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
 }
 
 #[derive(Debug, Error)]
-pub enum IteratorError {
+pub(crate) enum IteratorError {
     #[error("Inner Iterator Error: {0}")]
     InnerIteratorError(#[from] TagIteratorError),
     #[error("Position Correction Error: {before_correct_position}")]
     PositionCorrectionError { before_correct_position: u64 },
-    #[error("Rollback Error: {tag_name} at position {tag_position}")]
-    RollbackError { tag_name: String, tag_position: usize },
     #[error("Value Expected: {0}")]
     ValueExpected(&'static str),
     #[error("IO Error: {0}")]
@@ -65,7 +63,7 @@ impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
 {
-    pub fn new(inner: WebmIterator<R>) -> Self {
+    pub(crate) fn new(inner: WebmIterator<R>) -> Self {
         Self {
             inner: Some(inner),
             last_tag_position: 0,
@@ -80,7 +78,7 @@ where
         }
     }
 
-    pub fn next(&mut self) -> Option<Result<MatroskaSpec, IteratorError>> {
+    pub(crate) fn next(&mut self) -> Option<Result<MatroskaSpec, IteratorError>> {
         let Some(inner) = self.inner.as_mut() else {
             return Some(Err(IteratorError::ValueExpected("inner tag writer")));
         };
@@ -99,9 +97,15 @@ where
                 // we check if the tag is BlockGroup Full,
                 // If so, we need to correct for the last tag position
                 // because the full element offset will skip the header
-                self.correct_for_blockgroup_header()
-                    .context("failed to correct for blockgroup header")
-                    .expect("fix me by use customized tag error");
+
+                if let Err(e) =
+                    self.correct_for_blockgroup_header()
+                        .map_err(|_| IteratorError::PositionCorrectionError {
+                            before_correct_position: self.last_tag_position as u64,
+                        })
+                {
+                    return Some(Err(e));
+                }
             }
 
             if let MatroskaSpec::Timestamp(time) = tag {
@@ -181,7 +185,7 @@ where
         result.map(|result| result.map_err(|err| err.into()))
     }
 
-    pub fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
         let inner = self.inner.take().ok_or_else(|| anyhow::anyhow!("No inner iterator"))?;
         let mut file = inner.into_inner();
         file.reopen()?;
@@ -200,7 +204,7 @@ where
         Ok(())
     }
 
-    pub fn skip(&mut self, number: u32) -> anyhow::Result<()> {
+    pub(crate) fn skip(&mut self, number: u32) -> anyhow::Result<()> {
         for _ in 0..number {
             let _ = self.next().context("Failed to skip tag")??;
         }
@@ -208,7 +212,7 @@ where
         Ok(())
     }
 
-    pub fn rollback_to_last_key_frame(&mut self) -> Result<LastKeyFrameInfo, IteratorError> {
+    pub(crate) fn rollback_to_last_key_frame(&mut self) -> Result<LastKeyFrameInfo, IteratorError> {
         let LastKeyFrameInfo::Met {
             position: last_key_frame_position,
             cluster_start_position,
@@ -232,26 +236,7 @@ where
         Ok(self.last_key_frame_info)
     }
 
-    pub fn rollback_to_last_cluster_start(&mut self) -> anyhow::Result<()> {
-        let last_cluster_position = self
-            .last_cluster_position
-            .ok_or_else(|| anyhow::anyhow!("No last cluster position"))?;
-        let inner = self.inner.take().ok_or_else(|| anyhow::anyhow!("No inner iterator"))?;
-        let mut file = inner.into_inner();
-        file.reopen()?;
-        file.seek(std::io::SeekFrom::Start(last_cluster_position as u64))?;
-        self.inner = Some(WebmIterator::new(file, &[MatroskaSpec::BlockGroup(Master::Start)]));
-        self.rollback_record = Some(last_cluster_position);
-        self.last_tag_position = last_cluster_position;
-        self.rolled_back_between_cluster = false;
-        Ok(())
-    }
-
-    pub fn last_emitted_tag_offset(&self) -> usize {
-        self.inner.as_ref().unwrap().last_emitted_tag_offset()
-    }
-
-    pub fn last_tag_position(&self) -> usize {
+    pub(crate) fn last_tag_position(&self) -> usize {
         self.last_tag_position
     }
 
@@ -313,7 +298,7 @@ where
     }
 }
 
-pub fn read_vint(buffer: &[u8]) -> anyhow::Result<Option<(u64, usize)>> {
+pub(crate) fn read_vint(buffer: &[u8]) -> anyhow::Result<Option<(u64, usize)>> {
     if buffer.is_empty() {
         return Ok(None);
     }

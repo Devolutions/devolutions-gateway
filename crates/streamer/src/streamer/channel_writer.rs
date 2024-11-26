@@ -1,7 +1,7 @@
 use std::io;
 
 #[derive(Debug)]
-pub enum ChannelWriterError {
+pub(crate) enum ChannelWriterError {
     ChannelClosed,
 }
 

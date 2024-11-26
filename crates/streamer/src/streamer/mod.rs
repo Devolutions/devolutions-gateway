@@ -120,7 +120,6 @@ pub fn webm_stream(
                 }
 
                 match encode_writer.write(tag) {
-                    Ok(WriterResult::Finished) => break Ok(()),
                     Ok(WriterResult::Continue) => continue,
                     Err(e) => {
                         let Some(TagWriterError::WriteError { source }) = e.downcast_ref::<TagWriterError>() else {

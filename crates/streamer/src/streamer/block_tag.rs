@@ -3,13 +3,13 @@ use std::fmt;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 #[derive(Clone)]
-pub enum BlockTag {
+pub(crate) enum BlockTag {
     SimpleBlock(Vec<u8>),
     BlockGroup(Vec<MatroskaSpec>),
 }
 
 #[derive(Clone)]
-pub struct VideoBlock {
+pub(crate) struct VideoBlock {
     pub(crate) cluster_timestamp: Option<u64>,
     pub(crate) timestamp: i16,
     pub(crate) is_key_frame: bool,
@@ -34,7 +34,7 @@ impl fmt::Debug for VideoBlock {
 }
 
 impl VideoBlock {
-    pub fn new(tag: MatroskaSpec, cluster_timestamp: Option<u64>) -> anyhow::Result<Self> {
+    pub(crate) fn new(tag: MatroskaSpec, cluster_timestamp: Option<u64>) -> anyhow::Result<Self> {
         let result = match tag {
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let block = children
@@ -74,7 +74,7 @@ impl VideoBlock {
         Ok(result)
     }
 
-    pub fn absolute_timestamp(&self) -> anyhow::Result<u64> {
+    pub(crate) fn absolute_timestamp(&self) -> anyhow::Result<u64> {
         let timestamp = u64::try_from(self.timestamp)?;
         Ok(self
             .cluster_timestamp
@@ -82,12 +82,8 @@ impl VideoBlock {
             + timestamp)
     }
 
-    pub fn timestamp(&self) -> i16 {
-        self.timestamp
-    }
-
     // We only handle non-lacing frames for now
-    pub fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
+    pub(crate) fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
         let frame: Vec<_> = match &self.block_tag {
             BlockTag::SimpleBlock(data) => {
                 let simple_block = SimpleBlock::try_from(data).unwrap();
