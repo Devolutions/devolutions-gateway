@@ -24,10 +24,11 @@ use crate::config::ConfHandle;
 
 use integrity::validate_artifact_hash;
 use io::{download_binary, download_utf8, save_to_temp_file};
-use package::{install_package, validate_package};
+use package::{install_package, uninstall_package, validate_package};
 use productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use security::set_file_dacl;
 
+use detect::get_product_code;
 pub(crate) use error::UpdaterError;
 pub(crate) use product::Product;
 
@@ -42,8 +43,14 @@ struct UpdaterCtx {
     conf: ConfHandle,
 }
 
+struct DowngradeInfo {
+    installed_version: DateVersion,
+    product_code: String,
+}
+
 struct UpdateOrder {
     target_version: DateVersion,
+    downgrade: Option<DowngradeInfo>,
     package_url: String,
     hash: Option<String>,
 }
@@ -169,11 +176,22 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         return Ok(());
     }
 
-    install_package(&ctx, &package_path)
+    if let Some(downgrade) = order.downgrade {
+        let installed_version = downgrade.installed_version;
+        info!(%product, %installed_version, %target_version, "Downgrading product...");
+
+        let uninstall_log_path = package_path.with_extension("uninstall.log");
+
+        uninstall_package(&ctx, downgrade.product_code, &uninstall_log_path).await?;
+    }
+
+    let log_path = package_path.with_extension("log");
+
+    install_package(&ctx, &package_path, &log_path)
         .await
         .context("failed to install package")?;
 
-    info!(%product, "Product updated to v{target_version}!");
+    info!(%product, %target_version, "Product updated!");
 
     Ok(())
 }
@@ -210,15 +228,13 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     trace!(%product, %detected_version, "Detected installed product version");
 
-    let is_target_version_same_as_installed = match target_version {
-        VersionSpecification::Latest => false,
-        VersionSpecification::Specific(target) => target == detected_version,
-    };
-
-    // Early exit without checking remote database.
-    if is_target_version_same_as_installed {
-        info!(%product, %detected_version, "Product is up to date, skipping update");
-        return Ok(None);
+    match target_version {
+        VersionSpecification::Specific(target) if target == detected_version => {
+            // Early exit without checking remote database.
+            info!(%product, %detected_version, "Product is up to date, skipping update");
+            return Ok(None);
+        }
+        VersionSpecification::Latest | VersionSpecification::Specific(_) => {}
     }
 
     info!(%product, %target_version, "Ready to update the product");
@@ -241,11 +257,23 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
                 info!(%product, %detected_version, "Product is up to date, skipping update (update to `latest` requested)");
                 return Ok(None);
             }
+
+            Ok(Some(UpdateOrder {
+                target_version: remote_version,
+                downgrade: None,
+                package_url: product_info.url.clone(),
+                hash: product_info.hash.clone(),
+            }))
         }
         VersionSpecification::Specific(version) => {
-            if version == detected_version {
-                info!(%product, %detected_version, "Product is up to date, skipping update");
-                return Ok(None);
+            if version == remote_version {
+                // Product info DB version matches the requested version, proceed with update.
+                return Ok(Some(UpdateOrder {
+                    target_version: version,
+                    downgrade: None,
+                    package_url: product_info.url.clone(),
+                    hash: product_info.hash.clone(),
+                }));
             }
 
             // If the target version is not available on devolutions.net, try to guess the requested
@@ -253,36 +281,44 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
             //
             // TODO(@pacmancoder): This is a temporary workaround until we have improved productinfo
             // database with multiple version information.
-            if version != remote_version {
-                let modified_url = try_modify_product_url_version(&product_info.url, remote_version, version)?;
+            let modified_url = try_modify_product_url_version(&product_info.url, remote_version, version)?;
 
-                // Quick check if the modified URL points to existing resource.
-                let response = reqwest::Client::builder().build()?.head(&modified_url).send().await?;
-                if !response.status().is_success() {
-                    warn!(
-                        %product,
-                        %version,
-                        %modified_url,
-                        "Modified product URL does not exist, skipping update"
-                    );
-                    return Ok(None);
-                }
-
-                // Target MSI found, proceed with update.
-                return Ok(Some(UpdateOrder {
-                    target_version: version,
-                    package_url: modified_url,
-                    hash: None,
-                }));
+            // Quick check if the modified URL points to existing resource.
+            let response = reqwest::Client::builder().build()?.head(&modified_url).send().await?;
+            if let Err(error) = response.error_for_status() {
+                warn!(
+                    %error,
+                    %product,
+                    %version,
+                    %modified_url,
+                    "Failed to access the product URL, skipping update"
+                );
+                return Ok(None);
             }
+            // Target MSI found, proceed with update.
+
+            // For the downgrade, we remove the installed product and install the target
+            // version. This is the simplest and more reliable way to handle downgrades. (WiX
+            // downgrade is not used).
+            let downgrade = if version < detected_version {
+                let product_code = get_product_code(product)?.ok_or(UpdaterError::MissingRegistryValue)?;
+
+                Some(DowngradeInfo {
+                    installed_version: detected_version,
+                    product_code,
+                })
+            } else {
+                None
+            };
+
+            Ok(Some(UpdateOrder {
+                target_version: version,
+                downgrade,
+                package_url: modified_url,
+                hash: None,
+            }))
         }
     }
-
-    Ok(Some(UpdateOrder {
-        target_version: remote_version,
-        package_url: product_info.url.clone(),
-        hash: product_info.hash.clone(),
-    }))
 }
 
 async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
@@ -331,7 +367,7 @@ fn try_modify_product_url_version(
     let new_url = url.replace(&original_version.to_string(), &version.to_string());
 
     if new_url == url {
-        return Err(anyhow!("Product URL has unexpected format, version cannot be modified"));
+        return Err(anyhow!("product URL has unexpected format, version cannot be modified"));
     }
 
     Ok(new_url)

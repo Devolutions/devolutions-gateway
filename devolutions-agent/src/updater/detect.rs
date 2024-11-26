@@ -6,6 +6,7 @@ use crate::updater::uuid::{reversed_hex_to_uuid, uuid_to_reversed_hex};
 use crate::updater::{Product, UpdaterError};
 
 const GATEWAY_UPDATE_CODE: &str = "{db3903d6-c451-4393-bd80-eb9f45b90214}";
+const REG_CURRENT_VERSION: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion";
 
 /// Get the installed version of a product.
 pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<DateVersion>, UpdaterError> {
@@ -14,11 +15,14 @@ pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<D
     }
 }
 
-/// Get the installed version of a product using Windows registry.
-fn get_installed_product_version_winreg(update_code: &str) -> Result<Option<DateVersion>, UpdaterError> {
-    let reversed_hex_uuid = uuid_to_reversed_hex(update_code)?;
+pub(crate) fn get_product_code(product: Product) -> Result<Option<String>, UpdaterError> {
+    match product {
+        Product::Gateway => get_product_code_winreg(GATEWAY_UPDATE_CODE),
+    }
+}
 
-    const REG_CURRENT_VERSION: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion";
+fn get_product_code_winreg(update_code: &str) -> Result<Option<String>, UpdaterError> {
+    let reversed_hex_uuid = uuid_to_reversed_hex(update_code)?;
 
     let update_code_key = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
         .open_subkey(format!(
@@ -38,7 +42,15 @@ fn get_installed_product_version_winreg(update_code: &str) -> Result<Option<Date
         None => return Err(UpdaterError::MissingRegistryValue),
     };
 
-    let product_code_uuid = reversed_hex_to_uuid(&product_code)?;
+    Ok(Some(reversed_hex_to_uuid(&product_code)?))
+}
+
+/// Get the installed version of a product using Windows registry.
+fn get_installed_product_version_winreg(update_code: &str) -> Result<Option<DateVersion>, UpdaterError> {
+    let product_code_uuid = match get_product_code_winreg(update_code)? {
+        Some(uuid) => uuid,
+        None => return Ok(None),
+    };
 
     // Now we know the product code of installed MSI, we could read its version.
     let product_tree = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)

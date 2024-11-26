@@ -14,20 +14,32 @@ const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
     "8db5a43bb8afe4d2ffb92da9007d8997a4cc4e13",
 ];
 
-pub(crate) async fn install_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
+pub(crate) async fn install_package(
+    ctx: &UpdaterCtx,
+    path: &Utf8Path,
+    log_path: &Utf8Path,
+) -> Result<(), UpdaterError> {
     match ctx.product {
-        Product::Gateway => install_msi(ctx, path).await,
+        Product::Gateway => install_msi(ctx, path, log_path).await,
     }
 }
 
-async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
+pub(crate) async fn uninstall_package(
+    ctx: &UpdaterCtx,
+    product_code: String,
+    log_path: &Utf8Path,
+) -> Result<(), UpdaterError> {
+    match ctx.product {
+        Product::Gateway => uninstall_msi(ctx, product_code, log_path).await,
+    }
+}
+
+async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> Result<(), UpdaterError> {
     // When running in service, we do always have enough rights to install MSI. However, for ease
     // of testing, we can skip MSI installation.
     ensure_enough_rights()?;
 
     info!("Installing MSI from path: {}", path);
-
-    let log_path = path.with_extension("log");
 
     let msi_install_result = tokio::process::Command::new("msiexec")
         .arg("/i")
@@ -42,7 +54,7 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterErr
         info!("MSI installation log: {log_path}");
 
         // Schedule log file for deletion on reboot
-        if let Err(error) = remove_file_on_reboot(&log_path) {
+        if let Err(error) = remove_file_on_reboot(log_path) {
             error!(%error, "Failed to schedule log file for deletion on reboot");
         }
     }
@@ -51,6 +63,40 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterErr
         return Err(UpdaterError::MsiInstall {
             product: ctx.product,
             msi_path: path.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+async fn uninstall_msi(ctx: &UpdaterCtx, product_code: String, log_path: &Utf8Path) -> Result<(), UpdaterError> {
+    // See `install_msi`
+    ensure_enough_rights()?;
+
+    info!(%product_code, "Uninstalling MSI");
+
+    let msi_uninstall_result = tokio::process::Command::new("msiexec")
+        .arg("/x")
+        .arg(&product_code)
+        .arg("/quiet")
+        .arg("/l*v")
+        .arg(log_path.as_str())
+        .status()
+        .await;
+
+    if log_path.exists() {
+        info!(%product_code, "MSI uninstall log: {log_path}");
+
+        // Schedule log file for deletion on reboot
+        if let Err(error) = remove_file_on_reboot(log_path) {
+            error!(%error, "Failed to schedule log file for deletion on reboot");
+        }
+    }
+
+    if msi_uninstall_result.is_err() {
+        return Err(UpdaterError::MsiUninstall {
+            product: ctx.product,
+            product_code,
         });
     }
 
@@ -91,7 +137,7 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
             Some(&mut token_elevation as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
             size_of::<TOKEN_ELEVATION>()
                 .try_into()
-                .expect("Unreachable: TOKEN_ELEVATION size always fits into u32"),
+                .expect("TOKEN_ELEVATION size always fits into u32"),
             &mut return_size as *mut u32,
         )
     };
