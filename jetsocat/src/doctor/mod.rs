@@ -169,7 +169,6 @@ impl Link {
 
 #[derive(Default)]
 struct DiagnosticCtx {
-    out: String,
     help: Option<String>,
     links: Vec<Link>,
 }
@@ -188,11 +187,14 @@ impl DiagnosticCtx {
     }
 }
 
-fn write_cert_as_pem(mut out: impl fmt::Write, cert_der: &[u8]) -> fmt::Result {
+fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
+    use std::fmt::Write as _;
 
     let body = STANDARD.encode(cert_der);
+
+    let mut out = String::new();
 
     write!(out, "------BEGIN CERTIFICATE------")?;
 
@@ -206,5 +208,45 @@ fn write_cert_as_pem(mut out: impl fmt::Write, cert_der: &[u8]) -> fmt::Result {
 
     writeln!(out, "\n------END CERTIFICATE------")?;
 
-    Ok(())
+    Ok(out)
+}
+
+struct DiagnosticTrace(std::sync::Mutex<Vec<u8>>);
+
+impl DiagnosticTrace {
+    fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self(std::sync::Mutex::new(Vec::new())))
+    }
+
+    fn finish(self: std::sync::Arc<Self>) -> String {
+        let trace = std::sync::Arc::into_inner(self).expect("call finish when you are done logging");
+        let inner = trace.0.into_inner().expect("poisoned");
+        String::from_utf8(inner).expect("only write UTF-8")
+    }
+}
+
+impl std::io::Write for &DiagnosticTrace {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("poisoned").write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn build_tracing_dispatcher(trace: std::sync::Arc<DiagnosticTrace>) -> tracing::Dispatch {
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let filter = EnvFilter::try_from_env("JETSOCAT_LOG").unwrap_or_else(|_| EnvFilter::new("debug"));
+
+    let subscriber = fmt::Subscriber::builder()
+        .with_ansi(false)
+        .with_env_filter(filter)
+        .with_target(false)
+        .without_time()
+        .with_writer(trace)
+        .finish();
+
+    tracing::dispatcher::Dispatch::new(subscriber)
 }
