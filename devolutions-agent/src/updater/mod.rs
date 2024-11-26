@@ -24,10 +24,11 @@ use crate::config::ConfHandle;
 
 use integrity::validate_artifact_hash;
 use io::{download_binary, download_utf8, save_to_temp_file};
-use package::{install_package, validate_package};
+use package::{install_package, uninstall_package, validate_package};
 use productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use security::set_file_dacl;
 
+use detect::get_product_code;
 pub(crate) use error::UpdaterError;
 pub(crate) use product::Product;
 
@@ -42,10 +43,16 @@ struct UpdaterCtx {
     conf: ConfHandle,
 }
 
+struct DowngradeInfo {
+    installed_version: DateVersion,
+    product_code: String,
+}
+
 struct UpdateOrder {
     target_version: DateVersion,
+    downgrade: Option<DowngradeInfo>,
     package_url: String,
-    hash: String,
+    hash: Option<String>,
 }
 
 pub(crate) struct UpdaterTask {
@@ -158,7 +165,9 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     let ctx = UpdaterCtx { product, conf };
 
-    validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+    if let Some(hash) = hash {
+        validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+    }
 
     validate_package(&ctx, &package_path).context("failed to validate package contents")?;
 
@@ -167,11 +176,22 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         return Ok(());
     }
 
-    install_package(&ctx, &package_path)
+    if let Some(downgrade) = order.downgrade {
+        let installed_version = downgrade.installed_version;
+        info!(%product, %installed_version, %target_version, "Downgrading product...");
+
+        let uninstall_log_path = package_path.with_extension("uninstall.log");
+
+        uninstall_package(&ctx, downgrade.product_code, &uninstall_log_path).await?;
+    }
+
+    let log_path = package_path.with_extension("log");
+
+    install_package(&ctx, &package_path, &log_path)
         .await
         .context("failed to install package")?;
 
-    info!(%product, "Product updated to v{target_version}!");
+    info!(%product, %target_version, "Product updated!");
 
     Ok(())
 }
@@ -208,14 +228,13 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     trace!(%product, %detected_version, "Detected installed product version");
 
-    let is_target_version_newer = match target_version {
-        VersionSpecification::Latest => true,
-        VersionSpecification::Specific(target) => target > detected_version,
-    };
-
-    if !is_target_version_newer {
-        info!(%product, %detected_version, "Product is up to date, skipping update");
-        return Ok(None);
+    match target_version {
+        VersionSpecification::Specific(target) if target == detected_version => {
+            // Early exit without checking remote database.
+            info!(%product, %detected_version, "Product is up to date, skipping update");
+            return Ok(None);
+        }
+        VersionSpecification::Latest | VersionSpecification::Specific(_) => {}
     }
 
     info!(%product, %target_version, "Ready to update the product");
@@ -238,20 +257,68 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
                 info!(%product, %detected_version, "Product is up to date, skipping update (update to `latest` requested)");
                 return Ok(None);
             }
+
+            Ok(Some(UpdateOrder {
+                target_version: remote_version,
+                downgrade: None,
+                package_url: product_info.url.clone(),
+                hash: product_info.hash.clone(),
+            }))
         }
         VersionSpecification::Specific(version) => {
-            if version != remote_version {
-                warn!(%product, %version, "Product uptate target version does not match available version on devolutions.net, skipping update");
+            if version == remote_version {
+                // Product info DB version matches the requested version, proceed with update.
+                return Ok(Some(UpdateOrder {
+                    target_version: version,
+                    downgrade: None,
+                    package_url: product_info.url.clone(),
+                    hash: product_info.hash.clone(),
+                }));
+            }
+
+            // If the target version is not available on devolutions.net, try to guess the requested
+            // version MSI URL by modifying the detected version.
+            //
+            // TODO(@pacmancoder): This is a temporary workaround until we have improved productinfo
+            // database with multiple version information.
+            let modified_url = try_modify_product_url_version(&product_info.url, remote_version, version)?;
+
+            // Quick check if the modified URL points to existing resource.
+            let response = reqwest::Client::builder().build()?.head(&modified_url).send().await?;
+            if let Err(error) = response.error_for_status() {
+                warn!(
+                    %error,
+                    %product,
+                    %version,
+                    %modified_url,
+                    "Failed to access the product URL, skipping update"
+                );
                 return Ok(None);
             }
+            // Target MSI found, proceed with update.
+
+            // For the downgrade, we remove the installed product and install the target
+            // version. This is the simplest and more reliable way to handle downgrades. (WiX
+            // downgrade is not used).
+            let downgrade = if version < detected_version {
+                let product_code = get_product_code(product)?.ok_or(UpdaterError::MissingRegistryValue)?;
+
+                Some(DowngradeInfo {
+                    installed_version: detected_version,
+                    product_code,
+                })
+            } else {
+                None
+            };
+
+            Ok(Some(UpdateOrder {
+                target_version: version,
+                downgrade,
+                package_url: modified_url,
+                hash: None,
+            }))
         }
     }
-
-    Ok(Some(UpdateOrder {
-        target_version: remote_version,
-        package_url: product_info.url.clone(),
-        hash: product_info.hash.clone(),
-    }))
 }
 
 async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
@@ -281,4 +348,55 @@ async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
     }
 
     Ok(update_file_path)
+}
+
+/// Change the version in the URL to the target version.
+///
+/// Fails if the URL does not contain the original version.
+///
+/// Example:
+/// - Original version: 2024.3.3.0
+/// - Target version: 2024.4.0.0
+/// - Original URL: https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.3.3.0.msi
+/// - Modified URL: https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.4.0.0.msi
+fn try_modify_product_url_version(
+    url: &str,
+    original_version: DateVersion,
+    version: DateVersion,
+) -> anyhow::Result<String> {
+    let new_url = url.replace(&original_version.to_string(), &version.to_string());
+
+    if new_url == url {
+        return Err(anyhow!("product URL has unexpected format, version cannot be modified"));
+    }
+
+    Ok(new_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_try_modify_product_url_version() {
+        let url = "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.3.3.0.msi";
+        let original_version = DateVersion {
+            year: 2024,
+            month: 3,
+            day: 3,
+            revision: 0,
+        };
+        let target_version = DateVersion {
+            year: 2024,
+            month: 4,
+            day: 0,
+            revision: 0,
+        };
+
+        let new_url = try_modify_product_url_version(url, original_version, target_version).unwrap();
+        assert_eq!(
+            new_url,
+            "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.4.0.0.msi"
+        );
+    }
 }

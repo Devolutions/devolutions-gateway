@@ -35,7 +35,7 @@ git = "https://github.com/Devolutions/IronRDP"
 rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861"
 default-features = false
 features = [
-    "server", # FIXME(@CBenoit): this is enabling AWS LC unconditionnally.
+    "server", # FIXME(@CBenoit): this is enabling AWS LC unconditionally.
     "acceptor",
 ]
 

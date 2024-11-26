@@ -8,6 +8,12 @@ use {
     serde_json as _, tap as _, tokio as _, tokio_rustls as _,
 };
 
+#[cfg(windows)]
+use {
+    devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, smallvec as _,
+    thiserror as _, uuid as _, win_api_wrappers as _, windows as _, winreg as _,
+};
+
 #[macro_use]
 extern crate tracing;
 

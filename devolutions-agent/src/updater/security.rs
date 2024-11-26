@@ -3,6 +3,7 @@
 use camino::Utf8Path;
 
 use crate::updater::UpdaterError;
+use win_api_wrappers::utils::WideString;
 
 /// DACL for the update.json file:
 /// Owner: SYSTEM
@@ -16,7 +17,6 @@ pub(crate) const UPDATE_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;NS)(A
 
 /// Set DACL (Discretionary Access Control List) on a specified file.
 pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError> {
-    use windows::core::HSTRING;
     use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, FALSE, HLOCAL};
     use windows::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
@@ -32,20 +32,25 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
             if self.0 .0.is_null() {
                 return;
             }
+            // SAFETY: `self.0` is a valid pointer to a security descriptor, therefore the function
+            // is safe to call.
             unsafe { LocalFree(HLOCAL(self.0 .0)) };
         }
     }
 
     // Decode ACL string into a security descriptor and get PACL instance.
 
-    let acl_hstring = HSTRING::from(acl);
+    let wide_acl = WideString::from(acl);
+
     let mut psecurity_descriptor = OwnedPSecurityDescriptor(PSECURITY_DESCRIPTOR::default());
 
+    // SAFETY: `wide_acl` is a valid null-terminated UTF-16 string, `psecurity_descriptor` is a
+    // valid pointer to a stack variable, therefore the function is safe to call.
     unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            &acl_hstring,
+            wide_acl.as_pcwstr(),
             SDDL_REVISION_1,
-            &mut psecurity_descriptor.0 as _,
+            &mut psecurity_descriptor.0 as *mut PSECURITY_DESCRIPTOR,
             None,
         )
     }
@@ -56,12 +61,15 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
 
     let mut dacl: *mut ACL = std::ptr::null_mut();
 
+    // SAFETY: `sec_present`, `set_defaulted` and `dacl` are valid pointers to stack variables,
+    // `psecurity_descriptor` is a valid pointer returned by the WinAPI call above, therefore the
+    // function is safe to call.
     unsafe {
         GetSecurityDescriptorDacl(
             psecurity_descriptor.0,
-            &mut sec_present as _,
-            &mut dacl as _,
-            &mut sec_defaulted as _,
+            &mut sec_present as *mut windows::Win32::Foundation::BOOL,
+            &mut dacl as *mut *mut ACL,
+            &mut sec_defaulted as *mut windows::Win32::Foundation::BOOL,
         )
     }
     .map_err(|_| UpdaterError::AclString { acl: acl.to_owned() })?;
@@ -70,11 +78,13 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
         return Err(UpdaterError::AclString { acl: acl.to_owned() });
     }
 
-    let file_path_hstring = HSTRING::from(file_path.as_str());
+    let wide_file_path = WideString::from(file_path.as_str());
 
+    // SAFETY: `wide_file_path` points to valid null-terminated UTF-16 string, `dacl` is a valid
+    // pointer returned by `GetSecurityDescriptorDacl`, therefore the function is safe to call.
     let set_permissions_result = unsafe {
         SetNamedSecurityInfoW(
-            &file_path_hstring,
+            wide_file_path.as_pcwstr(),
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
             PSID::default(),

@@ -19,8 +19,10 @@ pub(crate) enum UpdaterError {
     MsiCertHash { product: Product, msi_path: Utf8PathBuf },
     #[error("MSI for `{product}` is signed with invalid non-Devolutions certificate. Certificate thumbprint: `{thumbprint}`")]
     MsiCertificateThumbprint { product: Product, thumbprint: String },
-    #[error("failed to install `{product}` MSI. Path: `{msi_path}")]
+    #[error("failed to install `{product}` MSI. Path: `{msi_path}`")]
     MsiInstall { product: Product, msi_path: Utf8PathBuf },
+    #[error("failed to uninstall `{product}` MSI. Produc code: `{product_code}`")]
+    MsiUninstall { product: Product, product_code: String },
     #[error("ACL string `{acl}` is invalid")]
     AclString { acl: String },
     #[error("failed to set permissions for file: `{file_path}`")]
