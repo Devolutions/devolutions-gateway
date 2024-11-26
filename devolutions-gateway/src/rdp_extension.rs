@@ -141,11 +141,14 @@ enum CleanPathError {
     BadRequest(#[source] anyhow::Error),
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
-    #[error("Couldn’t perform TLS handshake")]
-    TlsHandshake(#[source] io::Error),
+    #[error("TLS handshake with server {target_server} failed")]
+    TlsHandshake {
+        source: io::Error,
+        target_server: TargetAddr,
+    },
     #[error("authorization error")]
     Authorization(#[from] AuthorizationError),
-    #[error("Generic IO error")]
+    #[error("generic IO error")]
     Io(#[from] io::Error),
 }
 
@@ -190,11 +193,11 @@ async fn process_cleanpath(
     match cleanpath_pdu.destination.as_deref() {
         Some(destination) => match TargetAddr::parse(destination, 3389) {
             Ok(destination) if !destination.eq(targets.first()) => {
-                warn!(%destination, "destination in RDCleanPath PDU does not match destination in token");
+                warn!(%destination, "Destination in RDCleanPath PDU does not match destination in token");
             }
             Ok(_) => {}
             Err(error) => {
-                warn!(%error, "invalid destination field in RDCleanPath PDU");
+                warn!(%error, "Invalid destination field in RDCleanPath PDU");
             }
         },
         None => warn!("RDCleanPath PDU is missing the destination field"),
@@ -227,7 +230,7 @@ async fn process_cleanpath(
 
     let x224_rsp = read_x224_response(&mut server_stream)
         .await
-        .context("read X224 response")
+        .with_context(|| format!("read X224 response from {selected_target}"))
         .map_err(CleanPathError::BadRequest)?;
 
     trace!("Establishing TLS connection with server");
@@ -236,7 +239,10 @@ async fn process_cleanpath(
 
     let server_stream = crate::tls::connect(selected_target.host(), server_stream)
         .await
-        .map_err(CleanPathError::TlsHandshake)?;
+        .map_err(|source| CleanPathError::TlsHandshake {
+            source,
+            target_server: selected_target.to_owned(),
+        })?;
 
     Ok(CleanPathResult {
         destination: selected_target.to_owned(),
@@ -339,7 +345,10 @@ impl From<&CleanPathError> for RDCleanPathPdu {
         match value {
             CleanPathError::BadRequest(_) => Self::new_http_error(400),
             CleanPathError::Internal(_) => Self::new_http_error(500),
-            CleanPathError::TlsHandshake(e) => io_to_rdcleanpath_err(e),
+            CleanPathError::TlsHandshake {
+                source,
+                target_server: _,
+            } => io_to_rdcleanpath_err(source),
             CleanPathError::Io(e) => io_to_rdcleanpath_err(e),
             CleanPathError::Authorization(AuthorizationError::Forbidden) => Self::new_http_error(403),
             CleanPathError::Authorization(AuthorizationError::Unauthorized) => Self::new_http_error(401),
