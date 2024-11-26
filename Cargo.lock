@@ -685,6 +685,7 @@ dependencies = [
 [[package]]
 name = "cadeau"
 version = "0.4.0"
+source = "git+https://github.com/Devolutions/cadeau.git?rev=9e07c39ea10ec11215228c3f74c0181e17751d4e#9e07c39ea10ec11215228c3f74c0181e17751d4e"
 dependencies = [
  "xmf-sys",
 ]
@@ -7303,6 +7304,7 @@ dependencies = [
 [[package]]
 name = "xmf-sys"
 version = "0.2.0"
+source = "git+https://github.com/Devolutions/cadeau.git?rev=9e07c39ea10ec11215228c3f74c0181e17751d4e#9e07c39ea10ec11215228c3f74c0181e17751d4e"
 dependencies = [
  "dlib",
 ]
