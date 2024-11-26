@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     let input_path = Path::new(args.input_path);
     let (eof_sender, eof_receiver) = tokio::sync::watch::channel(());
     let (file_written_sender, file_written_receiver) = tokio::sync::broadcast::channel(1);
-    let intermidiate_file = get_slowly_written_file(input_path, eof_sender, file_written_sender).await?;
+    let intermediate_file = get_slowly_written_file(input_path, eof_sender, file_written_sender).await?;
 
     let (client, server) = create_local_websocket().await;
     let output_file = tokio::fs::OpenOptions::new()
@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::task::spawn_blocking(move || {
         webm_stream(
             server,
-            intermidiate_file,
+            intermediate_file,
             shutdown_signal,
             StreamingConfig { encoder_threads: 1 },
             || {
@@ -115,7 +115,7 @@ async fn get_slowly_written_file(
         .context("no parent")?
         .join(format!("temp_{}", input_file_name));
 
-    // rmove the temp file if it exists
+    // remove the temp file if it exists
     tokio::fs::remove_file(&temp_file_path).await.ok();
 
     let mut temp_file = tokio::fs::OpenOptions::new()

@@ -1,6 +1,6 @@
 use channel_writer::{ChannelWriter, ChannelWriterError};
 use futures_util::SinkExt;
-use iter::{IteratorError, WebmPostionedIterator};
+use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 use tokio_util::codec::Framed;
@@ -37,7 +37,7 @@ pub fn webm_stream(
     config: StreamingConfig,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    let mut webm_itr = WebmPostionedIterator::new(WebmIterator::new(
+    let mut webm_itr = WebmPositionedIterator::new(WebmIterator::new(
         input_stream,
         &[MatroskaSpec::BlockGroup(Master::Start)],
     ));
@@ -61,7 +61,7 @@ pub fn webm_stream(
         }
     }
 
-    let cut_block_postion = webm_itr.last_tag_position();
+    let cut_block_position = webm_itr.last_tag_position();
 
     let framed = Framed::new(output_stream, ProtocolCodeC);
 
@@ -115,7 +115,7 @@ pub fn webm_stream(
                 webm_itr.skip(1)?;
             }
             Some(Ok(tag)) => {
-                if webm_itr.last_tag_position() == cut_block_postion {
+                if webm_itr.last_tag_position() == cut_block_position {
                     encode_writer.mark_cut_block_hit();
                 }
 

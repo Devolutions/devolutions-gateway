@@ -70,7 +70,7 @@ pub enum EncodeNext {
 enum CutBlockState {
     HaventMet,
     AtCutBlock,
-    // All time here are in unit of millsecond
+    // All time here are in unit of millisecond
     // |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
     //                                        ￪                                    ￪
     // (absolute timeline)             cut_block_absolute_time            last_block_absolute_time
@@ -102,7 +102,7 @@ where
     cluster_timestamp: Option<u64>,
     ended: bool,
     encoder: VpxEncoder,
-    deocder: VpxDecoder,
+    decoder: VpxDecoder,
     cut_block_state: CutBlockState,
 }
 
@@ -111,7 +111,7 @@ where
     T: std::io::Write,
 {
     fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<Self> {
-        let deocder = VpxDecoder::builder()
+        let decoder = VpxDecoder::builder()
             .threads(config.threads)
             .width(config.width as u32)
             .height(config.height as u32)
@@ -134,7 +134,7 @@ where
             cluster_timestamp: None,
             ended: false,
             encoder,
-            deocder,
+            decoder,
             cut_block_state: CutBlockState::HaventMet,
         })
     }
@@ -179,9 +179,9 @@ where
 
     fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Vec<u8>> {
         let frame = video_block.get_frame()?;
-        self.deocder.decode(&frame)?;
+        self.decoder.decode(&frame)?;
         {
-            let image = self.deocder.next_frame()?;
+            let image = self.decoder.next_frame()?;
             self.encoder.encode_frame(
                 &image,
                 video_block.timestamp.into(),

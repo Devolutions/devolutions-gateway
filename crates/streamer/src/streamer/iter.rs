@@ -17,17 +17,17 @@ use super::mastroka_spec_name;
 #[derive(Debug, Clone, Copy)]
 pub enum LastKeyFrameInfo {
     NotMet {
-        cluster_start_postion: Option<usize>,
+        cluster_start_position: Option<usize>,
         cluster_timestamp: Option<u64>,
     },
     Met {
         position: usize,
         cluster_timestamp: u64,
-        cluster_start_postion: usize,
+        cluster_start_position: usize,
     },
 }
 
-pub struct WebmPostionedIterator<R: std::io::Read + Seek + Reopenable> {
+pub struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
     inner: Option<WebmIterator<R>>,
     // The absolute position of the last tag emitted
     last_tag_position: usize,
@@ -51,8 +51,8 @@ pub struct WebmPostionedIterator<R: std::io::Read + Seek + Reopenable> {
 pub enum IteratorError {
     #[error("Inner Iterator Error: {0}")]
     InnerIteratorError(#[from] TagIteratorError),
-    #[error("Postion Correction Error: {before_correct_postion}")]
-    PostionCorrectionError { before_correct_postion: u64 },
+    #[error("Position Correction Error: {before_correct_position}")]
+    PositionCorrectionError { before_correct_position: u64 },
     #[error("Rollback Error: {tag_name} at position {tag_position}")]
     RollbackError { tag_name: String, tag_position: usize },
     #[error("Value Expected: {0}")]
@@ -61,7 +61,7 @@ pub enum IteratorError {
     IOError(#[from] std::io::Error),
 }
 
-impl<R> WebmPostionedIterator<R>
+impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
 {
@@ -75,7 +75,7 @@ where
             should_emit_cache: None,
             last_key_frame_info: LastKeyFrameInfo::NotMet {
                 cluster_timestamp: None,
-                cluster_start_postion: None,
+                cluster_start_position: None,
             },
         }
     }
@@ -97,7 +97,7 @@ where
             self.last_tag_position = record + inner.last_emitted_tag_offset();
             if matches!(tag, MatroskaSpec::BlockGroup(Master::Full(_))) {
                 // we check if the tag is BlockGroup Full,
-                // If so, we need to correct for the last tag postion
+                // If so, we need to correct for the last tag position
                 // because the full element offset will skip the header
                 self.correct_for_blockgroup_header()
                     .context("failed to correct for blockgroup header")
@@ -124,24 +124,24 @@ where
             }
 
             if self.is_key_frame(tag) {
-                info!(tag_name = ?tag_name, last_tag_postion = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
+                info!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
                 match self.last_key_frame_info {
                     LastKeyFrameInfo::NotMet {
                         cluster_timestamp,
-                        cluster_start_postion,
+                        cluster_start_position,
                     } => {
                         let Some(cluster_timestamp) = cluster_timestamp else {
                             return Some(Err(IteratorError::ValueExpected("cluster_timestamp")));
                         };
 
-                        let Some(cluster_start_postion) = cluster_start_postion else {
-                            return Some(Err(IteratorError::ValueExpected("cluster_start_postion")));
+                        let Some(cluster_start_position) = cluster_start_position else {
+                            return Some(Err(IteratorError::ValueExpected("cluster_start_position")));
                         };
 
                         self.last_key_frame_info = LastKeyFrameInfo::Met {
                             position: self.last_tag_position,
                             cluster_timestamp,
-                            cluster_start_postion,
+                            cluster_start_position,
                         }
                     }
                     LastKeyFrameInfo::Met { ref mut position, .. } => {
@@ -155,16 +155,16 @@ where
 
                 match self.last_key_frame_info {
                     LastKeyFrameInfo::NotMet {
-                        ref mut cluster_start_postion,
+                        ref mut cluster_start_position,
                         ..
                     } => {
-                        cluster_start_postion.replace(self.last_tag_position);
+                        cluster_start_position.replace(self.last_tag_position);
                     }
                     LastKeyFrameInfo::Met {
-                        ref mut cluster_start_postion,
+                        ref mut cluster_start_position,
                         ..
                     } => {
-                        *cluster_start_postion = self.last_tag_position;
+                        *cluster_start_position = self.last_tag_position;
                     }
                 };
 
@@ -191,7 +191,7 @@ where
 
         if self
             .last_cluster_position
-            .map(|last_cluster_postion| last_cluster_postion != self.last_tag_position)
+            .map(|last_cluster_position| last_cluster_position != self.last_tag_position)
             .unwrap_or(false)
         {
             self.rolled_back_between_cluster = true;
@@ -210,8 +210,8 @@ where
 
     pub fn rollback_to_last_key_frame(&mut self) -> Result<LastKeyFrameInfo, IteratorError> {
         let LastKeyFrameInfo::Met {
-            position: last_key_frame_postion,
-            cluster_start_postion,
+            position: last_key_frame_position,
+            cluster_start_position,
             ..
         } = self.last_key_frame_info
         else {
@@ -224,11 +224,11 @@ where
             .ok_or_else(|| IteratorError::ValueExpected("inner tag writer"))?;
         let mut file = inner.into_inner();
         file.reopen()?;
-        file.seek(std::io::SeekFrom::Start(last_key_frame_postion as u64))?;
-        self.rollback_record = Some(last_key_frame_postion);
-        self.last_tag_position = last_key_frame_postion;
+        file.seek(std::io::SeekFrom::Start(last_key_frame_position as u64))?;
+        self.rollback_record = Some(last_key_frame_position);
+        self.last_tag_position = last_key_frame_position;
         self.inner = Some(WebmIterator::new(file, &[MatroskaSpec::BlockGroup(Master::Start)]));
-        self.last_cluster_position = Some(cluster_start_postion);
+        self.last_cluster_position = Some(cluster_start_position);
         Ok(self.last_key_frame_info)
     }
 
@@ -257,7 +257,7 @@ where
 
     // The BlockGroup element binary layout is like this
     // a0 [VInt for content length] [content]
-    // We search for a0 [VInt for content length] from 16 bytes backward from current postion
+    // We search for a0 [VInt for content length] from 16 bytes backward from current position
     fn correct_for_blockgroup_header(&mut self) -> anyhow::Result<()> {
         let file = self.inner.as_mut().context("inner is none")?.get_mut();
         let current_position = file.stream_position()?;
