@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::extract::HeartbeatReadScope;
 use crate::http::HttpError;
 use crate::DgwState;
+#[cfg(windows)]
 use devolutions_agent_shared::windows::registry::get_installed_product_version;
 #[cfg(windows)]
 use devolutions_agent_shared::windows::AGENT_UPDATE_CODE;
