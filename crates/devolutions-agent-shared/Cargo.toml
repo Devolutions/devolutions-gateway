@@ -16,7 +16,9 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
+windows-registry = "0.3"
+# Required for `windows-registry` error type. (`Error` is not reexported from `windows-registry`).
+windows-result = "0.2"
 smallvec = "1"
 
 [dev-dependencies]
