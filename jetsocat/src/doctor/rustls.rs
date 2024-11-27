@@ -1,12 +1,11 @@
 use anyhow::Context as _;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
-use std::fmt::Write as _;
 use std::ops::Deref;
 use std::path::Path;
 
-use crate::doctor::macros::{diagnostic, output};
-use crate::doctor::{help, write_cert_as_pem, Args, Diagnostic, DiagnosticCtx};
+use crate::doctor::macros::diagnostic;
+use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
 
 pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     let mut root_store = rustls::RootCertStore::empty();
@@ -34,21 +33,18 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     }
 }
 
-fn rustls_load_native_certs(ctx: &mut DiagnosticCtx, root_store: &mut rustls::RootCertStore) -> anyhow::Result<()> {
+fn rustls_load_native_certs(_: &mut DiagnosticCtx, root_store: &mut rustls::RootCertStore) -> anyhow::Result<()> {
     let result = rustls_native_certs::load_native_certs();
 
     for error in result.errors {
-        output!(
-            ctx.out,
-            "-> Error when loading native certs: {:?}",
-            anyhow::Error::new(error),
-        )?;
+        warn!("Error when loading native certs: {:?}", anyhow::Error::new(error),);
     }
 
     for cert in result.certs {
         if let Err(e) = root_store.add(cert.clone()) {
-            output!(ctx.out, "-> Invalid root certificate: {e}")?;
-            write_cert_as_pem(&mut ctx.out, &cert).context("failed to write the certificate as PEM")?;
+            warn!("Invalid root certificate: {e}");
+            let root_cert_pem = cert_to_pem(&cert).context("failed to write the certificate as PEM")?;
+            info!("{root_cert_pem}");
         }
     }
 
@@ -64,7 +60,7 @@ fn rustls_fetch_chain(
     use std::io::Write as _;
     use std::net::TcpStream;
 
-    output!(ctx.out, "-> Connect to {subject_name}")?;
+    info!("Connect to {subject_name}");
 
     let mut socket = TcpStream::connect((subject_name, port.unwrap_or(443)))
         .with_context(|| format!("failed to connect to {subject_name}..."))
@@ -79,7 +75,7 @@ fn rustls_fetch_chain(
     let subject_name = pki_types::ServerName::try_from(subject_name.to_owned()).context("invalid DNS name")?;
     let mut client = rustls::ClientConnection::new(config, subject_name).context("failed to create TLS client")?;
 
-    output!(ctx.out, "-> Fetch server certificates")?;
+    info!("Fetch server certificates");
 
     loop {
         if client.wants_read() {
@@ -95,7 +91,8 @@ fn rustls_fetch_chain(
 
         if let Some(peer_certificates) = client.peer_certificates() {
             for certificate in peer_certificates {
-                write_cert_as_pem(&mut ctx.out, certificate).context("failed to write the peer certificate as PEM")?;
+                let cert_pem = cert_to_pem(certificate).context("failed to write the peer certificate as PEM")?;
+                info!("{cert_pem}");
                 server_certificates.push(certificate.clone().into_owned());
             }
 
@@ -113,7 +110,7 @@ fn rustls_read_chain(
     chain_path: &Path,
     server_certificates: &mut Vec<pki_types::CertificateDer<'static>>,
 ) -> anyhow::Result<()> {
-    output!(ctx.out, "-> Read file at {}", chain_path.display())?;
+    info!("Read file at {}", chain_path.display());
 
     let mut file = std::fs::File::open(chain_path)
         .map(std::io::BufReader::new)
@@ -121,8 +118,9 @@ fn rustls_read_chain(
 
     for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
         let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
-        write_cert_as_pem(&mut ctx.out, &certificate)
-            .with_context(|| format!("failed to write the certificate number {idx}"))?;
+        let cert_pem =
+            cert_to_pem(&certificate).with_context(|| format!("failed to write the certificate number {idx}"))?;
+        info!("{cert_pem}");
         server_certificates.push(certificate);
     }
 
@@ -138,13 +136,13 @@ fn rustls_check_end_entity_cert(
 ) -> anyhow::Result<()> {
     let end_entity_cert = server_certificates.first().cloned().context("empty chain")?;
 
-    output!(ctx.out, "-> Decode end entity certificate")?;
+    info!("Decode end entity certificate");
 
     let end_entity_cert =
         rustls::server::ParsedCertificate::try_from(&end_entity_cert).context("parse end entity certificate")?;
 
     if let Some(subject_name_to_verify) = subject_name_to_verify {
-        output!(ctx.out, "-> Verify validity for DNS name")?;
+        info!("Verify validity for DNS name");
 
         let server_name = pki_types::ServerName::try_from(subject_name_to_verify).context("invalid DNS name")?;
         rustls::client::verify_server_name(&end_entity_cert, &server_name)
@@ -166,12 +164,12 @@ fn rustls_check_chain(
 
     let end_entity_cert = certs.next().context("empty chain")?;
 
-    output!(ctx.out, "-> Decode end entity certificate")?;
+    info!("Decode end entity certificate");
 
     let end_entity_cert =
         rustls::server::ParsedCertificate::try_from(&end_entity_cert).context("parse end entity certificate")?;
 
-    output!(ctx.out, "-> Verify server certificate signed by trust anchor")?;
+    info!("Verify server certificate signed by trust anchor");
 
     let intermediates: Vec<_> = certs.collect();
     let now = pki_types::UnixTime::now();
