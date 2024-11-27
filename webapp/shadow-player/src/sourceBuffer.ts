@@ -1,4 +1,3 @@
-const DEBUG = true;
 
 export class ReactiveSourceBuffer {
   sourceBuffer: SourceBuffer;
@@ -6,6 +5,7 @@ export class ReactiveSourceBuffer {
   isAppending = false;
   next = () => {};
   allBuffers: Blob[] = []; // Store all buffers for file creation
+  debug = false;
 
   constructor(mediaSource: MediaSource, codec: string, next: () => void) {
     this.sourceBuffer = mediaSource.addSourceBuffer(
@@ -24,9 +24,13 @@ export class ReactiveSourceBuffer {
     });
   }
 
+  setDebug(debug: boolean) {
+    this.debug = debug;
+  }
+
   appendBuffer(buffer: Uint8Array) {
     this.bufferQueue.push(buffer);
-    if (DEBUG) {
+    if (this.debug) {
       this.allBuffers.push(new Blob([buffer], { type: 'video/webm' })); // Save each buffer
     }
     this.tryAppendBuffer();
@@ -68,7 +72,7 @@ export class ReactiveSourceBuffer {
     console.log('Buffered file downloaded.');
   }
 
-  private logErrorDetails(error: any) {
+  private logErrorDetails(error: unknown) {
     console.error('Error encountered in ReactiveSourceBuffer:');
 
     // Log the error object with stack trace

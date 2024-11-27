@@ -8,6 +8,7 @@ export class ShadowPlayer extends HTMLElement {
   _src: string | null = null;
   _buffer: ReactiveSourceBuffer | null = null;
   onErrorCallback: ((ev: ErrorMessage) => void) | null = null;
+  debug = false;
   static get observedAttributes() {
     return [
       'src',
@@ -22,12 +23,18 @@ export class ShadowPlayer extends HTMLElement {
     ];
   }
 
+  setDebug(debug: boolean) {
+    this.debug = debug;
+    if (this._buffer) {
+      this._buffer.setDebug(debug);
+    }
+  }
+
   onError(callback: (ev: ErrorMessage) => void) {
     this.onErrorCallback = callback;
   }
 
   attributeChangedCallback(name: string, _oldValue: string, newValue: string) {
-    console.log('attributeChangedCallback', name, newValue);
     if (name === 'src') {
       this.srcChange(newValue);
       return;
@@ -117,10 +124,16 @@ export class ShadowPlayer extends HTMLElement {
               this._videoElement.duration - this._videoElement.currentTime >
               5
             ) {
-              console.log('Seeking to the end');
-              console.debug(this._videoElement);
-              this._videoElement.currentTime =
-                this._videoElement.seekable.end(0);
+              try {
+                this._videoElement.currentTime =
+                  this._videoElement.seekable.end(0);
+              } catch (error) {
+                // ignore error, if not debug
+                // this could happen when the first chunk is received, but it's expected
+                if (this.debug) {
+                  console.error('Error seeking:', error);
+                }
+              }
             }
           }
         }
@@ -131,7 +144,6 @@ export class ShadowPlayer extends HTMLElement {
           this.onErrorCallback(ev);
         }
       }
-
     });
 
     websocket.onclose(() => {
@@ -153,7 +165,7 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   public downloadBUfferAsFile() {
-    if (this._buffer) {
+    if (this._buffer && this.debug) {
       this._buffer.downloadBufferedFile();
     }
   }
