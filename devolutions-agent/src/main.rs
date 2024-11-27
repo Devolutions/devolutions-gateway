@@ -10,8 +10,8 @@ use {
 
 #[cfg(windows)]
 use {
-    devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, smallvec as _,
-    thiserror as _, uuid as _, win_api_wrappers as _, windows as _, winreg as _,
+    devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, thiserror as _, uuid as _,
+    win_api_wrappers as _, windows as _,
 };
 
 #[macro_use]

@@ -1,5 +1,7 @@
 mod date_version;
 mod update_json;
+#[cfg(windows)]
+pub mod windows;
 
 use std::env;
 

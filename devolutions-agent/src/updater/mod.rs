@@ -6,7 +6,6 @@ mod package;
 mod product;
 mod productinfo;
 mod security;
-mod uuid;
 
 use std::sync::Arc;
 use std::time::Duration;

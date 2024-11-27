@@ -27,12 +27,10 @@ pub(crate) enum UpdaterError {
     AclString { acl: String },
     #[error("failed to set permissions for file: `{file_path}`")]
     SetFilePermissions { file_path: Utf8PathBuf },
-    #[error("invalid UUID `{uuid}`")]
-    Uuid { uuid: String },
     #[error("invalid productinfo.htm format")]
     ProductInfo,
-    #[error("windows registry error")]
-    WindowsRegistry(std::io::Error),
+    #[error(transparent)]
+    WindowsRegistry(#[from] devolutions_agent_shared::windows::registry::RegistryError),
     #[error("missing registry value")]
     MissingRegistryValue,
     #[error("failed to download update")]

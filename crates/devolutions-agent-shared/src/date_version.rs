@@ -18,6 +18,12 @@ pub struct DateVersion {
     pub revision: u32,
 }
 
+impl DateVersion {
+    pub fn to_string_without_revision(&self) -> String {
+        format!("{}.{}.{}", self.year, self.month, self.day)
+    }
+}
+
 impl Serialize for DateVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -75,7 +81,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn date_version_rountrip() {
+    fn date_version_roundtrip() {
         let version = DateVersion {
             year: 2022,
             month: 10,

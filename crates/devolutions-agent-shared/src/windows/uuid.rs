@@ -2,19 +2,23 @@
 
 use smallvec::SmallVec;
 
-use crate::updater::UpdaterError;
-
 const UUID_CHARS: usize = 32;
 const UUID_REVERSING_PATTERN: &[usize] = &[8, 4, 4, 2, 2, 2, 2, 2, 2, 2, 2];
 const UUID_ALPHABET: &[char] = &[
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
 ];
 
+#[derive(Debug, thiserror::Error)]
+#[error("invalid UUID `{uuid}`")]
+pub struct UuidError {
+    uuid: String,
+}
+
 /// Converts standard UUID to its reversed hex representation used in Windows Registry
 /// for upgrade code table.
 ///
 /// e.g.: `{82318d3c-811f-4d5d-9a82-b7c31b076755}` => `C3D81328F118D5D4A9287B3CB1707655`
-pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
+pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UuidError> {
     const IGNORED_CHARS: &[char] = &['-', '{', '}'];
 
     let hex_chars = uuid
@@ -39,7 +43,7 @@ pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
     }
 
     if reversed_hex.len() != 32 || reversed_hex.chars().any(|ch| !UUID_ALPHABET.contains(&ch)) {
-        return Err(UpdaterError::Uuid { uuid: uuid.to_owned() });
+        return Err(UuidError { uuid: uuid.to_owned() });
     }
 
     Ok(reversed_hex)
@@ -48,9 +52,9 @@ pub(crate) fn uuid_to_reversed_hex(uuid: &str) -> Result<String, UpdaterError> {
 /// Converts reversed hex UUID back to standard Windows Registry format (upper case letters).
 ///
 /// e.g.: `C3D81328F118D5D4A9287B3CB1707655` => `{82318d3c-811f-4d5d-9a82-b7c31b076755}`
-pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<String, UpdaterError> {
+pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<String, UuidError> {
     if hex.len() != 32 || hex.chars().any(|ch| !UUID_ALPHABET.contains(&ch)) {
-        return Err(UpdaterError::Uuid { uuid: hex.to_owned() });
+        return Err(UuidError { uuid: hex.to_owned() });
     }
 
     const FORMATTED_UUID_LEN: usize = UUID_CHARS

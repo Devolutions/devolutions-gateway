@@ -1,6 +1,7 @@
+use std::future::Future;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{future::Future, path::Path};
 
 use anyhow::Context as _;
 use axum::async_trait;
