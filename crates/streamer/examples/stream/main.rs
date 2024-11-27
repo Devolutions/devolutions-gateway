@@ -117,13 +117,14 @@ async fn get_slowly_written_file(
     // remove the temp file if it exists
     tokio::fs::remove_file(&temp_file_path).await.ok();
 
-    let mut temp_file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .share_mode(0x00000002 | 0x00000001)
-        .open(&temp_file_path)
-        .await?;
+    let mut open_option = tokio::fs::OpenOptions::new();
+    open_option.create(true).write(true).truncate(true);
+
+    #[cfg(target_os = "windows")]
+    {
+        open_option.share_mode(0x00000002 | 0x00000001);
+    }
+    let mut temp_file = open_option.open(&temp_file_path).await?;
 
     tokio::spawn(async move {
         let mut input_file = input_file;
