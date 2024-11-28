@@ -28,6 +28,11 @@ pub(crate) fn uuid_to_reversed_hex(uuid: Uuid) -> String {
         hex_chars_slice = rest;
     }
 
+    assert!(
+        reversed_hex.len() == UUID_CHARS,
+        "UUID_REVERSING_PATTERN should ensure output length"
+    );
+
     reversed_hex
 }
 
