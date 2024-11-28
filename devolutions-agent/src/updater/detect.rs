@@ -1,4 +1,5 @@
 //!  Module which provides logic to detect installed products and their versions.
+use uuid::Uuid;
 
 use devolutions_agent_shared::windows::{registry, GATEWAY_UPDATE_CODE};
 use devolutions_agent_shared::DateVersion;
@@ -14,7 +15,7 @@ pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<D
     }
 }
 
-pub(crate) fn get_product_code(product: Product) -> Result<Option<String>, UpdaterError> {
+pub(crate) fn get_product_code(product: Product) -> Result<Option<Uuid>, UpdaterError> {
     match product {
         Product::Gateway => registry::get_product_code(GATEWAY_UPDATE_CODE).map_err(UpdaterError::WindowsRegistry),
     }

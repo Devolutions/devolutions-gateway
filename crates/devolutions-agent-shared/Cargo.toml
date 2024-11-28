@@ -19,7 +19,7 @@ thiserror = "1"
 windows-registry = "0.3"
 # Required for `windows-registry` error type. (`Error` is not reexported from `windows-registry`).
 windows-result = "0.2"
-smallvec = "1"
+uuid = "1"
 
 [dev-dependencies]
 serde_json = "1"

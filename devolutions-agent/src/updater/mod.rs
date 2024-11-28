@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use notify_debouncer_mini::notify::RecursiveMode;
 use tokio::fs;
+use uuid::Uuid;
 
 use devolutions_agent_shared::{get_updater_file_path, DateVersion, UpdateJson, VersionSpecification};
 use devolutions_gateway_task::{ShutdownSignal, Task};
@@ -44,7 +45,7 @@ struct UpdaterCtx {
 
 struct DowngradeInfo {
     installed_version: DateVersion,
-    product_code: String,
+    product_code: Uuid,
 }
 
 struct UpdateOrder {

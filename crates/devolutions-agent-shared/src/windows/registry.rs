@@ -1,4 +1,6 @@
-use crate::windows::uuid::{reversed_hex_to_uuid, uuid_to_reversed_hex, UuidError};
+use uuid::Uuid;
+
+use crate::windows::reversed_hex_uuid::{reversed_hex_to_uuid, uuid_to_reversed_hex, InvalidReversedHexUuid};
 use crate::DateVersion;
 
 const REG_CURRENT_VERSION: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion";
@@ -16,12 +18,12 @@ pub enum RegistryError {
         source: windows_result::Error,
     },
     #[error(transparent)]
-    Uuid(#[from] UuidError),
+    InvalidReversedHexUuid(#[from] InvalidReversedHexUuid),
 }
 
 /// Get the product code of an installed MSI using its upgrade code.
-pub fn get_product_code(update_code: &str) -> Result<Option<String>, RegistryError> {
-    let reversed_hex_uuid = uuid_to_reversed_hex(update_code)?;
+pub fn get_product_code(update_code: Uuid) -> Result<Option<Uuid>, RegistryError> {
+    let reversed_hex_uuid = uuid_to_reversed_hex(update_code);
 
     let key_path = format!("{REG_CURRENT_VERSION}\\Installer\\UpgradeCodes\\{reversed_hex_uuid}");
 
@@ -48,7 +50,7 @@ pub fn get_product_code(update_code: &str) -> Result<Option<String>, RegistryErr
 
 /// Get the installed version of a product using Windows registry. Returns `None` if the product
 /// is not installed.
-pub fn get_installed_product_version(update_code: &str) -> Result<Option<DateVersion>, RegistryError> {
+pub fn get_installed_product_version(update_code: Uuid) -> Result<Option<DateVersion>, RegistryError> {
     let product_code_uuid = match get_product_code(update_code)? {
         Some(uuid) => uuid,
         None => return Ok(None),

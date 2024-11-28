@@ -1124,8 +1124,8 @@ dependencies = [
  "cfg-if",
  "serde",
  "serde_json",
- "smallvec",
  "thiserror",
+ "uuid",
  "windows-registry 0.3.0",
  "windows-result",
 ]
