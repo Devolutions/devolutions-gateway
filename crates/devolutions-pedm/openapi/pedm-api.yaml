@@ -342,7 +342,7 @@ components:
       properties:
         Seconds:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0.0
     ElevationConfigurations:
       type: object
@@ -379,7 +379,7 @@ components:
           $ref: '#/components/schemas/Application'
         UnixTimestampSeconds:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0.0
     ElevationResult:
       type: object
@@ -409,7 +409,7 @@ components:
           $ref: '#/components/schemas/Error'
         Win32Error:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
     GetProfilesMeResponse:
       type: object
@@ -445,7 +445,7 @@ components:
           nullable: true
         CreationFlags:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         ExecutablePath:
           type: string
@@ -464,11 +464,11 @@ components:
       properties:
         ProcessId:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         ThreadId:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
     OptionalId:
       type: object
@@ -563,47 +563,47 @@ components:
           nullable: true
         FillAttribute:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         Flags:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         ParentPid:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
           nullable: true
         ShowWindow:
           type: integer
-          format: uint16
+          format: int32
           minimum: 0.0
         Title:
           type: string
           nullable: true
         X:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         XCountChars:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         XSize:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         Y:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         YCountChars:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
         YSize:
           type: integer
-          format: uint32
+          format: int32
           minimum: 0.0
     StatusResponse:
       type: object
@@ -628,7 +628,7 @@ components:
           type: boolean
         MaximumSeconds:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0.0
     TemporaryElevationStatus:
       type: object
@@ -641,11 +641,11 @@ components:
           type: boolean
         MaximumSeconds:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0.0
         TimeLeft:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0.0
     User:
       type: object

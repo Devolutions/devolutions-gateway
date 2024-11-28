@@ -15,7 +15,7 @@ All URIs are relative to *http://localhost*
 
 Mass-deletes recordings stored on this instance
 
-If you try to delete more than 50,000 recordings at once, you should split the list into multiple requests. Bigger payloads will be rejected with 413 Payload Too Large.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
 
 ### Example
 ```csharp
@@ -108,7 +108,6 @@ catch (ApiException e)
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **406** | A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted) |  -  |
-| **413** | Request payload is too large |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
