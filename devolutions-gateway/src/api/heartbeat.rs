@@ -5,10 +5,7 @@ use uuid::Uuid;
 use crate::extract::HeartbeatReadScope;
 use crate::http::HttpError;
 use crate::DgwState;
-#[cfg(windows)]
-use devolutions_agent_shared::windows::registry::get_installed_product_version;
-#[cfg(windows)]
-use devolutions_agent_shared::windows::AGENT_UPDATE_CODE;
+use devolutions_agent_shared::get_installed_agent_version;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
@@ -120,17 +117,14 @@ pub(super) async fn get_heartbeat(
         (None, None)
     };
 
-    #[cfg(windows)]
-    let agent_version = match get_installed_product_version(AGENT_UPDATE_CODE) {
-        Ok(Some(version)) => Some(version.to_string_without_revision()),
+    let agent_version = match get_installed_agent_version() {
+        Ok(Some(version)) => Some(version.fmt_without_revision()),
         Ok(None) => None,
         Err(error) => {
             warn!(error = %error, "Failed to get Agent version");
             None
         }
     };
-    #[cfg(not(windows))]
-    let agent_version = None;
 
     Ok(Json(Heartbeat {
         id: conf.id,

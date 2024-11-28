@@ -3,6 +3,8 @@ mod update_json;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(not(windows))]
+use std::convert::Infallible;
 use std::env;
 
 use camino::Utf8PathBuf;
@@ -10,6 +12,16 @@ use cfg_if::cfg_if;
 
 pub use date_version::{DateVersion, DateVersionError};
 pub use update_json::{ProductUpdateInfo, UpdateJson, VersionSpecification};
+
+#[cfg(windows)]
+pub fn get_installed_agent_version() -> Result<Option<DateVersion>, windows::registry::RegistryError> {
+    windows::registry::get_installed_product_version(windows::AGENT_UPDATE_CODE)
+}
+
+#[cfg(not(windows))]
+pub fn get_installed_agent_version() -> Result<Option<DateVersion>, Infallible> {
+    Ok(None)
+}
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {

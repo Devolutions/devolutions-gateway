@@ -19,7 +19,7 @@ pub struct DateVersion {
 }
 
 impl DateVersion {
-    pub fn to_string_without_revision(&self) -> String {
+    pub fn fmt_without_revision(&self) -> String {
         format!("{}.{}.{}", self.year, self.month, self.day)
     }
 }
