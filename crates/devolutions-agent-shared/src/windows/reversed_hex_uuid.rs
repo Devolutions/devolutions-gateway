@@ -3,7 +3,7 @@
 use std::str::FromStr;
 use uuid::Uuid;
 
-const UUID_CHARS: usize = uuid::fmt::Simple::LENGTH;
+const REVERSED_UUID_STR_LENGTH: usize = uuid::fmt::Simple::LENGTH;
 const UUID_REVERSING_PATTERN: &[usize] = &[8, 4, 4, 2, 2, 2, 2, 2, 2, 2, 2];
 
 #[derive(Debug, thiserror::Error)]
@@ -17,10 +17,10 @@ pub struct InvalidReversedHexUuid {
 ///
 /// e.g.: `{82318d3c-811f-4d5d-9a82-b7c31b076755}` => `C3D81328F118D5D4A9287B3CB1707655`
 pub(crate) fn uuid_to_reversed_hex(uuid: Uuid) -> String {
-    let mut simple_uuid_buffer = [0u8; UUID_CHARS];
+    let mut simple_uuid_buffer = [0u8; REVERSED_UUID_STR_LENGTH];
     let mut hex_chars_slice: &str = uuid.as_simple().encode_upper(&mut simple_uuid_buffer);
 
-    let mut reversed_hex = String::with_capacity(UUID_CHARS);
+    let mut reversed_hex = String::with_capacity(REVERSED_UUID_STR_LENGTH);
 
     for block_len in UUID_REVERSING_PATTERN.iter() {
         let (block, rest) = hex_chars_slice.split_at(*block_len);
@@ -29,7 +29,7 @@ pub(crate) fn uuid_to_reversed_hex(uuid: Uuid) -> String {
     }
 
     assert!(
-        reversed_hex.len() == UUID_CHARS,
+        reversed_hex.len() == REVERSED_UUID_STR_LENGTH,
         "UUID_REVERSING_PATTERN should ensure output length"
     );
 
@@ -40,7 +40,7 @@ pub(crate) fn uuid_to_reversed_hex(uuid: Uuid) -> String {
 ///
 /// e.g.: `C3D81328F118D5D4A9287B3CB1707655` => `{82318d3c-811f-4d5d-9a82-b7c31b076755}`
 pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<Uuid, InvalidReversedHexUuid> {
-    if hex.len() != UUID_CHARS {
+    if hex.len() != REVERSED_UUID_STR_LENGTH {
         return Err(InvalidReversedHexUuid { uuid: hex.to_owned() });
     }
 
@@ -53,7 +53,7 @@ pub(crate) fn reversed_hex_to_uuid(mut hex: &str) -> Result<Uuid, InvalidReverse
     }
 
     assert!(
-        uuid_chars.len() == UUID_CHARS,
+        uuid_chars.len() == REVERSED_UUID_STR_LENGTH,
         "UUID_REVERSING_PATTERN should ensure output length"
     );
 

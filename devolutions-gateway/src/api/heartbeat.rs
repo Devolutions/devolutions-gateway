@@ -16,7 +16,7 @@ pub(crate) struct Heartbeat {
     hostname: String,
     /// Gateway service version
     version: &'static str,
-    /// Agent version (If installed)
+    /// Agent version, if installed
     #[serde(skip_serializing_if = "Option::is_none")]
     agent_version: Option<String>,
     /// Number of running sessions
