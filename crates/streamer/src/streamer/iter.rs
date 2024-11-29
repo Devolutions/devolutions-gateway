@@ -214,7 +214,7 @@ where
 
     pub(crate) fn skip(&mut self, number: u32) -> anyhow::Result<()> {
         for _ in 0..number {
-            let _ = self.next().context("Failed to skip tag")??;
+            let _ = self.next().context("failed to skip tag")??;
         }
 
         Ok(())

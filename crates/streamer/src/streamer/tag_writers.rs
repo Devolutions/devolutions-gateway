@@ -43,7 +43,7 @@ where
         } else {
             self.writer.write(tag)
         }
-        .with_context(|| format!("Failed to write tag: {}", mastroka_spec_name(tag)))?;
+        .with_context(|| format!("failed to write tag: {}", mastroka_spec_name(tag)))?;
 
         Ok(())
     }
@@ -329,7 +329,7 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
                     }
                     "V_VP9" | "vp9" => codec = Some(VpxCodec::VP9),
                     _ => {
-                        anyhow::bail!("Unknown codec: {}", codec_id);
+                        anyhow::bail!("unknown codec: {}", codec_id);
                     }
                 },
                 MatroskaSpec::PixelWidth(w) => {

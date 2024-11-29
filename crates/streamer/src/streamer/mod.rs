@@ -92,7 +92,7 @@ pub fn webm_stream(
     // However, the WebM file emitted by the CaptureStream API in Chrome does not adhere to this requirement.
     match webm_itr.rollback_to_last_key_frame()? {
         iter::LastKeyFrameInfo::NotMet { .. } => {
-            anyhow::bail!("No key frame found in the last cluster");
+            anyhow::bail!("no key frame found in the last cluster");
         }
         iter::LastKeyFrameInfo::Met { cluster_timestamp, .. } => {
             encode_writer.write(MatroskaSpec::Timestamp(cluster_timestamp))?;
