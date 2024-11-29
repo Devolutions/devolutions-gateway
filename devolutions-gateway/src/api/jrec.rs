@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -44,10 +45,11 @@ struct JrecPushQueryParam {
     file_type: RecordingFileType,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JrecListQueryParam {
-    active: Option<bool>,
+    #[serde(default)]
+    active: bool,
 }
 
 async fn jrec_push(
@@ -216,7 +218,7 @@ async fn jrec_delete_many(
     }
 
     let recording_path = conf_handle.get_conf().recording_path.clone();
-    let active_recordings = recordings.active_recordings.clone();
+    let active_recordings = recordings.active_recordings.cloned();
 
     // Given the threshold of 50,000, it's high unlikely that check_preconditions takes more than 250ms to execute.
     // It typically takes between 50ms and 100ms depending on the hardware.
@@ -255,9 +257,9 @@ async fn jrec_delete_many(
     fn process_request(
         delete_list: Vec<Uuid>,
         recording_path: &Utf8Path,
-        active_recordings: &ActiveRecordings,
+        active_recordings: &HashSet<Uuid>,
     ) -> Result<ProcessResult, HttpError> {
-        let conflict = delete_list.iter().any(|id| active_recordings.contains(*id));
+        let conflict = delete_list.iter().any(|id| active_recordings.contains(id));
 
         if conflict {
             return Err(HttpErrorBuilder::new(StatusCode::CONFLICT)
@@ -359,10 +361,8 @@ pub(crate) async fn list_recordings(
     Query(query): Query<JrecListQueryParam>,
     _scope: RecordingsReadScope,
 ) -> Result<Json<Vec<Uuid>>, HttpError> {
-    if let Some(active) = query.active {
-        if active {
-            return list_active_recordings(recordings).await;
-        }
+    if query.active {
+        return list_active_recordings(recordings).await;
     }
 
     let conf = conf_handle.get_conf();
@@ -398,7 +398,7 @@ pub(crate) async fn list_recordings(
 }
 
 async fn list_active_recordings(recordings: RecordingMessageSender) -> Result<Json<Vec<Uuid>>, HttpError> {
-    let recordings = recordings.active_recordings.copy_set().into_iter().collect();
+    let recordings = recordings.active_recordings.cloned().into_iter().collect();
     Ok(Json(recordings))
 }
 
