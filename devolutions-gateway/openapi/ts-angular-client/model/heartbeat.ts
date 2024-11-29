@@ -11,6 +11,10 @@
 
 export interface Heartbeat { 
     /**
+     * Agent version, if installed
+     */
+    agent_version?: string | null;
+    /**
      * This Gateway\'s hostname
      */
     hostname: string;

@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2024.3.4
+2024.3.5
 :toc: left
 :numbered:
 :toclevels: 4
@@ -532,7 +532,7 @@ Mass-deletes recordings stored on this instance
 
 ===== Description
 
-If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+If you try to delete more than 50,000 recordings at once, you should split the list into multiple requests. Bigger payloads will be rejected with 413 Payload Too Large.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
 
 
 // markup not found, no include::{specDir}jet/jrec/delete/DELETE/spec.adoc[opts=optional]
@@ -610,6 +610,11 @@ If you try to delete more than 1,000,000 recordings at once, you should split th
 
 | 406
 | A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted)
+|  <<>>
+
+
+| 413
+| Request payload is too large
 |  <<>>
 
 |===
@@ -1859,6 +1864,13 @@ Service configuration diagnostic
 [cols="2,1,1,2,4,1"]
 |===
 | Field Name| Required| Nullable | Type| Description | Format
+
+| agent_version
+| 
+| X
+|   String  
+| Agent version, if installed
+|     
 
 | hostname
 | X
