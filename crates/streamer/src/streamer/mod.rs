@@ -56,7 +56,7 @@ pub fn webm_stream(
 
     // we run to the last cluster, skipping everything that has been played
     while let Some(tag) = webm_itr.next() {
-        if let Err(IteratorError::InnerIteratorError(TagIteratorError::UnexpectedEOF { .. })) = tag {
+        if let Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. })) = tag {
             break;
         }
     }
@@ -100,10 +100,10 @@ pub fn webm_stream(
 
     loop {
         match webm_itr.next() {
-            Some(Err(IteratorError::InnerIteratorError(TagIteratorError::ReadError { source }))) => {
+            Some(Err(IteratorError::InnerError(TagIteratorError::ReadError { source }))) => {
                 return Err(source.into());
             }
-            Some(Err(IteratorError::InnerIteratorError(TagIteratorError::UnexpectedEOF {
+            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF {
                 tag_start,
                 tag_id,
                 tag_size,

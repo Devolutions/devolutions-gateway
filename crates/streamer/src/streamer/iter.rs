@@ -50,13 +50,15 @@ pub(crate) struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
 #[derive(Debug, Error)]
 pub(crate) enum IteratorError {
     #[error("Inner Iterator Error: {0}")]
-    InnerIteratorError(#[from] TagIteratorError),
+    InnerError(#[from] TagIteratorError),
     #[error("Position Correction Error: {before_correct_position}")]
     PositionCorrectionError { before_correct_position: u64 },
     #[error("Value Expected: {0}")]
     ValueExpected(&'static str),
     #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
+    #[error("Webm Coercion Error: {0}")]
+    WebmCoercionError(#[from] webm_iterable::errors::WebmCoercionError),
 }
 
 impl<R> WebmPositionedIterator<R>
@@ -127,32 +129,38 @@ where
                 return result.map(|result| result.map_err(|err| err.into()));
             }
 
-            if self.is_key_frame(tag) {
-                info!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
-                match self.last_key_frame_info {
-                    LastKeyFrameInfo::NotMet {
-                        cluster_timestamp,
-                        cluster_start_position,
-                    } => {
-                        let Some(cluster_timestamp) = cluster_timestamp else {
-                            return Some(Err(IteratorError::ValueExpected("cluster_timestamp")));
-                        };
-
-                        let Some(cluster_start_position) = cluster_start_position else {
-                            return Some(Err(IteratorError::ValueExpected("cluster_start_position")));
-                        };
-
-                        self.last_key_frame_info = LastKeyFrameInfo::Met {
-                            position: self.last_tag_position,
+            match Self::is_key_frame(tag) {
+                Err(e) => {
+                    return Some(Err(e));
+                }
+                Ok(false) => {}
+                Ok(true) => {
+                    info!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
+                    match self.last_key_frame_info {
+                        LastKeyFrameInfo::NotMet {
                             cluster_timestamp,
                             cluster_start_position,
+                        } => {
+                            let Some(cluster_timestamp) = cluster_timestamp else {
+                                return Some(Err(IteratorError::ValueExpected("cluster_timestamp")));
+                            };
+
+                            let Some(cluster_start_position) = cluster_start_position else {
+                                return Some(Err(IteratorError::ValueExpected("cluster_start_position")));
+                            };
+
+                            self.last_key_frame_info = LastKeyFrameInfo::Met {
+                                position: self.last_tag_position,
+                                cluster_timestamp,
+                                cluster_start_position,
+                            }
+                        }
+                        LastKeyFrameInfo::Met { ref mut position, .. } => {
+                            *position = self.last_tag_position;
                         }
                     }
-                    LastKeyFrameInfo::Met { ref mut position, .. } => {
-                        *position = self.last_tag_position;
-                    }
                 }
-            }
+            };
 
             if let Some(Ok(MatroskaSpec::Cluster(Master::Start))) = &result {
                 self.last_cluster_position = Some(self.last_tag_position);
@@ -270,7 +278,7 @@ where
         Ok(())
     }
 
-    fn is_key_frame(&self, tag: &MatroskaSpec) -> bool {
+    fn is_key_frame(tag: &MatroskaSpec) -> Result<bool, IteratorError> {
         match tag {
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let block = children
@@ -282,18 +290,20 @@ where
                             None
                         }
                     })
-                    .unwrap();
+                    .ok_or(IteratorError::ValueExpected(
+                        "MatroskaSpec::Block not found in MatroskaSpec::BlockGroup",
+                    ))?;
 
-                let block = Block::try_from(block).unwrap();
-                let frame = block.read_frame_data().unwrap();
+                let block = Block::try_from(block)?;
+                let frame = block.read_frame_data()?;
 
-                frame.into_iter().any(|frame| is_key_frame(frame.data))
+                Ok(frame.into_iter().any(|frame| is_key_frame(frame.data)))
             }
             MatroskaSpec::SimpleBlock(data) => {
-                let simple_block = SimpleBlock::try_from(data).unwrap();
-                simple_block.keyframe
+                let simple_block = SimpleBlock::try_from(data)?;
+                Ok(simple_block.keyframe)
             }
-            _ => false,
+            _ => Ok(false),
         }
     }
 }

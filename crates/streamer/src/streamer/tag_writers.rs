@@ -99,8 +99,8 @@ where
     fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<Self> {
         let decoder = VpxDecoder::builder()
             .threads(config.threads)
-            .width(config.width as u32)
-            .height(config.height as u32)
+            .width(config.width)
+            .height(config.height)
             .codec(config.codec)
             .build()?;
 
@@ -108,8 +108,8 @@ where
             .timebase_num(1)
             .timebase_den(1000)
             .codec(config.codec)
-            .width(config.width as u32)
-            .height(config.height as u32)
+            .width(config.width)
+            .height(config.height)
             .threads(config.threads)
             .bitrate(256 * 1024)
             .build()?;
@@ -157,7 +157,7 @@ where
         Ok(WriterResult::Continue)
     }
 
-    fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Vec<u8>> {
+    fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Option<Vec<u8>>> {
         let frame = video_block.get_frame()?;
         self.decoder.decode(&frame)?;
         {
@@ -169,13 +169,18 @@ where
                 if is_key_frame { VPX_EFLAG_FORCE_KF } else { 0 },
             )?;
         }
-        let frame: Vec<u8> = self.encoder.next_frame()?.unwrap();
+        let frame = self.encoder.next_frame()?;
 
         Ok(frame)
     }
 
     fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
         let frame = self.reencode(current_video_block, true)?;
+        let Some(frame) = frame else {
+            // No frame available from the encoder, proceed to the next
+            return Ok(());
+        };
+
         let block = match self.cut_block_state {
             CutBlockState::HaventMet => {
                 return Ok(());
@@ -205,14 +210,18 @@ where
                 }
                 let relative_timestamp = current_video_block.absolute_timestamp()?
                     - cut_block_absolute_time
-                    - self.last_cluster_relative_time().unwrap();
+                    - self
+                        .last_cluster_relative_time()
+                        .context("missing last cluster relative time")?;
 
                 trace!(
                     relative_timestamp,
                     relative_timestamp,
                     cut_block_absolute_time,
                     current_block_absolute_timestamp = current_video_block.absolute_timestamp()?,
-                    last_cluster_relative_time = self.last_cluster_relative_time().unwrap()
+                    last_cluster_relative_time = self
+                        .last_cluster_relative_time()
+                        .context("missing last cluster relative time")?,
                 );
                 let timestamp = i16::try_from(relative_timestamp)?;
 
@@ -277,7 +286,7 @@ where
             // the block time relative to last_cluster_relative_time
             if block_absolute_time - (cut_block_absolute_time + last_cluster_relative_time)
                 // i16::Max can always convert to u64
-                > u64::try_from(i16::MAX).unwrap()
+                > u64::try_from(i16::MAX).expect("unreachable, i16::MAX is always a valid u64")
             {
                 return true;
             }
@@ -293,8 +302,8 @@ where
 #[derive(Debug)]
 pub(crate) struct EncodeWriterConfig {
     pub threads: u32,
-    pub width: u64,
-    pub height: u64,
+    pub width: u32,
+    pub height: u32,
     pub codec: VpxCodec,
 }
 
@@ -332,9 +341,13 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
 
         let config = EncodeWriterConfig {
             threads: config.encoder_threads,
-            width: width.ok_or(anyhow::anyhow!("No width specified"))?,
-            height: height.ok_or(anyhow::anyhow!("No height specified"))?,
-            codec: codec.ok_or(anyhow::anyhow!("No codec specified"))?,
+            width: width
+                .map(u32::try_from)
+                .ok_or_else(|| anyhow::anyhow!("No width specified"))??,
+            height: height
+                .map(u32::try_from)
+                .ok_or_else(|| anyhow::anyhow!("No height specified"))??,
+            codec: codec.ok_or_else(|| anyhow::anyhow!("No codec specified"))?,
         };
 
         Ok(config)

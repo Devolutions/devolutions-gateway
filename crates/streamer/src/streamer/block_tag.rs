@@ -86,7 +86,7 @@ impl VideoBlock {
     pub(crate) fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
         let frame: Vec<_> = match &self.block_tag {
             BlockTag::SimpleBlock(data) => {
-                let simple_block = SimpleBlock::try_from(data).unwrap();
+                let simple_block = SimpleBlock::try_from(data)?;
                 simple_block
                     .read_frame_data()?
                     .into_iter()

@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{ActiveRecordings, RecordingMessageSender};
+use crate::recording::RecordingMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
@@ -362,7 +362,8 @@ pub(crate) async fn list_recordings(
     _scope: RecordingsReadScope,
 ) -> Result<Json<Vec<Uuid>>, HttpError> {
     if query.active {
-        return list_active_recordings(recordings).await;
+        let recordings = recordings.active_recordings.cloned().into_iter().collect();
+        return Ok(Json(recordings));
     }
 
     let conf = conf_handle.get_conf();
@@ -395,11 +396,6 @@ pub(crate) async fn list_recordings(
 
         Ok(list)
     }
-}
-
-async fn list_active_recordings(recordings: RecordingMessageSender) -> Result<Json<Vec<Uuid>>, HttpError> {
-    let recordings = recordings.active_recordings.cloned().into_iter().collect();
-    Ok(Json(recordings))
 }
 
 /// Retrieves a recording file for a given session

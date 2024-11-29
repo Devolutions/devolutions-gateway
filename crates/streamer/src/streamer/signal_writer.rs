@@ -8,7 +8,7 @@ pub struct SignalWriter<W> {
 impl<W> SignalWriter<W> {
     pub fn new(writer: W) -> (Self, Arc<tokio::sync::Notify>) {
         let notify = Arc::new(tokio::sync::Notify::new());
-        let clone = notify.clone();
+        let clone = Arc::clone(&notify);
         (Self { writer, notify }, clone)
     }
 }
