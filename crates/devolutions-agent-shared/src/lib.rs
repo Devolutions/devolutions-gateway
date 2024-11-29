@@ -1,6 +1,10 @@
 mod date_version;
 mod update_json;
+#[cfg(windows)]
+pub mod windows;
 
+#[cfg(not(windows))]
+use std::convert::Infallible;
 use std::env;
 
 use camino::Utf8PathBuf;
@@ -23,6 +27,26 @@ cfg_if! {
         const PROGRAM_DIR: &str = "agent";
         const APPLICATION_DIR: &str = "devolutions-agent";
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to get package info")]
+pub struct PackageInfoError {
+    #[cfg(windows)]
+    #[from]
+    source: windows::registry::RegistryError,
+}
+
+#[cfg(windows)]
+pub fn get_installed_agent_version() -> Result<Option<DateVersion>, PackageInfoError> {
+    Ok(windows::registry::get_installed_product_version(
+        windows::AGENT_UPDATE_CODE,
+    )?)
+}
+
+#[cfg(not(windows))]
+pub fn get_installed_agent_version() -> Result<Option<DateVersion>, PackageInfoError> {
+    Ok(None)
 }
 
 pub fn get_data_dir() -> Utf8PathBuf {

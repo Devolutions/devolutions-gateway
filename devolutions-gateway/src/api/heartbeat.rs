@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::extract::HeartbeatReadScope;
 use crate::http::HttpError;
 use crate::DgwState;
+use devolutions_agent_shared::get_installed_agent_version;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
@@ -15,6 +16,9 @@ pub(crate) struct Heartbeat {
     hostname: String,
     /// Gateway service version
     version: &'static str,
+    /// Agent version, if installed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_version: Option<String>,
     /// Number of running sessions
     running_session_count: usize,
     /// Whether the recording storage is writeable or not.
@@ -113,10 +117,20 @@ pub(super) async fn get_heartbeat(
         (None, None)
     };
 
+    let agent_version = match get_installed_agent_version() {
+        Ok(Some(version)) => Some(version.fmt_without_revision()),
+        Ok(None) => None,
+        Err(error) => {
+            warn!(error = %error, "Failed to get Agent version");
+            None
+        }
+    };
+
     Ok(Json(Heartbeat {
         id: conf.id,
         hostname: conf.hostname.clone(),
         version: env!("CARGO_PKG_VERSION"),
+        agent_version,
         running_session_count,
         recording_storage_is_writeable,
         recording_storage_total_space,

@@ -1,5 +1,6 @@
 use camino::Utf8PathBuf;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::updater::Product;
 
@@ -22,17 +23,15 @@ pub(crate) enum UpdaterError {
     #[error("failed to install `{product}` MSI. Path: `{msi_path}`")]
     MsiInstall { product: Product, msi_path: Utf8PathBuf },
     #[error("failed to uninstall `{product}` MSI. Produc code: `{product_code}`")]
-    MsiUninstall { product: Product, product_code: String },
+    MsiUninstall { product: Product, product_code: Uuid },
     #[error("ACL string `{acl}` is invalid")]
     AclString { acl: String },
     #[error("failed to set permissions for file: `{file_path}`")]
     SetFilePermissions { file_path: Utf8PathBuf },
-    #[error("invalid UUID `{uuid}`")]
-    Uuid { uuid: String },
     #[error("invalid productinfo.htm format")]
     ProductInfo,
-    #[error("windows registry error")]
-    WindowsRegistry(std::io::Error),
+    #[error(transparent)]
+    WindowsRegistry(#[from] devolutions_agent_shared::windows::registry::RegistryError),
     #[error("missing registry value")]
     MissingRegistryValue,
     #[error("failed to download update")]
