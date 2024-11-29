@@ -45,7 +45,7 @@ struct JrecPushQueryParam {
     file_type: RecordingFileType,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JrecListQueryParam {
     #[serde(default)]
