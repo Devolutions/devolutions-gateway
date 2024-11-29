@@ -46,7 +46,7 @@ impl VideoBlock {
                             None
                         }
                     })
-                    .context("Block not found inside block group")?;
+                    .context("MatroskaSpec::Block not found inside block group")?;
 
                 let block = Block::try_from(block)?;
                 let timestamp = block.timestamp;
@@ -103,7 +103,7 @@ impl VideoBlock {
                             None
                         }
                     })
-                    .context("Block not found inside block group")?;
+                    .context("MatroskaSpec::Block not found inside block group")?;
 
                 let block = Block::try_from(block)?;
 
