@@ -186,7 +186,7 @@ fn gateway_service_main(
 
     loop {
         if let Ok(control_code) = rx.recv() {
-            info!(%control_code, "Received control code");
+            debug!(%control_code, "Received control code");
 
             if let ServiceEvent::Stop = control_code {
                 service.stop();
