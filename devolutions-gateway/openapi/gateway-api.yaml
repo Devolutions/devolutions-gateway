@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.3.4
+  version: 2024.3.5
 paths:
   /jet/config:
     patch:
@@ -150,8 +150,8 @@ paths:
       - Jrec
       summary: Mass-deletes recordings stored on this instance
       description: |-
-        If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests
-        to avoid timing out during the processing of the request.
+        If you try to delete more than 50,000 recordings at once, you should split the list into multiple requests.
+        Bigger payloads will be rejected with 413 Payload Too Large.
 
         The request processing consist in
         1) checking if one of the recording is active,
@@ -188,6 +188,8 @@ paths:
           description: Insufficient permissions
         '406':
           description: A recording is still ongoing and can't be deleted yet (nothing is deleted)
+        '413':
+          description: Request payload is too large
       security:
       - scope_token:
         - gateway.recording.delete
@@ -611,6 +613,10 @@ components:
       - version
       - running_session_count
       properties:
+        agent_version:
+          type: string
+          description: Agent version, if installed
+          nullable: true
         hostname:
           type: string
           description: This Gateway's hostname

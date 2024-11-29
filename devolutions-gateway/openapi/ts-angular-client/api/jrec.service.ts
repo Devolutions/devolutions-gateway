@@ -92,7 +92,7 @@ export class JrecService {
 
     /**
      * Mass-deletes recordings stored on this instance
-     * If you try to delete more than 1,000,000 recordings at once, you should split the list into multiple requests to avoid timing out during the processing of the request.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
+     * If you try to delete more than 50,000 recordings at once, you should split the list into multiple requests. Bigger payloads will be rejected with 413 Payload Too Large.  The request processing consist in 1) checking if one of the recording is active, 2) counting the number of recordings not found on this instance.  When a recording is not found on this instance, a counter is incremented. This number is returned as part of the response. You may use this information to detect anomalies on your side. For instance, this suggests the list of recordings on your side is out of date, and you may want re-index.
      * @param requestBody JSON-encoded list of session IDs
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
