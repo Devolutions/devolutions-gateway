@@ -344,9 +344,9 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
 
         let config = EncodeWriterConfig {
             threads: config.encoder_threads,
-            width: width.map(u32::try_from).context("No width specified")??,
-            height: height.map(u32::try_from).context("No height specified")??,
-            codec: codec.context("No codec specified")?,
+            width: width.map(u32::try_from).context("no width specified")??,
+            height: height.map(u32::try_from).context("no height specified")??,
+            codec: codec.context("no codec specified")?,
         };
 
         Ok(config)
