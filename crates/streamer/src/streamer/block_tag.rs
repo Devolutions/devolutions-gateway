@@ -68,7 +68,7 @@ impl VideoBlock {
                     block_tag: BlockTag::SimpleBlock(data),
                 }
             }
-            _ => anyhow::bail!("BlockGroup expected, got {:?}", tag),
+            _ => anyhow::bail!("blockGroup expected, got {:?}", tag),
         };
 
         Ok(result)

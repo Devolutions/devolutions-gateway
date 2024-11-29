@@ -272,7 +272,7 @@ where
 
         file.seek(std::io::SeekFrom::Start(current_position))?;
         if !found {
-            anyhow::bail!("No EBML Element of BlockGroup Found");
+            anyhow::bail!("no EBML Element of BlockGroup Found");
         }
 
         Ok(())

@@ -146,7 +146,7 @@ where
             MatroskaSpec::BlockGroup(Master::Full(_)) | MatroskaSpec::SimpleBlock(_) => {}
             MatroskaSpec::BlockGroup(Master::End) | MatroskaSpec::BlockGroup(Master::Start) => {
                 // If this happens, check the webm iterator cache tag parameter on new function
-                anyhow::bail!("BlockGroup start and end tags are not supported");
+                anyhow::bail!("blockGroup start and end tags are not supported");
             }
             _ => {
                 return Ok(WriterResult::Continue);
