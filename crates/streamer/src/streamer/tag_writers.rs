@@ -58,20 +58,23 @@ enum CutBlockState {
     HaventMet,
     AtCutBlock,
     // All time here are in unit of millisecond
-    // |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
-    //                                        ￪                                    ￪
-    // (absolute timeline)             cut_block_absolute_time            last_block_absolute_time
-    //                                        ￪                                    ↓
-    //                            |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
-    //                                        ￪                          ￪                               ￪
-    // (relative timeline)             last_cluster_relative_time        ￪                          last_cluster_relative_time
-    //                                        ￪--------------------------￪                               ￪
-    //                                        ￪                     block timestamp                      ￪
-    //                                        ￪  (relative to it's cluster)                              ￪
-    //                                        ￪----------------------------------------------------------￪
-    //                                             (relative to the cut_block_absolute_time)        last_cluster_relative_time
-    //
-    //
+    //             |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
+    //                        ￪                           ￪                                    ￪
+    //(absolute timeline)     ￪                 cut_block_absolute_time            last_block_absolute_time
+    //                        ￪                           ￪                                    ↓
+    //                        ￪               |headers||Cluster Start||Blocks|....|Blocks|..|Blocks||Cluster End||Cluster Start||Blocks|.......|Blocks||Cluster End|.......
+    //                        ￪                           ￪                          ￪                               ￪
+    //(relative timeline)     ￪           (1st) last_cluster_relative_time           ￪            (2nd) last_cluster_relative_time
+    //                        ￪                           ￪--------------------------￪                               ￪
+    //                        ￪                           ￪                     block timestamp                      ￪
+    //                        ￪                           ￪  (relative to it's cluster)                              ￪
+    //                        ￪                           ￪----------------------------------------------------------￪
+    //                        ￪                           ￪    (relative to the cut_block_absolute_time)        last_cluster_relative_time
+    //    begining of the absolute timeline               ￪
+    //                        ￪               begining of the relatve timeline
+    //                        ￪---------------------------￪
+    //                        offset between the two timelines
+    //                        defined by the cut_block_absolute_time
     Met {
         cut_block_absolute_time: u64,
         // This is the cluster timestamp for the last cluster::timestamp we wrote
