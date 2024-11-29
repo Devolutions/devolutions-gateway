@@ -87,8 +87,9 @@ pub fn webm_stream(
 
     let mut encode_writer = header_writer.into_encoded_writer(encode_writer_config)?;
 
-    // We start muxing from the last key frame
-    // In the WebM project
+    // Start muxing from the last key frame.
+    // The WebM project requires the muxer to ensure the first Block/SimpleBlock is a keyframe.
+    // However, the WebM file emitted by the CaptureStream API in Chrome does not adhere to this requirement.
     match webm_itr.rollback_to_last_key_frame()? {
         iter::LastKeyFrameInfo::NotMet { .. } => {
             anyhow::bail!("No key frame found in the last cluster");
