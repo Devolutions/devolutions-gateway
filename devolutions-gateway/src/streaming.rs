@@ -22,11 +22,11 @@ pub(crate) async fn stream_file(
 ) -> anyhow::Result<Response<Body>> {
     // 1.identify the file type
     if path.extension() != Some(RecordingFileType::WebM.extension()) {
-        return Err(anyhow::anyhow!("Invalid file type"));
+        anyhow::bail!("invalid file type");
     }
     // 2.if the file is actively being recorded, then proceed
     let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(recording_id).await else {
-        return Err(anyhow::anyhow!("File is not being recorded"));
+        anyhow::bail!("file is not being recorded");
     };
 
     let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;

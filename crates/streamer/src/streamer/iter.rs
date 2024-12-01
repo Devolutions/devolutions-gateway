@@ -194,7 +194,7 @@ where
     }
 
     pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
-        let inner = self.inner.take().ok_or_else(|| anyhow::anyhow!("No inner iterator"))?;
+        let inner = self.inner.take().context("no inner iterator")?;
         let mut file = inner.into_inner();
         file.reopen()?;
         file.seek(std::io::SeekFrom::Start(self.last_tag_position as u64))?;
