@@ -43,9 +43,7 @@ pub(crate) async fn stream_file(
                 streamer::StreamingConfig { encoder_threads: 4 },
                 move || {
                     let (tx, rx) = tokio::sync::oneshot::channel();
-                    recordings
-                        .add_new_chunk_listener(recording_id, tx)
-                        .expect("Failed to send on_appended message"); // early development
+                    recordings.add_new_chunk_listener(recording_id, tx);
                     rx
                 },
             )

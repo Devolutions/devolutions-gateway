@@ -321,7 +321,7 @@ impl RecordingMessageSender {
             .context("couldn't send UpdateRecordingPolicy message")
     }
 
-    pub(crate) fn add_new_chunk_listener(&self, recording_id: Uuid, tx: oneshot::Sender<()>) -> anyhow::Result<()> {
+    pub(crate) fn add_new_chunk_listener(&self, recording_id: Uuid, tx: oneshot::Sender<()>) {
         let mut lock = self.flush_map.lock();
         let senders = lock.entry(recording_id);
         let senders = senders.or_default();
