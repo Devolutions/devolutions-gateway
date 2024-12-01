@@ -18,7 +18,7 @@ $tmpFolder = [System.IO.Path]::GetTempPath() + [System.Guid]::NewGuid()
 Write-Host "Temporary directory: $tmpFolder"
 New-Item -ItemType Directory -Path "$tmpFolder" | Out-Null
 
-$downloadUrl = "https://github.com/Devolutions/cadeau/releases/download/v2024.7.23.0/cadeau-$Platform-$Architecture.zip"
+$downloadUrl = "https://github.com/Devolutions/cadeau/releases/download/v2024.11.22.0/cadeau-$Platform-$Architecture.zip"
 Write-Host "Download URL: $downloadUrl"
 
 try
