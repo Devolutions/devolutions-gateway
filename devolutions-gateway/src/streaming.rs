@@ -55,10 +55,10 @@ pub(crate) async fn stream_file(
 
         match streaming_result {
             Err(e) => {
-                error!(?e, "streaming file task join failed");
+                error!(?e, "Streaming file task join failed");
             }
             Ok(Err(e)) => {
-                error!(?e, "streaming file failed");
+                error!(?e, "Streaming file failed");
             }
             _ => {}
         };
