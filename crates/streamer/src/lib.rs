@@ -1,8 +1,10 @@
+pub mod config;
 pub mod debug;
 pub mod reopenable;
 pub(crate) mod streamer;
 
+pub use config::StreamingConfig;
 pub use streamer::reopenable_file::ReOpenableFile;
 pub use streamer::signal_writer::SignalWriter;
-pub use streamer::{webm_stream, Signal, StreamingConfig};
+pub use streamer::{webm_stream, Signal};
 use webm_iterable as _;

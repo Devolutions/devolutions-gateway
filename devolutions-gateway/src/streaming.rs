@@ -1,6 +1,6 @@
 use anyhow::Context;
 use axum::{body::Body, response::Response};
-use streamer::{webm_stream, ReOpenableFile};
+use streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 use uuid::Uuid;
 
 use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
@@ -39,8 +39,9 @@ pub(crate) async fn stream_file(
                 websocket_stream,
                 streaming_file,
                 ShutdownSignal(shutdown_signal),
-                // Question: Do we need to make it configurable
-                streamer::StreamingConfig { encoder_threads: 4 },
+                streamer::StreamingConfig {
+                    encoder_threads: CpuCount::default(),
+                },
                 move || {
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     recordings.add_new_chunk_listener(recording_id, tx);

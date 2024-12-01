@@ -6,9 +6,7 @@ use std::{env, path::Path, process::exit};
 use anyhow::Context;
 use cadeau::xmf;
 use local_websocket::create_local_websocket;
-use streamer::{
-    ReOpenableFile, {webm_stream, StreamingConfig},
-};
+use streamer::{config::CpuCount, webm_stream, ReOpenableFile, StreamingConfig};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::watch::Sender,
@@ -77,7 +75,9 @@ async fn main() -> anyhow::Result<()> {
             server,
             intermediate_file,
             shutdown_signal,
-            StreamingConfig { encoder_threads: 1 },
+            StreamingConfig {
+                encoder_threads: CpuCount::default(),
+            },
             || {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 let mut file_written_receiver = file_written_receiver.resubscribe();

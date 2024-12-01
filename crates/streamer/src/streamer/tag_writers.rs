@@ -7,9 +7,9 @@ use webm_iterable::{
     WebmWriter, WriteOptions,
 };
 
-use crate::debug::mastroka_spec_name;
+use crate::{debug::mastroka_spec_name, StreamingConfig};
 
-use super::{block_tag::VideoBlock, StreamingConfig};
+use super::block_tag::VideoBlock;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
 
@@ -343,7 +343,11 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
         }
 
         let config = EncodeWriterConfig {
-            threads: config.encoder_threads,
+            threads: config
+                .encoder_threads
+                .value
+                .try_into()
+                .context("invalid thread count")?,
             width: width.map(u32::try_from).context("no width specified")??,
             height: height.map(u32::try_from).context("no height specified")??,
             codec: codec.context("no codec specified")?,
