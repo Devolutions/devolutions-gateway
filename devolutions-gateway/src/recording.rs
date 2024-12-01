@@ -326,7 +326,6 @@ impl RecordingMessageSender {
         let senders = lock.entry(recording_id);
         let senders = senders.or_default();
         senders.push(tx);
-        Ok(())
     }
 
     pub(crate) fn new_chunk_appended(&self, recording_id: Uuid) -> anyhow::Result<()> {

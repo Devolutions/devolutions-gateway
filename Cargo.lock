@@ -88,7 +88,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b0e3b97a21e41ec5c19bfd9b4fc1f7086be104f8b988681230247ffc91cc8ed"
 dependencies = [
- "axum 0.7.9",
+ "axum 0.7.7",
  "axum-extra",
  "bytes 1.8.0",
  "cfg-if",
@@ -348,9 +348,9 @@ dependencies = [
 
 [[package]]
 name = "axum"
-version = "0.7.9"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
+checksum = "504e3947307ac8326a5437504c517c4b56716c9d98fac0028c2acc7ca47d70ae"
 dependencies = [
  "async-trait",
  "axum-core 0.4.5",
@@ -427,7 +427,7 @@ version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73c3220b188aea709cf1b6c5f9b01c3bd936bb08bd2b5184a12b35ac8131b1f9"
 dependencies = [
- "axum 0.7.9",
+ "axum 0.7.7",
  "axum-core 0.4.5",
  "bytes 1.8.0",
  "futures-util",
@@ -1135,7 +1135,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "async-trait",
- "axum 0.7.9",
+ "axum 0.7.7",
  "axum-extra",
  "backoff",
  "bytes 1.8.0",
@@ -1242,7 +1242,7 @@ dependencies = [
  "aide",
  "anyhow",
  "async-trait",
- "axum 0.7.9",
+ "axum 0.7.7",
  "base16ct",
  "base64 0.22.1",
  "camino",
@@ -5325,7 +5325,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd34f36fe4c5ba9654417139a9b3a20d2e1de6012ee678ad14d240c22c78d8d6"
 dependencies = [
- "axum 0.7.9",
+ "axum 0.7.7",
  "futures",
  "percent-encoding",
  "serde",
@@ -5610,7 +5610,7 @@ name = "streamer"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "axum 0.7.9",
+ "axum 0.7.7",
  "cadeau",
  "futures",
  "futures-util",
