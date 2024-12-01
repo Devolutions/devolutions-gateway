@@ -193,7 +193,7 @@ fn parse_arg<'a>(mut value: &[&'a str]) -> anyhow::Result<Args<'a>> {
             }
             [] => break,
             _ => {
-                anyhow::bail!("Invalid argument");
+                anyhow::bail!("invalid argument");
             }
         }
     }
