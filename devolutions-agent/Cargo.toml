@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-agent"
-version = "2024.3.5"
+version = "2024.3.6"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]

@@ -2,6 +2,43 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2024.3.6 (2024-12-02)
+
+### Features
+
+- _dgw_: persistent job queue for crash resistance ([#1108](https://github.com/Devolutions/devolutions-gateway/issues/1108)) ([2420b07d21](https://github.com/Devolutions/devolutions-gateway/commit/2420b07d21b40b11a97f3094559740bd186156c3)) 
+
+  This year we added some background tasks in the Gateway that should
+  not be canceled, or if they are, should be restarted later. Essentially
+  two tasks: mass deletion of recordings (relatively important, but
+  it's always possible to launch indexing in DVLS in case of a problem)
+  and remuxing recordings to webm format (good to have). If the service
+  is killed in the middle of one of these operations, we should resume
+  execution on the next startup.
+  
+  This persisent job queue is implemented using Turso’s libSQL. Using
+  libSQL (or SQLite) for implementing the queue allow us to benefit from
+  all the work put into implementing a reliable, secure and performant
+  disk-based database instead of attempting to implement our own ad-hoc
+  storage and debugging it forever.
+
+- _dgw_: add agent version field to heartbeat API ([#1122](https://github.com/Devolutions/devolutions-gateway/issues/1122)) ([83fbddb5a4](https://github.com/Devolutions/devolutions-gateway/commit/83fbddb5a465587716b3ebcc1a8ab2c424b50559)) 
+
+- _jetsocat_: Schannel diagnostics for Windows ([#1125](https://github.com/Devolutions/devolutions-gateway/issues/1125)) ([991d856dea](https://github.com/Devolutions/devolutions-gateway/commit/991d856deaed652722b8b10cdeaf64fb7a3442c8)) ([ARC-255](https://devolutions.atlassian.net/browse/ARC-255)) 
+
+  These diagnostics will return detailed information about how Windows
+  will understand the specified certification chain.
+
+### Bug Fixes
+
+- _webapp_: session toolbar loading issues ([#1106](https://github.com/Devolutions/devolutions-gateway/issues/1106)) ([1442a1dc6f](https://github.com/Devolutions/devolutions-gateway/commit/1442a1dc6fa3871f7cf8463c89c80b587b8f82b2)) ([DGW-230
+
+- _webapp_: active session connection status in menu ([#1115](https://github.com/Devolutions/devolutions-gateway/issues/1115)) ([45f396af9c](https://github.com/Devolutions/devolutions-gateway/commit/45f396af9c6e151db4241841ae71fc9688dfe0bb)) ([DGW-231](https://devolutions.atlassian.net/browse/DGW-231)) 
+
+- _dgw_: improve logs of rdp extension module ([#1120](https://github.com/Devolutions/devolutions-gateway/issues/1120)) ([a068fb46e7](https://github.com/Devolutions/devolutions-gateway/commit/a068fb46e77499b1c91f1c343fd148aed1f0ec33)) 
+
+- _dgw_: lower the level of the control code log ([#1123](https://github.com/Devolutions/devolutions-gateway/issues/1123)) ([85850304f6](https://github.com/Devolutions/devolutions-gateway/commit/85850304f6d7a95104c4e9bf96ee997deaffd3b2)) 
+
 ## 2024.3.5 (2024-11-12)
 
 ### Bug Fixes
