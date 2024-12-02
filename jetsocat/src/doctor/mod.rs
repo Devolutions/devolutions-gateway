@@ -5,6 +5,8 @@ mod macros;
 mod native_tls;
 #[cfg(feature = "rustls")]
 mod rustls;
+#[cfg(target_os = "windows")]
+mod schannel;
 
 use core::fmt;
 use std::path::PathBuf;
@@ -47,6 +49,11 @@ pub fn run(args: Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     #[cfg(feature = "native-tls")]
     {
         native_tls::run(&args, callback);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        schannel::run(&args, callback);
     }
 }
 
@@ -196,7 +203,7 @@ fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
 
     let mut out = String::new();
 
-    write!(out, "------BEGIN CERTIFICATE------")?;
+    write!(out, "-----BEGIN CERTIFICATE-----")?;
 
     for (idx, char) in body.chars().enumerate() {
         if idx % 64 == 0 {
@@ -206,7 +213,7 @@ fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
         }
     }
 
-    writeln!(out, "\n------END CERTIFICATE------")?;
+    write!(out, "\n-----END CERTIFICATE-----")?;
 
     Ok(out)
 }
@@ -249,4 +256,21 @@ fn build_tracing_dispatcher(trace: std::sync::Arc<DiagnosticTrace>) -> tracing::
         .finish();
 
     tracing::dispatcher::Dispatch::new(subscriber)
+}
+
+#[cfg(any(
+    windows,
+    all(feature = "native-tls", not(any(target_os = "windows", target_vendor = "apple")))
+))]
+fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
+    let mut expected_it = wildcard_host.rsplit('.');
+    let mut actual_it = actual_host.rsplit('.');
+    loop {
+        match (expected_it.next(), actual_it.next()) {
+            (Some(expected), Some(actual)) if expected.eq_ignore_ascii_case(actual) => {}
+            (Some("*"), Some(_)) => {}
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
 }
