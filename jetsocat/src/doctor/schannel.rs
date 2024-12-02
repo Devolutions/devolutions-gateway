@@ -261,21 +261,21 @@ fn schannel_fetch_chain(
             Foundation::SEC_E_INCOMPLETE_MESSAGE => {
                 trace!("Got SEC_E_INCOMPLETE_MESSAGE; read token from server");
 
-                let required_additional = if inbufs[1].BufferType == Identity::SECBUFFER_MISSING {
+                let additional_required = if inbufs[1].BufferType == Identity::SECBUFFER_MISSING {
                     inbufs[1].cbBuffer as usize
                 } else {
                     1
                 };
 
-                trace!("At least {required_additional} additional bytes are required from the server");
+                trace!("At least {additional_required} additional bytes are required from the server");
 
                 let len_before = recv_buffer.len();
-                recv_buffer.resize(len_before + required_additional, 0);
+                recv_buffer.resize(len_before + additional_required, 0);
 
                 // Receive data from server.
                 match socket.read_exact(&mut recv_buffer[len_before..]) {
                     Ok(()) => {
-                        trace!("Received {required_additional} bytes from server");
+                        trace!("Received {additional_required} bytes from server");
                     }
                     Err(error) => {
                         error!(%error, "Failed to receive bytes from server");
@@ -304,7 +304,7 @@ fn schannel_fetch_chain(
     let remote_end_entity_cert = wrapper::OwnedCertContext::schannel_remote_cert(ctx_handle.as_ref())
         .context("failed to retrieve remote cert")?;
 
-    // Update the CERT_INFO of the end entity certificate.
+    // Update the end entity info of the chain context.
     chain_ctx.end_entity_info = remote_end_entity_cert.to_info();
 
     let remote_chain = remote_end_entity_cert
