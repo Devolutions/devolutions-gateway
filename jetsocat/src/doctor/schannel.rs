@@ -76,7 +76,6 @@ fn schannel_fetch_chain(
             ..Default::default()
         };
 
-        // Notice the null-terminator.
         let package_name = windows::core::w!("Microsoft Unified Security Protocol Provider");
 
         debug!(
