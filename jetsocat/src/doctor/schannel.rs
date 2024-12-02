@@ -24,8 +24,6 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
 
     let Some(mut chain_ctx) = chain_ctx else { return };
 
-    // Following functions must insert the remote certification chain into this store.
-    // The first inserted certificate should be the end entity certificate.
     if let Some(chain_path) = &args.chain_path {
         diagnostic!(callback, schannel_read_chain(&chain_path, &mut chain_ctx));
     } else if let Some(subject_name) = args.subject_name.as_deref() {
@@ -176,7 +174,7 @@ fn schannel_fetch_chain(
             |outbufs| {
                 for buf in &outbufs {
                     if !buf.pvBuffer.is_null() {
-                        // SAFETY: We assume the pointers returned by InitializeSecurityContextW are valids.
+                        // SAFETY: We assume the pointers returned by InitializeSecurityContextW are valid.
                         if let Err(error) = unsafe { Identity::FreeContextBuffer(buf.pvBuffer) } {
                             warn!(%error, "Failed to free context buffer");
                         }
@@ -693,6 +691,11 @@ mod wrapper {
             // SAFETY: CERT_CONTEXT is properly initialized per invariant.
             let cert_info = unsafe { cert_context.pCertInfo.read() };
 
+            // Note that simply copying and returning the CERT_INFO struct is
+            // dangerous as most of the data will be left dangling after the
+            // CERT_CONTEXT is freed. Instead, we perform a deep copy of the
+            // relevant fields into a separate opaque type.
+
             // SAFETY: CERT_CONTEXT is properly initialized per invariant.
             let serial = unsafe {
                 std::slice::from_raw_parts(cert_info.SerialNumber.pbData, cert_info.SerialNumber.cbData as usize)
@@ -838,7 +841,7 @@ mod wrapper {
 
     impl Drop for OwnedCertContext<'_> {
         fn drop(&mut self) {
-            // SAFETY: The store handle is owned by us.
+            // SAFETY: The CERT_CONTEXT handle is owned by us.
             let ret = unsafe { Cryptography::CertFreeCertificateContext(Some(self.ptr)) };
 
             if !ret.as_bool() {
@@ -938,7 +941,7 @@ mod wrapper {
 
     impl Drop for ChainContext<'_> {
         fn drop(&mut self) {
-            // SAFETY: The store handle is owned by us.
+            // SAFETY: The CERT_CHAIN_CONTEXT handle is owned by us.
             unsafe { Cryptography::CertFreeCertificateChain(self.ptr) };
         }
     }
