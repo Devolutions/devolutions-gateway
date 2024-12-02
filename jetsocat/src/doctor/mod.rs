@@ -258,6 +258,10 @@ fn build_tracing_dispatcher(trace: std::sync::Arc<DiagnosticTrace>) -> tracing::
     tracing::dispatcher::Dispatch::new(subscriber)
 }
 
+#[cfg(any(
+    windows,
+    all(feature = "native-tls", not(any(target_os = "windows", target_vendor = "apple")))
+))]
 fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
     let mut expected_it = wildcard_host.rsplit('.');
     let mut actual_it = actual_host.rsplit('.');
