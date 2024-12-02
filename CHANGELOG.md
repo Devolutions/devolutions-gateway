@@ -31,7 +31,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Bug Fixes
 
-- _webapp_: session toolbar loading issues ([#1106](https://github.com/Devolutions/devolutions-gateway/issues/1106)) ([1442a1dc6f](https://github.com/Devolutions/devolutions-gateway/commit/1442a1dc6fa3871f7cf8463c89c80b587b8f82b2)) ([DGW-230
+- _webapp_: session toolbar loading issues ([#1106](https://github.com/Devolutions/devolutions-gateway/issues/1106)) ([1442a1dc6f](https://github.com/Devolutions/devolutions-gateway/commit/1442a1dc6fa3871f7cf8463c89c80b587b8f82b2)) ([DGW-230](https://devolutions.atlassian.net/browse/DGW-230))
 
 - _webapp_: active session connection status in menu ([#1115](https://github.com/Devolutions/devolutions-gateway/issues/1115)) ([45f396af9c](https://github.com/Devolutions/devolutions-gateway/commit/45f396af9c6e151db4241841ae71fc9688dfe0bb)) ([DGW-231](https://devolutions.atlassian.net/browse/DGW-231)) 
 
