@@ -3,10 +3,12 @@
 use std::ops::DerefMut;
 
 use camino::Utf8Path;
+use uuid::Uuid;
+
+use win_api_wrappers::utils::WideString;
 
 use crate::updater::io::remove_file_on_reboot;
 use crate::updater::{Product, UpdaterCtx, UpdaterError};
-use win_api_wrappers::utils::WideString;
 
 /// List of allowed thumbprints for Devolutions code signing certificates
 const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
@@ -26,7 +28,7 @@ pub(crate) async fn install_package(
 
 pub(crate) async fn uninstall_package(
     ctx: &UpdaterCtx,
-    product_code: String,
+    product_code: Uuid,
     log_path: &Utf8Path,
 ) -> Result<(), UpdaterError> {
     match ctx.product {
@@ -69,7 +71,7 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> 
     Ok(())
 }
 
-async fn uninstall_msi(ctx: &UpdaterCtx, product_code: String, log_path: &Utf8Path) -> Result<(), UpdaterError> {
+async fn uninstall_msi(ctx: &UpdaterCtx, product_code: Uuid, log_path: &Utf8Path) -> Result<(), UpdaterError> {
     // See `install_msi`
     ensure_enough_rights()?;
 
@@ -77,7 +79,7 @@ async fn uninstall_msi(ctx: &UpdaterCtx, product_code: String, log_path: &Utf8Pa
 
     let msi_uninstall_result = tokio::process::Command::new("msiexec")
         .arg("/x")
-        .arg(&product_code)
+        .arg(product_code.braced().to_string())
         .arg("/quiet")
         .arg("/l*v")
         .arg(log_path.as_str())

@@ -8,6 +8,8 @@ use native_tls as _;
 use openssl as _;
 #[cfg(feature = "detect-proxy")]
 use proxy_cfg as _;
+#[cfg(windows)]
+use windows as _;
 use {
     base64 as _, futures_util as _, jet_proto as _, jmux_proto as _, openssl_probe as _, proxy_http as _,
     proxy_socks as _, proxy_types as _, rustls_pemfile as _, tinyjson as _, tokio_tungstenite as _, transport as _,

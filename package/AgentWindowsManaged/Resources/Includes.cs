@@ -22,7 +22,7 @@ namespace DevolutionsAgent.Resources
 
         internal static string FORUM_SUPPORT = "forum.devolutions.net";
 
-        internal static Guid UPGRADE_CODE = new("82318D3C-811F-4D5D-9A82-B7C31B076755");
+        internal static Guid UPGRADE_CODE = new("82318d3c-811f-4d5d-9a82-b7c31b076755");
 
         internal static string INFO_URL = "https://server.devolutions.net";
 

@@ -1,8 +1,7 @@
 use anyhow::Context as _;
-use std::fmt::Write as _;
 
-use crate::doctor::macros::{diagnostic, output};
-use crate::doctor::{help, write_cert_as_pem, Args, Diagnostic, DiagnosticCtx};
+use crate::doctor::macros::diagnostic;
+use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
 
 pub(crate) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     #[cfg(not(windows))]
@@ -22,7 +21,7 @@ fn native_tls_connect(ctx: &mut DiagnosticCtx, subject_name: &str, port: Option<
     use native_tls::TlsConnector;
     use std::net::TcpStream;
 
-    output!(ctx.out, "-> Connect to {subject_name}")?;
+    info!("Connect to {subject_name}");
 
     let connector = TlsConnector::new().context("failed to build TLS connector")?;
 
@@ -30,7 +29,7 @@ fn native_tls_connect(ctx: &mut DiagnosticCtx, subject_name: &str, port: Option<
         .inspect_err(|_| help::failed_to_connect_to_server(ctx, subject_name))
         .context("failed to connect to server...")?;
 
-    output!(ctx.out, "-> Perform TLS handshake")?;
+    info!("Perform TLS handshake");
 
     let tls_stream = connector
         .connect(subject_name, socket)
@@ -42,10 +41,7 @@ fn native_tls_connect(ctx: &mut DiagnosticCtx, subject_name: &str, port: Option<
         })
         .context("TLS connection failed")?;
 
-    output!(
-        ctx.out,
-        "-> NOTE: We can't retrieve the certification chain using the API exposed by native-tls and schannel crates"
-    )?;
+    warn!("We can't retrieve the certification chain using the API exposed by native-tls and schannel crates");
 
     let peer_certificate = tls_stream
         .peer_certificate()
@@ -53,8 +49,9 @@ fn native_tls_connect(ctx: &mut DiagnosticCtx, subject_name: &str, port: Option<
         .context("no peer certificate attached to the TLS stream")?;
     let peer_certificate = peer_certificate.to_der().context("peer certificate der conversion")?;
 
-    output!(ctx.out, "-> Peer certificate:")?;
-    write_cert_as_pem(&mut ctx.out, &peer_certificate).context("failed to write the peer certificate as PEM")?;
+    info!("Peer certificate:");
+    let cert_pem = cert_to_pem(&peer_certificate).context("failed to write the peer certificate as PEM")?;
+    info!("{cert_pem}");
 
     Ok(())
 }
@@ -127,11 +124,10 @@ fn parse_tls_connect_error_string(_ctx: &mut DiagnosticCtx, _error: &native_tls:
 mod openssl {
     use anyhow::Context as _;
     use openssl::x509::X509;
-    use std::fmt::Write as _;
     use std::path::Path;
 
-    use crate::doctor::macros::{diagnostic, output};
-    use crate::doctor::{help, write_cert_as_pem, Args, Diagnostic, DiagnosticCtx};
+    use crate::doctor::macros::diagnostic;
+    use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
 
     pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         let mut server_certificates = Vec::new();
@@ -168,7 +164,7 @@ mod openssl {
         use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
         use std::net::TcpStream;
 
-        output!(ctx.out, "-> Connect to {subject_name}")?;
+        info!("Connect to {subject_name}");
 
         let mut builder = SslConnector::builder(SslMethod::tls_client()).context("failed to create SSL builder")?;
         builder.set_verify(SslVerifyMode::NONE);
@@ -178,7 +174,7 @@ mod openssl {
             .inspect_err(|_| help::failed_to_connect_to_server(ctx, subject_name))
             .context("failed to connect to server...")?;
 
-        output!(ctx.out, "-> Fetch server certificates")?;
+        info!("Fetch server certificates");
 
         let stream = connector
             .connect(subject_name, socket)
@@ -192,7 +188,8 @@ mod openssl {
             .context("peer certification chain missing from SSL context")?
         {
             let der = certificate.to_der().context("certificate.to_der()")?;
-            write_cert_as_pem(&mut ctx.out, &der).context("failed to write the peer chain as PEM")?;
+            let cert_pem = cert_to_pem(&der).context("failed to write the peer chain as PEM")?;
+            info!("{cert_pem}");
             server_certificates.push(certificate.to_owned());
         }
 
@@ -211,7 +208,7 @@ mod openssl {
         chain_path: &Path,
         server_certificates: &mut Vec<X509>,
     ) -> anyhow::Result<()> {
-        output!(ctx.out, "-> Read file at {}", chain_path.display())?;
+        info!("Read file at {}", chain_path.display());
 
         let mut file = std::fs::File::open(chain_path)
             .map(std::io::BufReader::new)
@@ -219,8 +216,9 @@ mod openssl {
 
         for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
             let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
-            write_cert_as_pem(&mut ctx.out, &certificate)
+            let cert_pem = cert_to_pem(&certificate)
                 .with_context(|| format!("failed to write certificate number {idx} as PEM"))?;
+            info!("{cert_pem}");
             let certificate = X509::from_der(&certificate).context("X509::from_der")?;
             server_certificates.push(certificate);
         }
@@ -244,7 +242,7 @@ mod openssl {
             .first()
             .context("end entity certificate is missing")?;
 
-        output!(ctx.out, "-> Inspect the end entity certificate")?;
+        info!("Inspect the end entity certificate");
 
         let mut certificate_names = Vec::new();
 
@@ -277,14 +275,14 @@ mod openssl {
         }
 
         for value in &certificate_names {
-            output!(ctx.out, "-> Found name: {value}")?;
+            info!("Found name: {value}");
         }
 
-        output!(ctx.out, "-> Verify validity for subject name {subject_name_to_verify}")?;
+        info!("Verify validity for subject name {subject_name_to_verify}");
 
         let success = certificate_names
             .into_iter()
-            .any(|certificate_name| wildcard_host_match(&certificate_name, subject_name_to_verify));
+            .any(|certificate_name| crate::doctor::wildcard_host_match(&certificate_name, subject_name_to_verify));
 
         if !success {
             help::cert_invalid_hostname(ctx, subject_name_to_verify);
@@ -293,20 +291,7 @@ mod openssl {
             );
         }
 
-        return Ok(());
-
-        fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
-            let mut expected_it = wildcard_host.rsplit('.');
-            let mut actual_it = actual_host.rsplit('.');
-            loop {
-                match (expected_it.next(), actual_it.next()) {
-                    (Some(expected), Some(actual)) if expected.eq_ignore_ascii_case(actual) => {}
-                    (Some("*"), Some(_)) => {}
-                    (None, None) => return true,
-                    _ => return false,
-                }
-            }
-        }
+        Ok(())
     }
 
     fn openssl_check_chain(ctx: &mut DiagnosticCtx, server_certificates: &[X509]) -> anyhow::Result<()> {
@@ -314,7 +299,7 @@ mod openssl {
         use openssl::stack::Stack;
         use openssl::x509::{X509StoreContext, X509VerifyResult};
 
-        output!(ctx.out, "-> Create SSL context")?;
+        info!("Create SSL context");
 
         let connector = SslConnector::builder(SslMethod::tls_client())
             .context("failed to create SSL builder")?
@@ -328,7 +313,7 @@ mod openssl {
         let ssl_context = ssl.ssl_context();
         let store = ssl_context.cert_store();
 
-        output!(ctx.out, "-> Verify chain")?;
+        info!("Verify chain");
 
         let mut store_context = X509StoreContext::new().context("failed to create X509 store context")?;
 

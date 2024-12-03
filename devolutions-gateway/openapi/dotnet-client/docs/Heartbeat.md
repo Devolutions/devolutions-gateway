@@ -4,6 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**AgentVersion** | **string** | Agent version, if installed | [optional] 
 **Hostname** | **string** | This Gateway&#39;s hostname | 
 **Id** | **Guid?** | This Gateway&#39;s unique ID | [optional] 
 **RecordingStorageAvailableSpace** | **long?** | The remaining available space to store recordings, in bytes.  Since v2024.1.6. | [optional] 

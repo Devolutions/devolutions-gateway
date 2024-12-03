@@ -1,6 +1,6 @@
 [package]
 name = "jetsocat"
-version = "2024.3.5"
+version = "2024.3.6"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 description = "(Web)Socket toolkit for jet protocol related operations"
@@ -67,6 +67,16 @@ base64 = "0.22" # Same dependency as rustls-pemfile
 [target.'cfg(not(any(target_os = "windows", target_vendor = "apple")))'.dependencies]
 # doctor
 openssl = { version = "0.10", optional = true } # Same dependency as tokio-tungstenite/native-tls
+
+# doctor
+[target.'cfg(target_os = "windows")'.dependencies.windows]
+version = "0.58"
+features = [
+  "Win32_Security_Authentication_Identity",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Credentials",
+  "Win32_Globalization",
+]
 
 [dev-dependencies]
 test-utils = { path = "../crates/test-utils" }
