@@ -16,7 +16,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   is killed in the middle of one of these operations, we should resume
   execution on the next startup.
   
-  This persisent job queue is implemented using Turso’s libSQL. Using
+  This persistent job queue is implemented using Turso’s libSQL. Using
   libSQL (or SQLite) for implementing the queue allow us to benefit from
   all the work put into implementing a reliable, secure and performant
   disk-based database instead of attempting to implement our own ad-hoc
