@@ -21,21 +21,34 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    Router::new()
+    let router = Router::new()
         .route("/push/:id", get(jrec_push))
         .route("/delete/:id", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
         .route("/play", get(get_player))
-        .route("/play/*path", get(get_player))
-        .with_state(state)
+        .route("/play/*path", get(get_player));
+
+    if state.conf_handle.get_conf().debug.enable_unstable {
+        router.route("/shadow/:id/:filename", get(shadow_recording))
+    } else {
+        router
+    }
+    .with_state(state)
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JrecListQueryParam {
+    #[serde(default)]
+    active: bool,
 }
 
 async fn jrec_push(
@@ -332,6 +345,9 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
     operation_id = "ListRecordings",
     tag = "Jrec",
     path = "/jet/jrec/list",
+    params(
+        ("active" = bool, Query, description = "When true, only the active recordings are returned"),
+    ),
     responses(
         (status = 200, description = "List of recordings on this Gateway instance", body = [Uuid]),
         (status = 400, description = "Bad request"),
@@ -341,9 +357,19 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
     security(("scope_token" = ["gateway.recordings.read"])),
 ))]
 pub(crate) async fn list_recordings(
-    State(DgwState { conf_handle, .. }): State<DgwState>,
+    State(DgwState {
+        conf_handle,
+        recordings,
+        ..
+    }): State<DgwState>,
+    Query(query): Query<JrecListQueryParam>,
     _scope: RecordingsReadScope,
 ) -> Result<Json<Vec<Uuid>>, HttpError> {
+    if query.active {
+        let recordings = recordings.active_recordings.cloned().into_iter().collect();
+        return Ok(Json(recordings));
+    }
+
     let conf = conf_handle.get_conf();
     let recording_path = conf.recording_path.as_std_path();
 
@@ -466,4 +492,38 @@ where
         Ok(response) => Ok(response),
         Err(never) => match never {},
     }
+}
+
+async fn shadow_recording(
+    State(DgwState {
+        recordings,
+        shutdown_signal,
+        conf_handle,
+        ..
+    }): State<DgwState>,
+    extract::Path((id, filename)): extract::Path<(Uuid, String)>,
+    JrecToken(claims): JrecToken,
+    ws: WebSocketUpgrade,
+) -> Result<Response, HttpError> {
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return Err(HttpError::bad_request().msg("invalid file name"));
+    }
+
+    if id != claims.jet_aid {
+        return Err(HttpError::forbidden().msg("not allowed to read this recording"));
+    }
+
+    let path = conf_handle
+        .get_conf()
+        .recording_path
+        .join(id.to_string())
+        .join(filename);
+
+    if !path.exists() || !path.is_file() {
+        return Err(HttpError::not_found().msg("requested file does not exist"));
+    }
+
+    crate::streaming::stream_file(path, ws, shutdown_signal, recordings, id)
+        .await
+        .map_err(HttpError::internal().err())
 }

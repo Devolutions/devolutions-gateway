@@ -45,7 +45,7 @@ export async function requestScopeToken(data: ScopeRequest): Promise<TokenRespon
 export async function listRealtimeRecordings(): Promise<string[]> {
   const res = await requestScopeToken({ scope: 'gateway.recordings.read' });
   try {
-    const response = await fetch(`${GATEWAY_BASE_URL}/jet/jrec/list/realtime`, {
+    const response = await fetch(`${GATEWAY_BASE_URL}/jet/jrec/list?active=true`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${res.token}`,
@@ -124,5 +124,5 @@ export async function getInfoFile(uid: string): Promise<GetInfoFileResponse> {
 export async function getStreamingWebsocketUrl(uid: string): Promise<string> {
   const fileInfo = await getInfoFile(uid);
   const token = await requestPullToken({ jet_rop: 'pull', jet_aid: uid });
-  return `${GATEWAY_BASE_URL}/jet/jrec/realtime/${uid}/${fileInfo.files[0].fileName}?token=${token.token}`;
+  return `${GATEWAY_BASE_URL}/jet/jrec/shadow/${uid}/${fileInfo.files[0].fileName}?token=${token.token}`;
 }

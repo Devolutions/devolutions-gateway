@@ -1,0 +1,41 @@
+[package]
+name = "streamer"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio = { version = "1.41", features = [
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros"
+] }
+tokio-util = { version = "0.7", features = ["codec"] }
+tracing = "0.1"
+webm-iterable = { version = "0.6", features = ["futures"] }
+cadeau = { version = "0.5", features = ["dlopen"] }
+thiserror = "2"
+num_cpus = "1.16.0"
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
+tokio = { version = "1.41", features = [
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "fs"
+] }
+axum = { version = "0.7", features = ["ws"] }
+futures = "0.3"
+tokio-tungstenite = "0.24"
+transport = { path = "../transport" }
+
+[lints]
+workspace = true

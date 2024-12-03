@@ -1,3 +1,4 @@
+import { ErrorMessage } from './protocol';
 import { ReactiveSourceBuffer } from './sourceBuffer';
 import { ServerWebSocket } from './websocket';
 
@@ -5,17 +6,35 @@ export class ShadowPlayer extends HTMLElement {
   shadowRoot: ShadowRoot | null = null;
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
-
-  constructor() {
-    super();
+  _buffer: ReactiveSourceBuffer | null = null;
+  onErrorCallback: ((ev: ErrorMessage) => void) | null = null;
+  debug = false;
+  static get observedAttributes() {
+    return [
+      'src',
+      'autoplay',
+      'loop',
+      'muted',
+      'poster',
+      'preload',
+      'style',
+      'width',
+      'height',
+    ];
   }
 
-  static get observedAttributes() {
-    return ['src', 'autoplay', 'loop', 'muted', 'poster', 'preload', 'style', 'width', 'height', 'controls'];
+  setDebug(debug: boolean) {
+    this.debug = debug;
+    if (this._buffer) {
+      this._buffer.setDebug(debug);
+    }
+  }
+
+  onError(callback: (ev: ErrorMessage) => void) {
+    this.onErrorCallback = callback;
   }
 
   attributeChangedCallback(name: string, _oldValue: string, newValue: string) {
-    console.log('attributeChangedCallback', name, newValue);
     if (name === 'src') {
       this.srcChange(newValue);
       return;
@@ -34,7 +53,6 @@ export class ShadowPlayer extends HTMLElement {
     this.shadowRoot = this.attachShadow({ mode: 'open' });
     const content = document.createElement('div');
     this.videoElement = document.createElement('video');
-    this.videoElement.controls = true;
     content.appendChild(this.videoElement);
     this.shadowRoot.appendChild(content);
     this.syncAttributes();
@@ -60,11 +78,17 @@ export class ShadowPlayer extends HTMLElement {
     this._videoElement = value;
   }
 
+  public play() {
+    this.videoElement.play();
+  }
+
   public srcChange(value: string) {
     const mediaSource = new MediaSource();
     this._src = value;
     this.videoElement.src = URL.createObjectURL(mediaSource);
-    mediaSource.addEventListener('sourceopen', () => this.handleSourceOpen(mediaSource));
+    mediaSource.addEventListener('sourceopen', () =>
+      this.handleSourceOpen(mediaSource)
+    );
   }
 
   private async handleSourceOpen(mediaSource: MediaSource) {
@@ -82,14 +106,42 @@ export class ShadowPlayer extends HTMLElement {
       }
       if (ev.type === 'metadata') {
         const codec = ev.codec;
-        reactiveSourceBuffer = new ReactiveSourceBuffer(mediaSource, codec, () => {
-          websocket.send({ type: 'pull' });
-        });
+        reactiveSourceBuffer = new ReactiveSourceBuffer(
+          mediaSource,
+          codec,
+          () => {
+            websocket.send({ type: 'pull' });
+          }
+        );
+        this._buffer = reactiveSourceBuffer;
       }
 
       if (ev.type === 'chunk') {
         if (reactiveSourceBuffer) {
           reactiveSourceBuffer.appendBuffer(ev.data);
+          if (this._videoElement) {
+            if (
+              this._videoElement.duration - this._videoElement.currentTime >
+              5
+            ) {
+              try {
+                this._videoElement.currentTime =
+                  this._videoElement.seekable.end(0);
+              } catch (error) {
+                // ignore error, if not debug
+                // this could happen when the first chunk is received, but it's expected
+                if (this.debug) {
+                  console.error('Error seeking:', error);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (ev.type === 'error') {
+        if (this.onErrorCallback) {
+          this.onErrorCallback(ev);
         }
       }
     });
@@ -110,6 +162,12 @@ export class ShadowPlayer extends HTMLElement {
         }
       }
     });
+  }
+
+  public downloadBUfferAsFile() {
+    if (this._buffer && this.debug) {
+      this._buffer.downloadBufferedFile();
+    }
   }
 }
 

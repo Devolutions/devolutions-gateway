@@ -12,6 +12,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
+use streamer::SignalWriter;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::{fs, io};
@@ -24,6 +25,7 @@ use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
 const DISCONNECTED_TTL_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
+const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,25 +110,51 @@ where
             open_options.share_mode(FILE_SHARE_READ);
         }
 
+        debug!(path = %recording_file, "File opened");
+
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
-                let mut file = BufWriter::new(file);
-
-                let shutdown_signal = shutdown_signal.wait();
+                // Wrap SignalWriter inside a BufWriter to reduce the number of flushes.
+                let (file, flush_signal) = SignalWriter::new(file);
+                // larger buffer size to reduce the number of flushes
+                let mut file = BufWriter::with_capacity(BUFFER_WRITER_SIZE, file);
+                let mut shutdown_signal_clone = shutdown_signal.clone();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
+                let signal_loop = tokio::spawn({
+                    let recordings = recordings.clone();
+                    async move {
+                        loop {
+                            tokio::select! {
+                                _ = flush_signal.notified() => {
+                                    recordings.new_chunk_appended(session_id)?;
+                                },
+                                _ = shutdown_signal_clone.wait() => {
+                                    break;
+                                },
+                            }
+                        }
+                        Ok::<_, anyhow::Error>(())
+                    }
+                });
 
-                tokio::select! {
+                let res = tokio::select! {
                     res = copy_fut => {
                         res.context("JREC streaming to file").map(|_| ())
                     },
-                    _ = shutdown_signal => {
+                    _ = shutdown_signal.wait() => {
                         trace!("Received shutdown signal");
                         client_stream.shutdown().await.context("shutdown")
                     },
-                }
+                };
+
+                signal_loop.abort();
+
+                res
             }
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
+
+        info!(?res, "Recording finished");
 
         recordings.disconnect(session_id).await.context("disconnect")?;
 
@@ -234,6 +262,7 @@ impl fmt::Debug for RecordingManagerMessage {
 #[derive(Clone, Debug)]
 pub struct RecordingMessageSender {
     channel: mpsc::Sender<RecordingManagerMessage>,
+    flush_map: Arc<Mutex<HashMap<Uuid, Vec<oneshot::Sender<()>>>>>,
     pub active_recordings: Arc<ActiveRecordings>,
 }
 
@@ -291,6 +320,27 @@ impl RecordingMessageSender {
             .ok()
             .context("couldn't send UpdateRecordingPolicy message")
     }
+
+    pub(crate) fn add_new_chunk_listener(&self, recording_id: Uuid, tx: oneshot::Sender<()>) {
+        let mut lock = self.flush_map.lock();
+        let senders = lock.entry(recording_id);
+        let senders = senders.or_default();
+        senders.push(tx);
+    }
+
+    pub(crate) fn new_chunk_appended(&self, recording_id: Uuid) -> anyhow::Result<()> {
+        let senders = { self.flush_map.lock().remove(&recording_id) };
+
+        let Some(senders) = senders else {
+            return Ok(());
+        };
+
+        for tx in senders {
+            let _ = tx.send(());
+        }
+
+        Ok(())
+    }
 }
 
 pub struct RecordingMessageReceiver {
@@ -305,6 +355,7 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
 
     let handle = RecordingMessageSender {
         channel: tx,
+        flush_map: Arc::new(Mutex::new(HashMap::new())),
         active_recordings: Arc::clone(&ongoing_recordings),
     };
 
@@ -670,7 +721,7 @@ async fn recording_manager_task(
                                 "Updated recording policy for session",
                             );
                         }
-                    }
+                    },
                 }
             }
             _ = shutdown_signal.wait() => {
