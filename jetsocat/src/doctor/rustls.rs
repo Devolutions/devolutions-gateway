@@ -1,11 +1,11 @@
 use anyhow::Context as _;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
-use std::ops::Deref;
+use std::borrow::Cow;
 use std::path::Path;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
+use crate::doctor::{cert_to_pem, help, Args, CertInfo, Diagnostic, DiagnosticCtx};
 
 pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     let mut root_store = rustls::RootCertStore::empty();
@@ -91,8 +91,6 @@ fn rustls_fetch_chain(
 
         if let Some(peer_certificates) = client.peer_certificates() {
             for certificate in peer_certificates {
-                let cert_pem = cert_to_pem(certificate).context("failed to write the peer certificate as PEM")?;
-                info!("{cert_pem}");
                 server_certificates.push(certificate.clone().into_owned());
             }
 
@@ -100,7 +98,8 @@ fn rustls_fetch_chain(
         }
     }
 
-    help::x509_io_link(ctx, server_certificates.iter().map(|cert| cert.deref()));
+    crate::doctor::log_chain(server_certificates.iter());
+    help::x509_io_link(ctx, server_certificates.iter());
 
     Ok(())
 }
@@ -118,13 +117,11 @@ fn rustls_read_chain(
 
     for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
         let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
-        let cert_pem =
-            cert_to_pem(&certificate).with_context(|| format!("failed to write the certificate number {idx}"))?;
-        info!("{cert_pem}");
         server_certificates.push(certificate);
     }
 
-    help::x509_io_link(ctx, server_certificates.iter().map(|cert| cert.deref()));
+    crate::doctor::log_chain(server_certificates.iter());
+    help::x509_io_link(ctx, server_certificates.iter());
 
     Ok(())
 }
@@ -247,5 +244,15 @@ impl ServerCertVerifier for NoCertificateVerification {
             SignatureScheme::ED25519,
             SignatureScheme::ED448,
         ]
+    }
+}
+
+impl CertInfo for pki_types::CertificateDer<'_> {
+    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
+        Ok(Cow::Borrowed(self))
+    }
+
+    fn friendly_name(&self) -> Option<Cow<'_, str>> {
+        None
     }
 }

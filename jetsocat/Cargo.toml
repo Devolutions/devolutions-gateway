@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [features]
-default = ["rustls", "detect-proxy"]
+default = ["rustls", "detect-proxy", "native-tls"]
 detect-proxy = ["proxy_cfg"]
 rustls = ["tokio-tungstenite/rustls-tls-native-roots", "dep:rustls", "dep:rustls-native-certs"]
 native-tls = ["tokio-tungstenite/native-tls", "dep:openssl", "dep:native-tls"]

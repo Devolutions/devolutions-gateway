@@ -1,6 +1,4 @@
-use core::fmt;
-
-use crate::doctor::DiagnosticCtx;
+use crate::doctor::{CertInfo, DiagnosticCtx};
 
 pub(crate) fn failed_to_connect_to_server(ctx: &mut DiagnosticCtx, hostname: &str) {
     ctx.attach_help(format!(
@@ -74,41 +72,34 @@ You need to generate a separate certificate valid for server authentication."
 pub(crate) fn x509_io_link<C>(ctx: &mut DiagnosticCtx, certs: C)
 where
     C: Iterator,
-    C::Item: AsRef<[u8]>,
+    C::Item: CertInfo,
 {
-    let mut href = String::new();
-    write_x509_io_link(&mut href, certs).expect("writing to a String will typially not cause any error (unless OOM)");
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+
+    let mut chain_href = "https://x509.io/?cert=".to_owned();
+
+    for (idx, cert) in certs.enumerate() {
+        if let Ok(cert_der) = cert.der() {
+            if idx > 0 {
+                chain_href.push(',');
+            }
+            let cert_base64 = URL_SAFE_NO_PAD.encode(cert_der);
+            chain_href.push_str(&cert_base64);
+
+            ctx.attach_link(
+                cert.friendly_name()
+                    .map(|name| format!("{name} (certificate {idx})"))
+                    .unwrap_or_else(|| format!("Certificate {idx}")),
+                format!("https://x509.io/?cert={cert_base64}"),
+                "view the certificate using x509.io viewer in the browser",
+            );
+        }
+    }
 
     ctx.attach_link(
-        "x509.io Certificates Viewer",
-        href,
-        "view the extracted certification chain using x509.io certificates viewer in the browser",
+        "Certification chain",
+        chain_href,
+        "view the certification chain using x509.io viewer in the browser",
     );
-
-    fn write_x509_io_link<C>(mut out: impl fmt::Write, certs: C) -> fmt::Result
-    where
-        C: Iterator,
-        C::Item: AsRef<[u8]>,
-    {
-        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        use base64::Engine as _;
-
-        write!(out, "https://x509.io/?cert=")?;
-
-        let mut is_first = true;
-
-        for cert_der in certs {
-            if is_first {
-                is_first = false;
-            } else {
-                write!(out, ",")?;
-            }
-
-            let cert_base64 = URL_SAFE_NO_PAD.encode(cert_der.as_ref());
-
-            write!(out, "{cert_base64}")?;
-        }
-
-        Ok(())
-    }
 }
