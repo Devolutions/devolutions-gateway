@@ -98,7 +98,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_qs",
- "thiserror",
+ "thiserror 1.0.68",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -167,7 +167,7 @@ dependencies = [
  "nom",
  "num-traits",
  "rusticata-macros",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -685,8 +685,7 @@ dependencies = [
 [[package]]
 name = "cadeau"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d42bf15e6b58306b08fc02fd6e60b6913ca595f9d61cf719c097683805c8d182"
+source = "git+https://github.com/Devolutions/cadeau.git?rev=9e07c39ea10ec11215228c3f74c0181e17751d4e#9e07c39ea10ec11215228c3f74c0181e17751d4e"
 dependencies = [
  "xmf-sys",
 ]
@@ -1107,7 +1106,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tap",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tokio-rustls 0.26.0",
  "tracing",
@@ -1124,7 +1123,7 @@ dependencies = [
  "cfg-if",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "uuid",
  "windows-registry 0.3.0",
  "windows-result",
@@ -1183,9 +1182,10 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "smol_str",
+ "streamer",
  "sysinfo",
  "tap",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tokio 1.41.1",
  "tokio-rustls 0.26.0",
@@ -1348,7 +1348,7 @@ dependencies = [
  "serde_json",
  "tap",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tracing",
  "win-api-wrappers",
@@ -1454,6 +1454,35 @@ name = "dyn-clone"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
+
+[[package]]
+name = "ebml-iterable"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "005525496ebdcae1d865c85fd71bc401a80921804ebb59c9340e2ab0c83aa1b0"
+dependencies = [
+ "ebml-iterable-specification",
+ "ebml-iterable-specification-derive",
+ "futures",
+]
+
+[[package]]
+name = "ebml-iterable-specification"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f56467af159a98735d44231f53eaa505e919e6003266f103b99649a93f106784"
+
+[[package]]
+name = "ebml-iterable-specification-derive"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b066b81018300fdce40f71c4db355a102699324af96fad28f25ab1b5f87de066"
+dependencies = [
+ "ebml-iterable-specification",
+ "proc-macro2 1.0.88",
+ "quote 1.0.37",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "ecdsa"
@@ -2554,7 +2583,7 @@ dependencies = [
  "bitflags 2.6.0",
  "ironrdp-pdu 0.1.0 (git+https://github.com/Devolutions/IronRDP?rev=2e1a9ac88e38e7d92d893007bc25d0a05c365861)",
  "ironrdp-svc 0.1.0 (git+https://github.com/Devolutions/IronRDP?rev=2e1a9ac88e38e7d92d893007bc25d0a05c365861)",
- "thiserror",
+ "thiserror 1.0.68",
  "tracing",
 ]
 
@@ -2670,7 +2699,7 @@ dependencies = [
  "lazy_static",
  "num-derive",
  "num-traits",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -2688,7 +2717,7 @@ dependencies = [
  "lazy_static",
  "num-derive",
  "num-traits",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -2709,7 +2738,7 @@ dependencies = [
  "pkcs1",
  "sha1",
  "tap",
- "thiserror",
+ "thiserror 1.0.68",
  "x509-cert",
 ]
 
@@ -2732,7 +2761,7 @@ dependencies = [
  "pkcs1",
  "sha1",
  "tap",
- "thiserror",
+ "thiserror 1.0.68",
  "x509-cert",
 ]
 
@@ -3064,7 +3093,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tokio-stream",
  "tokio-util",
@@ -3155,7 +3184,7 @@ dependencies = [
  "parking_lot",
  "prost",
  "serde",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tokio-stream",
  "tokio-util",
@@ -3390,7 +3419,7 @@ dependencies = [
  "futures",
  "pin-project 1.1.7",
  "rand",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tokio-util",
  "tracing",
@@ -3447,7 +3476,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "paste",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -3461,7 +3490,7 @@ dependencies = [
  "log",
  "netlink-packet-core",
  "netlink-sys",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
 ]
 
@@ -3486,7 +3515,7 @@ checksum = "433419f898328beca4f2c6c73a1b52540658d92b0a99f0269330457e0fd998d5"
 dependencies = [
  "cc",
  "libc",
- "thiserror",
+ "thiserror 1.0.68",
  "winapi",
 ]
 
@@ -3508,7 +3537,7 @@ dependencies = [
  "rtnetlink",
  "serde",
  "socket2",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tracing",
  "tracing-subscriber",
@@ -3524,7 +3553,7 @@ dependencies = [
  "parking_lot",
  "polling 3.7.3",
  "socket2",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tracing",
  "tracing-cov-mark",
@@ -3559,7 +3588,7 @@ dependencies = [
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tokio-retry",
  "tokio-util",
@@ -3739,6 +3768,16 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "num_cpus"
+version = "1.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
+dependencies = [
+ "hermit-abi 0.3.9",
+ "libc",
 ]
 
 [[package]]
@@ -3927,7 +3966,7 @@ checksum = "1fc1f139757b058f9f37b76c48501799d12c9aa0aa4c0d4c980b062ee925d1b2"
 dependencies = [
  "byteorder_slice",
  "derive-into-owned",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -4025,7 +4064,7 @@ dependencies = [
  "sha1",
  "sha2",
  "sha3",
- "thiserror",
+ "thiserror 1.0.68",
  "x25519-dalek",
  "zeroize",
 ]
@@ -4141,7 +4180,7 @@ dependencies = [
  "rand",
  "serde",
  "sha1",
- "thiserror",
+ "thiserror 1.0.68",
  "uuid",
 ]
 
@@ -4166,7 +4205,7 @@ dependencies = [
  "rand",
  "serde",
  "sha1",
- "thiserror",
+ "thiserror 1.0.68",
  "uuid",
 ]
 
@@ -4521,7 +4560,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.15",
  "socket2",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
  "tracing",
 ]
@@ -4538,7 +4577,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.15",
  "slab",
- "thiserror",
+ "thiserror 1.0.68",
  "tinyvec",
  "tracing",
 ]
@@ -4665,7 +4704,7 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -4895,7 +4934,7 @@ dependencies = [
  "netlink-proto",
  "netlink-sys",
  "nix 0.27.1",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio 1.41.1",
 ]
 
@@ -5292,7 +5331,7 @@ dependencies = [
  "futures",
  "percent-encoding",
  "serde",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -5569,6 +5608,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
+name = "streamer"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum 0.7.7",
+ "cadeau",
+ "futures",
+ "futures-util",
+ "num_cpus",
+ "thiserror 2.0.3",
+ "tokio 1.41.1",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "transport",
+ "webm-iterable",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5696,7 +5755,16 @@ version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02dd99dc800bbb97186339685293e1cc5d9df1f8fae2d0aecd9ff1c77efea892"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.68",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+dependencies = [
+ "thiserror-impl 2.0.3",
 ]
 
 [[package]]
@@ -5704,6 +5772,17 @@ name = "thiserror-impl"
 version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7c61ec9a6f64d2793d8a45faba21efbe3ced62a886d44c36a009b2b519b4c7e"
+dependencies = [
+ "proc-macro2 1.0.88",
+ "quote 1.0.37",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
 dependencies = [
  "proc-macro2 1.0.88",
  "quote 1.0.37",
@@ -6277,7 +6356,7 @@ version = "0.2.999"
 source = "git+https://github.com/CBenoit/tracing.git?rev=42097daf92e683cf18da7639ddccb056721a796c#42097daf92e683cf18da7639ddccb056721a796c"
 dependencies = [
  "crossbeam-channel",
- "thiserror",
+ "thiserror 1.0.68",
  "time",
  "tracing-subscriber",
 ]
@@ -6378,7 +6457,7 @@ dependencies = [
  "rustls 0.23.15",
  "rustls-pki-types",
  "sha1",
- "thiserror",
+ "thiserror 1.0.68",
  "utf-8",
 ]
 
@@ -6720,6 +6799,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "webm-iterable"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "008955b5d96fc6e1e36f2c7f33120aef9e52b54efc5c76b6f1b125809513df78"
+dependencies = [
+ "ebml-iterable",
+ "futures",
+]
+
+[[package]]
 name = "webpki"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6768,7 +6857,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base16ct",
- "thiserror",
+ "thiserror 1.0.68",
  "tracing",
  "uuid",
  "windows 0.58.0",
@@ -7248,8 +7337,7 @@ dependencies = [
 [[package]]
 name = "xmf-sys"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1696dde452e6a776f31a02bb123082f86abb0cf07aed8a1e69d925d83da6003"
+source = "git+https://github.com/Devolutions/cadeau.git?rev=9e07c39ea10ec11215228c3f74c0181e17751d4e#9e07c39ea10ec11215228c3f74c0181e17751d4e"
 dependencies = [
  "dlib",
 ]
