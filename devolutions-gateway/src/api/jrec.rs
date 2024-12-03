@@ -346,7 +346,7 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
     tag = "Jrec",
     path = "/jet/jrec/list",
     params(
-        ("active" = bool, Query, description = "When true only the active recordings are returned"),
+        ("active" = bool, Query, description = "When true, only the active recordings are returned"),
     ),
     responses(
         (status = 200, description = "List of recordings on this Gateway instance", body = [Uuid]),
