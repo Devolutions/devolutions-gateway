@@ -1,5 +1,5 @@
 use anyhow::Context;
-use cadeau::xmf::vpx::{decoder::VpxDecoder, encoder::VpxEncoder, VpxCodec};
+use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
 use tracing::{instrument, trace, warn};
 use webm_iterable::{
     errors::TagWriterError,

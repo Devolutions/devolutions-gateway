@@ -18,7 +18,7 @@ tokio = { version = "1.41", features = [
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
 webm-iterable = { version = "0.6", features = ["futures"] }
-cadeau = { version = "0.4", features = ["dlopen"] }
+cadeau = { version = "0.5", features = ["dlopen"] }
 thiserror = "2"
 num_cpus = "1.16.0"
 

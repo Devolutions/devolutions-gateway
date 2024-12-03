@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -210,6 +209,8 @@ async fn jrec_delete_many(
     _scope: RecordingDeleteScope,
     Json(delete_list): Json<Vec<Uuid>>,
 ) -> Result<Json<DeleteManyResult>, HttpError> {
+    use std::collections::HashSet;
+
     const THRESHOLD: usize = 50_000;
     const CHUNK_SIZE: usize = 1_000;
 
@@ -345,7 +346,7 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
     tag = "Jrec",
     path = "/jet/jrec/list",
     params(
-        ("active" = bool, Query, description = "When false, return only finished recordings, when true return only active recordings"),
+        ("active" = bool, Query, description = "When true only the active recordings are returned"),
     ),
     responses(
         (status = 200, description = "List of recordings on this Gateway instance", body = [Uuid]),
