@@ -8,7 +8,6 @@ import { createTerminalDiv, loadFile } from './index.js';
  */
 export async function handleCast(gatewayApi) {
   const terminalDiv = createTerminalDiv();
-  // const castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
   const castSrc = gatewayApi.staticRecordingUrl(gatewayApi.recordingInfo.files[0].fileName);
 
   try {

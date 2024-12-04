@@ -10,7 +10,6 @@ import { convertTRPtoCast } from '../trp-decoder.js';
 
 export async function handleTrp(gatewayApi) {
   const terminalDiv = createTerminalDiv();
-  // const trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
   const trpSrc = gatewayApi.staticRecordingUrl(gatewayApi.recordingInfo.files[0].fileName);
 
   try {
