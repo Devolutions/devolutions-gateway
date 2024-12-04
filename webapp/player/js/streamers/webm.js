@@ -17,12 +17,10 @@ export async function handleWebm(gatewayAccessApi) {
   await customElements.whenDefined('shadow-player');
 
   // Wait for next microtask to ensure connectedCallback has run
-  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   // Now safe to call methods
-  shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl(
-    gatewayAccessApi.recordingInfo.files[0].fileName
-  ));
+  shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl(gatewayAccessApi.recordingInfo.files[0].fileName));
   shadowPlayer.play();
 
   return shadowPlayer;
