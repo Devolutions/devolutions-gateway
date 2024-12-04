@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -210,6 +209,8 @@ async fn jrec_delete_many(
     _scope: RecordingDeleteScope,
     Json(delete_list): Json<Vec<Uuid>>,
 ) -> Result<Json<DeleteManyResult>, HttpError> {
+    use std::collections::HashSet;
+
     const THRESHOLD: usize = 50_000;
     const CHUNK_SIZE: usize = 1_000;
 
