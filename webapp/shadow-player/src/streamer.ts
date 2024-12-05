@@ -171,4 +171,4 @@ export class ShadowPlayer extends HTMLElement {
   }
 }
 
-customElements.define('shawdow-player', ShadowPlayer);
+customElements.define('shadow-player', ShadowPlayer);
