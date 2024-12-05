@@ -54,7 +54,8 @@ pub fn get_installed_product_version(update_code: Uuid) -> Result<Option<DateVer
     let product_code_uuid = match get_product_code(update_code)? {
         Some(uuid) => uuid,
         None => return Ok(None),
-    };
+    }
+    .braced();
 
     let key_path = format!("{REG_CURRENT_VERSION}\\Uninstall\\{product_code_uuid}");
 
