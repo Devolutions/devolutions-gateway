@@ -103,6 +103,7 @@ where
 
         #[cfg(windows)]
         {
+            #[cfg(not(windows))]
             use std::os::windows::fs::OpenOptionsExt as _;
 
             const FILE_SHARE_READ: u32 = 1;
