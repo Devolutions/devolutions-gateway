@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::info;
+use tracing::debug;
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
@@ -135,7 +135,7 @@ where
                 }
                 Ok(false) => {}
                 Ok(true) => {
-                    info!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
+                    debug!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
                     match self.last_key_frame_info {
                         LastKeyFrameInfo::NotMet {
                             cluster_timestamp,
