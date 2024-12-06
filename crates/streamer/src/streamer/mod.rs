@@ -248,10 +248,6 @@ fn spawn_sending_task<W>(
                         Some(RecordingEvent::Disconnected {
                             sender,
                         }) => {
-                            let _ = ws_frame_clone.lock().await.send(protocol::ServerMessage::End).await.inspect_err(|e| {
-                                warn!(error=%e, "Failed to send end message");
-                            });
-
                             tokio::spawn(async move {
                                 let _ = file_droped_receiver.await;
                                 let _ = sender.send(()).inspect_err(|e| {
