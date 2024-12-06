@@ -689,14 +689,14 @@ impl RecordingManagerTask {
     }
 
     fn subscribe(&mut self, id: Uuid, tx: mpsc::Sender<RecordingEvent>) -> anyhow::Result<()> {
-        info!(%id, "Subscribing to ongoing recording");
+        debug!(%id, "Subscribing to ongoing recording");
         if self.ongoing_recordings.contains_key(&id) {
             let subscribers = self.recording_state_subscribers.entry(id).or_default();
             subscribers.push(tx);
-            info!(%id, "Subscribed to ongoing recording successfully");
+            debug!(%id, "Subscribed to ongoing recording successfully");
             Ok(())
         } else {
-            Err(anyhow::anyhow!("unknown recording for ID {id}"))
+            anyhow::bail!("unknown recording for ID {id}")
         }
     }
 }

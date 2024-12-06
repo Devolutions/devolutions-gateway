@@ -44,12 +44,10 @@ pub(crate) async fn stream_file(
                 let event = match event {
                     RecordingEvent::Disconnected { sender } => streamer::RecordingEvent::Disconnected { sender },
                 };
-                info!("Forwarding recording event to streaming task: {:?}", event);
                 if let Err(e) = sender.send(event).await {
                     warn!(error=?e, "Failed to send recording event");
                 }
             }
-            info!("forwarding recording event task finished");
         });
         receiver
     };
