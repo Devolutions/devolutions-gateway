@@ -220,7 +220,7 @@ fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
 
 fn log_cert<C>(cert_idx: usize, cert: C) -> anyhow::Result<()>
 where
-    C: CertInfo,
+    C: InspectCert,
 {
     use anyhow::Context as _;
 
@@ -244,7 +244,7 @@ where
 fn log_chain<C>(certs: C)
 where
     C: Iterator,
-    C::Item: CertInfo,
+    C::Item: InspectCert,
 {
     for (cert_idx, cert) in certs.enumerate() {
         if let Err(e) = log_cert(cert_idx, cert) {
@@ -310,12 +310,12 @@ fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
     }
 }
 
-trait CertInfo {
+trait InspectCert {
     fn der(&self) -> anyhow::Result<Cow<'_, [u8]>>;
     fn friendly_name(&self) -> Option<Cow<'_, str>>;
 }
 
-impl<T: CertInfo> CertInfo for &T {
+impl<T: InspectCert> InspectCert for &T {
     fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
         (*self).der()
     }
@@ -325,7 +325,7 @@ impl<T: CertInfo> CertInfo for &T {
     }
 }
 
-impl CertInfo for ::rustls::pki_types::CertificateDer<'_> {
+impl InspectCert for ::rustls::pki_types::CertificateDer<'_> {
     fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
         Ok(Cow::Borrowed(self))
     }
@@ -336,12 +336,12 @@ impl CertInfo for ::rustls::pki_types::CertificateDer<'_> {
 }
 
 #[cfg_attr(not(windows), expect(unused))]
-struct CertProxy {
+struct CertInspectProxy {
     pub friendly_name: Option<String>,
     pub der: Vec<u8>,
 }
 
-impl CertInfo for CertProxy {
+impl InspectCert for CertInspectProxy {
     fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
         Ok(Cow::Borrowed(&self.der))
     }

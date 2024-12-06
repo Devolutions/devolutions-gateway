@@ -1,4 +1,4 @@
-use crate::doctor::{CertInfo, DiagnosticCtx};
+use crate::doctor::{DiagnosticCtx, InspectCert};
 
 pub(crate) fn failed_to_connect_to_server(ctx: &mut DiagnosticCtx, hostname: &str) {
     ctx.attach_help(format!(
@@ -72,7 +72,7 @@ You need to generate a separate certificate valid for server authentication."
 pub(crate) fn x509_io_link<C>(ctx: &mut DiagnosticCtx, certs: C)
 where
     C: Iterator,
-    C::Item: CertInfo,
+    C::Item: InspectCert,
 {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine as _;

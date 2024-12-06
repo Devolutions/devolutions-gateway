@@ -10,7 +10,7 @@ use windows::Win32::Security::{Credentials, Cryptography};
 use wrapper::ScopeGuard;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{help, Args, CertProxy, Diagnostic, DiagnosticCtx};
+use crate::doctor::{help, Args, CertInspectProxy, Diagnostic, DiagnosticCtx};
 
 struct ChainCtx {
     store: wrapper::CertStore,
@@ -318,7 +318,7 @@ fn schannel_fetch_chain(
             warn!(cert_idx, %error, "Failed to add certificate to the store");
         }
 
-        certificates.push(CertProxy {
+        certificates.push(CertInspectProxy {
             friendly_name: element.cert.subject_friendly_name().ok(),
             der: element.cert.as_x509_der().to_owned(),
         });

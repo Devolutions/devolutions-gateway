@@ -128,7 +128,7 @@ mod openssl {
     use std::path::Path;
 
     use crate::doctor::macros::diagnostic;
-    use crate::doctor::{help, Args, CertInfo, Diagnostic, DiagnosticCtx};
+    use crate::doctor::{help, Args, Diagnostic, DiagnosticCtx, InspectCert};
 
     pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         let mut server_certificates = Vec::new();
@@ -345,7 +345,7 @@ To resolve this issue, you can:
 - Obtain and use a certificate signed by a legitimate certification authority.");
     }
 
-    impl CertInfo for X509 {
+    impl InspectCert for X509 {
         fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
             let der = self.to_der()?;
             Ok(Cow::Owned(der))
