@@ -196,7 +196,7 @@ fn spawn_sending_task<W>(
                     break;
                 }
                 Some(Err(e)) => {
-                    warn!(?e, "error while receiving message from client");
+                    warn!(error = ?e, "error while receiving message from client");
                     break;
                 }
                 Some(Ok(protocol::ClientMessage::Start)) => {
@@ -236,7 +236,7 @@ fn spawn_sending_task<W>(
                 err = error_receiver.recv() => {
                     if let Some(err) = err {
                         let _ = ws_frame_clone.lock().await.send(protocol::ServerMessage::Error(err)).await.inspect_err(|e| {
-                            warn!(?e, "failed to send error message");
+                            warn!(error=?e, "failed to send error message");
                         });
                         break;
                     } else {
@@ -249,13 +249,13 @@ fn spawn_sending_task<W>(
                             sender,
                         }) => {
                             let _ = ws_frame_clone.lock().await.send(protocol::ServerMessage::End).await.inspect_err(|e| {
-                                warn!(?e, "failed to send end message");
+                                warn!(error=?e, "failed to send end message");
                             });
 
                             tokio::spawn(async move {
                                 let _ = file_droped_receiver.await;
                                 let _ = sender.send(()).inspect_err(|e| {
-                                    warn!(?e, "failed to send recording event");
+                                    warn!(error=?e, "failed to send recording event");
                                 });
                             });
 

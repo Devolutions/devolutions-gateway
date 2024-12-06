@@ -46,7 +46,7 @@ pub(crate) async fn stream_file(
                 };
                 info!("Forwarding recording event to streaming task: {:?}", event);
                 if let Err(e) = sender.send(event).await {
-                    warn!(?e, "Failed to send recording event");
+                    warn!(error=?e, "Failed to send recording event");
                 }
             }
             info!("forwarding recording event task finished");
@@ -85,10 +85,10 @@ pub(crate) async fn stream_file(
 
         match streaming_result {
             Err(e) => {
-                error!(?e, "Streaming file task join failed");
+                error!(error=?e, "Streaming file task join failed");
             }
             Ok(Err(e)) => {
-                error!(?e, "Streaming file failed");
+                error!(error=?e, "Streaming file failed");
             }
             _ => {}
         };
