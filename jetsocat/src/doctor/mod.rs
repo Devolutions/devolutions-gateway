@@ -9,7 +9,7 @@ mod rustls;
 mod schannel;
 
 use core::fmt;
-use std::path::PathBuf;
+use std::{borrow::Cow, path::PathBuf};
 
 use tinyjson::JsonValue;
 
@@ -218,6 +218,41 @@ fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
     Ok(out)
 }
 
+fn log_cert<C>(cert_idx: usize, cert: C) -> anyhow::Result<()>
+where
+    C: InspectCert,
+{
+    use anyhow::Context as _;
+
+    let friendly_name = if let Some(name) = cert.friendly_name() {
+        name
+    } else {
+        Cow::Owned(String::from("???"))
+    };
+    info!(cert_idx, cert_name = %friendly_name);
+
+    let cert_der = cert
+        .der()
+        .with_context(|| format!("failed to retrieve DER encoding for certificate number {cert_idx}"))?;
+    let cert_pem =
+        cert_to_pem(&cert_der).with_context(|| format!("failed to write certificate number {cert_idx} as PEM"))?;
+    info!("{cert_pem}");
+
+    Ok(())
+}
+
+fn log_chain<C>(certs: C)
+where
+    C: Iterator,
+    C::Item: InspectCert,
+{
+    for (cert_idx, cert) in certs.enumerate() {
+        if let Err(e) = log_cert(cert_idx, cert) {
+            warn!(error = format!("{e:#}"), "Failed to log certificate");
+        }
+    }
+}
+
 struct DiagnosticTrace(std::sync::Mutex<Vec<u8>>);
 
 impl DiagnosticTrace {
@@ -272,5 +307,36 @@ fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
             (None, None) => return true,
             _ => return false,
         }
+    }
+}
+
+trait InspectCert {
+    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>>;
+    fn friendly_name(&self) -> Option<Cow<'_, str>>;
+}
+
+impl<T: InspectCert> InspectCert for &T {
+    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
+        (*self).der()
+    }
+
+    fn friendly_name(&self) -> Option<Cow<'_, str>> {
+        (*self).friendly_name()
+    }
+}
+
+#[cfg_attr(not(windows), expect(unused))]
+struct CertInspectProxy {
+    pub friendly_name: Option<String>,
+    pub der: Vec<u8>,
+}
+
+impl InspectCert for CertInspectProxy {
+    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
+        Ok(Cow::Borrowed(&self.der))
+    }
+
+    fn friendly_name(&self) -> Option<Cow<'_, str>> {
+        self.friendly_name.as_deref().map(Cow::Borrowed)
     }
 }

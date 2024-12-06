@@ -10,7 +10,7 @@ use windows::Win32::Security::{Credentials, Cryptography};
 use wrapper::ScopeGuard;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
+use crate::doctor::{help, Args, CertInspectProxy, Diagnostic, DiagnosticCtx};
 
 struct ChainCtx {
     store: wrapper::CertStore,
@@ -301,8 +301,8 @@ fn schannel_fetch_chain(
         }
     }
 
-    let remote_end_entity_cert = wrapper::OwnedCertContext::schannel_remote_cert(ctx_handle.as_ref())
-        .context("failed to retrieve remote cert")?;
+    let remote_end_entity_cert =
+        wrapper::CertContext::schannel_remote_cert(ctx_handle.as_ref()).context("failed to retrieve remote cert")?;
 
     // Update the end entity info of the chain context.
     chain_ctx.end_entity_info = remote_end_entity_cert.to_info();
@@ -314,26 +314,17 @@ fn schannel_fetch_chain(
     let mut certificates = Vec::new();
 
     remote_chain.for_each(|cert_idx, element| {
-        let cert_name = if let Ok(name) = element.cert.subject_friendly_name() {
-            name
-        } else {
-            String::from("?")
-        };
-
-        info!(cert_idx, cert_name);
-
-        match cert_to_pem(element.cert.as_x509_der()) {
-            Ok(cert_pem) => info!("{cert_pem}"),
-            Err(error) => warn!(cert_idx, %error, "Failed to write certificate as PEM"),
-        }
-
         if let Err(error) = chain_ctx.store.add_x509_encoded_certificate(element.cert.as_x509_der()) {
             warn!(cert_idx, %error, "Failed to add certificate to the store");
         }
 
-        certificates.push(element.cert.as_x509_der().to_owned());
+        certificates.push(CertInspectProxy {
+            friendly_name: element.cert.subject_friendly_name().ok(),
+            der: element.cert.as_x509_der().to_owned(),
+        });
     });
 
+    crate::doctor::log_chain(certificates.iter());
     help::x509_io_link(ctx, certificates.iter());
 
     return Ok(());
@@ -370,21 +361,21 @@ fn schannel_read_chain(ctx: &mut DiagnosticCtx, chain_path: &Path, chain_ctx: &m
 
     let mut certificates = Vec::new();
 
-    for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
-        let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
+    for (idx, cert_der) in rustls_pemfile::certs(&mut file).enumerate() {
+        let cert_der = cert_der.with_context(|| format!("failed to read certificate number {idx}"))?;
 
-        let cert_pem =
-            cert_to_pem(&certificate).with_context(|| format!("failed to write certificate number {idx} as PEM"))?;
-        info!("{cert_pem}");
-
-        chain_ctx
+        let cert_ctx = chain_ctx
             .store
-            .add_x509_encoded_certificate(&certificate)
+            .add_x509_encoded_certificate(&cert_der)
             .with_context(|| format!("failed to add certificate number {idx} to the store"))?;
 
-        certificates.push(certificate);
+        certificates.push(CertInspectProxy {
+            friendly_name: cert_ctx.subject_friendly_name().ok(),
+            der: cert_ctx.as_x509_der().to_owned(),
+        });
     }
 
+    crate::doctor::log_chain(certificates.iter());
     help::x509_io_link(ctx, certificates.iter());
 
     Ok(())
@@ -601,7 +592,9 @@ mod wrapper {
             Ok(Self { ptr: cert_store })
         }
 
-        pub(super) fn add_x509_encoded_certificate(&mut self, cert: &[u8]) -> windows::core::Result<()> {
+        pub(super) fn add_x509_encoded_certificate(&mut self, cert: &[u8]) -> windows::core::Result<CertContext<'_>> {
+            let mut cert_ctx: *mut Cryptography::CERT_CONTEXT = ptr::null_mut();
+
             // SAFETY: FFI call with no outstanding preconditions.
             unsafe {
                 Cryptography::CertAddEncodedCertificateToStore(
@@ -609,14 +602,17 @@ mod wrapper {
                     Cryptography::X509_ASN_ENCODING,
                     cert,
                     Cryptography::CERT_STORE_ADD_ALWAYS,
-                    None,
+                    Some(&mut cert_ctx),
                 )?;
             }
 
-            Ok(())
+            Ok(CertContext {
+                ptr: cert_ctx,
+                _marker: core::marker::PhantomData,
+            })
         }
 
-        pub(super) fn fetch_certificate(&self, info: &CertInfo) -> windows::core::Result<OwnedCertContext<'_>> {
+        pub(super) fn fetch_certificate(&self, info: &CertInfo) -> windows::core::Result<CertContext<'_>> {
             let serial_number_blob = Cryptography::CRYPT_INTEGER_BLOB {
                 cbData: u32::try_from(info.serial.len()).expect("usize-to-u32"),
                 pbData: info.serial.as_ptr().cast_mut(),
@@ -643,12 +639,9 @@ mod wrapper {
             if ptr.is_null() {
                 Err(windows::core::Error::from_win32())
             } else {
-                Ok(OwnedCertContext {
+                Ok(CertContext {
                     ptr,
-                    borrowed: BorrowedCertContext {
-                        ptr: ptr.cast_const(),
-                        _marker: core::marker::PhantomData,
-                    },
+                    _marker: core::marker::PhantomData,
                 })
             }
         }
@@ -665,13 +658,14 @@ mod wrapper {
         }
     }
 
-    pub(super) struct BorrowedCertContext<'store> {
+    #[repr(transparent)]
+    pub(super) struct CertContextRef<'store> {
         /// INVARIANT: A valid pointer to a properly initialized CERT_CONTEXT.
         ptr: *const Cryptography::CERT_CONTEXT,
         _marker: core::marker::PhantomData<&'store CertStore>,
     }
 
-    impl BorrowedCertContext<'_> {
+    impl CertContextRef<'_> {
         pub(super) fn as_x509_der(&self) -> &[u8] {
             // SAFETY: Pointer is valid per invariant.
             let cert_context = unsafe { self.ptr.read() };
@@ -805,13 +799,14 @@ mod wrapper {
         }
     }
 
-    pub(super) struct OwnedCertContext<'store> {
+    #[repr(transparent)]
+    pub(super) struct CertContext<'store> {
         /// INVARIANT: A valid pointer to a properly initialized CERT_CONTEXT.
         ptr: *mut Cryptography::CERT_CONTEXT,
-        borrowed: BorrowedCertContext<'store>,
+        _marker: core::marker::PhantomData<&'store CertStore>,
     }
 
-    impl<'store> OwnedCertContext<'store> {
+    impl<'store> CertContext<'store> {
         pub(super) fn schannel_remote_cert(ctx_handle: &'store Credentials::SecHandle) -> windows::core::Result<Self> {
             let mut cert_ctx: *mut Cryptography::CERT_CONTEXT = ptr::null_mut();
 
@@ -831,15 +826,12 @@ mod wrapper {
 
             Ok(Self {
                 ptr: cert_ctx,
-                borrowed: BorrowedCertContext {
-                    ptr: cert_ctx.cast_const(),
-                    _marker: std::marker::PhantomData,
-                },
+                _marker: std::marker::PhantomData,
             })
         }
     }
 
-    impl Drop for OwnedCertContext<'_> {
+    impl Drop for CertContext<'_> {
         fn drop(&mut self) {
             // SAFETY: The CERT_CONTEXT handle is owned by us.
             let ret = unsafe { Cryptography::CertFreeCertificateContext(Some(self.ptr)) };
@@ -851,11 +843,16 @@ mod wrapper {
         }
     }
 
-    impl<'store> std::ops::Deref for OwnedCertContext<'store> {
-        type Target = BorrowedCertContext<'store>;
+    impl<'store> std::ops::Deref for CertContext<'store> {
+        type Target = CertContextRef<'store>;
 
         fn deref(&self) -> &Self::Target {
-            &self.borrowed
+            debug_assert!(!self.ptr.is_null());
+
+            // SAFETY:
+            // - Both CertContext and CertContextRef are #[repr(transparent)] over a raw pointer on a CERT_CONTEXT.
+            // - Per invariants, the pointers are on valid CERT_CONTEXT.
+            unsafe { &*(self as *const _ as *const CertContextRef<'_>) }
         }
     }
 
@@ -873,7 +870,7 @@ mod wrapper {
         }
 
         #[expect(clippy::similar_names)] // pp and p are close, but this is fine.
-        pub(super) fn for_each(&self, mut f: impl FnMut(usize, &ChainElement<'store>)) {
+        pub(super) fn for_each(&self, mut f: impl for<'cert> FnMut(usize, &ChainElement<'store, 'cert>)) {
             // SAFETY: Pointer is valid per invariants.
             let chain_context: &Cryptography::CERT_CHAIN_CONTEXT = unsafe { &*self.ptr };
 
@@ -923,13 +920,13 @@ mod wrapper {
                         continue;
                     }
 
-                    let borrowed_cert_context = BorrowedCertContext {
+                    let cert_context = CertContextRef {
                         ptr: p_cert_context,
                         _marker: std::marker::PhantomData,
                     };
 
                     let chain_element = ChainElement {
-                        cert: borrowed_cert_context,
+                        cert: &cert_context,
                         trust_status: chain_element.TrustStatus,
                     };
 
@@ -946,8 +943,8 @@ mod wrapper {
         }
     }
 
-    pub(super) struct ChainElement<'store> {
-        pub cert: BorrowedCertContext<'store>,
+    pub(super) struct ChainElement<'store, 'cert> {
+        pub cert: &'cert CertContextRef<'store>,
         pub trust_status: Cryptography::CERT_TRUST_STATUS,
     }
 

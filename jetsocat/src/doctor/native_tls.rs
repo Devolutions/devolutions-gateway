@@ -124,10 +124,11 @@ fn parse_tls_connect_error_string(_ctx: &mut DiagnosticCtx, _error: &native_tls:
 mod openssl {
     use anyhow::Context as _;
     use openssl::x509::X509;
+    use std::borrow::Cow;
     use std::path::Path;
 
     use crate::doctor::macros::diagnostic;
-    use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
+    use crate::doctor::{help, Args, Diagnostic, DiagnosticCtx, InspectCert};
 
     pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         let mut server_certificates = Vec::new();
@@ -187,18 +188,11 @@ mod openssl {
             .peer_cert_chain()
             .context("peer certification chain missing from SSL context")?
         {
-            let der = certificate.to_der().context("certificate.to_der()")?;
-            let cert_pem = cert_to_pem(&der).context("failed to write the peer chain as PEM")?;
-            info!("{cert_pem}");
             server_certificates.push(certificate.to_owned());
         }
 
-        help::x509_io_link(
-            ctx,
-            server_certificates
-                .iter()
-                .map(|cert| cert.to_der().expect("checked above")),
-        );
+        crate::doctor::log_chain(server_certificates.iter());
+        help::x509_io_link(ctx, server_certificates.iter());
 
         Ok(())
     }
@@ -216,19 +210,12 @@ mod openssl {
 
         for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
             let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
-            let cert_pem = cert_to_pem(&certificate)
-                .with_context(|| format!("failed to write certificate number {idx} as PEM"))?;
-            info!("{cert_pem}");
             let certificate = X509::from_der(&certificate).context("X509::from_der")?;
             server_certificates.push(certificate);
         }
 
-        help::x509_io_link(
-            ctx,
-            server_certificates
-                .iter()
-                .map(|cert| cert.to_der().expect("checked above")),
-        );
+        crate::doctor::log_chain(server_certificates.iter());
+        help::x509_io_link(ctx, server_certificates.iter());
 
         Ok(())
     }
@@ -356,5 +343,28 @@ It is generally considered a bad practice to use self-signed certificates, becau
 To resolve this issue, you can:
 - Trust the self-signed certificate on your system, if you know what you are doing.
 - Obtain and use a certificate signed by a legitimate certification authority.");
+    }
+
+    impl InspectCert for X509 {
+        fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
+            let der = self.to_der()?;
+            Ok(Cow::Owned(der))
+        }
+
+        fn friendly_name(&self) -> Option<Cow<'_, str>> {
+            let mut friendly_name = String::new();
+
+            self.subject_name().entries().enumerate().for_each(|(idx, entry)| {
+                if idx > 0 {
+                    friendly_name.push(' ');
+                }
+
+                if let Ok(name) = entry.data().as_utf8() {
+                    friendly_name.push_str(&name);
+                }
+            });
+
+            Some(Cow::Owned(friendly_name))
+        }
     }
 }
