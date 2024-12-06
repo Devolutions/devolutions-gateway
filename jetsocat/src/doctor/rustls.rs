@@ -1,10 +1,11 @@
 use anyhow::Context as _;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
+use std::borrow::Cow;
 use std::path::Path;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
+use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx, InspectCert};
 
 pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     let mut root_store = rustls::RootCertStore::empty();
@@ -192,6 +193,16 @@ fn rustls_check_chain(
     .context("failed to verify certification chain")?;
 
     Ok(())
+}
+
+impl InspectCert for pki_types::CertificateDer<'_> {
+    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
+        Ok(Cow::Borrowed(self))
+    }
+
+    fn friendly_name(&self) -> Option<Cow<'_, str>> {
+        None
+    }
 }
 
 #[derive(Debug)]

@@ -325,16 +325,6 @@ impl<T: InspectCert> InspectCert for &T {
     }
 }
 
-impl InspectCert for ::rustls::pki_types::CertificateDer<'_> {
-    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
-        Ok(Cow::Borrowed(self))
-    }
-
-    fn friendly_name(&self) -> Option<Cow<'_, str>> {
-        None
-    }
-}
-
 #[cfg_attr(not(windows), expect(unused))]
 struct CertInspectProxy {
     pub friendly_name: Option<String>,
