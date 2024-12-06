@@ -45,7 +45,7 @@ pub(crate) async fn stream_file(
                     RecordingEvent::Disconnected { sender } => streamer::RecordingEvent::Disconnected { sender },
                 };
                 if let Err(e) = sender.send(event).await {
-                    warn!(error=?e, "failed to send recording event");
+                    warn!(error=?e, "Failed to send recording event");
                 }
             }
         });
@@ -83,10 +83,10 @@ pub(crate) async fn stream_file(
 
         match streaming_result {
             Err(e) => {
-                error!(error=?e, "streaming file task join failed");
+                error!(error=?e, "Streaming file task join failed");
             }
             Ok(Err(e)) => {
-                error!(error = format!("{e:#}"), "streaming file failed");
+                error!(error = format!("{e:#}"), "Streaming file failed");
             }
             _ => {}
         };
