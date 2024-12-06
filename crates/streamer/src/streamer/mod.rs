@@ -180,7 +180,7 @@ fn spawn_sending_task<W>(
     use futures_util::stream::StreamExt;
 
     let ws_frame = Arc::new(Mutex::new(ws_frame));
-    let ws_frame_clone = ws_frame.clone();
+    let ws_frame_clone = Arc::clone(&ws_frame);
     // Spawn a dedicated task to handle incoming messages from the client
     // Reasoning: tokio::select! will stuck on `chunk_receiver.recv()` when there's no more data to receive
     // This will disable the ability to receive shutdown signal
@@ -200,7 +200,7 @@ fn spawn_sending_task<W>(
                     break;
                 }
                 Some(Ok(protocol::ClientMessage::Start)) => {
-                    let _ = ws_frame
+                    ws_frame
                         .lock()
                         .await
                         .send(protocol::ServerMessage::MetaData {
