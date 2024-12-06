@@ -1,6 +1,6 @@
-var u = Object.defineProperty;
-var a = (o, t, e) => t in o ? u(o, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : o[t] = e;
-var s = (o, t, e) => a(o, typeof t != "symbol" ? t + "" : t, e);
+var d = Object.defineProperty;
+var u = (o, t, e) => t in o ? d(o, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : o[t] = e;
+var s = (o, t, e) => u(o, typeof t != "symbol" ? t + "" : t, e);
 class c {
   constructor(t, e, r) {
     s(this, "sourceBuffer");
@@ -95,8 +95,14 @@ class p {
     this.ws.onmessage = (e) => {
       const r = new FileReader();
       r.onload = () => {
-        const n = r.result, i = f(n);
-        t(i);
+        const n = r.result;
+        try {
+          const i = f(n);
+          t(i);
+        } catch (i) {
+          console.warn("Error parsing server message", i);
+          return;
+        }
       }, r.readAsArrayBuffer(e.data);
     };
   }
@@ -113,7 +119,7 @@ class p {
     return this.ws.readyState === WebSocket.CLOSED;
   }
 }
-class d extends HTMLElement {
+class a extends HTMLElement {
   constructor() {
     super(...arguments);
     s(this, "shadowRoot", null);
@@ -158,7 +164,7 @@ class d extends HTMLElement {
     this.videoElement = document.createElement("video"), e.appendChild(this.videoElement), this.shadowRoot.appendChild(e), this.syncAttributes();
   }
   syncAttributes() {
-    for (const e of d.observedAttributes) {
+    for (const e of a.observedAttributes) {
       const r = this.getAttribute(e);
       e === "src" && r !== null && this.srcChange(r), r !== null && this.videoElement.setAttribute(e, r);
     }
@@ -219,7 +225,7 @@ class d extends HTMLElement {
     this._buffer && this.debug && this._buffer.downloadBufferedFile();
   }
 }
-customElements.define("shadow-player", d);
+customElements.define("shadow-player", a);
 export {
-  d as ShadowPlayer
+  a as ShadowPlayer
 };

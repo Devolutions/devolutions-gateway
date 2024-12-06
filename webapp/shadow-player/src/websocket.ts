@@ -1,4 +1,9 @@
-import { ClientMessage, parseClientMessage, parseServerMessage, ServerMessage } from './protocol';
+import {
+  ClientMessage,
+  parseClientMessage,
+  parseServerMessage,
+  ServerMessage,
+} from './protocol';
 
 export class ServerWebSocket {
   ws: WebSocket;
@@ -15,8 +20,13 @@ export class ServerWebSocket {
       const reader = new FileReader();
       reader.onload = () => {
         const arrayBuffer = reader.result as ArrayBuffer;
-        const serverResponse = parseServerMessage(arrayBuffer);
-        callback(serverResponse);
+        try {
+          const serverResponse = parseServerMessage(arrayBuffer);
+          callback(serverResponse);
+        } catch (e) {
+          console.warn('Error parsing server message', e);
+          return;
+        }
       };
 
       reader.readAsArrayBuffer(ev.data);
