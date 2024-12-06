@@ -361,15 +361,18 @@ fn schannel_read_chain(ctx: &mut DiagnosticCtx, chain_path: &Path, chain_ctx: &m
 
     let mut certificates = Vec::new();
 
-    for (idx, certificate) in rustls_pemfile::certs(&mut file).enumerate() {
-        let certificate = certificate.with_context(|| format!("failed to read certificate number {idx}"))?;
+    for (idx, cert_der) in rustls_pemfile::certs(&mut file).enumerate() {
+        let cert_der = cert_der.with_context(|| format!("failed to read certificate number {idx}"))?;
 
-        chain_ctx
+        let cert_ctx = chain_ctx
             .store
-            .add_x509_encoded_certificate(&certificate)
+            .add_x509_encoded_certificate(&cert_der)
             .with_context(|| format!("failed to add certificate number {idx} to the store"))?;
 
-        certificates.push(certificate);
+        certificates.push(CertInspectProxy {
+            friendly_name: cert_ctx.subject_friendly_name().ok(),
+            der: cert_ctx.as_x509_der().to_owned(),
+        });
     }
 
     crate::doctor::log_chain(certificates.iter());
