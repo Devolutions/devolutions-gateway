@@ -523,7 +523,17 @@ async fn shadow_recording(
         return Err(HttpError::not_found().msg("requested file does not exist"));
     }
 
-    crate::streaming::stream_file(path, ws, shutdown_signal, recordings, id)
+    let (subscribe_sender, subscribe_receiver) = tokio::sync::mpsc::channel(1);
+
+    recordings
+        .subscribe_to_active_recording(id, subscribe_sender)
+        .await
+        .map_err(|e| {
+            error!(error = format!("{e:#}"), "failed to subscribe to active recording");
+            HttpError::internal().msg("failed to subscribe to active recording")
+        })?;
+
+    crate::streaming::stream_file(path, ws, shutdown_signal, recordings, subscribe_receiver, id)
         .await
         .map_err(HttpError::internal().err())
 }

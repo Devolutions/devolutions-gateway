@@ -69,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
     run_client(client, output_file);
 
     let shutdown_signal = TokioSignal { signal: eof_receiver };
+    let (_sender, receiver) = tokio::sync::mpsc::channel(1);
 
     tokio::task::spawn_blocking(move || {
         webm_stream(
@@ -78,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
             StreamingConfig {
                 encoder_threads: CpuCount::default(),
             },
+            receiver,
             || {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 let mut file_written_receiver = file_written_receiver.resubscribe();
