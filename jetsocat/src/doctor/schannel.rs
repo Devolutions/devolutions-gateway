@@ -867,7 +867,7 @@ mod wrapper {
         }
 
         #[expect(clippy::similar_names)] // pp and p are close, but this is fine.
-        pub(super) fn for_each(&self, mut f: impl FnMut(usize, &ChainElement<'store>)) {
+        pub(super) fn for_each(&self, mut f: impl for<'cert> FnMut(usize, &ChainElement<'store, 'cert>)) {
             // SAFETY: Pointer is valid per invariants.
             let chain_context: &Cryptography::CERT_CHAIN_CONTEXT = unsafe { &*self.ptr };
 
@@ -917,13 +917,13 @@ mod wrapper {
                         continue;
                     }
 
-                    let borrowed_cert_context = CertContextRef {
+                    let cert_context = CertContextRef {
                         ptr: p_cert_context,
                         _marker: std::marker::PhantomData,
                     };
 
                     let chain_element = ChainElement {
-                        cert: borrowed_cert_context,
+                        cert: &cert_context,
                         trust_status: chain_element.TrustStatus,
                     };
 
@@ -940,8 +940,8 @@ mod wrapper {
         }
     }
 
-    pub(super) struct ChainElement<'store> {
-        pub cert: CertContextRef<'store>,
+    pub(super) struct ChainElement<'store, 'cert> {
+        pub cert: &'cert CertContextRef<'store>,
         pub trust_status: Cryptography::CERT_TRUST_STATUS,
     }
 
