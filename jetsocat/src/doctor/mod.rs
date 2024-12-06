@@ -325,6 +325,16 @@ impl<T: CertInfo> CertInfo for &T {
     }
 }
 
+impl CertInfo for ::rustls::pki_types::CertificateDer<'_> {
+    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
+        Ok(Cow::Borrowed(self))
+    }
+
+    fn friendly_name(&self) -> Option<Cow<'_, str>> {
+        None
+    }
+}
+
 #[cfg_attr(not(windows), expect(unused))]
 struct CertProxy {
     pub friendly_name: Option<String>,

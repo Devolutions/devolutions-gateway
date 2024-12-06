@@ -246,13 +246,3 @@ impl ServerCertVerifier for NoCertificateVerification {
         ]
     }
 }
-
-impl CertInfo for pki_types::CertificateDer<'_> {
-    fn der(&self) -> anyhow::Result<Cow<'_, [u8]>> {
-        Ok(Cow::Borrowed(self))
-    }
-
-    fn friendly_name(&self) -> Option<Cow<'_, str>> {
-        None
-    }
-}
