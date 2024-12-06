@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2024.3.5
+2024.3.6
 :toc: left
 :numbered:
 :toclevels: 4
@@ -758,6 +758,26 @@ Lists all recordings stored on this instance
 | `scope_token`
 | http
 | bearer
+|===
+
+===== Parameters
+
+
+
+
+
+====== Query Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| active
+| When true, only the active recordings are returned 
+| X
+| null
+| 
+
 |===
 
 

@@ -1,4 +1,4 @@
-openapi: 3.0.3
+﻿openapi: 3.0.3
 info:
   title: devolutions-gateway-subscriber
   description: API a service must implement in order to receive Devolutions Gateway notifications
@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.3.5
+  version: 2024.3.6
 paths:
   /dgw/subscriber:
     post:

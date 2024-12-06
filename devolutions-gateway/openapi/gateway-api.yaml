@@ -1,4 +1,4 @@
-openapi: 3.0.3
+﻿openapi: 3.0.3
 info:
   title: devolutions-gateway
   description: Protocol-aware fine-grained relay server
@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.3.5
+  version: 2024.3.6
 paths:
   /jet/config:
     patch:
@@ -229,6 +229,13 @@ paths:
       - Jrec
       summary: Lists all recordings stored on this instance
       operationId: ListRecordings
+      parameters:
+      - name: active
+        in: query
+        description: When true, only the active recordings are returned
+        required: true
+        schema:
+          type: boolean
       responses:
         '200':
           description: List of recordings on this Gateway instance
