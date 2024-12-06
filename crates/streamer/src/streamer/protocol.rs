@@ -115,7 +115,7 @@ impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
             ServerMessage::Error(err) => {
                 let json = format!("{{\"error\":\"{}\"}}", err.as_str());
                 dst.put(json.as_bytes());
-            },
+            }
             ServerMessage::End => {
                 info!("Sending end message");
             }
