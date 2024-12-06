@@ -45,7 +45,7 @@ pub(crate) async fn stream_file(
                     RecordingEvent::Disconnected { sender } => streamer::RecordingEvent::Disconnected { sender },
                 };
                 if let Err(e) = sender.send(event).await {
-                    warn!(error=?e, "Failed to send recording event");
+                    warn!(error=?e, "failed to send recording event");
                 }
             }
         });
