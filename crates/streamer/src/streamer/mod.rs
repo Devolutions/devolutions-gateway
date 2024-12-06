@@ -196,7 +196,7 @@ fn spawn_sending_task<W>(
                     break;
                 }
                 Some(Err(e)) => {
-                    warn!(error = ?e, "error while receiving message from client");
+                    warn!(error = %e, "error while receiving message from client");
                     break;
                 }
                 Some(Ok(protocol::ClientMessage::Start)) => {
@@ -249,7 +249,7 @@ fn spawn_sending_task<W>(
                             sender,
                         }) => {
                             let _ = ws_frame_clone.lock().await.send(protocol::ServerMessage::End).await.inspect_err(|e| {
-                                warn!(error=?e, "failed to send end message");
+                                warn!(error=%e, "failed to send end message");
                             });
 
                             tokio::spawn(async move {
@@ -281,7 +281,7 @@ fn spawn_sending_task<W>(
         let task_result = task.await;
 
         if let Err(e) = task_result {
-            tracing::warn!(error=?e);
+            tracing::warn!(error = format!("{e:#}"));
         }
     });
 }
