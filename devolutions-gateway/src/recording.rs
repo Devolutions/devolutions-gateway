@@ -13,6 +13,7 @@ use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
 use streamer::SignalWriter;
+use time::{Duration, OffsetDateTime};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::{fs, io};
@@ -562,9 +563,12 @@ impl RecordingManagerTask {
 
                     let _ = self
                         .job_queue_handle
-                        .enqueue(RemuxJob {
-                            input_path: recording_file_path,
-                        })
+                        .schedule(
+                            RemuxJob {
+                                input_path: recording_file_path,
+                            },
+                            OffsetDateTime::now_utc() + Duration::seconds(60),
+                        )
                         .await;
                 } else {
                     debug!("Video remuxing was skipped because XMF native library is not loaded");
