@@ -40,7 +40,7 @@ features = [
 ]
 
 [dependencies.tokio]
-version = "1.41"
+version = "1.42"
 features = [
     "signal",
     "net",
