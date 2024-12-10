@@ -218,24 +218,20 @@ fn spawn_sending_task<W>(
                     break;
                 }
                 Some(Ok(protocol::ClientMessage::Start)) => {
-                    ws_frame
-                        .lock()
-                        .await
-                        .send(protocol::ServerMessage::MetaData {
+                    ws_send(
+                        &ws_frame,
+                        protocol::ServerMessage::MetaData {
                             codec: codec
                                 .as_ref()
                                 .and_then(|c| c.as_str().try_into().ok())
                                 .unwrap_or(protocol::Codec::Vp8),
-                        })
-                        .await?;
+                        },
+                    )
+                    .await;
                 }
                 Some(Ok(protocol::ClientMessage::Pull)) => match chunk_receiver.recv().await {
                     Some(data) => {
-                        ws_frame
-                            .lock()
-                            .await
-                            .send(protocol::ServerMessage::Chunk(&data))
-                            .await?;
+                        ws_send(&ws_frame, protocol::ServerMessage::Chunk(&data)).await;
                     }
                     _ => {
                         break;
@@ -252,16 +248,15 @@ fn spawn_sending_task<W>(
             tokio::select! {
                 err = error_receiver.recv() => {
                     if let Some(err) = err {
-                        let _ = ws_frame_clone.lock().await.send(protocol::ServerMessage::Error(err)).await.inspect_err(|e| {
-                            warn!(error=?e, "Failed to send error message");
-                        });
+                        ws_send(&ws_frame_clone, protocol::ServerMessage::Error(err)).await;
                         break;
                     } else {
                         continue;
                     }
                 },
                 _ = shutdown_signal.wait() => {
-                    info!("Received shutdown signal"); 
+                    info!("Received shutdown signal");
+                    ws_send(&ws_frame_clone, protocol::ServerMessage::End).await;
                     break;
                 },
             }
@@ -279,6 +274,15 @@ fn spawn_sending_task<W>(
             tracing::warn!(error = format!("{e:#}"));
         }
     });
+
+    async fn ws_send<W: tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static>(
+        ws_frame: &Arc<Mutex<Framed<W, ProtocolCodeC>>>,
+        message: protocol::ServerMessage<'_>,
+    ) {
+        let _ = ws_frame.lock().await.send(message).await.inspect_err(|e| {
+            warn!(error = %e, "Failed to send message to client");
+        });
+    }
 }
 
 enum WhenEofControlFlow {

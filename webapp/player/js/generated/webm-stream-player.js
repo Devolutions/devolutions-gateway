@@ -1,7 +1,7 @@
-var u = Object.defineProperty;
-var a = (o, t, e) => t in o ? u(o, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : o[t] = e;
-var s = (o, t, e) => a(o, typeof t != "symbol" ? t + "" : t, e);
-class c {
+var c = Object.defineProperty;
+var f = (n, t, e) => t in n ? c(n, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : n[t] = e;
+var s = (n, t, e) => f(n, typeof t != "symbol" ? t + "" : t, e);
+class h {
   constructor(t, e, r) {
     s(this, "sourceBuffer");
     s(this, "bufferQueue", []);
@@ -15,8 +15,8 @@ class c {
       `video/webm; codecs="${e}"`
     ), this.next = r, this.sourceBuffer.addEventListener("updateend", () => {
       this.tryAppendBuffer();
-    }), this.sourceBuffer.addEventListener("error", (n) => {
-      this.logErrorDetails(n), this.downloadBufferedFile();
+    }), this.sourceBuffer.addEventListener("error", (o) => {
+      this.logErrorDetails(o), this.downloadBufferedFile();
     });
   }
   setDebug(t) {
@@ -53,37 +53,41 @@ class c {
     return e.trim();
   }
 }
-function f(o) {
-  const e = new DataView(o).getUint8(0);
+function p(n) {
+  const e = new DataView(n).getUint8(0);
   if (e === 0)
     return {
       type: "chunk",
-      data: new Uint8Array(o, 1)
+      data: new Uint8Array(n, 1)
     };
   if (e === 1) {
-    const r = new TextDecoder().decode(new Uint8Array(o, 1));
+    const r = new TextDecoder().decode(new Uint8Array(n, 1));
     return {
       type: "metadata",
       codec: JSON.parse(r).codec === "vp8" ? "vp8" : "vp9"
     };
   }
   if (e === 2) {
-    const r = new TextDecoder().decode(new Uint8Array(o, 1));
+    const r = new TextDecoder().decode(new Uint8Array(n, 1));
     return {
       type: "error",
       error: JSON.parse(r).error
     };
   }
+  if (e === 3)
+    return {
+      type: "end"
+    };
   throw new Error("Unknown message type");
 }
-function h(o) {
-  if (o.type === "start")
+function b(n) {
+  if (n.type === "start")
     return new Uint8Array([0]);
-  if (o.type === "pull")
+  if (n.type === "pull")
     return new Uint8Array([1]);
   throw new Error("Unknown message type");
 }
-class p {
+class g {
   constructor(t) {
     s(this, "ws");
     this.ws = new WebSocket(t);
@@ -95,7 +99,7 @@ class p {
     this.ws.onmessage = (e) => {
       const r = new FileReader();
       r.onload = () => {
-        const n = r.result, i = f(n);
+        const o = r.result, i = p(o);
         t(i);
       }, r.readAsArrayBuffer(e.data);
     };
@@ -107,13 +111,13 @@ class p {
     this.ws.onerror = t;
   }
   send(t) {
-    this.ws.send(h(t));
+    this.ws.send(b(t));
   }
   isClosed() {
     return this.ws.readyState === WebSocket.CLOSED;
   }
 }
-class d extends HTMLElement {
+class u extends HTMLElement {
   constructor() {
     super(...arguments);
     s(this, "shadowRoot", null);
@@ -121,6 +125,7 @@ class d extends HTMLElement {
     s(this, "_src", null);
     s(this, "_buffer", null);
     s(this, "onErrorCallback", null);
+    s(this, "onEndCallback", null);
     s(this, "debug", !1);
   }
   static get observedAttributes() {
@@ -142,12 +147,15 @@ class d extends HTMLElement {
   onError(e) {
     this.onErrorCallback = e;
   }
-  attributeChangedCallback(e, r, n) {
+  onEnd(e) {
+    this.onEndCallback = e;
+  }
+  attributeChangedCallback(e, r, o) {
     if (e === "src") {
-      this.srcChange(n);
+      this.srcChange(o);
       return;
     }
-    Object.prototype.hasOwnProperty.call(this.videoElement, e) && this.videoElement.setAttribute(e, n !== null ? n : "");
+    Object.prototype.hasOwnProperty.call(this.videoElement, e) && this.videoElement.setAttribute(e, o !== null ? o : "");
   }
   connectedCallback() {
     this.init();
@@ -158,7 +166,7 @@ class d extends HTMLElement {
     this.videoElement = document.createElement("video"), e.appendChild(this.videoElement), this.shadowRoot.appendChild(e), this.syncAttributes();
   }
   syncAttributes() {
-    for (const e of d.observedAttributes) {
+    for (const e of u.observedAttributes) {
       const r = this.getAttribute(e);
       e === "src" && r !== null && this.srcChange(r), r !== null && this.videoElement.setAttribute(e, r);
     }
@@ -180,32 +188,37 @@ class d extends HTMLElement {
     );
   }
   async handleSourceOpen(e) {
-    const r = new p(this._src);
-    let n = null;
+    const r = new g(this._src);
+    let o = null;
     r.onopen(() => {
       r.send({ type: "start" }), r.send({ type: "pull" });
     }), r.onmessage((i) => {
+      var l, a;
       if (e.readyState !== "closed") {
         if (i.type === "metadata") {
-          const l = i.codec;
-          n = new c(
+          const d = i.codec;
+          o = new h(
             e,
-            l,
+            d,
             () => {
               r.send({ type: "pull" });
             }
-          ), this._buffer = n;
+          ), this._buffer = o;
         }
-        if (i.type === "chunk" && n && (n.appendBuffer(i.data), this._videoElement && this._videoElement.duration - this._videoElement.currentTime > 5))
-          try {
-            this._videoElement.currentTime = this._videoElement.seekable.end(0);
-          } catch (l) {
-            this.debug && console.error("Error seeking:", l);
-          }
-        i.type === "error" && this.onErrorCallback && this.onErrorCallback(i);
+        if (i.type === "chunk") {
+          if (!o || (o.appendBuffer(i.data), !this._videoElement))
+            return;
+          if (this._videoElement.duration - this._videoElement.currentTime > 5)
+            try {
+              this._videoElement.currentTime = this._videoElement.seekable.end(0);
+            } catch (d) {
+              this.debug && console.error("Error seeking:", d);
+            }
+        }
+        i.type === "error" && ((l = this.onErrorCallback) == null || l.call(this, i)), i.type === "end" && ((a = this.onEndCallback) == null || a.call(this));
       }
     }), r.onclose(() => {
-      n && e.endOfStream();
+      o && e.endOfStream();
     }), r.onerror((i) => {
       if (console.error("WebSocket error:", i), e.readyState === "open")
         try {
@@ -219,7 +232,7 @@ class d extends HTMLElement {
     this._buffer && this.debug && this._buffer.downloadBufferedFile();
   }
 }
-customElements.define("shadow-player", d);
+customElements.define("shadow-player", u);
 export {
-  d as ShadowPlayer
+  u as ShadowPlayer
 };

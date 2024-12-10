@@ -8,6 +8,7 @@ export class ShadowPlayer extends HTMLElement {
   _src: string | null = null;
   _buffer: ReactiveSourceBuffer | null = null;
   onErrorCallback: ((ev: ErrorMessage) => void) | null = null;
+  onEndCallback: (() => void) | null = null;
   debug = false;
   static get observedAttributes() {
     return [
@@ -32,6 +33,10 @@ export class ShadowPlayer extends HTMLElement {
 
   onError(callback: (ev: ErrorMessage) => void) {
     this.onErrorCallback = callback;
+  }
+
+  onEnd(callback: () => void) {
+    this.onEndCallback = callback;
   }
 
   attributeChangedCallback(name: string, _oldValue: string, newValue: string) {
@@ -117,32 +122,35 @@ export class ShadowPlayer extends HTMLElement {
       }
 
       if (ev.type === 'chunk') {
-        if (reactiveSourceBuffer) {
-          reactiveSourceBuffer.appendBuffer(ev.data);
-          if (this._videoElement) {
-            if (
-              this._videoElement.duration - this._videoElement.currentTime >
-              5
-            ) {
-              try {
-                this._videoElement.currentTime =
-                  this._videoElement.seekable.end(0);
-              } catch (error) {
-                // ignore error, if not debug
-                // this could happen when the first chunk is received, but it's expected
-                if (this.debug) {
-                  console.error('Error seeking:', error);
-                }
-              }
+        if (!reactiveSourceBuffer) {
+          return;
+        }
+
+        reactiveSourceBuffer.appendBuffer(ev.data);
+
+        if (!this._videoElement) {
+          return;
+        }
+
+        if (this._videoElement.duration - this._videoElement.currentTime > 5) {
+          try {
+            this._videoElement.currentTime = this._videoElement.seekable.end(0);
+          } catch (error) {
+            // ignore error, if not debug
+            // this could happen when the first chunk is received, but it's expected
+            if (this.debug) {
+              console.error('Error seeking:', error);
             }
           }
         }
       }
 
       if (ev.type === 'error') {
-        if (this.onErrorCallback) {
-          this.onErrorCallback(ev);
-        }
+        this.onErrorCallback?.(ev);
+      }
+
+      if (ev.type === 'end') {
+        this.onEndCallback?.();
       }
     });
 
