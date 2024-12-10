@@ -758,8 +758,8 @@ jobs:
           Write-Host "toolsPath = $toolsPath"
           Get-ChildItem "$toolsPath"
 
-          $firstItem = Get-ChildItem "$toolsPath" | Select-Object -First 1
-          $binPath = "$($firstItem.Name)\bin\Hostx64\x64"
+          $firstItem = Get-ChildItem "$toolsPath" | Select-Object -Last 1
+          $binPath = "$toolsPath\$($firstItem.Name)\bin\Hostx64\x64"
           Write-Host "binPath = $binPath"
           Get-ChildItem "$binPath"
 
