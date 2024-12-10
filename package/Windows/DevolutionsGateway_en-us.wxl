@@ -4,7 +4,7 @@
    <!-- Supported language and codepage codes can be found here: http://www.tramontana.co.hu/wix/lesson2.php#2.4 -->
    <String Id="VendorName">Devolutions</String>
    <String Id="VendorFullName">Devolutions Inc.</String>
-   <String Id="ProductDescription">A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.</String>
+   <String Id="ProductDescription">A blazingly fast relay server adaptable to different protocols and desired levels of traffic inspection.</String>
    <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
    <String Id="NewerInstalled">A newer version of this product is already installed.</String>
    <String Id="x64VersionRequired">You need to install the 64-bit version of this product on 64-bit Windows.</String>

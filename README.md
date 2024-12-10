@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/Devolutions/devolutions-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Devolutions/devolutions-gateway/actions/workflows/ci.yml)
 
-A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.
+A blazingly fast relay server adaptable to different protocols and desired levels of traffic inspection.
 
 ## Install
 

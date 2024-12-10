@@ -21,7 +21,7 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string VendorFullName = "VendorFullName";		
 		/// <summary>
-		/// A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.
+		/// A blazingly fast relay server adaptable to different protocols and desired levels of traffic inspection.
 		/// </summary>
 		public const string ProductDescription = "ProductDescription";		
 		/// <summary>

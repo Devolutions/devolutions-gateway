@@ -2,7 +2,7 @@
 <WixLocalization Culture="en-us" Codepage="1252" Language="1033" xmlns="http://schemas.microsoft.com/wix/2006/localization">
         <!-- metadata -->
                 <String Id="Language">1033</String>
-                <String Id="ProductDescription">A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.</String>
+                <String Id="ProductDescription">A blazingly fast relay server adaptable to different protocols and desired levels of traffic inspection.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
