@@ -77,7 +77,7 @@ pub fn webm_stream(
         },
         shutdown_signal,
         error_receiver,
-        stop_notifier.clone(),
+        Arc::clone(&stop_notifier),
     );
 
     let mut header_writer = HeaderWriter::new(chunk_writer);
@@ -91,16 +91,16 @@ pub fn webm_stream(
     fn when_eof(
         when_new_chunk_appended: &impl Fn() -> tokio::sync::oneshot::Receiver<()>,
         stop_notifier: Arc<Notify>,
-    ) -> Result<Option<()>, RecvError> {
+    ) -> Result<WhenEofControlFlow, RecvError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let when_new_chunk_appended_receiver = when_new_chunk_appended();
         tokio::spawn(async move {
             tokio::select! {
                 _ = when_new_chunk_appended_receiver => {
-                    let _ = tx.send(Some(()));
+                    let _ = tx.send(WhenEofControlFlow::Continue);
                 },
                 _ = stop_notifier.notified() => {
-                    let _ = tx.send(None);
+                    let _ = tx.send(WhenEofControlFlow::Break);
                 }
             }
         });
@@ -132,16 +132,16 @@ pub fn webm_stream(
             }))) => {
                 trace!(tag_start, tag_id, tag_size, "End of file reached, retrying");
                 match when_eof(&when_new_chunk_appended, Arc::clone(&stop_notifier)) {
-                    Ok(Some(())) => {
+                    Ok(WhenEofControlFlow::Continue) => {
                         webm_itr.rollback_to_last_successful_tag()?;
                         webm_itr.skip(1)?;
                     }
-                    Ok(None) => {
+                    Ok(WhenEofControlFlow::Break) => {
                         break Ok(());
                     }
                     Err(e) => {
                         error_sender.blocking_send(UserFriendlyError::UnexpectedEOF)?;
-                        anyhow::bail!("unexpected None: {:?}", e);
+                        anyhow::bail!(e);
                     }
                 }
             }
@@ -277,4 +277,9 @@ fn spawn_sending_task<W>(
             tracing::warn!(error = format!("{e:#}"));
         }
     });
+}
+
+enum WhenEofControlFlow {
+    Continue,
+    Break,
 }
