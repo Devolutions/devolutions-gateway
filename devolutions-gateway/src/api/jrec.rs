@@ -522,7 +522,7 @@ async fn shadow_recording(
         return Err(HttpError::not_found().msg("requested file does not exist"));
     }
 
-    let notify = recordings.subscribe_to_active_recording(id).await.map_err(|e| {
+    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(|e| {
         error!(error = format!("{e:#}"), "failed to subscribe to active recording");
         HttpError::internal().msg("failed to subscribe to active recording")
     })?;

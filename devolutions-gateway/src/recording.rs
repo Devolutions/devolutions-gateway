@@ -354,7 +354,7 @@ impl RecordingMessageSender {
         Ok(())
     }
 
-    pub(crate) async fn subscribe_to_active_recording(&self, recording_id: Uuid) -> anyhow::Result<Arc<Notify>> {
+    pub(crate) async fn subscribe_to_recording_finish(&self, recording_id: Uuid) -> anyhow::Result<Arc<Notify>> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::SubscribeToSessionEndNotification {
