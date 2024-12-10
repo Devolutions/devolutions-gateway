@@ -181,6 +181,7 @@ pub fn webm_stream(
         }
     };
 
+    info!(?result, "WebM streaming finished");
     result
 }
 
