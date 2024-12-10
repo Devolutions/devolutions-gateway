@@ -13,6 +13,7 @@ anyhow = "1.0"
 thiserror = "1.0"
 tracing = "0.1"
 uuid = { version = "1.10", features = ["v4"] }
+widestring = "1.1.0"
 
 [dependencies.windows]
 version = "0.58.0"

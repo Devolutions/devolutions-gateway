@@ -8,6 +8,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;
 use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
 
 use crate::process::Process;
+use crate::str::U16CStr;
 use crate::token::{Token, TokenPrivilegesAdjustment};
 use crate::utils::{slice_from_ptr, Snapshot, WideString};
 
@@ -140,7 +141,7 @@ impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
     }
 }
 
-pub fn lookup_privilege_value(system_name: Option<&str>, name: PCWSTR) -> anyhow::Result<LUID> {
+pub fn lookup_privilege_value(system_name: Option<&U16CStr>, name: &str) -> anyhow::Result<LUID> {
     let system_name = system_name.map(WideString::from);
     let mut luid = LUID::default();
 
@@ -182,7 +183,7 @@ pub struct ScopedPrivileges<'a> {
 }
 
 impl<'a> ScopedPrivileges<'a> {
-    pub fn enter(token: &'a mut Token, privileges: &[PCWSTR]) -> anyhow::Result<ScopedPrivileges<'a>> {
+    pub fn enter(token: &'a mut Token, privileges: &[&str]) -> anyhow::Result<ScopedPrivileges<'a>> {
         let mut token_privileges = Vec::with_capacity(privileges.len());
 
         for privilege in privileges.iter().copied() {
@@ -194,7 +195,8 @@ impl<'a> ScopedPrivileges<'a> {
             .iter()
             .map(|p| {
                 // SAFETY: `p` is a valid pointer to a NUL-terminated string.
-                String::from_utf16_lossy(unsafe { p.as_wide() })
+                let utf16_str = unsafe { p.as_wide() };
+                String::from_utf16_lossy(utf16_str)
             })
             .reduce(|mut acc, value| {
                 acc.push_str(", ");
