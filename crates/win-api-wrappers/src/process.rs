@@ -6,28 +6,22 @@ use std::path::{Path, PathBuf};
 use std::{ptr, slice};
 
 use anyhow::{bail, Context, Result};
-
-use crate::handle::{Handle, HandleWrapper};
-use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
-use crate::thread::Thread;
-use crate::token::Token;
-use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
-use crate::utils::{Allocation, AnsiString, CommandLine, WideString};
-use crate::Error;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
     FreeLibrary, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, E_INVALIDARG, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT,
     WAIT_FAILED,
 };
-use windows::Win32::Security::{
-    SE_ASSIGNPRIMARYTOKEN_NAME, SE_INCREASE_QUOTA_NAME, SE_TCB_NAME, TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES,
-    TOKEN_QUERY,
-};
+use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::LibraryLoader::{
     GetModuleFileNameW, GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
 };
+use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
     CreateProcessAsUserW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess, GetProcessId, OpenProcess,
     OpenProcessToken, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
@@ -38,13 +32,14 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
-use super::security::privilege::ScopedPrivileges;
-use super::utils::{u32size_of, ComContext};
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
-};
-use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
-use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+use crate::handle::{Handle, HandleWrapper};
+use crate::security::acl::{RawSecurityAttributes, SecurityAttributes};
+use crate::security::privilege::{self, ScopedPrivileges};
+use crate::thread::Thread;
+use crate::token::Token;
+use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
+use crate::utils::{u32size_of, Allocation, AnsiString, ComContext, CommandLine, WideString};
+use crate::Error;
 
 #[derive(Debug)]
 pub struct Process {
@@ -798,9 +793,9 @@ pub fn create_process_in_session(
 
     // (needs investigation) Setting all of these at once fails and crashes the process.
     // In `wayk-agent` project they are set one by one.
-    let mut _priv_tcb = ScopedPrivileges::enter(&mut current_process_token, &[SE_TCB_NAME])?;
-    let mut _priv_primary = ScopedPrivileges::enter(_priv_tcb.token_mut(), &[SE_ASSIGNPRIMARYTOKEN_NAME])?;
-    let _priv_quota = ScopedPrivileges::enter(_priv_primary.token_mut(), &[SE_INCREASE_QUOTA_NAME])?;
+    let mut _priv_tcb = ScopedPrivileges::enter(&mut current_process_token, &[privilege::SE_TCB_NAME])?;
+    let mut _priv_primary = ScopedPrivileges::enter(_priv_tcb.token_mut(), &[privilege::SE_ASSIGNPRIMARYTOKEN_NAME])?;
+    let _priv_quota = ScopedPrivileges::enter(_priv_primary.token_mut(), &[privilege::SE_INCREASE_QUOTA_NAME])?;
 
     let mut session_token = Token::for_session(session_id)?;
 

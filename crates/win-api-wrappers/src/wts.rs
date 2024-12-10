@@ -1,11 +1,7 @@
-use super::process::Process;
-use super::security::privilege::ScopedPrivileges;
-use super::utils::WideString;
-
 use anyhow::anyhow;
 use windows::core::Owned;
 use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, ERROR_NO_TOKEN, HANDLE};
-use windows::Win32::Security::{SE_TCB_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
+use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::RemoteDesktop::{
     WTSDomainName, WTSEnumerateSessionsW, WTSFreeMemory, WTSLogoffSession, WTSQuerySessionInformationW,
     WTSQueryUserToken, WTSSendMessageW, WTSUserName, WTSVirtualChannelClose, WTSVirtualChannelOpenEx,
@@ -15,8 +11,10 @@ use windows::Win32::System::RemoteDesktop::{
 use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_RESULT;
 
+use crate::process::Process;
+use crate::security::privilege::{self, ScopedPrivileges};
 use crate::ui::MessageBoxResult;
-use crate::utils::{AnsiString, SafeWindowsString};
+use crate::utils::{AnsiString, SafeWindowsString, WideString};
 
 /// RAII wrapper for WTS virtual channel handle.
 pub struct WtsVirtualChannel(HANDLE);
@@ -257,7 +255,7 @@ fn query_session_information_string(session_id: u32, info_class: WTS_INFO_CLASS)
 /// Returns true if a user is logged in the provided session.
 pub fn session_has_logged_in_user(session_id: u32) -> anyhow::Result<bool> {
     let mut current_process_token = Process::current_process().token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
-    let mut _priv_tcb = ScopedPrivileges::enter(&mut current_process_token, &[SE_TCB_NAME])?;
+    let mut _priv_tcb = ScopedPrivileges::enter(&mut current_process_token, &[privilege::SE_TCB_NAME])?;
     let mut handle = HANDLE::default();
 
     // SAFETY: FFI call with no outstanding precondition.

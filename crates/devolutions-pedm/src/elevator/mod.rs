@@ -1,10 +1,13 @@
 //! Module in charge of elevating tokens.
+
 mod local_admin_elevator;
 mod virtual_account_elevator;
+
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
+use anyhow::{Context as _, Result};
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
 use local_admin_elevator::LocalAdminElevator;
 use virtual_account_elevator::VirtualAccountElevator;
@@ -16,30 +19,24 @@ use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTR
 use win_api_wrappers::utils::{environment_block, CommandLine, WideString};
 use win_api_wrappers::Error;
 
-use anyhow::{anyhow, Result};
-
 use crate::policy::{self, application_from_path};
 use crate::utils::{start_process, AccountExt};
 use crate::{config, log};
+
+static LOCAL_ADMIN_ELEVATOR: LazyLock<LocalAdminElevator> =
+    LazyLock::new(|| LocalAdminElevator::new(config::LADM_SRC_NAME, config::LADM_SRC_LUID));
+
+static VIRTUAL_ACCOUNT_ELEVATOR: LazyLock<VirtualAccountElevator> =
+    LazyLock::new(|| VirtualAccountElevator::new(config::VADM_DOMAIN.to_owned(), config::VADM_RID));
 
 trait Elevator {
     fn elevate_token(&self, token: &Token) -> Result<Token>;
 }
 
-fn local_admin_elevator() -> &'static LocalAdminElevator {
-    static ELEVATOR: OnceLock<LocalAdminElevator> = OnceLock::new();
-    ELEVATOR.get_or_init(|| LocalAdminElevator::new(config::LADM_SRC_NAME, config::LADM_SRC_LUID))
-}
-
-fn virtual_account_elevator() -> &'static VirtualAccountElevator {
-    static ELEVATOR: OnceLock<VirtualAccountElevator> = OnceLock::new();
-    ELEVATOR.get_or_init(|| VirtualAccountElevator::new(config::VADM_DOMAIN.to_owned(), config::VADM_RID))
-}
-
 fn elevator(method: ElevationMethod) -> &'static dyn Elevator {
     match method {
-        ElevationMethod::LocalAdmin => local_admin_elevator(),
-        ElevationMethod::VirtualAccount => virtual_account_elevator(),
+        ElevationMethod::LocalAdmin => &*LOCAL_ADMIN_ELEVATOR,
+        ElevationMethod::VirtualAccount => &*VIRTUAL_ACCOUNT_ELEVATOR,
     }
 }
 
@@ -49,7 +46,7 @@ fn elevate_token(token: &Token) -> Result<Token> {
             let policy = policy::policy().read();
             let elevation_method = policy
                 .user_current_profile(&token.sid_and_attributes()?.sid.account(None)?.to_user())
-                .ok_or_else(|| anyhow!("User not assigned"))?
+                .context("user not assigned")?
                 .elevation_method;
             elevator(elevation_method).elevate_token(token)
         }

@@ -736,6 +736,79 @@ jobs:
           run: |
             ./powershell/run-tests.ps1
 
+  winapi-sanitizer-tests:
+    name: Windows API sanitizer tests
+    runs-on: windows-2022
+    needs: preflight
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Prepare runner
+        shell: pwsh
+        run: |
+          $VSInstallationPath = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          Write-Host "VCToolsInstallDir = $VSInstallationPath"
+          Get-ChildItem "$VSInstallationPath"
+
+          $toolsPath = "$VSInstallationPath\VC\Tools\MSVC"
+          Write-Host "toolsPath = $toolsPath"
+          Get-ChildItem "$toolsPath"
+
+          $firstItem = Get-ChildItem "$toolsPath" | Select-Object -Last 1
+          $binPath = "$toolsPath\$($firstItem.Name)\bin\Hostx64\x64"
+          Write-Host "binPath = $binPath"
+          Get-ChildItem "$binPath"
+
+          $asanDllPath = "$binPath\clang_rt.asan_dynamic-x86_64.dll"
+          Write-Host "asanDllPath = $asanDllPath"
+
+          New-Item -ItemType Directory ".\target\x86_64-pc-windows-msvc\debug\"
+          Copy-Item -Path "$asanDllPath" -Destination .\target\x86_64-pc-windows-msvc\debug\
+
+          rustup toolchain install nightly
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $Env:RUSTFLAGS="-Zsanitizer=address"
+          cargo +nightly test --target x86_64-pc-windows-msvc -p win-api-wrappers -p devolutions-pedm
+
+  winapi-miri:
+    name: Windows API miri tests [${{ matrix.target }}][${{ matrix.mode }}]
+    runs-on: ubuntu-20.04
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - x86_64-unknown-linux-gnu
+        mode:
+          - stacked-borrow
+          - tree-borrows
+        include:
+          - mode: tree-borrows
+            miri-flags: -Zmiri-tree-borrows
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Prepare runner
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup target add ${{ matrix.target }}
+
+      - name: Run tests
+        shell: pwsh
+        run: cargo +nightly test ${{ matrix.miri-flags }} --target ${{ matrix.target }} -p win-api-wrappers
+
   success:
     name: Success
     runs-on: ubuntu-latest
@@ -749,6 +822,8 @@ jobs:
       - devolutions-agent-merge
       - dotnet-utils-tests
       - powershell-tests
+      - winapi-sanitizer-tests
+      - winapi-miri
 
     steps:
       - name: Check success

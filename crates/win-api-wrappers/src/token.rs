@@ -5,16 +5,31 @@ use std::fmt::Debug;
 use std::mem::MaybeUninit;
 use std::{ptr, slice};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context as _};
 use windows::core::PCWSTR;
+use windows::Win32::Foundation::{
+    ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, HANDLE, LUID,
+};
+use windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT;
+use windows::Win32::Security::{
+    self, AdjustTokenGroups, AdjustTokenPrivileges, DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser,
+    RevertToSelf, SecurityIdentification, SecurityImpersonation, SetTokenInformation, TokenElevationTypeDefault,
+    TokenElevationTypeFull, TokenElevationTypeLimited, TokenPrimary, TokenSecurityAttributes, LOGON32_LOGON,
+    LOGON32_PROVIDER, LUID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES, SECURITY_DYNAMIC_TRACKING,
+    SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE, SID_AND_ATTRIBUTES, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
+    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_IMPERSONATE,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_OWNER, TOKEN_PRIMARY_GROUP,
+    TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY, TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER,
+};
+use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
+use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
 
 use crate::handle::{Handle, HandleWrapper};
 use crate::identity::account::{create_profile, get_username, ProfileInfo};
 use crate::identity::sid::{RawSid, RawSidAndAttributes, Sid, SidAndAttributes};
+use crate::raw_buffer::{InitedBuffer, RawBuffer};
 use crate::security::acl::Acl;
-use crate::security::privilege::{
-    find_token_with_privilege, lookup_privilege_value, RawTokenPrivileges, TokenPrivileges,
-};
+use crate::security::privilege::{self, find_token_with_privilege, lookup_privilege_value, TokenPrivileges};
 use crate::undoc::{
     LogonUserExExW, NtCreateToken, OBJECT_ATTRIBUTES, TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION,
     TOKEN_SECURITY_ATTRIBUTES_INFORMATION, TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1,
@@ -26,27 +41,11 @@ use crate::undoc::{
 };
 use crate::utils::{u32size_of, WideString};
 use crate::{create_impersonation_context, Error};
-use windows::Win32::Foundation::{
-    ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, HANDLE,
-    LUID,
-};
-use windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT;
-use windows::Win32::Security::{
-    AdjustTokenGroups, AdjustTokenPrivileges, DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser,
-    RevertToSelf, SecurityIdentification, SecurityImpersonation, SetTokenInformation, TokenElevationTypeDefault,
-    TokenElevationTypeFull, TokenElevationTypeLimited, TokenPrimary, TokenSecurityAttributes, LOGON32_LOGON,
-    LOGON32_PROVIDER, LUID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES, SECURITY_DYNAMIC_TRACKING,
-    SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE, SE_ASSIGNPRIMARYTOKEN_NAME, SE_CREATE_TOKEN_NAME,
-    SE_PRIVILEGE_ENABLED, SE_PRIVILEGE_REMOVED, SID_AND_ATTRIBUTES, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
-    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_IMPERSONATE,
-    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_OWNER, TOKEN_PRIMARY_GROUP,
-    TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY, TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER,
-};
-use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
-use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
 
 #[derive(Debug)]
 pub struct Token {
+    // TODO(DGW-215): Create a sort of CowHandle<'a> to wrap `BorrowedHandle` and `OwnedHandle`, superseding the `Handle` helper.
+    // This helper would keep track of the resource lifetime as necessary. It would be of course possible to use the 'static lifetime for many things.
     handle: Handle,
 }
 
@@ -58,12 +57,13 @@ impl From<Handle> for Token {
 
 impl Token {
     pub fn current_process_token() -> Self {
+        // FIXME: Is it really? What about https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocesstoken
         Self {
             handle: Handle::new_borrowed(HANDLE(-4isize as *mut c_void)).expect("always valid"),
         }
     }
 
-    pub fn for_session(session_id: u32) -> Result<Self> {
+    pub fn for_session(session_id: u32) -> anyhow::Result<Self> {
         let mut user_token = HANDLE::default();
 
         // SAFETY: Query user token is always safe if dst pointer is valid.
@@ -78,8 +78,7 @@ impl Token {
         })
     }
 
-    // Wrapper around `NtCreateToken`, which has a lot of arguments.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)] // Wrapper around `NtCreateToken`, which has a lot of arguments.
     pub fn create_token(
         authentication_id: &LUID,
         expiration_time: i64,
@@ -90,7 +89,7 @@ impl Token {
         primary_group: &Sid,
         default_dacl: Option<&Acl>,
         source: &TOKEN_SOURCE,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         // See https://github.com/decoder-it/CreateTokenExample/blob/master/StopZillaCreateToken.cpp#L344
         let sqos = SECURITY_QUALITY_OF_SERVICE {
             Length: u32size_of::<SECURITY_QUALITY_OF_SERVICE>(),
@@ -105,21 +104,27 @@ impl Token {
             ..Default::default()
         };
 
-        let default_dacl = default_dacl.map(Acl::to_raw).transpose()?;
-        let owner_sid = RawSid::try_from(owner)?;
+        let default_dacl = default_dacl.map(Acl::to_raw).transpose().context("Acl::to_raw")?;
+        let owner_sid = RawSid::try_from(owner).context("RawSid::try_from")?;
         let groups = RawTokenGroups::try_from(groups)?;
-        let privileges = RawTokenPrivileges::try_from(privileges)?;
         let primary_group = RawSid::try_from(primary_group)?;
         let user = RawSidAndAttributes::try_from(user)?;
 
-        let mut priv_token = find_token_with_privilege(lookup_privilege_value(None, SE_CREATE_TOKEN_NAME)?)?
-            .ok_or_else(|| Error::from_win32(ERROR_NO_TOKEN))?
-            .duplicate_impersonation()?;
+        let create_token_name_privilege = lookup_privilege_value(None, privilege::SE_CREATE_TOKEN_NAME)
+            .context("lookup SE_CREATE_TOKEN_NAME privilege")?;
 
-        priv_token.adjust_privileges(&TokenPrivilegesAdjustment::Enable(vec![
-            lookup_privilege_value(None, SE_CREATE_TOKEN_NAME)?,
-            lookup_privilege_value(None, SE_ASSIGNPRIMARYTOKEN_NAME)?,
-        ]))?;
+        let mut priv_token = find_token_with_privilege(create_token_name_privilege)
+            .context("find_token_with_privilege for SE_CREATE_TOKEN_NAME")?
+            .context("no token found for SE_CREATE_TOKEN_NAME privilege")?
+            .duplicate_impersonation()
+            .context("duplicate_impersonation failed")?;
+
+        priv_token
+            .adjust_privileges(&TokenPrivilegesAdjustment::Enable(vec![
+                lookup_privilege_value(None, privilege::SE_CREATE_TOKEN_NAME)?,
+                lookup_privilege_value(None, privilege::SE_ASSIGNPRIMARYTOKEN_NAME)?,
+            ]))
+            .context("adjust_privileges failed")?;
 
         let mut handle = HANDLE::default();
         let _ctx = priv_token.impersonate()?;
@@ -135,7 +140,7 @@ impl Token {
                 &expiration_time,
                 &TOKEN_USER { User: *user.as_raw() },
                 groups.as_raw(),
-                privileges.as_raw(),
+                privileges.as_raw().as_ref(),
                 &TOKEN_OWNER {
                     Owner: owner_sid.as_psid(),
                 },
@@ -164,7 +169,7 @@ impl Token {
         attributes: Option<&SECURITY_ATTRIBUTES>,
         impersonation_level: SECURITY_IMPERSONATION_LEVEL,
         token_type: TOKEN_TYPE,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let mut handle = HANDLE::default();
 
         // SAFETY: Returned `handle` must be closed, which it is in its RAII wrapper.
@@ -185,72 +190,141 @@ impl Token {
         Ok(Self::from(handle))
     }
 
-    pub fn duplicate_impersonation(&self) -> Result<Self> {
+    pub fn duplicate_impersonation(&self) -> anyhow::Result<Self> {
         self.duplicate(TOKEN_ACCESS_MASK(0), None, SecurityImpersonation, TokenPrimary)
     }
 
-    pub fn impersonate(&self) -> Result<TokenImpersonation<'_>> {
+    pub fn impersonate(&self) -> anyhow::Result<TokenImpersonation<'_>> {
         TokenImpersonation::try_new(self)
     }
 
-    pub fn reset_privileges(&mut self) -> Result<()> {
+    pub fn reset_privileges(&mut self) -> anyhow::Result<()> {
         // SAFETY: No preconditions.
         unsafe { AdjustTokenPrivileges(self.handle.raw(), true, None, 0, None, None) }?;
         Ok(())
     }
 
-    pub fn reset_groups(&mut self) -> Result<()> {
+    pub fn reset_groups(&mut self) -> anyhow::Result<()> {
         // SAFETY: No preconditions.
         unsafe { AdjustTokenGroups(self.handle.raw(), true, None, 0, None, None) }?;
         Ok(())
     }
 
-    fn information_var_size<S, D: for<'a> TryFrom<&'a S>>(&self, info_class: TOKEN_INFORMATION_CLASS) -> Result<D>
+    /// Wraps `GetTokenInformation` for DST types.
+    /// As a convenience, the `D` generic type is used to perform a conversion into a more idiomatic type.
+    ///
+    /// # Safety
+    ///
+    /// For memory alignment purposes, the provided `T` type must correspond to the structure associated to the provided `info_class`.
+    unsafe fn get_information_dst<T, D>(&self, info_class: TOKEN_INFORMATION_CLASS) -> anyhow::Result<D>
     where
-        anyhow::Error: for<'a> From<<D as TryFrom<&'a S>>::Error>,
+        D: for<'a> TryFrom<&'a T>,
+        anyhow::Error: for<'a> From<<D as TryFrom<&'a T>>::Error>,
     {
-        let mut required_size = 0u32;
+        // SAFETY: Same preconditions as this function.
+        let info = unsafe { self.get_information_dst_raw::<T>(info_class)? };
 
-        // SAFETY: No preconditions. We ignore result because we are collecting size.
-        let _ = unsafe { GetTokenInformation(self.handle.raw(), info_class, None, 0, &mut required_size) };
+        let info = D::try_from(info.as_ref())?;
 
-        let mut buf = vec![0u8; required_size as usize];
-
-        // SAFETY: No preconditions. `TokenInformationLength` matches length of `buf` in `TokenInformation`.
-        unsafe {
-            GetTokenInformation(
-                self.handle.raw(),
-                info_class,
-                Some(buf.as_mut_ptr().cast()),
-                u32::try_from(buf.len())?,
-                &mut required_size,
-            )
-        }?;
-
-        // SAFETY: We assume the target buffer matches the requested type. We can safely dereference because it is our buffer.
-        Ok(unsafe { &*buf.as_ptr().cast::<S>() }.try_into()?)
+        Ok(info)
     }
 
-    fn information_raw<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS) -> Result<T> {
+    /// Wraps `GetTokenInformation` for DST types.
+    ///
+    /// # Safety
+    ///
+    /// For memory alignment purposes, the provided `T` type must correspond to the structure associated to the provided `info_class`.
+    unsafe fn get_information_dst_raw<T: Sized>(
+        &self,
+        info_class: TOKEN_INFORMATION_CLASS,
+    ) -> anyhow::Result<InitedBuffer<T>> {
+        use std::alloc::Layout;
+
+        let mut return_length = 0u32;
+
+        // SAFETY:
+        // - `info` is null and,
+        // - `info_length` is set to 0.
+        let _ = unsafe { self.get_information_raw(info_class, ptr::null_mut(), 0, &mut return_length) };
+
+        // We try again, but allocate manually using the length specified in return_length for variable-sized structs.
+        // The value *can’t* live on the stack because of its DST nature.
+
+        let allocated_length = return_length;
+        let align = align_of::<T>();
+        let layout = Layout::from_size_align(allocated_length as usize, align)?;
+
+        // SAFETY: The layout initialization is checked using the Layout::from_size_align method.
+        let mut info = unsafe { RawBuffer::alloc_zeroed(layout)? };
+
+        // SAFETY: As per safety preconditions, the alignment is valid for the desired info class.
+        unsafe {
+            self.get_information_raw(
+                info_class,
+                info.as_mut_ptr().cast::<c_void>(),
+                allocated_length,
+                &mut return_length,
+            )?
+        };
+
+        debug_assert_eq!(allocated_length, return_length);
+
+        // SAFETY: get_information_raw returned with success, the info struct is expected to be initialized.
+        let info = unsafe { info.assume_init::<T>() };
+
+        Ok(info)
+    }
+
+    /// Wraps `GetTokenInformation`.
+    ///
+    /// # Safety
+    ///
+    /// The provided `T` type must correspond to the structure associated to the provided `info_class`.
+    unsafe fn get_information<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS) -> anyhow::Result<T> {
         let mut info = MaybeUninit::<T>::uninit();
         let mut return_length = 0u32;
 
-        // SAFETY: No preconditions. `TokenInformationLength` matches length of `info` in `TokenInformation`.
+        // SAFETY:
+        // - `info` is a valid pointer,
+        // - `info_length` is the size of the expected structure.
         unsafe {
-            GetTokenInformation(
-                self.handle.raw(),
+            self.get_information_raw(
                 info_class,
-                Some(info.as_mut_ptr().cast()),
+                info.as_mut_ptr().cast::<c_void>(),
                 u32size_of::<T>(),
                 &mut return_length,
-            )
-        }?;
+            )?
+        };
 
-        // SAFETY: `GetTokenInformation` is successful here. Assume the value has been initialized.
-        Ok(unsafe { info.assume_init() })
+        debug_assert_eq!(u32size_of::<T>(), return_length);
+
+        // SAFETY: `GetTokenInformation` is successful, we assume the value is properly initialized.
+        let info = unsafe { info.assume_init() };
+
+        Ok(info)
     }
 
-    fn set_information_raw<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS, value: &T) -> Result<()> {
+    /// Very thin wrapper above `GetTokenInformation`
+    ///
+    /// # Safety
+    ///
+    /// - `info` must be a valid pointer properly aligned for the struct associated to `info_class` or null.
+    /// - if `info` is null, `info_length` must be set to zero.
+    unsafe fn get_information_raw(
+        &self,
+        info_class: TOKEN_INFORMATION_CLASS,
+        info: *mut c_void,
+        info_length: u32,
+        return_length: &mut u32,
+    ) -> windows::core::Result<()> {
+        // SAFETY:
+        // - The alignement of the `info` pointer is valid for writing the struct associated to the provided info class.
+        // - When `info` is null, `info_length` is set to zero.
+        unsafe { GetTokenInformation(self.handle.raw(), info_class, Some(info), info_length, return_length) }
+    }
+
+    // FIXME(DGW-215): audit this too. Probably unsound.
+    fn set_information_raw<T: Sized>(&self, info_class: TOKEN_INFORMATION_CLASS, value: &T) -> anyhow::Result<()> {
         // SAFETY: No preconditions. `TokenInformationLength` matches length of `info` in `TokenInformation`.
         unsafe {
             SetTokenInformation(
@@ -264,32 +338,60 @@ impl Token {
         Ok(())
     }
 
-    pub fn groups(&self) -> Result<TokenGroups> {
-        self.information_var_size::<TOKEN_GROUPS, TokenGroups>(windows::Win32::Security::TokenGroups)
+    pub fn groups(&self) -> anyhow::Result<TokenGroups> {
+        // SAFETY: The TokenGroups info class is associated to a TOKEN_GROUPS struct.
+        unsafe {
+            self.get_information_dst::<TOKEN_GROUPS, TokenGroups>(Security::TokenGroups)
+                .context("get TokenGroups information")
+        }
     }
 
-    pub fn privileges(&self) -> Result<TokenPrivileges> {
-        self.information_var_size::<TOKEN_PRIVILEGES, TokenPrivileges>(windows::Win32::Security::TokenPrivileges)
+    pub fn privileges(&self) -> anyhow::Result<TokenPrivileges> {
+        // SAFETY: The TokenPrivileges info class is associated to a TOKEN_PRIVILEGES struct.
+        let buffer = unsafe {
+            self.get_information_dst_raw::<TOKEN_PRIVILEGES>(Security::TokenPrivileges)
+                .context("get TokenPrivileges information")?
+        };
+
+        // SAFETY: The TOKEN_PRIVILEGES struct is properly initialized by the Win32 API.
+        let privileges = unsafe { TokenPrivileges::from_raw(buffer) };
+
+        Ok(privileges)
     }
 
-    pub fn elevation_type(&self) -> Result<TokenElevationType> {
-        self.information_raw::<TOKEN_ELEVATION_TYPE>(windows::Win32::Security::TokenElevationType)?
-            .try_into()
+    pub fn elevation_type(&self) -> anyhow::Result<TokenElevationType> {
+        // SAFETY: The TokenElevationType info class is associated to a TOKEN_ELEVATION_TYPE struct.
+        unsafe {
+            self.get_information::<TOKEN_ELEVATION_TYPE>(Security::TokenElevationType)
+                .context("get TokenElevationType information")?
+                .try_into()
+        }
     }
 
-    pub fn is_elevated(&self) -> Result<bool> {
-        Ok(self.information_raw::<i32>(windows::Win32::Security::TokenElevation)? != 0)
+    pub fn is_elevated(&self) -> anyhow::Result<bool> {
+        // SAFETY: The TokenElevation info class is associated to a i32.
+        let elevation = unsafe {
+            self.get_information::<i32>(Security::TokenElevation)
+                .context("get TokenElevation information")?
+        };
+        let is_elevated = elevation != 0;
+        Ok(is_elevated)
     }
 
-    pub fn linked_token(&self) -> Result<Self> {
-        let handle = self.information_raw::<HANDLE>(windows::Win32::Security::TokenLinkedToken)?;
-        // SAFETY: We are responsible for closing the linked token.
+    pub fn linked_token(&self) -> anyhow::Result<Self> {
+        // SAFETY: The TokenLinkedToken info class is associated to a HANDLE.
+        let handle = unsafe {
+            self.get_information::<HANDLE>(Security::TokenLinkedToken)
+                .context("get TokenLinkedToken information")?
+        };
+
+        // SAFETY: We are responsible for closing the linked token retrived above.
         let handle = unsafe { Handle::new_owned(handle)? };
 
         Ok(Self::from(handle))
     }
 
-    pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> Result<String> {
+    pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> anyhow::Result<String> {
         let _ctx = self.impersonate()?;
 
         get_username(format)
@@ -302,7 +404,7 @@ impl Token {
         logon_type: LOGON32_LOGON,
         logon_provider: LOGON32_PROVIDER,
         groups: Option<&TokenGroups>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let mut raw_token = HANDLE::default();
 
         let groups = groups.map(RawTokenGroups::try_from).transpose()?;
@@ -335,48 +437,67 @@ impl Token {
         Ok(Token::from(handle))
     }
 
-    pub fn statistics(&self) -> Result<TOKEN_STATISTICS> {
-        self.information_raw::<TOKEN_STATISTICS>(windows::Win32::Security::TokenStatistics)
+    pub fn statistics(&self) -> anyhow::Result<TOKEN_STATISTICS> {
+        // SAFETY: The TokenStatistics info class is associated to a TOKEN_STATISTICS struct.
+        unsafe {
+            self.get_information::<TOKEN_STATISTICS>(Security::TokenStatistics)
+                .context("get TokenStatistics information")
+        }
     }
 
-    pub fn sid_and_attributes(&self) -> Result<SidAndAttributes> {
-        Ok(self
-            .information_var_size::<TOKEN_USER, TokenUser>(windows::Win32::Security::TokenUser)?
-            .user)
+    pub fn sid_and_attributes(&self) -> anyhow::Result<SidAndAttributes> {
+        // SAFETY: The TokenUser info class is associated to a TOKEN_USER struct.
+        let token_user = unsafe {
+            self.get_information_dst::<TOKEN_USER, TokenUser>(Security::TokenUser)
+                .context("get TokenUser information")?
+        };
+
+        Ok(token_user.user)
     }
 
-    pub fn session_id(&self) -> Result<u32> {
-        self.information_raw::<u32>(windows::Win32::Security::TokenSessionId)
+    pub fn session_id(&self) -> anyhow::Result<u32> {
+        // SAFETY: The TokenSessionId info class is associated to a u32.
+        unsafe {
+            self.get_information::<u32>(Security::TokenSessionId)
+                .context("get TokenSessionId information")
+        }
     }
 
-    pub fn set_session_id(&mut self, session_id: u32) -> Result<()> {
-        self.set_information_raw(windows::Win32::Security::TokenSessionId, &session_id)
+    pub fn set_session_id(&mut self, session_id: u32) -> anyhow::Result<()> {
+        self.set_information_raw(Security::TokenSessionId, &session_id)
     }
 
-    pub fn ui_access(&self) -> Result<u32> {
-        self.information_raw::<u32>(windows::Win32::Security::TokenUIAccess)
+    pub fn ui_access(&self) -> anyhow::Result<u32> {
+        // SAFETY: The TokenUIAccess info class is associated to a u32.
+        unsafe {
+            self.get_information::<u32>(Security::TokenUIAccess)
+                .context("get TokenUIAccess information")
+        }
     }
 
-    pub fn set_ui_access(&mut self, ui_access: u32) -> Result<()> {
-        self.set_information_raw(windows::Win32::Security::TokenUIAccess, &ui_access)
+    pub fn set_ui_access(&mut self, ui_access: u32) -> anyhow::Result<()> {
+        self.set_information_raw(Security::TokenUIAccess, &ui_access)
     }
 
-    pub fn mandatory_policy(&self) -> Result<TOKEN_MANDATORY_POLICY_ID> {
-        Ok(self
-            .information_raw::<TOKEN_MANDATORY_POLICY>(windows::Win32::Security::TokenMandatoryPolicy)?
-            .Policy)
+    pub fn mandatory_policy(&self) -> anyhow::Result<TOKEN_MANDATORY_POLICY_ID> {
+        // SAFETY: The TokenMandatoryPolicy info class is associated to a TOKEN_MANDATORY_POLICY struct.
+        let mandatory_policy = unsafe {
+            self.get_information::<TOKEN_MANDATORY_POLICY>(Security::TokenMandatoryPolicy)
+                .context("get TokenMandatoryPolicy information")?
+        };
+        Ok(mandatory_policy.Policy)
     }
 
-    pub fn set_mandatory_policy(&mut self, mandatory_policy: TOKEN_MANDATORY_POLICY_ID) -> Result<()> {
+    pub fn set_mandatory_policy(&mut self, mandatory_policy: TOKEN_MANDATORY_POLICY_ID) -> anyhow::Result<()> {
         self.set_information_raw(
-            windows::Win32::Security::TokenMandatoryPolicy,
+            Security::TokenMandatoryPolicy,
             &TOKEN_MANDATORY_POLICY {
                 Policy: mandatory_policy,
             },
         )
     }
 
-    pub fn load_profile(&self, username: &str) -> Result<ProfileInfo> {
+    pub fn load_profile(&self, username: &str) -> anyhow::Result<ProfileInfo> {
         if let Err(err) = create_profile(&self.sid_and_attributes()?.sid, username) {
             match err.downcast::<windows::core::Error>() {
                 Ok(err) => {
@@ -399,7 +520,7 @@ impl Token {
         )
     }
 
-    pub fn adjust_groups(&mut self, adjustment: &TokenGroupAdjustment) -> Result<()> {
+    pub fn adjust_groups(&mut self, adjustment: &TokenGroupAdjustment) -> anyhow::Result<()> {
         match adjustment {
             // SAFETY: No preconditions.
             TokenGroupAdjustment::ResetToDefaults => unsafe {
@@ -417,69 +538,87 @@ impl Token {
         Ok(())
     }
 
-    pub fn adjust_privileges(&mut self, adjustment: &TokenPrivilegesAdjustment) -> Result<()> {
+    // TODO(DGW-215): Update this API to take a vec of adjustements (we may enable, disable and remove at the same time).
+    // DisableAll could be a dedicated function.
+    pub fn adjust_privileges(&mut self, adjustment: &TokenPrivilegesAdjustment) -> anyhow::Result<()> {
         match adjustment {
-            // SAFETY: No preconditions.
+            // SAFETY: FFI call with no outstanding precondition.
             TokenPrivilegesAdjustment::DisableAllPrivileges => unsafe {
                 AdjustTokenPrivileges(self.handle.raw(), true, None, 0, None, None)?;
             },
-            TokenPrivilegesAdjustment::Enable(privs)
-            | TokenPrivilegesAdjustment::Disable(privs)
-            | TokenPrivilegesAdjustment::Remove(privs) => {
+            TokenPrivilegesAdjustment::Enable(ids)
+            | TokenPrivilegesAdjustment::Disable(ids)
+            | TokenPrivilegesAdjustment::Remove(ids) => {
                 let attr = match adjustment {
-                    TokenPrivilegesAdjustment::Enable(_) => SE_PRIVILEGE_ENABLED,
+                    TokenPrivilegesAdjustment::Enable(_) => Security::SE_PRIVILEGE_ENABLED,
                     TokenPrivilegesAdjustment::DisableAllPrivileges | TokenPrivilegesAdjustment::Disable(_) => {
                         TOKEN_PRIVILEGES_ATTRIBUTES(0)
                     }
-                    TokenPrivilegesAdjustment::Remove(_) => SE_PRIVILEGE_REMOVED,
+                    TokenPrivilegesAdjustment::Remove(_) => Security::SE_PRIVILEGE_REMOVED,
                 };
 
-                let privs = TokenPrivileges(
-                    privs
-                        .iter()
-                        .map(|p| LUID_AND_ATTRIBUTES {
-                            Luid: *p,
-                            Attributes: attr,
-                        })
-                        .collect(),
-                );
+                let mut iter = ids.iter();
 
-                let privs = RawTokenPrivileges::try_from(&privs)?;
+                let Some(first_id) = iter.next() else { return Ok(()) };
 
-                // SAFETY: No preconditions. We assume `privs` is well constructed.
-                unsafe { AdjustTokenPrivileges(self.handle.raw(), false, Some(privs.as_raw()), 0, None, None) }?;
+                let first_element = LUID_AND_ATTRIBUTES {
+                    Luid: *first_id,
+                    Attributes: attr,
+                };
 
-                let last_err = Error::last_error();
-                if last_err.code() != ERROR_SUCCESS.to_hresult().0 {
-                    bail!(last_err);
+                let mut privileges = TokenPrivileges::new(first_element);
+
+                for id in ids {
+                    privileges.push(LUID_AND_ATTRIBUTES {
+                        Luid: *id,
+                        Attributes: attr,
+                    });
                 }
+
+                // SAFETY: FFI call with no outstanding precondition.
+                unsafe {
+                    AdjustTokenPrivileges(
+                        self.handle.raw(),
+                        false,
+                        Some(privileges.as_raw().as_ref()),
+                        0,
+                        None,
+                        None,
+                    )
+                }?;
             }
         }
 
         Ok(())
     }
 
-    pub fn default_dacl(&self) -> Result<Option<Acl>> {
-        Ok(self
-            .information_var_size::<TOKEN_DEFAULT_DACL, TokenDefaultDacl>(windows::Win32::Security::TokenDefaultDacl)?
-            .default_dacl)
+    pub fn default_dacl(&self) -> anyhow::Result<Option<Acl>> {
+        // SAFETY: The TokenDefaultDacl info class is associated to a TOKEN_DEFAULT_DACL struct.
+        let dacl = unsafe {
+            self.get_information_dst::<TOKEN_DEFAULT_DACL, TokenDefaultDacl>(Security::TokenDefaultDacl)
+                .context("get TokenDefaultDacl information")?
+        };
+
+        Ok(dacl.default_dacl)
     }
 
-    pub fn primary_group(&self) -> Result<Sid> {
-        Ok(self
-            .information_var_size::<TOKEN_PRIMARY_GROUP, TokenPrimaryGroup>(
-                windows::Win32::Security::TokenPrimaryGroup,
-            )?
-            .primary_group)
+    pub fn primary_group(&self) -> anyhow::Result<Sid> {
+        // SAFETY: The TokenPrimaryGroup info class is associated to a TOKEN_PRIMARY_GROUP struct.
+        let primary_group = unsafe {
+            self.get_information_dst::<TOKEN_PRIMARY_GROUP, TokenPrimaryGroup>(Security::TokenPrimaryGroup)
+                .context("get TokenPrimaryGroup information")?
+        };
+
+        Ok(primary_group.primary_group)
     }
 
-    pub fn try_clone(&self) -> Result<Self> {
+    pub fn try_clone(&self) -> anyhow::Result<Self> {
         Ok(Self {
             handle: self.handle.try_clone()?,
         })
     }
 
-    pub fn logon_sid(&self) -> Result<Sid> {
+    pub fn logon_sid(&self) -> anyhow::Result<Sid> {
         // Here, losing the sign is fine, because we want to make a bitwise comparison (g.attributes & SE_GROUP_LOGON_ID).
         // TODO: Use `cast_unsigned` / `cast_signed` when stabilized: https://github.com/rust-lang/rust/issues/125882
         #[expect(clippy::cast_sign_loss)]
@@ -496,7 +635,7 @@ impl Token {
         &mut self,
         action: TOKEN_SECURITY_ATTRIBUTE_OPERATION,
         attribute: &TokenSecurityAttribute,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let attribute = RawTokenSecurityAttribute::from(attribute);
         let raw_attribute = attribute.as_raw()?;
         let attribute_info = TOKEN_SECURITY_ATTRIBUTES_INFORMATION {
@@ -528,7 +667,7 @@ pub struct TokenUser {
 impl TryFrom<&TOKEN_USER> for TokenUser {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TOKEN_USER) -> Result<Self, Self::Error> {
+    fn try_from(value: &TOKEN_USER) -> anyhow::Result<Self, Self::Error> {
         Ok(Self {
             user: SidAndAttributes::try_from(&value.User)?,
         })
@@ -552,12 +691,12 @@ impl RawTokenGroups {
 impl TryFrom<&TokenGroups> for RawTokenGroups {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TokenGroups) -> Result<Self> {
+    fn try_from(value: &TokenGroups) -> anyhow::Result<Self> {
         let raw_sid_and_attributes = value
             .0
             .iter()
             .map(RawSidAndAttributes::try_from)
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let mut buf = vec![
             0u8;
@@ -598,7 +737,7 @@ impl TryFrom<&TokenGroups> for RawTokenGroups {
 impl TryFrom<&TOKEN_GROUPS> for TokenGroups {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TOKEN_GROUPS) -> Result<Self> {
+    fn try_from(value: &TOKEN_GROUPS) -> anyhow::Result<Self> {
         // SAFETY: We assume `Groups` and `GroupCount` are well constructed and valid.
         let groups_slice = unsafe { slice::from_raw_parts(value.Groups.as_ptr(), value.GroupCount as usize) };
 
@@ -622,7 +761,7 @@ pub enum TokenElevationType {
 impl TryFrom<TOKEN_ELEVATION_TYPE> for TokenElevationType {
     type Error = anyhow::Error;
 
-    fn try_from(value: TOKEN_ELEVATION_TYPE) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: TOKEN_ELEVATION_TYPE) -> Result<Self, Self::Error> {
         TokenElevationType::try_from(&value)
     }
 }
@@ -630,7 +769,7 @@ impl TryFrom<TOKEN_ELEVATION_TYPE> for TokenElevationType {
 impl TryFrom<&TOKEN_ELEVATION_TYPE> for TokenElevationType {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TOKEN_ELEVATION_TYPE) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: &TOKEN_ELEVATION_TYPE) -> Result<Self, Self::Error> {
         if *value == TokenElevationTypeDefault {
             Ok(TokenElevationType::Default)
         } else if *value == TokenElevationTypeFull {
@@ -672,7 +811,7 @@ impl<'a> From<&'a TokenSecurityAttribute> for RawTokenSecurityAttribute<'a> {
 }
 
 impl RawTokenSecurityAttribute<'_> {
-    pub fn as_raw(&self) -> Result<TOKEN_SECURITY_ATTRIBUTE_V1> {
+    pub fn as_raw(&self) -> anyhow::Result<TOKEN_SECURITY_ATTRIBUTE_V1> {
         struct RawValues {
             value_type: TOKEN_SECURITY_ATTRIBUTE_TYPE,
             value_count: usize,
@@ -713,7 +852,7 @@ impl RawTokenSecurityAttribute<'_> {
                 let ctx = Box::new(
                     x.iter()
                         .map(WideString::as_unicode_string)
-                        .collect::<Result<Vec<_>>>()?,
+                        .collect::<anyhow::Result<Vec<_>>>()?,
                 );
 
                 let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pString: ctx.as_ptr() };
@@ -728,7 +867,7 @@ impl RawTokenSecurityAttribute<'_> {
                                 Name: x.name.as_unicode_string()?,
                             })
                         })
-                        .collect::<Result<Vec<_>>>()?,
+                        .collect::<anyhow::Result<Vec<_>>>()?,
                 );
 
                 let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pFqbn: ctx.as_ptr() };
@@ -744,7 +883,7 @@ impl RawTokenSecurityAttribute<'_> {
                                 pValue: x.as_ptr(),
                             })
                         })
-                        .collect::<Result<Vec<_>>>()?,
+                        .collect::<anyhow::Result<Vec<_>>>()?,
                 );
 
                 let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE {
@@ -795,7 +934,7 @@ pub struct TokenDefaultDacl {
 impl TryFrom<&TOKEN_DEFAULT_DACL> for TokenDefaultDacl {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TOKEN_DEFAULT_DACL) -> Result<Self, Self::Error> {
+    fn try_from(value: &TOKEN_DEFAULT_DACL) -> anyhow::Result<Self, Self::Error> {
         Ok(Self {
             // SAFETY: We assume `DefaultDacl` actually points to an ACL.
             default_dacl: unsafe { value.DefaultDacl.as_ref() }.map(Acl::try_from).transpose()?,
@@ -810,7 +949,7 @@ pub struct TokenPrimaryGroup {
 impl TryFrom<&TOKEN_PRIMARY_GROUP> for TokenPrimaryGroup {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TOKEN_PRIMARY_GROUP) -> Result<Self, Self::Error> {
+    fn try_from(value: &TOKEN_PRIMARY_GROUP) -> anyhow::Result<Self, Self::Error> {
         Ok(Self {
             primary_group: Sid::try_from(value.PrimaryGroup)?,
         })

@@ -8,20 +8,11 @@ use std::path::Path;
 use tracing::info;
 use win_api_wrappers::identity::account::Account;
 use win_api_wrappers::identity::sid::Sid;
-use win_api_wrappers::netmgmt::{get_local_admin_group_members, get_local_group_members};
+use win_api_wrappers::netmgmt::get_local_admin_group_members;
 use win_api_wrappers::process::{create_process_as_user, ProcessInformation, StartupInfo};
-use win_api_wrappers::raw::Win32::Foundation::{GENERIC_ALL, GENERIC_READ};
-use win_api_wrappers::raw::Win32::Security::Authorization::SE_FILE_OBJECT;
-use win_api_wrappers::raw::Win32::Security::{WinLocalSystemSid, OBJECT_INHERIT_ACE};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
-use win_api_wrappers::security::acl::{
-    set_named_security_info, Ace, AceType, Acl, InheritableAcl, InheritableAclKind, SecurityAttributes,
-    SecurityDescriptor,
-};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{create_directory, CommandLine};
-
-use anyhow::Result;
 
 // WinAPI's functions have many arguments, we wrap the same way.
 #[expect(clippy::too_many_arguments)]
@@ -34,7 +25,7 @@ pub(crate) fn start_process(
     environment: Option<&HashMap<String, String>>,
     current_directory: Option<&Path>,
     startup_info: &mut StartupInfo,
-) -> Result<ProcessInformation> {
+) -> anyhow::Result<ProcessInformation> {
     let token = token.duplicate_impersonation()?;
     let account = token.sid_and_attributes()?.sid.account(None)?;
 
@@ -114,7 +105,7 @@ impl Update for MultiHasher {
     }
 }
 
-pub(crate) fn file_hash(path: &Path) -> Result<Hash> {
+pub(crate) fn file_hash(path: &Path) -> anyhow::Result<Hash> {
     let data = fs::read(path)?;
 
     let mut hasher = MultiHasher::default();
@@ -122,7 +113,7 @@ pub(crate) fn file_hash(path: &Path) -> Result<Hash> {
     Ok(hasher.finalize())
 }
 
-pub(crate) fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> Result<()> {
+pub(crate) fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> anyhow::Result<()> {
     // FIXME: Underlying behaviour of security primitives must be corrected before this can work
     // let owner = Sid::from_well_known(WinLocalSystemSid, None)?;
 
