@@ -1,6 +1,6 @@
 use anyhow::Context;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
-use tracing::{instrument, trace, warn};
+use tracing::{info, instrument, trace, warn};
 use webm_iterable::{
     errors::TagWriterError,
     matroska_spec::{Master, MatroskaSpec, SimpleBlock},
@@ -298,6 +298,7 @@ where
     }
 
     pub(crate) fn mark_cut_block_hit(&mut self) {
+        info!("cut block hit");
         self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }
