@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::info;
+use tracing::{info, warn};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
@@ -61,6 +61,14 @@ pub(crate) enum IteratorError {
     WebmCoercionError(#[from] webm_iterable::errors::WebmCoercionError),
 }
 
+#[derive(Debug)]
+pub(crate) enum IteratorResult {
+    Tag(MatroskaSpec),
+    Error(IteratorError),
+    Retry,
+    Continue,
+}
+
 impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
@@ -90,11 +98,42 @@ where
             .as_ref()
             .map(|x| x.as_ref().map(|t| mastroka_spec_name(t)))
             .filter(|x| x.is_ok());
+        let debug_info = result
+            .as_ref()
+            .map(|res| res.as_ref().map(|tag| mastroka_spec_name(&tag)));
+
+        if result.is_none() {
+            info!("\n")
+        }
+
+        info!(
+            ?debug_info,
+            rollback_record = self.rollback_record,
+            last_emitted_tag_offset_relative = inner.last_emitted_tag_offset(),
+            last_tag_position_absolute = self.last_tag_position,
+            last_cluster_position_absolute = self.last_cluster_position,
+            "Next Tag"
+        );
+
+        if result.is_none() {
+            info!("\n")
+        }
+
+        if result.is_none() {
+            let record = self.rollback_record.unwrap_or(0);
+            if record + inner.last_emitted_tag_offset() > self.last_tag_position {
+                self.last_tag_position = record + inner.last_emitted_tag_offset();
+            }
+            return None;
+        }
 
         if let Some(Ok(tag)) = &result {
             let record = self.rollback_record.unwrap_or(0);
             // The last emitted tag is relative, i.e when rollback, the last_emitted_tag_offset() will be reset to 0
-            self.last_tag_position = record + inner.last_emitted_tag_offset();
+            if record + inner.last_emitted_tag_offset() >= self.last_tag_position {
+                self.last_tag_position = record + inner.last_emitted_tag_offset();
+            }
+
             if matches!(tag, MatroskaSpec::BlockGroup(Master::Full(_))) {
                 // we check if the tag is BlockGroup Full,
                 // If so, we need to correct for the last tag position
@@ -194,6 +233,10 @@ where
     }
 
     pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
+        warn!(
+            last_tag_position = self.last_tag_position,
+            "Rolling back to last successful tag"
+        );
         let inner = self.inner.take().context("no inner iterator")?;
         let mut file = inner.into_inner();
         file.reopen()?;

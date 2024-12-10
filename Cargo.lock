@@ -1459,8 +1459,6 @@ checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
 [[package]]
 name = "ebml-iterable"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "005525496ebdcae1d865c85fd71bc401a80921804ebb59c9340e2ab0c83aa1b0"
 dependencies = [
  "ebml-iterable-specification",
  "ebml-iterable-specification-derive",
@@ -1470,14 +1468,10 @@ dependencies = [
 [[package]]
 name = "ebml-iterable-specification"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f56467af159a98735d44231f53eaa505e919e6003266f103b99649a93f106784"
 
 [[package]]
 name = "ebml-iterable-specification-derive"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b066b81018300fdce40f71c4db355a102699324af96fad28f25ab1b5f87de066"
 dependencies = [
  "ebml-iterable-specification",
  "proc-macro2 1.0.88",
