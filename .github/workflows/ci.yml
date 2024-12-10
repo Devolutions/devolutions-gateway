@@ -750,13 +750,16 @@ jobs:
       - name: Prepare runner
         shell: pwsh
         run: |
-          Write-Host "$Env:VCToolsInstallDir"
-          Write-Host "$(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)"
-          Write-Host "$(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)"
+          Write-Host "1: $Env:VCToolsInstallDir"
+          Write-Host "2: $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)"
+          Write-Host "3: $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)"
 
-          ls "${Env:VCToolsInstallDir}\bin\Hostx64\x64\"
+          $VCToolsInstallDir = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath);
 
-          $asanDllPath = "${Env:VCToolsInstallDir}\bin\Hostx64\x64\clang_rt.asan_dynamic-x86_64.dll"
+          ls "$VCToolsInstallDir"
+          ls "$VCToolsInstallDir\bin\Hostx64\x64\"
+
+          $asanDllPath = "$VCToolsInstallDir\bin\Hostx64\x64\clang_rt.asan_dynamic-x86_64.dll"
 
           cp "$asanDllPath" .\target\x86_64-pc-windows-msvc\debug\
 
