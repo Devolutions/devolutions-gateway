@@ -750,16 +750,21 @@ jobs:
       - name: Prepare runner
         shell: pwsh
         run: |
-          Write-Host "1: $Env:VCToolsInstallDir"
-          Write-Host "2: $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)"
-          Write-Host "3: $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)"
+          $VSInstallationPath = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          Write-Host "VCToolsInstallDir = $VSInstallationPath"
+          Get-ChildItem "$VSInstallationPath"
 
-          $VCToolsInstallDir = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath);
+          $toolsPath = "$VSInstallationPath\VC\Tools\MSVC"
+          Write-Host "toolsPath = $toolsPath"
+          Get-ChildItem "$toolsPath"
 
-          ls "$VCToolsInstallDir"
-          ls "$VCToolsInstallDir\bin\Hostx64\x64\"
+          $firstItem = Get-ChildItem "$toolsPath" | Select-Object -First 1
+          $binPath = "$($firstItem.Name)\bin\Hostx64\x64"
+          Write-Host "binPath = $binPath"
+          Get-ChildItem "$binPath"
 
-          $asanDllPath = "$VCToolsInstallDir\bin\Hostx64\x64\clang_rt.asan_dynamic-x86_64.dll"
+          $asanDllPath = "$binPath\clang_rt.asan_dynamic-x86_64.dll"
+          Write-Host "asanDllPath = $asanDllPath"
 
           cp "$asanDllPath" .\target\x86_64-pc-windows-msvc\debug\
 
