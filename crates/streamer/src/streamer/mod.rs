@@ -124,13 +124,8 @@ pub fn webm_stream(
             Some(Err(IteratorError::InnerError(TagIteratorError::ReadError { source }))) => {
                 return Err(source.into());
             }
-            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF {
-                tag_start,
-                tag_id,
-                tag_size,
-                ..
-            }))) => {
-                trace!(tag_start, tag_id, tag_size, "End of file reached, retrying");
+            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. }))) | None => {
+                trace!("End of file reached, retrying");
                 match when_eof(&when_new_chunk_appended, Arc::clone(&stop_notifier)) {
                     Ok(WhenEofControlFlow::Continue) => {
                         webm_itr.rollback_to_last_successful_tag()?;
@@ -169,10 +164,6 @@ pub fn webm_stream(
                         break Ok(());
                     }
                 }
-            }
-            None => {
-                error_sender.blocking_send(UserFriendlyError::UnexpectedEOF)?;
-                anyhow::bail!("unexpected None");
             }
             Some(Err(e)) => {
                 error_sender.blocking_send(UserFriendlyError::UnexpectedError)?;
