@@ -58,6 +58,7 @@ impl From<Handle> for Token {
 
 impl Token {
     pub fn current_process_token() -> Self {
+        // FIXME: Is it really? What about https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocesstoken
         Self {
             handle: Handle::new_borrowed(HANDLE(-4isize as *mut c_void)).expect("always valid"),
         }

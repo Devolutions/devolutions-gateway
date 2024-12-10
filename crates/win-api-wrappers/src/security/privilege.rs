@@ -1,33 +1,91 @@
 use std::alloc::Layout;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
-use anyhow::Result;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::LUID;
+use windows::Win32::Security;
+use windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;
+use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
 
 use crate::process::Process;
 use crate::token::{Token, TokenPrivilegesAdjustment};
 use crate::utils::{slice_from_ptr, Snapshot, WideString};
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::LUID;
-use windows::Win32::Security::{
-    LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_BACKUP_NAME, SE_CHANGE_NOTIFY_NAME, SE_CREATE_GLOBAL_NAME,
-    SE_CREATE_PAGEFILE_NAME, SE_CREATE_SYMBOLIC_LINK_NAME, SE_DEBUG_NAME, SE_DELEGATE_SESSION_USER_IMPERSONATE_NAME,
-    SE_IMPERSONATE_NAME, SE_INCREASE_QUOTA_NAME, SE_INC_BASE_PRIORITY_NAME, SE_INC_WORKING_SET_NAME,
-    SE_LOAD_DRIVER_NAME, SE_MANAGE_VOLUME_NAME, SE_PRIVILEGE_ENABLED, SE_PRIVILEGE_ENABLED_BY_DEFAULT,
-    SE_PROF_SINGLE_PROCESS_NAME, SE_REMOTE_SHUTDOWN_NAME, SE_RESTORE_NAME, SE_SECURITY_NAME, SE_SHUTDOWN_NAME,
-    SE_SYSTEMTIME_NAME, SE_SYSTEM_ENVIRONMENT_NAME, SE_SYSTEM_PROFILE_NAME, SE_TAKE_OWNERSHIP_NAME, SE_TIME_ZONE_NAME,
-    SE_UNDOCK_NAME, TOKEN_ALL_ACCESS, TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES,
-};
-use windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;
-use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
 
-pub struct TokenPrivileges(pub Vec<LUID_AND_ATTRIBUTES>);
+pub static DEFAULT_ADMIN_PRIVILEGES: LazyLock<TokenPrivileges> = LazyLock::new(|| {
+    use windows::Win32::Security::{
+        SE_BACKUP_NAME, SE_CHANGE_NOTIFY_NAME, SE_CREATE_GLOBAL_NAME, SE_CREATE_PAGEFILE_NAME,
+        SE_CREATE_SYMBOLIC_LINK_NAME, SE_DEBUG_NAME, SE_DELEGATE_SESSION_USER_IMPERSONATE_NAME, SE_IMPERSONATE_NAME,
+        SE_INCREASE_QUOTA_NAME, SE_INC_BASE_PRIORITY_NAME, SE_INC_WORKING_SET_NAME, SE_LOAD_DRIVER_NAME,
+        SE_MANAGE_VOLUME_NAME, SE_PRIVILEGE_ENABLED, SE_PRIVILEGE_ENABLED_BY_DEFAULT, SE_PROF_SINGLE_PROCESS_NAME,
+        SE_REMOTE_SHUTDOWN_NAME, SE_RESTORE_NAME, SE_SECURITY_NAME, SE_SHUTDOWN_NAME, SE_SYSTEMTIME_NAME,
+        SE_SYSTEM_ENVIRONMENT_NAME, SE_SYSTEM_PROFILE_NAME, SE_TAKE_OWNERSHIP_NAME, SE_TIME_ZONE_NAME, SE_UNDOCK_NAME,
+        TOKEN_PRIVILEGES_ATTRIBUTES,
+    };
+
+    let mut privs = vec![];
+
+    macro_rules! add_priv {
+        ($priv:ident, $name:expr, $state:expr) => {
+            $priv.push(Security::LUID_AND_ATTRIBUTES {
+                Luid: lookup_privilege_value(None, $name).expect("privilege name not found"),
+                Attributes: $state,
+            });
+        };
+    }
+
+    add_priv!(privs, SE_INCREASE_QUOTA_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_SECURITY_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_TAKE_OWNERSHIP_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_LOAD_DRIVER_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_SYSTEM_PROFILE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_SYSTEMTIME_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_PROF_SINGLE_PROCESS_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_INC_BASE_PRIORITY_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_CREATE_PAGEFILE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_BACKUP_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_RESTORE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_SHUTDOWN_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_DEBUG_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_SYSTEM_ENVIRONMENT_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_REMOTE_SHUTDOWN_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_UNDOCK_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_MANAGE_VOLUME_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_INC_WORKING_SET_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_TIME_ZONE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(privs, SE_CREATE_SYMBOLIC_LINK_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+    add_priv!(
+        privs,
+        SE_DELEGATE_SESSION_USER_IMPERSONATE_NAME,
+        TOKEN_PRIVILEGES_ATTRIBUTES(0)
+    );
+
+    add_priv!(
+        privs,
+        SE_CHANGE_NOTIFY_NAME,
+        SE_PRIVILEGE_ENABLED | SE_PRIVILEGE_ENABLED_BY_DEFAULT
+    );
+    add_priv!(
+        privs,
+        SE_IMPERSONATE_NAME,
+        SE_PRIVILEGE_ENABLED | SE_PRIVILEGE_ENABLED_BY_DEFAULT
+    );
+    add_priv!(
+        privs,
+        SE_CREATE_GLOBAL_NAME,
+        SE_PRIVILEGE_ENABLED | SE_PRIVILEGE_ENABLED_BY_DEFAULT
+    );
+
+    TokenPrivileges(privs)
+});
+
+pub struct TokenPrivileges(pub Vec<Security::LUID_AND_ATTRIBUTES>);
 
 pub struct RawTokenPrivileges(Vec<u8>);
 
-impl TryFrom<&TOKEN_PRIVILEGES> for TokenPrivileges {
+impl TryFrom<&Security::TOKEN_PRIVILEGES> for TokenPrivileges {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TOKEN_PRIVILEGES) -> Result<Self, Self::Error> {
+    fn try_from(value: &Security::TOKEN_PRIVILEGES) -> Result<Self, Self::Error> {
         // SAFETY: We assume `value.Privileges` is truthful and big enough to fit its VLA.
         let privs_slice = unsafe { slice_from_ptr(value.Privileges.as_ptr(), value.PrivilegeCount as usize) };
 
@@ -36,11 +94,11 @@ impl TryFrom<&TOKEN_PRIVILEGES> for TokenPrivileges {
 }
 
 impl RawTokenPrivileges {
-    pub fn as_raw(&self) -> &TOKEN_PRIVILEGES {
+    pub fn as_raw(&self) -> &Security::TOKEN_PRIVILEGES {
         // SAFETY: It is safe to dereference since it is our buffer.
         #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         unsafe {
-            &*self.0.as_ptr().cast::<TOKEN_PRIVILEGES>()
+            &*self.0.as_ptr().cast::<Security::TOKEN_PRIVILEGES>()
         }
     }
 }
@@ -48,17 +106,19 @@ impl RawTokenPrivileges {
 impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
     type Error = anyhow::Error;
 
-    fn try_from(value: &TokenPrivileges) -> Result<Self> {
+    fn try_from(value: &TokenPrivileges) -> Result<Self, Self::Error> {
         let mut buf = vec![
             0;
-            Layout::new::<TOKEN_PRIVILEGES>()
-                .extend(Layout::array::<LUID_AND_ATTRIBUTES>(value.0.len().saturating_sub(1))?)?
+            Layout::new::<Security::TOKEN_PRIVILEGES>()
+                .extend(Layout::array::<Security::LUID_AND_ATTRIBUTES>(
+                    value.0.len().saturating_sub(1)
+                )?)?
                 .0
                 .pad_to_align()
                 .size()
         ];
 
-        let privileges = buf.as_mut_ptr().cast::<TOKEN_PRIVILEGES>();
+        let privileges = buf.as_mut_ptr().cast::<Security::TOKEN_PRIVILEGES>();
 
         // SAFETY: Aligment is valid for these `write`s.
         unsafe {
@@ -70,7 +130,7 @@ impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
             //   We need to use `write_unaligned`, because we are effectively writing into a [u8] buffer
             //   using a pointer with alignment 1, while aligment 8 is required when writing isize values on a 64-bit system.
             unsafe {
-                (std::ptr::addr_of_mut!((*privileges).Privileges) as *mut LUID_AND_ATTRIBUTES)
+                (std::ptr::addr_of_mut!((*privileges).Privileges) as *mut Security::LUID_AND_ATTRIBUTES)
                     .offset(i as isize)
                     .write_unaligned(*v)
             };
@@ -80,13 +140,13 @@ impl TryFrom<&TokenPrivileges> for RawTokenPrivileges {
     }
 }
 
-pub fn lookup_privilege_value(system_name: Option<&str>, name: PCWSTR) -> Result<LUID> {
+pub fn lookup_privilege_value(system_name: Option<&str>, name: PCWSTR) -> anyhow::Result<LUID> {
     let system_name = system_name.map(WideString::from);
     let mut luid = LUID::default();
 
     // SAFETY: `system_name` is either NULL or valid and NUL terminated. We assume `name` is valid. No preconditions.
     unsafe {
-        LookupPrivilegeValueW(
+        Security::LookupPrivilegeValueW(
             system_name.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
             name,
             &mut luid,
@@ -96,12 +156,12 @@ pub fn lookup_privilege_value(system_name: Option<&str>, name: PCWSTR) -> Result
     Ok(luid)
 }
 
-pub fn find_token_with_privilege(privilege: LUID) -> Result<Option<Token>> {
+pub fn find_token_with_privilege(privilege: LUID) -> anyhow::Result<Option<Token>> {
     let snapshot = Snapshot::new(TH32CS_SNAPPROCESS, None)?;
 
     Ok(snapshot.process_ids().find_map(|pid| {
         let proc = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION).ok()?;
-        let token = proc.token(TOKEN_ALL_ACCESS).ok()?;
+        let token = proc.token(Security::TOKEN_ALL_ACCESS).ok()?;
 
         if token.privileges().ok()?.0.iter().any(|p| p.Luid == privilege) {
             Some(token)
@@ -111,7 +171,7 @@ pub fn find_token_with_privilege(privilege: LUID) -> Result<Option<Token>> {
     }))
 }
 
-/// ScopedPrivilege enables a Windows privilege for the lifetime of the object and
+/// [`ScopedPrivileges`] enables Windows privileges for the lifetime of the object and
 /// disables it when going out of scope.
 ///
 /// Token is borrowed to ensure that the token is alive throughout the lifetime of the scope.
@@ -122,7 +182,7 @@ pub struct ScopedPrivileges<'a> {
 }
 
 impl<'a> ScopedPrivileges<'a> {
-    pub fn enter(token: &'a mut Token, privileges: &[PCWSTR]) -> Result<ScopedPrivileges<'a>> {
+    pub fn enter(token: &'a mut Token, privileges: &[PCWSTR]) -> anyhow::Result<ScopedPrivileges<'a>> {
         let mut token_privileges = Vec::with_capacity(privileges.len());
 
         for privilege in privileges.iter().copied() {
@@ -159,6 +219,10 @@ impl<'a> ScopedPrivileges<'a> {
     pub fn token_mut(&mut self) -> &mut Token {
         self.token
     }
+
+    pub fn description(&self) -> &str {
+        &self.description
+    }
 }
 
 impl Drop for ScopedPrivileges<'_> {
@@ -172,48 +236,20 @@ impl Drop for ScopedPrivileges<'_> {
     }
 }
 
-#[rustfmt::skip]
-pub fn default_admin_privileges() -> &'static TokenPrivileges {
-    static PRIVS: OnceLock<TokenPrivileges> = OnceLock::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    PRIVS.get_or_init(|| {
-        let mut privs = vec![];
+    #[test]
+    fn scoped_privileges() {
+        let mut token = Process::current_process()
+            .token(Security::TOKEN_ADJUST_PRIVILEGES | Security::TOKEN_QUERY)
+            .unwrap();
 
-        macro_rules! add_priv {
-            ($priv:ident, $name:expr, $state:expr) => {
-                $priv.push(LUID_AND_ATTRIBUTES {
-                    Luid: lookup_privilege_value(None, $name).expect("privilege name not found"),
-                    Attributes: $state,
-                });
-            };
-        }
+        let privileges = ScopedPrivileges::enter(&mut token, &[Security::SE_TIME_ZONE_NAME]).unwrap();
 
-        add_priv!(privs, SE_INCREASE_QUOTA_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_SECURITY_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_TAKE_OWNERSHIP_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_LOAD_DRIVER_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_SYSTEM_PROFILE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_SYSTEMTIME_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_PROF_SINGLE_PROCESS_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_INC_BASE_PRIORITY_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_CREATE_PAGEFILE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_BACKUP_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_RESTORE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_SHUTDOWN_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_DEBUG_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_SYSTEM_ENVIRONMENT_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_REMOTE_SHUTDOWN_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_UNDOCK_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_MANAGE_VOLUME_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_INC_WORKING_SET_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_TIME_ZONE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_CREATE_SYMBOLIC_LINK_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
-        add_priv!(privs, SE_DELEGATE_SESSION_USER_IMPERSONATE_NAME, TOKEN_PRIVILEGES_ATTRIBUTES(0));
+        println!("{:?}", privileges.description());
 
-        add_priv!(privs, SE_CHANGE_NOTIFY_NAME, SE_PRIVILEGE_ENABLED | SE_PRIVILEGE_ENABLED_BY_DEFAULT);
-        add_priv!(privs, SE_IMPERSONATE_NAME, SE_PRIVILEGE_ENABLED | SE_PRIVILEGE_ENABLED_BY_DEFAULT);
-        add_priv!(privs, SE_CREATE_GLOBAL_NAME, SE_PRIVILEGE_ENABLED | SE_PRIVILEGE_ENABLED_BY_DEFAULT);
-
-        TokenPrivileges(privs)
-    })
+        assert_eq!(privileges.description(), "SeTimeZonePrivilege");
+    }
 }

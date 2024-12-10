@@ -736,6 +736,38 @@ jobs:
           run: |
             ./powershell/run-tests.ps1
 
+  winapi-sanitizer-tests:
+    name: Windows API sanitizer tests
+    runs-on: windows-2022
+    needs: preflight
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Prepare runner
+        shell: pwsh
+        run: |
+          Write-Host "$Env:VCToolsInstallDir"
+          Write-Host "$(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)"
+          Write-Host "$(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)"
+
+          ls "${Env:VCToolsInstallDir}\bin\Hostx64\x64\"
+
+          $asanDllPath = "${Env:VCToolsInstallDir}\bin\Hostx64\x64\clang_rt.asan_dynamic-x86_64.dll"
+
+          cp "$asanDllPath" .\target\x86_64-pc-windows-msvc\debug\
+
+          rustup toolchain install nightly
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $Env:RUSTFLAGS="-Zsanitizer=address"
+          cargo +nightly test --target x86_64-pc-windows-msvc -p win-api-wrappers
+
   success:
     name: Success
     runs-on: ubuntu-latest
@@ -749,6 +781,7 @@ jobs:
       - devolutions-agent-merge
       - dotnet-utils-tests
       - powershell-tests
+      - winapi-sanitizer-tests
 
     steps:
       - name: Check success
