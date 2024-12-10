@@ -94,7 +94,6 @@ pub fn webm_stream(
     ) -> Result<Option<()>, RecvError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let when_new_chunk_appended_receiver = when_new_chunk_appended();
-        let stop_notifier = stop_notifier.clone();
         tokio::spawn(async move {
             tokio::select! {
                 _ = when_new_chunk_appended_receiver => {
