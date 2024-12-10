@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use channel_writer::{ChannelWriter, ChannelWriterError};
+use channel_writer::{ChannelWriter, ChannelWriterError, ChannelWriterReceiver};
 use futures_util::SinkExt;
 use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot::error::RecvError, Mutex, Notify};
 use tokio_util::codec::Framed;
 use tracing::{debug, info, instrument, trace, warn, Instrument};
 use webm_iterable::{
@@ -28,18 +28,12 @@ pub trait Signal: Send + 'static {
     fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
-#[derive(Debug)]
-pub enum RecordingEvent {
-    Disconnected { sender: tokio::sync::oneshot::Sender<()> },
-}
-
 #[instrument(skip_all)]
 pub fn webm_stream(
     output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static, // A websocket usually
     input_stream: impl std::io::Read + Reopenable,                                             // A file usually
     shutdown_signal: impl Signal,
     config: StreamingConfig,
-    recording_event_receiver: mpsc::Receiver<RecordingEvent>,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     let mut webm_itr = WebmPositionedIterator::new(WebmIterator::new(
@@ -73,7 +67,7 @@ pub fn webm_stream(
     // ChannelWriter is a writer that writes to a channel
     let (chunk_writer, chunk_receiver) = ChannelWriter::new();
     let (error_sender, error_receiver) = mpsc::channel(1);
-    let (file_droped_sender, file_droped_receiver) = tokio::sync::oneshot::channel();
+    let stop_notifier = Arc::new(Notify::new());
     spawn_sending_task(
         ws_frame,
         chunk_receiver,
@@ -83,8 +77,7 @@ pub fn webm_stream(
         },
         shutdown_signal,
         error_receiver,
-        recording_event_receiver,
-        file_droped_receiver,
+        stop_notifier.clone(),
     );
 
     let mut header_writer = HeaderWriter::new(chunk_writer);
@@ -94,6 +87,26 @@ pub fn webm_stream(
     }
 
     let mut encode_writer = header_writer.into_encoded_writer(encode_writer_config)?;
+
+    fn when_eof(
+        when_new_chunk_appended: &impl Fn() -> tokio::sync::oneshot::Receiver<()>,
+        stop_notifier: Arc<Notify>,
+    ) -> Result<Option<()>, RecvError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let when_new_chunk_appended_receiver = when_new_chunk_appended();
+        let stop_notifier = stop_notifier.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = when_new_chunk_appended_receiver => {
+                    let _ = tx.send(Some(()));
+                },
+                _ = stop_notifier.notified() => {
+                    let _ = tx.send(None);
+                }
+            }
+        });
+        rx.blocking_recv()
+    }
 
     // Start muxing from the last key frame.
     // The WebM project requires the muxer to ensure the first Block/SimpleBlock is a keyframe.
@@ -119,9 +132,19 @@ pub fn webm_stream(
                 ..
             }))) => {
                 trace!(tag_start, tag_id, tag_size, "End of file reached, retrying");
-                when_new_chunk_appended().blocking_recv()?;
-                webm_itr.rollback_to_last_successful_tag()?;
-                webm_itr.skip(1)?;
+                match when_eof(&when_new_chunk_appended, Arc::clone(&stop_notifier)) {
+                    Ok(Some(())) => {
+                        webm_itr.rollback_to_last_successful_tag()?;
+                        webm_itr.skip(1)?;
+                    }
+                    Ok(None) => {
+                        break Ok(());
+                    }
+                    Err(e) => {
+                        error_sender.blocking_send(UserFriendlyError::UnexpectedEOF)?;
+                        anyhow::bail!("unexpected None: {:?}", e);
+                    }
+                }
             }
             Some(Ok(tag)) => {
                 if webm_itr.last_tag_position() == cut_block_position {
@@ -143,7 +166,6 @@ pub fn webm_stream(
                         else {
                             break Err(e);
                         };
-                        info!("Stopping streaming task");
                         // Channel is closed, we can break
                         break Ok(());
                     }
@@ -159,26 +181,21 @@ pub fn webm_stream(
             }
         }
     };
-    drop(webm_itr);
-
-    let _ = file_droped_sender.send(());
 
     result
 }
 
 fn spawn_sending_task<W>(
     ws_frame: Framed<W, ProtocolCodeC>,
-    mut chunk_receiver: mpsc::Receiver<Vec<u8>>,
+    mut chunk_receiver: ChannelWriterReceiver,
     codec: Option<String>,
     mut shutdown_signal: impl Signal,
     mut error_receiver: mpsc::Receiver<UserFriendlyError>,
-    mut recording_event_receiver: mpsc::Receiver<RecordingEvent>,
-    file_droped_receiver: tokio::sync::oneshot::Receiver<()>,
+    stop_notifier: Arc<Notify>,
 ) where
     W: tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     use futures_util::stream::StreamExt;
-
     let ws_frame = Arc::new(Mutex::new(ws_frame));
     let ws_frame_clone = Arc::clone(&ws_frame);
     // Spawn a dedicated task to handle incoming messages from the client
@@ -212,24 +229,23 @@ fn spawn_sending_task<W>(
                         .await?;
                 }
                 Some(Ok(protocol::ClientMessage::Pull)) => match chunk_receiver.recv().await {
-                    Some(data) => {
+                    Ok(Some(data)) => {
                         ws_frame
                             .lock()
                             .await
                             .send(protocol::ServerMessage::Chunk(&data))
                             .await?;
                     }
-                    None => {
+                    _ => {
                         break;
                     }
                 },
             }
         }
-
         Ok::<_, anyhow::Error>(())
     });
 
-    let task = async move {
+    let control_task = async move {
         info!("Starting streaming task");
         loop {
             tokio::select! {
@@ -243,39 +259,21 @@ fn spawn_sending_task<W>(
                         continue;
                     }
                 },
-                event = recording_event_receiver.recv() => {
-                     match event {
-                        Some(RecordingEvent::Disconnected {
-                            sender,
-                        }) => {
-                            tokio::spawn(async move {
-                                let _ = file_droped_receiver.await;
-                                let _ = sender.send(()).inspect_err(|e| {
-                                    warn!(error=?e, "Failed to send recording event");
-                                });
-                            });
-
-                            break;
-                        },
-                        None => {
-                            break;
-                        }
-                    }
-                },
                 _ = shutdown_signal.wait() => {
+                    info!("Received shutdown signal"); 
                     break;
                 },
             }
         }
-
+        info!("Stopping streaming task");
         handle.abort();
+        stop_notifier.notify_waiters();
         Ok::<_, anyhow::Error>(())
     }
     .instrument(tracing::span!(tracing::Level::INFO, "Streaming WebM task"));
 
     tokio::spawn(async move {
-        let task_result = task.await;
-
+        let task_result = control_task.await;
         if let Err(e) = task_result {
             tracing::warn!(error = format!("{e:#}"));
         }

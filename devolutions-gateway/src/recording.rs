@@ -10,12 +10,11 @@ use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
-use futures::TryFutureExt;
 use parking_lot::Mutex;
 use serde::Serialize;
 use streamer::SignalWriter;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
@@ -234,10 +233,9 @@ enum RecordingManagerMessage {
         id: Uuid,
         session_must_be_recorded: bool,
     },
-    SubscribeToOngoingRecording {
+    SubscribeToSessionEndNotification {
         id: Uuid,
-        subscribe_sender: mpsc::Sender<RecordingEvent>,
-        channel: oneshot::Sender<anyhow::Result<()>>,
+        channel: oneshot::Sender<anyhow::Result<Arc<Notify>>>,
     },
 }
 
@@ -266,11 +264,9 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("session_must_be_recorded", session_must_be_recorded)
                 .finish(),
-            RecordingManagerMessage::SubscribeToOngoingRecording {
-                id,
-                subscribe_sender: _,
-                channel: _,
-            } => f.debug_struct("SubscribeToOngoingRecording").field("id", id).finish(),
+            RecordingManagerMessage::SubscribeToSessionEndNotification { id, channel: _ } => {
+                f.debug_struct("SubscribeToOngoingRecording").field("id", id).finish()
+            }
         }
     }
 }
@@ -358,23 +354,16 @@ impl RecordingMessageSender {
         Ok(())
     }
 
-    pub(crate) async fn subscribe_to_active_recording(
-        &self,
-        recording_id: Uuid,
-        subscribe_sender: mpsc::Sender<RecordingEvent>,
-    ) -> anyhow::Result<()> {
+    pub(crate) async fn subscribe_to_active_recording(&self, recording_id: Uuid) -> anyhow::Result<Arc<Notify>> {
         let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::SubscribeToOngoingRecording {
+            .send(RecordingManagerMessage::SubscribeToSessionEndNotification {
                 id: recording_id,
-                subscribe_sender,
                 channel: tx,
             })
-            .await
-            .ok()
-            .context("couldn't send SubscribeToOngoingRecording message")?;
-        rx.await.context("couldn't subscribe to ongoing recording")??;
-        Ok(())
+            .await?;
+        let notify = rx.await.context("couldn't subscribe to ongoing recording")??;
+        Ok(notify)
     }
 }
 
@@ -434,7 +423,7 @@ impl Ord for DisconnectedTtl {
 pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
-    recording_state_subscribers: HashMap<Uuid, Vec<mpsc::Sender<RecordingEvent>>>,
+    recording_end_notifier: HashMap<Uuid, Arc<Notify>>,
     recordings_path: Utf8PathBuf,
     session_manager_handle: SessionMessageSender,
     job_queue_handle: JobQueueHandle,
@@ -450,7 +439,7 @@ impl RecordingManagerTask {
         Self {
             rx,
             ongoing_recordings: HashMap::new(),
-            recording_state_subscribers: HashMap::new(),
+            recording_end_notifier: HashMap::new(),
             recordings_path,
             session_manager_handle,
             job_queue_handle,
@@ -593,22 +582,9 @@ impl RecordingManagerTask {
                 .save_to_file(&ongoing.manifest_path)
                 .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
 
-            // We signal all the streaming tasks and wait for them to acknowledge the event.
-            info!(%id, path = %recording_file_path, "Emit recording disconnected event");
-            if let Some(subscribers) = self.recording_state_subscribers.get(&id) {
-                for subscriber in subscribers {
-                    let (sender, receiver) = oneshot::channel();
-                    let _ = subscriber
-                        .send(RecordingEvent::Disconnected { sender })
-                        .await
-                        .inspect_err(|error| {
-                            warn!(%error, "couldn’t send recording event to subscriber");
-                        });
-
-                    let _ = receiver.await.inspect_err(|error| {
-                        warn!(%error, "couldn’t wait for subscriber to acknowledge the event");
-                    });
-                }
+            // Notify all the streamers that recording has ended.
+            if let Some(notify) = self.recording_end_notifier.get(&id) {
+                notify.notify_one();
             }
 
             info!(%id, "Start video remuxing operation");
@@ -616,11 +592,15 @@ impl RecordingManagerTask {
                 if cadeau::xmf::is_init() {
                     debug!(%recording_file_path, "Enqueue video remuxing operation");
 
+                    // Schedule 60 seconds to wait for the streamers to release the file.
                     let _ = self
                         .job_queue_handle
-                        .enqueue(RemuxJob {
-                            input_path: recording_file_path,
-                        })
+                        .schedule(
+                            RemuxJob {
+                                input_path: recording_file_path,
+                            },
+                            time::OffsetDateTime::now_utc() + time::Duration::seconds(60),
+                        )
                         .await;
                 } else {
                     debug!("Video remuxing was skipped because XMF native library is not loaded");
@@ -679,7 +659,7 @@ impl RecordingManagerTask {
                     }
 
                     self.ongoing_recordings.remove(&id);
-                    self.recording_state_subscribers.remove(&id);
+                    self.recording_end_notifier.remove(&id);
                 }
                 _ => {
                     trace!(%id, "Recording should not be removed yet");
@@ -688,15 +668,18 @@ impl RecordingManagerTask {
         }
     }
 
-    fn subscribe(&mut self, id: Uuid, tx: mpsc::Sender<RecordingEvent>) -> anyhow::Result<()> {
+    fn subscribe(&mut self, id: Uuid) -> anyhow::Result<Arc<Notify>> {
         debug!(%id, "Subscribing to ongoing recording");
-        if self.ongoing_recordings.contains_key(&id) {
-            let subscribers = self.recording_state_subscribers.entry(id).or_default();
-            subscribers.push(tx);
-            debug!(%id, "Subscribed to ongoing recording successfully");
-            Ok(())
+        if !self.ongoing_recordings.contains_key(&id) {
+            anyhow::bail!("unknown recording for ID {id}");
+        }
+
+        if let Some(notify) = self.recording_end_notifier.get(&id) {
+            Ok(Arc::clone(notify))
         } else {
-            anyhow::bail!("unknown recording for ID {id}")
+            let notify = Arc::new(Notify::new());
+            self.recording_end_notifier.insert(id, Arc::clone(&notify));
+            Ok(notify)
         }
     }
 }
@@ -791,8 +774,8 @@ async fn recording_manager_task(
                             );
                         }
                     },
-                    RecordingManagerMessage::SubscribeToOngoingRecording {id, subscribe_sender, channel } => {
-                        let result = manager.subscribe(id, subscribe_sender) ;
+                    RecordingManagerMessage::SubscribeToSessionEndNotification {id, channel } => {
+                        let result = manager.subscribe(id) ;
                         let _ = channel.send(result);
                     }
                 }

@@ -1,28 +1,26 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use axum::{body::Body, response::Response};
 use streamer::{config::CpuCount, webm_stream, ReOpenableFile};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::{
-    recording::{OnGoingRecordingState, RecordingEvent},
-    token::RecordingFileType,
-    ws::websocket_compat,
-};
+use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
-struct ShutdownSignal(devolutions_gateway_task::ShutdownSignal);
+struct ShutdownSignal(Arc<Notify>);
 
 impl streamer::Signal for ShutdownSignal {
     fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send {
-        self.0.wait()
+        self.0.notified()
     }
 }
 
 pub(crate) async fn stream_file(
     path: camino::Utf8PathBuf,
     ws: axum::extract::WebSocketUpgrade,
-    shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    shutdown_notify: Arc<Notify>,
     recordings: crate::recording::RecordingMessageSender,
-    mut recording_event_receiver: tokio::sync::mpsc::Receiver<RecordingEvent>,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
     // 1.identify the file type
@@ -36,27 +34,11 @@ pub(crate) async fn stream_file(
 
     let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
 
-    // prepare the streaming task
-    let recording_event_receiver = {
-        let (sender, receiver) = tokio::sync::mpsc::channel(2);
-        tokio::spawn(async move {
-            while let Some(event) = recording_event_receiver.recv().await {
-                let event = match event {
-                    RecordingEvent::Disconnected { sender } => streamer::RecordingEvent::Disconnected { sender },
-                };
-                if let Err(e) = sender.send(event).await {
-                    warn!(error=?e, "Failed to send recording event");
-                }
-            }
-        });
-        receiver
-    };
-
     let streamer_config = streamer::StreamingConfig {
         encoder_threads: CpuCount::default(),
     };
 
-    let shutdown_signal = ShutdownSignal(shutdown_signal);
+    let shutdown_signal = ShutdownSignal(shutdown_notify);
 
     let when_new_chunk_appended = move || {
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -73,7 +55,6 @@ pub(crate) async fn stream_file(
                 streaming_file,
                 shutdown_signal,
                 streamer_config,
-                recording_event_receiver,
                 when_new_chunk_appended,
             )
             .context("webm_stream failed")?;
