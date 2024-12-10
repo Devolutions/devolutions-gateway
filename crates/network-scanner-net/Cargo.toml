@@ -20,7 +20,7 @@ tracing = "0.1"
 [dev-dependencies]
 tracing-cov-mark = { path = "../tracing-cov-mark" }
 tracing-subscriber = "0.3"
-tokio = { version = "1.41", features = [
+tokio = { version = "1.42", features = [
     "rt",
     "sync",
     "macros",

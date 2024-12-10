@@ -13,5 +13,5 @@ default = []
 named_tasks = ["tokio/tracing"]
 
 [dependencies]
-tokio = { version = "1.41", features = ["sync", "rt", "tracing"] }
+tokio = { version = "1.42", features = ["sync", "rt", "tracing"] }
 async-trait = "0.1"
