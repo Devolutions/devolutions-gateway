@@ -766,7 +766,8 @@ jobs:
           $asanDllPath = "$binPath\clang_rt.asan_dynamic-x86_64.dll"
           Write-Host "asanDllPath = $asanDllPath"
 
-          cp "$asanDllPath" .\target\x86_64-pc-windows-msvc\debug\
+          New-Item -Path ".\target\x86_64-pc-windows-msvc\debug\"
+          Copy-Item -Path "$asanDllPath" -Destination .\target\x86_64-pc-windows-msvc\debug\
 
           rustup toolchain install nightly
 
