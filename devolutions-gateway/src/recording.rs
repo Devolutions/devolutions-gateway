@@ -200,11 +200,6 @@ pub enum OnGoingRecordingState {
     LastSeen { timestamp: i64 },
 }
 
-#[derive(Debug)]
-pub enum RecordingEvent {
-    Disconnected { sender: oneshot::Sender<()> },
-}
-
 #[derive(Debug, Clone)]
 struct OnGoingRecording {
     state: OnGoingRecordingState,
