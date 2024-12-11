@@ -44,7 +44,7 @@ pub(crate) struct ChannelWriterReceiver {
 }
 
 impl ChannelWriterReceiver {
-    pub(crate) async fn recv(&mut self) -> Result<Option<Vec<u8>>, ChannelWriterError> {
-        Ok(self.receiver.recv().await)
+    pub(crate) async fn recv(&mut self) -> Option<Vec<u8>> {
+        self.receiver.recv().await
     }
 }
