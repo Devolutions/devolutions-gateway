@@ -88,25 +88,6 @@ pub fn webm_stream(
 
     let mut encode_writer = header_writer.into_encoded_writer(encode_writer_config)?;
 
-    fn when_eof(
-        when_new_chunk_appended: &impl Fn() -> tokio::sync::oneshot::Receiver<()>,
-        stop_notifier: Arc<Notify>,
-    ) -> Result<WhenEofControlFlow, RecvError> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let when_new_chunk_appended_receiver = when_new_chunk_appended();
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = when_new_chunk_appended_receiver => {
-                    let _ = tx.send(WhenEofControlFlow::Continue);
-                },
-                _ = stop_notifier.notified() => {
-                    let _ = tx.send(WhenEofControlFlow::Break);
-                }
-            }
-        });
-        rx.blocking_recv()
-    }
-
     // Start muxing from the last key frame.
     // The WebM project requires the muxer to ensure the first Block/SimpleBlock is a keyframe.
     // However, the WebM file emitted by the CaptureStream API in Chrome does not adhere to this requirement.
@@ -182,6 +163,25 @@ pub fn webm_stream(
     };
 
     info!(?result, "WebM streaming finished");
+
+    fn when_eof(
+        when_new_chunk_appended: &impl Fn() -> tokio::sync::oneshot::Receiver<()>,
+        stop_notifier: Arc<Notify>,
+    ) -> Result<WhenEofControlFlow, RecvError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let when_new_chunk_appended_receiver = when_new_chunk_appended();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = when_new_chunk_appended_receiver => {
+                    let _ = tx.send(WhenEofControlFlow::Continue);
+                },
+                _ = stop_notifier.notified() => {
+                    let _ = tx.send(WhenEofControlFlow::Break);
+                }
+            }
+        });
+        rx.blocking_recv()
+    }
     result
 }
 
@@ -229,7 +229,7 @@ fn spawn_sending_task<W>(
                         .await?;
                 }
                 Some(Ok(protocol::ClientMessage::Pull)) => match chunk_receiver.recv().await {
-                    Ok(Some(data)) => {
+                    Some(data) => {
                         ws_frame
                             .lock()
                             .await
