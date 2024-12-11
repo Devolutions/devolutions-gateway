@@ -230,7 +230,7 @@ enum RecordingManagerMessage {
     },
     SubscribeToSessionEndNotification {
         id: Uuid,
-        channel: oneshot::Sender<anyhow::Result<Arc<Notify>>>,
+        channel: oneshot::Sender<Arc<Notify>>,
     },
 }
 
