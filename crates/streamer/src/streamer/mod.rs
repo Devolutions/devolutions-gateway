@@ -164,6 +164,8 @@ pub fn webm_stream(
 
     info!(?result, "WebM streaming finished");
 
+    return result;
+
     fn when_eof(
         when_new_chunk_appended: &impl Fn() -> tokio::sync::oneshot::Receiver<()>,
         stop_notifier: Arc<Notify>,
@@ -182,7 +184,6 @@ pub fn webm_stream(
         });
         rx.blocking_recv()
     }
-    result
 }
 
 fn spawn_sending_task<W>(
