@@ -357,8 +357,7 @@ impl RecordingMessageSender {
                 channel: tx,
             })
             .await?;
-        let notify = rx.await.context("couldn't subscribe to ongoing recording")??;
-        Ok(notify)
+        Ok(rx.await?)
     }
 }
 
@@ -770,8 +769,12 @@ async fn recording_manager_task(
                         }
                     },
                     RecordingManagerMessage::SubscribeToSessionEndNotification {id, channel } => {
-                        let result = manager.subscribe(id) ;
-                        let _ = channel.send(result);
+                        match manager.subscribe(id) {
+                            Ok(notifier) => {
+                                let _ = channel.send(notifier);
+                            },
+                            Err(e) => error!(error = format!("{e:#}"), "subscribe to session end notification"),
+                        }
                     }
                 }
             }
