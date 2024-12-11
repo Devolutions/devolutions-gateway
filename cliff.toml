@@ -1,8 +1,8 @@
 # Configuration file for git-cliff
 
 [changelog]
+trim = false
 
-# changelog header
 header = """
 # Changelog
 
@@ -10,7 +10,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 """
 
-# template for the changelog body
 # https://tera.netlify.app/docs/#introduction
 body = """
 {% if version -%}
@@ -56,18 +55,15 @@ body = """
 {% endfor -%}
 """
 
-# remove the leading and trailing whitespace from the template
-trim = false
-# changelog footer
 footer = ""
 
 [git]
-
-# parse the commits based on https://www.conventionalcommits.org
 conventional_commits = true
-# filter out the commits that are not conventional
 filter_unconventional = false
-# regex for preprocessing the commit messages
+filter_commits = false
+date_order = false
+sort_commits = "oldest"
+
 commit_preprocessors = [
   # Check spelling of the commit with https://github.com/crate-ci/typos
   # If the spelling is incorrect, it will be automatically fixed.
@@ -77,6 +73,7 @@ commit_preprocessors = [
   # Replace commit sha1 with the link
   { pattern = '([a-f0-9]{10})([a-f0-9]{30})', replace = "[${0}](https://github.com/Devolutions/devolutions-gateway/commit/${1}${2})" }
 ]
+
 # regex for parsing and grouping commits
 # <!-- <NUMBER> --> is a trick to control the section order: https://github.com/orhun/git-cliff/issues/9#issuecomment-914521594
 commit_parsers = [
@@ -113,10 +110,3 @@ commit_parsers = [
 
   { message = ".*", group = "<!-- 99 -->Please Sort" },
 ]
-# filter out the commits that are not matched by commit parsers
-filter_commits = false
-# sort the tags chronologically
-date_order = false
-# sort the commits inside sections by oldest/newest order
-sort_commits = "oldest"
-
