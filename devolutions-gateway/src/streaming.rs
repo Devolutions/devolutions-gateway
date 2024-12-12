@@ -1,22 +1,25 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use axum::{body::Body, response::Response};
 use streamer::{config::CpuCount, webm_stream, ReOpenableFile};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
-struct ShutdownSignal(devolutions_gateway_task::ShutdownSignal);
+struct ShutdownSignal(Arc<Notify>);
 
 impl streamer::Signal for ShutdownSignal {
     fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send {
-        self.0.wait()
+        self.0.notified()
     }
 }
 
 pub(crate) async fn stream_file(
     path: camino::Utf8PathBuf,
     ws: axum::extract::WebSocketUpgrade,
-    shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    shutdown_notify: Arc<Notify>,
     recordings: crate::recording::RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
@@ -31,6 +34,18 @@ pub(crate) async fn stream_file(
 
     let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
 
+    let streamer_config = streamer::StreamingConfig {
+        encoder_threads: CpuCount::default(),
+    };
+
+    let shutdown_signal = ShutdownSignal(shutdown_notify);
+
+    let when_new_chunk_appended = move || {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        recordings.add_new_chunk_listener(recording_id, tx);
+        rx
+    };
+
     let upgrade_result = ws.on_upgrade(move |socket| async move {
         let websocket_stream = websocket_compat(socket);
         // Spawn blocking because webm_stream is blocking
@@ -38,15 +53,9 @@ pub(crate) async fn stream_file(
             webm_stream(
                 websocket_stream,
                 streaming_file,
-                ShutdownSignal(shutdown_signal),
-                streamer::StreamingConfig {
-                    encoder_threads: CpuCount::default(),
-                },
-                move || {
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    recordings.add_new_chunk_listener(recording_id, tx);
-                    rx
-                },
+                shutdown_signal,
+                streamer_config,
+                when_new_chunk_appended,
             )
             .context("webm_stream failed")?;
             Ok::<_, anyhow::Error>(())
@@ -55,10 +64,10 @@ pub(crate) async fn stream_file(
 
         match streaming_result {
             Err(e) => {
-                error!(?e, "Streaming file task join failed");
+                error!(error=?e, "Streaming file task join failed");
             }
             Ok(Err(e)) => {
-                error!(?e, "Streaming file failed");
+                error!(error = format!("{e:#}"), "Streaming file failed");
             }
             _ => {}
         };

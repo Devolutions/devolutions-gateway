@@ -7,6 +7,8 @@ use crate::reopenable::Reopenable;
 const FILE_SHARE_WRITE: u32 = 0x00000002;
 #[cfg(windows)]
 const FILE_SHARE_READ: u32 = 0x00000001;
+#[cfg(windows)]
+const FILE_SHARE_DELETE: u32 = 0x00000004;
 
 pub struct ReOpenableFile {
     inner: std::fs::File,
@@ -20,7 +22,7 @@ impl ReOpenableFile {
         #[cfg(windows)]
         {
             use std::os::windows::fs::OpenOptionsExt;
-            open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ);
+            open_option.share_mode(FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE);
         }
 
         let file_path: PathBuf = file_path.into();

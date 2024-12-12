@@ -18,9 +18,9 @@ pub(crate) struct ChannelWriter {
 }
 
 impl ChannelWriter {
-    pub(crate) fn new() -> (Self, tokio::sync::mpsc::Receiver<Vec<u8>>) {
+    pub(crate) fn new() -> (Self, ChannelWriterReceiver) {
         let (sender, receiver) = tokio::sync::mpsc::channel(10);
-        (Self { writer: sender }, receiver)
+        (Self { writer: sender }, ChannelWriterReceiver { receiver })
     }
 }
 
@@ -35,5 +35,16 @@ impl io::Write for ChannelWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ChannelWriterReceiver {
+    receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
+}
+
+impl ChannelWriterReceiver {
+    pub(crate) async fn recv(&mut self) -> Option<Vec<u8>> {
+        self.receiver.recv().await
     }
 }

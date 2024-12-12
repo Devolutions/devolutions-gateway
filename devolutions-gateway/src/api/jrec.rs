@@ -497,7 +497,6 @@ where
 async fn shadow_recording(
     State(DgwState {
         recordings,
-        shutdown_signal,
         conf_handle,
         ..
     }): State<DgwState>,
@@ -523,7 +522,12 @@ async fn shadow_recording(
         return Err(HttpError::not_found().msg("requested file does not exist"));
     }
 
-    crate::streaming::stream_file(path, ws, shutdown_signal, recordings, id)
+    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(|e| {
+        error!(error = format!("{e:#}"), "failed to subscribe to active recording");
+        HttpError::internal().msg("failed to subscribe to active recording")
+    })?;
+
+    crate::streaming::stream_file(path, ws, notify, recordings, id)
         .await
         .map_err(HttpError::internal().err())
 }
