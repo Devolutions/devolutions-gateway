@@ -14,7 +14,7 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::process::{Module, Process};
 use win_api_wrappers::raw::core::{
-    implement, interface, w, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
+    implement, interface, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
 };
 use win_api_wrappers::raw::Win32::Foundation::{
     BOOL, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL,
@@ -31,9 +31,12 @@ use win_api_wrappers::raw::Win32::UI::Shell::{
     ECS_ENABLED, SIGDN_FILESYSPATH,
 };
 use win_api_wrappers::token::Token;
+use win_api_wrappers::user;
 use win_api_wrappers::utils::{
     environment_block, expand_environment, expand_environment_path, Link, Snapshot, WideString,
 };
+
+const IDS_RUN_ELEVATED: u32 = 150;
 
 struct Channels {
     pub tx: Sender<ChannelCommand>,
@@ -71,8 +74,18 @@ impl IElevationContextMenuCommand_Impl for ElevationContextMenuCommand_Impl {}
 
 impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
     fn GetTitle(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
-        // SAFETY: The `w` macro creates a constant, so the argument is valid.
-        unsafe { SHStrDupW(w!("Run elevated")) }
+        // SAFETY:
+        // `DLL_MODULE` is fully initialized and valid for the lifetime of the DLL in the process,
+        // and is not mutated after inital initialization
+        let hinstance = unsafe { DLL_MODULE };
+        let title = user::load_string(hinstance, IDS_RUN_ELEVATED)?.unwrap_or(String::from("Run elevated"));
+        let mut title = WideString::from(title.as_str());
+        // SAFETY:
+        // - `WideString` guarantees proper UTF-16 encoding and null-termination when calling `as_pwstr`
+        // - `title` is derived from a valid Rust `String`, guaranteed by the `unwrap` to a default value above,
+        // and as such the result of `as_pwstr` doesn't need to be checked against `PWSTR::null`
+        // - Memory allocated by `SHStrDupW` will be properly free'd with `CoTaskMemFree` by the COM runtime
+        unsafe { SHStrDupW(title.as_pwstr()) }
     }
 
     fn GetIcon(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
@@ -134,11 +147,10 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
             path
         };
 
-        match {
-            channels()
-                .tx
-                .blocking_send(ChannelCommand::Elevate(PathBuf::from(path)))
-        } {
+        match channels()
+            .tx
+            .blocking_send(ChannelCommand::Elevate(PathBuf::from(path)))
+        {
             Ok(_) => Ok(()),
             Err(_) => Err(Error::from_hresult(E_FAIL)),
         }
@@ -288,10 +300,22 @@ enum ChannelCommand {
     Elevate(PathBuf),
 }
 
+static mut DLL_MODULE: HINSTANCE = HINSTANCE(std::ptr::null_mut());
+
 #[no_mangle]
-extern "system" fn DllMain(_dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
+extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
     match call_reason {
         DLL_PROCESS_ATTACH => {
+            // SAFETY:
+            // - `dll_module` is guaranteed by the Windows loader to be the base address of the DLL
+            // - `DLL_MODULE` is initialized exactly once: `DLL_PROCESS_ATTACH` is executed in a serialized
+            // manner by the Windows loader, so no race condition exists
+            // - Access to `DLL_MODULE` is inherently safe because Windows ensures the DLL is full initalized
+            // before other threads can execute code in the DLL
+            // - `DLL_MODULE` is never mutated after the initial assignment
+            // - The module handle remains valid for the entire lifetime of the DLL in the process
+            unsafe { DLL_MODULE = dll_module };
+
             start_listener();
 
             true

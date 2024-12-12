@@ -17,6 +17,7 @@ mod lib_win {
     pub mod thread;
     pub mod token;
     pub mod ui;
+    pub mod user;
     pub mod utils;
     pub mod wts;
 
