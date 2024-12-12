@@ -1,5 +1,6 @@
 import '../generated/webm-stream-player.js';
 import { ShadowPlayer } from '../generated/webm-stream-player.js';
+import { showNotification } from '../notification.js';
 
 /**
  * Handles the playback of WebM files using the provided gateway API.
@@ -22,6 +23,14 @@ export async function handleWebm(gatewayAccessApi) {
   // Now safe to call methods
   shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl(gatewayAccessApi.recordingInfo.files[0].fileName));
   shadowPlayer.play();
+
+  shadowPlayer.onEnd(() => {
+    showNotification('Playback has ended', 'success');
+  });
+
+  shadowPlayer.onError((error) => {
+    showNotification(`An error occurred: ${error}`, 'error');
+  });
 
   return shadowPlayer;
 }

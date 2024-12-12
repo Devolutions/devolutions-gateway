@@ -1,5 +1,9 @@
 // Define the message types
-export type ServerMessage = ChunkMessage | MetaDataMessage | ErrorMessage;
+export type ServerMessage =
+  | ChunkMessage
+  | MetaDataMessage
+  | ErrorMessage
+  | EndMessage;
 
 export interface ChunkMessage {
   type: 'chunk';
@@ -14,6 +18,10 @@ export interface ErrorMessage {
 export interface MetaDataMessage {
   type: 'metadata';
   codec: 'vp8' | 'vp9';
+}
+
+export interface EndMessage {
+  type: 'end';
 }
 
 export type ClientMessageTypes = 'start' | 'pull';
@@ -56,6 +64,13 @@ export function parseServerMessage(buffer: ArrayBuffer): ServerMessage {
       error: json.error,
     };
   }
+
+  if (typeCode === 3) {
+    return {
+      type: 'end',
+    };
+  }
+
   throw new Error('Unknown message type');
 }
 

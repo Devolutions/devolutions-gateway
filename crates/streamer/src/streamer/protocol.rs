@@ -38,6 +38,7 @@ pub(crate) enum ServerMessage<'a> {
     // leave for future extension (e.g. audio metadata, size, etc.)
     MetaData { codec: Codec },
     Error(UserFriendlyError),
+    End,
 }
 
 #[derive(Debug)]
@@ -97,6 +98,7 @@ impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
             ServerMessage::Chunk(_) => 0,
             ServerMessage::MetaData { .. } => 1,
             ServerMessage::Error { .. } => 2,
+            ServerMessage::End => 3,
         };
 
         dst.put_u8(type_code);
@@ -113,6 +115,7 @@ impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
                 let json = format!("{{\"error\":\"{}\"}}", err.as_str());
                 dst.put(json.as_bytes());
             }
+            ServerMessage::End => {}
         }
 
         Ok(())
