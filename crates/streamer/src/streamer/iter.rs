@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
@@ -61,19 +61,12 @@ pub(crate) enum IteratorError {
     WebmCoercionError(#[from] webm_iterable::errors::WebmCoercionError),
 }
 
-#[derive(Debug)]
-pub(crate) enum IteratorResult {
-    Tag(MatroskaSpec),
-    Error(IteratorError),
-    Retry,
-    Continue,
-}
-
 impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
 {
-    pub(crate) fn new(inner: WebmIterator<R>) -> Self {
+    pub(crate) fn new(mut inner: WebmIterator<R>) -> Self {
+        inner.emit_master_end_when_eof(false);
         Self {
             inner: Some(inner),
             last_tag_position: 0,
