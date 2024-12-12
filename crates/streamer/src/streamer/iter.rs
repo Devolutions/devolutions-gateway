@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{trace, warn};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
@@ -11,8 +11,6 @@ use webm_iterable::{
 };
 
 use crate::reopenable::Reopenable;
-
-use super::mastroka_spec_name;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LastKeyFrameInfo {
@@ -87,30 +85,6 @@ where
         };
 
         let result = inner.next();
-        let tag_name = result
-            .as_ref()
-            .map(|x| x.as_ref().map(|t| mastroka_spec_name(t)))
-            .filter(|x| x.is_ok());
-        let debug_info = result
-            .as_ref()
-            .map(|res| res.as_ref().map(|tag| mastroka_spec_name(&tag)));
-
-        if result.is_none() {
-            info!("\n")
-        }
-
-        info!(
-            ?debug_info,
-            rollback_record = self.rollback_record,
-            last_emitted_tag_offset_relative = inner.last_emitted_tag_offset(),
-            last_tag_position_absolute = self.last_tag_position,
-            last_cluster_position_absolute = self.last_cluster_position,
-            "Next Tag"
-        );
-
-        if result.is_none() {
-            info!("\n")
-        }
 
         if result.is_none() {
             let record = self.rollback_record.unwrap_or(0);
@@ -167,7 +141,7 @@ where
                 }
                 Ok(false) => {}
                 Ok(true) => {
-                    debug!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
+                    trace!(last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
                     match self.last_key_frame_info {
                         LastKeyFrameInfo::NotMet {
                             cluster_timestamp,
