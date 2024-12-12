@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
@@ -200,7 +200,7 @@ where
     }
 
     pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
-        warn!(
+        debug!(
             last_tag_position = self.last_tag_position,
             "Rolling back to last successful tag"
         );
