@@ -298,7 +298,6 @@ where
     }
 
     pub(crate) fn mark_cut_block_hit(&mut self) {
-        info!("cut block hit");
         self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }
