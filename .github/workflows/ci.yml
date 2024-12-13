@@ -110,11 +110,10 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --all -- --check
-          if ! [ $? -eq 0 ] ; then
-              echo "::error::Bad formatting, please run 'cargo +stable fmt --all'"
-              exit 1
-          fi
-
+          if (-not $?) {
+            echo "::error::Bad formatting, please run 'cargo +stable fmt --all'"
+            exit 1
+          }
       - name: Configure rust profile
         id: rust-profile
         run: |
