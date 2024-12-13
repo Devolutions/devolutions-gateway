@@ -2,6 +2,10 @@ name: Build Tools
 on:
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   build:
     name: build ${{ matrix.tool }} [${{ matrix.platform }} ${{ matrix.arch }}]
@@ -32,13 +36,11 @@ jobs:
         run: rustup target add ${{ matrix.arch }}-${{ matrix.platform }}
 
       - name: Build ${{ matrix.tool }}
-        shell: pwsh
         working-directory: tools/${{ matrix.tool }}
         run: cargo build --target ${{ matrix.arch }}-${{ matrix.platform }} --release
 
       - name: Get output path
         id: get-binary-path
-        shell: pwsh
         run: |
           $Path = 'tools/${{ matrix.tool }}/target/${{ matrix.arch }}-${{ matrix.platform }}/release/${{ matrix.tool }}'
           if ('${{ matrix.platform}}' -Eq 'pc-windows-msvc') {
@@ -72,7 +74,6 @@ jobs:
           rm -r cctools-x86_64-ubuntu-20.04.tar.xz
 
       - name: Lipo
-        shell: pwsh
         run: |
           $OutputPath = '${{ matrix.tool }}-universal-apple-darwin'
           New-Item -ItemType Directory -Path $OutputPath | Out-Null
@@ -114,7 +115,6 @@ jobs:
 
       - name: Get binary path
         id: get-binary-path
-        shell: pwsh
         run: |
           $Path = '${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}/${{ matrix.tool }}'
           if ('${{ matrix.platform}}' -Eq 'pc-windows-msvc') {
@@ -151,7 +151,6 @@ jobs:
         run: echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
   
       - name: Sign executables
-        shell: pwsh
         run: |
           if ('${{ matrix.platform }}' -Eq 'pc-windows-msvc') {
             $Params = @('sign',
@@ -178,7 +177,6 @@ jobs:
           }
 
       - name: Verification
-        shell: pwsh
         run: |
           if ('${{ matrix.platform }}' -Eq 'pc-windows-msvc') {
             signtool verify /pa '${{ steps.get-binary-path.outputs.binary-path }}'

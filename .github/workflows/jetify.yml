@@ -27,6 +27,10 @@ on:
         type: boolean
         default: true
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   preflight:
     name: Preflight
@@ -42,7 +46,6 @@ jobs:
     steps:
       - name: Package information
         id: info
-        shell: pwsh
         run: |
           $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
           $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
@@ -106,13 +109,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure runner
-        shell: pwsh
         run: |
           Install-Module -Name VsDevShell -Force
           New-Item .\package -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
 
       - name: Update version
-        shell: pwsh
         run: |
           $PackageVersion = '${{ needs.preflight.outputs.package-version }}'
           $nuspecFilePath = "jetify\nuget\Devolutions.Jetify.nuspec"
@@ -130,7 +131,6 @@ jobs:
 
       - name: Build Detours (${{matrix.arch}})
         if: steps.cache-detours.outputs.cache-hit != 'true'
-        shell: pwsh
         run: |
           Enter-VsDevShell ${{matrix.arch}}
           $GitCommit = '${{ needs.preflight.outputs.detours-git-commit }}'
@@ -144,7 +144,6 @@ jobs:
           key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
 
       - name: Build Jetify (${{matrix.arch}})
-        shell: pwsh
         working-directory: jetify
         run: |
           $Arch = "${{matrix.arch}}"
@@ -177,7 +176,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure runner
-        shell: pwsh
         run: |
           New-Item .\package -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
           New-Item ".\dependencies\Jetify" -ItemType Directory | Out-Null
@@ -200,7 +198,6 @@ jobs:
           path: package
 
       - name: Create nuget package
-        shell: pwsh
         run: |
             Get-Item .\package\*.zip | ForEach-Object {
                 ($Name, $Version, $Arch) = $_.BaseName -Split '-'
@@ -211,7 +208,6 @@ jobs:
             nuget pack jetify/nuget -OutputDirectory package
 
       - name: Code sign nuget contents
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
           $NugetBaseName = $(Get-Item ./package/*.nupkg).BaseName
@@ -235,7 +231,6 @@ jobs:
 
       - name: Code sign nuget package
         if: ${{ fromJSON(needs.preflight.outputs.sign-nuget) == true }}
-        shell: pwsh
         working-directory: jetify
         run: |
           $NugetPackage = (Get-Item ".\package\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
@@ -270,7 +265,6 @@ jobs:
           path: package
 
       - name: Publish to nuget.org
-        shell: pwsh
         run: |
           $DryRun = [System.Boolean]::Parse('${{ needs.preflight.outputs.dry-run }}')
           $NugetPackage = (Get-Item ./package/*.nupkg) | Resolve-Path -Relative

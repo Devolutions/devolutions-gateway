@@ -24,6 +24,10 @@ on:
         type: boolean
         default: true
 
+defaults:
+  run:
+    shell: pwsh
+
 concurrency: gateway-release
 
 jobs:
@@ -40,7 +44,6 @@ jobs:
       ## workflow_call:     The run_id is the current run_id
       - name: Get run
         id: get-run
-        shell: pwsh
         run: |
           if ('${{ github.event.inputs.run }}') {
             echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
@@ -50,7 +53,6 @@ jobs:
 
       - name: Get dry run
         id: get-dry-run
-        shell: pwsh
         run: |
           $DryRun = "false"
           if ('${{ inputs.dry-run }}') {
@@ -64,14 +66,12 @@ jobs:
           }
 
       - name: Download version
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
 
       - name: Get version
         id: get-version
-        shell: pwsh
         run: |
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
@@ -80,7 +80,6 @@ jobs:
       ## If we already released this version to GitHub, publishing will be skipped
       - name: Check GitHub releases
         id: check-release
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -126,19 +125,16 @@ jobs:
 
     steps:
       - name: Download artifacts
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway -n native-libs --repo $Env:GITHUB_REPOSITORY
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
-        shell: pwsh
         run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Prepare artifacts
         id: prepare-artifacts
-        shell: pwsh
         run: |
           $PkgDir = Join-Path docker $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "package-path=$PkgDir" >> $Env:GITHUB_OUTPUT
@@ -180,7 +176,6 @@ jobs:
 
       - name: Build container
         id: build-container
-        shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
           $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
@@ -193,7 +188,6 @@ jobs:
           Get-ChildItem -Recurse
 
       - name: Push container
-        shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
           echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
@@ -217,19 +211,16 @@ jobs:
         run: cargo install parse-changelog
 
       - name: Download artifacts
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n devolutions-agent -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
 
       - name: Manage artifacts
-        shell: pwsh
         run: |
           # workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
           Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Create GitHub release
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -266,18 +257,15 @@ jobs:
 
     steps:
       - name: Download artifacts
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
-        shell: pwsh
         run: Remove-Item (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Publish PowerShell module
-        shell: pwsh
         run: |
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File
           Expand-Archive -Path $Archive -DestinationPath 'PowerShell'
@@ -326,14 +314,12 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download artifacts
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare upload
         id: prepare
-        shell: pwsh
         run: |
           $destinationFolder = "${{ runner.temp }}/artifacts"
           $version="${{ needs.preflight.outputs.version }}"
@@ -385,14 +371,12 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download artifacts
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare upload
         id: prepare
-        shell: pwsh
         run: |
           $destinationFolder = "${{ runner.temp }}/artifacts"
           $version="${{ needs.preflight.outputs.version }}"
@@ -437,7 +421,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Remove labels
-        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./ci/remove-labels.ps1 -Label 'release-required'
