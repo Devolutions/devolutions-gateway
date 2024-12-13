@@ -22,7 +22,7 @@ pub(crate) mod reopenable_file;
 pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
-use crate::{debug::mastroka_spec_name, reopenable::Reopenable, StreamingConfig};
+use crate::{reopenable::Reopenable, StreamingConfig};
 
 pub trait Signal: Send + 'static {
     fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send;

@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},

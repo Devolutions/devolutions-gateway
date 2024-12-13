@@ -1458,8 +1458,9 @@ checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
 
 [[package]]
 name = "ebml-iterable"
-version = "0.6.2"
-source = "git+https://github.com/irvingoujAtDevolution/ebml-iterable.git?rev=805e26bb35cd9b801c3ce977f69f2b1ceeaa9727#805e26bb35cd9b801c3ce977f69f2b1ceeaa9727"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5173ac3752f08b526a6991509615e1a345b221ec3c58c7633433e8c9582312"
 dependencies = [
  "ebml-iterable-specification",
  "ebml-iterable-specification-derive",
@@ -1469,12 +1470,14 @@ dependencies = [
 [[package]]
 name = "ebml-iterable-specification"
 version = "0.4.0"
-source = "git+https://github.com/irvingoujAtDevolution/ebml-iterable.git?rev=805e26bb35cd9b801c3ce977f69f2b1ceeaa9727#805e26bb35cd9b801c3ce977f69f2b1ceeaa9727"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f56467af159a98735d44231f53eaa505e919e6003266f103b99649a93f106784"
 
 [[package]]
 name = "ebml-iterable-specification-derive"
 version = "0.4.0"
-source = "git+https://github.com/irvingoujAtDevolution/ebml-iterable.git?rev=805e26bb35cd9b801c3ce977f69f2b1ceeaa9727#805e26bb35cd9b801c3ce977f69f2b1ceeaa9727"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b066b81018300fdce40f71c4db355a102699324af96fad28f25ab1b5f87de066"
 dependencies = [
  "ebml-iterable-specification",
  "proc-macro2 1.0.88",
@@ -5612,6 +5615,7 @@ dependencies = [
  "anyhow",
  "axum 0.7.7",
  "cadeau",
+ "ebml-iterable",
  "futures",
  "futures-util",
  "num_cpus",
@@ -6797,9 +6801,9 @@ dependencies = [
 
 [[package]]
 name = "webm-iterable"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "008955b5d96fc6e1e36f2c7f33120aef9e52b54efc5c76b6f1b125809513df78"
+checksum = "cd9fbf173b4b38f2f8bbb0082a0d4cb21f263a70811f5fccb1663c421c66d9f9"
 dependencies = [
  "ebml-iterable",
  "futures",
