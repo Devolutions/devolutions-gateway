@@ -25,6 +25,30 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string ProductDescription = "ProductDescription";		
 		/// <summary>
+		/// Devolutions Agent
+		/// </summary>
+		public const string FeatureAgentName = "FeatureAgentName";		
+		/// <summary>
+		/// Install the Devolutions Agent service
+		/// </summary>
+		public const string FeatureAgentDescription = "FeatureAgentDescription";		
+		/// <summary>
+		/// Devolutions PEDM
+		/// </summary>
+		public const string FeaturePedmName = "FeaturePedmName";		
+		/// <summary>
+		/// Enable PEDM features and install the shell extension
+		/// </summary>
+		public const string FeaturePedmDescription = "FeaturePedmDescription";		
+		/// <summary>
+		/// Devolutions Session
+		/// </summary>
+		public const string FeatureSessionName = "FeatureSessionName";		
+		/// <summary>
+		/// Install the Devolutions Session application
+		/// </summary>
+		public const string FeatureSessionDescription = "FeatureSessionDescription";		
+		/// <summary>
 		/// There is a problem with the entered data. Please correct the issue and try again.
 		/// </summary>
 		public const string ThereIsAProblemWithTheEnteredData = "ThereIsAProblemWithTheEnteredData";		

@@ -17,6 +17,30 @@
         {
           "id": "ProductDescription",
           "text": "System-wide service for extending Devolutions Gateway functionality."
+        },
+        {
+          "id": "FeatureAgentName",
+          "text": "Devolutions Agent"
+        },
+        {
+          "id": "FeatureAgentDescription",
+          "text": "Install the Devolutions Agent service"
+        },
+        {
+          "id": "FeaturePedmName",
+          "text": "Devolutions PEDM"
+        },
+        {
+          "id": "FeaturePedmDescription",
+          "text": "Enable PEDM features and install the shell extension"
+        },
+        {
+          "id": "FeatureSessionName",
+          "text": "Devolutions Session"
+        },
+        {
+          "id": "FeatureSessionDescription",
+          "text": "Install the Devolutions Session application"
         }
       ],
       "messages": [

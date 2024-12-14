@@ -1,17 +1,16 @@
+using Microsoft.Deployment.WindowsInstaller;
 using System;
-using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using DevolutionsAgent.Dialogs;
 using WixSharp;
 using WixSharp.UI.Forms;
 
-namespace WixSharpSetup.Dialogs;
+namespace DevolutionsAgent.Dialogs;
 
 public partial class FeaturesDialog : AgentDialog
 {
     FeatureItem[] features;
-    bool isAutoCheckingActive = false;
 
     public FeaturesDialog()
     {
@@ -20,196 +19,76 @@ public partial class FeaturesDialog : AgentDialog
         label2.MakeTransparentOn(banner);
     }
 
-    void FeaturesDialog_Load(object sender, System.EventArgs e)
+    private void FeaturesDialog_Load(object sender, EventArgs e)
     {
-        string drawTextOnlyProp = Runtime.Session.Property("WixSharpUI_TreeNode_TexOnlyDrawing");
-
-        bool drawTextOnly = true;
-
-        if (drawTextOnlyProp.IsNotEmpty())
-        {
-            if (string.Compare(drawTextOnlyProp, "false", true) == 0)
-            {
-                drawTextOnly = false;
-            }
-        }
-        else
-        {
-            float dpi = CreateGraphics().DpiY;
-
-            if (dpi == 96) // the checkbox custom drawing is only compatible with 96 DPI
-            {
-                drawTextOnly = false;
-            }
-        }
-
-        ReadOnlyTreeNode.Behavior.AttachTo(featuresTree, drawTextOnly);
-
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
+
         BuildFeaturesHierarchy();
     }
 
-    /// <summary>
-    /// The collection of the features selected by user as the features to be installed.
-    /// </summary>
-    public static List<string> UserSelectedItems { get; private set; }
-
-    /// <summary>
-    /// The initial/default set of selected items (features) before user made any selection(s).
-    /// </summary>
-    public static List<string> InitialUserSelectedItems { get; private set; }
-
     private void BuildFeaturesHierarchy()
     {
-        features = Runtime.Session.Features;
+        this.features = Runtime.Session.Features;
+        
+        FeatureItem[] rootItems = this.features.OrderBy(x => x.Title).ToArray();
 
-        //build the hierarchy tree
-        var rootItems = features.Where(x => x.ParentName.IsEmpty())
-                                .OrderBy(x => x.RawDisplay)
-                                .ToArray();
+        string[] addLocal = Runtime.Session["ADDLOCAL"].Split(',');
+        string[] remove = Runtime.Session["REMOVE"].Split(',');
 
-        var itemsToProcess = new Queue<FeatureItem>(rootItems); //features to find the children for
-
-        while (itemsToProcess.Any())
+        foreach (FeatureItem rootItem in rootItems)
         {
-            var item = itemsToProcess.Dequeue();
-
-            //create the view of the feature
-            var view = new ReadOnlyTreeNode
+            ListViewItem view = new ListViewItem
             {
-                Text = item.Title,
-                Tag = item, //link view to model
-                IsReadOnly = item.DisallowAbsent,
-                DefaultChecked = item.DefaultIsToBeInstalled(),
-                Checked = item.DefaultIsToBeInstalled()
+                Text = rootItem.Title,
+                Tag = rootItem
             };
 
-            item.View = view;
-
-            if (item.Parent != null && item.Display != FeatureDisplay.hidden)
+            if (rootItem.DisallowAbsent)
             {
-                (item.Parent.View as TreeNode).Nodes.Add(view); //link child view to parent view
+                view.ForeColor = SystemColors.GrayText;
+                view.BackColor = SystemColors.InactiveBorder;
             }
 
-            // even if the item is hidden process all its children so the correct hierarchy is established
+            rootItem.View = view;
 
-            // find all children
-            features.Where(x => x.ParentName == item.Name)
-                    .ForEach(c =>
-                    {
-                        c.Parent = item; //link child model to parent model
-                        itemsToProcess.Enqueue(c); //schedule for further processing
-                    });
-
-            if (UserSelectedItems != null)
+            if (addLocal.Contains(rootItem.Name))
             {
-                view.Checked = UserSelectedItems.Contains((view.Tag as FeatureItem).Name);
+                view.Checked = true;
             }
 
-            if (item.Display == FeatureDisplay.expand)
+            if (remove.Contains(rootItem.Name))
             {
-                view.Expand();
+                view.Checked = false;
+            }
+
+            if (rootItem.DisallowAbsent)
+            {
+                view.Checked = true;
             }
         }
 
-        //add views to the treeView control
         rootItems.Where(x => x.Display != FeatureDisplay.hidden)
                  .Select(x => x.View)
-                 .Cast<TreeNode>()
-                 .ForEach(node => featuresTree.Nodes.Add(node));
-
-        InitialUserSelectedItems = features.Where(x => x.IsViewChecked())
-                                           .Select(x => x.Name)
-                                           .OrderBy(x => x)
-                                           .ToList();
-
-        isAutoCheckingActive = true;
+                 .Cast<ListViewItem>()
+                 .ForEach(node => featuresTree.Items.Add(node));
     }
 
-    private void SaveUserSelection()
+    private void Reset_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
-        UserSelectedItems = features.Where(x => x.IsViewChecked())
-                                    .Select(x => x.Name)
-                                    .OrderBy(x => x)
-                                    .ToList();
-    }
-
-    private void featuresTree_AfterSelect(object sender, TreeViewEventArgs e)
-    {
-        description.Text = e.Node.FeatureItem().Description.LocalizeWith(Runtime.Localize);
-    }
-
-    private void featuresTree_AfterCheck(object sender, TreeViewEventArgs e)
-    {
-        if (isAutoCheckingActive)
-        {
-            isAutoCheckingActive = false;
-            bool newState = e.Node.Checked;
-            var queue = new Queue<TreeNode>();
-            queue.EnqueueRange(e.Node.Nodes.ToArray());
-
-            while (queue.Any())
-            {
-                var node = queue.Dequeue();
-                node.Checked = newState;
-                queue.EnqueueRange(node.Nodes.ToArray());
-            }
-
-            if (e.Node.Checked)
-            {
-                var parent = e.Node.Parent;
-                while (parent != null)
-                {
-                    parent.Checked = true;
-                    parent = parent.Parent;
-                }
-            }
-
-            isAutoCheckingActive = true;
-        }
-    }
-
-    private void reset_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-    {
-        isAutoCheckingActive = false;
-        features.ForEach(f => f.ResetViewChecked());
-        isAutoCheckingActive = true;
+        features.ForEach(ResetViewChecked);
     }
 
     // ReSharper disable once RedundantOverriddenMember
     protected override void Back_Click(object sender, EventArgs e)
     {
         SaveUserSelection();
+
         base.Back_Click(sender, e);
     }
 
     // ReSharper disable once RedundantOverriddenMember
     protected override void Next_Click(object sender, EventArgs e)
     {
-        bool userChangedFeatures = UserSelectedItems?.JoinBy(",") != InitialUserSelectedItems.JoinBy(",");
-
-        if (userChangedFeatures)
-        {
-            string itemsToInstall = features.Where(x => x.IsViewChecked())
-                .Select(x => x.Name)
-                .JoinBy(",");
-
-            string itemsToRemove = features.Where(x => !x.IsViewChecked())
-                .Select(x => x.Name)
-                .JoinBy(",");
-
-            if (itemsToRemove.Any())
-                Runtime.Session["REMOVE"] = itemsToRemove;
-
-            if (itemsToInstall.Any())
-                Runtime.Session["ADDLOCAL"] = itemsToInstall;
-        }
-        else
-        {
-            Runtime.Session["REMOVE"] = "";
-            Runtime.Session["ADDLOCAL"] = "";
-        }
-
         SaveUserSelection();
 
         base.Next_Click(sender, e);
@@ -217,4 +96,56 @@ public partial class FeaturesDialog : AgentDialog
 
     // ReSharper disable once RedundantOverriddenMember
     protected override void Cancel_Click(object sender, EventArgs e) => base.Cancel_Click(sender, e);
+
+    private void SaveUserSelection()
+    {
+        Runtime.Session["ADDLOCAL"] = features
+            .Where(IsViewChecked)
+            .Select(x => x.Name)
+            .JoinBy(",");
+
+        Runtime.Session["REMOVE"] = features
+            .Where(x => !IsViewChecked(x))
+            .Select(x => x.Name)
+            .JoinBy(",");
+    }
+
+    private void FeaturesTree_ItemCheck(object sender, ItemCheckEventArgs e)
+    {
+        if ((this.featuresTree.Items[e.Index].Tag as FeatureItem).DisallowAbsent)
+        {
+            e.NewValue = CheckState.Checked;
+        }
+    }
+
+    private void FeaturesTree_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        if (this.featuresTree.SelectedItems.Count == 0)
+        {
+            description.Text = string.Empty;
+            return;
+        }
+
+        description.Text = (this.featuresTree.SelectedItems[0].Tag as FeatureItem).Description.LocalizeWith(Runtime.Localize);
+    }
+
+    private static bool IsViewChecked(FeatureItem feature)
+    {
+        return feature.View is ListViewItem {Checked: true};
+    }
+
+    private static void ResetViewChecked(FeatureItem feature)
+    {
+        if (feature.View is not ListViewItem item)
+        {
+            return;
+        }
+
+        item.Checked = DefaultIsToBeInstalled(feature);
+    }
+
+    private static bool DefaultIsToBeInstalled(FeatureItem feature)
+    {
+        return feature.RequestedState != InstallState.Absent;
+    }
 }
