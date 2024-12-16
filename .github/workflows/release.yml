@@ -235,7 +235,7 @@ jobs:
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $HashPath = 'checksums'
-          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md', '*.dll' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
           echo "::group::checksums"
