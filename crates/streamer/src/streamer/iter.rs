@@ -3,7 +3,7 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, trace};
 use webm_iterable::{
     errors::TagIteratorError,
     matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
@@ -11,8 +11,6 @@ use webm_iterable::{
 };
 
 use crate::reopenable::Reopenable;
-
-use super::mastroka_spec_name;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LastKeyFrameInfo {
@@ -65,7 +63,8 @@ impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
 {
-    pub(crate) fn new(inner: WebmIterator<R>) -> Self {
+    pub(crate) fn new(mut inner: WebmIterator<R>) -> Self {
+        inner.emit_master_end_when_eof(false);
         Self {
             inner: Some(inner),
             last_tag_position: 0,
@@ -86,15 +85,22 @@ where
         };
 
         let result = inner.next();
-        let tag_name = result
-            .as_ref()
-            .map(|x| x.as_ref().map(|t| mastroka_spec_name(t)))
-            .filter(|x| x.is_ok());
+
+        if result.is_none() {
+            let record = self.rollback_record.unwrap_or(0);
+            if record + inner.last_emitted_tag_offset() > self.last_tag_position {
+                self.last_tag_position = record + inner.last_emitted_tag_offset();
+            }
+            return None;
+        }
 
         if let Some(Ok(tag)) = &result {
             let record = self.rollback_record.unwrap_or(0);
             // The last emitted tag is relative, i.e when rollback, the last_emitted_tag_offset() will be reset to 0
-            self.last_tag_position = record + inner.last_emitted_tag_offset();
+            if record + inner.last_emitted_tag_offset() >= self.last_tag_position {
+                self.last_tag_position = record + inner.last_emitted_tag_offset();
+            }
+
             if matches!(tag, MatroskaSpec::BlockGroup(Master::Full(_))) {
                 // we check if the tag is BlockGroup Full,
                 // If so, we need to correct for the last tag position
@@ -135,7 +141,7 @@ where
                 }
                 Ok(false) => {}
                 Ok(true) => {
-                    debug!(tag_name = ?tag_name, last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
+                    trace!(last_tag_position = self.last_tag_position, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
                     match self.last_key_frame_info {
                         LastKeyFrameInfo::NotMet {
                             cluster_timestamp,
@@ -194,6 +200,10 @@ where
     }
 
     pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
+        debug!(
+            last_tag_position = self.last_tag_position,
+            "Rolling back to last successful tag"
+        );
         let inner = self.inner.take().context("no inner iterator")?;
         let mut file = inner.into_inner();
         file.reopen()?;
