@@ -1,8 +1,6 @@
 using System.Windows.Forms;
-using WixSharp;
-using WixSharp.UI.Forms;
 
-namespace WixSharpSetup.Dialogs
+namespace DevolutionsAgent.Dialogs
 {
     partial class FeaturesDialog
     {
@@ -35,7 +33,7 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel = new System.Windows.Forms.Panel();
             this.descriptionPanel = new System.Windows.Forms.Panel();
             this.description = new System.Windows.Forms.Label();
-            this.featuresTree = new System.Windows.Forms.TreeView();
+            this.featuresTree = new System.Windows.Forms.ListView();
             this.label3 = new System.Windows.Forms.Label();
             this.reset = new System.Windows.Forms.LinkLabel();
             this.topBorder = new System.Windows.Forms.Panel();
@@ -99,12 +97,16 @@ namespace WixSharpSetup.Dialogs
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.featuresTree.CheckBoxes = true;
+            this.featuresTree.HideSelection = false;
             this.featuresTree.Location = new System.Drawing.Point(14, 28);
             this.featuresTree.Name = "featuresTree";
+            this.featuresTree.MultiSelect = false;
             this.featuresTree.Size = new System.Drawing.Size(270, 186);
             this.featuresTree.TabIndex = 0;
-            this.featuresTree.AfterCheck += new System.Windows.Forms.TreeViewEventHandler(this.featuresTree_AfterCheck);
-            this.featuresTree.AfterSelect += new System.Windows.Forms.TreeViewEventHandler(this.featuresTree_AfterSelect);
+            this.featuresTree.UseCompatibleStateImageBehavior = false;
+            this.featuresTree.View = System.Windows.Forms.View.List;
+            this.featuresTree.ItemCheck += new System.Windows.Forms.ItemCheckEventHandler(this.FeaturesTree_ItemCheck);
+            this.featuresTree.SelectedIndexChanged += new System.EventHandler(this.FeaturesTree_SelectedIndexChanged);
             // 
             // label3
             // 
@@ -128,7 +130,7 @@ namespace WixSharpSetup.Dialogs
             this.reset.TabIndex = 9;
             this.reset.TabStop = true;
             this.reset.Text = "[CustomizeDlgReset]";
-            this.reset.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.reset_LinkClicked);
+            this.reset.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.Reset_LinkClicked);
             // 
             // topBorder
             // 
@@ -295,7 +297,7 @@ namespace WixSharpSetup.Dialogs
         }
 
         #endregion
-        private TreeView featuresTree;
+        private ListView featuresTree;
         private PictureBox banner;
         private Panel topPanel;
         private Label label2;

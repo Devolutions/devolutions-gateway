@@ -57,4 +57,11 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="WixRollbackFirewallExceptionsUninstall">Restauration de la configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
+                    <!-- metadata.- -->
+                <String Id="FeatureAgentDescription">Install the Devolutions Agent service</String>
+                <String Id="FeatureAgentName">Devolutions Agent</String>
+                <String Id="FeaturePedmDescription">Enable PEDM features and install the shell extension</String>
+                <String Id="FeaturePedmName">Devolutions PEDM</String>
+                <String Id="FeatureSessionDescription">Install the Devolutions Session application</String>
+                <String Id="FeatureSessionName">Devolutions Session</String>
                     </WixLocalization>

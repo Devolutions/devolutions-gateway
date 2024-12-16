@@ -201,6 +201,7 @@ internal class Program
             project.CandleOptions = "-fips";
         }
 
+        project.DefaultFeature = Includes.AGENT_FEATURE;
         project.Dirs = new Dir[]
         {
             new ("%ProgramFiles%", new Dir(Includes.VENDOR_NAME, new InstallDir(Includes.SHORT_NAME)
@@ -241,7 +242,7 @@ internal class Program
                             Vital = true,
                             Name = Includes.SERVICE_NAME,
                             DisplayName = Includes.SERVICE_DISPLAY_NAME,
-                            Description = Includes.SERVICE_DISPLAY_NAME,
+                            Description = Includes.SERVICE_DESCRIPTION,
                             FirstFailureActionType = FailureActionType.restart,
                             SecondFailureActionType = FailureActionType.restart,
                             ThirdFailureActionType = FailureActionType.restart,
@@ -257,7 +258,7 @@ internal class Program
                 },
                 Dirs = new[]
                 {
-                    new Dir(Includes.PEDM_FEATURE, "desktop", new Files($"{DevolutionsDesktopAgentPath}\\*.*"))
+                    new Dir(Includes.PEDM_FEATURE, "desktop", new Files(Includes.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*"))
                 }
             })),
         };
