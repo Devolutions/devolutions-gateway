@@ -21,7 +21,7 @@ webm-iterable = { version = "0.6", features = ["futures"] }
 cadeau = { version = "0.5", features = ["dlopen"] }
 thiserror = "2"
 num_cpus = "1.16.0"
-ebml-iterable = "0.6.3"
+ebml-iterable = "0.6"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
