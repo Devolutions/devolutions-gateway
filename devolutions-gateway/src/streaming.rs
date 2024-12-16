@@ -7,7 +7,7 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::{
-    recording::{JrecManifest, OnGoingRecordingState},
+    recording::OnGoingRecordingState,
     token::RecordingFileType,
     ws::websocket_compat,
 };
@@ -81,10 +81,22 @@ pub(crate) async fn stream_file(
     return Ok(upgrade_result);
 
     fn get_recording_file_path(recording_folder_path: camino::Utf8PathBuf) -> anyhow::Result<camino::Utf8PathBuf> {
-        let manifest = JrecManifest::read_from_file(&recording_folder_path.join("recording.json"))?;
-        // TODO: handle multiple files
-        let file = manifest.files.last().context("no files in manifest")?;
+        use serde_json::Value;
+        let json = std::fs::read(recording_folder_path.join("recording.json"))?;
+        let json: Value = serde_json::from_slice(&json)?;
+        let Value::Array(files) = &json["files"] else {
+            anyhow::bail!("no files or files are not array in recording.json");
+        };
 
-        Ok(recording_folder_path.join(&file.file_name))
+        let file = files.last().context("no files in manifest")?;
+        let Value::Object(file) = file else {
+            anyhow::bail!("file is not an object");
+        };
+
+        let Value::String(file_name) = &file["fileName"] else {
+            anyhow::bail!("file_name is not a string");
+        };
+
+        Ok(recording_folder_path.join(file_name))
     }
 }

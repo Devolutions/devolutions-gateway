@@ -29,23 +29,23 @@ const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct JrecFile {
-    pub(crate) file_name: String,
+pub struct JrecFile {
+    pub file_name: String,
     start_time: i64,
     duration: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct JrecManifest {
+pub struct JrecManifest {
     session_id: Uuid,
     start_time: i64,
     duration: i64,
-    pub(crate) files: Vec<JrecFile>,
+    pub files: Vec<JrecFile>,
 }
 
 impl JrecManifest {
-    pub(crate) fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let json = std::fs::read(path)?;
         let manifest = serde_json::from_slice(&json)?;
         Ok(manifest)
