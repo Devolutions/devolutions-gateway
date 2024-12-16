@@ -6,7 +6,11 @@ use streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
+use crate::{
+    recording::{JrecManifest, OnGoingRecordingState},
+    token::RecordingFileType,
+    ws::websocket_compat,
+};
 
 struct ShutdownSignal(Arc<Notify>);
 
@@ -17,14 +21,15 @@ impl streamer::Signal for ShutdownSignal {
 }
 
 pub(crate) async fn stream_file(
-    path: camino::Utf8PathBuf,
+    recording_folder_path: camino::Utf8PathBuf,
     ws: axum::extract::WebSocketUpgrade,
     shutdown_notify: Arc<Notify>,
     recordings: crate::recording::RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
+    let recording_file_path = get_recording_file_path(recording_folder_path)?;
     // 1.identify the file type
-    if path.extension() != Some(RecordingFileType::WebM.extension()) {
+    if recording_file_path.extension() != Some(RecordingFileType::WebM.extension()) {
         anyhow::bail!("invalid file type");
     }
     // 2.if the file is actively being recorded, then proceed
@@ -32,7 +37,7 @@ pub(crate) async fn stream_file(
         anyhow::bail!("file is not being recorded");
     };
 
-    let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
+    let streaming_file = ReOpenableFile::open(&recording_file_path)?;
 
     let streamer_config = streamer::StreamingConfig {
         encoder_threads: CpuCount::default(),
@@ -73,5 +78,13 @@ pub(crate) async fn stream_file(
         };
     });
 
-    Ok(upgrade_result)
+    return Ok(upgrade_result);
+
+    fn get_recording_file_path(recording_folder_path: camino::Utf8PathBuf) -> anyhow::Result<camino::Utf8PathBuf> {
+        let manifest = JrecManifest::read_from_file(&recording_folder_path.join("recording.json"))?;
+        // TODO: handle multiple files
+        let file = manifest.files.get(0).context("no files in manifest")?;
+
+        Ok(recording_folder_path.join(&file.file_name))
+    }
 }

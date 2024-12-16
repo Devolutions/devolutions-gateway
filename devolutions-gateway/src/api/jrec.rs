@@ -28,14 +28,11 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
         .route("/play", get(get_player))
-        .route("/play/*path", get(get_player));
+        .route("/play/*path", get(get_player))
+        .route("/shadow/:id", get(shadow_recording))
+        .with_state(state);
 
-    if state.conf_handle.get_conf().debug.enable_unstable {
-        router.route("/shadow/:id/:filename", get(shadow_recording))
-    } else {
-        router
-    }
-    .with_state(state)
+    router
 }
 
 #[derive(Deserialize)]
@@ -500,25 +497,17 @@ async fn shadow_recording(
         conf_handle,
         ..
     }): State<DgwState>,
-    extract::Path((id, filename)): extract::Path<(Uuid, String)>,
+    extract::Path(id): extract::Path<Uuid>,
     JrecToken(claims): JrecToken,
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err(HttpError::bad_request().msg("invalid file name"));
-    }
-
     if id != claims.jet_aid {
         return Err(HttpError::forbidden().msg("not allowed to read this recording"));
     }
 
-    let path = conf_handle
-        .get_conf()
-        .recording_path
-        .join(id.to_string())
-        .join(filename);
+    let recording_dir_path = conf_handle.get_conf().recording_path.join(id.to_string());
 
-    if !path.exists() || !path.is_file() {
+    if !recording_dir_path.exists() || !recording_dir_path.is_dir() {
         return Err(HttpError::not_found().msg("requested file does not exist"));
     }
 
@@ -527,7 +516,7 @@ async fn shadow_recording(
         HttpError::internal().msg("failed to subscribe to active recording")
     })?;
 
-    crate::streaming::stream_file(path, ws, notify, recordings, id)
+    crate::streaming::stream_file(recording_dir_path, ws, notify, recordings, id)
         .await
         .map_err(HttpError::internal().err())
 }

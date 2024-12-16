@@ -21,7 +21,7 @@ export async function handleWebm(gatewayAccessApi) {
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   // Now safe to call methods
-  shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl(gatewayAccessApi.recordingInfo.files[0].fileName));
+  shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl());
   shadowPlayer.play();
 
   shadowPlayer.onEnd(() => {

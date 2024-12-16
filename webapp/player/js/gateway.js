@@ -36,8 +36,8 @@ export class GatewayAccessApi {
     return `${this.gatewayAccessUrl}/jet/jrec/pull/${this.sessionId}/${fileName}?token=${this.token}`;
   }
 
-  sessionShadowingUrl(fileName) {
-    return `${this.gatewayAccessUrl.replace('http://', 'ws://').replace('https://', 'wss://')}/jet/jrec/shadow/${this.sessionId}/${fileName}?token=${this.token}`;
+  sessionShadowingUrl() {
+    return `${this.gatewayAccessUrl.replace('http://', 'ws://').replace('https://', 'wss://')}/jet/jrec/shadow/${this.sessionId}?token=${this.token}`;
   }
 }
 
