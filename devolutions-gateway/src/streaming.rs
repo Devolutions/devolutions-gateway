@@ -6,11 +6,7 @@ use streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::{
-    recording::OnGoingRecordingState,
-    token::RecordingFileType,
-    ws::websocket_compat,
-};
+use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
 struct ShutdownSignal(Arc<Notify>);
 

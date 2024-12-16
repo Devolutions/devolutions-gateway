@@ -45,7 +45,7 @@ pub struct JrecManifest {
 }
 
 impl JrecManifest {
-    pub fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let json = std::fs::read(path)?;
         let manifest = serde_json::from_slice(&json)?;
         Ok(manifest)
