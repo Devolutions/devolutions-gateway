@@ -10,10 +10,10 @@
     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
     xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
     IgnorableNamespaces="uap uap2 uap3 rescap desktop desktop4 desktop5 uap10 com">
-    <Identity Name="DevolutionsAgent" ProcessorArchitecture="neutral" Publisher="CN=Devolutions"
-        Version="1.0.0.0" />
+    <Identity Name="DevolutionPEDMShellExtension" ProcessorArchitecture="neutral" Publisher="CN=Devolutions"
+        Version="2024.3.6.0" />
     <Properties>
-        <DisplayName>Devolutions Agent Shell Extension</DisplayName>
+        <DisplayName>Devolutions Agent</DisplayName>
         <PublisherDisplayName>Devolutions</PublisherDisplayName>
         <Logo>Assets\Logo.png</Logo>
         <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
