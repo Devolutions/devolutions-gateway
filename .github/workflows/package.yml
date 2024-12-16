@@ -225,11 +225,14 @@ jobs:
         if: matrix.os == 'windows' || matrix.os == 'macos'
         shell: pwsh
         run: |
-          $IncludePattern = switch ('${{ matrix.project }}') {
-            'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
-              'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe' }
-            'jetsocat' { 'jetsocat_*' }
+          $IncludePattern = @(switch ('${{ matrix.project }}') {
+            'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
+            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
+              'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'jetsocat' { @('jetsocat_*') }
+          })
+          if (('${{ matrix.project }}' -eq 'devolutions-gateway') -and ('${{ matrix.os }}' -Eq 'windows')) {
+            $IncludePattern += @('*.ps1', '*.psd1', '*.psm1', '*.dll')
           }
           $ExcludePattern = "*.pdb"
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
@@ -389,6 +392,17 @@ jobs:
           $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption assemble
+
+          $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
+          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
+          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
+          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
+
+          @($Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH,
+            $Env:DAGENT_PEDM_SHELL_EXT_DLL, $Env:DAGENT_PEDM_SHELL_EXT_MSIX,
+            $Env:DAGENT_SESSION_EXECUTABLE) | ForEach-Object {
+            Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
+          }
 
       - name: Sign packages
         if: (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') && matrix.os == 'windows'
