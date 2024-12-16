@@ -29,19 +29,19 @@ const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct JrecFile {
-    pub file_name: String,
+struct JrecFile {
+    file_name: String,
     start_time: i64,
     duration: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct JrecManifest {
+struct JrecManifest {
     session_id: Uuid,
     start_time: i64,
     duration: i64,
-    pub files: Vec<JrecFile>,
+    files: Vec<JrecFile>,
 }
 
 impl JrecManifest {
