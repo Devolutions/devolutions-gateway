@@ -65,12 +65,8 @@
           "text": "You need to install the 32-bit version of this product on 32-bit Windows."
         },
         {
-          "id": "DotNet48IsStrongRecommendedDownloadNow",
-          "text": "Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
-        },
-        {
-          "id": "Dotnet462IsRequired",
-          "text": "The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+          "id": "Dotnet48IsRequired",
+          "text": "The product requires Microsoft .NET Framework 4.8. Would you like to download it now?"
         }
       ],
       "buttons": [

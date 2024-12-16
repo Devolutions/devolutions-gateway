@@ -41,12 +41,8 @@
           "text": "Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows."
         },
         {
-          "id": "DotNet48IsStrongRecommendedDownloadNow",
-          "text": "Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
-        },
-        {
-          "id": "Dotnet462IsRequired",
-          "text": "Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
+          "id": "Dotnet48IsRequired",
+          "text": "Le produit nécessite Microsoft .NET Framework 4.8. Souhaiteriez-vous le télécharger maintenant?"
         }
       ],
       "buttons": [

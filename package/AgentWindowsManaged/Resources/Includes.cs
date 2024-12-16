@@ -26,11 +26,11 @@ namespace DevolutionsAgent.Resources
 
         internal static string INFO_URL = "https://server.devolutions.net";
 
-        internal static Feature AGENT_FEATURE = new("!(loc.FeatureAgentName)", true, false) { Description = "!(loc.FeatureAgentDescription)" };
+        internal static Feature AGENT_FEATURE = new("!(loc.FeatureAgentName)", true, false) { Id = "F.Agent", Description = "!(loc.FeatureAgentDescription)" };
 
-        internal static Feature PEDM_FEATURE = new("!(loc.FeaturePedmName)", "!(loc.FeaturePedmDescription)", false);
+        internal static Feature PEDM_FEATURE = new("!(loc.FeaturePedmName)", "!(loc.FeaturePedmDescription)", false) { Id = "F.Pedm" };
 
-        internal static Feature SESSION_FEATURE = new("!(loc.FeatureSessionName)", "!(loc.FeatureSessionDescription)", false);
+        internal static Feature SESSION_FEATURE = new("!(loc.FeatureSessionName)", "!(loc.FeatureSessionDescription)", false) { Id = "F.Session" };
 
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\agent ACL

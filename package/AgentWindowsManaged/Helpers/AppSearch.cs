@@ -1,6 +1,8 @@
-﻿using System;
+﻿using DevolutionsAgent.Resources;
+using Microsoft.Deployment.WindowsInstaller;
+using System;
+using System.Collections.Generic;
 using System.Linq;
-using DevolutionsAgent.Resources;
 
 namespace DevolutionsAgent.Helpers
 {
@@ -11,5 +13,11 @@ namespace DevolutionsAgent.Helpers
                 .Where(productCode => WixSharp.CommonTasks.AppSearch.GetProductName(productCode)?.Equals(Includes.PRODUCT_NAME) ?? false)
                 .Select(WixSharp.CommonTasks.AppSearch.GetProductVersion)
                 .FirstOrDefault();
+
+        internal static IEnumerable<FeatureInstallation> InstalledFeatures =>
+            ProductInstallation.GetRelatedProducts("{" + Includes.UPGRADE_CODE + "}")
+                .Where(product => product.ProductName?.Equals(Includes.PRODUCT_NAME) ?? false)
+                .Where(product => product.IsInstalled)
+                .SelectMany(product => product.Features.Where(feature => feature.State == InstallState.Local));
     }
 }

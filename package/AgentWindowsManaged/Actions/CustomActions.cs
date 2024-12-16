@@ -37,7 +37,7 @@ namespace DevolutionsAgent.Actions
         {
             uint version = session.Get(AgentProperties.netFx45Version);
 
-            if (version < 394802) //4.6.2
+            if (version < 528040) // 4.8
             {
                 session.Log($"netfx45 version: {version} is too old");
                 return ActionResult.Failure;
