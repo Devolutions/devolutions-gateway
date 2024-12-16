@@ -5615,7 +5615,6 @@ dependencies = [
  "anyhow",
  "axum 0.7.7",
  "cadeau",
- "ebml-iterable",
  "futures",
  "futures-util",
  "num_cpus",
