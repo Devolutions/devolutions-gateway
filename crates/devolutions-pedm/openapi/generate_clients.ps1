@@ -21,6 +21,17 @@ $targets = @(
 
 Push-Location -Path $PSScriptRoot
 
+# Update the version in dotnet-client
+$NewVersion = Get-Date -Format "yyyy.M.d"
+$ConfigJson = Get-Content -Path $targets[0].Config | ConvertFrom-Json
+$CurrentVersion = $ConfigJson.packageVersion
+$ConfigJson.packageVersion = $NewVersion
+$ConfigJson = $ConfigJson | ConvertTo-Json
+Set-Content -Path $targets[0].Config -Value $ConfigJson
+Write-Host "Current version is $CurrentVersion"
+Write-Host "Next version is $NewVersion"
+Write-Host
+
 try {
 	ForEach ($target in $targets)
 	{
