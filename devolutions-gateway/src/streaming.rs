@@ -17,15 +17,14 @@ impl streamer::Signal for ShutdownSignal {
 }
 
 pub(crate) async fn stream_file(
-    recording_folder_path: camino::Utf8PathBuf,
+    path: &camino::Utf8PathBuf,
     ws: axum::extract::WebSocketUpgrade,
     shutdown_notify: Arc<Notify>,
     recordings: crate::recording::RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
-    let recording_file_path = get_recording_file_path(recording_folder_path)?;
     // 1.identify the file type
-    if recording_file_path.extension() != Some(RecordingFileType::WebM.extension()) {
+    if path.extension() != Some(RecordingFileType::WebM.extension()) {
         anyhow::bail!("invalid file type");
     }
     // 2.if the file is actively being recorded, then proceed
@@ -33,7 +32,7 @@ pub(crate) async fn stream_file(
         anyhow::bail!("file is not being recorded");
     };
 
-    let streaming_file = ReOpenableFile::open(&recording_file_path)?;
+    let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
 
     let streamer_config = streamer::StreamingConfig {
         encoder_threads: CpuCount::default(),
@@ -74,25 +73,5 @@ pub(crate) async fn stream_file(
         };
     });
 
-    return Ok(upgrade_result);
-
-    fn get_recording_file_path(recording_folder_path: camino::Utf8PathBuf) -> anyhow::Result<camino::Utf8PathBuf> {
-        use serde_json::Value;
-        let json = std::fs::read(recording_folder_path.join("recording.json"))?;
-        let json: Value = serde_json::from_slice(&json)?;
-        let Value::Array(files) = &json["files"] else {
-            anyhow::bail!("no files or files are not array in recording.json");
-        };
-
-        let file = files.last().context("no files in manifest")?;
-        let Value::Object(file) = file else {
-            anyhow::bail!("file is not an object");
-        };
-
-        let Value::String(file_name) = &file["fileName"] else {
-            anyhow::bail!("file_name is not a string");
-        };
-
-        Ok(recording_folder_path.join(file_name))
-    }
+    Ok(upgrade_result)
 }

@@ -516,7 +516,17 @@ async fn shadow_recording(
         HttpError::internal().msg("failed to subscribe to active recording")
     })?;
 
-    crate::streaming::stream_file(recording_dir_path, ws, notify, recordings, id)
+    let recording_files = recordings.get_recording_files_path(id).await.map_err(|e| {
+        error!(error = format!("{e:#}"), "failed to get recording files path");
+        HttpError::internal().msg("failed to get recording file")
+    })?;
+
+    let recording_path = recording_files.last().ok_or_else(|| {
+        error!("recording files path is empty");
+        HttpError::internal().msg("failed to get recording file")
+    })?;
+
+    crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
         .await
         .map_err(HttpError::internal().err())
 }

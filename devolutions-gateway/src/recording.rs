@@ -221,6 +221,10 @@ enum RecordingManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<Option<OnGoingRecordingState>>,
     },
+    GetRecordingFilesPath {
+        id: Uuid,
+        channel: oneshot::Sender<Vec<Utf8PathBuf>>,
+    },
     GetCount {
         channel: oneshot::Sender<usize>,
     },
@@ -261,6 +265,9 @@ impl fmt::Debug for RecordingManagerMessage {
                 .finish(),
             RecordingManagerMessage::SubscribeToSessionEndNotification { id, channel: _ } => {
                 f.debug_struct("SubscribeToOngoingRecording").field("id", id).finish()
+            }
+            RecordingManagerMessage::GetRecordingFilesPath { id, channel: _ } => {
+                f.debug_struct("GetRecordingFilePath").field("id", id).finish()
             }
         }
     }
@@ -353,6 +360,17 @@ impl RecordingMessageSender {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::SubscribeToSessionEndNotification {
+                id: recording_id,
+                channel: tx,
+            })
+            .await?;
+        Ok(rx.await?)
+    }
+
+    pub(crate) async fn get_recording_files_path(&self, recording_id: Uuid) -> anyhow::Result<Vec<Utf8PathBuf>> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::GetRecordingFilesPath {
                 id: recording_id,
                 channel: tx,
             })
@@ -774,6 +792,20 @@ async fn recording_manager_task(
                                 let _ = channel.send(notifier);
                             },
                             Err(e) => error!(error = format!("{e:#}"), "subscribe to session end notification"),
+                        }
+                    },
+                    RecordingManagerMessage::GetRecordingFilesPath { id, channel } => {
+                        let response = manager.ongoing_recordings.get(&id).map(|ongoing| {
+                            ongoing
+                                .manifest
+                                .files
+                                .iter()
+                                .map(|file| ongoing.manifest_path.parent().expect("a parent").join(&file.file_name))
+                                .collect()
+                        });
+
+                        if let Some(jrec_file) = response {
+                            let _ = channel.send(jrec_file);
                         }
                     }
                 }
