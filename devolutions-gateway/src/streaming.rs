@@ -83,7 +83,7 @@ pub(crate) async fn stream_file(
     fn get_recording_file_path(recording_folder_path: camino::Utf8PathBuf) -> anyhow::Result<camino::Utf8PathBuf> {
         let manifest = JrecManifest::read_from_file(&recording_folder_path.join("recording.json"))?;
         // TODO: handle multiple files
-        let file = manifest.files.get(0).context("no files in manifest")?;
+        let file = manifest.files.last().context("no files in manifest")?;
 
         Ok(recording_folder_path.join(&file.file_name))
     }

@@ -508,7 +508,7 @@ async fn shadow_recording(
     let recording_dir_path = conf_handle.get_conf().recording_path.join(id.to_string());
 
     if !recording_dir_path.exists() || !recording_dir_path.is_dir() {
-        return Err(HttpError::not_found().msg("requested file does not exist"));
+        return Err(HttpError::not_found().msg("requested recording does not exist"));
     }
 
     let notify = recordings.subscribe_to_recording_finish(id).await.map_err(|e| {
