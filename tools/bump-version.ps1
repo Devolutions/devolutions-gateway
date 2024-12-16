@@ -18,7 +18,6 @@ $targetFiles = @(
 	'./devolutions-session/Cargo.toml'
 	'./crates/devolutions-pedm-shell-ext/Cargo.toml'
 	'./crates/devolutions-pedm-shell-ext/AppxManifest.xml'
-	'./crates/devolutions-pedm/openapi/dotnet-client/config.json'
 	'./dotnet/DesktopAgent/DesktopAgent.csproj'
 	'./powershell/DevolutionsGateway/DevolutionsGateway.psd1'
 	'./Cargo.lock'
