@@ -512,7 +512,7 @@ async fn shadow_recording(
     let recording_files = recordings
         .list_files(id)
         .await
-        .map_err(HttpError::internal().with_msg("failed to get recording file").err())?;
+        .map_err(HttpError::internal().with_msg("failed to get recording files").err())?;
 
     let recording_path = recording_files
         .last()
