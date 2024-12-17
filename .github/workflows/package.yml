@@ -221,6 +221,37 @@ jobs:
           choco install wixtoolset --version 3.14.0 --allow-downgrade --force
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Sign PowerShell module contents
+        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          Write-Host $PWD
+          Import-Module ..\ci\PSModuleHelpers.ps1
+          $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
+          $PSModuleZipFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.zip" | Select-Object -First 1
+          Expand-Archive -Path $PSModuleZipFilePath -Destination $PSModuleOutputPath
+          $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
+
+          $IncludePattern = @('*.ps1', '*.psd1', '*.psm1', 'DevolutionsGateway.dll')
+          Get-ChildItem -Path $PSModuleOutputPath -Recurse -Include $IncludePattern | % {
+            $Params = @('sign',
+              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+              '-v')
+            AzureSignTool @Params $_.FullName
+          }
+
+          Remove-Item $PSModuleZipFilePath -ErrorAction SilentlyContinue | Out-Null
+          Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath -CompressionLevel Optimal
+
+          $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
+          New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
+          #Remove-Item $DGatewayPSModulePath -Recurse -ErrorAction SilentlyContinue | Out-Null
+
       - name: Sign executables
         if: matrix.os == 'windows' || matrix.os == 'macos'
         shell: pwsh
