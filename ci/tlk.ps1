@@ -465,16 +465,11 @@ class TlkRecipe
 
         $PSManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
         $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
-        $PSModuleName = $(Get-Item $PSManifestFile).BaseName
         $PSModuleVersion = $PSManifest.ModuleVersion
 
         if ($PackageVersion -ne $PSModuleVersion) {
             Write-Warning "PowerShell module version mismatch: $PSModuleVersion (expected: $PackageVersion)"
         }
-
-        $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
-        $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps-$PSModuleVersion.zip"
-        Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath -Update
 
         $DGatewayPSModuleStagingPath = Join-Path $Env:Temp "DevolutionsGateway"
         New-Item -Force -Type Directory $DGatewayPSModuleStagingPath

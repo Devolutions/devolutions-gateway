@@ -471,7 +471,7 @@ jobs:
         run: |
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
 
           # WiX is installed on Windows runners but not in the PATH
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -494,7 +494,13 @@ jobs:
         if: matrix.os == 'windows'
         env:
           PSMODULE_OUTPUT_PATH: ${{ steps.load-variables.outputs.psmodule-output-path }}
-        run: .\powershell\build.ps1
+        run:
+          $PSModuleVersion = '${{ needs.preflight.outputs.version }}'
+          $DGatewayPSModulePath = $Env:PSMODULE_OUTPUT_PATH
+          .\powershell\build.ps1
+          $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
+          $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps-$PSModuleVersion.zip"
+          Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath
 
       - name: Add msbuild to PATH
         if: matrix.os == 'windows'
