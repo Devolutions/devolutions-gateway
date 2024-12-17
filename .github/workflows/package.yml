@@ -231,9 +231,6 @@ jobs:
               'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
             'jetsocat' { @('jetsocat_*') }
           })
-          if (('${{ matrix.project }}' -eq 'devolutions-gateway') -and ('${{ matrix.os }}' -Eq 'windows')) {
-            $IncludePattern += @('*.ps1', '*.psd1', '*.psm1', '*.dll')
-          }
           $ExcludePattern = "*.pdb"
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
