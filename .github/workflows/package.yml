@@ -377,7 +377,7 @@ jobs:
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
-          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
+          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption assemble
 
@@ -386,7 +386,7 @@ jobs:
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent
-          $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
+          $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption assemble
 
