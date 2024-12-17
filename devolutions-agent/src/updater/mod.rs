@@ -182,6 +182,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
         let uninstall_log_path = package_path.with_extension("uninstall.log");
 
+        // NOTE: An uninstall/reinstall will lose any custom feature selection or other options in the existing installation
         uninstall_package(&ctx, downgrade.product_code, &uninstall_log_path).await?;
     }
 

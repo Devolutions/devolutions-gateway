@@ -8,12 +8,10 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.ServiceProcess;
 using System.Text;
 using WixSharp;
 using File = System.IO.File;
@@ -142,15 +140,42 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                if (!Directory.Exists(path))
-                {
-                    Directory.CreateDirectory(path);
-                }
+                DirectoryInfo di = Directory.CreateDirectory(path);
+                session.Log($"created directory at {di.FullName} or already exists");
             }
             catch (Exception e)
             {
                 session.Log($"failed to evaluate or create path {path}: {e}");
                 return ActionResult.Failure;
+            }
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult CreateProgramDataPedmDirectories(Session session)
+        {
+            string rootPath = Path.Combine(ProgramDataDirectory, "pedm");
+
+            foreach (string directory in new[]
+                     {
+                         "logs", 
+                         Path.Combine("policy", "profiles"), 
+                         Path.Combine("policy", "rules")
+                     })
+            {
+                string path = Path.Combine(rootPath, directory);
+
+                try
+                {
+                    DirectoryInfo di = Directory.CreateDirectory(path);
+                    session.Log($"created directory at {di.FullName} or already exists");
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to evaluate or create path {path}: {e}");
+                    return ActionResult.Failure;
+                }
             }
 
             return ActionResult.Success;
@@ -308,6 +333,21 @@ namespace DevolutionsAgent.Actions
             try
             {
                 SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult SetProgramDataPedmDirectoryPermissions(Session session)
+        {
+            try
+            {
+                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
