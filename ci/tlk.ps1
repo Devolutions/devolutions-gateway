@@ -495,7 +495,7 @@ class TlkRecipe
                 Remove-Item -Path "$DesktopAgentOutputPath" -Recurse -Force -ErrorAction SilentlyContinue
                 New-Item -Path "$DesktopAgentOutputPath" -ItemType 'Directory' -Force | Out-Null
 
-                $BuiltDesktop = Get-ChildItem -Path "./dotnet/DesktopAgent/bin/Release/*" -Recurse -Include *.dll,*.exe,*.pdb
+                $BuiltDesktop = Get-ChildItem -Path "./dotnet/DesktopAgent/bin/Release/net48/*" -Recurse -Include *.dll,*.exe,*.pdb
 
                 foreach ($File in $BuiltDesktop) {
                     Copy-Item $File.FullName -Destination $DesktopAgentOutputPath

@@ -275,6 +275,12 @@ internal class Program
                 AttributesDefinition = "Type=string; Component:Permanent=yes",
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
+            },
+            new (RegistryHive.LocalMachine, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", Includes.SERVICE_NAME, $"[{AgentProperties.InstallDir}]desktop\\DevolutionsDesktopAgent.exe")
+            {
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.create,
+                Feature = Includes.PEDM_FEATURE,
             }
         };
         project.Properties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToArray();
