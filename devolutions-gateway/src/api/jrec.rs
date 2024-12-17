@@ -21,7 +21,7 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    let router = Router::new()
+    Router::new()
         .route("/push/:id", get(jrec_push))
         .route("/delete/:id", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
@@ -30,9 +30,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/play", get(get_player))
         .route("/play/*path", get(get_player))
         .route("/shadow/:id", get(shadow_recording))
-        .with_state(state);
-
-    router
+        .with_state(state)
 }
 
 #[derive(Deserialize)]
@@ -492,11 +490,7 @@ where
 }
 
 async fn shadow_recording(
-    State(DgwState {
-        recordings,
-        conf_handle,
-        ..
-    }): State<DgwState>,
+    State(DgwState { recordings, .. }): State<DgwState>,
     extract::Path(id): extract::Path<Uuid>,
     JrecToken(claims): JrecToken,
     ws: WebSocketUpgrade,
@@ -505,26 +499,24 @@ async fn shadow_recording(
         return Err(HttpError::forbidden().msg("not allowed to read this recording"));
     }
 
-    let recording_dir_path = conf_handle.get_conf().recording_path.join(id.to_string());
-
-    if !recording_dir_path.exists() || !recording_dir_path.is_dir() {
-        return Err(HttpError::not_found().msg("requested recording does not exist"));
+    if !recordings.active_recordings.contains(id) {
+        return Err(HttpError::not_found().msg("no active recording found for the specified ID"));
     }
 
-    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(|e| {
-        error!(error = format!("{e:#}"), "failed to subscribe to active recording");
-        HttpError::internal().msg("failed to subscribe to active recording")
-    })?;
+    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(
+        HttpError::internal()
+            .with_msg("failed to subscribe to active recording")
+            .err(),
+    )?;
 
-    let recording_files = recordings.get_recording_files_path(id).await.map_err(|e| {
-        error!(error = format!("{e:#}"), "failed to get recording files path");
-        HttpError::internal().msg("failed to get recording file")
-    })?;
+    let recording_files = recordings
+        .list_files(id)
+        .await
+        .map_err(HttpError::internal().with_msg("failed to get recording file").err())?;
 
-    let recording_path = recording_files.last().ok_or_else(|| {
-        error!("recording files path is empty");
-        HttpError::internal().msg("failed to get recording file")
-    })?;
+    let recording_path = recording_files
+        .last()
+        .ok_or_else(|| HttpError::internal().msg("no recording file found"))?;
 
     crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
         .await

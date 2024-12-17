@@ -221,7 +221,7 @@ enum RecordingManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<Option<OnGoingRecordingState>>,
     },
-    GetRecordingFilesPath {
+    ListFiles {
         id: Uuid,
         channel: oneshot::Sender<Vec<Utf8PathBuf>>,
     },
@@ -266,8 +266,8 @@ impl fmt::Debug for RecordingManagerMessage {
             RecordingManagerMessage::SubscribeToSessionEndNotification { id, channel: _ } => {
                 f.debug_struct("SubscribeToOngoingRecording").field("id", id).finish()
             }
-            RecordingManagerMessage::GetRecordingFilesPath { id, channel: _ } => {
-                f.debug_struct("GetRecordingFilePath").field("id", id).finish()
+            RecordingManagerMessage::ListFiles { id, channel: _ } => {
+                f.debug_struct("ListFiles").field("id", id).finish()
             }
         }
     }
@@ -367,10 +367,10 @@ impl RecordingMessageSender {
         Ok(rx.await?)
     }
 
-    pub(crate) async fn get_recording_files_path(&self, recording_id: Uuid) -> anyhow::Result<Vec<Utf8PathBuf>> {
+    pub(crate) async fn list_files(&self, recording_id: Uuid) -> anyhow::Result<Vec<Utf8PathBuf>> {
         let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::GetRecordingFilesPath {
+            .send(RecordingManagerMessage::ListFiles {
                 id: recording_id,
                 channel: tx,
             })
@@ -794,18 +794,23 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "subscribe to session end notification"),
                         }
                     },
-                    RecordingManagerMessage::GetRecordingFilesPath { id, channel } => {
-                        let response = manager.ongoing_recordings.get(&id).map(|ongoing| {
-                            ongoing
-                                .manifest
-                                .files
-                                .iter()
-                                .map(|file| ongoing.manifest_path.parent().expect("a parent").join(&file.file_name))
-                                .collect()
-                        });
+                    RecordingManagerMessage::ListFiles { id, channel } => {
+                        match manager.ongoing_recordings.get(&id) {
+                            Some(recording) => {
+                                let recordings_folder = recording.manifest_path.parent().expect("a parent");
 
-                        if let Some(jrec_file) = response {
-                            let _ = channel.send(jrec_file);
+                                let files = recording
+                                    .manifest
+                                    .files
+                                    .iter()
+                                    .map(|file| recordings_folder.join(&file.file_name))
+                                    .collect();
+
+                                let _ = channel.send(files);
+                            }
+                            None => {
+                                warn!(%id, "No recording found for provided ID");
+                            }
                         }
                     }
                 }

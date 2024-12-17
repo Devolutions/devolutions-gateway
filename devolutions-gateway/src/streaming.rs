@@ -17,7 +17,7 @@ impl streamer::Signal for ShutdownSignal {
 }
 
 pub(crate) async fn stream_file(
-    path: &camino::Utf8PathBuf,
+    path: &camino::Utf8Path,
     ws: axum::extract::WebSocketUpgrade,
     shutdown_notify: Arc<Notify>,
     recordings: crate::recording::RecordingMessageSender,
@@ -27,12 +27,13 @@ pub(crate) async fn stream_file(
     if path.extension() != Some(RecordingFileType::WebM.extension()) {
         anyhow::bail!("invalid file type");
     }
+
     // 2.if the file is actively being recorded, then proceed
     let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(recording_id).await else {
         anyhow::bail!("file is not being recorded");
     };
 
-    let streaming_file = ReOpenableFile::open(&path).with_context(|| format!("failed to open file: {path:?}"))?;
+    let streaming_file = ReOpenableFile::open(path).with_context(|| format!("failed to open file: {path:?}"))?;
 
     let streamer_config = streamer::StreamingConfig {
         encoder_threads: CpuCount::default(),
