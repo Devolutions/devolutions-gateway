@@ -703,93 +703,6 @@ class TlkRecipe
         }
     }
 
-    [void] Package_Windows() {
-        if ($this.Product -ne 'gateway') {
-            throw "Legacy packaging for $($this.Product) is not supported"
-        }
-
-        $ShortVersion = $this.Version.Substring(2) # msi version
-        $TargetArch = $this.Target.WindowsArchitecture()
-
-        Push-Location
-        Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
-
-        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
-            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
-        } else {
-            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
-        }
-
-        $PSModulePaths = $this.Package_Windows_Prepare_Ps1Module()
-        $DGatewayPSModulePath = $PSModulePaths[0]
-        $DGatewayPSModuleStagingPath = $PSModulePaths[1]
-
-        $TargetConfiguration = "Release"
-        $ActionsProjectPath = Join-Path $(Get-Location) 'Actions'
-
-        if ((Get-Command "MSBuild.exe" -ErrorAction SilentlyContinue) -Eq $Null) {
-            throw 'MSBuild was not found in the PATH'
-        }
-
-        & 'MSBuild.exe' "$(Join-Path $ActionsProjectPath 'DevolutionsGateway.Installer.Actions.sln')" "/p:Configuration=$TargetConfiguration" "/p:Platform=$TargetArch" | Out-Host
-
-        $HeatArgs = @('dir', "$DGatewayPSModuleStagingPath",
-            '-dr', 'D.DGATEWAYPSROOTDIRECTORY',
-            '-cg', 'CG.DGatewayPSComponentGroup',
-            '-var', 'var.DGatewayPSSourceDir',
-            '-nologo', '-srd', '-suid', '-scom', '-sreg', '-sfrag', '-gg')
-
-        & 'heat.exe' $HeatArgs + @('-t', 'HeatTransform64.xslt', '-o', "$($this.PackageName())-$TargetArch.wxs") | Out-Host
-
-        $WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
-        $WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
-
-        $WixArgs = @($WixExtensions | ForEach-Object { @('-ext', $_) }) + @(
-            "-dDGatewayPSSourceDir=$DGatewayPSModuleStagingPath",
-            "-dDGatewayExecutable=$DGatewayExecutable",
-            "-dVersion=$ShortVersion",
-            "-dActionsLib=$(Join-Path $ActionsProjectPath $TargetArch $TargetConfiguration 'DevolutionsGateway.Installer.Actions.dll')",
-            "-v")
-
-        $WixFiles = Get-ChildItem -Include '*.wxs' -Recurse
-
-        $InputFiles = $WixFiles | Foreach-Object { Resolve-Path $_.FullName -Relative }
-        $ObjectFiles = $WixFiles | ForEach-Object { $_.BaseName + '.wixobj' }
-
-        $Cultures = @('en-US', 'fr-FR')
-
-        foreach ($Culture in $Cultures) {
-            & 'candle.exe' '-nologo' $InputFiles $WixArgs "-dPlatform=$TargetArch" | Out-Host
-            $OutputFile = "$($this.PackageName())_${Culture}.msi"
-
-            if ($Culture -Eq 'en-US') {
-                $OutputFile = "$($this.PackageName()).msi"
-            }
-
-            & 'light.exe' "-nologo" $ObjectFiles "-cultures:${Culture}" "-loc" "$($this.PackageName)_${Culture}.wxl" `
-                "-out" $OutputFile $WixArgs "-dPlatform=$TargetArch" "-sice:ICE61" | Out-Host
-        }
-
-        foreach ($Culture in $($Cultures | Select-Object -Skip 1)) {
-            & 'torch.exe' "$($this.PackageName()).msi" "$($this.PackageName())_${Culture}.msi" "-o" "${Culture}_$TargetArch.mst" | Out-Host
-            & 'cscript.exe' "/nologo" "WiSubStg.vbs" "$($this.PackageName()).msi" "${Culture}_$TargetArch.mst" "1036" | Out-Host
-            & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName()).msi" "Package" "1033,1036" | Out-Host
-        }
-
-        if (Test-Path Env:DGATEWAY_PSMODULE_CLEAN) {
-            # clean up the extracted PowerShell module directory
-            Remove-Item -Path $DGatewayPSModulePath -Recurse
-            Remove-Item -Path $DGatewayPSModuleStagingPath -Recurse
-        }
-
-        if (Test-Path Env:DGATEWAY_PACKAGE) {
-            $DGatewayPackage = $Env:DGATEWAY_PACKAGE
-            Copy-Item -Path "$($this.PackageName()).msi" -Destination $DGatewayPackage
-        }
-
-        Pop-Location
-    }
-
     [void] Package_Linux() {
         $DebianArchitecture = $this.Target.DebianArchitecture()
         $Packager = "Devolutions Inc."
@@ -985,9 +898,6 @@ class TlkRecipe
             }
 
             switch ($PackageOption) {
-                "legacy" {
-                    $this.Package_Windows()
-                }
                 "generate" {
                     $this.Package_Windows_Managed($true)
                 }
@@ -1033,7 +943,7 @@ function Invoke-TlkStep {
         [Parameter(Position=0,Mandatory=$true)]
 		[ValidateSet('build','package','test')]
 		[string] $TlkVerb,
-        [ValidateSet('legacy', 'generate', 'assemble')]
+        [ValidateSet('generate', 'assemble')]
         [string] $PackageOption,
 		[ValidateSet('windows','macos','linux')]
 		[string] $Platform,
