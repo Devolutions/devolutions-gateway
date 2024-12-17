@@ -94,6 +94,21 @@ internal static class AgentActions
         Sequence.InstallExecuteSequence);
 
     /// <summary>
+    /// Create the path %ProgramData%\Devolutions\Agent\Pedm and subfolders if they do not exist
+    /// </summary>
+    /// <remarks>
+    /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
+    /// it's easy to create it with a custom action than workaround Windows Installer.
+    /// </remarks>
+    private static readonly ElevatedManagedAction createProgramDataPedmDirectories = new(
+        new Id($"CA.{nameof(createProgramDataPedmDirectories)}"),
+        CustomActions.CreateProgramDataPedmDirectories,
+        Return.check,
+        When.After, Step.CreateFolders,
+        Condition.Always,
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
     /// Set or reset the ACL on %ProgramData%\Devolutions\Agent
     /// </summary>
     private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
@@ -101,6 +116,21 @@ internal static class AgentActions
         CustomActions.SetProgramDataDirectoryPermissions,
         Return.ignore,
         When.After, new Step(createProgramDataDirectory.Id),
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// Set or reset the ACL on %ProgramData%\Devolutions\Agent\pedm
+    /// </summary>
+    private static readonly ElevatedManagedAction setProgramDataPedmDirectoryPermissions = new(
+        new Id($"CA.{nameof(setProgramDataPedmDirectoryPermissions)}"),
+        CustomActions.SetProgramDataPedmDirectoryPermissions,
+        Return.ignore,
+        When.After, new Step(createProgramDataPedmDirectories.Id),
         Condition.Always,
         Sequence.InstallExecuteSequence)
     {
@@ -294,15 +324,15 @@ internal static class AgentActions
         setArpInstallLocation,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
+        createProgramDataPedmDirectories,
+        setProgramDataPedmDirectoryPermissions,
         installPedm,
         cleanupPedmShellExt,
         uninstallPedmShellExt,
         installPedmShellExt,
         installSession,
-
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,
-
         startAgentIfNeeded,
         restartAgent,
         rollbackConfig,
