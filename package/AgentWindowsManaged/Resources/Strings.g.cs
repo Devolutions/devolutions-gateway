@@ -69,13 +69,9 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string x86VersionRequired = "x86VersionRequired";		
 		/// <summary>
-		/// Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?
+		/// The product requires Microsoft .NET Framework 4.8. Would you like to download it now?
 		/// </summary>
-		public const string DotNet48IsStrongRecommendedDownloadNow = "DotNet48IsStrongRecommendedDownloadNow";		
-		/// <summary>
-		/// The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?
-		/// </summary>
-		public const string Dotnet462IsRequired = "Dotnet462IsRequired";		
+		public const string Dotnet48IsRequired = "Dotnet48IsRequired";		
 		/// <summary>
 		/// View
 		/// </summary>

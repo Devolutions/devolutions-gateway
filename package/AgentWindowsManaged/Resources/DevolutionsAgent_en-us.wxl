@@ -12,8 +12,7 @@
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
-                <String Id="Dotnet462IsRequired">The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
-                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
+                <String Id="Dotnet48IsRequired">The product requires Microsoft .NET Framework 4.8. Would you like to download it now?</String>
                 <String Id="NewerInstalled">A newer version of this product is already installed.</String>
                 <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">There is a problem with the entered data. Please correct the issue and try again.</String>
