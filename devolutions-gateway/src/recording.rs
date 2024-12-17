@@ -221,6 +221,10 @@ enum RecordingManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<Option<OnGoingRecordingState>>,
     },
+    ListFiles {
+        id: Uuid,
+        channel: oneshot::Sender<Vec<Utf8PathBuf>>,
+    },
     GetCount {
         channel: oneshot::Sender<usize>,
     },
@@ -261,6 +265,9 @@ impl fmt::Debug for RecordingManagerMessage {
                 .finish(),
             RecordingManagerMessage::SubscribeToSessionEndNotification { id, channel: _ } => {
                 f.debug_struct("SubscribeToOngoingRecording").field("id", id).finish()
+            }
+            RecordingManagerMessage::ListFiles { id, channel: _ } => {
+                f.debug_struct("ListFiles").field("id", id).finish()
             }
         }
     }
@@ -353,6 +360,17 @@ impl RecordingMessageSender {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::SubscribeToSessionEndNotification {
+                id: recording_id,
+                channel: tx,
+            })
+            .await?;
+        Ok(rx.await?)
+    }
+
+    pub(crate) async fn list_files(&self, recording_id: Uuid) -> anyhow::Result<Vec<Utf8PathBuf>> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::ListFiles {
                 id: recording_id,
                 channel: tx,
             })
@@ -774,6 +792,25 @@ async fn recording_manager_task(
                                 let _ = channel.send(notifier);
                             },
                             Err(e) => error!(error = format!("{e:#}"), "subscribe to session end notification"),
+                        }
+                    },
+                    RecordingManagerMessage::ListFiles { id, channel } => {
+                        match manager.ongoing_recordings.get(&id) {
+                            Some(recording) => {
+                                let recordings_folder = recording.manifest_path.parent().expect("a parent");
+
+                                let files = recording
+                                    .manifest
+                                    .files
+                                    .iter()
+                                    .map(|file| recordings_folder.join(&file.file_name))
+                                    .collect();
+
+                                let _ = channel.send(files);
+                            }
+                            None => {
+                                warn!(%id, "No recording found for provided ID");
+                            }
                         }
                     }
                 }

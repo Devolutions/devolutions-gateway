@@ -21,21 +21,16 @@ use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    let router = Router::new()
+    Router::new()
         .route("/push/:id", get(jrec_push))
         .route("/delete/:id", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
         .route("/play", get(get_player))
-        .route("/play/*path", get(get_player));
-
-    if state.conf_handle.get_conf().debug.enable_unstable {
-        router.route("/shadow/:id/:filename", get(shadow_recording))
-    } else {
-        router
-    }
-    .with_state(state)
+        .route("/play/*path", get(get_player))
+        .route("/shadow/:id", get(shadow_recording))
+        .with_state(state)
 }
 
 #[derive(Deserialize)]
@@ -495,39 +490,35 @@ where
 }
 
 async fn shadow_recording(
-    State(DgwState {
-        recordings,
-        conf_handle,
-        ..
-    }): State<DgwState>,
-    extract::Path((id, filename)): extract::Path<(Uuid, String)>,
+    State(DgwState { recordings, .. }): State<DgwState>,
+    extract::Path(id): extract::Path<Uuid>,
     JrecToken(claims): JrecToken,
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err(HttpError::bad_request().msg("invalid file name"));
-    }
-
     if id != claims.jet_aid {
         return Err(HttpError::forbidden().msg("not allowed to read this recording"));
     }
 
-    let path = conf_handle
-        .get_conf()
-        .recording_path
-        .join(id.to_string())
-        .join(filename);
-
-    if !path.exists() || !path.is_file() {
-        return Err(HttpError::not_found().msg("requested file does not exist"));
+    if !recordings.active_recordings.contains(id) {
+        return Err(HttpError::not_found().msg("no active recording found for the specified ID"));
     }
 
-    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(|e| {
-        error!(error = format!("{e:#}"), "failed to subscribe to active recording");
-        HttpError::internal().msg("failed to subscribe to active recording")
-    })?;
+    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(
+        HttpError::internal()
+            .with_msg("failed to subscribe to active recording")
+            .err(),
+    )?;
 
-    crate::streaming::stream_file(path, ws, notify, recordings, id)
+    let recording_files = recordings
+        .list_files(id)
+        .await
+        .map_err(HttpError::internal().with_msg("failed to get recording files").err())?;
+
+    let recording_path = recording_files
+        .last()
+        .ok_or_else(|| HttpError::internal().msg("no recording file found"))?;
+
+    crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
         .await
         .map_err(HttpError::internal().err())
 }
