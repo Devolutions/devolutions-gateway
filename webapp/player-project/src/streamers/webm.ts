@@ -1,15 +1,10 @@
-import '../generated/webm-stream-player.js';
-import { ShadowPlayer } from '../generated/webm-stream-player.js';
-import { showNotification } from '../notification.js';
+import { ShadowPlayer } from '../../../shadow-player/src/streamer';
+import { GatewayAccessApi } from '../gateway';
+import { showNotification } from '../notification';
 
-/**
- * Handles the playback of WebM files using the provided gateway API.
- *
- * @param {string} gatewayAccessUrl - The URL to access the gateway for video streaming.
- */
-export async function handleWebm(gatewayAccessApi) {
+export async function handleWebm(gatewayAccessApi: GatewayAccessApi) {
   // Create element with correct spelling
-  const shadowPlayer = /** @type {ShadowPlayer} */ (document.createElement('shadow-player'));
+  const shadowPlayer = document.createElement('shadow-player') as ShadowPlayer;
 
   // Append to DOM
   document.body.appendChild(shadowPlayer);
