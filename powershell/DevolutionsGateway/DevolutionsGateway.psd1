@@ -7,7 +7,7 @@
     RootModule = 'DevolutionsGateway.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2024.3.6'
+    ModuleVersion = '2025.1.0'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Desktop', 'Core'
