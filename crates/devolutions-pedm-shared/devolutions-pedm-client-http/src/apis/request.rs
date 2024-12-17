@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 
+use futures;
 use futures::future::*;
 use futures::Future;
+use hyper;
 use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
-use {futures, hyper, serde, serde_json};
+use serde;
+use serde_json;
 
 use super::{configuration, Error};
 
