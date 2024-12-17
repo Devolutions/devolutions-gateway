@@ -348,10 +348,6 @@ jobs:
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
           $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
 
-          Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
-            Remove-Item $_.FullName -Force
-          }
-
           ./ci/tlk.ps1 package -Product gateway -PackageOption generate
 
       - name: Regenerate Agent MSI
