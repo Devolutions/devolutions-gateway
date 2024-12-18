@@ -792,7 +792,7 @@ jobs:
           - tree-borrows
         include:
           - mode: tree-borrows
-            miri-flags: -Zmiri-tree-borrows
+            miriflags: -Zmiri-tree-borrows
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -807,7 +807,9 @@ jobs:
 
       - name: Run tests
         shell: pwsh
-        run: cargo +nightly test ${{ matrix.miri-flags }} --target ${{ matrix.target }} -p win-api-wrappers
+        run: |
+          $Env:MIRIFLAGS = "${{ matrix.miriflags }}"
+          cargo +nightly test --target ${{ matrix.target }} -p win-api-wrappers
 
   success:
     name: Success
