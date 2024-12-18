@@ -218,19 +218,48 @@ jobs:
 
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Sign PowerShell module contents
+        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          . .\ci\PSModuleHelpers.ps1
+          $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
+          $PSModuleZipFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.zip" | Select-Object -First 1
+          Expand-Archive -Path $PSModuleZipFilePath -Destination $PSModuleOutputPath
+          $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
+
+          $IncludePattern = @('*.ps1', '*.psd1', '*.psm1', 'DevolutionsGateway.dll')
+          Get-ChildItem -Path $PSModuleOutputPath -Recurse -Include $IncludePattern | % {
+            $Params = @('sign',
+              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+              '-v')
+            AzureSignTool @Params $_.FullName
+          }
+
+          Remove-Item $PSModuleZipFilePath -ErrorAction SilentlyContinue | Out-Null
+          Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath -CompressionLevel Optimal
+
+          $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
+          New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
 
       - name: Sign executables
         if: matrix.os == 'windows' || matrix.os == 'macos'
         shell: pwsh
         run: |
-          $IncludePattern = switch ('${{ matrix.project }}') {
-            'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
-              'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe' }
-            'jetsocat' { 'jetsocat_*' }
-          }
+          $IncludePattern = @(switch ('${{ matrix.project }}') {
+            'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
+            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
+              'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'jetsocat' { @('jetsocat_*') }
+          })
           $ExcludePattern = "*.pdb"
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
@@ -319,10 +348,6 @@ jobs:
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
           $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
 
-          Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
-            Remove-Item $_.FullName -Force
-          }
-
           ./ci/tlk.ps1 package -Product gateway -PackageOption generate
 
       - name: Regenerate Agent MSI
@@ -381,6 +406,9 @@ jobs:
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption assemble
 
+          $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
+          Remove-Item $Env:DGATEWAY_PSMODULE_PATH -Recurse -ErrorAction SilentlyContinue | Out-Null
+
       - name: Repackage Agent
         if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
         shell: pwsh
@@ -389,6 +417,17 @@ jobs:
           $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption assemble
+
+          $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
+          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
+          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
+          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
+
+          @($Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH,
+            $Env:DAGENT_PEDM_SHELL_EXT_DLL, $Env:DAGENT_PEDM_SHELL_EXT_MSIX,
+            $Env:DAGENT_SESSION_EXECUTABLE) | ForEach-Object {
+            Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
+          }
 
       - name: Sign packages
         if: (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') && matrix.os == 'windows'
