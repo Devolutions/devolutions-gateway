@@ -572,12 +572,12 @@ class TlkRecipe
             # Generate a language transform
             & 'torch.exe' "$BaseMsi" "$LangMsi" "-o" "$Transform" | Out-Host
             # Embed the transform in the base MSI
-            & 'cscript.exe' "/nologo" "../Windows/WiSubStg.vbs" "$BaseMsi" "$Transform" "$($PackageLanguage.LCID)" | Out-Host
+            & 'cscript.exe' "/nologo" "$($this.SourcePath)/ci/WiSubStg.vbs" "$BaseMsi" "$Transform" "$($PackageLanguage.LCID)" | Out-Host
         }
 
         # Set the complete language list on the base MSI
         $LCIDs = ([TlkRecipe]::PackageLanguages | ForEach-Object { $_.LCID }) -join ','
-        & 'cscript.exe' "/nologo" "../Windows/WiLangId.vbs" "$BaseMsi" "Package" "$LCIDs" | Out-Host
+        & 'cscript.exe' "/nologo" "$($this.SourcePath)/ci/WiLangId.vbs" "$BaseMsi" "Package" "$LCIDs" | Out-Host
 
         switch ($this.Product) {
             "gateway" {
