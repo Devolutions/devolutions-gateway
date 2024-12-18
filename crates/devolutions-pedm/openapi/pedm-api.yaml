@@ -435,6 +435,7 @@ components:
           type: string
     Id:
       type: string
+      format: uuid
     LaunchPayload:
       type: object
       required:
@@ -501,7 +502,7 @@ components:
               MaximumSeconds: 0
           $ref: '#/components/schemas/ElevationConfigurations'
         Id:
-          default: default
+          default: 00000000-0000-0000-0000-000000000000
           $ref: '#/components/schemas/Id'
         Name:
           default: Unnamed profile

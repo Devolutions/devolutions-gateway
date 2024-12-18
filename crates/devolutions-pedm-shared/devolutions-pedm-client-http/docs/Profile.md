@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 **default_elevation_kind** | Option<[**models::ElevationKind**](ElevationKind.md)> |  | [optional][default to Deny]
 **elevation_method** | Option<[**models::ElevationMethod**](ElevationMethod.md)> |  | [optional][default to LocalAdmin]
 **elevation_settings** | Option<[**models::ElevationConfigurations**](ElevationConfigurations.md)> |  | [optional][default to {Session={Enabled=false}, Temporary={Enabled=false, MaximumSeconds=0}}]
-**id** | Option<**String**> |  | [optional]
+**id** | Option<[**uuid::Uuid**](uuid::Uuid.md)> |  | [optional]
 **name** | Option<**String**> |  | [optional][default to Unnamed profile]
 **prompt_secure_desktop** | Option<**bool**> |  | [optional][default to true]
 

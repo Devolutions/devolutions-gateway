@@ -117,7 +117,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="user"></param>
         /// <returns></returns>
-        void PolicyAssignmentsIdPut(string id, List<User> user);
+        void PolicyAssignmentsIdPut(Guid id, List<User> user);
 
         /// <summary>
         /// 
@@ -129,7 +129,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="user"></param>
         /// <returns>ApiResponse of Object(void)</returns>
-        ApiResponse<Object> PolicyAssignmentsIdPutWithHttpInfo(string id, List<User> user);
+        ApiResponse<Object> PolicyAssignmentsIdPutWithHttpInfo(Guid id, List<User> user);
         /// <summary>
         /// 
         /// </summary>
@@ -168,8 +168,8 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>List&lt;string&gt;</returns>
-        List<string> PolicyProfilesGet();
+        /// <returns>List&lt;Guid&gt;</returns>
+        List<Guid> PolicyProfilesGet();
 
         /// <summary>
         /// 
@@ -178,15 +178,15 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>ApiResponse of List&lt;string&gt;</returns>
-        ApiResponse<List<string>> PolicyProfilesGetWithHttpInfo();
+        /// <returns>ApiResponse of List&lt;Guid&gt;</returns>
+        ApiResponse<List<Guid>> PolicyProfilesGetWithHttpInfo();
         /// <summary>
         /// 
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns></returns>
-        void PolicyProfilesIdDelete(string id);
+        void PolicyProfilesIdDelete(Guid id);
 
         /// <summary>
         /// 
@@ -197,14 +197,14 @@ namespace Devolutions.Pedm.Client.Api
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns>ApiResponse of Object(void)</returns>
-        ApiResponse<Object> PolicyProfilesIdDeleteWithHttpInfo(string id);
+        ApiResponse<Object> PolicyProfilesIdDeleteWithHttpInfo(Guid id);
         /// <summary>
         /// 
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns>Profile</returns>
-        Profile PolicyProfilesIdGet(string id);
+        Profile PolicyProfilesIdGet(Guid id);
 
         /// <summary>
         /// 
@@ -215,7 +215,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns>ApiResponse of Profile</returns>
-        ApiResponse<Profile> PolicyProfilesIdGetWithHttpInfo(string id);
+        ApiResponse<Profile> PolicyProfilesIdGetWithHttpInfo(Guid id);
         /// <summary>
         /// 
         /// </summary>
@@ -223,7 +223,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="profile"></param>
         /// <returns></returns>
-        void PolicyProfilesIdPut(string id, Profile profile);
+        void PolicyProfilesIdPut(Guid id, Profile profile);
 
         /// <summary>
         /// 
@@ -235,7 +235,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="profile"></param>
         /// <returns>ApiResponse of Object(void)</returns>
-        ApiResponse<Object> PolicyProfilesIdPutWithHttpInfo(string id, Profile profile);
+        ApiResponse<Object> PolicyProfilesIdPutWithHttpInfo(Guid id, Profile profile);
         /// <summary>
         /// 
         /// </summary>
@@ -415,7 +415,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="user"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task PolicyAssignmentsIdPutAsync(string id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task PolicyAssignmentsIdPutAsync(Guid id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// 
@@ -428,7 +428,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="user"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> PolicyAssignmentsIdPutWithHttpInfoAsync(string id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ApiResponse<Object>> PolicyAssignmentsIdPutWithHttpInfoAsync(Guid id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         /// <summary>
         /// 
         /// </summary>
@@ -481,8 +481,8 @@ namespace Devolutions.Pedm.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of List&lt;string&gt;</returns>
-        System.Threading.Tasks.Task<List<string>> PolicyProfilesGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of List&lt;Guid&gt;</returns>
+        System.Threading.Tasks.Task<List<Guid>> PolicyProfilesGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// 
@@ -492,8 +492,8 @@ namespace Devolutions.Pedm.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse (List&lt;string&gt;)</returns>
-        System.Threading.Tasks.Task<ApiResponse<List<string>>> PolicyProfilesGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of ApiResponse (List&lt;Guid&gt;)</returns>
+        System.Threading.Tasks.Task<ApiResponse<List<Guid>>> PolicyProfilesGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         /// <summary>
         /// 
         /// </summary>
@@ -504,7 +504,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task PolicyProfilesIdDeleteAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task PolicyProfilesIdDeleteAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// 
@@ -516,7 +516,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> PolicyProfilesIdDeleteWithHttpInfoAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ApiResponse<Object>> PolicyProfilesIdDeleteWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         /// <summary>
         /// 
         /// </summary>
@@ -527,7 +527,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Profile</returns>
-        System.Threading.Tasks.Task<Profile> PolicyProfilesIdGetAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<Profile> PolicyProfilesIdGetAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// 
@@ -539,7 +539,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Profile)</returns>
-        System.Threading.Tasks.Task<ApiResponse<Profile>> PolicyProfilesIdGetWithHttpInfoAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ApiResponse<Profile>> PolicyProfilesIdGetWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         /// <summary>
         /// 
         /// </summary>
@@ -551,7 +551,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="profile"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        System.Threading.Tasks.Task PolicyProfilesIdPutAsync(string id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task PolicyProfilesIdPutAsync(Guid id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// 
@@ -564,7 +564,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="profile"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        System.Threading.Tasks.Task<ApiResponse<Object>> PolicyProfilesIdPutWithHttpInfoAsync(string id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ApiResponse<Object>> PolicyProfilesIdPutWithHttpInfoAsync(Guid id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         /// <summary>
         /// 
         /// </summary>
@@ -1383,7 +1383,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="user"></param>
         /// <returns></returns>
-        public void PolicyAssignmentsIdPut(string id, List<User> user)
+        public void PolicyAssignmentsIdPut(Guid id, List<User> user)
         {
             PolicyAssignmentsIdPutWithHttpInfo(id, user);
         }
@@ -1395,12 +1395,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="user"></param>
         /// <returns>ApiResponse of Object(void)</returns>
-        public Devolutions.Pedm.Client.Client.ApiResponse<Object> PolicyAssignmentsIdPutWithHttpInfo(string id, List<User> user)
+        public Devolutions.Pedm.Client.Client.ApiResponse<Object> PolicyAssignmentsIdPutWithHttpInfo(Guid id, List<User> user)
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyAssignmentsIdPut");
-
             // verify the required parameter 'user' is set
             if (user == null)
                 throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'user' when calling DefaultApi->PolicyAssignmentsIdPut");
@@ -1446,7 +1442,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="user"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task PolicyAssignmentsIdPutAsync(string id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task PolicyAssignmentsIdPutAsync(Guid id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             await PolicyAssignmentsIdPutWithHttpInfoAsync(id, user, cancellationToken).ConfigureAwait(false);
         }
@@ -1459,12 +1455,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="user"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Object>> PolicyAssignmentsIdPutWithHttpInfoAsync(string id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Object>> PolicyAssignmentsIdPutWithHttpInfoAsync(Guid id, List<User> user, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyAssignmentsIdPut");
-
             // verify the required parameter 'user' is set
             if (user == null)
                 throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'user' when calling DefaultApi->PolicyAssignmentsIdPut");
@@ -1725,10 +1717,10 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>List&lt;string&gt;</returns>
-        public List<string> PolicyProfilesGet()
+        /// <returns>List&lt;Guid&gt;</returns>
+        public List<Guid> PolicyProfilesGet()
         {
-            Devolutions.Pedm.Client.Client.ApiResponse<List<string>> localVarResponse = PolicyProfilesGetWithHttpInfo();
+            Devolutions.Pedm.Client.Client.ApiResponse<List<Guid>> localVarResponse = PolicyProfilesGetWithHttpInfo();
             return localVarResponse.Data;
         }
 
@@ -1736,8 +1728,8 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>ApiResponse of List&lt;string&gt;</returns>
-        public Devolutions.Pedm.Client.Client.ApiResponse<List<string>> PolicyProfilesGetWithHttpInfo()
+        /// <returns>ApiResponse of List&lt;Guid&gt;</returns>
+        public Devolutions.Pedm.Client.Client.ApiResponse<List<Guid>> PolicyProfilesGetWithHttpInfo()
         {
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
@@ -1758,7 +1750,7 @@ namespace Devolutions.Pedm.Client.Api
 
 
             // make the HTTP request
-            var localVarResponse = this.Client.Get<List<string>>("/policy/profiles", localVarRequestOptions, this.Configuration);
+            var localVarResponse = this.Client.Get<List<Guid>>("/policy/profiles", localVarRequestOptions, this.Configuration);
 
             if (this.ExceptionFactory != null)
             {
@@ -1774,10 +1766,10 @@ namespace Devolutions.Pedm.Client.Api
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of List&lt;string&gt;</returns>
-        public async System.Threading.Tasks.Task<List<string>> PolicyProfilesGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of List&lt;Guid&gt;</returns>
+        public async System.Threading.Tasks.Task<List<Guid>> PolicyProfilesGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            Devolutions.Pedm.Client.Client.ApiResponse<List<string>> localVarResponse = await PolicyProfilesGetWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
+            Devolutions.Pedm.Client.Client.ApiResponse<List<Guid>> localVarResponse = await PolicyProfilesGetWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
         }
 
@@ -1786,8 +1778,8 @@ namespace Devolutions.Pedm.Client.Api
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse (List&lt;string&gt;)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<List<string>>> PolicyProfilesGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of ApiResponse (List&lt;Guid&gt;)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<List<Guid>>> PolicyProfilesGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
 
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
@@ -1811,7 +1803,7 @@ namespace Devolutions.Pedm.Client.Api
 
             // make the HTTP request
 
-            var localVarResponse = await this.AsynchronousClient.GetAsync<List<string>>("/policy/profiles", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+            var localVarResponse = await this.AsynchronousClient.GetAsync<List<Guid>>("/policy/profiles", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
 
             if (this.ExceptionFactory != null)
             {
@@ -1828,7 +1820,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns></returns>
-        public void PolicyProfilesIdDelete(string id)
+        public void PolicyProfilesIdDelete(Guid id)
         {
             PolicyProfilesIdDeleteWithHttpInfo(id);
         }
@@ -1839,12 +1831,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns>ApiResponse of Object(void)</returns>
-        public Devolutions.Pedm.Client.Client.ApiResponse<Object> PolicyProfilesIdDeleteWithHttpInfo(string id)
+        public Devolutions.Pedm.Client.Client.ApiResponse<Object> PolicyProfilesIdDeleteWithHttpInfo(Guid id)
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyProfilesIdDelete");
-
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
             string[] _contentTypes = new string[] {
@@ -1883,7 +1871,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task PolicyProfilesIdDeleteAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task PolicyProfilesIdDeleteAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             await PolicyProfilesIdDeleteWithHttpInfoAsync(id, cancellationToken).ConfigureAwait(false);
         }
@@ -1895,12 +1883,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Object>> PolicyProfilesIdDeleteWithHttpInfoAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Object>> PolicyProfilesIdDeleteWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyProfilesIdDelete");
-
 
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
@@ -1941,7 +1925,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns>Profile</returns>
-        public Profile PolicyProfilesIdGet(string id)
+        public Profile PolicyProfilesIdGet(Guid id)
         {
             Devolutions.Pedm.Client.Client.ApiResponse<Profile> localVarResponse = PolicyProfilesIdGetWithHttpInfo(id);
             return localVarResponse.Data;
@@ -1953,12 +1937,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id"></param>
         /// <returns>ApiResponse of Profile</returns>
-        public Devolutions.Pedm.Client.Client.ApiResponse<Profile> PolicyProfilesIdGetWithHttpInfo(string id)
+        public Devolutions.Pedm.Client.Client.ApiResponse<Profile> PolicyProfilesIdGetWithHttpInfo(Guid id)
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyProfilesIdGet");
-
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
             string[] _contentTypes = new string[] {
@@ -1997,7 +1977,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of Profile</returns>
-        public async System.Threading.Tasks.Task<Profile> PolicyProfilesIdGetAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Profile> PolicyProfilesIdGetAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             Devolutions.Pedm.Client.Client.ApiResponse<Profile> localVarResponse = await PolicyProfilesIdGetWithHttpInfoAsync(id, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
@@ -2010,12 +1990,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (Profile)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Profile>> PolicyProfilesIdGetWithHttpInfoAsync(string id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Profile>> PolicyProfilesIdGetWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyProfilesIdGet");
-
 
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
@@ -2057,7 +2033,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="profile"></param>
         /// <returns></returns>
-        public void PolicyProfilesIdPut(string id, Profile profile)
+        public void PolicyProfilesIdPut(Guid id, Profile profile)
         {
             PolicyProfilesIdPutWithHttpInfo(id, profile);
         }
@@ -2069,12 +2045,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="id"></param>
         /// <param name="profile"></param>
         /// <returns>ApiResponse of Object(void)</returns>
-        public Devolutions.Pedm.Client.Client.ApiResponse<Object> PolicyProfilesIdPutWithHttpInfo(string id, Profile profile)
+        public Devolutions.Pedm.Client.Client.ApiResponse<Object> PolicyProfilesIdPutWithHttpInfo(Guid id, Profile profile)
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyProfilesIdPut");
-
             // verify the required parameter 'profile' is set
             if (profile == null)
                 throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'profile' when calling DefaultApi->PolicyProfilesIdPut");
@@ -2120,7 +2092,7 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="profile"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
-        public async System.Threading.Tasks.Task PolicyProfilesIdPutAsync(string id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task PolicyProfilesIdPutAsync(Guid id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             await PolicyProfilesIdPutWithHttpInfoAsync(id, profile, cancellationToken).ConfigureAwait(false);
         }
@@ -2133,12 +2105,8 @@ namespace Devolutions.Pedm.Client.Api
         /// <param name="profile"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Object>> PolicyProfilesIdPutWithHttpInfoAsync(string id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<Object>> PolicyProfilesIdPutWithHttpInfoAsync(Guid id, Profile profile, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            // verify the required parameter 'id' is set
-            if (id == null)
-                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'id' when calling DefaultApi->PolicyProfilesIdPut");
-
             // verify the required parameter 'profile' is set
             if (profile == null)
                 throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'profile' when calling DefaultApi->PolicyProfilesIdPut");
