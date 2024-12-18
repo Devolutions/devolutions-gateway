@@ -505,7 +505,7 @@ impl Snapshot {
         // SAFETY: No preconditions. Flags or process ID cannot create scenarios where undefined behavior happens.
         let handle = unsafe { CreateToolhelp32Snapshot(flags, process_id.unwrap_or(0))? };
 
-        // SAFETY: We created the handle just above and are responsibles for closing it.
+        // SAFETY: We created the handle just above and are responsible for closing it.
         let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
 
         Ok(Self { handle })

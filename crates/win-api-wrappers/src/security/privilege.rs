@@ -108,6 +108,8 @@ pub struct TokenPrivilegesDstDef;
 // SAFETY:
 // - The offests are in bounds of the container (ensured via the offset_of! macro).
 // - The container (TOKEN_PRIVILEGES) is not #[repr(packet)].
+// - The container (TOKEN_PRIVILEGES) is #[repr(C)].
+// - The array is defined last and its hardcoded size if of 1.
 unsafe impl Win32DstDef for TokenPrivilegesDstDef {
     type Container = Security::TOKEN_PRIVILEGES;
 

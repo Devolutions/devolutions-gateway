@@ -7,13 +7,17 @@ use crate::raw_buffer::{InitedBuffer, RawBuffer};
 /// # Safety
 ///
 /// - The offsets must be in bound of the container.
-/// - The container must not be `#[repr(packed)]`.
+/// - The container must be annotated with `#[repr(C)]`
+/// - The container must not be annotated `#[repr(packed)]`.
+/// - The array is defined last in the struct.
+/// - The array defined in the container must be an array exactly of length 1,
+///   otherwise the Drop implementation will attempt to drop some items twice.
 pub unsafe trait Win32DstDef {
     type Container;
 
     type Item;
 
-    type ItemCount: TryInto<usize, Error = core::num::TryFromIntError> + Copy;
+    type ItemCount: TryInto<usize> + Copy;
 
     /// Offset to the item count, in bounds of the container.
     const ITEM_COUNT_OFFSET: usize;
@@ -29,15 +33,21 @@ pub unsafe trait Win32DstDef {
 }
 
 /// Wrapper over a Win32-style dynamically sized type.
-pub struct Win32Dst<Def: Win32DstDef> {
+pub struct Win32Dst<Def>
+where
+    Def: Win32DstDef,
+{
     /// INVARIANT: The array holds exactly `Def::ItemCount` elements.
     /// INVARIANT: `Def::ITEM_COUNT_OFFSET` is in bounds of the allocated container.
     /// INVARIANT: `Def::ARRAY_OFFSET` is in bounds of the allocated container.
-    /// INVARIANT: `Def::Container` is not #[repr(packed)], so the fields are properly aligned when reading.
+    /// INVARIANT: `Def::Container` is #[repr(C)], and not #[repr(packed)], so the fields are properly aligned when reading.
     inner: InitedBuffer<Def::Container>,
 }
 
-impl<Def: Win32DstDef> Win32Dst<Def> {
+impl<Def> Win32Dst<Def>
+where
+    Def: Win32DstDef,
+{
     pub fn new(first_item: Def::Item) -> Self {
         use core::alloc::Layout;
 
@@ -89,7 +99,7 @@ impl<Def: Win32DstDef> Win32Dst<Def> {
 
         // SAFETY:
         // - We ensure new_size is valid just above.
-        // - We immediately write the new value in-place, keeping the underlying TOKEN_PRIVILEGES valid.
+        // - We immediately write the new value in-place, keeping the underlying object valid.
         unsafe { raw_buffer.realloc(new_size).expect("OOM") };
 
         // From here, the invariants of InitedBuffer are not holding anymore -->
@@ -103,7 +113,7 @@ impl<Def: Win32DstDef> Win32Dst<Def> {
         let new_item_ptr = unsafe {
             array_ptr
                 .cast::<Def::Item>()
-                .add(current_count.try_into().expect("fit into usize"))
+                .add(current_count.try_into().ok().expect("count is too big"))
         };
 
         // SAFETY: The pointed memory is valid for writes and is properly aligned.
@@ -128,11 +138,12 @@ impl<Def: Win32DstDef> Win32Dst<Def> {
         // SAFETY: Per invariants, the offset must be in bounds of the allocated object.
         let count_ptr = unsafe { self.inner.as_ptr().byte_add(Def::ITEM_COUNT_OFFSET) };
 
+        // SAFETY: Per invariants, the data at the offset ITEM_COUNT_OFFSET is a valid ItemCount value.
         unsafe { count_ptr.cast::<Def::ItemCount>().read() }
     }
 
     pub fn as_slice(&self) -> &[Def::Item] {
-        let count = self.count().try_into().expect("fit into usize");
+        let count = self.count().try_into().ok().expect("count is too big");
 
         // SAFETY: Per invariants, the offset must be in bounds of the allocated object.
         let array_ptr = unsafe { self.inner.as_ptr().byte_add(Def::ARRAY_OFFSET) };
@@ -142,55 +153,146 @@ impl<Def: Win32DstDef> Win32Dst<Def> {
     }
 }
 
+impl<Def> Drop for Win32Dst<Def>
+where
+    Def: Win32DstDef,
+{
+    fn drop(&mut self) {
+        use core::ptr::drop_in_place;
+
+        let current_count = self.count().try_into().ok().expect("count is too big");
+
+        let raw_buffer = self.inner.as_inner_mut();
+
+        // SAFETY: Per invariants, the offset is in bounds of the container.
+        let array_ptr = unsafe { raw_buffer.as_mut_ptr().byte_add(Def::ARRAY_OFFSET) };
+
+        // We need to manually drop all the items past the first element of the array.
+        for idx in 1..current_count {
+            // SAFETY:
+            // - The index is bounded by the allocated object.
+            // - current_count is a reasonable value as per invariants.
+            let item_ptr = unsafe { array_ptr.cast::<Def::Item>().add(idx) };
+
+            // SAFETY:
+            // - item_ptr is valid for both reads and writes.
+            // - item_ptr is properly aligned.
+            // - item_ptr is nonnull.
+            // - We assume the safety invariants which may be associated to the item are properly upheld.
+            // - The RawBuffer is owned by us, and no-one else can access it (unless unsafe code is used).
+            // - As per invariants, the container is defined as #[repr(C)].
+            unsafe { drop_in_place::<Def::Item>(item_ptr) };
+        }
+
+        // Finally, we drop the container itself.
+        // This includes the first item.
+
+        // SAFETY: Safe for the same reason it is safe for the items.
+        unsafe { drop_in_place::<Def::Container>(self.inner.as_mut_ptr()) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    //! Ideally, these tests should be run under Miri to check for UBs and memory leaks.
+
     use std::mem;
 
     use super::*;
 
-    struct MockContainer {
-        count: u32,
-        array: [u128; 1],
-    }
+    #[test]
+    fn pod_item() {
+        let mut list = U128List::new(u128::MAX);
 
-    struct MockDef;
+        list.push(u128::MIN);
 
-    unsafe impl Win32DstDef for MockDef {
-        type Container = MockContainer;
+        for item in list.as_slice() {
+            println!("{item}")
+        }
 
-        type Item = u128;
+        assert_eq!(list.as_slice().len(), 2);
 
-        type ItemCount = u32;
+        #[repr(C)]
+        struct U128Container {
+            count: u32,
+            array: [u128; 1],
+        }
 
-        const ITEM_COUNT_OFFSET: usize = mem::offset_of!(MockContainer, count);
+        struct U128ListDef;
 
-        const ARRAY_OFFSET: usize = mem::offset_of!(MockContainer, array);
+        unsafe impl Win32DstDef for U128ListDef {
+            type Container = U128Container;
 
-        fn new_container(first_item: Self::Item) -> Self::Container {
-            MockContainer {
-                count: 1,
-                array: [first_item],
+            type Item = u128;
+
+            type ItemCount = u32;
+
+            const ITEM_COUNT_OFFSET: usize = mem::offset_of!(U128Container, count);
+
+            const ARRAY_OFFSET: usize = mem::offset_of!(U128Container, array);
+
+            fn new_container(first_item: Self::Item) -> Self::Container {
+                U128Container {
+                    count: 1,
+                    array: [first_item],
+                }
+            }
+
+            fn increment_count(count: Self::ItemCount) -> Self::ItemCount {
+                count + 1
             }
         }
 
-        fn increment_count(count: Self::ItemCount) -> Self::ItemCount {
-            count + 1
-        }
+        type U128List = Win32Dst<U128ListDef>;
     }
 
-    type MockDst = Win32Dst<MockDef>;
-
-    // Ideally run with miri.
     #[test]
-    fn smoke() {
-        let mut dst = MockDst::new(u128::MAX);
+    fn allocated_item() {
+        let mut list = StringList::new("hello".to_owned());
 
-        dst.push(u128::MIN);
+        list.push("world".to_owned());
+        list.push("foo".to_owned());
+        list.push("bar".to_owned());
 
-        for item in dst.as_slice() {
-            core::hint::black_box(item);
+        for item in list.as_slice() {
+            println!("{item}")
         }
 
-        assert_eq!(dst.as_slice().len(), 2);
+        assert_eq!(list.as_slice().len(), 4);
+
+        #[repr(C)]
+        struct StringContainer {
+            count: u8,
+            _some_allocated_metadata: String,
+            array: [String; 1],
+        }
+
+        struct StringListDef;
+
+        unsafe impl Win32DstDef for StringListDef {
+            type Container = StringContainer;
+
+            type Item = String;
+
+            type ItemCount = u8;
+
+            const ITEM_COUNT_OFFSET: usize = mem::offset_of!(StringContainer, count);
+
+            const ARRAY_OFFSET: usize = mem::offset_of!(StringContainer, array);
+
+            fn new_container(first_item: Self::Item) -> Self::Container {
+                StringContainer {
+                    count: 1,
+                    _some_allocated_metadata: "some_value".to_owned(),
+                    array: [first_item],
+                }
+            }
+
+            fn increment_count(count: Self::ItemCount) -> Self::ItemCount {
+                count + 1
+            }
+        }
+
+        type StringList = Win32Dst<StringListDef>;
     }
 }

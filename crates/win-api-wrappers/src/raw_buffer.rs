@@ -36,6 +36,7 @@ impl RawBuffer {
     ///
     /// See [`GlobalAlloc::alloc_zeroed`].
     pub unsafe fn alloc_zeroed(layout: Layout) -> Result<Self, AllocError> {
+        // SAFETY: The safety contract for alloc must be upheld by the caller.
         let ptr = unsafe { alloc_zeroed(layout) };
 
         if let Some(ptr) = NonNull::new(ptr) {
@@ -57,6 +58,10 @@ impl RawBuffer {
     ///   does not overflow `isize` (i.e., the rounded value must be less than or
     ///   equal to `isize::MAX`).
     pub unsafe fn realloc(&mut self, new_size: usize) -> Result<(), AllocError> {
+        // SAFETY:
+        // - The caller must ensure `new_size` is well-formed.
+        // - The layout is the same one used when the memory was allocated.
+        // - The pointer is the one returned by alloc_zeroed or a previous call to realloc.
         let new_ptr = unsafe { realloc(self.ptr.as_ptr(), self.layout, new_size) };
 
         if let Some(new_ptr) = NonNull::new(new_ptr) {
@@ -80,6 +85,7 @@ impl RawBuffer {
     ///
     /// The underlying buffer must hold a valid, initialized `T`.
     pub const unsafe fn as_ref_cast<T>(&self) -> &T {
+        // SAFETY: The caller must ensure the underlying buffer holds a valid, initialized T.
         unsafe { self.ptr.cast::<T>().as_ref() }
     }
 
@@ -89,6 +95,7 @@ impl RawBuffer {
     ///
     /// The underlying buffer must hold a valid, initialized `T`.
     pub unsafe fn as_mut_cast<T>(&mut self) -> &mut T {
+        // SAFETY: The caller must ensure the underlying buffer holds a valid, initialized T.
         unsafe { self.ptr.cast::<T>().as_mut() }
     }
 
@@ -136,6 +143,9 @@ pub struct InitedBuffer<T> {
     _marker: core::marker::PhantomData<*mut T>,
 }
 
+// The names triggering the warning are used in method names found in the std library as well.
+// In this case, author believes it makes sense to ignore this clippy warning.
+#[expect(clippy::should_implement_trait)]
 impl<T> InitedBuffer<T> {
     pub const fn as_inner(&self) -> &RawBuffer {
         &self.inner
