@@ -4,7 +4,8 @@
 //! A token is manually created using `NtCreateToken`, and the administrator group is specified.
 //! This has the advantage of granting the user a token for admin purposes we can control without a timespan where the user
 //! is free to do what they want in the admin group.
-use anyhow::Result;
+
+use anyhow::Context as _;
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
 use win_api_wrappers::raw::Win32::Foundation::LUID;
 use win_api_wrappers::raw::Win32::Security::{
@@ -13,10 +14,10 @@ use win_api_wrappers::raw::Win32::Security::{
 use win_api_wrappers::raw::Win32::System::SystemServices::{
     SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
 };
-use win_api_wrappers::security::privilege::default_admin_privileges;
+use win_api_wrappers::security::privilege::DEFAULT_ADMIN_PRIVILEGES;
 use win_api_wrappers::token::Token;
 
-use super::Elevator;
+use crate::elevator::Elevator;
 
 pub(crate) struct LocalAdminElevator {
     source: TOKEN_SOURCE,
@@ -42,7 +43,7 @@ impl LocalAdminElevator {
 }
 
 impl Elevator for LocalAdminElevator {
-    fn elevate_token(&self, token: &Token) -> Result<Token> {
+    fn elevate_token(&self, token: &Token) -> anyhow::Result<Token> {
         let stats = token.statistics()?;
 
         let owner_sid = Sid::from_well_known(WinBuiltinAdministratorsSid, None)?;
@@ -71,15 +72,21 @@ impl Elevator for LocalAdminElevator {
             stats.ExpirationTime,
             &token.sid_and_attributes()?,
             &groups,
-            default_admin_privileges(),
+            &DEFAULT_ADMIN_PRIVILEGES,
             &owner_sid,
             &token.primary_group()?,
             token.default_dacl()?.as_ref(),
             &self.source,
-        )?;
+        )
+        .context("create token")?;
 
-        admin_token.set_session_id(token.session_id()?)?;
-        admin_token.set_mandatory_policy(token.mandatory_policy()?)?;
+        admin_token
+            .set_session_id(token.session_id()?)
+            .context("set session ID on admin token")?;
+
+        admin_token
+            .set_mandatory_policy(token.mandatory_policy()?)
+            .context("set mandatory policy on admin token")?;
 
         Ok(admin_token)
     }

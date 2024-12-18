@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::mem::MaybeUninit;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{ptr, slice};
@@ -457,7 +458,7 @@ pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>
 }
 
 pub struct Snapshot {
-    handle: Handle,
+    handle: OwnedHandle,
 }
 
 pub struct ProcessIdIterator<'a> {
@@ -490,8 +491,10 @@ impl Iterator for ProcessIdIterator<'_> {
             Process32Next
         };
 
+        let handle = HANDLE(self.snapshot.handle.as_raw_handle());
+
         // SAFETY: Only precondition is entry's `dwSize` being set correctly, which is done in `ProcessIdIterator::new`.
-        unsafe { iter_fn(self.snapshot.handle.raw(), &mut self.entry) }.ok()?;
+        unsafe { iter_fn(handle, &mut self.entry) }.ok()?;
 
         Some(self.entry.th32ProcessID)
     }
@@ -499,10 +502,11 @@ impl Iterator for ProcessIdIterator<'_> {
 
 impl Snapshot {
     pub fn new(flags: CREATE_TOOLHELP_SNAPSHOT_FLAGS, process_id: Option<u32>) -> anyhow::Result<Self> {
-        // SAFETY: No preconditions. Flags or process ID cannot create scenarios where unsafe behavior happens.
+        // SAFETY: No preconditions. Flags or process ID cannot create scenarios where undefined behavior happens.
         let handle = unsafe { CreateToolhelp32Snapshot(flags, process_id.unwrap_or(0))? };
-        // SAFETY: We created the handle just above and are responsibles for closing it ourselves.
-        let handle = unsafe { Handle::new_owned(handle)? };
+
+        // SAFETY: We created the handle just above and are responsible for closing it.
+        let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
 
         Ok(Self { handle })
     }

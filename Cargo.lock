@@ -6860,6 +6860,7 @@ dependencies = [
  "thiserror 1.0.68",
  "tracing",
  "uuid",
+ "widestring 1.1.0",
  "windows 0.58.0",
 ]
 

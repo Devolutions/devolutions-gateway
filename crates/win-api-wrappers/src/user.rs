@@ -1,5 +1,6 @@
 use windows::core::PWSTR;
-use windows::Win32::{Foundation::HINSTANCE, UI::WindowsAndMessaging::LoadStringW};
+use windows::Win32::Foundation::HINSTANCE;
+use windows::Win32::UI::WindowsAndMessaging::LoadStringW;
 
 pub fn load_string(hinstance: HINSTANCE, resource_id: u32) -> anyhow::Result<Option<String>, windows::core::Error> {
     let mut resource_ptr: PWSTR = PWSTR::null();

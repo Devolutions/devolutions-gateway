@@ -6,8 +6,8 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use chrono::Local;
 use devolutions_pedm_shared::policy::{ElevationResult, User};
-use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead};
+use std::fs;
+use std::io::{self, BufRead as _};
 use walkdir::WalkDir;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Security::WinBuiltinUsersSid;
@@ -53,8 +53,10 @@ pub(crate) fn query_logs(user: Option<&User>) -> Result<Vec<ElevationResult>> {
     let log_path = user.map_or_else(|| Ok(log_path()), log_path_for_user)?;
 
     let mut logs = vec![];
+
     for entry in WalkDir::new(log_path).into_iter() {
         let entry = entry?;
+
         if !(entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext == "json")) {
             continue;
         }
