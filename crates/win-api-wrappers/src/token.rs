@@ -304,7 +304,7 @@ impl Token {
         Ok(info)
     }
 
-    /// Very thin wrapper above `GetTokenInformation`
+    /// Very thin wrapper around `GetTokenInformation`
     ///
     /// # Safety
     ///
