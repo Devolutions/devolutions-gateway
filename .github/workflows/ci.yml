@@ -803,7 +803,7 @@ jobs:
       - name: Prepare runner
         run: |
           rustup toolchain install nightly --component miri
-          rustup target add ${{ matrix.target }}
+          rustup target add --toolchain nightly ${{ matrix.target }}
 
       - name: Run tests
         shell: pwsh
