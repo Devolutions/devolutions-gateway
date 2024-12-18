@@ -778,19 +778,23 @@ jobs:
           cargo +nightly test --target x86_64-pc-windows-msvc -p win-api-wrappers -p devolutions-pedm
 
   winapi-miri:
-    name: Windows API miri tests [${{ matrix.target }}][${{ matrix.mode }}]
-    runs-on: ubuntu-20.04
+    name: Windows API miri tests [${{ matrix.os }}][${{ matrix.mode }}]
+    runs-on: ${{ matrix.runner }}
     needs: preflight
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-pc-windows-msvc
-          - x86_64-unknown-linux-gnu
+        os:
+          - windows
+          - linux
         mode:
           - stacked-borrow
           - tree-borrows
         include:
+          - os: windows
+            runner: windows-latest
+          - os: linux
+            runner: ubuntu-latest
           - mode: tree-borrows
             miriflags: -Zmiri-tree-borrows
 
@@ -803,13 +807,12 @@ jobs:
       - name: Prepare runner
         run: |
           rustup toolchain install nightly --component miri
-          rustup target add --toolchain nightly ${{ matrix.target }}
 
       - name: Run tests
         shell: pwsh
         run: |
           $Env:MIRIFLAGS = "${{ matrix.miriflags }}"
-          cargo +nightly test --target ${{ matrix.target }} -p win-api-wrappers
+          cargo +nightly test -p win-api-wrappers
 
   success:
     name: Success
