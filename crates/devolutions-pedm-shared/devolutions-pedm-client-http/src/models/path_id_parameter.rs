@@ -14,11 +14,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PathIdParameter {
     #[serde(rename = "id")]
-    pub id: String,
+    pub id: uuid::Uuid,
 }
 
 impl PathIdParameter {
-    pub fn new(id: String) -> PathIdParameter {
+    pub fn new(id: uuid::Uuid) -> PathIdParameter {
         PathIdParameter { id }
     }
 }

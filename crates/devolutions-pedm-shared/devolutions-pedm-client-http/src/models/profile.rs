@@ -20,7 +20,7 @@ pub struct Profile {
     #[serde(rename = "ElevationSettings", skip_serializing_if = "Option::is_none")]
     pub elevation_settings: Option<models::ElevationConfigurations>,
     #[serde(rename = "Id", skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: Option<uuid::Uuid>,
     #[serde(rename = "Name", skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(rename = "PromptSecureDesktop", skip_serializing_if = "Option::is_none")]

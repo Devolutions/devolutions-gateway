@@ -459,7 +459,7 @@ No authorization required
 
 <a id="policyassignmentsidput"></a>
 # **PolicyAssignmentsIdPut**
-> void PolicyAssignmentsIdPut (string id, List<User> user)
+> void PolicyAssignmentsIdPut (Guid id, List<User> user)
 
 
 
@@ -484,7 +484,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // string | 
+            var id = "id_example";  // Guid | 
             var user = new List<User>(); // List<User> | 
 
             try
@@ -522,7 +522,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **string** |  |  |
+| **id** | **Guid** |  |  |
 | **user** | [**List&lt;User&gt;**](User.md) |  |  |
 
 ### Return type
@@ -724,7 +724,7 @@ No authorization required
 
 <a id="policyprofilesget"></a>
 # **PolicyProfilesGet**
-> List&lt;string&gt; PolicyProfilesGet ()
+> List&lt;Guid&gt; PolicyProfilesGet ()
 
 
 
@@ -752,7 +752,7 @@ namespace Example
 
             try
             {
-                List<string> result = apiInstance.PolicyProfilesGet();
+                List<Guid> result = apiInstance.PolicyProfilesGet();
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
@@ -772,7 +772,7 @@ This returns an ApiResponse object which contains the response data, status code
 ```csharp
 try
 {
-    ApiResponse<List<string>> response = apiInstance.PolicyProfilesGetWithHttpInfo();
+    ApiResponse<List<Guid>> response = apiInstance.PolicyProfilesGetWithHttpInfo();
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
@@ -789,7 +789,7 @@ catch (ApiException e)
 This endpoint does not need any parameter.
 ### Return type
 
-**List<string>**
+**List<Guid>**
 
 ### Authorization
 
@@ -811,7 +811,7 @@ No authorization required
 
 <a id="policyprofilesiddelete"></a>
 # **PolicyProfilesIdDelete**
-> void PolicyProfilesIdDelete (string id)
+> void PolicyProfilesIdDelete (Guid id)
 
 
 
@@ -836,7 +836,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // string | 
+            var id = "id_example";  // Guid | 
 
             try
             {
@@ -873,7 +873,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **string** |  |  |
+| **id** | **Guid** |  |  |
 
 ### Return type
 
@@ -899,7 +899,7 @@ No authorization required
 
 <a id="policyprofilesidget"></a>
 # **PolicyProfilesIdGet**
-> Profile PolicyProfilesIdGet (string id)
+> Profile PolicyProfilesIdGet (Guid id)
 
 
 
@@ -924,7 +924,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // string | 
+            var id = "id_example";  // Guid | 
 
             try
             {
@@ -965,7 +965,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **string** |  |  |
+| **id** | **Guid** |  |  |
 
 ### Return type
 
@@ -991,7 +991,7 @@ No authorization required
 
 <a id="policyprofilesidput"></a>
 # **PolicyProfilesIdPut**
-> void PolicyProfilesIdPut (string id, Profile profile)
+> void PolicyProfilesIdPut (Guid id, Profile profile)
 
 
 
@@ -1016,7 +1016,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // string | 
+            var id = "id_example";  // Guid | 
             var profile = new Profile(); // Profile | 
 
             try
@@ -1054,7 +1054,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **string** |  |  |
+| **id** | **Guid** |  |  |
 | **profile** | [**Profile**](Profile.md) |  |  |
 
 ### Return type

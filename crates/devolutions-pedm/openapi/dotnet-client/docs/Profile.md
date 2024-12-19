@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 **DefaultElevationKind** | **ElevationKind** |  | [optional] 
 **ElevationMethod** | **ElevationMethod** |  | [optional] 
 **ElevationSettings** | [**ElevationConfigurations**](ElevationConfigurations.md) |  | [optional] 
-**Id** | **string** |  | [optional] 
+**Id** | **Guid** |  | [optional] 
 **Name** | **string** |  | [optional] [default to "Unnamed profile"]
 **PromptSecureDesktop** | **bool** |  | [optional] [default to true]
 

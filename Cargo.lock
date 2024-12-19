@@ -1312,6 +1312,7 @@ dependencies = [
  "serde_json",
  "tokio 1.42.0",
  "tower 0.3.1",
+ "uuid",
  "win-api-wrappers",
  "windows-registry 0.2.0",
 ]
@@ -5162,6 +5163,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

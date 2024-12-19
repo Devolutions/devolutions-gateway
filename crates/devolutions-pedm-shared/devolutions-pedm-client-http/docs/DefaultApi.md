@@ -163,7 +163,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **String** |  | [required] |
+**id** | **uuid::Uuid** |  | [required] |
 **user** | [**Vec<models::User>**](User.md) |  | [required] |
 
 ### Return type
@@ -237,7 +237,7 @@ No authorization required
 
 ## policy_profiles_get
 
-> Vec<String> policy_profiles_get()
+> Vec<uuid::Uuid> policy_profiles_get()
 
 
 ### Parameters
@@ -246,7 +246,7 @@ This endpoint does not need any parameter.
 
 ### Return type
 
-**Vec<String>**
+[**Vec<uuid::Uuid>**](uuid::Uuid.md)
 
 ### Authorization
 
@@ -270,7 +270,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **String** |  | [required] |
+**id** | **uuid::Uuid** |  | [required] |
 
 ### Return type
 
@@ -298,7 +298,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **String** |  | [required] |
+**id** | **uuid::Uuid** |  | [required] |
 
 ### Return type
 
@@ -326,7 +326,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **String** |  | [required] |
+**id** | **uuid::Uuid** |  | [required] |
 **profile** | [**Profile**](Profile.md) |  | [required] |
 
 ### Return type

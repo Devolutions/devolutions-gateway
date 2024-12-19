@@ -348,7 +348,7 @@ components:
         Profile:
           PromptSecureDesktop: true
           DefaultElevationKind: AutoApprove
-          Id: Id
+          Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
           ElevationSettings:
             Temporary:
               MaximumSeconds: 0
@@ -656,12 +656,13 @@ components:
       - Win32Error
     GetProfilesMeResponse:
       example:
-        Active: Active
+        Active: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
         Available:
         - null
         - null
       properties:
         Active:
+          format: uuid
           type: string
         Available:
           items:
@@ -682,6 +683,7 @@ components:
       - Sha1
       - Sha256
     Id:
+      format: uuid
       type: string
     LaunchPayload:
       example:
@@ -738,13 +740,15 @@ components:
       - ThreadId
     OptionalId:
       example:
-        Id: Id
+        Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
       properties:
         Id:
+          format: uuid
           type: string
     PathIdParameter:
       properties:
         id:
+          format: uuid
           type: string
       required:
       - id
@@ -752,7 +756,7 @@ components:
       example:
         PromptSecureDesktop: true
         DefaultElevationKind: AutoApprove
-        Id: Id
+        Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
         ElevationSettings:
           Temporary:
             MaximumSeconds: 0
@@ -769,6 +773,7 @@ components:
         ElevationSettings:
           $ref: '#/components/schemas/ElevationConfigurations'
         Id:
+          format: uuid
           type: string
         Name:
           default: Unnamed profile

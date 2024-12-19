@@ -52,7 +52,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="id">id.</param>
         /// <param name="name">name (default to &quot;Unnamed profile&quot;).</param>
         /// <param name="promptSecureDesktop">promptSecureDesktop (default to true).</param>
-        public Profile(ElevationKind? defaultElevationKind = default(ElevationKind?), ElevationMethod? elevationMethod = default(ElevationMethod?), ElevationConfigurations elevationSettings = default(ElevationConfigurations), string id = default(string), string name = @"Unnamed profile", bool promptSecureDesktop = true)
+        public Profile(ElevationKind? defaultElevationKind = default(ElevationKind?), ElevationMethod? elevationMethod = default(ElevationMethod?), ElevationConfigurations elevationSettings = default(ElevationConfigurations), Guid id = default(Guid), string name = @"Unnamed profile", bool promptSecureDesktop = true)
         {
             this.DefaultElevationKind = defaultElevationKind;
             this.ElevationMethod = elevationMethod;
@@ -73,7 +73,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets Id
         /// </summary>
         [DataMember(Name = "Id", EmitDefaultValue = false)]
-        public string Id { get; set; }
+        public Guid Id { get; set; }
 
         /// <summary>
         /// Gets or Sets Name

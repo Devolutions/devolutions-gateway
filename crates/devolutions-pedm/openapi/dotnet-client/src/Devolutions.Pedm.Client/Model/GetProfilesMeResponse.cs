@@ -41,7 +41,7 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="active">active.</param>
         /// <param name="available">available (required).</param>
-        public GetProfilesMeResponse(string active = default(string), List<string> available = default(List<string>))
+        public GetProfilesMeResponse(Guid active = default(Guid), List<Guid> available = default(List<Guid>))
         {
             // to ensure "available" is required (not null)
             if (available == null)
@@ -56,13 +56,13 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets Active
         /// </summary>
         [DataMember(Name = "Active", EmitDefaultValue = false)]
-        public string Active { get; set; }
+        public Guid Active { get; set; }
 
         /// <summary>
         /// Gets or Sets Available
         /// </summary>
         [DataMember(Name = "Available", IsRequired = true, EmitDefaultValue = true)]
-        public List<string> Available { get; set; }
+        public List<Guid> Available { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
