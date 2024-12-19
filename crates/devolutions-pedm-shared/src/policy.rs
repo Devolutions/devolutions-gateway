@@ -6,6 +6,7 @@ use std::{fmt, fs};
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 pub static ID_PATTERN: &str = r"^[a-z0-9_]{1,32}$";
 
@@ -309,15 +310,17 @@ pub struct ElevationConfigurations {
 #[repr(transparent)]
 #[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Eq, Hash, Clone)]
 #[serde(try_from = "String")]
-pub struct Id(String);
+pub struct Id(Uuid);
 
 impl Id {
-    pub fn try_new(id: String) -> anyhow::Result<Self> {
-        let pat = Regex::new(ID_PATTERN)?;
+    pub fn new(id: Uuid) -> Self {
+        Id(id)
+    }
+}
 
-        pat.is_match(&id)
-            .then_some(Id(id))
-            .ok_or_else(|| anyhow::anyhow!("Invalid ID"))
+impl From<Id> for Uuid {
+    fn from(value: Id) -> Uuid {
+        value.0
     }
 }
 
@@ -325,7 +328,8 @@ impl TryFrom<String> for Id {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Id::try_new(value)
+        let uuid = Uuid::parse_str(&value)?;
+        Ok(Id::new(uuid))
     }
 }
 
@@ -360,7 +364,7 @@ impl Identifiable for Profile {
 impl Default for Profile {
     fn default() -> Self {
         Self {
-            id: Id("default".to_owned()),
+            id: Id(Uuid::default()),
             name: "Unnamed profile".to_owned(),
             elevation_method: ElevationMethod::LocalAdmin,
             elevation_settings: ElevationConfigurations::default(),
