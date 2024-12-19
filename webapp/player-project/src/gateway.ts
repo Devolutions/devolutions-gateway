@@ -1,5 +1,9 @@
 export class GatewayAccessApi {
   recordingInfo = null;
+  gatewayAccessUrl: string;
+  token: string;
+  sessionId: string;
+
   constructor(gatewayAccessUrl, token, sessionId) {
     this.gatewayAccessUrl = gatewayAccessUrl;
     this.token = token;
@@ -42,6 +46,10 @@ export class GatewayAccessApi {
 }
 
 class GatewayAccessApiBuilder {
+  _gatewayAccessUrl: string | null;
+  _token: string | null;
+  _sessionId: string | null;
+
   constructor() {
     this._gatewayAccessUrl = null;
     this._token = null;

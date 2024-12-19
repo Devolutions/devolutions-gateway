@@ -1,7 +1,9 @@
-import { handleWebm } from './webm.js';
+import { GatewayAccessApi } from '../gateway';
+import { handleWebm } from './webm';
+
 export const getShadowPlayer = (fileType) => {
   const player = {
-    play: () => {},
+    play: (_: GatewayAccessApi) => {},
   };
 
   if (fileType === 'webm') {

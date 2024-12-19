@@ -1,14 +1,10 @@
-/**
- * Handles the playback of WebM videos using the provided gateway API.
- *
- * @param {GatewayAccessApi} gatewayApi - The API to access the gateway for video streaming.
- */
-export function handleWebm(gatewayApi) {
+import { GatewayAccessApi } from '../gateway';
+
+export function handleWebm(gatewayApi: GatewayAccessApi) {
   const videoPlayer = document.createElement('video');
   videoPlayer.id = 'videoPlayer';
   videoPlayer.controls = true;
   videoPlayer.autoplay = true;
-  videoPlayer.name = 'media';
   videoPlayer.muted = true;
 
   const videoSrcElement = document.createElement('source');
