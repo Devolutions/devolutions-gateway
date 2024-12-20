@@ -1,6 +1,6 @@
+import { GatewayAccessApi } from './gateway';
 import { getPlayer } from './players/index.js';
 import { getShadowPlayer } from './streamers/index.js';
-import { GatewayAccessApi } from './gateway';
 
 async function main() {
   const { sessionId, token, gatewayAccessUrl, isActive } = getSessionDetails();

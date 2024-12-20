@@ -39,7 +39,6 @@ export function convertTRPtoCast(fileArray) {
       }
     } else if (type === 4) {
       // RECORD_CHUNK_TERMINAL_SETUP
-
       // What this is for here? not used, commented out for now
       // const tagCount = size / 6;
       // for (let i = 0; i < tagCount; i++) {

@@ -5,5 +5,5 @@ export default defineConfig({
   build: {
     outDir: '../player',
     emptyOutDir: true,
-  }
+  },
 });
