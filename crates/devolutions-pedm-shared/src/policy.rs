@@ -351,7 +351,6 @@ pub trait Identifiable {
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-#[serde(default)]
 pub struct Profile {
     pub id: Id,
     pub name: String,
@@ -364,19 +363,6 @@ pub struct Profile {
 impl Identifiable for Profile {
     fn id(&self) -> &Id {
         &self.id
-    }
-}
-
-impl Default for Profile {
-    fn default() -> Self {
-        Self {
-            id: Id(Uuid::default()),
-            name: "Unnamed profile".to_owned(),
-            elevation_method: ElevationMethod::LocalAdmin,
-            elevation_settings: ElevationConfigurations::default(),
-            default_elevation_kind: ElevationKind::Deny,
-            prompt_secure_desktop: true,
-        }
     }
 }
 
