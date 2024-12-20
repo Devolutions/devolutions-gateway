@@ -88,7 +88,7 @@ async fn delete_profiles_id(
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct GetProfilesMeResponse {
-    pub(crate) active: Option<Id>,
+    pub(crate) active: Id,
     pub(crate) available: Vec<Id>,
 }
 
@@ -110,11 +110,10 @@ async fn get_me(
     let policy = policy::policy().read();
 
     Ok(Json(GetProfilesMeResponse {
-        // OpenAPI won't generate a guid? for the `active` field, so be sure to return a value
         active: policy
             .user_current_profile(&named_pipe_info.user)
             .map(|p| p.id.clone())
-            .or_else(|| Some(Id::default())),
+            .unwrap_or_else(Id::default),
         available: policy
             .user_profiles(&named_pipe_info.user)
             .into_iter()
