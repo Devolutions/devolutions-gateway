@@ -40,13 +40,8 @@ namespace Devolutions.Pedm.Client.Model
         /// Initializes a new instance of the <see cref="PathIdParameter" /> class.
         /// </summary>
         /// <param name="id">id (required).</param>
-        public PathIdParameter(string id = default(string))
+        public PathIdParameter(Guid id = default(Guid))
         {
-            // to ensure "id" is required (not null)
-            if (id == null)
-            {
-                throw new ArgumentNullException("id is a required property for PathIdParameter and cannot be null");
-            }
             this.Id = id;
         }
 
@@ -54,7 +49,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets Id
         /// </summary>
         [DataMember(Name = "id", IsRequired = true, EmitDefaultValue = true)]
-        public string Id { get; set; }
+        public Guid Id { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object

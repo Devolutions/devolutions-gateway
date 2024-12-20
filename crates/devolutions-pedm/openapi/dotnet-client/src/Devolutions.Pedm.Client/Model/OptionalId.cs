@@ -35,7 +35,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Initializes a new instance of the <see cref="OptionalId" /> class.
         /// </summary>
         /// <param name="id">id.</param>
-        public OptionalId(string id = default(string))
+        public OptionalId(Guid id = default(Guid))
         {
             this.Id = id;
         }
@@ -44,7 +44,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets Id
         /// </summary>
         [DataMember(Name = "Id", EmitDefaultValue = false)]
-        public string Id { get; set; }
+        public Guid Id { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
