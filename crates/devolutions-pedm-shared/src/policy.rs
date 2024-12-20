@@ -318,6 +318,12 @@ impl Id {
     }
 }
 
+impl Default for Id {
+    fn default() -> Self {
+        Id(Uuid::nil())
+    }
+}
+
 impl From<Id> for Uuid {
     fn from(value: Id) -> Uuid {
         value.0

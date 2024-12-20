@@ -110,7 +110,8 @@ async fn get_me(
     let policy = policy::policy().read();
 
     Ok(Json(GetProfilesMeResponse {
-        active: policy.user_current_profile(&named_pipe_info.user).map(|p| p.id.clone()),
+        // OpenAPI won't generate a guid? for the `active` field, so be sure to return a value
+        active: policy.user_current_profile(&named_pipe_info.user).map(|p| p.id.clone()).or_else(|| Some(Id::default())),
         available: policy
             .user_profiles(&named_pipe_info.user)
             .into_iter()
