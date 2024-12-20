@@ -10,7 +10,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use camino::Utf8PathBuf;
 use devolutions_pedm_shared::policy::{
-    Application, Certificate, Configuration, ElevationRequest, Id, Identifiable, Profile, Signature, Signer, User,
+    Application, Certificate, Configuration, ElevationRequest, Identifiable, Profile, Signature, Signer, User,
 };
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
@@ -21,6 +21,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tracing::error;
+use uuid::Uuid;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, TOKEN_QUERY};
@@ -37,7 +38,7 @@ use devolutions_pedm_shared::policy;
 
 pub(crate) struct IdList<T: Identifiable> {
     root_path: PathBuf,
-    data: HashMap<Id, T>,
+    data: HashMap<Uuid, T>,
 }
 
 impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
@@ -85,7 +86,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         &self.root_path
     }
 
-    pub(crate) fn get(&self, id: &Id) -> Option<&T> {
+    pub(crate) fn get(&self, id: &Uuid) -> Option<&T> {
         self.data.get(id)
     }
 
@@ -93,7 +94,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         self.data.values()
     }
 
-    pub(crate) fn contains(&self, id: &Id) -> bool {
+    pub(crate) fn contains(&self, id: &Uuid) -> bool {
         self.data.contains_key(id)
     }
 
@@ -120,7 +121,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         self.add_internal(entry, true)
     }
 
-    pub(crate) fn remove(&mut self, id: &Id) -> Result<()> {
+    pub(crate) fn remove(&mut self, id: &Uuid) -> Result<()> {
         if !self.contains(id) {
             bail!(Error::NotFound);
         }
@@ -141,7 +142,7 @@ pub(crate) struct Policy {
     config_path: PathBuf,
     config: Configuration,
     profiles: IdList<Profile>,
-    current_profiles: HashMap<User, Id>,
+    current_profiles: HashMap<User, Uuid>,
 }
 
 impl Policy {
@@ -184,11 +185,11 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn profile(&self, id: &Id) -> Option<&Profile> {
+    pub(crate) fn profile(&self, id: &Uuid) -> Option<&Profile> {
         self.profiles.get(id)
     }
 
-    pub(crate) fn user_profile(&self, user: &User, id: &Id) -> Option<&Profile> {
+    pub(crate) fn user_profile(&self, user: &User, id: &Uuid) -> Option<&Profile> {
         // Check that the user has access to profile.
         if !self
             .config
@@ -210,7 +211,7 @@ impl Policy {
             .collect()
     }
 
-    pub(crate) fn set_user_current_profile(&mut self, user: User, profile_id: Option<Id>) -> Result<()> {
+    pub(crate) fn set_user_current_profile(&mut self, user: User, profile_id: Option<Uuid>) -> Result<()> {
         if let Some(profile_id) = profile_id {
             if !self
                 .config
@@ -258,7 +259,7 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn replace_profile(&mut self, old_id: &Id, profile: Profile) -> Result<()> {
+    pub(crate) fn replace_profile(&mut self, old_id: &Uuid, profile: Profile) -> Result<()> {
         if !self.profiles.contains(old_id) {
             bail!(Error::NotFound);
         } else if old_id != &profile.id && self.profiles.contains(&profile.id) {
@@ -277,7 +278,7 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn remove_profile(&mut self, id: &Id) -> Result<()> {
+    pub(crate) fn remove_profile(&mut self, id: &Uuid) -> Result<()> {
         self.profiles.remove(id)?;
 
         self.config.assignments.remove(id);
@@ -285,11 +286,11 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn assignments(&self) -> &HashMap<Id, Vec<User>> {
+    pub(crate) fn assignments(&self) -> &HashMap<Uuid, Vec<User>> {
         &self.config.assignments
     }
 
-    pub(crate) fn set_assignments(&mut self, profile_id: Id, users: Vec<User>) -> Result<()> {
+    pub(crate) fn set_assignments(&mut self, profile_id: Uuid, users: Vec<User>) -> Result<()> {
         if !self.profiles.contains(&profile_id) {
             bail!(Error::NotFound);
         }
@@ -314,7 +315,7 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn validate(&self, session_id: u32, request: &ElevationRequest) -> Result<()> {
+    pub(crate) fn validate(&self, _session_id: u32, request: &ElevationRequest) -> Result<()> {
         let profile = self
             .user_current_profile(&request.asker.user)
             .ok_or_else(|| anyhow!(Error::AccessDenied))?;

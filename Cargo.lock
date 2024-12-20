@@ -1266,6 +1266,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tower-service",
  "tracing",
+ "uuid",
  "walkdir",
  "win-api-wrappers",
 ]

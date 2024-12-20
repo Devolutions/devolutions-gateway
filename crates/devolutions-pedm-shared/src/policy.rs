@@ -1,14 +1,12 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fmt, fs};
 
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-pub static ID_PATTERN: &str = r"^[a-z0-9_]{1,32}$";
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
@@ -307,52 +305,14 @@ pub struct ElevationConfigurations {
     pub session: SessionElevationConfiguration,
 }
 
-#[repr(transparent)]
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Eq, Hash, Clone)]
-#[serde(try_from = "String")]
-pub struct Id(Uuid);
-
-impl Id {
-    pub fn new(id: Uuid) -> Self {
-        Id(id)
-    }
-}
-
-impl Default for Id {
-    fn default() -> Self {
-        Id(Uuid::nil())
-    }
-}
-
-impl From<Id> for Uuid {
-    fn from(value: Id) -> Uuid {
-        value.0
-    }
-}
-
-impl TryFrom<String> for Id {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let uuid = Uuid::parse_str(&value)?;
-        Ok(Id::new(uuid))
-    }
-}
-
-impl fmt::Display for Id {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 pub trait Identifiable {
-    fn id(&self) -> &Id;
+    fn id(&self) -> &Uuid;
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct Profile {
-    pub id: Id,
+    pub id: Uuid,
     pub name: String,
     pub elevation_method: ElevationMethod,
     pub elevation_settings: ElevationConfigurations,
@@ -361,7 +321,7 @@ pub struct Profile {
 }
 
 impl Identifiable for Profile {
-    fn id(&self) -> &Id {
+    fn id(&self) -> &Uuid {
         &self.id
     }
 }
@@ -369,5 +329,5 @@ impl Identifiable for Profile {
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct Configuration {
-    pub assignments: HashMap<Id, Vec<User>>,
+    pub assignments: HashMap<Uuid, Vec<User>>,
 }
