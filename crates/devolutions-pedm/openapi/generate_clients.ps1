@@ -71,12 +71,12 @@ try {
 		Write-Host
 
 		$FilesPath = Join-Path $(Convert-Path -LiteralPath $target.Folder) ".openapi-generator" "FILES"
-		$PathsToFormat = Get-Content -Path $FilesPath | ForEach-Object { Join-Path $(Convert-Path -LiteralPath $target.Folder) $_ }
+		$PathsToFormat = Get-Content -Path $FilesPath | Where-Object { $_ -Like "*.rs" } | ForEach-Object { Join-Path $(Convert-Path -LiteralPath $target.Folder) $_ }
 
 		Push-Location $RootDirectory
 
 		try {
-			foreach ($PathToFormat in $PathsToFormat | Where-Object { $_ -Like "*.rs" })
+			foreach ($PathToFormat in $PathsToFormat)
 			{
 				rustfmt $PathToFormat
 			}
