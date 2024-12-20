@@ -1,4 +1,4 @@
-import { GatewayAccessApi } from './gateway.js';
+import { GatewayAccessApi } from './gateway';
 import { getPlayer } from './players/index.js';
 import { getShadowPlayer } from './streamers/index.js';
 

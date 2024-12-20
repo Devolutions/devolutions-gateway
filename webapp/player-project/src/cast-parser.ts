@@ -1,4 +1,4 @@
-export function ensureNoSameTimeCues(content) {
+export function ensureNoSameTimeCues(content: string) {
   const lines = content.split('\n');
   let prevLine = null; // Correctly using let to track previous line
   for (let i = 0; i < lines.length; i++) {

@@ -3,6 +3,7 @@ export function convertTRPtoCast(fileArray) {
     version: 2,
     width: 0,
     height: 0,
+    duration: 0,
   };
   const castEvents = [];
 
@@ -38,11 +39,12 @@ export function convertTRPtoCast(fileArray) {
       }
     } else if (type === 4) {
       // RECORD_CHUNK_TERMINAL_SETUP
-      const tagCount = size / 6;
-      for (let i = 0; i < tagCount; i++) {
-        const _tag = readUInt16(chunk, i * 6);
-        const _tagValue = readUInt32(chunk, i * 6 + 2);
-      }
+      // What this is for here? not used, commented out for now
+      // const tagCount = size / 6;
+      // for (let i = 0; i < tagCount; i++) {
+      //   const _tag = readUInt16(chunk, i * 6);
+      //   const _tagValue = readUInt32(chunk, i * 6 + 2);
+      // }
     }
   }
   castHeader.duration = time;

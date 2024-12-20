@@ -1,10 +1,11 @@
-import { handleCast } from './cast.js';
-import { handleTrp } from './trp.js';
-import { handleWebm } from './webm.js';
+import { GatewayAccessApi } from '../gateway';
+import { handleCast } from './cast';
+import { handleTrp } from './trp';
+import { handleWebm } from './webm';
 
 export const getPlayer = (fileType) => {
   const player = {
-    play: () => {},
+    play: (_: GatewayAccessApi) => {},
   };
 
   if (fileType === 'webm') {
@@ -21,7 +22,7 @@ export const getPlayer = (fileType) => {
 
   return player;
 };
-
+const originalFetch = window.fetch;
 export function overrideFetch(objectUrl, content) {
   const originalFetch = window.fetch;
   window.fetch = (url) => {
@@ -30,18 +31,10 @@ export function overrideFetch(objectUrl, content) {
     }
     return originalFetch(url);
   };
-  window.originalFetch = originalFetch; // Save for restoration
 }
 
 export function restoreFetch() {
-  window.fetch = window.originalFetch;
-}
-
-export function createTerminalDiv() {
-  const terminalDiv = document.createElement('div');
-  terminalDiv.setAttribute('id', 'terminal');
-  document.body.appendChild(terminalDiv);
-  return terminalDiv;
+  window.fetch = originalFetch;
 }
 
 export function loadFile(fileName) {

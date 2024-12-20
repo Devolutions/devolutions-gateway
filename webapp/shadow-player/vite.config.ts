@@ -5,11 +5,7 @@ import dts from 'vite-plugin-dts';
 // Simple deep merge function
 function deepMerge<T extends object>(target: Partial<T>, source: T): T {
   for (const key in source) {
-    if (
-      source[key] &&
-      typeof source[key] === 'object' &&
-      !Array.isArray(source[key])
-    ) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
       target[key] = deepMerge(target[key] || {}, source[key]);
     } else {
       target[key] = source[key];
@@ -38,7 +34,7 @@ const DefaultConfig: UserConfig = {
 
 const OutDir = {
   debug: 'dist',
-  release: '../player/js/generated',
+  release: 'dist',
 };
 
 const Plugins = {
@@ -47,7 +43,11 @@ const Plugins = {
       insertTypesEntry: true,
     }),
   ],
-  release: [],
+  release: [
+    dts({
+      insertTypesEntry: true,
+    }),
+  ],
 };
 
 export default defineConfig(({ mode }) => {

@@ -9,7 +9,9 @@
       "*.js.map",
       "*.min.js",
       "*.min.css",
-      "player/js/generated"
+      "player/",
+      "player-project/dist/",
+      "player-project/node_modules/"
     ]
   },
   "linter": {

@@ -1,11 +1,8 @@
 {
-  "name": "shadow-player",
+  "name": "player-project",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -13,10 +10,9 @@
   },
   "devDependencies": {
     "typescript": "~5.6.2",
-    "vite": "^5.4.9"
+    "vite": "^6.0.1"
   },
   "dependencies": {
-    "ts-node": "^10.9.2",
-    "vite-plugin-dts": "^4.3.0"
+    "asciinema-player": "^3.8.1"
   }
 }
