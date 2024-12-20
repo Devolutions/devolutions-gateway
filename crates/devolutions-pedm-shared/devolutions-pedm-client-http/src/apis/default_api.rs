@@ -56,7 +56,7 @@ pub trait DefaultApi {
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn policy_me_get(&self) -> Pin<Box<dyn Future<Output = Result<models::GetProfilesMeResponse, Error>>>>;
     fn policy_me_put(&self, optional_id: models::OptionalId) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<String>, Error>>>>;
+    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<uuid::Uuid>, Error>>>>;
     fn policy_profiles_id_delete(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn policy_profiles_id_get(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<models::Profile, Error>>>>;
     fn policy_profiles_id_put(
@@ -149,7 +149,7 @@ where
     }
 
     #[allow(unused_mut)]
-    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<String>, Error>>>> {
+    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<uuid::Uuid>, Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::GET, "/policy/profiles".to_string());
 
         req.execute(self.configuration.borrow())

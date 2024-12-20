@@ -1,13 +1,12 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fmt, fs};
 
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-pub static ID_PATTERN: &str = r"^[a-z0-9_]{1,32}$";
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
@@ -306,44 +305,14 @@ pub struct ElevationConfigurations {
     pub session: SessionElevationConfiguration,
 }
 
-#[repr(transparent)]
-#[derive(Serialize, Deserialize, JsonSchema, Debug, PartialEq, Eq, Hash, Clone)]
-#[serde(try_from = "String")]
-pub struct Id(String);
-
-impl Id {
-    pub fn try_new(id: String) -> anyhow::Result<Self> {
-        let pat = Regex::new(ID_PATTERN)?;
-
-        pat.is_match(&id)
-            .then_some(Id(id))
-            .ok_or_else(|| anyhow::anyhow!("Invalid ID"))
-    }
-}
-
-impl TryFrom<String> for Id {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Id::try_new(value)
-    }
-}
-
-impl fmt::Display for Id {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 pub trait Identifiable {
-    fn id(&self) -> &Id;
+    fn id(&self) -> &Uuid;
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-#[serde(default)]
 pub struct Profile {
-    pub id: Id,
+    pub id: Uuid,
     pub name: String,
     pub elevation_method: ElevationMethod,
     pub elevation_settings: ElevationConfigurations,
@@ -352,26 +321,13 @@ pub struct Profile {
 }
 
 impl Identifiable for Profile {
-    fn id(&self) -> &Id {
+    fn id(&self) -> &Uuid {
         &self.id
-    }
-}
-
-impl Default for Profile {
-    fn default() -> Self {
-        Self {
-            id: Id("default".to_owned()),
-            name: "Unnamed profile".to_owned(),
-            elevation_method: ElevationMethod::LocalAdmin,
-            elevation_settings: ElevationConfigurations::default(),
-            default_elevation_kind: ElevationKind::Deny,
-            prompt_secure_desktop: true,
-        }
     }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct Configuration {
-    pub assignments: HashMap<Id, Vec<User>>,
+    pub assignments: HashMap<Uuid, Vec<User>>,
 }

@@ -142,7 +142,8 @@ paths:
             application/json:
               schema:
                 items:
-                  $ref: '#/components/schemas/Id'
+                  format: uuid
+                  type: string
                 type: array
           description: ""
     post:
@@ -169,7 +170,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          format: uuid
+          type: string
         style: simple
       responses:
         default:
@@ -187,7 +189,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          format: uuid
+          type: string
         style: simple
       responses:
         default:
@@ -209,7 +212,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          format: uuid
+          type: string
         style: simple
       requestBody:
         content:
@@ -251,7 +255,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          format: uuid
+          type: string
         style: simple
       requestBody:
         content:
@@ -348,7 +353,7 @@ components:
         Profile:
           PromptSecureDesktop: true
           DefaultElevationKind: AutoApprove
-          Id: Id
+          Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
           ElevationSettings:
             Temporary:
               MaximumSeconds: 0
@@ -356,7 +361,7 @@ components:
             Session:
               Enabled: true
           ElevationMethod: LocalAdmin
-          Name: Unnamed profile
+          Name: Name
       properties:
         Profile:
           $ref: '#/components/schemas/Profile'
@@ -656,18 +661,21 @@ components:
       - Win32Error
     GetProfilesMeResponse:
       example:
-        Active: Active
+        Active: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
         Available:
-        - null
-        - null
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
       properties:
         Active:
+          format: uuid
           type: string
         Available:
           items:
-            $ref: '#/components/schemas/Id'
+            format: uuid
+            type: string
           type: array
       required:
+      - Active
       - Available
     Hash:
       example:
@@ -681,8 +689,6 @@ components:
       required:
       - Sha1
       - Sha256
-    Id:
-      type: string
     LaunchPayload:
       example:
         CreationFlags: 0
@@ -738,13 +744,16 @@ components:
       - ThreadId
     OptionalId:
       example:
-        Id: Id
+        Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
       properties:
         Id:
+          format: uuid
           type: string
+          nullable: true
     PathIdParameter:
       properties:
         id:
+          format: uuid
           type: string
       required:
       - id
@@ -752,7 +761,7 @@ components:
       example:
         PromptSecureDesktop: true
         DefaultElevationKind: AutoApprove
-        Id: Id
+        Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
         ElevationSettings:
           Temporary:
             MaximumSeconds: 0
@@ -760,7 +769,7 @@ components:
           Session:
             Enabled: true
         ElevationMethod: LocalAdmin
-        Name: Unnamed profile
+        Name: Name
       properties:
         DefaultElevationKind:
           $ref: '#/components/schemas/ElevationKind'
@@ -769,13 +778,19 @@ components:
         ElevationSettings:
           $ref: '#/components/schemas/ElevationConfigurations'
         Id:
+          format: uuid
           type: string
         Name:
-          default: Unnamed profile
           type: string
         PromptSecureDesktop:
-          default: true
           type: boolean
+      required:
+      - DefaultElevationKind
+      - ElevationMethod
+      - ElevationSettings
+      - Id
+      - Name
+      - PromptSecureDesktop
     SessionElevationConfiguration:
       example:
         Enabled: true

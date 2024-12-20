@@ -20,6 +20,7 @@ $targets = @(
 )
 
 Push-Location -Path $PSScriptRoot
+$RootDirectory = git rev-parse --show-toplevel
 
 # Update the version in dotnet-client
 $NewVersion = Get-Date -Format "yyyy.M.d"
@@ -66,6 +67,23 @@ try {
 		$Cmd = $Cmd -Join ' '
 		Write-Host $Cmd
 		Invoke-Expression $Cmd
+
+		Write-Host
+
+		$FilesPath = Join-Path $(Convert-Path -LiteralPath $target.Folder) ".openapi-generator" "FILES"
+		$PathsToFormat = Get-Content -Path $FilesPath | Where-Object { $_ -Like "*.rs" } | ForEach-Object { Join-Path $(Convert-Path -LiteralPath $target.Folder) $_ }
+
+		Push-Location $RootDirectory
+
+		try {
+			foreach ($PathToFormat in $PathsToFormat)
+			{
+				rustfmt $PathToFormat
+			}
+		}
+		finally {
+			Pop-Location
+		}
 
 		Write-Host
 	}

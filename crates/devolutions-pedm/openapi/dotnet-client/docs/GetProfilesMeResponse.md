@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**Active** | **string** |  | [optional] 
-**Available** | **List&lt;string&gt;** |  | 
+**Active** | **Guid** |  | 
+**Available** | **List&lt;Guid&gt;** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

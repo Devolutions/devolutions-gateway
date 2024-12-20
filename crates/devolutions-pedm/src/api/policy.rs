@@ -2,17 +2,18 @@ use aide::axum::routing::{get, put};
 use aide::axum::ApiRouter;
 use axum::extract::Path;
 use axum::{Extension, Json};
-use devolutions_pedm_shared::policy::{Id, Profile, User};
+use devolutions_pedm_shared::policy::{Profile, User};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use uuid::Uuid;
 
 use crate::error::Error;
 use crate::policy;
 
 use super::NamedPipeConnectInfo;
 
-async fn get_profiles(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Result<Json<Vec<Id>>, Error> {
+async fn get_profiles(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Result<Json<Vec<Uuid>>, Error> {
     if !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
@@ -88,19 +89,19 @@ async fn delete_profiles_id(
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct GetProfilesMeResponse {
-    pub(crate) active: Option<Id>,
-    pub(crate) available: Vec<Id>,
+    pub(crate) active: Uuid,
+    pub(crate) available: Vec<Uuid>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct PathIdParameter {
-    pub(crate) id: Id,
+    pub(crate) id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct OptionalId {
-    pub(crate) id: Option<Id>,
+    pub(crate) id: Option<Uuid>,
 }
 
 async fn get_me(
@@ -110,7 +111,10 @@ async fn get_me(
     let policy = policy::policy().read();
 
     Ok(Json(GetProfilesMeResponse {
-        active: policy.user_current_profile(&named_pipe_info.user).map(|p| p.id.clone()),
+        active: policy
+            .user_current_profile(&named_pipe_info.user)
+            .map(|p| p.id.clone())
+            .unwrap_or_else(Uuid::nil),
         available: policy
             .user_profiles(&named_pipe_info.user)
             .into_iter()

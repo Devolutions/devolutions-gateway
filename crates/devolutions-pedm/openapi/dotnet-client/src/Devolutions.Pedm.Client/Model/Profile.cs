@@ -35,56 +35,70 @@ namespace Devolutions.Pedm.Client.Model
         /// <summary>
         /// Gets or Sets DefaultElevationKind
         /// </summary>
-        [DataMember(Name = "DefaultElevationKind", EmitDefaultValue = false)]
-        public ElevationKind? DefaultElevationKind { get; set; }
+        [DataMember(Name = "DefaultElevationKind", IsRequired = true, EmitDefaultValue = true)]
+        public ElevationKind DefaultElevationKind { get; set; }
 
         /// <summary>
         /// Gets or Sets ElevationMethod
         /// </summary>
-        [DataMember(Name = "ElevationMethod", EmitDefaultValue = false)]
-        public ElevationMethod? ElevationMethod { get; set; }
+        [DataMember(Name = "ElevationMethod", IsRequired = true, EmitDefaultValue = true)]
+        public ElevationMethod ElevationMethod { get; set; }
         /// <summary>
         /// Initializes a new instance of the <see cref="Profile" /> class.
         /// </summary>
-        /// <param name="defaultElevationKind">defaultElevationKind.</param>
-        /// <param name="elevationMethod">elevationMethod.</param>
-        /// <param name="elevationSettings">elevationSettings.</param>
-        /// <param name="id">id.</param>
-        /// <param name="name">name (default to &quot;Unnamed profile&quot;).</param>
-        /// <param name="promptSecureDesktop">promptSecureDesktop (default to true).</param>
-        public Profile(ElevationKind? defaultElevationKind = default(ElevationKind?), ElevationMethod? elevationMethod = default(ElevationMethod?), ElevationConfigurations elevationSettings = default(ElevationConfigurations), string id = default(string), string name = @"Unnamed profile", bool promptSecureDesktop = true)
+        [JsonConstructorAttribute]
+        protected Profile() { }
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Profile" /> class.
+        /// </summary>
+        /// <param name="defaultElevationKind">defaultElevationKind (required).</param>
+        /// <param name="elevationMethod">elevationMethod (required).</param>
+        /// <param name="elevationSettings">elevationSettings (required).</param>
+        /// <param name="id">id (required).</param>
+        /// <param name="name">name (required).</param>
+        /// <param name="promptSecureDesktop">promptSecureDesktop (required).</param>
+        public Profile(ElevationKind defaultElevationKind = default(ElevationKind), ElevationMethod elevationMethod = default(ElevationMethod), ElevationConfigurations elevationSettings = default(ElevationConfigurations), Guid id = default(Guid), string name = default(string), bool promptSecureDesktop = default(bool))
         {
             this.DefaultElevationKind = defaultElevationKind;
             this.ElevationMethod = elevationMethod;
+            // to ensure "elevationSettings" is required (not null)
+            if (elevationSettings == null)
+            {
+                throw new ArgumentNullException("elevationSettings is a required property for Profile and cannot be null");
+            }
             this.ElevationSettings = elevationSettings;
             this.Id = id;
-            // use default value if no "name" provided
-            this.Name = name ?? @"Unnamed profile";
+            // to ensure "name" is required (not null)
+            if (name == null)
+            {
+                throw new ArgumentNullException("name is a required property for Profile and cannot be null");
+            }
+            this.Name = name;
             this.PromptSecureDesktop = promptSecureDesktop;
         }
 
         /// <summary>
         /// Gets or Sets ElevationSettings
         /// </summary>
-        [DataMember(Name = "ElevationSettings", EmitDefaultValue = false)]
+        [DataMember(Name = "ElevationSettings", IsRequired = true, EmitDefaultValue = true)]
         public ElevationConfigurations ElevationSettings { get; set; }
 
         /// <summary>
         /// Gets or Sets Id
         /// </summary>
-        [DataMember(Name = "Id", EmitDefaultValue = false)]
-        public string Id { get; set; }
+        [DataMember(Name = "Id", IsRequired = true, EmitDefaultValue = true)]
+        public Guid Id { get; set; }
 
         /// <summary>
         /// Gets or Sets Name
         /// </summary>
-        [DataMember(Name = "Name", EmitDefaultValue = false)]
+        [DataMember(Name = "Name", IsRequired = true, EmitDefaultValue = true)]
         public string Name { get; set; }
 
         /// <summary>
         /// Gets or Sets PromptSecureDesktop
         /// </summary>
-        [DataMember(Name = "PromptSecureDesktop", EmitDefaultValue = true)]
+        [DataMember(Name = "PromptSecureDesktop", IsRequired = true, EmitDefaultValue = true)]
         public bool PromptSecureDesktop { get; set; }
 
         /// <summary>

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OptionalId {
     #[serde(rename = "Id", skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: Option<uuid::Uuid>,
 }
 
 impl OptionalId {

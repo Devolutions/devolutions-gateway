@@ -13,17 +13,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GetProfilesMeResponse {
-    #[serde(rename = "Active", skip_serializing_if = "Option::is_none")]
-    pub active: Option<String>,
+    #[serde(rename = "Active")]
+    pub active: uuid::Uuid,
     #[serde(rename = "Available")]
-    pub available: Vec<String>,
+    pub available: Vec<uuid::Uuid>,
 }
 
 impl GetProfilesMeResponse {
-    pub fn new(available: Vec<String>) -> GetProfilesMeResponse {
-        GetProfilesMeResponse {
-            active: None,
-            available,
-        }
+    pub fn new(active: uuid::Uuid, available: Vec<uuid::Uuid>) -> GetProfilesMeResponse {
+        GetProfilesMeResponse { active, available }
     }
 }

@@ -142,7 +142,8 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Id'
+                  type: string
+                  format: uuid
     post:
       requestBody:
         content:
@@ -166,7 +167,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
         style: simple
       responses:
         default:
@@ -187,7 +189,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
         style: simple
       requestBody:
         content:
@@ -210,7 +213,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
         style: simple
       responses:
         default:
@@ -245,7 +249,8 @@ paths:
         name: id
         required: true
         schema:
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
         style: simple
       requestBody:
         content:
@@ -414,15 +419,17 @@ components:
     GetProfilesMeResponse:
       type: object
       required:
+      - Active
       - Available
       properties:
         Active:
-          $ref: '#/components/schemas/Id'
-          nullable: true
+          type: string
+          format: uuid
         Available:
           type: array
           items:
-            $ref: '#/components/schemas/Id'
+            type: string
+            format: uuid
     Hash:
       type: object
       required:
@@ -433,8 +440,6 @@ components:
           type: string
         Sha256:
           type: string
-    Id:
-      type: string
     LaunchPayload:
       type: object
       required:
@@ -474,7 +479,8 @@ components:
       type: object
       properties:
         Id:
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
           nullable: true
     PathIdParameter:
       type: object
@@ -482,32 +488,30 @@ components:
       - id
       properties:
         id:
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
     Profile:
       type: object
+      required:
+      - DefaultElevationKind
+      - ElevationMethod
+      - ElevationSettings
+      - Id
+      - Name
+      - PromptSecureDesktop
       properties:
         DefaultElevationKind:
-          default: Deny
           $ref: '#/components/schemas/ElevationKind'
         ElevationMethod:
-          default: LocalAdmin
           $ref: '#/components/schemas/ElevationMethod'
         ElevationSettings:
-          default:
-            Session:
-              Enabled: false
-            Temporary:
-              Enabled: false
-              MaximumSeconds: 0
           $ref: '#/components/schemas/ElevationConfigurations'
         Id:
-          default: default
-          $ref: '#/components/schemas/Id'
+          type: string
+          format: uuid
         Name:
-          default: Unnamed profile
           type: string
         PromptSecureDesktop:
-          default: true
           type: boolean
     SessionElevationConfiguration:
       type: object

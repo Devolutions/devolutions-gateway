@@ -13,29 +13,36 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
-    #[serde(rename = "DefaultElevationKind", skip_serializing_if = "Option::is_none")]
-    pub default_elevation_kind: Option<models::ElevationKind>,
-    #[serde(rename = "ElevationMethod", skip_serializing_if = "Option::is_none")]
-    pub elevation_method: Option<models::ElevationMethod>,
-    #[serde(rename = "ElevationSettings", skip_serializing_if = "Option::is_none")]
-    pub elevation_settings: Option<models::ElevationConfigurations>,
-    #[serde(rename = "Id", skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(rename = "Name", skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(rename = "PromptSecureDesktop", skip_serializing_if = "Option::is_none")]
-    pub prompt_secure_desktop: Option<bool>,
+    #[serde(rename = "DefaultElevationKind")]
+    pub default_elevation_kind: models::ElevationKind,
+    #[serde(rename = "ElevationMethod")]
+    pub elevation_method: models::ElevationMethod,
+    #[serde(rename = "ElevationSettings")]
+    pub elevation_settings: models::ElevationConfigurations,
+    #[serde(rename = "Id")]
+    pub id: uuid::Uuid,
+    #[serde(rename = "Name")]
+    pub name: String,
+    #[serde(rename = "PromptSecureDesktop")]
+    pub prompt_secure_desktop: bool,
 }
 
 impl Profile {
-    pub fn new() -> Profile {
+    pub fn new(
+        default_elevation_kind: models::ElevationKind,
+        elevation_method: models::ElevationMethod,
+        elevation_settings: models::ElevationConfigurations,
+        id: uuid::Uuid,
+        name: String,
+        prompt_secure_desktop: bool,
+    ) -> Profile {
         Profile {
-            default_elevation_kind: None,
-            elevation_method: None,
-            elevation_settings: None,
-            id: None,
-            name: None,
-            prompt_secure_desktop: None,
+            default_elevation_kind,
+            elevation_method,
+            elevation_settings,
+            id,
+            name,
+            prompt_secure_desktop,
         }
     }
 }
