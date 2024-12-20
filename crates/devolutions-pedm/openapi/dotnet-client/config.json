@@ -2,7 +2,7 @@
   "packageAuthors": "Devolutions Inc.",
   "packageName": "Devolutions.Pedm.Client",
   "packageTitle": "Devolutions PEDM REST API Client",
-  "packageVersion": "2024.12.19",
+  "packageVersion": "2024.12.20",
   "packageDescription": "Client for Devolutions PEDM REST API",
   "packageGuid": "0eb49e08-5842-4a2e-a5ac-926e6dd65c15",
   "packageCopyright": "© Devolutions Inc. All rights reserved.",

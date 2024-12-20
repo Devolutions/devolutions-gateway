@@ -39,23 +39,23 @@ namespace Devolutions.Pedm.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="GetProfilesMeResponse" /> class.
         /// </summary>
-        /// <param name="active">active.</param>
+        /// <param name="active">active (required).</param>
         /// <param name="available">available (required).</param>
         public GetProfilesMeResponse(Guid active = default(Guid), List<Guid> available = default(List<Guid>))
         {
+            this.Active = active;
             // to ensure "available" is required (not null)
             if (available == null)
             {
                 throw new ArgumentNullException("available is a required property for GetProfilesMeResponse and cannot be null");
             }
             this.Available = available;
-            this.Active = active;
         }
 
         /// <summary>
         /// Gets or Sets Active
         /// </summary>
-        [DataMember(Name = "Active", EmitDefaultValue = false)]
+        [DataMember(Name = "Active", IsRequired = true, EmitDefaultValue = true)]
         public Guid Active { get; set; }
 
         /// <summary>

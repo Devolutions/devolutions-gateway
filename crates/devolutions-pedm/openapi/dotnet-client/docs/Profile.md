@@ -4,12 +4,12 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**DefaultElevationKind** | **ElevationKind** |  | [optional] 
-**ElevationMethod** | **ElevationMethod** |  | [optional] 
-**ElevationSettings** | [**ElevationConfigurations**](ElevationConfigurations.md) |  | [optional] 
-**Id** | **Guid** |  | [optional] 
-**Name** | **string** |  | [optional] [default to "Unnamed profile"]
-**PromptSecureDesktop** | **bool** |  | [optional] [default to true]
+**DefaultElevationKind** | **ElevationKind** |  | 
+**ElevationMethod** | **ElevationMethod** |  | 
+**ElevationSettings** | [**ElevationConfigurations**](ElevationConfigurations.md) |  | 
+**Id** | **Guid** |  | 
+**Name** | **string** |  | 
+**PromptSecureDesktop** | **bool** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 
