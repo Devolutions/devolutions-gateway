@@ -27,7 +27,13 @@ pub fn load_string(hinstance: HINSTANCE, resource_id: u32) -> anyhow::Result<Opt
             // and be valid for reading `length` UTF-16 code units
             // - The memory is owned by the Windows resource system and must not be deallocated or modified
             // No attempt should be made to mutate or access `slice` beyond it's bounds
-            let slice = unsafe { std::slice::from_raw_parts(resource_ptr.0 as *const u16, length as usize) };
+            let slice = unsafe {
+                std::slice::from_raw_parts(
+                    resource_ptr.0.cast_const(),
+                    usize::try_from(length).expect("i32-to-usize"),
+                )
+            };
+
             Ok(Some(String::from_utf16_lossy(slice)))
         }
     }

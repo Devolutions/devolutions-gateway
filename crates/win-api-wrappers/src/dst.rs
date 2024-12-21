@@ -19,6 +19,9 @@ pub unsafe trait Win32DstDef {
 
     type ItemCount: TryInto<usize> + Copy;
 
+    /// Extra parameters to construct the container.
+    type Parameters;
+
     /// Offset to the item count, in bounds of the container.
     const ITEM_COUNT_OFFSET: usize;
 
@@ -26,7 +29,7 @@ pub unsafe trait Win32DstDef {
     const ARRAY_OFFSET: usize;
 
     /// Builds a container holding a single element.
-    fn new_container(first_item: Self::Item) -> Self::Container;
+    fn new_container(params: Self::Parameters, first_item: Self::Item) -> Self::Container;
 
     /// Increments count by one.
     fn increment_count(count: Self::ItemCount) -> Self::ItemCount;
@@ -48,10 +51,10 @@ impl<Def> Win32Dst<Def>
 where
     Def: Win32DstDef,
 {
-    pub fn new(first_item: Def::Item) -> Self {
+    pub fn new(params: Def::Parameters, first_item: Def::Item) -> Self {
         use core::alloc::Layout;
 
-        let container = Def::new_container(first_item);
+        let container = Def::new_container(params, first_item);
 
         let layout = Layout::new::<Def::Container>();
 
@@ -71,13 +74,17 @@ where
     ///
     /// # Safety
     ///
-    /// The underlying array must holds exactly the amount of `Def::Item` specified inside the `Def::ItemCount`.
+    /// The underlying array must hold exactly the amount of `Def::Item` specified inside the `Def::ItemCount`.
     pub unsafe fn from_raw(buffer: InitedBuffer<Def::Container>) -> Self {
         Self { inner: buffer }
     }
 
     pub fn as_raw(&self) -> &InitedBuffer<Def::Container> {
         &self.inner
+    }
+
+    pub fn as_raw_mut(&mut self) -> &mut InitedBuffer<Def::Container> {
+        &mut self.inner
     }
 
     pub fn push(&mut self, value: Def::Item) {
@@ -202,15 +209,11 @@ mod tests {
 
     #[test]
     fn pod_item() {
-        let mut list = U128List::new(u128::MAX);
+        let mut list = U128List::new((), u128::MAX);
 
         list.push(u128::MIN);
 
-        for item in list.as_slice() {
-            println!("{item}")
-        }
-
-        assert_eq!(list.as_slice().len(), 2);
+        assert_eq!(list.as_slice(), &[u128::MAX, u128::MIN]);
 
         #[repr(C)]
         struct U128Container {
@@ -227,11 +230,13 @@ mod tests {
 
             type ItemCount = u32;
 
+            type Parameters = ();
+
             const ITEM_COUNT_OFFSET: usize = mem::offset_of!(U128Container, count);
 
             const ARRAY_OFFSET: usize = mem::offset_of!(U128Container, array);
 
-            fn new_container(first_item: Self::Item) -> Self::Container {
+            fn new_container(_: Self::Parameters, first_item: Self::Item) -> Self::Container {
                 U128Container {
                     count: 1,
                     array: [first_item],
@@ -248,7 +253,7 @@ mod tests {
 
     #[test]
     fn allocated_item() {
-        let mut list = StringList::new("hello".to_owned());
+        let mut list = StringList::new("some_metadata".to_owned(), "hello".to_owned());
 
         list.push("world".to_owned());
         list.push("foo".to_owned());
@@ -276,14 +281,16 @@ mod tests {
 
             type ItemCount = u8;
 
+            type Parameters = String;
+
             const ITEM_COUNT_OFFSET: usize = mem::offset_of!(StringContainer, count);
 
             const ARRAY_OFFSET: usize = mem::offset_of!(StringContainer, array);
 
-            fn new_container(first_item: Self::Item) -> Self::Container {
+            fn new_container(some_allocated_metadata: Self::Parameters, first_item: Self::Item) -> Self::Container {
                 StringContainer {
                     count: 1,
-                    _some_allocated_metadata: "some_value".to_owned(),
+                    _some_allocated_metadata: some_allocated_metadata,
                     array: [first_item],
                 }
             }
