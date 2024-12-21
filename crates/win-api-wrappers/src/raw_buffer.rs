@@ -122,6 +122,25 @@ impl RawBuffer {
             _marker: core::marker::PhantomData,
         }
     }
+
+    /// Consumes the `RawBuffer`, returning the raw pointer and the layout used to allocate the memory.
+    pub fn into_raw(self) -> (*mut u8, Layout) {
+        (self.ptr.as_ptr(), self.layout)
+    }
+
+    /// Constructs a `RawBuffer` from a raw pointer and the associated layout.
+    ///
+    /// # Safety
+    ///
+    /// - `ptr` must be non-null.
+    /// - Memory pointed by `ptr` must be allocated using Rust’s global allocator.
+    /// - The memory pointed by `ptr` must have been allocated using `layout`.
+    pub unsafe fn from_raw(ptr: *mut u8, layout: Layout) -> Self {
+        Self {
+            ptr: NonNull::new(ptr).expect("non-null ptr"),
+            layout,
+        }
+    }
 }
 
 impl Drop for RawBuffer {

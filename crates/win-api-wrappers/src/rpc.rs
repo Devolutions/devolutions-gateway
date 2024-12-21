@@ -19,8 +19,11 @@ use crate::Error;
 
 use anyhow::{bail, Result};
 
+#[expect(non_camel_case_types)] // Unless a better name is found…
 pub type RPC_BINDING_HANDLE = *mut c_void;
 
+// FIXME: unsound API. E.g.: it’s possible to build a RpcBindingHandle with a dangling pointer,
+// and to call safe functions unsafely dereferencing that pointer.
 pub struct RpcBindingHandle(pub RPC_BINDING_HANDLE);
 
 pub struct RpcCallAttributes {

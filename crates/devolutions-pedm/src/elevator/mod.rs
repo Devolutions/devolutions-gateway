@@ -16,7 +16,7 @@ use win_api_wrappers::raw::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::{Token, TokenElevationType, TokenSecurityAttribute, TokenSecurityAttributeValues};
 use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
-use win_api_wrappers::utils::{environment_block, CommandLine, WideString};
+use win_api_wrappers::utils::{environment_block, CommandLine};
 use win_api_wrappers::Error;
 
 use crate::policy::{self, application_from_path};
@@ -45,7 +45,7 @@ fn elevate_token(token: &Token) -> Result<Token> {
         TokenElevationType::Default => {
             let policy = policy::policy().read();
             let elevation_method = policy
-                .user_current_profile(&token.sid_and_attributes()?.sid.account(None)?.to_user())
+                .user_current_profile(&token.sid_and_attributes()?.sid.lookup_account(None)?.to_user())
                 .context("user not assigned")?
                 .elevation_method;
             elevator(elevation_method).elevate_token(token)
@@ -121,7 +121,7 @@ pub(crate) fn try_start_elevated(
     let mut elevation = elevate_token(client_token)?.duplicate_impersonation()?;
 
     let attribute = TokenSecurityAttribute {
-        name: WideString::from("PEDM_TAGGED"),
+        name: win_api_wrappers::str::u16cstr!("PEDM_TAGGED").to_owned(),
         flags: TOKEN_SECURITY_ATTRIBUTE_FLAG(0),
         values: TokenSecurityAttributeValues::Uint64(vec![0x1337, 1337]),
     };

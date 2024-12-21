@@ -29,9 +29,9 @@ use tracing::error;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
-use win_api_wrappers::raw::Win32::Security::Authorization::{SetSecurityInfo, SE_KERNEL_OBJECT};
-use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, ACE_FLAGS, DACL_SECURITY_INFORMATION, PSID};
-use win_api_wrappers::security::acl::{Ace, AceType, Acl};
+use win_api_wrappers::raw::Win32::Security::Authorization::{SetSecurityInfo, GRANT_ACCESS, SE_KERNEL_OBJECT};
+use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, DACL_SECURITY_INFORMATION, NO_INHERITANCE, PSID};
+use win_api_wrappers::security::acl::{Acl, ExplicitAccess, Trustee};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
 use win_api_wrappers::utils::Pipe;
@@ -77,7 +77,7 @@ async fn named_pipe_middleware(
     };
 
     let token = Arc::new(pipe.client_primary_token()?);
-    let acc = token.sid_and_attributes()?.sid.account(None)?;
+    let acc = token.sid_and_attributes()?.sid.lookup_account(None)?;
 
     request.extensions_mut().insert(NamedPipeConnectInfo {
         user: acc.to_user(),
@@ -91,23 +91,23 @@ async fn named_pipe_middleware(
 fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
     let pipe = ServerOptions::new().write_dac(true).create(pipe_name)?;
 
-    let dacl = Acl::with_aces(vec![
-        Ace {
-            flags: ACE_FLAGS(0),
-            access_mask: GENERIC_READ.0 | GENERIC_WRITE.0,
-            data: AceType::AccessAllowed(Sid::from_well_known(WinBuiltinUsersSid, None)?),
+    let dacl = Acl::new()?.set_entries(&[
+        ExplicitAccess {
+            access_permissions: GENERIC_READ.0 | GENERIC_WRITE.0,
+            access_mode: GRANT_ACCESS,
+            inheritance: NO_INHERITANCE,
+            trustee: Trustee::Sid(Sid::from_well_known(WinBuiltinUsersSid, None)?),
         },
-        Ace {
-            flags: ACE_FLAGS(0),
-            access_mask: PIPE_ACCESS_FULL_CONTROL,
-            data: AceType::AccessAllowed(Token::current_process_token().sid_and_attributes()?.sid),
+        ExplicitAccess {
+            access_permissions: PIPE_ACCESS_FULL_CONTROL,
+            access_mode: GRANT_ACCESS,
+            inheritance: NO_INHERITANCE,
+            trustee: Trustee::Sid(Token::current_process_token().sid_and_attributes()?.sid),
         },
-    ])
-    .to_raw()?;
+    ])?;
 
     // SAFETY: `SetSecurityInfo` needs a handle and four potential inputs. Since `securityinfo` only
     // mentions `DACL_SECURITY_INFORMATION`, only the `pDacl` argument is used.
-    // We assume the `.to_raw()` function generated a correct ACL.
     unsafe {
         SetSecurityInfo(
             HANDLE(pipe.as_raw_handle().cast()),

@@ -64,7 +64,7 @@ pub static DEFAULT_ADMIN_PRIVILEGES: LazyLock<TokenPrivileges> = LazyLock::new(|
         }
     }
 
-    let mut privileges = TokenPrivileges::new(new_privilege(SE_INCREASE_QUOTA_NAME, NO_ATTRIBUTE));
+    let mut privileges = TokenPrivileges::new((), new_privilege(SE_INCREASE_QUOTA_NAME, NO_ATTRIBUTE));
 
     privileges.push(new_privilege(SE_SECURITY_NAME, NO_ATTRIBUTE));
     privileges.push(new_privilege(SE_TAKE_OWNERSHIP_NAME, NO_ATTRIBUTE));
@@ -117,11 +117,13 @@ unsafe impl Win32DstDef for TokenPrivilegesDstDef {
 
     type ItemCount = u32;
 
+    type Parameters = ();
+
     const ITEM_COUNT_OFFSET: usize = mem::offset_of!(Security::TOKEN_PRIVILEGES, PrivilegeCount);
 
     const ARRAY_OFFSET: usize = mem::offset_of!(Security::TOKEN_PRIVILEGES, Privileges);
 
-    fn new_container(first_item: Self::Item) -> Self::Container {
+    fn new_container(_: Self::Parameters, first_item: Self::Item) -> Self::Container {
         Security::TOKEN_PRIVILEGES {
             PrivilegeCount: 1,
             Privileges: [first_item],
@@ -135,10 +137,10 @@ unsafe impl Win32DstDef for TokenPrivilegesDstDef {
 
 pub type TokenPrivileges = Win32Dst<TokenPrivilegesDstDef>;
 
-// SAFETY: Just a POD with no interior mutabilty.
+// SAFETY: Just a POD with no thread-unsafe interior mutabilty.
 unsafe impl Send for TokenPrivileges {}
 
-// SAFETY: Just a POD with no interior mutabilty.
+// SAFETY: Just a POD with no thread-unsafe interior mutabilty.
 unsafe impl Sync for TokenPrivileges {}
 
 pub fn lookup_privilege_value(system_name: Option<&U16CStr>, name: &U16CStr) -> anyhow::Result<LUID> {
@@ -241,13 +243,16 @@ mod tests {
 
     #[test]
     fn push_token_privileges() {
-        let mut privileges = TokenPrivileges::new(Security::LUID_AND_ATTRIBUTES {
-            Luid: LUID {
-                LowPart: 32,
-                HighPart: 0,
+        let mut privileges = TokenPrivileges::new(
+            (),
+            Security::LUID_AND_ATTRIBUTES {
+                Luid: LUID {
+                    LowPart: 32,
+                    HighPart: 0,
+                },
+                Attributes: Security::TOKEN_PRIVILEGES_ATTRIBUTES(2),
             },
-            Attributes: Security::TOKEN_PRIVILEGES_ATTRIBUTES(2),
-        });
+        );
 
         privileges.push(Security::LUID_AND_ATTRIBUTES {
             Luid: LUID {

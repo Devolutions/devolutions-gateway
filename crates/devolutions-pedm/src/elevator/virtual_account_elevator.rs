@@ -7,9 +7,9 @@
 //!
 //! This method can however lead to isses when doing remote authentication etc. since sometimes it can expect a user, which
 //! is not the virtual user.
+
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use win_api_wrappers::identity::account::{create_virtual_account, ProfileInfo};
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
@@ -18,7 +18,9 @@ use win_api_wrappers::raw::Win32::Security::{WinBuiltinAdministratorsSid, WinLoc
 use win_api_wrappers::raw::Win32::System::SystemServices::{
     SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_LOGON_ID, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
 };
-use win_api_wrappers::token::{Token, TokenGroups};
+use win_api_wrappers::str::U16CString;
+use win_api_wrappers::token::Token;
+use win_api_wrappers::token_groups::TokenGroups;
 use win_api_wrappers::undoc::LOGON32_PROVIDER_VIRTUAL;
 use win_api_wrappers::Error;
 
@@ -51,10 +53,12 @@ impl VirtualAccountElevator {
         }
     }
 
-    fn create_token(&self, token: &Token) -> Result<()> {
-        let virtual_account = create_virtual_account(self.rid, &self.domain, token)?;
+    fn create_token(&self, token: &Token) -> anyhow::Result<()> {
+        let domain = U16CString::from_str(&self.domain)?;
 
-        let groups = vec![
+        let virtual_account = create_virtual_account(self.rid, &domain, token)?;
+
+        let mut groups = TokenGroups::new(
             // Needed for the virtual account to access the user's desktop and window station.
             SidAndAttributes {
                 sid: token.logon_sid()?,
@@ -62,34 +66,36 @@ impl VirtualAccountElevator {
                 attributes: (SE_GROUP_LOGON_ID | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY)
                     as u32, // 0xc0000007
             },
-            SidAndAttributes {
-                sid: Sid::from_well_known(WinLocalSid, None)?, // S-1-2-0
-                #[expect(clippy::cast_sign_loss)]
-                attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
-            },
-            SidAndAttributes {
-                sid: Sid::from_well_known(WinBuiltinAdministratorsSid, None)?, // S-1-5-32-544
-                #[expect(clippy::cast_sign_loss)]
-                attributes: (SE_GROUP_OWNER | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY)
-                    as u32, // 0xf
-            },
-            SidAndAttributes {
-                sid: virtual_account.domain_sid,
-                #[expect(clippy::cast_sign_loss)]
-                attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
-            },
-        ];
+        );
+
+        groups.push(SidAndAttributes {
+            sid: Sid::from_well_known(WinLocalSid, None)?, // S-1-2-0
+            #[expect(clippy::cast_sign_loss)]
+            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
+        });
+
+        groups.push(SidAndAttributes {
+            sid: Sid::from_well_known(WinBuiltinAdministratorsSid, None)?, // S-1-5-32-544
+            #[expect(clippy::cast_sign_loss)]
+            attributes: (SE_GROUP_OWNER | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0xf
+        });
+
+        groups.push(SidAndAttributes {
+            sid: virtual_account.domain_sid,
+            #[expect(clippy::cast_sign_loss)]
+            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
+        });
 
         let base_token = Token::logon(
-            &virtual_account.account_name,
-            Some(&self.domain),
+            &virtual_account.name,
+            Some(&domain),
             None,
             LOGON32_LOGON_INTERACTIVE,
             LOGON32_PROVIDER_VIRTUAL,
-            Some(&TokenGroups(groups)),
+            Some(&groups),
         )?;
 
-        let profile = base_token.load_profile(&virtual_account.account_name)?;
+        let profile = base_token.load_profile(virtual_account.name)?;
 
         let elevated_token = base_token.linked_token()?;
 
@@ -110,7 +116,7 @@ impl Elevator for VirtualAccountElevator {
     /// https://call4cloud.nl/2023/05/the-virtual-account-that-rocks-the-epm/
     /// https://posts.specterops.io/getting-intune-with-bugs-and-tokens-a-journey-through-epm-013b431e7f49
     /// consent.exe!CuipCreateAutomaticAdminAccount
-    fn elevate_token(&self, token: &Token) -> Result<Token> {
+    fn elevate_token(&self, token: &Token) -> anyhow::Result<Token> {
         let sid = token.sid_and_attributes()?.sid;
 
         if !self.tokens.read().contains_key(&sid) {
@@ -120,7 +126,7 @@ impl Elevator for VirtualAccountElevator {
         self.tokens
             .read()
             .get(&sid)
-            .ok_or_else(|| anyhow!(Error::from_win32(ERROR_ACCOUNT_EXPIRED)))
+            .ok_or_else(|| anyhow::anyhow!(Error::from_win32(ERROR_ACCOUNT_EXPIRED)))
             .and_then(|vtoken| {
                 let mut vtoken = vtoken.elevated_token.duplicate_impersonation()?;
 
