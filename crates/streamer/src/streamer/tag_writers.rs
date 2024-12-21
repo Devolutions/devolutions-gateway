@@ -1,6 +1,5 @@
 use anyhow::Context;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
-use tracing::{instrument, trace, warn};
 use webm_iterable::{
     errors::TagWriterError,
     matroska_spec::{Master, MatroskaSpec, SimpleBlock},
