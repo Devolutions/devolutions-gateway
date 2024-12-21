@@ -8,6 +8,7 @@ use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
+use cadeau::xmf;
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::ShutdownSignal;
 use hyper::StatusCode;
@@ -501,6 +502,10 @@ async fn shadow_recording(
 
     if !recordings.active_recordings.contains(id) {
         return Err(HttpError::not_found().msg("no active recording found for the specified ID"));
+    }
+
+    if !xmf::is_init() {
+        return Err(HttpError::internal().msg("XMF dynamic library is not initialized"));
     }
 
     let notify = recordings.subscribe_to_recording_finish(id).await.map_err(
