@@ -81,7 +81,7 @@ impl VirtualAccountElevator {
         ];
 
         let base_token = Token::logon(
-            &virtual_account.account_name,
+            &virtual_account.name,
             Some(&self.domain),
             None,
             LOGON32_LOGON_INTERACTIVE,
@@ -89,7 +89,7 @@ impl VirtualAccountElevator {
             Some(&TokenGroups(groups)),
         )?;
 
-        let profile = base_token.load_profile(&virtual_account.account_name)?;
+        let profile = base_token.load_profile(virtual_account.name)?;
 
         let elevated_token = base_token.linked_token()?;
 

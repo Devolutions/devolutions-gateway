@@ -3,6 +3,7 @@ extern crate tracing;
 
 pub mod dst;
 pub mod raw_buffer;
+pub mod scope_guard;
 pub mod str;
 
 #[cfg(target_os = "windows")]

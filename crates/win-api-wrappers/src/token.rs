@@ -30,6 +30,7 @@ use crate::identity::sid::{RawSid, RawSidAndAttributes, Sid, SidAndAttributes};
 use crate::raw_buffer::{InitedBuffer, RawBuffer};
 use crate::security::acl::Acl;
 use crate::security::privilege::{self, find_token_with_privilege, lookup_privilege_value, TokenPrivileges};
+use crate::str::U16CString;
 use crate::undoc::{
     LogonUserExExW, NtCreateToken, OBJECT_ATTRIBUTES, TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION,
     TOKEN_SECURITY_ATTRIBUTES_INFORMATION, TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1,
@@ -391,10 +392,9 @@ impl Token {
         Ok(Self::from(handle))
     }
 
-    pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> anyhow::Result<String> {
+    pub fn username(&self, format: EXTENDED_NAME_FORMAT) -> anyhow::Result<U16CString> {
         let _ctx = self.impersonate()?;
-
-        get_username(format)
+        get_username(format).context("failed to get username")
     }
 
     pub fn logon(
@@ -485,6 +485,7 @@ impl Token {
             self.get_information::<TOKEN_MANDATORY_POLICY>(Security::TokenMandatoryPolicy)
                 .context("get TokenMandatoryPolicy information")?
         };
+
         Ok(mandatory_policy.Policy)
     }
 
@@ -497,8 +498,8 @@ impl Token {
         )
     }
 
-    pub fn load_profile(&self, username: &str) -> anyhow::Result<ProfileInfo> {
-        if let Err(err) = create_profile(&self.sid_and_attributes()?.sid, username) {
+    pub fn load_profile(&self, username: U16CString) -> anyhow::Result<ProfileInfo> {
+        if let Err(err) = create_profile(&self.sid_and_attributes()?.sid, &username) {
             match err.downcast::<windows::core::Error>() {
                 Ok(err) => {
                     if err.code() != ERROR_ALREADY_EXISTS.to_hresult() {
@@ -528,6 +529,7 @@ impl Token {
             },
             TokenGroupAdjustment::Enable(groups) => {
                 let groups = RawTokenGroups::try_from(groups)?;
+
                 // SAFETY: No preconditions. We assume `groups` is well constructed.
                 unsafe {
                     AdjustTokenGroups(self.handle.raw(), false, Some(groups.as_raw()), 0, None, None)?;
@@ -566,7 +568,7 @@ impl Token {
                     Attributes: attr,
                 };
 
-                let mut privileges = TokenPrivileges::new(first_element);
+                let mut privileges = TokenPrivileges::new((), first_element);
 
                 for id in ids {
                     privileges.push(LUID_AND_ATTRIBUTES {
@@ -738,13 +740,17 @@ impl TryFrom<&TOKEN_GROUPS> for TokenGroups {
     type Error = anyhow::Error;
 
     fn try_from(value: &TOKEN_GROUPS) -> anyhow::Result<Self> {
+        // FIXME: Unsound. try_from should be unsafe, as we can’t control the input value at this point. We need to define a new trait.
         // SAFETY: We assume `Groups` and `GroupCount` are well constructed and valid.
         let groups_slice = unsafe { slice::from_raw_parts(value.Groups.as_ptr(), value.GroupCount as usize) };
 
         let mut groups = Vec::with_capacity(groups_slice.len());
 
         for group in groups_slice.iter() {
-            groups.push(SidAndAttributes::try_from(group)?);
+            // FIXME: Unsound. try_from should be unsafe, as we can’t control the input value at this point. We need to define a new trait.
+            let sid_and_attributes = unsafe { SidAndAttributes::from_raw(group)? };
+
+            groups.push(sid_and_attributes);
         }
 
         Ok(TokenGroups(groups))
@@ -936,6 +942,7 @@ impl TryFrom<&TOKEN_DEFAULT_DACL> for TokenDefaultDacl {
 
     fn try_from(value: &TOKEN_DEFAULT_DACL) -> anyhow::Result<Self, Self::Error> {
         Ok(Self {
+            // FIXME: Unsound. try_from should be unsafe, as we can’t control the input value at this point. We need to define a new trait.
             // SAFETY: We assume `DefaultDacl` actually points to an ACL.
             default_dacl: unsafe { value.DefaultDacl.as_ref() }.map(Acl::try_from).transpose()?,
         })
@@ -950,8 +957,9 @@ impl TryFrom<&TOKEN_PRIMARY_GROUP> for TokenPrimaryGroup {
     type Error = anyhow::Error;
 
     fn try_from(value: &TOKEN_PRIMARY_GROUP) -> anyhow::Result<Self, Self::Error> {
+        // FIXME: Unsound. try_from should be unsafe, as we can’t control the input value at this point. We need to define a new trait.
         Ok(Self {
-            primary_group: Sid::try_from(value.PrimaryGroup)?,
+            primary_group: unsafe { Sid::from_psid(value.PrimaryGroup)? },
         })
     }
 }

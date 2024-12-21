@@ -418,7 +418,7 @@ pub(crate) fn application_from_process(pid: u32) -> Result<Application> {
         .sid_and_attributes()?
         .sid
         .account(None)?
-        .to_user();
+        .into_user();
 
     application_from_path(path, proc_params.command_line, proc_params.working_directory, user)
 }

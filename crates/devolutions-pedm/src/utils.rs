@@ -165,15 +165,15 @@ pub(crate) fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> anyh
 }
 
 pub(crate) trait AccountExt {
-    fn to_user(self) -> User;
+    fn into_user(self) -> User;
 }
 
 impl AccountExt for Account {
-    fn to_user(self) -> User {
+    fn into_user(self) -> User {
         User {
-            account_name: self.account_name,
+            account_name: self.name,
             domain_name: self.domain_name,
-            account_sid: self.account_sid.to_string(),
+            account_sid: self.sid.to_string(),
             domain_sid: self.domain_sid.to_string(),
         }
     }

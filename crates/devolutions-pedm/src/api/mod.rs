@@ -80,7 +80,7 @@ async fn named_pipe_middleware(
     let acc = token.sid_and_attributes()?.sid.account(None)?;
 
     request.extensions_mut().insert(NamedPipeConnectInfo {
-        user: acc.to_user(),
+        user: acc.into_user(),
         token,
         pipe_process_id: pipe.client_process_id()?,
     });

@@ -45,7 +45,7 @@ fn elevate_token(token: &Token) -> Result<Token> {
         TokenElevationType::Default => {
             let policy = policy::policy().read();
             let elevation_method = policy
-                .user_current_profile(&token.sid_and_attributes()?.sid.account(None)?.to_user())
+                .user_current_profile(&token.sid_and_attributes()?.sid.lookup_account(None)?.into_user())
                 .context("user not assigned")?
                 .elevation_method;
             elevator(elevation_method).elevate_token(token)
