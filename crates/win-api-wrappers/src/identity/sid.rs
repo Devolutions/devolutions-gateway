@@ -1,40 +1,96 @@
 use std::alloc::Layout;
-use std::fmt::{self, Debug};
-use std::hash::Hash;
 use std::ptr;
+use std::{fmt, mem};
 
-use anyhow::{bail, Result};
-
-use crate::undoc::{RtlCreateVirtualAccountSid, SECURITY_MAX_SID_SIZE};
-use crate::utils::{nul_slice_wide_str, SafeWindowsString, WideString};
-use crate::Error;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{LocalFree, E_POINTER, HLOCAL};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
 use windows::Win32::Security::{
-    CreateWellKnownSid, GetLengthSid, GetSidSubAuthority, IsValidSid, LookupAccountSidW, PSID, SID, SID_AND_ATTRIBUTES,
-    SID_IDENTIFIER_AUTHORITY, SID_NAME_USE, WELL_KNOWN_SID_TYPE,
+    self, CreateWellKnownSid, GetLengthSid, GetSidSubAuthority, IsValidSid, LookupAccountSidW, SID_NAME_USE,
+    WELL_KNOWN_SID_TYPE,
 };
 
-use super::account::Account;
+use crate::dst::{Win32Dst, Win32DstDef};
+use crate::identity::account::Account;
+use crate::undoc::{RtlCreateVirtualAccountSid, SECURITY_MAX_SID_SIZE};
+use crate::utils::{nul_slice_wide_str, SafeWindowsString, WideString};
+use crate::Error;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sid {
-    pub revision: u8,
-    pub identifier_identity: SID_IDENTIFIER_AUTHORITY,
-    pub sub_authority: Vec<u32>,
+pub struct SidAndAttributes {
+    pub sid: Sid,
+    pub attributes: u32,
 }
 
-impl Hash for Sid {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.revision.hash(state);
-        self.identifier_identity.Value.hash(state);
-        self.sub_authority.hash(state);
+pub type Sid = Win32Dst<SidDstDef>;
+
+pub struct SidDstDef;
+
+// SAFETY:
+// - The offests are in bounds of the container (ensured via the offset_of! macro).
+// - The container (SID) is not #[repr(packet)].
+// - The container (SID) is #[repr(C)].
+// - The array is defined last and its hardcoded size if of 1.
+unsafe impl Win32DstDef for SidDstDef {
+    type Container = Security::SID;
+
+    type Item = u32;
+
+    type ItemCount = u8;
+
+    type Parameters = (u8, Security::SID_IDENTIFIER_AUTHORITY);
+
+    const ITEM_COUNT_OFFSET: usize = mem::offset_of!(Security::SID, SubAuthorityCount);
+
+    const ARRAY_OFFSET: usize = mem::offset_of!(Security::SID, SubAuthority);
+
+    fn new_container((revision, identifier_authority): Self::Parameters, first_item: Self::Item) -> Self::Container {
+        Security::SID {
+            Revision: revision,
+            SubAuthorityCount: 1,
+            IdentifierAuthority: identifier_authority,
+            SubAuthority: [first_item],
+        }
+    }
+
+    fn increment_count(count: Self::ItemCount) -> Self::ItemCount {
+        count + 1
     }
 }
 
+// SAFETY: Just a POD with no thread-unsafe interior mutabilty.
+unsafe impl Send for Sid {}
+
+// SAFETY: Just a POD with no thread-unsafe interior mutabilty.
+unsafe impl Sync for Sid {}
+
+impl fmt::Display for Sid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::str::{U16CStr, U16CStrExt};
+
+        let mut repr_ptr = PWSTR::null();
+        let ptr = Security::PSID(self.as_raw().as_ptr() as *mut std::ffi::c_void);
+
+        // SAFETY:
+        // - ptr is pointing to a valid SID, well constructed.
+        // - The mutability of the pointer is changed, but ConvertSidToStringSidW is not modifying the underlying data.
+        unsafe { ConvertSidToStringSidW(ptr, &mut repr_ptr).map_err(|_| fmt::Error)? };
+
+        // SAFETY: ConvertSidToStringSidW returns a null-terminated SID string.
+        let repr = unsafe { U16CStr::from_pwstr(repr_ptr) };
+
+        let res = f.write_str(&repr.to_string_lossy());
+
+        // SAFETY: The pointer allocated by ConvertSidToStringSidW must be freed using `LocalFree`.
+        unsafe { LocalFree(HLOCAL(repr_ptr.0.cast())) };
+
+        res
+    }
+}
+
+// TODO: from here
+
 impl Sid {
-    pub fn virtual_account_sid(name: &str, base_sub_authority: u32) -> Result<Self> {
+    pub fn virtual_account_sid(name: &str, base_sub_authority: u32) -> anyhow::Result<Self> {
         let name = WideString::from(name);
         let mut buf = vec![0; SECURITY_MAX_SID_SIZE as usize];
         let mut out_size = u32::try_from(buf.len())?;
@@ -44,7 +100,7 @@ impl Sid {
             RtlCreateVirtualAccountSid(
                 &name.as_unicode_string()?,
                 base_sub_authority,
-                PSID(buf.as_mut_ptr().cast()),
+                Security::PSID(buf.as_mut_ptr().cast()),
                 &mut out_size,
             )
         }?;
@@ -52,10 +108,10 @@ impl Sid {
         buf.truncate(out_size as usize);
 
         // SAFETY: We can safely dereference since it is our buffer. We assume it is actually a SID that is held.
-        Ok(unsafe { &*buf.as_ptr().cast::<SID>() }.into())
+        Ok(unsafe { &*buf.as_ptr().cast::<Security::SID>() }.into())
     }
 
-    pub fn from_well_known(sid_type: WELL_KNOWN_SID_TYPE, domain_sid: Option<&Self>) -> Result<Self> {
+    pub fn from_well_known(sid_type: WELL_KNOWN_SID_TYPE, domain_sid: Option<&Self>) -> anyhow::Result<Self> {
         let mut out_size = 0u32;
 
         let domain_sid = domain_sid.map(RawSid::try_from).transpose()?;
@@ -63,26 +119,33 @@ impl Sid {
         let domain_sid_ptr = domain_sid.as_ref().map(RawSid::as_psid).unwrap_or_default();
 
         // SAFETY: No preconditions. We assume `RawSid`'s `as_psid()` works correctly.
-        let _ = unsafe { CreateWellKnownSid(sid_type, domain_sid_ptr, PSID(ptr::null_mut()), &mut out_size) };
+        let _ = unsafe { CreateWellKnownSid(sid_type, domain_sid_ptr, Security::PSID(ptr::null_mut()), &mut out_size) };
 
         let mut buf: Vec<u8> = vec![0; out_size as usize];
 
         // SAFETY: No preconditions. We assume `RawSid`'s `as_psid()` works correctly.
         // `buf`'s size matches the previously returned `out_size` for the same arguments.
-        unsafe { CreateWellKnownSid(sid_type, domain_sid_ptr, PSID(buf.as_mut_ptr().cast()), &mut out_size) }?;
+        unsafe {
+            CreateWellKnownSid(
+                sid_type,
+                domain_sid_ptr,
+                Security::PSID(buf.as_mut_ptr().cast()),
+                &mut out_size,
+            )
+        }?;
 
         buf.truncate(out_size as usize);
 
         #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: We can safely dereference since this is our buffer. We assume the data in the buffer is a SID.
-        Ok(Self::from(unsafe { &*buf.as_ptr().cast::<SID>() }))
+        Ok(Self::from(unsafe { &*buf.as_ptr().cast::<Security::SID>() }))
     }
 
-    pub fn is_valid(&self) -> Result<bool> {
+    pub fn is_valid(&self) -> anyhow::Result<bool> {
         Ok(RawSid::try_from(self)?.is_valid())
     }
 
-    pub fn account(&self, system_name: Option<&str>) -> Result<Account> {
+    pub fn account(&self, system_name: Option<&str>) -> anyhow::Result<Account> {
         let raw_sid = RawSid::try_from(self)?;
         let mut name_size = 0u32;
         let mut domain_size = 0u32;
@@ -133,22 +196,6 @@ impl Sid {
     }
 }
 
-impl fmt::Display for Sid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        RawSid::try_from(self).map_err(|_| fmt::Error)?.fmt(f)
-    }
-}
-
-impl Default for Sid {
-    fn default() -> Self {
-        Self {
-            revision: 1,
-            identifier_identity: Default::default(),
-            sub_authority: Default::default(),
-        }
-    }
-}
-
 pub struct RawSid {
     pub buf: Vec<u8>,
 }
@@ -164,17 +211,17 @@ impl RawSid {
         self.len() == 0
     }
 
-    pub fn as_raw(&self) -> &SID {
+    pub fn as_raw(&self) -> &Security::SID {
         #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
         // SAFETY: Dereferencing is possible since it is our buffer.
         // We assume our buffer is well constructed and valid.
         unsafe {
-            &*self.buf.as_ptr().cast::<SID>()
+            &*self.buf.as_ptr().cast::<Security::SID>()
         }
     }
 
-    pub fn as_psid(&self) -> PSID {
-        PSID(self.as_raw() as *const _ as *mut _)
+    pub fn as_psid(&self) -> Security::PSID {
+        Security::PSID(self.as_raw() as *const _ as *mut _)
     }
 
     pub fn is_valid(&self) -> bool {
@@ -209,7 +256,7 @@ impl TryFrom<&str> for Sid {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let value = WideString::from(value);
-        let mut sid_ptr = PSID::default();
+        let mut sid_ptr = Security::PSID::default();
 
         // SAFETY: `value` is valid and null terminated. `sid_ptr` must be freed by `LocalFree`.
         unsafe { ConvertStringSidToSidW(value.as_pcwstr(), &mut sid_ptr) }?;
@@ -219,7 +266,7 @@ impl TryFrom<&str> for Sid {
         let sid = Self::from(unsafe {
             sid_ptr
                 .0
-                .cast::<SID>()
+                .cast::<Security::SID>()
                 .as_ref()
                 .ok_or_else(|| Error::NullPointer("SID"))
         }?);
@@ -234,17 +281,17 @@ impl TryFrom<&str> for Sid {
 impl TryFrom<&Sid> for RawSid {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Sid) -> Result<Self> {
+    fn try_from(value: &Sid) -> anyhow::Result<Self> {
         let mut buf = vec![
             0u8;
-            Layout::new::<SID>()
+            Layout::new::<Security::SID>()
                 .extend(Layout::array::<u32>(value.sub_authority.len().saturating_sub(1))?)?
                 .0
                 .pad_to_align()
                 .size()
         ];
 
-        let sid = buf.as_mut_ptr().cast::<SID>();
+        let sid = buf.as_mut_ptr().cast::<Security::SID>();
 
         // SAFETY: Aligment is valid for these `write`s.
         unsafe {
@@ -268,27 +315,27 @@ impl TryFrom<&Sid> for RawSid {
     }
 }
 
-impl TryFrom<PSID> for Sid {
+impl TryFrom<Security::PSID> for Sid {
     type Error = anyhow::Error;
 
-    fn try_from(value: PSID) -> std::result::Result<Self, Self::Error> {
-        let value = value.0.cast::<SID>();
+    fn try_from(value: Security::PSID) -> Result<Self, Self::Error> {
+        let value = value.0.cast::<Security::SID>();
 
         // SAFETY: We assume the pointer actually points to a valid SID.
         match unsafe { value.as_ref() } {
             Some(x) => Ok(Self::from(x)),
-            None => bail!(Error::from_hresult(E_POINTER)),
+            None => anyhow::bail!(Error::from_hresult(E_POINTER)),
         }
     }
 }
 
-impl From<&SID> for Sid {
-    fn from(sid: &SID) -> Self {
+impl From<&Security::SID> for Sid {
+    fn from(sid: &Security::SID) -> Self {
         let mut sub_authority = Vec::new();
         for i in 0..u32::from(sid.SubAuthorityCount) {
             // SAFETY: We assume `SubAuthorityCount` matches with the actual amount of sub authorities of the SID.
             // *mut cast is safe since `GetSidSubAuthority` does not mutate `SID`.
-            let ptr = unsafe { GetSidSubAuthority(PSID(sid as *const _ as *mut _), i) };
+            let ptr = unsafe { GetSidSubAuthority(Security::PSID(sid as *const _ as *mut _), i) };
 
             // SAFETY: We assume the returned pointer is valid.
             // Pointer is undefined if index is OOB. We assume it is in range.
@@ -303,18 +350,13 @@ impl From<&SID> for Sid {
     }
 }
 
-pub struct SidAndAttributes {
-    pub sid: Sid,
-    pub attributes: u32,
-}
-
 pub struct RawSidAndAttributes {
     _sid: RawSid,
-    raw: SID_AND_ATTRIBUTES,
+    raw: Security::SID_AND_ATTRIBUTES,
 }
 
 impl RawSidAndAttributes {
-    pub fn as_raw(&self) -> &SID_AND_ATTRIBUTES {
+    pub fn as_raw(&self) -> &Security::SID_AND_ATTRIBUTES {
         &self.raw
     }
 }
@@ -322,14 +364,14 @@ impl RawSidAndAttributes {
 impl TryFrom<&SidAndAttributes> for RawSidAndAttributes {
     type Error = anyhow::Error;
 
-    fn try_from(value: &SidAndAttributes) -> Result<Self> {
+    fn try_from(value: &SidAndAttributes) -> anyhow::Result<Self> {
         let raw_sid = RawSid::try_from(&value.sid)?;
 
         let raw_sid_ptr = raw_sid.as_psid();
 
         Ok(Self {
             _sid: raw_sid,
-            raw: SID_AND_ATTRIBUTES {
+            raw: Security::SID_AND_ATTRIBUTES {
                 Sid: raw_sid_ptr,
                 Attributes: value.attributes,
             },
@@ -337,10 +379,10 @@ impl TryFrom<&SidAndAttributes> for RawSidAndAttributes {
     }
 }
 
-impl TryFrom<&SID_AND_ATTRIBUTES> for SidAndAttributes {
+impl TryFrom<&Security::SID_AND_ATTRIBUTES> for SidAndAttributes {
     type Error = anyhow::Error;
 
-    fn try_from(value: &SID_AND_ATTRIBUTES) -> Result<Self> {
+    fn try_from(value: &Security::SID_AND_ATTRIBUTES) -> anyhow::Result<Self> {
         Ok(Self {
             sid: Sid::try_from(value.Sid)?,
             attributes: value.Attributes,
