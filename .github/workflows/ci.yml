@@ -386,6 +386,16 @@ jobs:
         working-directory: webapp
         run: npm run player:check
 
+      - name: install recording player
+        shell: pwsh
+        working-directory: webapp/player-project
+        run: npm install
+
+      - name: build recording player
+        shell: pwsh
+        working-directory: webapp/player-project
+        run: npm run build
+
       - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
