@@ -7,7 +7,7 @@ use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 use tokio::sync::{mpsc, oneshot::error::RecvError, Mutex, Notify};
 use tokio_util::codec::Framed;
-use tracing::{debug, info, instrument, trace, warn, Instrument};
+use tracing::Instrument;
 use webm_iterable::{
     errors::{TagIteratorError, TagWriterError},
     matroska_spec::{Master, MatroskaSpec},
