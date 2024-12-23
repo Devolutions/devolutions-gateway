@@ -505,7 +505,7 @@ async fn shadow_recording(
     }
 
     if !xmf::is_init() {
-        return Err(HttpError::internal().msg("XMF dynamic library is not initialized"));
+        return Err(HttpError::internal().msg("XMF native library is not loaded"));
     }
 
     let notify = recordings.subscribe_to_recording_finish(id).await.map_err(
