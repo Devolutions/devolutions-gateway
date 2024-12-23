@@ -366,10 +366,11 @@ jobs:
       - name: Install NPM dependencies
         working-directory: webapp
         run: npm ci
+        shell: pwsh
 
       - name: Configure runner
-        shell: pwsh
         run: npm install -g @angular/cli
+        shell: pwsh
 
       - name: Build
         shell: pwsh
@@ -380,31 +381,64 @@ jobs:
         shell: pwsh
         working-directory: webapp
         run: npm run check
-      
-      - name: check recording player
-        shell: pwsh
-        working-directory: webapp
-        run: npm run player:check
-
-      - name: install recording player
-        shell: pwsh
-        working-directory: webapp/player-project
-        run: npm install
-
-      - name: build recording player
-        shell: pwsh
-        working-directory: webapp/player-project
-        run: npm run build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: webapp-player
-          path: webapp/player
 
       - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
           path: webapp/client/
+
+
+  devolutions-gateway-players:
+    name: devolutions-gateway-players
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          ref: v1
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      - name: Get npm cache directory
+        id: npm-cache
+        run: |
+          "dir=$(npm config get cache)" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
+        working-directory: webapp
+
+      - name: Setup .npmrc config file
+        uses: ./.github/workflows/npmrc-setup
+        with:
+          npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
+
+      - name: Install recording player
+        shell: pwsh
+        working-directory: webapp/player-project
+        run: npm install
+
+      - name: Build recording player
+        shell: pwsh
+        working-directory: webapp/player-project
+        run: npm run build
+
+      - name: Check recording player
+        shell: pwsh
+        working-directory: webapp
+        run: npm run player:check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webapp-player
+          path: webapp/player
 
   devolutions-gateway-powershell:
     name: devolutions-gateway-powershell
