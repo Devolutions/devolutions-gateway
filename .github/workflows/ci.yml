@@ -398,6 +398,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          name: webapp-player
+          path: webapp/player
+
+      - uses: actions/upload-artifact@v4
+        with:
           name: webapp-client
           path: webapp/client/
 
