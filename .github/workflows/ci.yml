@@ -884,6 +884,7 @@ jobs:
       - check-dependencies
       - jetsocat-lipo
       - devolutions-gateway-powershell
+      - devolutions-gateway-player
       - devolutions-gateway
       - devolutions-gateway-merge
       - devolutions-agent-merge
