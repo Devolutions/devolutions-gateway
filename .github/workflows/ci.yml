@@ -394,7 +394,7 @@ jobs:
           path: webapp/client/
 
 
-  devolutions-gateway-players:
+  devolutions-gateway-player:
     name: devolutions-gateway-players
     runs-on: ubuntu-latest
     needs: preflight
