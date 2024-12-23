@@ -5,12 +5,12 @@ on:
     branches:
       - master
   pull_request:
-    types: [ opened, synchronize, reopened ]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
   workflow_call:
     inputs:
       ref:
-        description: "The commit SHA to build"
+        description: 'The commit SHA to build'
         required: false
         type: string
 
@@ -133,36 +133,36 @@ jobs:
           path: VERSION
 
   tests:
-      name: tests [${{ matrix.os }} ${{ matrix.arch }}]
-      runs-on: ${{ matrix.runner }}
-      needs: preflight
-      strategy:
-        matrix:
-          arch: [ x86_64 ]
-          os: [ windows, linux ]
-          include:
-            - os: windows
-              runner: windows-2022
-            - os: linux
-              runner: ubuntu-20.04
+    name: tests [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    needs: preflight
+    strategy:
+      matrix:
+        arch: [x86_64]
+        os: [windows, linux]
+        include:
+          - os: windows
+            runner: windows-2022
+          - os: linux
+            runner: ubuntu-20.04
 
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v4
-          with:
-            ref: ${{ needs.preflight.outputs.ref }}
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
-        - name: Configure Linux runner
-          if: matrix.os == 'linux'
-          run: |
-            sudo apt-get update
-            sudo apt-get -o Acquire::Retries=3 install libsystemd-dev
+      - name: Configure Linux runner
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 install libsystemd-dev
 
-        - name: Tests
-          shell: pwsh
-          env:
-            AWS_LC_SYS_NO_ASM: true
-          run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
+      - name: Tests
+        shell: pwsh
+        env:
+          AWS_LC_SYS_NO_ASM: true
+        run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
 
   check-dependencies:
     name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
@@ -171,9 +171,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        banned: [ aws-lc-rs ]
-        target: [ x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc ]
-        package: [ devolutions-gateway, jetsocat ]
+        banned: [aws-lc-rs]
+        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc]
+        package: [devolutions-gateway, jetsocat]
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -382,17 +382,10 @@ jobs:
         working-directory: webapp
         run: npm run check
 
-      # Check the recording player here so we don't have to download Biome again in the devolutions-gateway-players job.
-      - name: Check recording player
-        shell: pwsh
-        working-directory: webapp
-        run: npm run player:check
-
       - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
           path: webapp/client/
-
 
   devolutions-gateway-players:
     name: devolutions-gateway-players
@@ -414,25 +407,23 @@ jobs:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
-      - name: Get npm cache directory
-        id: npm-cache
-        run: |
-          "dir=$(npm config get cache)" >> $Env:GITHUB_OUTPUT
-        shell: pwsh
-        working-directory: webapp
-
       - name: Setup .npmrc config file
         uses: ./.github/workflows/npmrc-setup
         with:
           npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
 
+      - name: Install Biome
+        run: npm install -g @biome/cli
+
+      - name: Check recording player
+        working-directory: webapp/player-project
+        run: biome check ./src
+
       - name: Install recording player
-        shell: pwsh
         working-directory: webapp/player-project
         run: npm install
 
       - name: Build recording player
-        shell: pwsh
         working-directory: webapp/player-project
         run: npm run build
 
@@ -790,21 +781,21 @@ jobs:
           delete-merged: true
 
   dotnet-utils-tests:
-      name: .NET utils tests
-      runs-on: windows-2022
-      needs: preflight
+    name: .NET utils tests
+    runs-on: windows-2022
+    needs: preflight
 
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v4
-          with:
-            ref: ${{ needs.preflight.outputs.ref }}
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
-        - name: Tests
-          shell: pwsh
-          run: |
-            Set-PSDebug -Trace 1
-            dotnet test utils/dotnet/GatewayUtils.sln
+      - name: Tests
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          dotnet test utils/dotnet/GatewayUtils.sln
 
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests
