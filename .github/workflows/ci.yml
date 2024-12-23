@@ -382,6 +382,12 @@ jobs:
         working-directory: webapp
         run: npm run check
 
+      # Check the recording player here so we don't have to download Biome again in the devolutions-gateway-players job.
+      - name: Check recording player
+        shell: pwsh
+        working-directory: webapp
+        run: npm run player:check
+
       - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
@@ -429,11 +435,6 @@ jobs:
         shell: pwsh
         working-directory: webapp/player-project
         run: npm run build
-
-      - name: Check recording player
-        shell: pwsh
-        working-directory: webapp
-        run: npm run player:check
 
       - uses: actions/upload-artifact@v4
         with:
@@ -499,6 +500,13 @@ jobs:
         with:
           name: webapp-client
           path: webapp/client
+
+      - name: Download devolutions-gateway-player
+        uses: actions/download-artifact@v4
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          name: webapp-player
+          path: webapp/player
 
       - name: Download devolutions-gateway-powershell
         uses: actions/download-artifact@v4
