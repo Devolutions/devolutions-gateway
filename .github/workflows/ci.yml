@@ -413,7 +413,7 @@ jobs:
           npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
 
       - name: Install Biome
-        run: npm install -g @biome/cli
+        run: npm install -g @biomejs/biome
 
       - name: Check recording player
         working-directory: webapp/player-project
