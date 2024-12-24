@@ -399,7 +399,7 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
-      - name: Check out Devolutions/actions
+      - name: Checkout Devolutions/actions
         uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
