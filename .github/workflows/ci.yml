@@ -419,7 +419,7 @@ jobs:
         working-directory: webapp/player-project
         run: biome check ./src
 
-      - name: Install recording player
+      - name: Install NPM dependencies
         working-directory: webapp/player-project
         run: npm install
 
