@@ -380,16 +380,57 @@ jobs:
         shell: pwsh
         working-directory: webapp
         run: npm run check
-      
-      - name: check recording player
-        shell: pwsh
-        working-directory: webapp
-        run: npm run player:check
 
       - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
           path: webapp/client/
+
+
+  devolutions-gateway-player:
+    name: Recording Player
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Checkout Devolutions/actions
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          ref: v1
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      - name: Setup .npmrc config file
+        uses: ./.github/workflows/npmrc-setup
+        with:
+          npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
+
+      - name: Install Biome
+        run: npm install -g @biomejs/biome
+
+      - name: Check
+        working-directory: webapp/player-project
+        run: biome check ./src
+
+      - name: Install NPM dependencies
+        working-directory: webapp/player-project
+        run: npm install
+
+      - name: Build
+        working-directory: webapp/player-project
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webapp-player
+          path: webapp/player
 
   devolutions-gateway-powershell:
     name: devolutions-gateway-powershell
@@ -450,6 +491,13 @@ jobs:
         with:
           name: webapp-client
           path: webapp/client
+
+      - name: Download devolutions-gateway-player
+        uses: actions/download-artifact@v4
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          name: webapp-player
+          path: webapp/player
 
       - name: Download devolutions-gateway-powershell
         uses: actions/download-artifact@v4
@@ -836,6 +884,7 @@ jobs:
       - check-dependencies
       - jetsocat-lipo
       - devolutions-gateway-powershell
+      - devolutions-gateway-player
       - devolutions-gateway
       - devolutions-gateway-merge
       - devolutions-agent-merge
