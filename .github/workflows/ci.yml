@@ -415,7 +415,7 @@ jobs:
       - name: Install Biome
         run: npm install -g @biomejs/biome
 
-      - name: Check recording player
+      - name: Check
         working-directory: webapp/player-project
         run: biome check ./src
 
