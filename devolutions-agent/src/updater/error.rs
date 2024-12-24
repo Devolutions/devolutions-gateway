@@ -43,13 +43,7 @@ pub(crate) enum UpdaterError {
     #[error("process does not have required rights to install MSI")]
     NotElevated,
     #[error("failed to query service state for `{product}`")]
-    QueryServiceState {
-        product: Product,
-        source: win_api_wrappers::Error,
-    },
+    QueryServiceState { product: Product, source: anyhow::Error },
     #[error("failed to start service for `{product}`")]
-    StartService {
-        product: Product,
-        source: win_api_wrappers::Error,
-    },
+    StartService { product: Product, source: anyhow::Error },
 }

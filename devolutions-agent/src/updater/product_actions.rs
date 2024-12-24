@@ -19,7 +19,7 @@ struct GatewayUpdateActions {
 }
 
 impl GatewayUpdateActions {
-    fn pre_update_impl(&mut self) -> Result<(), win_api_wrappers::Error> {
+    fn pre_update_impl(&mut self) -> anyhow::Result<()> {
         info!("Querying service state for Gateway");
         let service_manager = ServiceManager::open_read()?;
         let service = service_manager.open_service_read(SERVICE_NAME)?;
@@ -35,7 +35,7 @@ impl GatewayUpdateActions {
         Ok(())
     }
 
-    fn post_update_impl(&self) -> Result<(), win_api_wrappers::Error> {
+    fn post_update_impl(&self) -> anyhow::Result<()> {
         // Start service if it was running prior to the update, but service startup
         // was set to manual.
         if !self.service_startup_was_automatic && self.service_was_running {
