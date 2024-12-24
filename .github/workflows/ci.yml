@@ -423,7 +423,7 @@ jobs:
         working-directory: webapp/player-project
         run: npm install
 
-      - name: Build recording player
+      - name: Build
         working-directory: webapp/player-project
         run: npm run build
 
