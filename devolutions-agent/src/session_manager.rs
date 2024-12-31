@@ -93,10 +93,6 @@ impl SessionManagerCtx {
         self.sessions.remove(&session.to_string());
     }
 
-    fn get_session(&self, session: &Session) -> Option<&GatewaySession> {
-        self.sessions.get(&session.to_string())
-    }
-
     fn get_session_mut(&mut self, session: &Session) -> Option<&mut GatewaySession> {
         self.sessions.get_mut(&session.to_string())
     }

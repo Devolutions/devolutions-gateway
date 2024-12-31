@@ -4,6 +4,7 @@ mod integrity;
 mod io;
 mod package;
 mod product;
+mod product_actions;
 mod productinfo;
 mod security;
 
@@ -25,6 +26,7 @@ use crate::config::ConfHandle;
 use integrity::validate_artifact_hash;
 use io::{download_binary, download_utf8, save_to_temp_file};
 use package::{install_package, uninstall_package, validate_package};
+use product_actions::{build_product_actions, ProductUpdateActions};
 use productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use security::set_file_dacl;
 
@@ -40,6 +42,7 @@ const PRODUCTS: &[Product] = &[Product::Gateway];
 /// Context for updater task
 struct UpdaterCtx {
     product: Product,
+    actions: Box<dyn ProductUpdateActions + Send + Sync + 'static>,
     conf: ConfHandle,
 }
 
@@ -163,7 +166,11 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     info!(%product, %target_version, %package_path, "Downloaded product Installer");
 
-    let ctx = UpdaterCtx { product, conf };
+    let mut ctx = UpdaterCtx {
+        product,
+        actions: build_product_actions(product),
+        conf,
+    };
 
     if let Some(hash) = hash {
         validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
@@ -175,6 +182,8 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         warn!(%product, "DEBUG MODE: Skipping package installation due to debug configuration");
         return Ok(());
     }
+
+    ctx.actions.pre_update()?;
 
     if let Some(downgrade) = order.downgrade {
         let installed_version = downgrade.installed_version;
@@ -191,6 +200,8 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
     install_package(&ctx, &package_path, &log_path)
         .await
         .context("failed to install package")?;
+
+    ctx.actions.post_update()?;
 
     info!(%product, %target_version, "Product updated!");
 
