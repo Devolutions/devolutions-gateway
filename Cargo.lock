@@ -127,9 +127,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.92"
+version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74f37166d7d48a0284b99dd824694c26119c700b53bf0d1540cdb147dbdaaf13"
+checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
 name = "arc-swap"
@@ -154,6 +154,15 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
+name = "ascii-streamer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio 1.42.0",
+ "tracing",
+]
 
 [[package]]
 name = "asn1-rs"
@@ -1136,6 +1145,7 @@ version = "2024.3.6"
 dependencies = [
  "anyhow",
  "argon2",
+ "ascii-streamer",
  "async-trait",
  "axum 0.7.7",
  "axum-extra",
@@ -1183,7 +1193,6 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "smol_str",
- "streamer",
  "sysinfo",
  "tap",
  "thiserror 1.0.68",
@@ -1202,6 +1211,7 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
+ "video-streamer",
  "zeroize",
 ]
 
@@ -5612,26 +5622,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
-name = "streamer"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "axum 0.7.7",
- "cadeau",
- "futures",
- "futures-util",
- "num_cpus",
- "thiserror 2.0.3",
- "tokio 1.42.0",
- "tokio-tungstenite",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "transport",
- "webm-iterable",
-]
-
-[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6646,6 +6636,26 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "video-streamer"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum 0.7.7",
+ "cadeau",
+ "futures",
+ "futures-util",
+ "num_cpus",
+ "thiserror 2.0.3",
+ "tokio 1.42.0",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "transport",
+ "webm-iterable",
+]
 
 [[package]]
 name = "vswhom"

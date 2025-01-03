@@ -1,37 +1,20 @@
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Context;
+use ascii_streamer::ascii_stream;
 use axum::{body::Body, extract::ws::WebSocket, response::Response};
-use futures::TryFutureExt;
-use streamer::{ascii_stream, config::CpuCount, webm_stream, ReOpenableFile};
 use tokio::{fs::OpenOptions, sync::Notify};
 use uuid::Uuid;
+use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 
 use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
-struct ShutdownSignal(Arc<Notify>);
-
-impl streamer::Signal for ShutdownSignal {
-    fn wait(&mut self) -> impl Future<Output = ()> + Send {
-        self.0.notified()
-    }
-}
-
 struct AsciiStreamSocketImpl(WebSocket);
 
-impl streamer::AsciiStreamSocket for AsciiStreamSocketImpl {
-    fn send(&mut self, value: String) -> impl Future<Output = Result<(), anyhow::Error>> + Send {
-        async move {
-            self.0.send(axum::extract::ws::Message::Text(value)).await?;
-            Ok(())
-        }
-    }
-
-    fn close(self) {
-        let _ = self
-            .0
-            .close()
-            .inspect_err(|e| error!(error = format!("{e:#}"), "Failed to close websocket"));
+impl ascii_streamer::AsciiStreamSocket for AsciiStreamSocketImpl {
+    async fn send(&mut self, value: String) -> Result<(), anyhow::Error> {
+        self.0.send(axum::extract::ws::Message::Text(value)).await?;
+        Ok(())
     }
 }
 
@@ -55,11 +38,9 @@ pub(crate) async fn stream_file(
         anyhow::bail!("file is not being recorded");
     };
 
-    let streamer_config = streamer::StreamingConfig {
+    let streamer_config = video_streamer::StreamingConfig {
         encoder_threads: CpuCount::default(),
     };
-
-    let shutdown_signal = ShutdownSignal(shutdown_notify);
 
     let when_new_chunk_appended = move || {
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -77,51 +58,45 @@ pub(crate) async fn stream_file(
             .await
             .with_context(|| format!("failed to open file: {path:?}"))?;
 
-        let upgrade_result = ws.on_upgrade(move |socket| async move {
+        ws.on_upgrade(move |socket| async move {
             let _ = ascii_stream(
                 AsciiStreamSocketImpl(socket),
                 streaming_file,
-                shutdown_signal,
+                shutdown_notify,
                 when_new_chunk_appended,
             )
             .await
             .inspect_err(|e| error!(error = format!("{e:#}"), "Streaming file failed"));
-        });
-
-        upgrade_result
-    }else {
-
-
-    let streaming_file = ReOpenableFile::open(path).with_context(|| format!("failed to open file: {path:?}"))?;
-    let upgrade_result = ws.on_upgrade(move |socket| async move {
-        let websocket_stream = websocket_compat(socket);
-        // Spawn blocking because webm_stream is blocking
-        let streaming_result = tokio::task::spawn_blocking(move || {
-            webm_stream(
-                websocket_stream,
-                streaming_file,
-                shutdown_signal,
-                streamer_config,
-                when_new_chunk_appended,
-            )
-            .context("webm_stream failed")?;
-            Ok::<_, anyhow::Error>(())
         })
-        .await;
+    } else {
+        let streaming_file = ReOpenableFile::open(path).with_context(|| format!("failed to open file: {path:?}"))?;
+        ws.on_upgrade(move |socket| async move {
+            let websocket_stream = websocket_compat(socket);
+            // Spawn blocking because webm_stream is blocking
+            let streaming_result = tokio::task::spawn_blocking(move || {
+                webm_stream(
+                    websocket_stream,
+                    streaming_file,
+                    shutdown_notify,
+                    streamer_config,
+                    when_new_chunk_appended,
+                )
+                .context("webm_stream failed")?;
+                Ok::<_, anyhow::Error>(())
+            })
+            .await;
 
-        match streaming_result {
-            Err(e) => {
-                error!(error=?e, "Streaming file task join failed");
-            }
-            Ok(Err(e)) => {
-                error!(error = format!("{e:#}"), "Streaming file failed");
-            }
-            _ => {}
-        };
-    });
-
-    upgrade_result
+            match streaming_result {
+                Err(e) => {
+                    error!(error=?e, "Streaming file task join failed");
+                }
+                Ok(Err(e)) => {
+                    error!(error = format!("{e:#}"), "Streaming file failed");
+                }
+                _ => {}
+            };
+        })
     };
-    
+
     Ok(upgrade_result)
 }

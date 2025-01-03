@@ -1,21 +1,22 @@
-use std::future::Future;
+#[macro_use]
+extern crate tracing;
 
-use tracing::instrument;
+use std::{future::Future, sync::Arc};
 
-use crate::Signal;
-
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    sync::Notify,
+};
 
 pub trait AsciiStreamSocket {
     fn send(&mut self, value: String) -> impl Future<Output = anyhow::Result<()>> + Send;
-    fn close(self);
 }
 
-#[instrument(skip_all)]
+#[tracing::instrument(skip_all)]
 pub async fn ascii_stream(
     mut websocket: impl AsciiStreamSocket,
     input_stream: impl tokio::io::AsyncRead + Unpin, // A file usually
-    mut shutdown_signal: impl Signal,
+    shutdown_signal: Arc<Notify>,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
@@ -56,13 +57,12 @@ pub async fn ascii_stream(
                     }
                 }
             }
-            _ = shutdown_signal.wait() => {
+            _ = shutdown_signal.notified() => {
                 break;
             }
         }
     }
 
-    websocket.close();
     debug!("Shutting down ASCII streaming");
     Ok(())
 }

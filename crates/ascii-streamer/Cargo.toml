@@ -1,0 +1,12 @@
+[package]
+name = "ascii-streamer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+tokio = { version = "1.42.0", features = ["io-util", "sync"] }
+tracing = "0.1.41"
+
+[lints]
+workspace = true
