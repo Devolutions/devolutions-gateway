@@ -23,10 +23,13 @@ pub async fn ascii_stream(
     // write all the data from the input stream to the output stream
     let buf_reader = BufReader::new(input_stream);
     let mut lines = BufReader::new(buf_reader).lines();
+    let mut last_line = None;
+
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                websocket.send(line).await?;
+                websocket.send(line.clone()).await?;
+                last_line = Some(line);
             }
             Ok(None) => {
                 break;
@@ -44,7 +47,8 @@ pub async fn ascii_stream(
                 loop {
                     match lines.next_line().await {
                         Ok(Some(line)) => {
-                            websocket.send(line).await?;
+                            websocket.send(line.clone()).await?;
+                            last_line = Some(line);
                         }
                         Ok(None) => {
                             debug!("EOF reached");
@@ -63,6 +67,19 @@ pub async fn ascii_stream(
         }
     }
 
+    // signal the end of the stream
+    if let Some(line) = last_line {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+            if value.get("status").is_none() {
+                let _ = websocket
+                    .send(serde_json::json!({"status": "offline"}).to_string())
+                    .await
+                    .inspect_err(|e| warn!(error = format!("{e:#}"), "failed to send offline status"));
+            }
+        }
+    }
+
     debug!("Shutting down ASCII streaming");
+
     Ok(())
 }

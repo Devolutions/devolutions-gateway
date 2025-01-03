@@ -8,6 +8,7 @@ export function createTerminal(src) {
   return AsciinemaPlayer.create(src, element, {
     fit: false,
     fontSize: 'big',
+    logger: console
   });
 }
 
