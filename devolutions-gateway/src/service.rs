@@ -97,7 +97,7 @@ impl GatewayService {
                 Err(error) => warn!(
                     %path,
                     %error,
-                    "Failed to load XMF native library, video processing (recording remuxing,video streaming) features are disabled"
+                    "Failed to load XMF native library, features requiring video processing such as remuxing and shadowing are disabled"
                 ),
             }
         }
