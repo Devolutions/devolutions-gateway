@@ -49,11 +49,20 @@ pub(crate) async fn stream_file(
     };
 
     let upgrade_result = if path.extension() == Some(RecordingFileType::Asciicast.extension()) {
+        #[cfg(windows)]
         const FILE_SHARE_READ: u32 = 0x00000001;
 
+        #[cfg(windows)]
         let streaming_file = OpenOptions::new()
             .read(true)
             .access_mode(FILE_SHARE_READ)
+            .open(path)
+            .await
+            .with_context(|| format!("failed to open file: {path:?}"))?;
+
+        #[cfg(not(windows))]
+        let streaming_file = OpenOptions::new()
+            .read(true)
             .open(path)
             .await
             .with_context(|| format!("failed to open file: {path:?}"))?;
