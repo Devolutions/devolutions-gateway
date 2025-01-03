@@ -1,6 +1,6 @@
- // ascinema-player does not have typescript support, so we need to disable typescript checking for this file
- // track issue: https://github.com/asciinema/asciinema-player/issues/187
- // @ts-ignore
+// ascinema-player does not have typescript support, so we need to disable typescript checking for this file
+// track issue: https://github.com/asciinema/asciinema-player/issues/187
+// @ts-ignore
 import * as AsciinemaPlayer from 'asciinema-player';
 
 export function createTerminal(src) {
