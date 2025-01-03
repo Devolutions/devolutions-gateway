@@ -421,14 +421,7 @@ jobs:
 
       - name: Install NPM dependencies
         working-directory: webapp/player-project
-        run: npm install --verbose
-
-      - name: Print Environment Information
-        working-directory: webapp/player-project
-        run: |
-          npm run env
-          node -v 
-          npm -v
+        run: npm install
 
       - name: Build
         working-directory: webapp/player-project
