@@ -1,26 +1,20 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::unwrap_used)]
 
-use std::{env, path::Path, process::exit};
+use std::{env, path::Path, process::exit, sync::Arc};
 
 use anyhow::Context;
 use cadeau::xmf;
 use local_websocket::create_local_websocket;
-use streamer::{config::CpuCount, webm_stream, ReOpenableFile, StreamingConfig};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::watch::Sender,
+    sync::{watch::Sender, Notify},
 };
 use tracing::{error, info};
+use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile, StreamingConfig};
 
 pub struct TokioSignal {
     signal: tokio::sync::watch::Receiver<()>,
-}
-
-impl streamer::Signal for TokioSignal {
-    async fn wait(&mut self) {
-        let _ = self.signal.changed().await;
-    }
 }
 
 mod local_websocket;
@@ -53,10 +47,11 @@ async fn main() -> anyhow::Result<()> {
         xmf::init(args.lib_xmf_path)?;
     }
 
+    let notify = Arc::new(Notify::new());
+
     let input_path = Path::new(args.input_path);
-    let (eof_sender, eof_receiver) = tokio::sync::watch::channel(());
     let (file_written_sender, file_written_receiver) = tokio::sync::broadcast::channel(1);
-    let intermediate_file = get_slowly_written_file(input_path, eof_sender, file_written_sender).await?;
+    let intermediate_file = get_slowly_written_file(input_path, notify.clone(), file_written_sender).await?;
 
     let (client, server) = create_local_websocket().await;
     let output_file = tokio::fs::OpenOptions::new()
@@ -68,13 +63,11 @@ async fn main() -> anyhow::Result<()> {
 
     run_client(client, output_file);
 
-    let shutdown_signal = TokioSignal { signal: eof_receiver };
-
     tokio::task::spawn_blocking(move || {
         webm_stream(
             server,
             intermediate_file,
-            shutdown_signal,
+            notify,
             StreamingConfig {
                 encoder_threads: CpuCount::default(),
             },
@@ -99,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn get_slowly_written_file(
     input_path: &Path,
-    eof_signal: Sender<()>,
+    eof_signal: Arc<Notify>,
     file_written_sender: tokio::sync::broadcast::Sender<()>,
 ) -> anyhow::Result<ReOpenableFile> {
     let input_file_name = input_path
@@ -152,7 +145,7 @@ async fn get_slowly_written_file(
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
 
-        eof_signal.send(()).unwrap();
+        eof_signal.notify_waiters();
         Ok::<_, anyhow::Error>(())
     });
 
