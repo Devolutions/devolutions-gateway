@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:debug": "tsc --sourceMap && vite build --mode development",
     "preview": "vite preview"
   },
   "devDependencies": {

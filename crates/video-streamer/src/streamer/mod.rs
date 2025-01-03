@@ -24,15 +24,11 @@ pub(crate) mod tag_writers;
 
 use crate::{reopenable::Reopenable, StreamingConfig};
 
-pub trait Signal: Send + 'static {
-    fn wait(&mut self) -> impl std::future::Future<Output = ()> + Send;
-}
-
 #[instrument(skip_all)]
 pub fn webm_stream(
     output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static, // A websocket usually
     input_stream: impl std::io::Read + Reopenable,                                             // A file usually
-    shutdown_signal: impl Signal,
+    shutdown_signal: Arc<Notify>,
     config: StreamingConfig,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
@@ -181,7 +177,7 @@ fn spawn_sending_task<W>(
     ws_frame: Framed<W, ProtocolCodeC>,
     mut chunk_receiver: ChannelWriterReceiver,
     codec: Option<String>,
-    mut shutdown_signal: impl Signal,
+    shutdown_signal: Arc<Notify>,
     mut error_receiver: mpsc::Receiver<UserFriendlyError>,
     stop_notifier: Arc<Notify>,
 ) where
@@ -245,7 +241,7 @@ fn spawn_sending_task<W>(
                         continue;
                     }
                 },
-                _ = shutdown_signal.wait() => {
+                _ = shutdown_signal.notified() => {
                     info!("Received shutdown signal");
                     ws_send(&ws_frame_clone, protocol::ServerMessage::End).await;
                     break;
