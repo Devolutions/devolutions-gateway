@@ -309,20 +309,33 @@ impl Conf {
     pub fn get_lib_xmf_path(&self) -> Option<Utf8PathBuf> {
         if let Ok(path) = env::var(ENV_VAR_DGATEWAY_LIB_XMF_PATH) {
             return Some(Utf8PathBuf::from(path));
-        };
+        }
 
         if let Some(path) = self.debug.lib_xmf_path.as_deref() {
             return Some(path.to_owned());
         }
 
-        if cfg!(target_os = "windows") {
+        #[cfg(target_os = "windows")]
+        {
             let path = env::current_exe().ok()?.parent()?.join("xmf.dll");
-            Utf8PathBuf::from_path_buf(path).ok()
-        } else if cfg!(target_os = "linux") {
-            Some(Utf8PathBuf::from("/usr/share/devolutions-gateway/libxmf.so"))
-        } else {
-            None
+            return Utf8PathBuf::from_path_buf(path).ok();
         }
+
+        #[cfg(target_os = "linux")]
+        {
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+            {
+                return None;
+            }
+
+            let arch_path = format!(
+                "/usr/lib/{arch}-linux-gnu/devolutions-gateway/libxmf.so",
+                arch = env::consts::ARCH,
+            );
+            return Some(Utf8PathBuf::from(arch_path));
+        }
+
+        None
     }
 }
 

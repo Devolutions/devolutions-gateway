@@ -769,7 +769,7 @@ class TlkRecipe
             arch = $DebianArchitecture
             deps = $($Dependencies -Join ", ")
             email = $Email
-            package = $Packager
+            packager = $Packager
             website = $Website
         } -OutputFile $ControlFile
 
