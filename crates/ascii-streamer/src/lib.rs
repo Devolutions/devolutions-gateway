@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::{future::Future, os::windows::io::AsRawHandle, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
