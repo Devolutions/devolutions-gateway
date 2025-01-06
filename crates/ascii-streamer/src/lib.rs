@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::{future::Future, sync::Arc};
+use std::{future::Future, os::windows::io::AsRawHandle, sync::Arc};
 
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -60,13 +60,11 @@ pub async fn ascii_stream(
                 }
             }
             _ = shutdown_signal.notified() => {
+                websocket.close().await;
                 break;
             }
         }
     }
-
-    // signal the end of the stream
-    websocket.close();
 
     debug!("Shutting down ASCII streaming");
 
