@@ -640,6 +640,8 @@ class TlkRecipe
 
     [void] Package_Linux() {
         $DebianArchitecture = $this.Target.DebianArchitecture()
+        $RpmArchitecture = $this.Target.Architecture
+
         $Packager = "Devolutions Inc."
         $Email = "support@devolutions.net"
         $Website = "https://devolutions.net"
@@ -695,6 +697,11 @@ class TlkRecipe
             "agent" { "Agent" }
         }
 
+        $Description = ""
+        if ($this.Product -eq "gateway") {
+            $Description = "Blazing fast relay server with desired levels of traffic inspection"
+        }
+
         $InputPackagePath = Join-Path $this.SourcePath "package/$($InputPackagePathPrefix)Linux"
 
         $OutputPath = Join-Path $this.SourcePath "output"
@@ -710,9 +717,10 @@ class TlkRecipe
         Push-Location
         Set-Location $OutputPackagePath
 
-        $DebPkgName = "devolutions-$($this.Product)"
-        $PkgNameVersion = "${DebPkgName}_$($this.Version).0"
-        $PkgNameTarget = "${PkgNameVersion}_${DebianArchitecture}"
+        $PkgName = "devolutions-$($this.Product)"
+        $PkgNameVersion = "${PkgName}_$($this.Version).0"
+        $DebPkgNameTarget = "${PkgNameVersion}_${DebianArchitecture}"
+        $RpmPkgNameTarget = "${PkgNameVersion}_${RpmArchitecture}"
         $CopyrightFile = Join-Path $InputPackagePath "$($this.Product)/copyright"
 
         # dh_make
@@ -771,6 +779,7 @@ class TlkRecipe
             email = $Email
             packager = $Packager
             website = $Website
+            description = $Description
         } -OutputFile $ControlFile
 
         # debian/copyright
@@ -778,7 +787,7 @@ class TlkRecipe
         $CopyrightTemplate = Join-Path $InputPackagePath "template/copyright"
 
         Merge-Tokens -TemplateFile $CopyrightTemplate -Tokens @{
-            package = $DebPkgName
+            package = $PkgName
             packager = $Packager
             year = $(Get-Date).Year
             website = $Website
@@ -789,7 +798,7 @@ class TlkRecipe
         $ChangelogTemplate = Join-Path $InputPackagePath "template/changelog"
 
         Merge-Tokens -TemplateFile $ChangelogTemplate -Tokens @{
-            package = $DebPkgName
+            package = $PkgName
             distro = $DistroCodeName
             email = $Email
             packager = $Packager
@@ -811,11 +820,30 @@ class TlkRecipe
 
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
+        $FpmArgs = @(
+            '--force',
+            '-s', 'dir',
+            '-t', 'rpm',
+            '-p', "$OutputPath/${RpmPkgNameTarget}.rpm",
+            '-n', $PkgName,
+            '-v', $PackageVersion,
+            '--maintainer', "$Packager <$Email>",
+            '--description', $Description,
+            '--url', $Website,
+            '--license', 'Apache-2.0 OR MIT'
+            '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
+            '--',
+            "$DGatewayExecutable=/usr/bin/$PkgName"
+        )
+
+        & 'fpm' @FpmArgs | Out-Host
+
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
             $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
             New-Item -Path $TargetOutputPath -ItemType 'Directory' -Force | Out-Null
-            Copy-Item "$OutputPath/${PkgNameTarget}.deb" "$TargetOutputPath/${PkgNameTarget}.deb"
-            Copy-Item "$OutputPath/${PkgNameTarget}.changes" "$TargetOutputPath/${PkgNameTarget}.changes"
+            Copy-Item "$OutputPath/${DebPkgNameTarget}.deb" "$TargetOutputPath/${DebPkgNameTarget}.deb"
+            Copy-Item "$OutputPath/${DebPkgNameTarget}.changes" "$TargetOutputPath/${DebPkgNameTarget}.changes"
+            Copy-Item "$OutputPath/${RpmPkgNameTarget}.rpm" "$TargetOutputPath/${RpmPkgNameTarget}.rpm"
         }
 
         Pop-Location

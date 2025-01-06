@@ -727,6 +727,10 @@ jobs:
         if: matrix.os == 'windows'
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install fpm
+        if: runner.os == 'Linux'
+        run: sudo gem install --no-document fpm
+
       - name: Build
         shell: pwsh
         env:
