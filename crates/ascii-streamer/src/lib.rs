@@ -60,12 +60,15 @@ pub async fn ascii_stream(
                 }
             }
             _ = shutdown_signal.notified() => {
-                websocket.close().await;
                 break;
             }
         }
     }
 
+    // Note: though sometimes we end the loop with error
+    // but we still needs to send 1000 code to the client
+    // as it is what is expected for the ascii-player to end the playback properly
+    websocket.close().await;
     debug!("Shutting down ASCII streaming");
 
     Ok(())
