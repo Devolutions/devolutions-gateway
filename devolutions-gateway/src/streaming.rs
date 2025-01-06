@@ -1,8 +1,12 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use anyhow::Context;
 use ascii_streamer::ascii_stream;
-use axum::{body::Body, extract::ws::WebSocket, response::Response};
+use axum::{
+    body::Body,
+    extract::ws::{CloseFrame, WebSocket},
+    response::Response,
+};
 use tokio::{fs::OpenOptions, sync::Notify};
 use uuid::Uuid;
 use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
@@ -15,6 +19,16 @@ impl ascii_streamer::AsciiStreamSocket for AsciiStreamSocketImpl {
     async fn send(&mut self, value: String) -> Result<(), anyhow::Error> {
         self.0.send(axum::extract::ws::Message::Text(value)).await?;
         Ok(())
+    }
+
+    async fn close(&mut self) {
+        let _ = self
+            .0
+            .send(axum::extract::ws::Message::Close(Some(CloseFrame {
+                code: 1000,
+                reason: Cow::Borrowed("EOF"),
+            })))
+            .await;
     }
 }
 
