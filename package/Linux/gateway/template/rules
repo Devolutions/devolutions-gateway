@@ -7,7 +7,7 @@ override_dh_auto_build:
 override_dh_auto_test:
 override_dh_auto_install:
 override_dh_usrlocal:
-	install -D -m 0755 {{ dgateway_executable }} $$(pwd)/debian/devolutions-gateway/usr/bin/devolutions-gateway
+	install -D -m 0755 {{ executable }} $$(pwd)/debian/devolutions-gateway/usr/bin/devolutions-gateway
 override_dh_install:
 	dh_install
 	mkdir -p $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/webapp

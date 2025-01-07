@@ -658,15 +658,14 @@ class TlkRecipe
         $Env:DEBFULLNAME = $Packager
         $Env:DEBEMAIL = $Email
 
-        $DGatewayExecutable = $null
+        $Executable = $null
         $DGatewayWebClient = $null
         $DGatewayLibXmf = $null
-        $DAgentExecutable = $null
 
         switch ($this.Product) {
             "gateway" {
                 if (Test-Path Env:DGATEWAY_EXECUTABLE) {
-                    $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+                    $Executable = $Env:DGATEWAY_EXECUTABLE
                 } else {
                     throw ("Specify DGATEWAY_EXECUTABLE environment variable")
                 }
@@ -685,7 +684,7 @@ class TlkRecipe
             }
             "agent" {
                 if (Test-Path Env:DAGENT_EXECUTABLE) {
-                    $DAgentExecutable = $Env:DAGENT_EXECUTABLE
+                    $Executable = $Env:DAGENT_EXECUTABLE
                 } else {
                     throw ("Specify DAGENT_EXECUTABLE environment variable")
                 }
@@ -697,9 +696,9 @@ class TlkRecipe
             "agent" { "Agent" }
         }
 
-        $Description = ""
-        if ($this.Product -eq "gateway") {
-            $Description = "Blazing fast relay server with desired levels of traffic inspection"
+        $Description = switch ($this.Product) {
+            "gateway" { "Blazing fast relay server with desired levels of traffic inspection" }
+            "agent" { "Agent companion service for Devolutions Gateway" }
         }
 
         $InputPackagePath = Join-Path $this.SourcePath "package/$($InputPackagePathPrefix)Linux"
@@ -754,7 +753,7 @@ class TlkRecipe
             "gateway" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
                     root_path = $this.SourcePath
-                    dgateway_executable = $DGatewayExecutable
+                    executable = $Executable
                     dgateway_webclient = $DGatewayWebClient
                     dgateway_libxmf = $DGatewayLibXmf
                     platform_dir = $InputPackagePath
@@ -763,7 +762,7 @@ class TlkRecipe
             }
             "agent" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    dagent_executable = $DAgentExecutable
+                    executable = $Executable
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
                 } -OutputFile $RulesFile
@@ -833,7 +832,7 @@ class TlkRecipe
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
             '--',
-            "$DGatewayExecutable=/usr/bin/$PkgName"
+            "$Executable=/usr/bin/$PkgName"
         )
 
         & 'fpm' @FpmArgs | Out-Host
