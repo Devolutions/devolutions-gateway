@@ -823,6 +823,10 @@ class TlkRecipe
             $DpkgBuildPackageArgs += @('-a', $this.Target.DebianArchitecture())
         }
 
+        # Strip first so the included binary is identical for deb and rpm
+        & 'strip' $Executable | Out-Host
+
+        $env:DEB_BUILD_OPTIONS = "nostrip"
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
         $FpmArgs = @(
