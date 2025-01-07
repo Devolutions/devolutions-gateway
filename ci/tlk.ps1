@@ -807,10 +807,14 @@ class TlkRecipe
             date = $($(Get-Date -UFormat "%a, %d %b %Y %H:%M:%S %Z00") -Replace '\.','')
         } -OutputFile $ChangelogFile
 
-        @('postinst', 'prerm', 'postrm') | % {
-            $InputFile = Join-Path $InputPackagePath "$($this.Product)/debian/$_"
-            $OutputFile = Join-Path $OutputDebianPath $_
-            Copy-Item $InputFile $OutputFile
+        $ScriptPath = Join-Path $InputPackagePath "$($this.Product)/debian"
+        $PostInstFile = Join-Path $ScriptPath 'postinst'
+        $PreRmFile = Join-Path $ScriptPath 'prerm'
+        $PostRmFile = Join-Path $ScriptPath 'postrm'
+        
+        @($PostInstFile, $PreRmFile, $PostRmFile) | % {
+            $OutputFile = Join-Path $OutputDebianPath (Split-Path $_ -Leaf)
+            Copy-Item $_ $OutputFile
         }
 
         $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
@@ -833,6 +837,17 @@ class TlkRecipe
             '--url', $Website,
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
+        )
+
+        if ($this.Product -eq "gateway") {
+            $FpmArgs += @(
+                '--after-install', $PostInstFile,
+                '--before-remove', $PreRmFile,
+                '--after-remove', $PostRmFile
+            )
+        }
+
+        $FpmArgs += @(
             '--'
             "$Executable=/usr/bin/$PkgName"
             "$ChangeLogFile=/usr/share/$PkgName/changelog"
