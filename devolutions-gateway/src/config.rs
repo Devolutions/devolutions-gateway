@@ -315,27 +315,17 @@ impl Conf {
             return Some(path.to_owned());
         }
 
-        #[cfg(target_os = "windows")]
-        {
+        if cfg!(target_os = "windows") {
             let path = env::current_exe().ok()?.parent()?.join("xmf.dll");
             return Utf8PathBuf::from_path_buf(path).ok();
+        } else if cfg!(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )) {
+            Some(Utf8PathBuf::from("/usr/lib/devolutions-gateway/libxmf.so"))
+        } else {
+            None
         }
-
-        #[cfg(target_os = "linux")]
-        {
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            {
-                return None;
-            }
-
-            let arch_path = format!(
-                "/usr/lib/{arch}-linux-gnu/devolutions-gateway/libxmf.so",
-                arch = env::consts::ARCH,
-            );
-            return Some(Utf8PathBuf::from(arch_path));
-        }
-
-        None
     }
 }
 

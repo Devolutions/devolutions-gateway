@@ -1,15 +1,7 @@
 #!/usr/bin/make -f
 
-ifeq ($(DEB_HOST_ARCH),amd64)
-ARCH = x86_64
-else ifeq ($(DEB_HOST_ARCH),arm64)
-ARCH = aarch64
-else
-$(error Unsupported architecture: $(DEB_HOST_ARCH))
-endif
-
 WEBAPP_DIR := $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/webapp
-LIBXMF_DIR := $$(pwd)/debian/devolutions-gateway/usr/lib/$(ARCH)-linux-gnu/devolutions-gateway
+LIBXMF_DIR := $$(pwd)/debian/devolutions-gateway/usr/lib/devolutions-gateway
 
 %:
 	dh $@
