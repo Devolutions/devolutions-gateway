@@ -89,6 +89,7 @@ useless_let_if_seq = "warn"
 string_add = "warn"
 range_plus_one = "warn"
 self_named_module_files = "warn"
+needless_return = "warn"
 
 # == Compile-time / optimization == #
 inline_always = "warn"
