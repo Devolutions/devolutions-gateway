@@ -108,7 +108,8 @@ impl Service {
         // QUERY_SERVICE_CONFIGW structure, as required size was queried and allocated above.
         // Passed buffer have correct alignment to hold QUERY_SERVICE_CONFIGW structure.
         unsafe {
-            #[expect(clippy::cast_ptr_alignment)] // Pointer cast is valid, as `buffer` is allocated with correct alignment above.
+            // Pointer cast is valid, as `buffer` is allocated with correct alignment above.
+            #[expect(clippy::cast_ptr_alignment)]
             QueryServiceConfigW(
                 *self.handle,
                 Some(buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
