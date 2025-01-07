@@ -317,7 +317,7 @@ impl Conf {
 
         if cfg!(target_os = "windows") {
             let path = env::current_exe().ok()?.parent()?.join("xmf.dll");
-            return Utf8PathBuf::from_path_buf(path).ok();
+            Utf8PathBuf::from_path_buf(path).ok()
         } else if cfg!(target_os = "linux") {
             Some(Utf8PathBuf::from("/usr/lib/devolutions-gateway/libxmf.so"))
         } else {
