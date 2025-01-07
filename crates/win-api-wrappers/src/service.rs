@@ -29,19 +29,20 @@ impl ServiceManager {
         // SAFETY: FFI call with no outstanding preconditions.
         let raw_sc_handle = unsafe { OpenSCManagerW(None, None, access)? };
 
-        // SAFETY: Handle returned by `OpenSCManagerW` is valid and needs to be closed after use,
-        // thus it is safe to take ownership of it via `Owned`.
+        // SAFETY: On success, the handle returned by `OpenSCManagerW` is valid and owned by the
+        // caller.
         let handle = unsafe { Owned::new(raw_sc_handle) };
 
         Ok(Self { handle })
     }
 
     fn open_service_with_access(&self, service_name: &str, access: u32) -> anyhow::Result<Service> {
-        let service_name_wide = WideString::from(service_name);
+        let service_name = WideString::from(service_name);
 
-        // SAFETY: Value passed as hSCManager is valid as long as `ServiceManager` instance is
-        // alive. Service name is valid null-terminated UTF-16 string allocated on the heap.
-        let raw_service_handle = unsafe { OpenServiceW(*self.handle, service_name_wide.as_pcwstr(), access)? };
+        // SAFETY:
+        // - Value passed as hSCManager is valid as long as `ServiceManager` instance is alive.
+        // - service_name_wide is a valid, null-terminated UTF-16 string allocated on the heap.
+        let raw_service_handle = unsafe { OpenServiceW(*self.handle, service_name.as_pcwstr(), access)? };
 
         // SAFETY: Handle returned by `OpenServiceW` is valid and needs to be closed after use,
         // thus it is safe to take ownership of it via `Owned`.
@@ -77,7 +78,7 @@ impl Service {
         let mut cbbufsize = 0u32;
         let mut pcbbytesneeded = 0u32;
 
-        // SAFETY: No preconditions. Query required buffer size.
+        // SAFETY: FFI call with no outstanding preconditions.
         let result = unsafe { QueryServiceConfigW(*self.handle, None, 0, &mut pcbbytesneeded) };
 
         match result {
@@ -107,8 +108,7 @@ impl Service {
         // QUERY_SERVICE_CONFIGW structure, as required size was queried and allocated above.
         // Passed buffer have correct alignment to hold QUERY_SERVICE_CONFIGW structure.
         unsafe {
-            // NOTE: Pointer cast is valid, as `buffer` is allocated with correct alignment above.
-            #[allow(clippy::cast_ptr_alignment)]
+            #[expect(clippy::cast_ptr_alignment)] // Pointer cast is valid, as `buffer` is allocated with correct alignment above.
             QueryServiceConfigW(
                 *self.handle,
                 Some(buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
@@ -118,7 +118,7 @@ impl Service {
         };
 
         // SAFETY: `QueryServiceConfigW` succeeded, thus `lpserviceconfig` is valid and contains
-        // QUERY_SERVICE_CONFIGW structure.
+        // a QUERY_SERVICE_CONFIGW structure.
         let config = unsafe { buffer.as_ref_cast::<QUERY_SERVICE_CONFIGW>() };
 
         match config.dwStartType {
@@ -134,8 +134,8 @@ impl Service {
     pub fn is_running(&self) -> anyhow::Result<bool> {
         let mut service_status = SERVICE_STATUS::default();
 
-        // SAFETY: hService is valid handle, lpServiceStatus is valid pointer to stack-allocated
-        // SERVICE_STATUS structure.
+        // SAFETY: hService is a valid handle.
+        // lpServiceStatus is a valid pointer to a stack-allocated SERVICE_STATUS structure.
         unsafe { QueryServiceStatus(*self.handle, &mut service_status as *mut _)? };
 
         Ok(service_status.dwCurrentState == SERVICE_RUNNING)
