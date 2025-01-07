@@ -676,7 +676,12 @@ class TlkRecipe
                 } else {
                     throw ("Specify DGATEWAY_WEBCLIENT_PATH environment variable")
                 }
-                $DGatewayWebPlayer = "$($this.SourcePath)/webapp/player"
+
+                if (Test-Path Env:DGATEWAY_WEBPLAYER_PATH) {
+                    $DGatewayWebPlayer = $Env:DGATEWAY_WEBPLAYER_PATH
+                } else {
+                    throw ("Specify DGATEWAY_WEBPLAYER_PATH environment variable")
+                }
 
                 if (Test-Path Env:DGATEWAY_LIB_XMF_PATH) {
                     $DGatewayLibXmf = $Env:DGATEWAY_LIB_XMF_PATH

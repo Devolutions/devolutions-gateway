@@ -346,6 +346,7 @@ jobs:
           $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
+          $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
           $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption generate
