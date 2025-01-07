@@ -553,6 +553,10 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
           echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
 
+      - name: Install fpm
+        if: matrix.os == 'Linux'
+        run: sudo gem install --no-document fpm
+
       - name: Configure Windows runner
         if: matrix.os == 'windows'
         run: |
