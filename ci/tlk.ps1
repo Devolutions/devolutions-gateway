@@ -660,6 +660,7 @@ class TlkRecipe
 
         $Executable = $null
         $DGatewayWebClient = $null
+        $DGatewayWebPlayer = $null
         $DGatewayLibXmf = $null
 
         switch ($this.Product) {
@@ -675,6 +676,7 @@ class TlkRecipe
                 } else {
                     throw ("Specify DGATEWAY_WEBCLIENT_PATH environment variable")
                 }
+                $DGatewayWebPlayer = "$($this.SourcePath)/webapp/player"
 
                 if (Test-Path Env:DGATEWAY_LIB_XMF_PATH) {
                     $DGatewayLibXmf = $Env:DGATEWAY_LIB_XMF_PATH
@@ -752,9 +754,9 @@ class TlkRecipe
         switch ($this.Product) {
             "gateway" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    root_path = $this.SourcePath
                     executable = $Executable
                     dgateway_webclient = $DGatewayWebClient
+                    dgateway_webplayer = $DGatewayWebPlayer
                     dgateway_libxmf = $DGatewayLibXmf
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
@@ -831,9 +833,19 @@ class TlkRecipe
             '--url', $Website,
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
-            '--',
+            '--'
             "$Executable=/usr/bin/$PkgName"
+            "$ChangeLogFile=/usr/share/$PkgName/changelog"
+            "$CopyrightFile=/usr/share/$PkgName/copyright"
         )
+
+        if ($this.Product -eq "gateway") {
+            $FpmArgs += @(
+                "$DGatewayWebClient=/usr/share/devolutions-gateway/webapp",
+                "$DGatewayWebPlayer=/usr/share/devolutions-gateway/webapp",
+                "$DGatewayLibXmf=/usr/lib/devolutions-gateway/libxmf.so"
+            )
+        }
 
         & 'fpm' @FpmArgs | Out-Host
 
