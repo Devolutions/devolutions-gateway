@@ -21,7 +21,7 @@ pub async fn ascii_stream(
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
-    // write all the data from the input stream to the output stream
+    // Write all the data from the input stream to the output stream.
     let buf_reader = BufReader::new(input_stream);
     let mut lines = BufReader::new(buf_reader).lines();
 
