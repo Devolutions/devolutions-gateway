@@ -100,6 +100,30 @@ internal class Program
         }
     }
 
+    private static string DevolutionsWebPlayerPath
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("DGATEWAY_WEBPLAYER_PATH");
+
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\webapp\\player";
+#else
+                throw new Exception("The environment variable DGATEWAY_WEBPLAYER_PATH is not specified or the directory does not exist");
+#endif
+            }
+
+            if (!Directory.Exists(path))
+            {
+                throw new DirectoryNotFoundException("The web player was not found");
+            }
+
+            return path;
+        }
+    }
+
     private static string LibXmfPath
     {
         get
