@@ -31,7 +31,7 @@ async function playSessionShadowing(gatewayAccessApi) {
         // faild, try to play static recording
         cleanUpStreamers();
         playStaticRecording(gatewayAccessApi);
-        showNotification('Session may have ended,playing recording instead', 'info');
+        showNotification('Session already ended. The recording will be played from the start.', 'info');
         return {
           ...closeEvent,
           code: 1000, // for avoid extra handling by other listeners
