@@ -12,12 +12,12 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
-use streamer::SignalWriter;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
+use video_streamer::SignalWriter;
 
 use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;

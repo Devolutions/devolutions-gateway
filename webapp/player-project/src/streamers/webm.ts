@@ -1,3 +1,4 @@
+import '../../../shadow-player/src/streamer';
 import { ShadowPlayer } from '../../../shadow-player/src/streamer';
 import { GatewayAccessApi } from '../gateway';
 import { showNotification } from '../notification';

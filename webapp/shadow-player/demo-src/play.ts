@@ -1,4 +1,4 @@
-import { getInfoFile, getStreamingWebsocketUrl } from './apiClient';
+import { getStreamingWebsocketUrl } from './apiClient';
 import { ShadowPlayer } from '../src/streamer';
 
 // Function to play the selected stream
@@ -7,7 +7,7 @@ export async function playStream(id: string) {
 
   const videoElement = document.getElementById('shadowPlayer') as ShadowPlayer;
   videoElement.srcChange(websocketUrl);
-  videoElement.play()
+  videoElement.play();
 }
 
 export function download() {
