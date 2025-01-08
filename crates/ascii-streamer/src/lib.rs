@@ -16,7 +16,7 @@ pub trait AsciiStreamSocket {
 #[tracing::instrument(skip_all)]
 pub async fn ascii_stream(
     mut websocket: impl AsciiStreamSocket,
-    input_stream: impl tokio::io::AsyncRead + Unpin, // A file usually
+    input_stream: impl tokio::io::AsyncRead + Unpin,
     shutdown_signal: Arc<Notify>,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
