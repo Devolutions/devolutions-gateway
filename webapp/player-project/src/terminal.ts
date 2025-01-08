@@ -18,3 +18,10 @@ export function createTerminalDiv() {
   document.body.appendChild(terminalDiv);
   return terminalDiv;
 }
+
+export function removeTerminal() {
+  const terminalDiv = document.getElementById('terminal');
+  if (terminalDiv) {
+    terminalDiv.remove();
+  }
+}

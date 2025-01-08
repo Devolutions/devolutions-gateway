@@ -11,7 +11,8 @@
       "*.min.css",
       "player/",
       "player-project/dist/",
-      "player-project/node_modules/"
+      "player-project/node_modules/",
+      "player-project/src/hack.js"
     ]
   },
   "linter": {

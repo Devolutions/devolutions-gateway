@@ -1,6 +1,9 @@
 import { GatewayAccessApi } from './gateway';
+import { showNotification } from './notification.ts';
 import { getPlayer } from './players/index.js';
-import { getShadowPlayer } from './streamers/index.js';
+import { cleanUpStreamers, getShadowPlayer } from './streamers/index.js';
+import './ws-proxy.ts';
+import { OnBeforeClose as BeforeWebsocketClose } from './ws-proxy.ts';
 
 async function main() {
   const { sessionId, token, gatewayAccessUrl, isActive } = getSessionDetails();
@@ -23,6 +26,18 @@ async function playSessionShadowing(gatewayAccessApi) {
   try {
     const recordingInfo = await gatewayAccessApi.fetchRecordingInfo();
     const fileType = getFileType(recordingInfo);
+    BeforeWebsocketClose((closeEvent) => {
+      if (closeEvent.code !== 1000) {
+        // faild, try to play static recording
+        cleanUpStreamers();
+        playStaticRecording(gatewayAccessApi);
+        showNotification('Session may have ended,playing recording instead', 'info');
+        return {
+          ...closeEvent,
+          code: 1000, // for avoid extra handling by other listeners
+        };
+      }
+    });
 
     getShadowPlayer(fileType).play(gatewayAccessApi);
   } catch (error) {
