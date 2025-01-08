@@ -9,5 +9,5 @@ Homepage: {{ website }}
 Package: devolutions-agent
 Architecture: {{ arch }}
 Depends: {{ deps }}
-Description: Devolutions Agent
+Description: {{ description }}
  {{ website }}

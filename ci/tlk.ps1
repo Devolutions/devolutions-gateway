@@ -640,6 +640,8 @@ class TlkRecipe
 
     [void] Package_Linux() {
         $DebianArchitecture = $this.Target.DebianArchitecture()
+        $RpmArchitecture = $this.Target.Architecture
+
         $Packager = "Devolutions Inc."
         $Email = "support@devolutions.net"
         $Website = "https://devolutions.net"
@@ -656,15 +658,15 @@ class TlkRecipe
         $Env:DEBFULLNAME = $Packager
         $Env:DEBEMAIL = $Email
 
-        $DGatewayExecutable = $null
+        $Executable = $null
         $DGatewayWebClient = $null
+        $DGatewayWebPlayer = $null
         $DGatewayLibXmf = $null
-        $DAgentExecutable = $null
 
         switch ($this.Product) {
             "gateway" {
                 if (Test-Path Env:DGATEWAY_EXECUTABLE) {
-                    $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+                    $Executable = $Env:DGATEWAY_EXECUTABLE
                 } else {
                     throw ("Specify DGATEWAY_EXECUTABLE environment variable")
                 }
@@ -675,6 +677,12 @@ class TlkRecipe
                     throw ("Specify DGATEWAY_WEBCLIENT_PATH environment variable")
                 }
 
+                if (Test-Path Env:DGATEWAY_WEBPLAYER_PATH) {
+                    $DGatewayWebPlayer = $Env:DGATEWAY_WEBPLAYER_PATH
+                } else {
+                    throw ("Specify DGATEWAY_WEBPLAYER_PATH environment variable")
+                }
+
                 if (Test-Path Env:DGATEWAY_LIB_XMF_PATH) {
                     $DGatewayLibXmf = $Env:DGATEWAY_LIB_XMF_PATH
                 } else {
@@ -683,7 +691,7 @@ class TlkRecipe
             }
             "agent" {
                 if (Test-Path Env:DAGENT_EXECUTABLE) {
-                    $DAgentExecutable = $Env:DAGENT_EXECUTABLE
+                    $Executable = $Env:DAGENT_EXECUTABLE
                 } else {
                     throw ("Specify DAGENT_EXECUTABLE environment variable")
                 }
@@ -693,6 +701,11 @@ class TlkRecipe
         $InputPackagePathPrefix = switch ($this.Product) {
             "gateway" { "" }
             "agent" { "Agent" }
+        }
+
+        $Description = switch ($this.Product) {
+            "gateway" { "Blazing fast relay server with desired levels of traffic inspection" }
+            "agent" { "Agent companion service for Devolutions Gateway" }
         }
 
         $InputPackagePath = Join-Path $this.SourcePath "package/$($InputPackagePathPrefix)Linux"
@@ -710,9 +723,10 @@ class TlkRecipe
         Push-Location
         Set-Location $OutputPackagePath
 
-        $DebPkgName = "devolutions-$($this.Product)"
-        $PkgNameVersion = "${DebPkgName}_$($this.Version).0"
-        $PkgNameTarget = "${PkgNameVersion}_${DebianArchitecture}"
+        $PkgName = "devolutions-$($this.Product)"
+        $PkgNameVersion = "${PkgName}_$($this.Version).0"
+        $DebPkgNameTarget = "${PkgNameVersion}_${DebianArchitecture}"
+        $RpmPkgNameTarget = "${PkgNameVersion}_${RpmArchitecture}"
         $CopyrightFile = Join-Path $InputPackagePath "$($this.Product)/copyright"
 
         # dh_make
@@ -745,9 +759,9 @@ class TlkRecipe
         switch ($this.Product) {
             "gateway" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    root_path = $this.SourcePath
-                    dgateway_executable = $DGatewayExecutable
+                    executable = $Executable
                     dgateway_webclient = $DGatewayWebClient
+                    dgateway_webplayer = $DGatewayWebPlayer
                     dgateway_libxmf = $DGatewayLibXmf
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
@@ -755,7 +769,7 @@ class TlkRecipe
             }
             "agent" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    dagent_executable = $DAgentExecutable
+                    executable = $Executable
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
                 } -OutputFile $RulesFile
@@ -771,6 +785,7 @@ class TlkRecipe
             email = $Email
             packager = $Packager
             website = $Website
+            description = $Description
         } -OutputFile $ControlFile
 
         # debian/copyright
@@ -778,7 +793,7 @@ class TlkRecipe
         $CopyrightTemplate = Join-Path $InputPackagePath "template/copyright"
 
         Merge-Tokens -TemplateFile $CopyrightTemplate -Tokens @{
-            package = $DebPkgName
+            package = $PkgName
             packager = $Packager
             year = $(Get-Date).Year
             website = $Website
@@ -789,7 +804,7 @@ class TlkRecipe
         $ChangelogTemplate = Join-Path $InputPackagePath "template/changelog"
 
         Merge-Tokens -TemplateFile $ChangelogTemplate -Tokens @{
-            package = $DebPkgName
+            package = $PkgName
             distro = $DistroCodeName
             email = $Email
             packager = $Packager
@@ -797,10 +812,14 @@ class TlkRecipe
             date = $($(Get-Date -UFormat "%a, %d %b %Y %H:%M:%S %Z00") -Replace '\.','')
         } -OutputFile $ChangelogFile
 
-        @('postinst', 'prerm', 'postrm') | % {
-            $InputFile = Join-Path $InputPackagePath "$($this.Product)/debian/$_"
-            $OutputFile = Join-Path $OutputDebianPath $_
-            Copy-Item $InputFile $OutputFile
+        $ScriptPath = Join-Path $InputPackagePath "$($this.Product)/debian"
+        $PostInstFile = Join-Path $ScriptPath 'postinst'
+        $PreRmFile = Join-Path $ScriptPath 'prerm'
+        $PostRmFile = Join-Path $ScriptPath 'postrm'
+        
+        @($PostInstFile, $PreRmFile, $PostRmFile) | % {
+            $OutputFile = Join-Path $OutputDebianPath (Split-Path $_ -Leaf)
+            Copy-Item $_ $OutputFile
         }
 
         $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
@@ -809,13 +828,55 @@ class TlkRecipe
             $DpkgBuildPackageArgs += @('-a', $this.Target.DebianArchitecture())
         }
 
+        # Disable dpkg-buildpackage stripping as the binary is already stripped.
+        $Env:DEB_BUILD_OPTIONS = "nostrip"
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
+
+        $FpmArgs = @(
+            '--force',
+            '-s', 'dir',
+            '-t', 'rpm',
+            '-p', "$OutputPath/${RpmPkgNameTarget}.rpm",
+            '-n', $PkgName,
+            '-v', $PackageVersion,
+            '--maintainer', "$Packager <$Email>",
+            '--description', $Description,
+            '--url', $Website,
+            '--license', 'Apache-2.0 OR MIT'
+            '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
+        )
+
+        if ($this.Product -eq "gateway") {
+            $FpmArgs += @(
+                '--after-install', $PostInstFile,
+                '--before-remove', $PreRmFile,
+                '--after-remove', $PostRmFile
+            )
+        }
+
+        $FpmArgs += @(
+            '--'
+            "$Executable=/usr/bin/$PkgName"
+            "$ChangeLogFile=/usr/share/$PkgName/changelog"
+            "$CopyrightFile=/usr/share/$PkgName/copyright"
+        )
+
+        if ($this.Product -eq "gateway") {
+            $FpmArgs += @(
+                "$DGatewayWebClient=/usr/share/devolutions-gateway/webapp",
+                "$DGatewayWebPlayer=/usr/share/devolutions-gateway/webapp",
+                "$DGatewayLibXmf=/usr/lib/devolutions-gateway/libxmf.so"
+            )
+        }
+
+        & 'fpm' @FpmArgs | Out-Host
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
             $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
             New-Item -Path $TargetOutputPath -ItemType 'Directory' -Force | Out-Null
-            Copy-Item "$OutputPath/${PkgNameTarget}.deb" "$TargetOutputPath/${PkgNameTarget}.deb"
-            Copy-Item "$OutputPath/${PkgNameTarget}.changes" "$TargetOutputPath/${PkgNameTarget}.changes"
+            Copy-Item "$OutputPath/${DebPkgNameTarget}.deb" "$TargetOutputPath/${DebPkgNameTarget}.deb"
+            Copy-Item "$OutputPath/${DebPkgNameTarget}.changes" "$TargetOutputPath/${DebPkgNameTarget}.changes"
+            Copy-Item "$OutputPath/${RpmPkgNameTarget}.rpm" "$TargetOutputPath/${RpmPkgNameTarget}.rpm"
         }
 
         Pop-Location

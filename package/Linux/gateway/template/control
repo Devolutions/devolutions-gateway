@@ -9,5 +9,5 @@ Homepage: {{ website }}
 Package: devolutions-gateway
 Architecture: {{ arch }}
 Depends: {{ deps }}
-Description: Devolutions Gateway
+Description: {{ description }}
  {{ website }}

@@ -7,7 +7,7 @@ override_dh_auto_build:
 override_dh_auto_test:
 override_dh_auto_install:
 override_dh_usrlocal:
-	install -D -m 0755 {{ dagent_executable }} $$(pwd)/debian/devolutions-agent/usr/bin/devolutions-agent
+	install -D -m 0755 {{ executable }} $$(pwd)/debian/devolutions-agent/usr/bin/devolutions-agent
 override_dh_install:
 	dh_install
 override_dh_shlibdeps:
