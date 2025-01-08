@@ -7,6 +7,7 @@ use axum::{
     extract::ws::{CloseFrame, WebSocket},
     response::Response,
 };
+use futures::SinkExt;
 use tokio::{fs::OpenOptions, sync::Notify};
 use uuid::Uuid;
 use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
@@ -29,6 +30,7 @@ impl ascii_streamer::AsciiStreamSocket for AsciiStreamSocketImpl {
                 reason: Cow::Borrowed("EOF"),
             })))
             .await;
+        let _ = self.0.flush().await;
     }
 }
 
