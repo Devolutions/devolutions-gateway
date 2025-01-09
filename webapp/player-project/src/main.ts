@@ -1,5 +1,4 @@
 import { GatewayAccessApi } from './gateway';
-import { showNotification } from './notification.ts';
 import { getPlayer } from './players/index.js';
 import { cleanUpStreamers, getShadowPlayer } from './streamers/index.js';
 import './ws-proxy.ts';
@@ -31,7 +30,6 @@ async function playSessionShadowing(gatewayAccessApi) {
         // faild, try to play static recording
         cleanUpStreamers();
         playStaticRecording(gatewayAccessApi);
-        showNotification('Session may have ended,playing recording instead', 'info');
         return {
           ...closeEvent,
           code: 1000, // for avoid extra handling by other listeners, for asciinema-player particularly in this case: https://github.com/asciinema/asciinema-player/blob/c09e1d2625450a32e9e76063cdc315fd54ecdd9d/src/driver/websocket.js#L219
