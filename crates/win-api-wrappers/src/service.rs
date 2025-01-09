@@ -1,5 +1,6 @@
 use std::alloc::Layout;
 
+use thiserror::Error;
 use windows::core::Owned;
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GENERIC_READ};
 use windows::Win32::System::Services::{
@@ -12,50 +13,57 @@ use windows::Win32::System::Services::{
 use crate::raw_buffer::RawBuffer;
 use crate::utils::WideString;
 
+#[derive(Debug, Error)]
+pub enum ServiceError {
+    #[error(transparent)]
+    WinAPI(#[from] windows::core::Error),
+}
+
+pub type ServiceResult<T> = Result<T, ServiceError>;
 pub struct ServiceManager {
     handle: Owned<SC_HANDLE>,
 }
 
 impl ServiceManager {
-    pub fn open_read() -> anyhow::Result<Self> {
+    pub fn open_read() -> ServiceResult<Self> {
         Self::open_with_access(GENERIC_READ.0)
     }
 
-    pub fn open_all_access() -> anyhow::Result<Self> {
+    pub fn open_all_access() -> ServiceResult<Self> {
         Self::open_with_access(SC_MANAGER_ALL_ACCESS)
     }
 
-    fn open_with_access(access: u32) -> anyhow::Result<Self> {
+    fn open_with_access(access: u32) -> ServiceResult<Self> {
         // SAFETY: FFI call with no outstanding preconditions.
-        let raw_sc_handle = unsafe { OpenSCManagerW(None, None, access)? };
+        let handle = unsafe { OpenSCManagerW(None, None, access)? };
 
         // SAFETY: On success, the handle returned by `OpenSCManagerW` is valid and owned by the
         // caller.
-        let handle = unsafe { Owned::new(raw_sc_handle) };
+        let handle = unsafe { Owned::new(handle) };
 
         Ok(Self { handle })
     }
 
-    fn open_service_with_access(&self, service_name: &str, access: u32) -> anyhow::Result<Service> {
+    fn open_service_with_access(&self, service_name: &str, access: u32) -> ServiceResult<Service> {
         let service_name = WideString::from(service_name);
 
         // SAFETY:
         // - Value passed as hSCManager is valid as long as `ServiceManager` instance is alive.
-        // - service_name_wide is a valid, null-terminated UTF-16 string allocated on the heap.
-        let raw_service_handle = unsafe { OpenServiceW(*self.handle, service_name.as_pcwstr(), access)? };
+        // - service_name is a valid, null-terminated UTF-16 string allocated on the heap.
+        let handle = unsafe { OpenServiceW(*self.handle, service_name.as_pcwstr(), access)? };
 
         // SAFETY: Handle returned by `OpenServiceW` is valid and needs to be closed after use,
         // thus it is safe to take ownership of it via `Owned`.
-        let handle = unsafe { Owned::new(raw_service_handle) };
+        let handle = unsafe { Owned::new(handle) };
 
         Ok(Service { handle })
     }
 
-    pub fn open_service_read(&self, service_name: &str) -> anyhow::Result<Service> {
+    pub fn open_service_read(&self, service_name: &str) -> ServiceResult<Service> {
         self.open_service_with_access(service_name, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS)
     }
 
-    pub fn open_service_all_access(&self, service_name: &str) -> anyhow::Result<Service> {
+    pub fn open_service_all_access(&self, service_name: &str) -> ServiceResult<Service> {
         self.open_service_with_access(service_name, SERVICE_ALL_ACCESS)
     }
 }
@@ -74,7 +82,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn startup_mode(&self) -> anyhow::Result<ServiceStartupMode> {
+    pub fn startup_mode(&self) -> ServiceResult<ServiceStartupMode> {
         let mut cbbufsize = 0u32;
         let mut pcbbytesneeded = 0u32;
 
@@ -99,10 +107,11 @@ impl Service {
         let layout = Layout::from_size_align(
             usize::try_from(pcbbytesneeded).expect("pcbbytesneeded < 8K as per MSDN"),
             align_of::<QUERY_SERVICE_CONFIGW>(),
-        )?;
+        )
+        .expect("layout always satisfies from_size_align invariants");
 
         // SAFETY: The layout initialization is checked using the Layout::from_size_align method.
-        let mut buffer = unsafe { RawBuffer::alloc_zeroed(layout)? };
+        let mut buffer = unsafe { RawBuffer::alloc_zeroed(layout).expect("OOM") };
 
         // SAFETY: Buffer passed to `lpServiceConfig` have enough size to hold a
         // QUERY_SERVICE_CONFIGW structure, as required size was queried and allocated above.
@@ -132,7 +141,7 @@ impl Service {
         }
     }
 
-    pub fn is_running(&self) -> anyhow::Result<bool> {
+    pub fn is_running(&self) -> ServiceResult<bool> {
         let mut service_status = SERVICE_STATUS::default();
 
         // SAFETY: hService is a valid handle.
@@ -142,7 +151,7 @@ impl Service {
         Ok(service_status.dwCurrentState == SERVICE_RUNNING)
     }
 
-    pub fn start(&self) -> anyhow::Result<()> {
+    pub fn start(&self) -> ServiceResult<()> {
         // SAFETY: FFI call with no outstanding preconditions.
         unsafe { StartServiceW(*self.handle, None)? };
 
