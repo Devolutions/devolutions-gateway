@@ -1,7 +1,7 @@
 import { GatewayAccessApi } from '../gateway';
+import { removeTerminal } from '../terminal';
 import { handleCast } from './cast';
 import { handleWebm } from './webm';
-
 export const getShadowPlayer = (fileType) => {
   const player = {
     play: (_: GatewayAccessApi) => {},
@@ -16,4 +16,13 @@ export const getShadowPlayer = (fileType) => {
   }
 
   return player;
+};
+
+export const cleanUpStreamers = () => {
+  // Remove all shadow-player elements.
+  const shadowPlayers = document.querySelectorAll('shadow-player');
+  for (const shadowPlayer of shadowPlayers) {
+    shadowPlayer.remove();
+  }
+  removeTerminal();
 };
