@@ -1,3 +1,5 @@
+mod trp_decoder;
+
 #[macro_use]
 extern crate tracing;
 
