@@ -19,7 +19,7 @@ export const getShadowPlayer = (fileType) => {
 };
 
 export const cleanUpStreamers = () => {
-  // Clean up any existing shadow-player elements
+  // Remove all shadow-player elements.
   const shadowPlayers = document.querySelectorAll('shadow-player');
   for (const shadowPlayer of shadowPlayers) {
     shadowPlayer.remove();
