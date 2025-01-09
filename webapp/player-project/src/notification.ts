@@ -1,6 +1,6 @@
 // This is a very basic notification system
 // We should definitely move away from plain JavaScript and use a library instead
-export function showNotification(message: string, type: 'success' | 'error' | 'info') {
+export function showNotification(message: string, type: 'success' | 'error') {
   const notification = document.getElementById('notification');
   notification.style.display = 'flex';
   const messageElement = document.getElementById('notification-message');
