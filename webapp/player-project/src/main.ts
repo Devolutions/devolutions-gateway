@@ -34,7 +34,7 @@ async function playSessionShadowing(gatewayAccessApi) {
         showNotification('Session may have ended,playing recording instead', 'info');
         return {
           ...closeEvent,
-          code: 1000, // for avoid extra handling by other listeners
+          code: 1000, // for avoid extra handling by other listeners, for asciinema-player particularly in this case: https://github.com/asciinema/asciinema-player/blob/c09e1d2625450a32e9e76063cdc315fd54ecdd9d/src/driver/websocket.js#L219
         };
       }
     });
