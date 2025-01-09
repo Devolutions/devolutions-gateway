@@ -15,7 +15,8 @@ use std::time::Duration;
 use tap::prelude::*;
 use tokio::runtime::{self, Runtime};
 
-pub(crate) const SERVICE_NAME: &str = "devolutions-gateway";
+pub(crate) use devolutions_agent_shared::GATEWAY_SERVICE_NAME as SERVICE_NAME;
+
 pub(crate) const DISPLAY_NAME: &str = "Devolutions Gateway";
 pub(crate) const DESCRIPTION: &str = "Devolutions Gateway service";
 

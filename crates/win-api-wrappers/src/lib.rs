@@ -18,6 +18,7 @@ mod lib_win {
     pub mod netmgmt;
     pub mod process;
     pub mod security;
+    pub mod service;
     pub mod thread;
     pub mod token;
     pub mod ui;

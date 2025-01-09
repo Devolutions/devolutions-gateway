@@ -43,14 +43,20 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> 
 
     info!("Installing MSI from path: {}", path);
 
-    let msi_install_result = tokio::process::Command::new("msiexec")
+    let mut msiexec_command = tokio::process::Command::new("msiexec");
+
+    msiexec_command
         .arg("/i")
         .arg(path.as_str())
         .arg("/quiet")
         .arg("/l*v")
-        .arg(log_path.as_str())
-        .status()
-        .await;
+        .arg(log_path.as_str());
+
+    for param in ctx.actions.get_msiexec_install_params() {
+        msiexec_command.arg(param);
+    }
+
+    let msi_install_result = msiexec_command.status().await;
 
     if log_path.exists() {
         info!("MSI installation log: {log_path}");
