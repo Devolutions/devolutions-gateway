@@ -32,7 +32,9 @@ async function playSessionShadowing(gatewayAccessApi) {
         playStaticRecording(gatewayAccessApi);
         return {
           ...closeEvent,
-          code: 1000, // for avoid extra handling by other listeners, for asciinema-player particularly in this case: https://github.com/asciinema/asciinema-player/blob/c09e1d2625450a32e9e76063cdc315fd54ecdd9d/src/driver/websocket.js#L219
+          // for avoid extra handling by other listeners, for asciinema-player particularly in this case.
+          // see asciinema-player websocket driver at on socket close handler
+          code: 1000,
         };
       }
     });
