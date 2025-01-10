@@ -47,7 +47,10 @@ where
         Ok(())
     }
 
-    pub(crate) fn into_encoded_writer(self, config: EncodeWriterConfig) -> anyhow::Result<CutCusterWriter<T>> {
+    pub(crate) fn into_encoded_writer(
+        self,
+        config: EncodeWriterConfig,
+    ) -> anyhow::Result<(CutCusterWriter<T>, CutBlockHitMarker)> {
         let encoded_writer = CutCusterWriter::new(config, self)?;
         Ok(encoded_writer)
     }
@@ -94,11 +97,13 @@ where
     cut_block_state: CutBlockState,
 }
 
+pub(crate) struct CutBlockHitMarker;
+
 impl<T> CutCusterWriter<T>
 where
     T: std::io::Write,
 {
-    fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<Self> {
+    fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<(Self, CutBlockHitMarker)> {
         let decoder = VpxDecoder::builder()
             .threads(config.threads)
             .width(config.width)
@@ -117,13 +122,16 @@ where
             .build()?;
 
         let HeaderWriter { writer } = writer;
-        Ok(Self {
-            writer,
-            cluster_timestamp: None,
-            encoder,
-            decoder,
-            cut_block_state: CutBlockState::HaventMet,
-        })
+        Ok((
+            Self {
+                writer,
+                cluster_timestamp: None,
+                encoder,
+                decoder,
+                cut_block_state: CutBlockState::HaventMet,
+            },
+            CutBlockHitMarker,
+        ))
     }
 }
 
@@ -137,6 +145,7 @@ where
 {
     #[instrument(skip(self, tag))]
     pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
+        warn!("attempted to write tag: {}", mastroka_spec_name(&tag));
         match tag {
             MatroskaSpec::Timestamp(timestamp) => {
                 self.cluster_timestamp = Some(timestamp);
@@ -203,7 +212,9 @@ where
                 let current_block_absolute_time = current_video_block.absolute_timestamp()?;
                 let cluster_relative_timestamp = current_block_absolute_time - cut_block_absolute_time;
                 if self.should_write_new_cluster(current_block_absolute_time) {
-                    self.start_new_cluster(cluster_relative_timestamp)?;
+                    self.start_new_cluster(cluster_relative_timestamp).inspect_err(|e| {
+                        error!("failed to start new cluster: {}", e);
+                    })?;
 
                     self.cut_block_state = CutBlockState::Met {
                         cut_block_absolute_time,
@@ -296,7 +307,8 @@ where
         false
     }
 
-    pub(crate) fn mark_cut_block_hit(&mut self) {
+    pub(crate) fn mark_cut_block_hit(&mut self, _marker: CutBlockHitMarker) {
+        debug!("marking cut block hit");
         self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }

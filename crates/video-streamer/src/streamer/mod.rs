@@ -82,8 +82,8 @@ pub fn webm_stream(
         header_writer.write(header)?;
     }
 
-    let mut encode_writer = header_writer.into_encoded_writer(encode_writer_config)?;
-
+    let (mut encode_writer, cut_block_hit_marker) = header_writer.into_encoded_writer(encode_writer_config)?;
+    let mut cut_block_hit_marker = Some(cut_block_hit_marker);
     // Start muxing from the last key frame.
     // The WebM project requires the muxer to ensure the first Block/SimpleBlock is a keyframe.
     // However, the WebM file emitted by the CaptureStream API in Chrome does not adhere to this requirement.
@@ -119,7 +119,9 @@ pub fn webm_stream(
             }
             Some(Ok(tag)) => {
                 if webm_itr.last_tag_position() == cut_block_position {
-                    encode_writer.mark_cut_block_hit();
+                    if let Some(cut_block_hit_marker) = cut_block_hit_marker.take() {
+                        encode_writer.mark_cut_block_hit(cut_block_hit_marker);
+                    }
                 }
 
                 match encode_writer.write(tag) {
