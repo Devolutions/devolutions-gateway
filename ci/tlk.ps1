@@ -760,8 +760,7 @@ class TlkRecipe
             $DhShLibDepsOverride = "dh_shlibdeps"
         }
 
-        $tmpDir = [System.IO.Path]::GetTempPath()
-        $DebUpstreamChangelogFile = Join-Path $tmpDir "changelog_deb_upstream"
+        $DebUpstreamChangelogFile = Join-Path $OutputPath "changelog_deb_upstream"
         
         switch ($this.Product) {
             "gateway" {
@@ -859,7 +858,7 @@ class TlkRecipe
         $Env:DEB_BUILD_OPTIONS = "nostrip"
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
-        $RpmUpstreamChangelogFile = Join-Path $tmpDir "changelog_rpm_upstream"
+        $RpmUpstreamChangelogFile = Join-Path $OutputPath "changelog_rpm_upstream"
         $s = New-Changelog `
         -Format 'RpmUpstream' `
         -InputFile $UpstreamChangelogFile `
@@ -867,7 +866,7 @@ class TlkRecipe
         -Email $Email
         Set-Content -Path $RpmUpstreamChangelogFile -Value $s
 
-        $RpmPackagingChangelogFile = Join-Path $tmpDir "changelog_rpm_packaging"
+        $RpmPackagingChangelogFile = Join-Path $OutputPath "changelog_rpm_packaging"
         $s = New-Changelog `
         -Format 'RpmPackaging' `
         -InputFile $UpstreamChangelogFile `
@@ -875,6 +874,7 @@ class TlkRecipe
         -Email $Email
         Set-Content -Path $RpmPackagingChangelogFile -Value $s
 
+        Write-Host("output destination: $OutputPath/${RpmPkgNameTarget}.rpm")
         $FpmArgs = @(
             '--force',
             '-s', 'dir',
