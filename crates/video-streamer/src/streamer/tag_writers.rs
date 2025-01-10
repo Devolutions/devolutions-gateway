@@ -145,7 +145,6 @@ where
 {
     #[instrument(skip(self, tag))]
     pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
-        warn!("attempted to write tag: {}", mastroka_spec_name(&tag));
         match tag {
             MatroskaSpec::Timestamp(timestamp) => {
                 self.cluster_timestamp = Some(timestamp);
