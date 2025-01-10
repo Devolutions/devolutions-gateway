@@ -40,8 +40,10 @@ const WebSocketProxy = new Proxy(window.WebSocket, {
       },
       get(target, prop, receiver) {
         const value = Reflect.get(target, prop, receiver);
-        // Bind native methods to the original WebSocket instance
-        // Websocket send and other method need the `this` to points to the WebSocket instance
+        // Because these methods are part of the native WebSocket prototype,       
+        // they must be called with the original WebSocket as `this`.
+        // If they're called with the Proxy as `this`, it results in an "illegal invocation".
+        // Binding them to the underlying `target` (the real WebSocket) avoids this issue.
         if (typeof value === 'function') {
           return value.bind(target);
         }
