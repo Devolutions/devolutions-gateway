@@ -190,14 +190,18 @@ where
 {
     use futures_util::StreamExt as _;
 
-    let compat = stream.map(|item| {
-        item.map(|msg| match msg {
-            tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
-            tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
-            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
-            tungstenite::Message::Close(_) => transport::WsMessage::Close,
-            tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
-        })
+    let compat = stream.filter_map(|item| {
+        let mapped = item
+            .map(|msg| match msg {
+                tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into_bytes())),
+                tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
+                tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
+                tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
+                tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+            })
+            .transpose();
+
+        core::future::ready(mapped)
     });
 
     transport::WsStream::new(compat)
@@ -226,14 +230,18 @@ where
     use futures_util::{SinkExt as _, StreamExt as _};
 
     let compat = ws
-        .map(|item| {
-            item.map(|msg| match msg {
-                tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
-                tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
-                tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
-                tungstenite::Message::Close(_) => transport::WsMessage::Close,
-                tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
-            })
+        .filter_map(|item| {
+            let mapped = item
+                .map(|msg| match msg {
+                    tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into_bytes())),
+                    tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
+                    tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
+                    tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
+                    tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+                })
+                .transpose();
+
+            core::future::ready(mapped)
         })
         .with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
 

@@ -3,9 +3,13 @@
 use anyhow as _;
 
 mod copy_bidirectional;
+mod pinnable;
+mod shared;
 mod ws;
 
 pub use self::copy_bidirectional::*;
+pub use self::pinnable::*;
+pub use self::shared::*;
 pub use self::ws::*;
 
 use tokio::io::{AsyncRead, AsyncWrite};

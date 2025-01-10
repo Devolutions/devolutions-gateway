@@ -6421,6 +6421,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
+ "parking_lot",
  "pin-project-lite 0.2.15",
  "proptest",
  "test-utils",

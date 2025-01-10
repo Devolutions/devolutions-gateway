@@ -1,9 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
+use devolutions_gateway_task::ShutdownSignal;
 use tracing::Instrument as _;
 
 use crate::config::Conf;
@@ -22,6 +24,7 @@ pub async fn handler(
         sessions,
         subscriber_tx,
         recordings,
+        shutdown_signal,
         ..
     }): State<DgwState>,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
@@ -37,6 +40,7 @@ pub async fn handler(
             token_cache,
             jrl,
             sessions,
+            shutdown_signal,
             subscriber_tx,
             recordings.active_recordings,
             source_addr,
@@ -54,11 +58,16 @@ async fn handle_socket(
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     sessions: SessionMessageSender,
+    shutdown_signal: ShutdownSignal,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     source_addr: SocketAddr,
 ) {
-    let stream = crate::ws::websocket_compat(ws);
+    let stream = crate::ws::handle(
+        ws,
+        crate::ws::KeepAliveShutdownSignal(shutdown_signal),
+        Duration::from_secs(conf.debug.ws_keep_alive_interval),
+    );
 
     let result = crate::rdp_extension::handle(
         stream,
