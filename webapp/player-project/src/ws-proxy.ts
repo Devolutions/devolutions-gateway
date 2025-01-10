@@ -38,6 +38,15 @@ const WebSocketProxy = new Proxy(window.WebSocket, {
         }
         return Reflect.set(target, prop, value);
       },
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        // Bind native methods to the original WebSocket instance
+        // Websocket send and other method need the `this` to points to the WebSocket instance
+        if (typeof value === 'function') {
+          return value.bind(target);
+        }
+        return value;
+      },
     });
   },
 });
