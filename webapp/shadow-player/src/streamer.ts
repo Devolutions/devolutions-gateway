@@ -2,12 +2,24 @@ import { ErrorMessage } from './protocol';
 import { ReactiveSourceBuffer } from './sourceBuffer';
 import { ServerWebSocket } from './websocket';
 
+export type ShadowPlayerError =
+  | {
+      type: 'websocket';
+      error: ErrorEvent;
+    }
+  | {
+      type: 'protocol';
+      error: ErrorMessage;
+    };
+
+type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
+
 export class ShadowPlayer extends HTMLElement {
   shadowRoot: ShadowRoot | null = null;
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
   _buffer: ReactiveSourceBuffer | null = null;
-  onErrorCallback: ((ev: ErrorMessage) => void) | null = null;
+  onErrorCallback: ShadowPlayerErrorCallback | null = null;
   onEndCallback: (() => void) | null = null;
   debug = false;
   static get observedAttributes() {
@@ -31,11 +43,13 @@ export class ShadowPlayer extends HTMLElement {
     }
   }
 
-  onError(callback: (ev: ErrorMessage) => void) {
+  onError(callback: ShadowPlayerErrorCallback) {
     this.onErrorCallback = callback;
   }
 
   onEnd(callback: () => void) {
+    this.videoElement.controls = true;
+
     this.onEndCallback = callback;
   }
 
@@ -146,7 +160,10 @@ export class ShadowPlayer extends HTMLElement {
       }
 
       if (ev.type === 'error') {
-        this.onErrorCallback?.(ev);
+        this.onErrorCallback?.({
+          type: 'protocol',
+          error: ev,
+        });
       }
 
       if (ev.type === 'end') {
@@ -155,13 +172,19 @@ export class ShadowPlayer extends HTMLElement {
     });
 
     websocket.onclose(() => {
+      // Now the video is fully loaded, we can show the controls
+      this.videoElement.controls = true;
       if (reactiveSourceBuffer) {
         mediaSource.endOfStream();
       }
     });
 
     websocket.onerror((ev) => {
-      console.error('WebSocket error:', ev);
+      this.onErrorCallback?.({
+        type: 'websocket',
+        error: ev as unknown as ErrorEvent,
+      });
+
       if (mediaSource.readyState === 'open') {
         try {
           mediaSource.endOfStream();

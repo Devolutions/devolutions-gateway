@@ -26,7 +26,7 @@ async function playSessionShadowing(gatewayAccessApi) {
     const recordingInfo = await gatewayAccessApi.fetchRecordingInfo();
     const fileType = getFileType(recordingInfo);
     BeforeWebsocketClose((closeEvent) => {
-      if (closeEvent.code !== 1000) {
+      if (closeEvent.code !== 1000 && closeEvent.code !== 1005) {
         // The session playback failed; attempt to play the recording as usual as a fallback.
         cleanUpStreamers();
         playStaticRecording(gatewayAccessApi);

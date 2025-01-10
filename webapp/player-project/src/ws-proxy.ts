@@ -8,7 +8,6 @@ export const OnBeforeClose = (callback: (args: CloseEvent) => CloseEvent) => {
 
 const WebSocketProxy = new Proxy(window.WebSocket, {
   construct(target, args: [url: string | URL, protocols?: string | string[]]) {
-    console.log('Proxying WebSocket connection', ...args);
     const ws = new target(...args); // Create the actual WebSocket instance
 
     // Proxy for intercepting `addEventListener`
@@ -29,7 +28,7 @@ const WebSocketProxy = new Proxy(window.WebSocket, {
         if (prop === 'onclose') {
           console.log('Intercepted setting of onclose');
           const transformedValue = (...args) => {
-            const transformedArgs = beforeClose(args as unknown as CloseEvent);
+            const transformedArgs = beforeClose(args[0] as unknown as CloseEvent);
             if (typeof value === 'function') {
               value(transformedArgs); // Call the original handler
             }
