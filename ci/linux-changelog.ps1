@@ -387,12 +387,3 @@ function New-Changelog {
     
     return $output
 }
-
-
-# New-UpstreamChangelog -Format "Deb" -InputFile "CHANGELOG.md" -Packager "Maurice" -Email "abc@foo.com" -PackageName "my-package" -Distro "focal" 
-
-$s = New-Changelog -Format 'RpmUpstream' -InputFile 'CHANGELOG.md' -Packager 'Maurice' -Email 'abc@foo.example'
-Set-Content -Path "changelog_rpm_upstream.txt" -Value $s
-
-$s = New-Changelog -Format 'RpmPackaging' -InputFile 'package/AgentLinux/CHANGELOG.md' -Packager 'Maurice' -Email 'abc@foo.com'
-Set-Content -Path 'changelog_rpm_packaging.txt' -Value $s
