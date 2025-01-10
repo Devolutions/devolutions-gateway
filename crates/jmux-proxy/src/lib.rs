@@ -725,6 +725,13 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 }
             }
+            // FIXME: Just a small hack to test if the keep-alive logic would help.
+            _ = tokio::time::sleep(core::time::Duration::from_millis(60)) => {
+                msg_to_send_tx
+                    .send(Message::window_adjust(0.into(), 0))
+                    .await
+                    .context("couldn’t send WINDOW ADJUST message")?;
+            }
             _ = core::future::ready(()), if !needs_window_adjustment.is_empty() => {
                 for channel_id in needs_window_adjustment.drain() {
                     let Some(channel) = jmux_ctx.get_channel_mut(channel_id) else {
