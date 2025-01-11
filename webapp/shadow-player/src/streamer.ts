@@ -162,7 +162,7 @@ export class ShadowPlayer extends HTMLElement {
       if (ev.type === 'error') {
         this.onErrorCallback?.({
           type: 'protocol',
-          error: ev,
+          inner: ev,
         });
       }
 
@@ -182,7 +182,7 @@ export class ShadowPlayer extends HTMLElement {
     websocket.onerror((ev) => {
       this.onErrorCallback?.({
         type: 'websocket',
-        error: ev as unknown as ErrorEvent,
+        inner: ev as unknown as ErrorEvent,
       });
 
       if (mediaSource.readyState === 'open') {
