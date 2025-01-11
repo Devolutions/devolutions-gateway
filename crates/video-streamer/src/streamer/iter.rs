@@ -207,7 +207,7 @@ where
         let mut file = inner.into_inner();
         file.reopen()?;
         file.seek(std::io::SeekFrom::Start(self.last_tag_position as u64))?;
-        self.inner = Some(WebmIterator::new(file, &[MatroskaSpec::BlockGroup(Master::Start)]));
+        self.new_inner(file);
         self.rollback_record = Some(self.last_tag_position);
 
         if self
@@ -248,7 +248,7 @@ where
         file.seek(std::io::SeekFrom::Start(last_key_frame_position as u64))?;
         self.rollback_record = Some(last_key_frame_position);
         self.last_tag_position = last_key_frame_position;
-        self.inner = Some(WebmIterator::new(file, &[MatroskaSpec::BlockGroup(Master::Start)]));
+        self.new_inner(file);
         self.last_cluster_position = Some(cluster_start_position);
         Ok(self.last_key_frame_info)
     }
@@ -314,6 +314,12 @@ where
             }
             _ => Ok(false),
         }
+    }
+
+    fn new_inner(&mut self, reader: R) {
+        let mut inner = WebmIterator::new(reader, &[MatroskaSpec::BlockGroup(Master::Start)]);
+        inner.emit_master_end_when_eof(false);
+        self.inner = Some(inner);
     }
 }
 

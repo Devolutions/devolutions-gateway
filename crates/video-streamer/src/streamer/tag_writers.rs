@@ -50,8 +50,8 @@ where
     pub(crate) fn into_encoded_writer(
         self,
         config: EncodeWriterConfig,
-    ) -> anyhow::Result<(CutCusterWriter<T>, CutBlockHitMarker)> {
-        let encoded_writer = CutCusterWriter::new(config, self)?;
+    ) -> anyhow::Result<(CutClusterWriter<T>, CutBlockHitMarker)> {
+        let encoded_writer = CutClusterWriter::new(config, self)?;
         Ok(encoded_writer)
     }
 }
@@ -85,7 +85,7 @@ enum CutBlockState {
     },
 }
 
-pub(crate) struct CutCusterWriter<T>
+pub(crate) struct CutClusterWriter<T>
 where
     T: std::io::Write,
 {
@@ -99,7 +99,7 @@ where
 
 pub(crate) struct CutBlockHitMarker;
 
-impl<T> CutCusterWriter<T>
+impl<T> CutClusterWriter<T>
 where
     T: std::io::Write,
 {
@@ -139,7 +139,7 @@ pub(crate) enum WriterResult {
     Continue,
 }
 
-impl<T> CutCusterWriter<T>
+impl<T> CutClusterWriter<T>
 where
     T: std::io::Write,
 {
@@ -211,9 +211,7 @@ where
                 let current_block_absolute_time = current_video_block.absolute_timestamp()?;
                 let cluster_relative_timestamp = current_block_absolute_time - cut_block_absolute_time;
                 if self.should_write_new_cluster(current_block_absolute_time) {
-                    self.start_new_cluster(cluster_relative_timestamp).inspect_err(|e| {
-                        error!("failed to start new cluster: {}", e);
-                    })?;
+                    self.start_new_cluster(cluster_relative_timestamp)?;
 
                     self.cut_block_state = CutBlockState::Met {
                         cut_block_absolute_time,
@@ -307,7 +305,6 @@ where
     }
 
     pub(crate) fn mark_cut_block_hit(&mut self, _marker: CutBlockHitMarker) {
-        debug!("marking cut block hit");
         self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }
