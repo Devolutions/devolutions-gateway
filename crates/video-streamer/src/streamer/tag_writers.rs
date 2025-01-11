@@ -47,11 +47,8 @@ where
         Ok(())
     }
 
-    pub(crate) fn into_encoded_writer(
-        self,
-        config: EncodeWriterConfig,
-    ) -> anyhow::Result<(CutClusterWriter<T>, CutBlockHitMarker)> {
-        let encoded_writer = CutClusterWriter::new(config, self)?;
+    pub(crate) fn into_encoded_writer(self, config: EncodeWriterConfig) -> anyhow::Result<CutCusterWriter<T>> {
+        let encoded_writer = CutCusterWriter::new(config, self)?;
         Ok(encoded_writer)
     }
 }
@@ -85,7 +82,7 @@ enum CutBlockState {
     },
 }
 
-pub(crate) struct CutClusterWriter<T>
+pub(crate) struct CutCusterWriter<T>
 where
     T: std::io::Write,
 {
@@ -97,13 +94,11 @@ where
     cut_block_state: CutBlockState,
 }
 
-pub(crate) struct CutBlockHitMarker;
-
-impl<T> CutClusterWriter<T>
+impl<T> CutCusterWriter<T>
 where
     T: std::io::Write,
 {
-    fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<(Self, CutBlockHitMarker)> {
+    fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<Self> {
         let decoder = VpxDecoder::builder()
             .threads(config.threads)
             .width(config.width)
@@ -122,16 +117,13 @@ where
             .build()?;
 
         let HeaderWriter { writer } = writer;
-        Ok((
-            Self {
-                writer,
-                cluster_timestamp: None,
-                encoder,
-                decoder,
-                cut_block_state: CutBlockState::HaventMet,
-            },
-            CutBlockHitMarker,
-        ))
+        Ok(Self {
+            writer,
+            cluster_timestamp: None,
+            encoder,
+            decoder,
+            cut_block_state: CutBlockState::HaventMet,
+        })
     }
 }
 
@@ -139,7 +131,7 @@ pub(crate) enum WriterResult {
     Continue,
 }
 
-impl<T> CutClusterWriter<T>
+impl<T> CutCusterWriter<T>
 where
     T: std::io::Write,
 {
@@ -304,7 +296,7 @@ where
         false
     }
 
-    pub(crate) fn mark_cut_block_hit(&mut self, _marker: CutBlockHitMarker) {
+    pub(crate) fn mark_cut_block_hit(&mut self) {
         self.cut_block_state = CutBlockState::AtCutBlock;
     }
 }

@@ -5,11 +5,11 @@ import { ServerWebSocket } from './websocket';
 export type ShadowPlayerError =
   | {
       type: 'websocket';
-      error: ErrorEvent;
+      inner: ErrorEvent;
     }
   | {
       type: 'protocol';
-      error: ErrorMessage;
+      inner: ErrorMessage;
     };
 
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
