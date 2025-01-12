@@ -1,12 +1,17 @@
-mod trp_decoder;
+pub mod trp_decoder;
 
 #[macro_use]
 extern crate tracing;
 
-use std::{future::Future, sync::Arc};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, BufReader, ReadBuf},
     sync::Notify,
 };
 
@@ -15,17 +20,27 @@ pub trait AsciiStreamSocket {
     fn close(&mut self) -> impl Future<Output = ()> + Send;
 }
 
+pub enum InputStreamType {
+    Asciinema,
+    Trp,
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn ascii_stream(
     mut websocket: impl AsciiStreamSocket,
-    input_stream: impl tokio::io::AsyncRead + Unpin,
+    input_stream: impl AsyncRead + Unpin + Send + 'static,
     shutdown_signal: Arc<Notify>,
+    input_type: InputStreamType,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
     // Write all the data from the input stream to the output stream.
-    let buf_reader = BufReader::new(input_stream);
-    let mut lines = BufReader::new(buf_reader).lines();
+    let either = match input_type {
+        InputStreamType::Asciinema => Either::Left(input_stream),
+        InputStreamType::Trp => Either::Right(trp_decoder::decode_buffer(input_stream)?),
+    };
+
+    let mut lines = BufReader::new(either).lines();
 
     loop {
         match lines.next_line().await {
@@ -74,4 +89,22 @@ pub async fn ascii_stream(
     debug!("Shutting down ASCII streaming");
 
     Ok(())
+}
+
+pub enum Either<A, B> {
+    Left(A),
+    Right(B),
+}
+
+impl<A, B> AsyncRead for Either<A, B>
+where
+    A: AsyncRead + Unpin + Send,
+    B: AsyncRead + Unpin + Send,
+{
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Either::Left(left) => Pin::new(left).poll_read(cx, buf),
+            Either::Right(right) => Pin::new(right).poll_read(cx, buf),
+        }
+    }
 }

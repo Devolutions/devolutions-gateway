@@ -44,7 +44,8 @@ pub(crate) async fn stream_file(
     // 1.identify the file type
     info!(?path, extension = ?path.extension(), "Streaming file");
     if !(path.extension() == Some(RecordingFileType::WebM.extension())
-        || path.extension() == Some(RecordingFileType::Asciicast.extension()))
+        || path.extension() == Some(RecordingFileType::Asciicast.extension())
+        || path.extension() == Some(RecordingFileType::TRP.extension()))
     {
         anyhow::bail!("invalid file type");
     }
@@ -64,7 +65,9 @@ pub(crate) async fn stream_file(
         rx
     };
 
-    let upgrade_result = if path.extension() == Some(RecordingFileType::Asciicast.extension()) {
+    let upgrade_result = if path.extension() == Some(RecordingFileType::Asciicast.extension())
+        || path.extension() == Some(RecordingFileType::TRP.extension())
+    {
         #[cfg(windows)]
         const FILE_SHARE_READ: u32 = 0x00000001;
 
@@ -83,11 +86,22 @@ pub(crate) async fn stream_file(
             .await
             .with_context(|| format!("failed to open file: {path:?}"))?;
 
+        let path_extension = path.extension().unwrap();
+
+        let input_type = if path_extension == RecordingFileType::Asciicast.extension() {
+            ascii_streamer::InputStreamType::Asciinema
+        } else if path_extension == RecordingFileType::TRP.extension() {
+            ascii_streamer::InputStreamType::Trp
+        } else {
+            unreachable!()
+        };
+
         ws.on_upgrade(move |socket| async move {
             let _ = ascii_stream(
                 AsciiStreamSocketImpl(socket),
                 streaming_file,
                 shutdown_notify,
+                input_type,
                 when_new_chunk_appended,
             )
             .await

@@ -160,7 +160,6 @@ name = "ascii-streamer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "serde_json",
  "tokio 1.42.0",
  "tracing",
 ]
