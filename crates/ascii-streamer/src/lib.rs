@@ -64,7 +64,6 @@ pub async fn ascii_stream(
     loop {
         tokio::select! {
             _ = when_new_chunk_appended() => {
-                warn!("New chunk appended");
                 loop {
                     match lines.next_line().await {
                         Ok(Some(line)) => {
