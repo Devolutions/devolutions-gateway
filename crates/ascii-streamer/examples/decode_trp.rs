@@ -22,7 +22,7 @@ pub async fn main() -> anyhow::Result<()> {
         .ok_or(anyhow::anyhow!("output path is required"))?;
 
     let file = tokio::fs::File::open(input).await?;
-    let mut output_reader = ascii_streamer::trp_decoder::decode_buffer(file)?;
+    let (_task, mut output_reader) = ascii_streamer::trp_decoder::decode_stream(file)?;
     let mut output_file = tokio::fs::File::create(output).await?;
 
     tokio::io::copy(&mut output_reader, &mut output_file).await?;

@@ -34,14 +34,18 @@ pub async fn ascii_stream(
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
+    let mut trp_task_handle = None;
     // Write all the data from the input stream to the output stream.
     let either = match input_type {
         InputStreamType::Asciinema => Either::Left(input_stream),
-        InputStreamType::Trp => Either::Right(trp_decoder::decode_buffer(input_stream)?),
+        InputStreamType::Trp => {
+            let (task, stream) = trp_decoder::decode_stream(input_stream)?;
+            trp_task_handle = Some(task);
+            Either::Right(stream)
+        }
     };
 
     let mut lines = BufReader::new(either).lines();
-
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
@@ -60,13 +64,13 @@ pub async fn ascii_stream(
     loop {
         tokio::select! {
             _ = when_new_chunk_appended() => {
+                warn!("New chunk appended");
                 loop {
                     match lines.next_line().await {
                         Ok(Some(line)) => {
                             websocket.send(line.clone()).await?;
                         }
                         Ok(None) => {
-                            debug!("EOF reached");
                             break;
                         }
                         Err(e) => {
@@ -86,6 +90,9 @@ pub async fn ascii_stream(
     // but we still needs to send 1000 code to the client
     // as it is what is expected for the ascii-player to end the playback properly
     websocket.close().await;
+    if let Some(task) = trp_task_handle {
+        task.abort();
+    }
     debug!("Shutting down ASCII streaming");
 
     Ok(())

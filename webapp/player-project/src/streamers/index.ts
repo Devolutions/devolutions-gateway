@@ -11,7 +11,7 @@ export const getShadowPlayer = (fileType) => {
     player.play = handleWebm;
   }
 
-  if (fileType === 'cast') {
+  if (fileType === 'cast' || fileType === 'trp') {
     player.play = handleCast;
   }
 
