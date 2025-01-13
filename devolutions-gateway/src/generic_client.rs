@@ -58,7 +58,13 @@ where
                 anyhow::bail!("timed out at preconnection blob reception");
             }
             result = read_pcb_fut => {
-                result?
+                match result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        info!(%error, "Received payload not matching the expected protocol");
+                        return Ok(())
+                    }
+                }
             }
         };
 
