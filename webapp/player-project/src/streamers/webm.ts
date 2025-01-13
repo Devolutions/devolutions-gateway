@@ -20,10 +20,6 @@ export async function handleWebm(gatewayAccessApi: GatewayAccessApi) {
   shadowPlayer.srcChange(gatewayAccessApi.sessionShadowingUrl());
   shadowPlayer.play();
 
-  shadowPlayer.onEnd(() => {
-    showNotification('Playback has ended', 'success');
-  });
-
   shadowPlayer.onError((error) => {
     showNotification(`An error occurred: ${error}`, 'error');
   });
