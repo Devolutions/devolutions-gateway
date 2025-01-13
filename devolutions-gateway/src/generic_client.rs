@@ -55,10 +55,17 @@ where
 
         let (pdu, mut leftover_bytes) = tokio::select! {
             () = timeout => {
-                anyhow::bail!("timed out at preconnection blob reception");
+                info!("Timed out at preconnection blob reception");
+                return Ok(())
             }
             result = read_pcb_fut => {
-                result?
+                match result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        info!(%error, "Received payload not matching the expected protocol");
+                        return Ok(())
+                    }
+                }
             }
         };
 
