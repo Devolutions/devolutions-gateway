@@ -23,6 +23,7 @@ pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
 use crate::{reopenable::Reopenable, StreamingConfig};
+use tokio::io::AsyncWriteExt;
 
 #[instrument(skip_all)]
 pub fn webm_stream(
@@ -226,6 +227,7 @@ fn spawn_sending_task<W>(
                 },
             }
         }
+        let _ = ws_frame.lock().await.get_mut().shutdown().await;
         Ok::<_, anyhow::Error>(())
     });
 
@@ -249,6 +251,7 @@ fn spawn_sending_task<W>(
             }
         }
         info!("Stopping streaming task");
+        let _ = ws_frame_clone.lock().await.get_mut().shutdown().await;
         handle.abort();
         stop_notifier.notify_waiters();
         Ok::<_, anyhow::Error>(())
