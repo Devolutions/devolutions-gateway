@@ -56,7 +56,7 @@ pub fn webm_stream(
         }
     }
 
-    let cut_block_position = webm_itr.last_tag_position();
+    let cut_block_position = webm_itr.previous_emitted_tag_postion();
 
     let ws_frame = Framed::new(output_stream, ProtocolCodeC);
 
@@ -118,9 +118,12 @@ pub fn webm_stream(
                 }
             }
             Some(Ok(tag)) => {
-                if webm_itr.last_tag_position() == cut_block_position {
+                if webm_itr.previous_emitted_tag_postion() == cut_block_position {
                     if let Some(cut_block_hit_marker) = cut_block_hit_marker.take() {
                         encode_writer.mark_cut_block_hit(cut_block_hit_marker);
+                    } else {
+                        error_sender.blocking_send(UserFriendlyError::UnexpectedError)?;
+                        anyhow::bail!("cut block hit twice");
                     }
                 }
 
