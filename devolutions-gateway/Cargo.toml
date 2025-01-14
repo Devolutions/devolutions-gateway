@@ -60,7 +60,7 @@ sysinfo = "0.30"
 dunce = "1.0"
 
 # Security, crypto…
-picky = { version = "7.0.0-rc.10", default-features = false, features = ["jose", "x509", "pkcs12"] }
+picky = { version = "7.0.0-rc.11", default-features = false, features = ["jose", "x509", "pkcs12"] }
 zeroize = { version = "1.8", features = ["derive"] }
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
