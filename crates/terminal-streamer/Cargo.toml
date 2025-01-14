@@ -1,0 +1,15 @@
+[package]
+name = "terminal-streamer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+tokio = { version = "1.42", features = ["io-util", "sync", "macros", "rt-multi-thread", "time"] }
+tracing = "0.1"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["fs"] }
