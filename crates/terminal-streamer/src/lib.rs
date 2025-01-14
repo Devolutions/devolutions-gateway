@@ -1,3 +1,4 @@
+pub(crate) mod asciinema;
 pub mod trp_decoder;
 
 #[macro_use]
@@ -5,13 +6,11 @@ extern crate tracing;
 
 use std::{
     future::Future,
-    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
 };
 
 use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, BufReader, ReadBuf},
+    io::{AsyncBufReadExt, AsyncRead, BufReader},
     sync::Notify,
 };
 
@@ -26,7 +25,7 @@ pub enum InputStreamType {
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn ascii_stream(
+pub async fn terminal_stream(
     mut websocket: impl AsciiStreamSocket,
     input_stream: impl AsyncRead + Unpin + Send + 'static,
     shutdown_signal: Arc<Notify>,
@@ -34,18 +33,20 @@ pub async fn ascii_stream(
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
+    
     let mut trp_task_handle = None;
     // Write all the data from the input stream to the output stream.
-    let either = match input_type {
-        InputStreamType::Asciinema => Either::Left(input_stream),
+    let boxed_stream = match input_type {
+        InputStreamType::Asciinema => Box::new(input_stream) as Box<dyn AsyncRead + Unpin + Send + 'static>,
         InputStreamType::Trp => {
             let (task, stream) = trp_decoder::decode_stream(input_stream)?;
             trp_task_handle = Some(task);
-            Either::Right(stream)
+            Box::new(stream) as Box<dyn AsyncRead + Unpin + Send + 'static>
         }
     };
 
-    let mut lines = BufReader::new(either).lines();
+    let mut lines = BufReader::new(boxed_stream).lines();
+    // iterate and drain all the lines from the input stream
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
@@ -95,22 +96,4 @@ pub async fn ascii_stream(
     debug!("Shutting down ASCII streaming");
 
     Ok(())
-}
-
-pub enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
-
-impl<A, B> AsyncRead for Either<A, B>
-where
-    A: AsyncRead + Unpin + Send,
-    B: AsyncRead + Unpin + Send,
-{
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Either::Left(left) => Pin::new(left).poll_read(cx, buf),
-            Either::Right(right) => Pin::new(right).poll_read(cx, buf),
-        }
-    }
 }

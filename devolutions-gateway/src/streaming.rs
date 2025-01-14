@@ -1,22 +1,22 @@
 use std::{borrow::Cow, sync::Arc};
 
 use anyhow::Context;
-use ascii_streamer::ascii_stream;
 use axum::{
     body::Body,
     extract::ws::{CloseFrame, WebSocket},
     response::Response,
 };
 use futures::SinkExt;
+use terminal_streamer::terminal_stream;
 use tokio::{fs::OpenOptions, sync::Notify};
 use uuid::Uuid;
 use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 
 use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
 
-struct AsciiStreamSocketImpl(WebSocket);
+struct TerminalStreamSocketImpl(WebSocket);
 
-impl ascii_streamer::AsciiStreamSocket for AsciiStreamSocketImpl {
+impl terminal_streamer::TerminalStreamSocket for TerminalStreamSocketImpl {
     async fn send(&mut self, value: String) -> Result<(), anyhow::Error> {
         self.0.send(axum::extract::ws::Message::Text(value)).await?;
         Ok(())
@@ -89,16 +89,16 @@ pub(crate) async fn stream_file(
         let path_extension = path.extension().unwrap();
 
         let input_type = if path_extension == RecordingFileType::Asciicast.extension() {
-            ascii_streamer::InputStreamType::Asciinema
+            terminal_streamer::InputStreamType::Asciinema
         } else if path_extension == RecordingFileType::TRP.extension() {
-            ascii_streamer::InputStreamType::Trp
+            terminal_streamer::InputStreamType::Trp
         } else {
             unreachable!()
         };
 
         ws.on_upgrade(move |socket| async move {
-            let _ = ascii_stream(
-                AsciiStreamSocketImpl(socket),
+            let _ = terminal_stream(
+                TerminalStreamSocketImpl(socket),
                 streaming_file,
                 shutdown_notify,
                 input_type,
