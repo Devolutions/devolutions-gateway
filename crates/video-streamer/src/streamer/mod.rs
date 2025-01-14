@@ -5,9 +5,9 @@ use futures_util::SinkExt;
 use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot::error::RecvError, Mutex, Notify};
 use tokio_util::codec::Framed;
-use tokio::io::AsyncWriteExt;
 use tracing::Instrument;
 use webm_iterable::{
     errors::{TagIteratorError, TagWriterError},
