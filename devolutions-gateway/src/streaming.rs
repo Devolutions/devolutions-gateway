@@ -41,11 +41,12 @@ pub(crate) async fn stream_file(
     recordings: crate::recording::RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
+    let path_extension = path.extension().context("no extension found in the recording file path")?;
     // 1.identify the file type
-    info!(?path, extension = ?path.extension(), "Streaming file");
-    if !(path.extension() == Some(RecordingFileType::WebM.extension())
-        || path.extension() == Some(RecordingFileType::Asciicast.extension())
-        || path.extension() == Some(RecordingFileType::TRP.extension()))
+    info!(?path, extension = ?path_extension, "Streaming file");
+    if !(path_extension == RecordingFileType::WebM.extension()
+        || path_extension == RecordingFileType::Asciicast.extension()
+        || path_extension == RecordingFileType::TRP.extension())
     {
         anyhow::bail!("invalid file type");
     }
@@ -65,8 +66,8 @@ pub(crate) async fn stream_file(
         rx
     };
 
-    let upgrade_result = if path.extension() == Some(RecordingFileType::Asciicast.extension())
-        || path.extension() == Some(RecordingFileType::TRP.extension())
+    let upgrade_result = if path_extension == RecordingFileType::Asciicast.extension()
+        || path_extension == RecordingFileType::TRP.extension()
     {
         #[cfg(windows)]
         const FILE_SHARE_READ: u32 = 0x00000001;
@@ -85,8 +86,6 @@ pub(crate) async fn stream_file(
             .open(path)
             .await
             .with_context(|| format!("failed to open file: {path:?}"))?;
-
-        let path_extension = path.extension().unwrap();
 
         let input_type = if path_extension == RecordingFileType::Asciicast.extension() {
             terminal_streamer::InputStreamType::Asciinema

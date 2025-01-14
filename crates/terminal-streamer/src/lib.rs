@@ -14,7 +14,7 @@ use tokio::{
     sync::Notify,
 };
 
-pub trait AsciiStreamSocket {
+pub trait TerminalStreamSocket {
     fn send(&mut self, value: String) -> impl Future<Output = anyhow::Result<()>> + Send;
     fn close(&mut self) -> impl Future<Output = ()> + Send;
 }
@@ -26,7 +26,7 @@ pub enum InputStreamType {
 
 #[tracing::instrument(skip_all)]
 pub async fn terminal_stream(
-    mut websocket: impl AsciiStreamSocket,
+    mut websocket: impl TerminalStreamSocket,
     input_stream: impl AsyncRead + Unpin + Send + 'static,
     shutdown_signal: Arc<Notify>,
     input_type: InputStreamType,
