@@ -493,10 +493,19 @@ where
 
 // Code from 4000 to 4999 are reserved for private custom use
 // https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code
-enum StreamerWebsocketCloseCode {
+enum StreamerCloseCode {
     StreamingEnded = 4001,
     InternalError = 4002,
     Forbidden = 4003,
+}
+
+impl From<StreamerCloseCode> for CloseFrame<'_> {
+    fn from(code: StreamerCloseCode) -> Self {
+        CloseFrame {
+            code: code as u16 as extract::ws::CloseCode,
+            reason: Cow::Borrowed(""),
+        }
+    }
 }
 
 async fn shadow_recording(
@@ -506,45 +515,40 @@ async fn shadow_recording(
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
     if id != claims.jet_aid {
-        return close_with_error(ws, StreamerWebsocketCloseCode::Forbidden);
+        return close_with_error(ws, StreamerCloseCode::Forbidden);
     }
 
     if !recordings.active_recordings.contains(id) {
-        return close_with_error(ws, StreamerWebsocketCloseCode::StreamingEnded);
+        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
     }
 
     let Ok(Some(crate::recording::OnGoingRecordingState::Connected)) = recordings.get_state(id).await else {
-        return close_with_error(ws, StreamerWebsocketCloseCode::StreamingEnded);
+        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
     };
 
     if !xmf::is_init() {
-        return close_with_error(ws, StreamerWebsocketCloseCode::InternalError);
+        return close_with_error(ws, StreamerCloseCode::InternalError);
     }
 
     let Ok(notify) = recordings.subscribe_to_recording_finish(id).await else {
-        return close_with_error(ws, StreamerWebsocketCloseCode::InternalError);
+        return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
     let Ok(recording_files) = recordings.list_files(id).await else {
-        return close_with_error(ws, StreamerWebsocketCloseCode::InternalError);
+        return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
     let Some(recording_path) = recording_files.last() else {
-        return close_with_error(ws, StreamerWebsocketCloseCode::InternalError);
+        return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
     return crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
         .await
         .map_err(|_| HttpError::internal().msg("failed to stream file"));
 
-    fn close_with_error(ws: WebSocketUpgrade, code: StreamerWebsocketCloseCode) -> Result<Response, HttpError> {
+    fn close_with_error(ws: WebSocketUpgrade, code: StreamerCloseCode) -> Result<Response, HttpError> {
         Ok(ws.on_upgrade(move |mut ws| async move {
-            let _ = ws
-                .send(extract::ws::Message::Close(Some(CloseFrame {
-                    code: code as u16 as extract::ws::CloseCode,
-                    reason: Cow::Borrowed(""),
-                })))
-                .await;
+            let _ = ws.send(extract::ws::Message::Close(Some(code.into()))).await;
         }))
     }
 }
