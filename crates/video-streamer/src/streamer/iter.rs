@@ -318,6 +318,19 @@ where
 
     fn new_inner(&mut self, reader: R) {
         let mut inner = WebmIterator::new(reader, &[MatroskaSpec::BlockGroup(Master::Start)]);
+        // Disable automatic Master::End or Master::Start tag emission at EOF.
+        //
+        // Scenario 1 - EOF within a Cluster:
+        // - When we hit EOF between Cluster(Master::Start) and expected Cluster(Master::End)
+        // - By default, iterator emits Cluster(Master::End) automatically
+        // - This causes last_emitted_tag_offset() to jump back to the Cluster(Master::Start) position
+        // - Our position tracking becomes incorrect as it's smaller than BlockGroup/SimpleBlock we read
+        //
+        // Scenario 2 - EOF when reading from middle of a Cluster:
+        // - When we start reading from middle of a Cluster (after rollback/seek)
+        // - At EOF, iterator assumes we need a matching Start tag.
+        // - It emits a Cluster(Master::Start) with offset 0
+        // - This resets last_emitted_tag_offset() to 0, breaking our position tracking
         inner.emit_master_end_when_eof(false);
         self.inner = Some(inner);
     }

@@ -97,6 +97,7 @@ where
     cut_block_state: CutBlockState,
 }
 
+/// A token type that enforces the one-time transition of cut block state.
 pub(crate) struct CutBlockHitMarker;
 
 impl<T> CutClusterWriter<T>
