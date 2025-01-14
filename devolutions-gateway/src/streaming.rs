@@ -12,7 +12,7 @@ use tokio::{fs::OpenOptions, sync::Notify};
 use uuid::Uuid;
 use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 
-use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
+use crate::{token::RecordingFileType, ws::websocket_compat};
 
 pub(crate) async fn stream_file(
     path: &camino::Utf8Path,
@@ -94,11 +94,6 @@ async fn validate_streaming_file(
     {
         anyhow::bail!("invalid file type");
     }
-
-    // Check if file is actively being recorded
-    let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(recording_id).await else {
-        anyhow::bail!("file is not being recorded");
-    };
 
     if path_extension == RecordingFileType::Asciicast.extension()
         || path_extension == RecordingFileType::TRP.extension()
