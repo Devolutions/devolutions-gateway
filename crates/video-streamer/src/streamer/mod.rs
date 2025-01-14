@@ -7,6 +7,7 @@ use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
 use tokio::sync::{mpsc, oneshot::error::RecvError, Mutex, Notify};
 use tokio_util::codec::Framed;
+use tokio::io::AsyncWriteExt;
 use tracing::Instrument;
 use webm_iterable::{
     errors::{TagIteratorError, TagWriterError},
@@ -23,7 +24,6 @@ pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
 use crate::{reopenable::Reopenable, StreamingConfig};
-use tokio::io::AsyncWriteExt;
 
 #[instrument(skip_all)]
 pub fn webm_stream(
