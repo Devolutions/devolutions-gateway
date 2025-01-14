@@ -46,6 +46,7 @@ pub async fn terminal_stream(
     };
 
     let mut lines = BufReader::new(boxed_stream).lines();
+
     // iterate and drain all the lines from the input stream
     loop {
         match lines.next_line().await {
@@ -61,6 +62,7 @@ pub async fn terminal_stream(
             }
         }
     }
+
 
     loop {
         tokio::select! {

@@ -58,9 +58,12 @@ async fn parse_trp_stream(
     mut input_stream: impl AsyncRead + Unpin + Send + 'static,
     mut tx: tokio::sync::mpsc::Sender<anyhow::Result<String>>,
 ) -> anyhow::Result<()> {
+
     let mut time = 0.0;
     let mut before_setup_cache = Some(Vec::new());
     let mut header = AsciinemaHeader::default();
+
+
     loop {
         let mut packet_head_buffer = [0u8; 8];
         if let Err(e) = input_stream.read_exact(&mut packet_head_buffer).await {
@@ -74,7 +77,10 @@ async fn parse_trp_stream(
         let time_delta = u32::from_le_bytes(packet_head_buffer[0..4].try_into()?);
         let event_type = u16::from_le_bytes(packet_head_buffer[4..6].try_into()?);
         let size = u16::from_le_bytes(packet_head_buffer[6..8].try_into()?);
+
+
         time += f64::from(time_delta) / 1000.0;
+
         let mut event_payload = vec![0u8; size as usize];
         if let Err(e) = input_stream.read_exact(&mut event_payload).await {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
@@ -83,6 +89,7 @@ async fn parse_trp_stream(
             }
             anyhow::bail!(e);
         }
+
 
         match event_type {
             0 => {
