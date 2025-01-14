@@ -4,10 +4,7 @@ pub mod trp_decoder;
 #[macro_use]
 extern crate tracing;
 
-use std::{
-    future::Future,
-    sync::Arc,
-};
+use std::{future::Future, sync::Arc};
 
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
@@ -33,7 +30,7 @@ pub async fn terminal_stream(
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("Starting ASCII streaming");
-    
+
     let mut trp_task_handle = None;
     // Write all the data from the input stream to the output stream.
     let boxed_stream = match input_type {
@@ -62,7 +59,6 @@ pub async fn terminal_stream(
             }
         }
     }
-
 
     loop {
         tokio::select! {

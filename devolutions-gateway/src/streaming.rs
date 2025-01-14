@@ -29,7 +29,6 @@ pub(crate) async fn stream_file(
         rx
     };
 
-
     let path = Arc::new(path.to_owned());
     let upgrade_result = match streaming_type {
         StreamingType::Terminal => {
@@ -88,7 +87,6 @@ async fn validate_streaming_file(
         .extension()
         .context("no extension found in the recording file path")?;
 
-
     info!(?path, extension = ?path_extension, "Streaming file");
     if !(path_extension == RecordingFileType::WebM.extension()
         || path_extension == RecordingFileType::Asciicast.extension()
@@ -97,12 +95,10 @@ async fn validate_streaming_file(
         anyhow::bail!("invalid file type");
     }
 
-
     // Check if file is actively being recorded
     let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(recording_id).await else {
         anyhow::bail!("file is not being recorded");
     };
-
 
     if path_extension == RecordingFileType::Asciicast.extension()
         || path_extension == RecordingFileType::TRP.extension()

@@ -49,14 +49,14 @@ impl AsciinemaEvent {
     }
 
     /// Sanitizes a string payload for JSON output by escaping ASCII control characters.
-    /// 
+    ///
     /// This function converts ASCII control characters (0x00-0x1F, 0x7F) into their Unicode
     /// escape sequence representation (e.g., '\u001b' for ESC), while leaving other characters unchanged.
     /// This ensures the resulting string is valid JSON and control characters are preserved in a readable format.
-    /// 
+    ///
     /// # Arguments
     /// * `payload` - The string to sanitize
-    /// 
+    ///
     /// # Returns
     /// A new string with all control characters escaped
     fn sanitize_payload(payload: &str) -> String {

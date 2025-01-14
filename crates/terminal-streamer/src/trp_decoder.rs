@@ -58,11 +58,9 @@ async fn parse_trp_stream(
     mut input_stream: impl AsyncRead + Unpin + Send + 'static,
     mut tx: tokio::sync::mpsc::Sender<anyhow::Result<String>>,
 ) -> anyhow::Result<()> {
-
     let mut time = 0.0;
     let mut before_setup_cache = Some(Vec::new());
     let mut header = AsciinemaHeader::default();
-
 
     loop {
         let mut packet_head_buffer = [0u8; 8];
@@ -78,7 +76,6 @@ async fn parse_trp_stream(
         let event_type = u16::from_le_bytes(packet_head_buffer[4..6].try_into()?);
         let size = u16::from_le_bytes(packet_head_buffer[6..8].try_into()?);
 
-
         time += f64::from(time_delta) / 1000.0;
 
         let mut event_payload = vec![0u8; size as usize];
@@ -89,7 +86,6 @@ async fn parse_trp_stream(
             }
             anyhow::bail!(e);
         }
-
 
         match event_type {
             0 => {
