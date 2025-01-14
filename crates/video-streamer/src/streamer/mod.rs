@@ -5,7 +5,6 @@ use futures_util::SinkExt;
 use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot::error::RecvError, Mutex, Notify};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
@@ -24,6 +23,7 @@ pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
 use crate::{reopenable::Reopenable, StreamingConfig};
+use tokio::io::AsyncWriteExt;
 
 #[instrument(skip_all)]
 pub fn webm_stream(
