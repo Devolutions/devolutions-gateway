@@ -21,14 +21,10 @@ export async function handleWebm(gatewayAccessApi: GatewayAccessApi) {
   shadowPlayer.play();
 
   shadowPlayer.onError((error) => {
-    let errorMessage = 'An error occurred';
-
     if (error.type === 'protocol') {
-      errorMessage = `An error occurred: ${error.inner.error}`;
-    } else {
-      errorMessage = `An error occurred: ${error.inner.message}`;
+      const errorMessage = `An error occurred: ${error.inner.error}`;
+      showNotification(errorMessage, 'error');
     }
-    showNotification(errorMessage, 'error');
   });
 
   return shadowPlayer;

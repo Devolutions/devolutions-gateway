@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
 
 use anyhow::Context as _;
-use axum::extract::ws::WebSocket;
+use axum::extract::ws::{CloseFrame, WebSocket};
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::{delete, get};
@@ -490,6 +491,23 @@ where
     }
 }
 
+// Code from 4000 to 4999 are reserved for private custom use
+// https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code
+enum StreamerCloseCode {
+    StreamingEnded = 4001,
+    InternalError = 4002,
+    Forbidden = 4003,
+}
+
+impl From<StreamerCloseCode> for CloseFrame<'_> {
+    fn from(code: StreamerCloseCode) -> Self {
+        CloseFrame {
+            code: code as u16 as extract::ws::CloseCode,
+            reason: Cow::Borrowed(""),
+        }
+    }
+}
+
 async fn shadow_recording(
     State(DgwState { recordings, .. }): State<DgwState>,
     extract::Path(id): extract::Path<Uuid>,
@@ -497,33 +515,40 @@ async fn shadow_recording(
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
     if id != claims.jet_aid {
-        return Err(HttpError::forbidden().msg("not allowed to read this recording"));
+        return close_with_error(ws, StreamerCloseCode::Forbidden);
     }
 
     if !recordings.active_recordings.contains(id) {
-        return Err(HttpError::not_found().msg("no active recording found for the specified ID"));
+        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
     }
+
+    let Ok(Some(crate::recording::OnGoingRecordingState::Connected)) = recordings.get_state(id).await else {
+        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
+    };
 
     if !xmf::is_init() {
-        return Err(HttpError::internal().msg("XMF native library is not loaded"));
+        return close_with_error(ws, StreamerCloseCode::InternalError);
     }
 
-    let notify = recordings.subscribe_to_recording_finish(id).await.map_err(
-        HttpError::internal()
-            .with_msg("failed to subscribe to active recording")
-            .err(),
-    )?;
+    let Ok(notify) = recordings.subscribe_to_recording_finish(id).await else {
+        return close_with_error(ws, StreamerCloseCode::InternalError);
+    };
 
-    let recording_files = recordings
-        .list_files(id)
+    let Ok(recording_files) = recordings.list_files(id).await else {
+        return close_with_error(ws, StreamerCloseCode::InternalError);
+    };
+
+    let Some(recording_path) = recording_files.last() else {
+        return close_with_error(ws, StreamerCloseCode::InternalError);
+    };
+
+    return crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
         .await
-        .map_err(HttpError::internal().with_msg("failed to get recording files").err())?;
+        .map_err(|_| HttpError::internal().msg("failed to stream file"));
 
-    let recording_path = recording_files
-        .last()
-        .ok_or_else(|| HttpError::internal().msg("no recording file found"))?;
-
-    crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
-        .await
-        .map_err(HttpError::internal().err())
+    fn close_with_error(ws: WebSocketUpgrade, code: StreamerCloseCode) -> Result<Response, HttpError> {
+        Ok(ws.on_upgrade(move |mut ws| async move {
+            let _ = ws.send(extract::ws::Message::Close(Some(code.into()))).await;
+        }))
+    }
 }

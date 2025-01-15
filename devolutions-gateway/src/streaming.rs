@@ -12,7 +12,7 @@ use tokio::{fs::OpenOptions, sync::Notify};
 use uuid::Uuid;
 use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
 
-use crate::{recording::OnGoingRecordingState, token::RecordingFileType, ws::websocket_compat};
+use crate::{token::RecordingFileType, ws::websocket_compat};
 
 pub(crate) async fn stream_file(
     path: &camino::Utf8Path,
@@ -21,7 +21,7 @@ pub(crate) async fn stream_file(
     recordings: crate::recording::RecordingMessageSender,
     recording_id: Uuid,
 ) -> anyhow::Result<Response<Body>> {
-    let streaming_type = validate_streaming_file(path, recording_id, &recordings).await?;
+    let streaming_type = validate_streaming_file(path).await?;
 
     let when_new_chunk_appended = move || {
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -41,7 +41,7 @@ pub(crate) async fn stream_file(
             })
         }
         StreamingType::WebM => {
-            let shutdown_notify = shutdown_notify.clone();
+            let shutdown_notify = Arc::clone(&shutdown_notify);
             ws.on_upgrade(move |socket| async move {
                 if let Err(e) = setup_webm_streaming(&path, socket, shutdown_notify, when_new_chunk_appended).await {
                     error!(error = ?e, "WebM streaming failed");
@@ -78,11 +78,7 @@ enum StreamingType {
     WebM,
 }
 
-async fn validate_streaming_file(
-    path: &camino::Utf8Path,
-    recording_id: Uuid,
-    recordings: &crate::recording::RecordingMessageSender,
-) -> anyhow::Result<StreamingType> {
+async fn validate_streaming_file(path: &camino::Utf8Path) -> anyhow::Result<StreamingType> {
     let path_extension = path
         .extension()
         .context("no extension found in the recording file path")?;
@@ -94,11 +90,6 @@ async fn validate_streaming_file(
     {
         anyhow::bail!("invalid file type");
     }
-
-    // Check if file is actively being recorded
-    let Ok(Some(OnGoingRecordingState::Connected)) = recordings.get_state(recording_id).await else {
-        anyhow::bail!("file is not being recorded");
-    };
 
     if path_extension == RecordingFileType::Asciicast.extension()
         || path_extension == RecordingFileType::TRP.extension()
@@ -133,7 +124,9 @@ async fn setup_terminal_streaming(
         .await
         .with_context(|| format!("failed to open file: {path:?}"))?;
 
-    let path_extension = path.extension().unwrap();
+    let path_extension = path
+        .extension()
+        .context("no extension found in the recording file path")?;
     let input_type = if path_extension == RecordingFileType::Asciicast.extension() {
         terminal_streamer::InputStreamType::Asciinema
     } else {
