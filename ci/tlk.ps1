@@ -869,6 +869,7 @@ class TlkRecipe
         Write-Host("output destination: $OutputPath/${RpmPkgNameTarget}.rpm")
         $FpmArgs = @(
             '--force',
+            '--verbose',
             '-s', 'dir',
             '-t', 'rpm',
             '-p', "$OutputPath/${RpmPkgNameTarget}.rpm",
