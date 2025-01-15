@@ -104,7 +104,7 @@ Describe 'Format-RpmPackagingEntry' {
         $Body = "- Removed dependency`n"  # body already formatted
 
         $Expected = @"
-* Wed Jan 01 00:00:00 2025 Maurice <maurice@foo.example> - 0.1.0-1
+* Wed Jan 01 2025 Maurice <maurice@foo.example> - 0.1.0-1
 - Removed dependency
 "@
 
@@ -209,12 +209,12 @@ my-package (0.1.0-1) focal; urgency=medium
             -Email $Email
 
         $Expected = @"
-* Wed Jan 01 00:00:00 2025 Maurice <maurice@foo.example> - 0.2.0-1
+* Wed Jan 01 2025 Maurice <maurice@foo.example> - 0.2.0-1
 - abc
 - abcabc
 - def
 
-* Mon Jan 01 00:00:00 2024 Maurice <maurice@foo.example> - 0.1.0-1
+* Mon Jan 01 2024 Maurice <maurice@foo.example> - 0.1.0-1
 - ghi
 "@
 

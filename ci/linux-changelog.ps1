@@ -217,7 +217,7 @@ function Format-RpmPackagingEntry {
 
         .EXAMPLE
         PS> Format-RpmPackagingEntry -Version "0.1.0" -Date "2025-01-01" -Packager "Maurice" -Email "maurice@foo.example" -Body "- Removed dependency"
-        * Wed Jan 01 00:00:00 2025 Maurice <maurice@foo.example> - 0.1.0-1
+        * Wed Jan 01 2025 Maurice <maurice@foo.example> - 0.1.0-1
         - Removed dependency
     #>
 
@@ -225,7 +225,7 @@ function Format-RpmPackagingEntry {
     $bdy = $Body.SubString(0, $Body.Length - 1)
 
     $dt = [datetime]::ParseExact($Date, "yyyy-MM-dd", $null)
-    $dt = $dt.ToString("ddd MMM dd 00:00:00 yyyy")
+    $dt = $dt.ToString("ddd MMM dd yyyy")
 
     return @"
 * $dt $Packager <$Email> - $Version-1
