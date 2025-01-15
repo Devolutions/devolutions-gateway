@@ -1,15 +1,31 @@
 import { ErrorMessage } from './protocol';
 import { ReactiveSourceBuffer } from './sourceBuffer';
 import { ServerWebSocket } from './websocket';
+import styles from './streamer.css?inline';
+
+export type ShadowPlayerError =
+  | {
+      type: 'websocket';
+      inner: ErrorEvent;
+    }
+  | {
+      type: 'protocol';
+      inner: ErrorMessage;
+    };
+
+type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
 
 export class ShadowPlayer extends HTMLElement {
   shadowRoot: ShadowRoot | null = null;
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
   _buffer: ReactiveSourceBuffer | null = null;
-  onErrorCallback: ((ev: ErrorMessage) => void) | null = null;
+  onErrorCallback: ShadowPlayerErrorCallback | null = null;
   onEndCallback: (() => void) | null = null;
   debug = false;
+  _container: HTMLDivElement | null = null;
+  _replayButton: HTMLButtonElement | null = null;
+
   static get observedAttributes() {
     return [
       'src',
@@ -31,11 +47,12 @@ export class ShadowPlayer extends HTMLElement {
     }
   }
 
-  onError(callback: (ev: ErrorMessage) => void) {
+  onError(callback: ShadowPlayerErrorCallback) {
     this.onErrorCallback = callback;
   }
 
   onEnd(callback: () => void) {
+    this.videoElement.controls = true;
     this.onEndCallback = callback;
   }
 
@@ -56,10 +73,29 @@ export class ShadowPlayer extends HTMLElement {
 
   init() {
     this.shadowRoot = this.attachShadow({ mode: 'open' });
-    const content = document.createElement('div');
+
+    // Add styles
+    const style = document.createElement('style');
+    style.textContent = styles;
+    this.shadowRoot.appendChild(style);
+
+    this._container = document.createElement('div');
+    this._container.className = 'container';
+
     this.videoElement = document.createElement('video');
-    content.appendChild(this.videoElement);
-    this.shadowRoot.appendChild(content);
+    this._container.appendChild(this.videoElement);
+
+    this._replayButton = document.createElement('button');
+    this._replayButton.className = 'replay-button';
+    this._replayButton.innerHTML = `
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+      </svg>
+    `;
+    this._replayButton.onclick = () => this.replay();
+    this._container.appendChild(this._replayButton);
+
+    this.shadowRoot.appendChild(this._container);
     this.syncAttributes();
   }
 
@@ -87,6 +123,13 @@ export class ShadowPlayer extends HTMLElement {
     this.videoElement.play();
   }
 
+  private replay() {
+    if (this._replayButton) {
+      this._replayButton.classList.remove('visible');
+    }
+    this._videoElement?.play();
+  }
+
   public srcChange(value: string) {
     const mediaSource = new MediaSource();
     this._src = value;
@@ -103,6 +146,10 @@ export class ShadowPlayer extends HTMLElement {
     websocket.onopen(() => {
       websocket.send({ type: 'start' });
       websocket.send({ type: 'pull' });
+
+      this._videoElement?.addEventListener('ended', () => {
+        this.showReplayButton();
+      });
     });
 
     websocket.onmessage((ev) => {
@@ -146,7 +193,10 @@ export class ShadowPlayer extends HTMLElement {
       }
 
       if (ev.type === 'error') {
-        this.onErrorCallback?.(ev);
+        this.onErrorCallback?.({
+          type: 'protocol',
+          inner: ev,
+        });
       }
 
       if (ev.type === 'end') {
@@ -155,13 +205,19 @@ export class ShadowPlayer extends HTMLElement {
     });
 
     websocket.onclose(() => {
+      // Now the video is fully loaded, we can show the controls
+      this.videoElement.controls = true;
       if (reactiveSourceBuffer) {
         mediaSource.endOfStream();
       }
     });
 
     websocket.onerror((ev) => {
-      console.error('WebSocket error:', ev);
+      this.onErrorCallback?.({
+        type: 'websocket',
+        inner: ev as unknown as ErrorEvent,
+      });
+
       if (mediaSource.readyState === 'open') {
         try {
           mediaSource.endOfStream();
@@ -175,6 +231,12 @@ export class ShadowPlayer extends HTMLElement {
   public downloadBUfferAsFile() {
     if (this._buffer && this.debug) {
       this._buffer.downloadBufferedFile();
+    }
+  }
+
+  private showReplayButton() {
+    if (this._replayButton) {
+      this._replayButton.classList.add('visible');
     }
   }
 }

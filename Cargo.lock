@@ -156,16 +156,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
-name = "ascii-streamer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "tokio 1.42.0",
- "tracing",
-]
-
-[[package]]
 name = "asn1-rs"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1146,7 +1136,6 @@ version = "2024.3.6"
 dependencies = [
  "anyhow",
  "argon2",
- "ascii-streamer",
  "async-trait",
  "axum 0.7.7",
  "axum-extra",
@@ -1196,6 +1185,7 @@ dependencies = [
  "smol_str",
  "sysinfo",
  "tap",
+ "terminal-streamer",
  "thiserror 1.0.68",
  "time",
  "tokio 1.42.0",
@@ -5316,9 +5306,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.134"
+version = "1.0.135"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d00f4175c42ee48b15416f6193a959ba3a0d67fc699a0db9ad12df9f83991c7d"
+checksum = "2b0d7ba2887406110130a978386c4e1befb98c674b4fba677954e4db976630d9"
 dependencies = [
  "itoa",
  "memchr",
@@ -5729,6 +5719,15 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "terminal-streamer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio 1.42.0",
+ "tracing",
 ]
 
 [[package]]

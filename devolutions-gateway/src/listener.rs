@@ -46,7 +46,7 @@ impl GatewayListener {
     pub fn init_and_bind(url: impl ToInternalUrl, state: DgwState) -> anyhow::Result<Self> {
         let url = url.to_internal_url();
 
-        info!(%url, "Initiating listener…");
+        info!(%url, "Initiating listener...");
 
         let socket_addr = url_to_socket_addr(&url).context("invalid url")?;
 
@@ -119,12 +119,12 @@ async fn run_tcp_listener(listener: TcpListener, state: DgwState) -> anyhow::Res
 
                 ChildTask::spawn(async move {
                     if let Err(e) = handle_tcp_peer(stream, state, peer_addr).await {
-                        error!(error = format!("{e:#}"), "Peer failure");
+                        error!(error = format!("{e:#}"), client = %peer_addr, "TCP peer failure");
                     }
                 })
                 .detach();
             }
-            Err(e) => error!(error = format!("{e:#}"), "Listener failure"),
+            Err(e) => error!(error = format!("{e:#}"), "TCP listener failure"),
         }
     }
 }
@@ -181,7 +181,7 @@ async fn run_http_listener(listener: TcpListener, state: DgwState) -> anyhow::Re
                 ChildTask::spawn(fut).detach();
             }
             Err(error) => {
-                error!(%error, "failed to accept connection");
+                error!(%error, "Failed to accept connection");
             }
         }
     }
