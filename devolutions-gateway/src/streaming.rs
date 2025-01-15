@@ -124,7 +124,9 @@ async fn setup_terminal_streaming(
         .await
         .with_context(|| format!("failed to open file: {path:?}"))?;
 
-    let path_extension = path.extension().context("no extension found in the recording file path")?;
+    let path_extension = path
+        .extension()
+        .context("no extension found in the recording file path")?;
     let input_type = if path_extension == RecordingFileType::Asciicast.extension() {
         terminal_streamer::InputStreamType::Asciinema
     } else {
