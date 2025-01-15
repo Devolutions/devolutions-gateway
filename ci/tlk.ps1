@@ -859,19 +859,11 @@ class TlkRecipe
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
         $RpmUpstreamChangelogFile = Join-Path $OutputPath "changelog_rpm_upstream"
-        $s = New-Changelog `
-        -Format 'RpmUpstream' `
-        -InputFile $UpstreamChangelogFile `
-        -Packager $Packager `
-        -Email $Email
+        $s = New-Changelog -Format 'RpmUpstream' -InputFile $UpstreamChangelogFile -Packager $Packager -Email $Email
         Set-Content -Path $RpmUpstreamChangelogFile -Value $s
 
         $RpmPackagingChangelogFile = Join-Path $OutputPath "changelog_rpm_packaging"
-        $s = New-Changelog `
-        -Format 'RpmPackaging' `
-        -InputFile $UpstreamChangelogFile `
-        -Packager $Packager `
-        -Email $Email
+        $s = New-Changelog -Format 'RpmPackaging' -InputFile $UpstreamChangelogFile -Packager $Packager -Email $Email
         Set-Content -Path $RpmPackagingChangelogFile -Value $s
 
         Write-Host("output destination: $OutputPath/${RpmPkgNameTarget}.rpm")
