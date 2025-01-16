@@ -4,5 +4,8 @@
     "internalError": "",
     "unauthorized": "",
     "unknownError": ""
+  },
+  "ui": {
+    "close": ""
   }
 }
