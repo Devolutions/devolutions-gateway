@@ -1,6 +1,7 @@
 import '../../../shadow-player/src/streamer';
 import { ShadowPlayer } from '../../../shadow-player/src/streamer';
 import { GatewayAccessApi } from '../gateway';
+import { t } from '../i18n';
 import { showNotification } from '../notification';
 
 export async function handleWebm(gatewayAccessApi: GatewayAccessApi) {
@@ -22,8 +23,7 @@ export async function handleWebm(gatewayAccessApi: GatewayAccessApi) {
 
   shadowPlayer.onError((error) => {
     if (error.type === 'protocol') {
-      const errorMessage = `An error occurred: ${error.inner.error}`;
-      showNotification(errorMessage, 'error');
+      showNotification(t('notifications.protocolError', { error: error.inner.error }), 'error');
     }
   });
 

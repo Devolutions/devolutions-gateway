@@ -3,22 +3,25 @@ import { showNotification } from './notification.ts';
 import { getPlayer } from './players/index.js';
 import { cleanUpStreamers, getShadowPlayer } from './streamers/index.js';
 import './ws-proxy.ts';
+import { setupI18n, t } from './i18n';
 import { OnBeforeClose as BeforeWebsocketClose } from './ws-proxy.ts';
 
 async function main() {
-  const { sessionId, token, gatewayAccessUrl, isActive } = getSessionDetails();
+  const { sessionId, token, gatewayAccessUrl, isActive, language } = getSessionDetails();
 
-  const getewayAccessApi = GatewayAccessApi.builder()
+  const gatewayAccessApi = GatewayAccessApi.builder()
     .gatewayAccessUrl(gatewayAccessUrl)
     .token(token)
     .sessionId(sessionId)
     .build();
 
+  await setupI18n(gatewayAccessApi, language);
+
   // shawdow session
   if (isActive) {
-    await playSessionShadowing(getewayAccessApi);
+    await playSessionShadowing(gatewayAccessApi);
   } else {
-    await playStaticRecording(getewayAccessApi);
+    await playStaticRecording(gatewayAccessApi);
   }
 }
 
@@ -51,7 +54,9 @@ function getSessionDetails() {
   const token = windowURL.searchParams.get('token');
   const gatewayAccessUrl = windowURL.toString().split('/jet/jrec')[0];
   const isActive = windowURL.searchParams.get('isActive') || false;
-  return { sessionId, token, gatewayAccessUrl, isActive };
+  const language = windowURL.searchParams.get('lang');
+
+  return { sessionId, token, gatewayAccessUrl, isActive, language };
 }
 
 function getFileType(recordingInfo) {
@@ -63,19 +68,19 @@ function beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi) {
     if (closeEvent.code === StreamerWebsocketCloseCode.StreamingEnded) {
       cleanUpStreamers();
       playStaticRecording(gatewayAccessApi);
-      showNotification('Streaming has finished, play recording as fallback', 'success');
+      showNotification(t('notifications.streamingFinished'), 'success');
     }
 
     if (closeEvent.code === StreamerWebsocketCloseCode.InternalError) {
-      showNotification('Internal error, please try again', 'error');
+      showNotification(t('notifications.internalError'), 'error');
     }
 
     if (closeEvent.code === StreamerWebsocketCloseCode.Forbidden) {
-      showNotification('You are not authorized to play this recording', 'error');
+      showNotification(t('notifications.unauthorized'), 'error');
     }
 
     // This prevents extra handling by other listeners, particularly for asciinema-player in this scenario.
-    // For more details, see the asciinema-player WebSocket driver’s socket close handler.
+    // For more details, see the asciinema-player WebSocket driver's socket close handler.
     // https://github.com/asciinema/asciinema-player/blob/c09e1d2625450a32e9e76063cdc315fd54ecdd9d/src/driver/websocket.js#L219
     return {
       ...closeEvent,
@@ -84,7 +89,7 @@ function beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi) {
   }
 
   if (closeEvent.code !== 1000 || closeEvent.code !== 1005) {
-    showNotification('Unknown error, please try again', 'error');
+    showNotification(t('notifications.unknownError'), 'error');
     return {
       ...closeEvent,
       code: 1000,

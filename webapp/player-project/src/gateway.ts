@@ -43,6 +43,10 @@ export class GatewayAccessApi {
   sessionShadowingUrl() {
     return `${this.gatewayAccessUrl.replace('http://', 'ws://').replace('https://', 'wss://')}/jet/jrec/shadow/${this.sessionId}?token=${this.token}`;
   }
+
+  playerResourceUrl(path: string) {
+    return `${this.gatewayAccessUrl}/jet/jrec/play/${path}`;
+  }
 }
 
 class GatewayAccessApiBuilder {

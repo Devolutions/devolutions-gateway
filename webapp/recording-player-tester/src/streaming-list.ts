@@ -2,6 +2,22 @@ import { listRealtimeRecordings } from './api-client';
 import { openPlayer } from './player';
 
 const recordingList = document.getElementById('recordingList');
+// Track existing recordings in memory with their DOM elements
+const recordingElements = new Map<string, HTMLLIElement>();
+
+// Get language selector element
+const languageSelect = document.getElementById('language') as HTMLSelectElement;
+if (!languageSelect) {
+  throw new Error('Language selector not found');
+}
+
+// Store current language
+let currentLanguage = languageSelect.value;
+
+// Add language change listener
+languageSelect.addEventListener('change', (event) => {
+  currentLanguage = (event.target as HTMLSelectElement).value;
+});
 
 if (!recordingList) {
   throw new Error('Recording list not found');
@@ -14,33 +30,51 @@ if (!refreshButton) {
 
 refreshButton.addEventListener('click', refresh);
 
-function populate_list(list: string[]) {
-  for (const recording of list) {
-    const listItem = document.createElement('li');
-    listItem.style.marginBottom = '10px';
+function createRecordingElement(recording: string): HTMLLIElement {
+  const listItem = document.createElement('li');
+  listItem.style.marginBottom = '10px';
 
-    const recordingText = document.createElement('span');
-    recordingText.textContent = recording;
+  const recordingText = document.createElement('span');
+  recordingText.textContent = recording;
 
-    const playButton = document.createElement('button');
-    playButton.textContent = 'Play';
-    playButton.style.marginLeft = '10px';
-    playButton.classList.add('btn');
+  const playButton = document.createElement('button');
+  playButton.textContent = 'Play';
+  playButton.style.marginLeft = '10px';
+  playButton.classList.add('btn');
 
-    // Add click event to play button
-    playButton.addEventListener('click', () => {
-      openPlayer({ recordingId: recording, active: true });
-    });
+  playButton.addEventListener('click', () => {
+    openPlayer({ recordingId: recording, active: true, language: currentLanguage });
+  });
 
-    listItem.appendChild(recordingText);
-    listItem.appendChild(playButton);
-    recordingList?.appendChild(listItem);
+  listItem.appendChild(recordingText);
+  listItem.appendChild(playButton);
+  return listItem;
+}
+
+function updateList(currentRecordings: string[]) {
+  const currentSet = new Set(currentRecordings);
+
+  // Remove recordings that are no longer active
+  for (const [id, element] of recordingElements) {
+    if (!currentSet.has(id)) {
+      element.remove();
+      recordingElements.delete(id);
+    }
+  }
+
+  // Add new recordings
+  for (const recording of currentRecordings) {
+    if (!recordingElements.has(recording)) {
+      const element = createRecordingElement(recording);
+      recordingList?.appendChild(element);
+      recordingElements.set(recording, element);
+    }
   }
 }
 
 async function refresh() {
   const list = await listRealtimeRecordings();
-  populate_list(list);
+  updateList(list);
 }
 
 refresh();
