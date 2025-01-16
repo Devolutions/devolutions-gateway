@@ -650,13 +650,7 @@ class TlkRecipe
         $Website = "https://devolutions.net"
         $PackageVersion = $this.Version
         $DistroCodeName = "focal" # Ubuntu 20.04
-        $Dependencies = @('liblzma5', 'liblz4-1')
-
-        if ($this.Target.DebianArchitecture() -Eq 'arm64') {
-            $Dependencies += @("libc6 (>= 2.29)", "libgcc-s1 (>= 4.2)")
-        } else {
-            $Dependencies += @('${shlibs:Depends}', '${misc:Depends}')
-        }
+        $Dependencies = @('libc6 (>= 2.31)')
 
         $Env:DEBFULLNAME = $Packager
         $Env:DEBEMAIL = $Email
@@ -875,6 +869,7 @@ class TlkRecipe
             '-p', "$OutputPath/${RpmPkgNameTarget}.rpm",
             '-n', $PkgName,
             '-v', $PackageVersion,
+            '-d', 'glibc',
             '--maintainer', "$Packager <$Email>",
             '--description', $Description,
             '--url', $Website,
