@@ -9,7 +9,7 @@ use ::{
 
 #[cfg(all(windows, feature = "dvc"))]
 use ::{
-    async_trait as _, ironrdp as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _,
+    async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _,
     windows as _,
 };
 
