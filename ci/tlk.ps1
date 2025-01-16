@@ -9,6 +9,9 @@ if ($IsWindows) {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12;
 }
 
+# load New-UpstreamChangelog
+. (Join-Path $PSScriptRoot "linux-changelog.ps1")
+
 function Get-DotEnvFile {
     param(
         [Parameter(Position=0,Mandatory=$true)]
@@ -642,8 +645,8 @@ class TlkRecipe
         $DebianArchitecture = $this.Target.DebianArchitecture()
         $RpmArchitecture = $this.Target.Architecture
 
-        $Packager = "Devolutions Inc."
-        $Email = "support@devolutions.net"
+        $Packager = "Benoît Cortier"
+        $Email = "bcortier@devolutions.net"
         $Website = "https://devolutions.net"
         $PackageVersion = $this.Version
         $DistroCodeName = "focal" # Ubuntu 20.04
@@ -724,7 +727,8 @@ class TlkRecipe
         Set-Location $OutputPackagePath
 
         $PkgName = "devolutions-$($this.Product)"
-        $PkgNameVersion = "${PkgName}_$($this.Version).0"
+        $PkgVersion = "$($this.Version)-1"
+        $PkgNameVersion = "${PkgName}_${PkgVersion}"
         $DebPkgNameTarget = "${PkgNameVersion}_${DebianArchitecture}"
         $RpmPkgNameTarget = "${PkgNameVersion}_${RpmArchitecture}"
         $CopyrightFile = Join-Path $InputPackagePath "$($this.Product)/copyright"
@@ -742,7 +746,7 @@ class TlkRecipe
         Set-Content -Path "$OutputDebianPath/docs" -Value ""
 
         # debian/compat
-        Set-Content -Path "$OutputDebianPath/compat" -Value "9"
+        Set-Content -Path "$OutputDebianPath/compat" -Value "10"
 
         # debian/README.debian
         Remove-Item -Path "$OutputDebianPath/README.debian" -ErrorAction 'SilentlyContinue'
@@ -756,6 +760,8 @@ class TlkRecipe
             $DhShLibDepsOverride = "dh_shlibdeps"
         }
 
+        $DebUpstreamChangelogFile = Join-Path $OutputPath "changelog_deb_upstream"
+        
         switch ($this.Product) {
             "gateway" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
@@ -765,6 +771,7 @@ class TlkRecipe
                     dgateway_libxmf = $DGatewayLibXmf
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
+                    upstream_changelog = $DebUpstreamChangelogFile
                 } -OutputFile $RulesFile
             }
             "agent" {
@@ -772,6 +779,7 @@ class TlkRecipe
                     executable = $Executable
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
+                    upstream_changelog = $DebUpstreamChangelogFile
                 } -OutputFile $RulesFile
             }
         }
@@ -788,29 +796,47 @@ class TlkRecipe
             description = $Description
         } -OutputFile $ControlFile
 
+        # This directory contains the copyright and changelog templates for both Gateway and Agent.
+        # Only the package name will differ.
+        $RequiredFilesDir = Join-Path $this.sourcePath "package/Linux/template"
+
         # debian/copyright
         $CopyrightFile = Join-Path $OutputDebianPath "copyright"
-        $CopyrightTemplate = Join-Path $InputPackagePath "template/copyright"
+        $CopyrightTemplate = Join-Path $RequiredFilesDir "copyright"
 
         Merge-Tokens -TemplateFile $CopyrightTemplate -Tokens @{
             package = $PkgName
             packager = $Packager
             year = $(Get-Date).Year
+            $PkgNameVersion = "${PkgName}_$($this.Version)-1"
             website = $Website
         } -OutputFile $CopyrightFile
 
-        # debian/changelog
-        $ChangelogFile = Join-Path $OutputDebianPath "changelog"
-        $ChangelogTemplate = Join-Path $InputPackagePath "template/changelog"
+        # input for upstream is the root CHANGELOG.md
+        $UpstreamChangelogFile = Join-Path $this.SourcePath "CHANGELOG.md"
 
-        Merge-Tokens -TemplateFile $ChangelogTemplate -Tokens @{
-            package = $PkgName
-            distro = $DistroCodeName
-            email = $Email
-            packager = $Packager
-            version = "${PackageVersion}.0"
-            date = $($(Get-Date -UFormat "%a, %d %b %Y %H:%M:%S %Z00") -Replace '\.','')
-        } -OutputFile $ChangelogFile
+        # input for debian/changelog is the package-specific CHANGELOG.md
+        $PackagingChangelogFile = Join-Path $InputPackagePath "CHANGELOG.md"
+        
+        $s = New-Changelog `
+        -Format 'Deb' `
+        -InputFile $UpstreamChangelogFile `
+        -Packager $Packager `
+        -Email $Email `
+        -PackageName $PkgName `
+        -Distro $DistroCodeName
+        Set-Content -Path $DebUpstreamChangelogFile -Value $s
+
+        # used by dh_make for the package
+        $DebPackagingChangelogFile = Join-Path $OutputDebianPath "changelog"
+        $s = New-Changelog `
+        -Format 'Deb' `
+        -InputFile $PackagingChangelogFile `
+        -Packager $Packager `
+        -Email $Email `
+        -PackageName $PkgName `
+        -Distro $DistroCodeName
+        Set-Content -Path $DebPackagingChangelogFile -Value $s
 
         $ScriptPath = Join-Path $InputPackagePath "$($this.Product)/debian"
         $PostInstFile = Join-Path $ScriptPath 'postinst'
@@ -832,8 +858,18 @@ class TlkRecipe
         $Env:DEB_BUILD_OPTIONS = "nostrip"
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
+        $RpmUpstreamChangelogFile = Join-Path $OutputPath "changelog_rpm_upstream"
+        $s = New-Changelog -Format 'RpmUpstream' -InputFile $UpstreamChangelogFile -Packager $Packager -Email $Email
+        Set-Content -Path $RpmUpstreamChangelogFile -Value $s
+
+        $RpmPackagingChangelogFile = Join-Path $OutputPath "changelog_rpm_packaging"
+        $s = New-Changelog -Format 'RpmPackaging' -InputFile $UpstreamChangelogFile -Packager $Packager -Email $Email
+        Set-Content -Path $RpmPackagingChangelogFile -Value $s
+
+        Write-Host("output destination: $OutputPath/${RpmPkgNameTarget}.rpm")
         $FpmArgs = @(
             '--force',
+            '--verbose',
             '-s', 'dir',
             '-t', 'rpm',
             '-p', "$OutputPath/${RpmPkgNameTarget}.rpm",
@@ -844,6 +880,7 @@ class TlkRecipe
             '--url', $Website,
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
+            '--rpm-changelog', $RpmPackagingChangelogFile
         )
 
         if ($this.Product -eq "gateway") {
@@ -857,8 +894,8 @@ class TlkRecipe
         $FpmArgs += @(
             '--'
             "$Executable=/usr/bin/$PkgName"
-            "$ChangeLogFile=/usr/share/$PkgName/changelog"
-            "$CopyrightFile=/usr/share/$PkgName/copyright"
+            "$RpmUpstreamChangelogFile=/usr/share/doc/$PkgName/ChangeLog"
+            "$CopyrightFile=/usr/share/doc/$PkgName/copyright"
         )
 
         if ($this.Product -eq "gateway") {

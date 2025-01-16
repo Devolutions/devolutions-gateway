@@ -1,9 +1,0 @@
-Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: {{ package }}
-Source: {{ website }}
-
-Files: *
-Copyright: {{ year }} {{ packager }}
-License: non-free
- .
-
