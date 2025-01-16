@@ -1,6 +1,6 @@
 {
   "notifications": {
-    "streamingFinished": "Le streaming est terminé, lecture de l'enregistrement comme solution de repli",
+    "streamingFinished": "Le streaming est terminé, lecture de l’enregistrement final",
     "internalError": "Erreur interne, veuillez réessayer",
     "unauthorized": "Vous n'êtes pas autorisé à lire cet enregistrement",
     "unknownError": "Erreur inconnue, veuillez réessayer",
