@@ -1,0 +1,12 @@
+{
+  "notifications": {
+    "streamingFinished": "Das Streaming ist beendet. Die Aufzeichnung wird als Fallback abgespielt.",
+    "internalError": "Interner Fehler, bitte versuchen Sie es erneut",
+    "unauthorized": "Sie verfügen nicht über die Berechtigung diese Aufnahme abzuspielen",
+    "unknownError": "Unbekannter Fehler, bitte versuchen Sie es erneut",
+    "protocolError": "Ein Fehler ist aufgetreten: {{error}}"
+  },
+  "ui": {
+    "close": "Schließen"
+  }
+}

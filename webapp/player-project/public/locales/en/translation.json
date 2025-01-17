@@ -1,0 +1,12 @@
+{
+  "notifications": {
+    "streamingFinished": "The session has finished, playing recording as fallback",
+    "internalError": "Internal error, please try again",
+    "unauthorized": "You are not authorized to play this recording",
+    "unknownError": "Unknown error, please try again",
+    "protocolError": "An error occurred: {{error}}"
+  },
+  "ui": {
+    "close": "Close"
+  }
+}

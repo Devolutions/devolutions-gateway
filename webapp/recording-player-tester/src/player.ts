@@ -3,17 +3,22 @@ import * as api from './api-client';
 export interface OpenPlayerParams {
   recordingId: string;
   active: boolean;
+  language?: string;
 }
+
 export function openPlayer(param: OpenPlayerParams | undefined = undefined) {
   if (param?.active) {
-    openStreamingPlayer(param.recordingId);
+    openStreamingPlayer(param.recordingId, param.language);
   } else {
     openRecordingPlayer();
   }
 }
 
-async function openStreamingPlayer(uuid: string) {
+async function openStreamingPlayer(uuid: string, language?: string) {
   const url = await api.getStreamingPlayerUrl(uuid, true);
+  if (language) {
+    url.searchParams.set('lang', language);
+  }
 
   player().style.display = 'flex'; // Display the player div
   iframeContent().innerHTML = `

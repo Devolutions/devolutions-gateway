@@ -1,0 +1,12 @@
+{
+  "notifications": {
+    "streamingFinished": "La session est terminée, lecture de l'enregistrement final",
+    "internalError": "Erreur interne, veuillez réessayer",
+    "unauthorized": "Vous n'êtes pas autorisé à lire cet enregistrement",
+    "unknownError": "Erreur inconnue, veuillez réessayer",
+    "protocolError": "Une erreur s'est produite: {{error}}"
+  },
+  "ui": {
+    "close": "Fermer"
+  }
+}

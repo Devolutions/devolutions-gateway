@@ -1,21 +1,27 @@
-// This is a very basic notification system
-// We should definitely move away from plain JavaScript and use a library instead
-export function showNotification(message: string, type: 'success' | 'error') {
+import { TranslatedString, t } from './i18n';
+
+type NotificationType = 'success' | 'error';
+
+export function showNotification(message: TranslatedString, type: NotificationType) {
   const notification = document.getElementById('notification');
-  notification.style.display = 'flex';
+  if (!notification) return;
+
   const messageElement = document.getElementById('notification-message');
-  messageElement.innerText = message;
-
-  notification.className = `notification-${type}`; // Example: notification-success, notification-error
-
-  notification.style.display = 'flex';
+  if (!messageElement) return;
 
   const closeButton = document.getElementById('notification-close');
+  if (!closeButton) return;
+
+  messageElement.textContent = message;
+  closeButton.textContent = t('ui.close');
+  notification.className = type === 'error' ? 'notification-error' : 'notification-success';
+  notification.style.display = 'flex';
+
   closeButton.onclick = () => {
     notification.style.display = 'none';
   };
 
   setTimeout(() => {
     notification.style.display = 'none';
-  }, 60_000);
+  }, 60000);
 }
