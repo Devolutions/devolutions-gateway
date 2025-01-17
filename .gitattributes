@@ -6,6 +6,7 @@
 *.sln text eol=crlf
 *.md text eol=lf
 *.mustache text eol=lf
+*.yaml text eol=lf
 
 devolutions-gateway/openapi/doc/index.adoc linguist-generated merge=binary
 devolutions-gateway/openapi/dotnet-client/src/** linguist-generated merge=binary
