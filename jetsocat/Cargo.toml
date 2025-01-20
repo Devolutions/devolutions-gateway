@@ -36,7 +36,7 @@ seahorse = "2.2"
 humantime = "2.1"
 
 # async
-tokio = { version = "1.42", features = ["io-std", "io-util", "net", "fs", "signal", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio = { version = "1.43", features = ["io-std", "io-util", "net", "fs", "signal", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 transport = { path = "../crates/transport" }
@@ -80,5 +80,5 @@ features = [
 
 [dev-dependencies]
 test-utils = { path = "../crates/test-utils" }
-tokio = { version = "1.42", features = ["time"] }
+tokio = { version = "1.43", features = ["time"] }
 proptest = "1.5"
