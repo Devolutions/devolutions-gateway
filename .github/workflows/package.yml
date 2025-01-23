@@ -256,8 +256,7 @@ jobs:
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
-            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll',
-              'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
             'jetsocat' { @('jetsocat_*') }
           })
           $ExcludePattern = "*.pdb"
@@ -318,6 +317,15 @@ jobs:
           $Destination = Join-Path "webapp" "client"
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
 
+      - name: Download web player artifacts
+        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $Destination = Join-Path "webapp" "player"
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-player -D "$Destination"
+
       - name: Add msbuild to PATH
         if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
         uses: microsoft/setup-msbuild@v2
@@ -351,13 +359,42 @@ jobs:
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption generate
 
+      - name: Download pedm desktop artifacts
+        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $Destination = "devolutions-pedm-desktop"
+          gh run download ${{ needs.preflight.outputs.run }} -n devolutions-pedm-desktop -D "$Destination"
+          Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") -Recurse | Where-Object { $_.Extension -notin '.exe', '.dll' } | Remove-Item -Recurse -Force
+          
+      - name: Sign pedm desktop executables
+        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
+        shell: pwsh
+        run: |
+          $IncludePattern = '*Devolutions*'
+          Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") | Where-Object { (Get-AuthenticodeSignature $_).Status -ne 'Valid'} | % {
+              $Params = @('sign',
+                '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+                '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+                '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+                '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+                '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+                '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+                '-v')
+
+              echo "::debug::signing $_.FullName"
+              AzureSignTool @Params $_.FullName
+          }
+
       - name: Regenerate Agent MSI
         if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
-          $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
+          $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
           $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
@@ -565,7 +602,7 @@ jobs:
 
   nuget:
     name: Nuget
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # nuget.exe not available on 24.04 and `nuget pack` doesn't work without a csproj
     needs: [preflight, codesign, jetsocat-merge]
 
     steps:

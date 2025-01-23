@@ -80,7 +80,7 @@ internal class Program
     private static string DevolutionsDesktopAgentPath
     {
         // ReSharper disable once ArrangeAccessorOwnerBody
-        get => ResolveDirectory("DAGENT_DESKTOP_AGENT_OUTPUT_PATH", "..\\..\\dotnet\\DesktopAgent\\bin\\Release\\");
+        get => ResolveDirectory("DAGENT_DESKTOP_AGENT_PATH", "..\\..\\dotnet\\DesktopAgent\\bin\\Release\\");
     }
 
     private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions_pedm_shell_ext.dll");

@@ -434,19 +434,6 @@ class TlkRecipe
         }
 
         if ($this.Product -Eq "agent" -And $this.Target.IsWindows()) {
-            if (Test-Path Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH) {
-                & './dotnet/DesktopAgent/build.ps1' | Out-Host
-                $DesktopAgentOutputPath = $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH
-                Remove-Item -Path "$DesktopAgentOutputPath" -Recurse -Force -ErrorAction SilentlyContinue
-                New-Item -Path "$DesktopAgentOutputPath" -ItemType 'Directory' -Force | Out-Null
-
-                $BuiltDesktop = Get-ChildItem -Path "./dotnet/DesktopAgent/bin/Release/net48/*" -Recurse -Include *.dll,*.exe,*.pdb
-
-                foreach ($File in $BuiltDesktop) {
-                    Copy-Item $File.FullName -Destination $DesktopAgentOutputPath
-                }
-            }
-
             if (Test-Path Env:DAGENT_SESSION_EXECUTABLE) {
                 $sessionExe = Get-ChildItem -Recurse -Include 'devolutions-session.exe' | Select-Object -First 1
 
