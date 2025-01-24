@@ -1,40 +1,14 @@
 ﻿<#@ template debug="false" hostspecific="false" language="C#" #>
 <#@ assembly name="System.Core" #>
-<#@ assembly name="System.ServiceProcess" #>
 <#@ import namespace="System.Linq" #>
 <#@ import namespace="System.Text" #>
 <#@ import namespace="System.Collections.Generic" #>
-<#@ import namespace="System.ServiceProcess" #>
-<#@ import namespace="System.Security.Cryptography.X509Certificates" #>
 <#@ output extension=".cs" #>
 
-using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
-using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
-using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
 using System;
-using static DevolutionsAgent.Properties.Constants;
 
 namespace DevolutionsAgent.Properties
 {
-    /// <summary>
-    /// do not modify the contents of this class with the code editor.
-    /// </summary>
-    public partial class Constants
-    {
-<# for (int idx = 0; idx < this.StaticStrings.GetLength(0); idx++) { #> 
-        public const string <#=this.StaticStrings[idx, 0]#> = "<#=this.StaticStrings[idx, 1]#>";
-<# } #>
-
-<# for (int idx = 0; idx < this.Enums.GetLength(0); idx++) { #> 
-        public enum <#=this.Enums[idx].Name #> 
-        {
-    <# foreach (var value in Enum.GetValues(this.Enums[idx])) { #>
-        <#=value#>,
-    <# } #>
-    }
-<# } #>
-    }
-
     /// <summary>
     /// do not modify the contents of this class with the code editor.
     /// </summary>
@@ -89,54 +63,6 @@ namespace DevolutionsAgent.Properties
 }
 
 <#+
-    public class Statics
-    {
-        internal const string HttpProtocol = "http";
-
-        internal const string HttpsProtocol = "https";
-
-        internal const string TcpProtocol = "tcp";
-
-        public enum AuthenticationMode
-        {
-            None,
-            Custom,
-        }
-
-        public enum CertificateMode
-        {
-            External,
-            System
-        }
-
-        public enum CertificateFindType
-        {
-            Thumbprint,
-            SubjectName
-        }
-
-        public enum CustomizeMode
-        {
-            Now,
-            Later,
-        }
-    }
-
-    public string[,] StaticStrings = new[,]
-    {
-        {nameof(Statics.HttpProtocol), Statics.HttpProtocol}, 
-        {nameof(Statics.HttpsProtocol), Statics.HttpsProtocol}, 
-        {nameof(Statics.TcpProtocol), Statics.TcpProtocol}, 
-    };
-
-    public Type[] Enums = new[]
-    {
-        typeof(Statics.AuthenticationMode),
-        typeof(Statics.CertificateMode),
-        typeof(Statics.CertificateFindType),
-        typeof(Statics.CustomizeMode),
-    };
-
     public abstract class BasePropertyDefinition
     {
         public abstract string Comment { get; set; }
@@ -202,7 +128,7 @@ namespace DevolutionsAgent.Properties
   private static uint DefaultHttpPort = 7171;
 
   BasePropertyDefinition[] properties = {
-    new PropertyDefinition<bool>("ConfigureAgent", false, secure: false, comment: "`true` to configure the Gateway interactively"),
+    new PropertyDefinition<bool>("ConfigureAgent", false, secure: false, comment: "`true` to configure the Agent interactively"),
 
     new PropertyDefinition<bool>("DebugPowerShell", false),
 
