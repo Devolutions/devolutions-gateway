@@ -1,50 +1,8 @@
 ﻿
-using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
-using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
-using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
 using System;
-using static DevolutionsAgent.Properties.Constants;
 
 namespace DevolutionsAgent.Properties
 {
-    /// <summary>
-    /// do not modify the contents of this class with the code editor.
-    /// </summary>
-    public partial class Constants
-    {
- 
-        public const string HttpProtocol = "http";
- 
-        public const string HttpsProtocol = "https";
- 
-        public const string TcpProtocol = "tcp";
-
- 
-        public enum AuthenticationMode 
-        {
-            None,
-            Custom,
-        }
- 
-        public enum CertificateMode 
-        {
-            External,
-            System,
-        }
- 
-        public enum CertificateFindType 
-        {
-            Thumbprint,
-            SubjectName,
-        }
- 
-        public enum CustomizeMode 
-        {
-            Now,
-            Later,
-        }
-    }
-
     /// <summary>
     /// do not modify the contents of this class with the code editor.
     /// </summary>
@@ -61,7 +19,7 @@ namespace DevolutionsAgent.Properties
             Public = true
         };
 
-        /// <summary>`true` to configure the Gateway interactively</summary>
+        /// <summary>`true` to configure the Agent interactively</summary>
         public Boolean ConfigureAgent
         {
             get

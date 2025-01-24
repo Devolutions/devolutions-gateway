@@ -183,6 +183,17 @@ internal static class AgentActions
         Impersonate = false,
     };
 
+    private static readonly ElevatedManagedAction shutdownDesktopApp = new(
+        CustomActions.ShutdownDesktopApp,
+        Return.ignore,
+        When.Before, Step.RemoveFiles,
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
     /// <summary>
     /// Start the installed DevolutionsAgent service
     /// </summary>
@@ -333,6 +344,7 @@ internal static class AgentActions
         installSession,
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,
+        shutdownDesktopApp,
         startAgentIfNeeded,
         restartAgent,
         rollbackConfig,

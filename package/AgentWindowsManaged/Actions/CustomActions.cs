@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -358,6 +359,40 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult ShutdownDesktopApp(Session session)
+        {
+            const string processName = "DevolutionsDesktopAgent";
+
+            try
+            {
+                foreach (Process process in Process.GetProcessesByName(processName))
+                {
+                    session.Log($"found instance of {processName} with PID {process.Id} in session {process.SessionId}");
+
+                    process.CloseMainWindow();
+                    process.WaitForExit((int)TimeSpan.FromSeconds(1).TotalMilliseconds);
+
+                    if (process.HasExited)
+                    {
+                        session.Log("process ended gracefully");
+                        continue;
+                    }
+
+                    session.Log("terminating process forcefully");
+
+                    process.Kill();
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"unexpected error: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
         public static ActionResult StartAgentIfNeeded(Session session)
         {
             try
@@ -579,10 +614,9 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                string packageName = "DevolutionsAgent";
                 string installPath = session.Property("INSTALLDIR");
                 string packageFileName = "DevolutionsPedmShellExt.msix";
-                string packagePath = System.IO.Path.Combine(installPath, packageFileName);
+                string packagePath = Path.Combine(installPath, packageFileName);
 
                 session.Log($"Installing MSIX package from path: {packagePath}");
                 session.Log($"with external location: {installPath}");
@@ -661,18 +695,6 @@ namespace DevolutionsAgent.Actions
                     deploymentOperation.AsTask().Wait();
                 }
             }
-        }
-
-        private static string FormatHttpUrl(string scheme, uint port)
-        {
-            string url = $"{scheme}://*";
-
-            if ((scheme.Equals(Constants.HttpProtocol) && port != 80) || (scheme.Equals(Constants.HttpsProtocol) && port != 443))
-            {
-                url += $":{port}";
-            }
-
-            return url;
         }
 
         public static void SetFileSecurity(Session session, string path, string sddl)

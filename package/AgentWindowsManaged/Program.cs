@@ -283,7 +283,20 @@ internal class Program
                 Feature = Includes.PEDM_FEATURE,
             }
         };
-        project.Properties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToArray();
+
+        List<Property> projectProperties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToList();
+
+        // Disable the restart manager, based on the following assumptions:
+        // - DevolutionsAgent (service) is properly managed with ServiceControl, and won't trigger the restart manager
+        // - DevolutionsSession is managed by DevolutionsAgent (service) and will be properly closed on service stop
+        // - DevolutionsDesktopAgent will be closed by the installer before removing any files
+        // Since none of these executables have a main window, they will not trigger the old style "files in use" dialog
+        // TODO:
+        // - Make DevolutionsDesktopAgent answer WM_CLOSE
+        // - Follow up on shell extension (COMSurrogate) behaviour
+        projectProperties.Add(new Property("MSIRESTARTMANAGERCONTROL", "Disable"));
+
+        project.Properties = projectProperties.ToArray();
         project.ManagedUI = new ManagedUI();
         project.ManagedUI.InstallDialogs.AddRange(Wizard.Dialogs);
         project.ManagedUI.InstallDialogs
