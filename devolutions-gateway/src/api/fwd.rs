@@ -379,11 +379,6 @@ async fn fwd_http(
     // 4. Forward the request.
 
     let response = if matches!(request.uri().scheme_str(), Some("ws" | "wss")) {
-        let conf = state.conf_handle.get_conf();
-        let sessions = state.sessions;
-        let subscriber_tx = state.subscriber_tx;
-        let shutdown_signal = state.shutdown_signal;
-
         // 4.a Prepare the WebSocket upgrade.
 
         // We are discarding the original body.
@@ -415,6 +410,9 @@ async fn fwd_http(
                     .err(),
             )?;
 
+        let conf = state.conf_handle.get_conf();
+        let shutdown_signal = state.shutdown_signal;
+
         let server_stream = tokio_tungstenite_websocket_handle(
             server_ws,
             shutdown_signal.clone(),
@@ -426,6 +424,8 @@ async fn fwd_http(
         // 4.c Start WebSocket forwarding.
 
         let span = tracing::Span::current();
+        let sessions = state.sessions;
+        let subscriber_tx = state.subscriber_tx;
 
         client_ws.on_upgrade(move |client_ws| {
             let client_stream = crate::ws::handle(
