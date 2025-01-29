@@ -9,14 +9,16 @@ publish = false
 workspace = true
 
 [dependencies]
-tokio = { version = "1.43", features = ["io-util"] }
+tokio = { version = "1.43", features = ["io-util", "sync", "rt", "macros", "time"] }
 futures-core = "0.3"
 futures-sink = "0.3"
+futures-util = { version = "0.3", features = ["sink"] }
 pin-project-lite = "0.2"
+parking_lot = "0.12"
+tracing = "0.1"
 
 [dev-dependencies]
 futures-util = "0.3"
 test-utils = { path = "../test-utils" }
-tokio = { version = "1.43", features = ["rt", "macros"] }
 proptest = "1.5"
 anyhow = "1"

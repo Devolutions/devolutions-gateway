@@ -7,9 +7,8 @@ use futures_sink::Sink;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub enum WsMessage {
+pub enum WsReadMsg {
     Payload(Vec<u8>),
-    Ignored,
     Close,
 }
 
@@ -41,7 +40,7 @@ impl<S> WsStream<S> {
 
 impl<S, E> AsyncRead for WsStream<S>
 where
-    S: Stream<Item = Result<WsMessage, E>>,
+    S: Stream<Item = Result<WsReadMsg, E>>,
     E: std::error::Error + Send + Sync + 'static,
 {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> Poll<io::Result<()>> {
@@ -50,18 +49,13 @@ where
         let mut data = if let Some(data) = this.read_buf.take() {
             data
         } else {
-            loop {
-                match ready!(this.inner.as_mut().poll_next(cx)) {
-                    Some(Ok(m)) => match m {
-                        WsMessage::Payload(data) => {
-                            break data;
-                        }
-                        WsMessage::Ignored => {}
-                        WsMessage::Close => return Poll::Ready(Ok(())),
-                    },
-                    Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
-                    None => return Poll::Ready(Ok(())),
-                }
+            match ready!(this.inner.as_mut().poll_next(cx)) {
+                Some(Ok(m)) => match m {
+                    WsReadMsg::Payload(data) => data,
+                    WsReadMsg::Close => return Poll::Ready(Ok(())),
+                },
+                Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+                None => return Poll::Ready(Ok(())),
             }
         };
 
@@ -128,4 +122,46 @@ fn to_io_result<E: std::error::Error + Send + Sync + 'static>(res: Result<(), E>
         Ok(()) => Ok(()),
         Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
     }
+}
+
+pub struct WsWritePing;
+
+pub trait KeepAliveShutdown: Send + 'static {
+    fn wait(&mut self) -> impl core::future::Future<Output = ()> + Send + '_;
+}
+
+impl KeepAliveShutdown for std::sync::Arc<tokio::sync::Notify> {
+    fn wait(&mut self) -> impl core::future::Future<Output = ()> + Send + '_ {
+        self.notified()
+    }
+}
+
+/// Spawns a task running the WebSocket keep-alive logic and returns a shared handle to the WebSocket for the actual user payload
+pub fn spawn_websocket_keep_alive_logic<S>(
+    mut ws: S,
+    mut shutdown_signal: impl KeepAliveShutdown,
+    interval: core::time::Duration,
+) where
+    S: Sink<WsWritePing> + Unpin + Send + 'static,
+{
+    use futures_util::SinkExt as _;
+    use tracing::Instrument as _;
+
+    let span = tracing::Span::current();
+
+    tokio::spawn(
+        async move {
+            loop {
+                tokio::select! {
+                    () = tokio::time::sleep(interval) => {
+                        if ws.send(WsWritePing).await.is_err() {
+                            break;
+                        }
+                    }
+                    () = shutdown_signal.wait() => break,
+                }
+            }
+        }
+        .instrument(span),
+    );
 }

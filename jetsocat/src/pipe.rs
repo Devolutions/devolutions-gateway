@@ -270,7 +270,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
             })
         }
         PipeMode::WebSocketListen { bind_addr } => {
-            use crate::utils::websocket_compat;
+            use crate::utils::websocket_handle;
             use tokio::net::TcpListener;
             use tokio_tungstenite::accept_async;
 
@@ -290,7 +290,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .await
                 .with_context(|| "WebSocket handshake failed")?;
 
-            let stream = Box::new(websocket_compat(ws)) as ErasedReadWrite;
+            let stream = Box::new(websocket_handle(ws)) as ErasedReadWrite;
 
             Ok(Pipe {
                 name: "websocket-listener",

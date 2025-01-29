@@ -9,7 +9,8 @@ mod rustls;
 mod schannel;
 
 use core::fmt;
-use std::{borrow::Cow, path::PathBuf};
+use std::borrow::Cow;
+use std::path::PathBuf;
 
 use tinyjson::JsonValue;
 

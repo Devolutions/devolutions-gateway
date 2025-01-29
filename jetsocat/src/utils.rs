@@ -110,7 +110,7 @@ pub(crate) async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> 
             let (ws, rsp) = client_async_tls(req, stream)
                 .await
                 .context("WebSocket handshake failed")?;
-            let stream = Box::new(websocket_compat(ws)) as ErasedReadWrite;
+            let stream = Box::new(websocket_handle(ws)) as ErasedReadWrite;
             Ok((stream, rsp))
         }
     })
@@ -147,7 +147,33 @@ where
     }
 }
 
-pub(crate) fn websocket_compat<S>(stream: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
+/// Spawns a keep-alive task and wraps the WebSocket into a type implementing AsyncRead and AsyncWrite.
+pub(crate) fn websocket_handle<S>(
+    ws: tokio_tungstenite::WebSocketStream<S>,
+) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    use futures_util::SinkExt as _;
+
+    let ws = transport::Shared::new(ws);
+
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+
+    transport::spawn_websocket_keep_alive_logic(
+        ws.shared().with(|_: transport::WsWritePing| {
+            future::ready(Result::<_, tungstenite::Error>::Ok(tungstenite::Message::Ping(
+                Vec::new(),
+            )))
+        }),
+        notify,
+        Duration::from_secs(45),
+    );
+
+    websocket_compat(ws)
+}
+
+fn websocket_compat<S>(stream: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
 where
     S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>>
         + Sink<tungstenite::Message, Error = tungstenite::Error>
@@ -158,14 +184,18 @@ where
     use futures_util::{SinkExt as _, StreamExt as _};
 
     let compat = stream
-        .map(|item| {
-            item.map(|msg| match msg {
-                tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
-                tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
-                tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
-                tungstenite::Message::Close(_) => transport::WsMessage::Close,
-                tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
-            })
+        .filter_map(|item| {
+            let mapped = item
+                .map(|msg| match msg {
+                    tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into_bytes())),
+                    tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
+                    tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
+                    tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
+                    tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+                })
+                .transpose();
+
+            core::future::ready(mapped)
         })
         .with(|item| future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
 

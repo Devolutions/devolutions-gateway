@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use axum::extract::ws::{CloseFrame, WebSocket};
@@ -52,6 +53,7 @@ async fn jrec_push(
     State(DgwState {
         shutdown_signal,
         recordings,
+        conf_handle,
         ..
     }): State<DgwState>,
     JrecToken(claims): JrecToken,
@@ -73,6 +75,7 @@ async fn jrec_push(
             query.file_type,
             session_id,
             source_addr,
+            Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
         )
     });
 
@@ -87,8 +90,13 @@ async fn handle_jrec_push(
     file_type: RecordingFileType,
     session_id: Uuid,
     source_addr: SocketAddr,
+    keep_alive_interval: Duration,
 ) {
-    let stream = crate::ws::websocket_compat(ws);
+    let stream = crate::ws::handle(
+        ws,
+        crate::ws::KeepAliveShutdownSignal(shutdown_signal.clone()),
+        keep_alive_interval,
+    );
 
     let result = crate::recording::ClientPush::builder()
         .client_stream(stream)

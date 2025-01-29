@@ -1129,8 +1129,15 @@ pub mod dto {
         /// Providing this option will cause the PCAP interceptor to be attached to each stream.
         pub capture_path: Option<Utf8PathBuf>,
 
-        /// Path to the XMF shared library (Cadeau) for runtime loading.
+        /// Path to the XMF shared library (Cadeau) for runtime loading
         pub lib_xmf_path: Option<Utf8PathBuf>,
+
+        /// WebSocket keep-alive interval in seconds
+        ///
+        /// The interval in seconds before a Ping message is sent to the other end.
+        ///
+        /// Default value is 45.
+        pub ws_keep_alive_interval: u64,
 
         /// Enable unstable features which may break at any point
         #[serde(default)]
@@ -1149,6 +1156,7 @@ pub mod dto {
                 capture_path: None,
                 lib_xmf_path: None,
                 enable_unstable: false,
+                ws_keep_alive_interval: 45,
             }
         }
     }

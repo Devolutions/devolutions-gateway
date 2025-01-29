@@ -1,18 +1,20 @@
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
-use axum::{
-    body::Body,
-    extract::ws::{CloseFrame, WebSocket},
-    response::Response,
-};
+use axum::body::Body;
+use axum::extract::ws::{CloseFrame, WebSocket};
+use axum::response::Response;
 use futures::SinkExt;
 use terminal_streamer::terminal_stream;
-use tokio::{fs::OpenOptions, sync::Notify};
+use tokio::fs::OpenOptions;
+use tokio::sync::Notify;
 use uuid::Uuid;
-use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile};
+use video_streamer::config::CpuCount;
+use video_streamer::{webm_stream, ReOpenableFile};
 
-use crate::{token::RecordingFileType, ws::websocket_compat};
+use crate::token::RecordingFileType;
 
 pub(crate) async fn stream_file(
     path: &camino::Utf8Path,
@@ -157,7 +159,7 @@ async fn setup_webm_streaming(
         encoder_threads: CpuCount::default(),
     };
 
-    let websocket_stream = websocket_compat(socket);
+    let websocket_stream = crate::ws::handle(socket, Arc::clone(&shutdown_notify), Duration::from_secs(45));
     let streaming_result = tokio::task::spawn_blocking(move || {
         webm_stream(
             websocket_stream,
