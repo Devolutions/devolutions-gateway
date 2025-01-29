@@ -145,17 +145,23 @@ pub fn spawn_websocket_keep_alive_logic<S>(
     S: Sink<WsWritePing> + Unpin + Send + 'static,
 {
     use futures_util::SinkExt as _;
+    use tracing::Instrument as _;
 
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                () = tokio::time::sleep(interval) => {
-                    if ws.send(WsWritePing).await.is_err() {
-                        break;
+    let span = tracing::Span::current();
+
+    tokio::spawn(
+        async move {
+            loop {
+                tokio::select! {
+                    () = tokio::time::sleep(interval) => {
+                        if ws.send(WsWritePing).await.is_err() {
+                            break;
+                        }
                     }
+                    () = shutdown_signal.wait() => break,
                 }
-                () = shutdown_signal.wait() => break,
             }
         }
-    });
+        .instrument(span),
+    );
 }

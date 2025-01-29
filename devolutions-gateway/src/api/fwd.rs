@@ -11,6 +11,7 @@ use devolutions_gateway_task::ShutdownSignal;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{field, Instrument as _};
+use transport::KeepAliveShutdown;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
@@ -378,6 +379,11 @@ async fn fwd_http(
     // 4. Forward the request.
 
     let response = if matches!(request.uri().scheme_str(), Some("ws" | "wss")) {
+        let conf = state.conf_handle.get_conf();
+        let sessions = state.sessions;
+        let subscriber_tx = state.subscriber_tx;
+        let shutdown_signal = state.shutdown_signal;
+
         // 4.a Prepare the WebSocket upgrade.
 
         // We are discarding the original body.
@@ -409,17 +415,17 @@ async fn fwd_http(
                     .err(),
             )?;
 
-        let server_stream = tokio_tungstenite_websocket_compat(server_ws);
+        let server_stream = tokio_tungstenite_websocket_handle(
+            server_ws,
+            shutdown_signal.clone(),
+            Duration::from_secs(conf.debug.ws_keep_alive_interval),
+        );
 
         debug!(?server_ws_response, %dangerous_tls, "Connected to target server");
 
         // 4.c Start WebSocket forwarding.
 
         let span = tracing::Span::current();
-        let conf = state.conf_handle.get_conf();
-        let sessions = state.sessions;
-        let subscriber_tx = state.subscriber_tx;
-        let shutdown_signal = state.shutdown_signal;
 
         client_ws.on_upgrade(move |client_ws| {
             let client_stream = crate::ws::handle(
@@ -549,6 +555,31 @@ async fn fwd_http(
                 .map_err(HttpError::bad_request().err())?;
             Ok(value)
         }
+    }
+
+    fn tokio_tungstenite_websocket_handle<S>(
+        ws: tokio_tungstenite::WebSocketStream<S>,
+        shutdown_signal: ShutdownSignal,
+        keep_alive_interval: Duration,
+    ) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        use futures::SinkExt as _;
+
+        let ws = transport::Shared::new(ws);
+
+        transport::spawn_websocket_keep_alive_logic(
+            ws.shared().with(|_: transport::WsWritePing| {
+                core::future::ready(Result::<_, tungstenite::Error>::Ok(tungstenite::Message::Ping(
+                    Vec::new(),
+                )))
+            }),
+            crate::ws::KeepAliveShutdownSignal(shutdown_signal),
+            keep_alive_interval,
+        );
+
+        tokio_tungstenite_websocket_compat(ws)
     }
 
     fn tokio_tungstenite_websocket_compat<S>(stream: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static

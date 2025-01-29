@@ -20,7 +20,7 @@ use crate::PinnableMutex;
 /// Note that it’s not desirable to use [`tokio::sync::Mutex`], because we are never holding the
 /// mutex guard across await points.
 ///
-/// Recommend reads on the topic:
+/// Recommended reads on the topic:
 /// - <https://ryhl.io/blog/async-what-is-blocking/>
 /// - <https://tokio.rs/tokio/tutorial/shared-state>
 pub struct Shared<T> {

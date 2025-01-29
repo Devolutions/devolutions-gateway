@@ -15,6 +15,7 @@ futures-sink = "0.3"
 futures-util = { version = "0.3", features = ["sink"] }
 pin-project-lite = "0.2"
 parking_lot = "0.12"
+tracing = "0.1"
 
 [dev-dependencies]
 futures-util = "0.3"
