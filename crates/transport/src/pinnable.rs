@@ -9,6 +9,9 @@ use std::{fmt, ops};
 /// `Pin<PinnableMutex<T>>` however can return a `Pin<MutexGuard<T>>`.
 /// It’s a trade-off, because it can no longer provide mutable access without being pinned.
 ///
+/// [`parking_lot::Mutex`] is both smaller than [`std::sync::Mutex`], and highly performant in low-contention scenarios,
+/// making [`PinnableMutex`] ideal for shared, pollable resources.
+///
 /// # Example
 ///
 /// ```

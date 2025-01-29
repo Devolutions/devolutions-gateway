@@ -1,3 +1,7 @@
+//! Provides [`Shared`], for sharing pinned, pollable resources.
+//!
+//! The number of trait implementations may grow over time, as we need them.
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -7,12 +11,24 @@ use futures_sink::Sink;
 
 use crate::PinnableMutex;
 
-pub struct Shared<S> {
-    inner: Pin<Arc<PinnableMutex<S>>>,
+/// A pinned, shared wrapper around some value
+///
+/// [`Shared`] is intended to be used for sharing pollable resources that must be pinned.
+/// Internally, it uses [`PinnableMutex`], to benefit from [`parking_lot::Mutex`] performance
+/// under low-contention (typical for network resources).
+///
+/// Note that it’s not desirable to use [`tokio::sync::Mutex`], because we are never holding the
+/// mutex guard across await points.
+///
+/// Recommend reads on the topic:
+/// - <https://ryhl.io/blog/async-what-is-blocking/>
+/// - <https://tokio.rs/tokio/tutorial/shared-state>
+pub struct Shared<T> {
+    inner: Pin<Arc<PinnableMutex<T>>>,
 }
 
-impl<S> Shared<S> {
-    pub fn new(stream: S) -> Self {
+impl<T> Shared<T> {
+    pub fn new(stream: T) -> Self {
         Self {
             inner: Arc::pin(PinnableMutex::new(stream)),
         }
