@@ -16,7 +16,7 @@ use std::{fmt, ops};
 /// use std::pin::Pin;
 /// use std::sync::Arc;
 /// use std::task::{Context, Poll};
-/// use transport::pinnable::PinnableMutex;
+/// use transport::PinnableMutex;
 ///
 /// fn poll_shared_future<F: Future>(
 ///     fut: &Pin<Arc<PinnableMutex<F>>>,
