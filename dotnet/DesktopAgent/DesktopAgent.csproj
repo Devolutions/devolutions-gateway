@@ -1,11 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <OutputType>WinExe</OutputType>
     <RootNamespace>Devolutions.Agent.Desktop</RootNamespace>
     <AssemblyName>DevolutionsDesktopAgent</AssemblyName>
     <LangVersion>latest</LangVersion>
-    <Version>2024.3.6.0</Version>
+    <Version>2025.1.0.0</Version>
 	<Company>Devolutions</Company>
 	<Copyright>Copyright © 2024</Copyright>
 	<Product>Devolutions Agent</Product>
