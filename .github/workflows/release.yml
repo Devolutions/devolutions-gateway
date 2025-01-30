@@ -347,9 +347,8 @@ jobs:
 
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.msi"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
-
-          # Note that at this point the deb package is already named using the ".0" suffix.
-          Move-Item -Path "./linux/x86_64/devolutions-gateway_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
+          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
+          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_x86_64.rpm"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
@@ -406,9 +405,8 @@ jobs:
 
           Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.msi"
           Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.symbols.zip"
-
-          # Note that at this point the deb package is already named using the ".0" suffix.
-          Move-Item -Path "./linux/x86_64/devolutions-agent_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
+          Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
+          Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-agent_${versionFull}_x86_64.rpm"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
