@@ -2,6 +2,81 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.1.0 (2025-01-29)
+
+### Features
+
+- _dgw_: session shadowing ([#1076](https://github.com/Devolutions/devolutions-gateway/issues/1076)) ([456d057b60](https://github.com/Devolutions/devolutions-gateway/commit/456d057b6040b09a3b727d57d63dd6cd4357e0a7)) ([#1131](https://github.com/Devolutions/devolutions-gateway/issues/1131)) ([ac7988cc51](https://github.com/Devolutions/devolutions-gateway/commit/ac7988cc51762a8a9dccfe20e9f9995208c8efeb)) ([#1148](https://github.com/Devolutions/devolutions-gateway/issues/1148)) ([b68bf85039](https://github.com/Devolutions/devolutions-gateway/commit/b68bf85039aaa2402d006c7e85f30e4ce74fc7e1)) ([#1165](https://github.com/Devolutions/devolutions-gateway/issues/1165)) ([8a52585c30](https://github.com/Devolutions/devolutions-gateway/commit/8a52585c30863993571c81da08753332c862c758)) ([#1188](https://github.com/Devolutions/devolutions-gateway/issues/1188)) ([5539ac6066](https://github.com/Devolutions/devolutions-gateway/commit/5539ac60667245e5e5a5d8a99317e2ff5314f635)) ([#1193](https://github.com/Devolutions/devolutions-gateway/issues/1193)) ([8d7c3d592b](https://github.com/Devolutions/devolutions-gateway/commit/8d7c3d592be7a153f6db9f3d417330c9a66feb22)) ([#1181](https://github.com/Devolutions/devolutions-gateway/issues/1181)) ([8cb4c66fec](https://github.com/Devolutions/devolutions-gateway/commit/8cb4c66fec4981347ae366b882a7e6d514c069ed)) 
+
+- _dgw_: add a replay button on streaming finish ([#1189](https://github.com/Devolutions/devolutions-gateway/issues/1189)) ([3177eae885](https://github.com/Devolutions/devolutions-gateway/commit/3177eae885241c42151fb8348e441511fae25e9e)) 
+
+### Bug Fixes
+
+- _jetsocat_: (also) return one link per certificate ([#1137](https://github.com/Devolutions/devolutions-gateway/issues/1137)) ([68f0523118](https://github.com/Devolutions/devolutions-gateway/commit/68f0523118593285198cff35a3c4edffe6632eaa)) ([DGW-235](https://devolutions.atlassian.net/browse/DGW-235)) 
+
+  Make jetsocat doctor return one link per certificate in addition to
+  the chain link.
+
+- _dgw_: improve log quality ([#1190](https://github.com/Devolutions/devolutions-gateway/issues/1190)) ([8b3118a640](https://github.com/Devolutions/devolutions-gateway/commit/8b3118a640a815a0258e35e5db960cd378a3d716)) 
+
+  - Enhance the "Peer failure" log to include the peer address and the
+  listener kind (in fact, always TCP).
+  - Instead of an ERROR-level trace, log an INFO-level trace when the
+  wrong protocol is used on the TCP listener.
+
+- _dgw,jetsocat_: implement WebSocket keep-alive logic ([#1202](https://github.com/Devolutions/devolutions-gateway/issues/1202)) ([22e9e7e73f](https://github.com/Devolutions/devolutions-gateway/commit/22e9e7e73fd572ff676dd10a971f75454f1cd84a)) 
+
+  Our WebSockets are already responding Pong messages to Ping messages,
+  but they were never sending Ping messages.
+
+### Build
+
+- _dgw_: correct typo causing missing packager ([#1176](https://github.com/Devolutions/devolutions-gateway/issues/1176)) ([dd17375552](https://github.com/Devolutions/devolutions-gateway/commit/dd17375552f13f97151138fd938514f977b1af35)) 
+
+  The control template expects a variable named `packager` but `package` was passed.
+
+- _dgw_: move libxmf.so to /usr/lib ([#1175](https://github.com/Devolutions/devolutions-gateway/issues/1175)) ([0ed70d21ba](https://github.com/Devolutions/devolutions-gateway/commit/0ed70d21bac2cbf31dcc9dbe5615a8e573b73717)) 
+
+  This moves _libxmf.so_ from `/usr/share/devolutions-gateway` to `/usr/lib/devolutions-gateway`.
+  
+  According to the [FHS](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch04s11.html),
+  `/usr/share` is for architecture-independent data files.
+
+- Add RPM for gateway and agent ([#1179](https://github.com/Devolutions/devolutions-gateway/issues/1179)) ([3b8667db83](https://github.com/Devolutions/devolutions-gateway/commit/3b8667db8366702d2033699dd7578efd3f3c1c0e)) 
+
+  This commit adds RPM packages for Gateway and Agent to the release
+  assets.
+  
+  The rpm is generated with fpm, a Linux packaging tool.
+  
+  The RPM includes all the assets of the corresponding Debian package,
+  including the changelog, copyright, maintainer scripts, and
+  webapp/libxmf.so for Gateway.
+  
+  Tested with RHEL 9 (glibc 2.34).
+
+- Add changelogs for Linux packaging ([#1185](https://github.com/Devolutions/devolutions-gateway/issues/1185)) ([fdf2bb1667](https://github.com/Devolutions/devolutions-gateway/commit/fdf2bb166712573da8133535273fadc6cb85f462)) ([DGW-237](https://devolutions.atlassian.net/browse/DGW-237)) 
+
+- Remove unused Linux deps ([#1194](https://github.com/Devolutions/devolutions-gateway/issues/1194)) ([efde6343a0](https://github.com/Devolutions/devolutions-gateway/commit/efde6343a0f6e4996e37d9575c5029f16e5ffc5d)) 
+
+  This removes unused dependencies.
+  libc6 on Debian is glibc on RPM-based systems.
+  
+  libc6 version is bumped to 2.31 as that is the version provided by the
+  CI runner generating the build.
+  libgcc-s1 dependency is removed as it is a dependency of libc6.
+  
+  ```
+  > ldd devolutions-gateway
+    linux-vdso.so.1 (0x000077b2330a9000)
+    libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x000077b22f5b1000)
+    libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000077b22f4c4000)
+    libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000077b22f200000)
+    /lib64/ld-linux-x86-64.so.2 (0x000077b2330ab000)
+  ```
+  
+  The ldd output for Agent is identical.
+
 ## 2024.3.6 (2024-12-02)
 
 ### Features
