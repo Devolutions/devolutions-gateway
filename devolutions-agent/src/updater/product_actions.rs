@@ -67,7 +67,7 @@ impl ProductUpdateActions for GatewayUpdateActions {
         if self.service_startup_was_automatic {
             info!("Adjusting MSIEXEC parameters for Gateway service startup mode");
 
-            return vec!["P.SERVICESTART=Automatic".to_string()];
+            return vec!["P.SERVICESTART=Automatic".to_owned()];
         }
 
         Vec::new()
