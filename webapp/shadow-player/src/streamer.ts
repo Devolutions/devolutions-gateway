@@ -83,6 +83,8 @@ export class ShadowPlayer extends HTMLElement {
     this._container.className = 'container';
 
     this.videoElement = document.createElement('video');
+    // Set muted to true so that the browser security policy will allow autoplay.
+    this.videoElement.muted = true;
     this._container.appendChild(this.videoElement);
 
     this._replayButton = document.createElement('button');
