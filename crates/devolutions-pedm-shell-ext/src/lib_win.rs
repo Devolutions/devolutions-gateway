@@ -18,7 +18,7 @@ use win_api_wrappers::raw::core::{
 };
 use win_api_wrappers::raw::Win32::Foundation::{
     BOOL, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL,
-    E_POINTER, E_UNEXPECTED, HINSTANCE,
+    E_POINTER, E_UNEXPECTED, HINSTANCE, S_FALSE,
 };
 use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
 use win_api_wrappers::raw::Win32::System::Com::{CoTaskMemFree, IBindCtx, IClassFactory, IClassFactory_Impl};
@@ -385,4 +385,9 @@ extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, ou
         }
         (_, _) => E_INVALIDARG,
     }
+}
+
+#[no_mangle]
+extern "system" fn DllCanUnloadNow() -> HRESULT {
+    S_FALSE // this will prevent unloading the DLL
 }
