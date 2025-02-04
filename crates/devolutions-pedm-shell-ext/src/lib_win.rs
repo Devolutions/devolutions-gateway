@@ -362,10 +362,8 @@ impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
 
 #[no_mangle]
 extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, out: *mut *mut c_void) -> HRESULT {
-    // SAFETY: We assume the argument is the correct type according to the doc.
+    // SAFETY: We assume the argument is the correct type according to documentation.
     let class_id = unsafe { class_id.as_ref() };
-
-    // SAFETY: We assume the argument is the correct type according to the doc.
     let iid = unsafe { iid.as_ref() };
 
     if out.is_null() {
@@ -373,17 +371,18 @@ extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, ou
     }
 
     match (iid, class_id) {
-        (Some(iid), Some(class_id)) => {
-            if *iid != IClassFactory::IID || *class_id != IElevationContextMenuCommand::IID {
-                return CLASS_E_CLASSNOTAVAILABLE;
+        (Some(iid), Some(class_id)) if *iid == IClassFactory::IID => {
+            if *class_id == IElevationContextMenuCommand::IID
+                || *class_id == IExplorerCommand::IID
+                || *class_id == IObjectWithSite::IID
+            {
+                let factory: IUnknown = ElevationContextMenuCommandFactory.into();
+                unsafe { factory.query(iid, out) }
+            } else {
+                CLASS_E_CLASSNOTAVAILABLE
             }
-
-            let factory: IUnknown = ElevationContextMenuCommandFactory.into();
-
-            // SAFETY: `iid` is checked before and is valid. `out` is checked for null in accordance to `.query()`'s safety doc.
-            unsafe { factory.query(iid, out) }
         }
-        (_, _) => E_INVALIDARG,
+        _ => CLASS_E_CLASSNOTAVAILABLE,
     }
 }
 
