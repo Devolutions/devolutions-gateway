@@ -331,6 +331,16 @@ extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: u32, _: *mut ()) 
     }
 }
 
+#[no_mangle]
+pub extern "system" fn DllRegisterServer() -> HRESULT {
+    HRESULT(0)
+}
+
+#[no_mangle]
+pub extern "system" fn DllUnregisterServer() -> HRESULT {
+    HRESULT(0)
+}
+
 #[implement(IClassFactory)]
 struct ElevationContextMenuCommandFactory;
 

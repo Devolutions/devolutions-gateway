@@ -16,6 +16,7 @@ mod lib_win {
     pub mod identity;
     pub mod memory;
     pub mod netmgmt;
+    pub mod package;
     pub mod process;
     pub mod security;
     pub mod service;
