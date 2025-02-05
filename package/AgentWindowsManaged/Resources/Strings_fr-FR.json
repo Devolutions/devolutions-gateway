@@ -75,6 +75,10 @@
         {
           "id": "UACPromptLabel",
           "text": "Veuillez attendre que l'invite UAC apparaisse.\n\nSi elle apparaît en mode réduit, alors vous devez l'activer à partir de la barre de tâches."
+        },
+        {
+          "id": "ExperimentalLabel",
+          "text": "Expérimental"
         }
       ],
       "filters": [

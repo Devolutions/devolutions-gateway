@@ -99,6 +99,10 @@
         {
           "id": "UACPromptLabel",
           "text": "Please wait for UAC prompt to appear.\n\nIf it appears minimized then active it from the taskbar."
+        },
+        {
+          "id": "ExperimentalLabel",
+          "text": "Experimental"
         }
       ],
       "filters": [

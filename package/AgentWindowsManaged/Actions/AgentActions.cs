@@ -229,12 +229,12 @@ internal static class AgentActions
     )
     {
         Id = new Id("installPedm"),
-        Feature = Includes.PEDM_FEATURE,
+        Feature = Features.PEDM_FEATURE,
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
         Step = Step.InstallFiles,
         When = When.After,
-        Condition = Includes.PEDM_FEATURE.BeingInstall(),
+        Condition = Features.PEDM_FEATURE.BeingInstall(),
     };
 
     private static readonly ElevatedManagedAction cleanupPedmShellExt = new(
@@ -242,14 +242,14 @@ internal static class AgentActions
     )
     {
         Id = new Id("cleanupPedmShellExt"),
-        Feature = Includes.PEDM_FEATURE,
+        Feature = Features.PEDM_FEATURE,
         Impersonate = false,
         Execute = Execute.deferred,
         Return = Return.check,
         Step = Step.RemoveFiles,
         When = When.Before,
         Sequence = Sequence.InstallExecuteSequence,
-        Condition = Includes.PEDM_FEATURE.BeingUninstall(),
+        Condition = Features.PEDM_FEATURE.BeingUninstall(),
     };
 
     private static readonly ElevatedManagedAction installPedmShellExt = new(
@@ -257,14 +257,14 @@ internal static class AgentActions
     )
     {
         Id = new Id("installPedmShellExt"),
-        Feature = Includes.PEDM_FEATURE,
+        Feature = Features.PEDM_FEATURE,
         Impersonate = true,
         Execute = Execute.deferred,
         Return = Return.check,
         Step = Step.InstallFiles,
         When = When.After,
         Sequence = Sequence.InstallExecuteSequence,
-        Condition = Includes.PEDM_FEATURE.BeingInstall(),
+        Condition = Features.PEDM_FEATURE.BeingInstall(),
     };
 
     private static readonly ElevatedManagedAction uninstallPedmShellExt = new(
@@ -272,14 +272,14 @@ internal static class AgentActions
     )
     {
         Id = new Id("uninstallPedmShellExt"),
-        Feature = Includes.PEDM_FEATURE,
+        Feature = Features.PEDM_FEATURE,
         Impersonate = false,
         Execute = Execute.deferred,
         Return = Return.check,
         Step = Step.RemoveFiles,
         When = When.Before,
         Sequence = Sequence.InstallExecuteSequence,
-        Condition = Includes.PEDM_FEATURE.BeingUninstall(),
+        Condition = Features.PEDM_FEATURE.BeingUninstall(),
     };
 
     private static readonly ElevatedManagedAction installSession = new(
@@ -287,12 +287,12 @@ internal static class AgentActions
     )
     {
         Id = new Id("installSession"),
-        Feature = Includes.SESSION_FEATURE,
+        Feature = Features.SESSION_FEATURE,
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
         Step = Step.InstallFiles,
         When = When.After,
-        Condition = Includes.SESSION_FEATURE.BeingInstall(),
+        Condition = Features.SESSION_FEATURE.BeingInstall(),
     };
 
     private static string UseProperties(IEnumerable<IWixProperty> properties)
