@@ -2,7 +2,7 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
-## 2025.1.2 (2025-01-05)
+## 2025.1.2 (2025-02-05)
 
 ### Bug Fixes
 
