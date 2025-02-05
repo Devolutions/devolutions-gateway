@@ -21,6 +21,7 @@
                     <!-- properties -->
                 <String Id="Property_Directory">Répertoire</String>
                     <!-- static -->
+                <String Id="ExperimentalLabel">Expérimental</String>
                 <String Id="UACPromptLabel">Veuillez attendre que l'invite UAC apparaisse.
 
 Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la barre de tâches.</String>

@@ -202,7 +202,7 @@ internal class Program
             project.CandleOptions = "-fips";
         }
 
-        project.DefaultFeature = Includes.AGENT_FEATURE;
+        project.DefaultFeature = Features.AGENT_FEATURE;
         project.Dirs = new Dir[]
         {
             new ("%ProgramFiles%", new Dir(Includes.VENDOR_NAME, new InstallDir(Includes.SHORT_NAME)
@@ -253,13 +253,13 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
-                    new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtDll),
-                    new (Includes.PEDM_FEATURE, DevolutionsPedmShellExtMsix),
-                    new (Includes.SESSION_FEATURE, DevolutionsSession)
+                    new (Features.PEDM_FEATURE, DevolutionsPedmShellExtDll),
+                    new (Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix),
+                    new (Features.SESSION_FEATURE, DevolutionsSession)
                 },
                 Dirs = new[]
                 {
-                    new Dir(Includes.PEDM_FEATURE, "desktop", new Files(Includes.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*"))
+                    new Dir(Features.PEDM_FEATURE, "desktop", new Files(Features.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*"))
                 }
             })),
         };
@@ -280,7 +280,7 @@ internal class Program
             {
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
-                Feature = Includes.PEDM_FEATURE,
+                Feature = Features.PEDM_FEATURE,
             }
         };
         project.Properties = AgentProperties.Properties.Select(x => x.ToWixSharpProperty()).ToArray();

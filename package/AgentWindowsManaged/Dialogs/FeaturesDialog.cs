@@ -3,8 +3,10 @@ using System;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using DevolutionsAgent.Resources;
 using WixSharp;
 using WixSharp.UI.Forms;
+using View = System.Windows.Forms.View;
 
 namespace DevolutionsAgent.Dialogs;
 
@@ -15,8 +17,15 @@ public partial class FeaturesDialog : AgentDialog
     public FeaturesDialog()
     {
         InitializeComponent();
-        label1.MakeTransparentOn(banner);
-        label2.MakeTransparentOn(banner);
+
+        this.label1.MakeTransparentOn(banner);
+        this.label2.MakeTransparentOn(banner);
+
+        this.featuresTree.Columns.Clear();
+        this.featuresTree.Columns.Add(string.Empty, -1, HorizontalAlignment.Left);
+        this.featuresTree.Columns.Add(string.Empty, -1, HorizontalAlignment.Left);
+        this.featuresTree.View = View.Details;
+        this.featuresTree.HeaderStyle = ColumnHeaderStyle.None;
     }
 
     private void FeaturesDialog_Load(object sender, EventArgs e)
@@ -65,12 +74,21 @@ public partial class FeaturesDialog : AgentDialog
             {
                 view.Checked = true;
             }
+
+            if (Features.ExperimentalFeatures.Any(x => x.Id == rootItem.Name))
+            {
+                view.UseItemStyleForSubItems = false;
+                view.SubItems.Add(I18n(Strings.ExperimentalLabel));
+                view.SubItems[1].BackColor = Color.Yellow;
+            }
         }
 
         rootItems.Where(x => x.Display != FeatureDisplay.hidden)
                  .Select(x => x.View)
                  .Cast<ListViewItem>()
-                 .ForEach(node => featuresTree.Items.Add(node));
+                 .ForEach(featuresTree.Items.Add);
+
+        this.featuresTree.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
     }
 
     private void Reset_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)

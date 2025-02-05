@@ -97,6 +97,10 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string UACPromptLabel = "UACPromptLabel";		
 		/// <summary>
+		/// Experimental
+		/// </summary>
+		public const string ExperimentalLabel = "ExperimentalLabel";		
+		/// <summary>
 		/// All Files
 		/// </summary>
 		public const string Filter_AllFiles = "Filter_AllFiles";		

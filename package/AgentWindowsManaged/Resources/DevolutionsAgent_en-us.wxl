@@ -27,6 +27,7 @@
                     <!-- properties -->
                 <String Id="Property_Directory">Directory</String>
                     <!-- static -->
+                <String Id="ExperimentalLabel">Experimental</String>
                 <String Id="UACPromptLabel">Please wait for UAC prompt to appear.
 
 If it appears minimized then active it from the taskbar.</String>
