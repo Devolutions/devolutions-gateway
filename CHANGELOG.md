@@ -2,6 +2,20 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.1.2 (2025-02-05)
+
+### Bug Fixes
+
+- _agent_: fix downgrade logic for unreleased Devolutions Gateway ([#1207](https://github.com/Devolutions/devolutions-gateway/issues/1207)) ([a978ec6c59](https://github.com/Devolutions/devolutions-gateway/commit/a978ec6c59641a15378fbc4c623283e912f3d32a)) 
+
+  Fix an updater corner case where the user is trying to downgrade to the
+  latest specified version in `productinfo.htm` while a newer unreleased
+  version is installed locally.
+
+- _dgw_: mute recording player by default to allow autoplay in web browsers ([#1208](https://github.com/Devolutions/devolutions-gateway/issues/1208)) ([1266e8b327](https://github.com/Devolutions/devolutions-gateway/commit/1266e8b32763e14467e9b650856f85084bcb0d08)) 
+
+- _agent-installer_: add experimental tag to PEDM and session features ([#1211](https://github.com/Devolutions/devolutions-gateway/issues/1211)) ([29b2facc61](https://github.com/Devolutions/devolutions-gateway/commit/29b2facc610ca0bd994af8a48f10337781a4205f)) 
+
 ## 2025.1.0 (2025-01-29)
 
 ### Features
