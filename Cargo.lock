@@ -293,28 +293,26 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.10.0"
+version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdd82dba44d209fddb11c190e0a94b78651f95299598e472215667417a03ff1d"
+checksum = "4c2b7ddaa2c56a367ad27a094ad8ef4faacf8a617c2575acb2ba88949df999ca"
 dependencies = [
  "aws-lc-sys",
- "mirai-annotations",
  "paste",
  "zeroize",
 ]
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.22.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df7a4168111d7eb622a31b214057b8509c0a7e1794f44c546d742330dc793972"
+checksum = "54ac4f13dad353b209b34cbec082338202cbc01c8f00336b55c750c13ac91f8f"
 dependencies = [
  "bindgen 0.69.5",
  "cc",
  "cmake",
  "dunce",
  "fs_extra",
- "libc",
  "paste",
 ]
 
@@ -2222,7 +2220,7 @@ dependencies = [
  "http 1.1.0",
  "hyper 1.5.0",
  "hyper-util",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "rustls-native-certs 0.8.0",
  "rustls-pki-types",
  "tokio 1.43.0",
@@ -2902,7 +2900,7 @@ dependencies = [
  "proxy-socks",
  "proxy-types",
  "proxy_cfg",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "rustls-native-certs 0.8.0",
  "rustls-pemfile 2.2.0",
  "seahorse",
@@ -3053,7 +3051,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -3374,12 +3372,6 @@ dependencies = [
  "wasi",
  "windows-sys 0.52.0",
 ]
-
-[[package]]
-name = "mirai-annotations"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9be0862c1b3f26a88803c4a49de6889c10e608b3ee9344e6ef5b45fb37ad3d1"
 
 [[package]]
 name = "mmap-fixed-fixed"
@@ -4562,7 +4554,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.0.0",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "socket2",
  "thiserror 1.0.68",
  "tokio 1.43.0",
@@ -4579,7 +4571,7 @@ dependencies = [
  "rand",
  "ring 0.17.8",
  "rustc-hash 2.0.0",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "slab",
  "thiserror 1.0.68",
  "tinyvec",
@@ -4797,7 +4789,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite 0.2.15",
  "quinn",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "rustls-native-certs 0.8.0",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
@@ -5019,9 +5011,8 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fbb44d7acc4e873d613422379f69f237a1b141928c02f6bc6ccfddddc2d7993"
+version = "0.23.999"
+source = "git+https://github.com/CBenoit/rustls.git?rev=eb657cf9cdf00d35197f33304630f8ec982d97aa#eb657cf9cdf00d35197f33304630f8ec982d97aa"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -5039,7 +5030,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70f1ff9ad152a0a9bc9c81f2b0b4b0b6399df856788b31fb9d1b5c1e8620c749"
 dependencies = [
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "sha2",
  "windows-sys 0.59.0",
 ]
@@ -5590,7 +5581,7 @@ dependencies = [
  "picky-krb 0.9.1",
  "rand",
  "rsa",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "serde",
  "serde_derive",
  "sha1",
@@ -5977,7 +5968,7 @@ version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f6d0975eaace0cf0fcadee4e4aaa5da15b5c079146f2cffb67c113be122bf37"
 dependencies = [
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "tokio 1.43.0",
 ]
 
@@ -6014,7 +6005,7 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "rustls-native-certs 0.8.0",
  "rustls-pki-types",
  "tokio 1.43.0",
@@ -6449,7 +6440,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand",
- "rustls 0.23.15",
+ "rustls 0.23.999",
  "rustls-pki-types",
  "sha1",
  "thiserror 1.0.68",

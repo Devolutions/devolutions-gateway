@@ -31,6 +31,7 @@ strip = "symbols"
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
+rustls = { git = "https://github.com/CBenoit/rustls.git", rev = "eb657cf9cdf00d35197f33304630f8ec982d97aa" }
 
 [workspace.lints.rust]
 
