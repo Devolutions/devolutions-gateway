@@ -9,8 +9,7 @@ use windows::Win32::System::Console::{
     AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
 };
 use windows::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, GetProcessHandleFromHwnd, TerminateProcess, WaitForMultipleObjects, INFINITE,
-    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
+    CreateProcessW, GetExitCodeProcess, GetProcessHandleFromHwnd, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW
 };
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, PostMessageW, WM_CLOSE};
@@ -247,20 +246,29 @@ impl WinApiProcessCtx {
 
                             let pid = self.process.pid();
 
-                            // SAFETY: No preconditions.
-                            if pid != 0 && unsafe { AttachConsole(pid) }.is_ok() {
-                                // Disable Ctrl+C handler for current process. Will be re-enabled,
-                                // when process exits (see WAIT_OBJECT_PROCESS_EXIT above).
-                                // SAFETY: No preconditions.
-                                unsafe { SetConsoleCtrlHandler(None, true)? };
+                            // When started with CREATE_NEW_PROCESS_GROUP, the following is true:
+                            //
+                            // The process identifier of the new process group is the same as
+                            // the process identifier, which is returned in the
+                            // lpProcessInformation parameter
+                            //
+                            // MSDN: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+                            if pid != 0 {
+                                // SAFETY: No outstanding preconditions.
+                                let ctrlc_result = unsafe {
+                                    GenerateConsoleCtrlEvent(CTRL_C_EVENT,pid)
+                                };
 
-                                // Send Ctrl+C to console application
-                                // SAFETY: No preconditions.
-                                unsafe { GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)? };
-
-                                // Detach from console
-                                // SAFETY: No preconditions.
-                                unsafe { FreeConsole()? };
+                                if let Err(error) = ctrlc_result {
+                                    // Acknowledge client that cancel request has failed.
+                                    self.io_notification_tx.blocking_send(
+                                        ServerChannelEvent::SessionCancelFailed {
+                                            session_id,
+                                            error: NowStatusError::new_winapi(error.code().0 as u32)
+                                        },
+                                    )?;
+                                    continue;
+                                }
 
                                 // Acknowledge client that cancel request has been processed
                                 // successfully.
@@ -533,7 +541,7 @@ impl WinApiProcessBuilder {
                 Some(security_attributes.as_ptr()),
                 None,
                 true,
-                Default::default(),
+                NORMAL_PRIORITY_CLASS  | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
                 None,
                 current_directory_wide.as_pcwstr(),
                 &startup_info as *const _,
@@ -570,19 +578,6 @@ impl WinApiProcessBuilder {
                 stdin_write_pipe: Some(stdin_write_pipe),
                 process: process_handle,
             };
-
-            let msg = match process_ctx.start_io_loop() {
-                Ok(exit_code) => {
-                    io_notification_tx.blocking_send(ServerChannelEvent::SessionExited { session_id, exit_code })
-                }
-                Err(error) => {
-                    io_notification_tx.blocking_send(ServerChannelEvent::SessionFailed { session_id, error })
-                }
-            };
-
-            if let Err(error) = msg {
-                error!(%error, session_id, "Failed to send process result message over channel.");
-            }
 
             let notification = match process_ctx.start_io_loop() {
                 Ok(exit_code) => {
