@@ -10,7 +10,8 @@ pub struct TmpFileGuard(PathBuf);
 
 impl TmpFileGuard {
     pub fn new(extension: &str) -> anyhow::Result<Self> {
-        let (_file, path) = tempfile::Builder::new()
+        // Create empty temporary file and release the handle.
+        let (file, path) = tempfile::Builder::new()
             .prefix("devolutions-")
             .suffix(&format!(".{}", extension))
             .tempfile()?
@@ -21,13 +22,6 @@ impl TmpFileGuard {
 
     pub fn write_content(&self, content: &str) -> anyhow::Result<()> {
         std::fs::write(&self.0, content)?;
-
-        let wide_name = WideString::from(self.0.as_os_str());
-
-        // Remove file on reboot.
-        // SAFETY: File path is valid, therefore it is safe to call.
-        unsafe { MoveFileExW(wide_name.as_pcwstr(), PCWSTR::null(), MOVEFILE_DELAY_UNTIL_REBOOT) }?;
-
         Ok(())
     }
 
@@ -42,6 +36,11 @@ impl TmpFileGuard {
 
 impl Drop for TmpFileGuard {
     fn drop(&mut self) {
+        // We can't use `MoveFileExW` for scheduled deletion by OS via MOVEFILE_DELAY_UNTIL_REBOOT
+        // because it requires administrative rights rights to work, however devolutions-session
+        // is running under non-elevated user account.
+        // (see [MSDN](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexa#remarks)).
+
         if let Err(error) = std::fs::remove_file(&self.0) {
             let path = format!("{}", self.0.display());
             error!(%error, path, "Failed to remove temporary file");

@@ -4,13 +4,13 @@ use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::System::Shutdown::{ExitWindowsEx, LockWorkStation, EWX_LOGOFF, SHUTDOWN_REASON};
+use windows::Win32::System::Shutdown::{ExitWindowsEx, InitiateSystemShutdownExW, InitiateSystemShutdownW, LockWorkStation, EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, EWX_SHUTDOWN, SHUTDOWN_REASON};
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_STYLE, SW_RESTORE};
+use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE, SW_RESTORE};
 
 use devolutions_gateway_task::Task;
 use now_proto_pdu::{
-    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage, NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage, NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage
+    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage, NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage, NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage
 };
 use now_proto_pdu::ironrdp_core::IntoOwned;
 use win_api_wrappers::event::Event;
@@ -21,6 +21,12 @@ use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use super::process::ExecError;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
+use win_api_wrappers::security::privilege::ScopedPrivileges;
+
+// One minute heartbeat interval by default
+const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
 
 const GENERIC_ERROR_CODE_ENCODING: u32 = 0x00000001;
 const GENERIC_ERROR_CODE_TOO_LONG_ERROR: u32 = 0x00000002;
@@ -131,11 +137,9 @@ async fn process_messages(
             | NowExecCapsetFlags::STYLE_WINPS
         );
 
-    if let Some(interval) = client_caps.heartbeat_interval() {
-        server_caps = server_caps
-            .with_heartbeat_interval(interval)
-            .expect("decoded heartbeat interval is always valid")
-    }
+    let heartbeat_interval = client_caps
+        .heartbeat_interval()
+        .unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
 
     let downgraded_caps = client_caps.downgrade(&server_caps);
 
@@ -226,7 +230,10 @@ async fn process_messages(
                     }
                 }
             }
-
+            _ = tokio::time::sleep(heartbeat_interval) => {
+                // Send periodic heartbeat message to the client.
+                dvc_tx.send(NowChannelHeartbeatMsg::default().into()).await?;
+            }
             _ = shutdown_signal.wait() => {
                 processor.shutdown_all_sessions().await;
                 return Ok(());
@@ -366,7 +373,7 @@ impl MessageProcessor {
             NowMessage::Exec(NowExecMessage::Data(data_msg)) => {
                 let session_id = data_msg.session_id();
 
-                if let NowExecDataStreamKind::Stdin = data_msg.stream_kind()? {
+                if data_msg.stream_kind()? != NowExecDataStreamKind::Stdin {
                     warn!(session_id, "Only STDIN data input is supported");
                     return Ok(ProcessMessageAction::Continue);
                 }
@@ -388,23 +395,55 @@ impl MessageProcessor {
             NowMessage::Session(NowSessionMessage::MsgBoxReq(request)) => {
                 let tx = self.dvc_tx.clone();
 
-                // Spawn blocking task for message box to avoid blocking the IO loop.
-                let join_handle = tokio::task::spawn_blocking(move || process_msg_box_req(request, tx));
-                drop(join_handle);
+                // Spawn separate async task for message box to avoid blocking the IO loop.
+                let _ = tokio::task::spawn(process_msg_box_req(request, tx));
             }
             NowMessage::Session(NowSessionMessage::Logoff(_logoff_msg)) => {
-                // SAFETY: `ExitWindowsEx` is always safe to call.
+                // SAFETY: No outstanding preconditions.
                 if let Err(error) = unsafe { ExitWindowsEx(EWX_LOGOFF, SHUTDOWN_REASON(0)) } {
                     error!(%error, "Failed to logoff user session");
                 }
             }
             NowMessage::Session(NowSessionMessage::Lock(_lock_msg)) => {
-                // SAFETY: `LockWorkStation` is always safe to call.
+                // SAFETY: No outstanding preconditions.
                 if let Err(error) = unsafe { LockWorkStation() } {
                     error!(%error, "Failed to lock workstation");
                 }
             }
-            NowMessage::System(NowSystemMessage::Shutdown(_shutdown_msg)) => {
+            NowMessage::System(NowSystemMessage::Shutdown(shutdown_msg)) => {
+                let mut current_process_token = win_api_wrappers::process::Process::current_process()
+                    .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
+                let mut _priv_tcb = ScopedPrivileges::enter(
+                    &mut current_process_token,
+                    &[win_api_wrappers::security::privilege::SE_SHUTDOWN_NAME],
+                )?;
+
+                let mut shutdown_flags = if shutdown_msg.is_reboot() {
+                    EWX_REBOOT
+                } else {
+                    EWX_POWEROFF
+                };
+
+                if shutdown_msg.is_force_shutdown() {
+                    shutdown_flags |= EWX_FORCE;
+                }
+
+                let message = (!shutdown_msg.message().is_empty())
+                    .then(|| WideString::from(shutdown_msg.message()));
+
+                let shutdown_result = unsafe { InitiateSystemShutdownW(
+                    PCWSTR::null(),
+                    message.map(|m| m.as_pcwstr()).unwrap_or(PCWSTR::null()),
+                    shutdown_msg.timeout().as_secs() as u32,
+                    shutdown_msg.is_force_shutdown(),
+                    shutdown_msg.is_reboot(),
+                ) };
+
+                if let Err(err) = shutdown_result {
+                    warn!(%err, "Failed to initiate system shutdown");
+                    return Ok(ProcessMessageAction::Continue);
+                }
+
                 // TODO: Adjust `NowSession` token privileges in NowAgent to make shutdown possible
                 // from this process.
             }
@@ -557,7 +596,7 @@ impl MessageProcessor {
 
         let params_str = params.join(" ");
 
-        let mut run_process = WinApiProcessBuilder::new("powershell.exe")
+        let mut run_process = WinApiProcessBuilder::new("pwsh.exe")
             .with_temp_file(tmp_file)
             .with_command_line(&params_str);
 
@@ -677,20 +716,43 @@ fn append_pwsh_args(args: &mut Vec<String>, msg: &NowExecPwshMsg<'_>) {
 async fn process_msg_box_req(request: NowSessionMsgBoxReqMsg<'static>, dvc_tx: WinapiSignaledSender<NowMessage<'static>>) {
     info!("Processing message box request `{}`", request.request_id());
 
-    let title = HSTRING::from(request.title().unwrap_or("Devolutions Agent"));
-    let text = HSTRING::from(request.message());
+    let title = WideString::from(
+        request.title().unwrap_or("Devolutions Session")
+    );
+
+    let text = WideString::from(request.message());
 
     // TODO: Use undocumented `MessageBoxTimeout` instead
     // or create custom window (?)
     // SAFETY: `MessageBoxW` is always safe to call.
     let result = unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(text.as_ptr()),
-            PCWSTR(title.as_ptr()),
-            MESSAGEBOX_STYLE(request.style().value()),
-        )
+        match request.timeout() {
+            Some(timeout) => {
+                // Using undocumented message box with timeout API
+                // (stable since Windows XP).
+                MessageBoxTimeOutW(
+                    HWND::default(),
+                    text.as_pcwstr(),
+                    title.as_pcwstr(),
+                    MESSAGEBOX_STYLE(request.style().value()),
+                    0,
+                    timeout.as_millis() as u32,
+                )
+            }
+            None => {
+                MessageBoxW(
+                    None,
+                    text.as_pcwstr(),
+                    title.as_pcwstr(),
+                    MESSAGEBOX_STYLE(request.style().value()),
+                )
+            }
+        }
     };
+
+    if !request.is_response_expected() {
+        return;
+    }
 
     #[allow(clippy::cast_sign_loss)]
     let message_box_response = result.0 as u32;
@@ -766,4 +828,17 @@ async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, s
     if let Err(error) = dvc_tx.send(msg.into()).await {
         error!(%error, "Failed to send error message");
     }
+}
+
+#[link(name = "user32", kind = "dylib")]
+unsafe extern "C" {
+    #[link_name = "MessageBoxTimeoutW"]
+    unsafe fn MessageBoxTimeOutW(
+        hwnd: HWND,
+        lptext: PCWSTR,
+        lpcaption: PCWSTR,
+        utype: MESSAGEBOX_STYLE,
+        wlanguageid: u16,
+        dwmillisedonds: u32,
+    ) -> MESSAGEBOX_RESULT;
 }
