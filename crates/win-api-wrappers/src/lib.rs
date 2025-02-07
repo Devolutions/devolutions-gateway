@@ -23,6 +23,7 @@ mod lib_win {
     pub mod process;
     pub mod rpc;
     pub mod security;
+    pub mod semaphore;
     pub mod service;
     pub mod thread;
     pub mod token;

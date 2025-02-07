@@ -50,7 +50,7 @@ pub fn run_dvc_io(
     ensure_overlapped_io_result(read_result)?;
 
     loop {
-        let events = [read_event.raw(), write_rx.raw_event(), stop_event.raw()];
+        let events = [read_event.raw(), write_rx.raw_wait_handle(), stop_event.raw()];
 
         const WAIT_OBJECT_READ_DVC: WAIT_EVENT = WAIT_OBJECT_0;
         const WAIT_OBJECT_WRITE_DVC: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);

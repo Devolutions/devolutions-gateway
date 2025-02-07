@@ -238,11 +238,6 @@ impl Process {
         })
     }
 
-    pub fn pid(&self) -> u32 {
-        // SAFETY: Safe to call with a valid process handle.
-        unsafe { GetProcessId(self.handle.raw()) }
-    }
-
     /// Reads process memory at a specified address into a buffer.
     /// The buffer is not read.
     /// Returns the number of bytes read.
