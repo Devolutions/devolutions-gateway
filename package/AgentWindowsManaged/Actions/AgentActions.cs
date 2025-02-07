@@ -237,48 +237,47 @@ internal static class AgentActions
         Condition = Features.PEDM_FEATURE.BeingInstall(),
     };
 
-    private static readonly ElevatedManagedAction cleanupPedmShellExt = new(
-        CustomActions.UninstallMsix
+    private static readonly ElevatedManagedAction registerExplorerCommand = new(
+        CustomActions.RegisterExplorerCommand
     )
     {
-        Id = new Id("cleanupPedmShellExt"),
+        Id = new Id($"CA.{nameof(registerExplorerCommand)}"),
         Feature = Features.PEDM_FEATURE,
-        Impersonate = false,
-        Execute = Execute.deferred,
-        Return = Return.check,
-        Step = Step.RemoveFiles,
-        When = When.Before,
         Sequence = Sequence.InstallExecuteSequence,
-        Condition = Features.PEDM_FEATURE.BeingUninstall(),
-    };
-
-    private static readonly ElevatedManagedAction installPedmShellExt = new(
-        CustomActions.InstallMsix
-    )
-    {
-        Id = new Id("installPedmShellExt"),
-        Feature = Features.PEDM_FEATURE,
-        Impersonate = true,
-        Execute = Execute.deferred,
         Return = Return.check,
+        Execute = Execute.deferred,
+        Impersonate = false,
         Step = Step.InstallFiles,
         When = When.After,
-        Sequence = Sequence.InstallExecuteSequence,
         Condition = Features.PEDM_FEATURE.BeingInstall(),
     };
 
-    private static readonly ElevatedManagedAction uninstallPedmShellExt = new(
-        CustomActions.UninstallMsix
+    private static readonly ElevatedManagedAction registerExplorerCommandRollback = new(
+        CustomActions.UnregisterExplorerCommand
     )
     {
-        Id = new Id("uninstallPedmShellExt"),
+        Id = new Id($"CA.{nameof(registerExplorerCommandRollback)}"),
         Feature = Features.PEDM_FEATURE,
-        Impersonate = false,
-        Execute = Execute.deferred,
+        Sequence = Sequence.InstallExecuteSequence,
+        Return = Return.ignore,
+        Execute = Execute.rollback,
+        Step = new Step(registerExplorerCommand.Id),
+        When = When.Before,
+        Condition = Features.PEDM_FEATURE.BeingInstall(),
+    };
+
+    private static readonly ElevatedManagedAction unregisterExplorerCommand = new(
+        CustomActions.UnregisterExplorerCommand
+    )
+    {
+        Id = new Id($"CA.{nameof(unregisterExplorerCommand)}"),
+        Feature = Features.PEDM_FEATURE,
+        Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
+        Execute = Execute.deferred,
+        Impersonate = false,
         Step = Step.RemoveFiles,
         When = When.Before,
-        Sequence = Sequence.InstallExecuteSequence,
         Condition = Features.PEDM_FEATURE.BeingUninstall(),
     };
 
@@ -327,9 +326,9 @@ internal static class AgentActions
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
         installPedm,
-        cleanupPedmShellExt,
-        uninstallPedmShellExt,
-        installPedmShellExt,
+        registerExplorerCommand,
+        registerExplorerCommandRollback,
+        unregisterExplorerCommand,
         installSession,
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,

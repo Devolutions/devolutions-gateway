@@ -18,9 +18,15 @@ namespace DevolutionsAgent.Resources
 
         internal static string EXECUTABLE_NAME = "DevolutionsAgent.exe";
 
+        internal static string DESKTOP_EXECUTABLE_NAME = "DevolutionsDesktopAgent.exe";
+
         internal static string EMAIL_SUPPORT = "support@devolutions.net";
 
         internal static string FORUM_SUPPORT = "forum.devolutions.net";
+
+        internal static string SHELL_EXT_BINARY_NAME = "DevolutionsPedmShellExt.dll";
+
+        internal static Guid SHELL_EXT_CSLID = new("0BA604FD-4A5A-4ABB-92B1-09AC5C3BF356");
 
         internal static Guid UPGRADE_CODE = new("82318d3c-811f-4d5d-9a82-b7c31b076755");
 
