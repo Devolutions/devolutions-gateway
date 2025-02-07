@@ -25,6 +25,7 @@ mod lib_win {
     pub mod user;
     pub mod utils;
     pub mod wts;
+    pub mod semaphore;
 
     // Allowed since the goal is to replicate the Windows API crate so that it's familiar, which itself uses the raw names from the API.
     #[allow(

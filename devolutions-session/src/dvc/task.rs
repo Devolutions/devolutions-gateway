@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::System::Shutdown::{ExitWindowsEx, InitiateSystemShutdownExW, InitiateSystemShutdownW, LockWorkStation, EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, EWX_SHUTDOWN, SHUTDOWN_REASON};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE, SW_RESTORE};
@@ -191,7 +191,7 @@ async fn process_messages(
                                 dvc_tx.send(message.into()).await?;
                             }
                             ServerChannelEvent::SessionCancelSuccess { session_id } => {
-                                info!(session_id, "Session canceled");
+                                info!(session_id, "Session cancelled");
                                 let message = NowExecCancelRspMsg::new_success(session_id);
                                 dvc_tx.send(message.into()).await?;
                             }
@@ -558,7 +558,7 @@ impl MessageProcessor {
 
         append_ps_args(&mut params, &winps_msg);
 
-        params.push("-File".to_string());
+        params.push("-File".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
         let params_str = params.join(" ");

@@ -5,14 +5,12 @@ use windows::Win32::Foundation::{
     WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::Console::{
-    AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
-};
+use windows::Win32::System::Console::{AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT};
 use windows::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, GetProcessHandleFromHwnd, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW
+    CreateProcessW, GetExitCodeProcess, GetProcessHandleFromHwnd, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW
 };
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, PostMessageW, WM_CLOSE};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostMessageW, PostThreadMessageW, WM_CLOSE, WM_QUIT};
 
 use now_proto_pdu::{
     NowExecDataStreamKind, NowProtoError, NowStatusError,
@@ -87,6 +85,8 @@ pub struct WinApiProcessCtx {
     stderr_read_pipe: Option<Pipe>,
     stdin_write_pipe: Option<Pipe>,
 
+    pid: u32,
+
     // NOTE: Order of fields is important, as process_handle must be dropped last in automatically
     // generated destructor, after all pipes were closed.
     process: Process,
@@ -106,7 +106,7 @@ impl WinApiProcessCtx {
         let wait_events = vec![
             stdout_read_event.raw(),
             stderr_read_event.raw(),
-            self.input_event_rx.raw_event(),
+            self.input_event_rx.raw_wait_handle(),
             self.process.handle.raw(),
         ];
 
@@ -173,12 +173,6 @@ impl WinApiProcessCtx {
                 WAIT_OBJECT_PROCESS_EXIT => {
                     info!(session_id, "Process has signaled exit");
 
-                    // Restore Ctrl+C handler for current process, in case it was disabled by
-                    // CancelExecution event.
-
-                    // SAFETY: No preconditions.
-                    unsafe { SetConsoleCtrlHandler(None, false)? };
-
                     let mut code: u32 = 0;
                     // SAFETY: process_handle is valid and `code` is a valid stack memory, therefore
                     // it is safe to call GetExitCodeProcess.
@@ -208,8 +202,8 @@ impl WinApiProcessCtx {
                             info!(session_id, "Cancelling process execution by user request");
 
                             let mut windows_enum_ctx = EnumWindowsContext {
-                                expected_process: self.process.handle.raw(),
-                                windows: Vec::new(),
+                                expected_pid: self.pid,
+                                threads: Default::default(),
                             };
 
                             // SAFETY: EnumWindows is safe to call with valid callback function
@@ -224,66 +218,24 @@ impl WinApiProcessCtx {
                             }?;
 
                             // For GUI windows - send WM_CLOSE message
-                            if !windows_enum_ctx.windows.is_empty() {
+                            if !windows_enum_ctx.threads.is_empty() {
                                 // Send cancel message to all windows
-                                for hwnd in windows_enum_ctx.windows {
-                                    // SAFETY: No preconditions.
-                                    let _ = unsafe { PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) };
+                                for thread in windows_enum_ctx.threads {
+                                    // SAFETY: No outstanding preconditions.
+                                    let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
                                 }
-
-                                // Acknowledge client that cancel request has been processed
-                                // successfully.
-                                self.io_notification_tx.blocking_send(
-                                    ServerChannelEvent::SessionCancelSuccess { session_id },
-                                )?;
-
-                                // Wait for process to exit normally.
-                                continue;
                             }
 
-                            // For console applications - send CTRL+C
-                            // SAFETY: No preconditions.
+                            // TODO: Figure out how to send CTRL+C to console applications.
 
-                            let pid = self.process.pid();
-
-                            // When started with CREATE_NEW_PROCESS_GROUP, the following is true:
-                            //
-                            // The process identifier of the new process group is the same as
-                            // the process identifier, which is returned in the
-                            // lpProcessInformation parameter
-                            //
-                            // MSDN: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
-                            if pid != 0 {
-                                // SAFETY: No outstanding preconditions.
-                                let ctrlc_result = unsafe {
-                                    GenerateConsoleCtrlEvent(CTRL_C_EVENT,pid)
-                                };
-
-                                if let Err(error) = ctrlc_result {
-                                    // Acknowledge client that cancel request has failed.
-                                    self.io_notification_tx.blocking_send(
-                                        ServerChannelEvent::SessionCancelFailed {
-                                            session_id,
-                                            error: NowStatusError::new_winapi(error.code().0 as u32)
-                                        },
-                                    )?;
-                                    continue;
-                                }
-
-                                // Acknowledge client that cancel request has been processed
-                                // successfully.
-                                self.io_notification_tx.blocking_send(
-                                    ServerChannelEvent::SessionCancelSuccess { session_id },
-                                )?;
-
-                                // wait for process to exit
-                                continue;
-                            }
-
-                            // Neither GUI nor console application, send cancel response with error
+                            // Acknowledge client that cancel request has been processed
+                            // successfully.
                             self.io_notification_tx.blocking_send(
-                                ServerChannelEvent::SessionCancelFailed { session_id, error: NowStatusError::new_proto(NowProtoError::InUse) },
+                                ServerChannelEvent::SessionCancelSuccess { session_id },
                             )?;
+
+                            // wait for process to exit
+                            continue;
                         }
                         ProcessIoInputEvent::DataIn { data, last } => {
                             trace!(session_id, "Received data to write to stdin pipe");
@@ -540,7 +492,7 @@ impl WinApiProcessBuilder {
                 Some(security_attributes.as_raw() as *const _),
                 None,
                 true,
-                NORMAL_PRIORITY_CLASS  | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+                NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
                 None,
                 current_directory_wide.as_pcwstr(),
                 &startup_info as *const _,
@@ -565,6 +517,8 @@ impl WinApiProcessBuilder {
             unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
         );
 
+        let pid = process_information.dwProcessId;
+
         // Create channel for `task` -> `Process IO thread` communication
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
 
@@ -576,6 +530,7 @@ impl WinApiProcessBuilder {
                 stdout_read_pipe: Some(stdout_read_pipe),
                 stderr_read_pipe: Some(stderr_read_pipe),
                 stdin_write_pipe: Some(stdin_write_pipe),
+                pid,
                 process: process_handle,
             };
 
@@ -636,8 +591,8 @@ impl WinApiProcess {
 }
 
 struct EnumWindowsContext {
-    expected_process: HANDLE,
-    windows: Vec<HWND>,
+    expected_pid: u32,
+    threads: Vec<u32>,
 }
 
 unsafe extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -645,16 +600,25 @@ unsafe extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL 
     let enum_ctx = unsafe { &mut *(lparam.0 as *mut EnumWindowsContext) };
 
     // SAFETY: No preconditions.
-    let process = unsafe { GetProcessHandleFromHwnd(hwnd) };
 
-    if process.is_invalid() {
+    let mut pid: u32 = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut _));
+
+    if pid == 0 || pid != enum_ctx.expected_pid {
         // Continue enumeration.
         return true.into();
     }
 
-    if process == enum_ctx.expected_process {
-        enum_ctx.windows.push(hwnd);
+
+    // Get thread id
+    let thread_id = GetWindowThreadProcessId(hwnd, None);
+
+    if thread_id == 0 {
+        // Continue enumeration.
+        return true.into();
     }
+
+    enum_ctx.threads.push(thread_id);
 
     true.into()
 }
