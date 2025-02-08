@@ -276,7 +276,7 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
             },
-            new (RegistryHive.LocalMachine, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", Includes.SERVICE_NAME, $"[{AgentProperties.InstallDir}]desktop\\DevolutionsDesktopAgent.exe")
+            new (RegistryHive.LocalMachine, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", Includes.SERVICE_NAME, $"[{AgentProperties.InstallDir}]desktop\\{Includes.DESKTOP_EXECUTABLE_NAME}")
             {
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
