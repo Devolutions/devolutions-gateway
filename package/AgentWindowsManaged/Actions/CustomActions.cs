@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -427,6 +428,40 @@ namespace DevolutionsAgent.Actions
                 session.Log($"failed to set permissions: {e}");
                 return ActionResult.Failure;
             }
+        }
+
+        [CustomAction]
+        public static ActionResult ShutdownDesktopApp(Session session)
+        {
+            string processName = Path.GetFileNameWithoutExtension(Includes.DESKTOP_EXECUTABLE_NAME);
+
+            try
+            {
+                foreach (Process process in Process.GetProcessesByName(processName))
+                {
+                    session.Log($"found instance of {processName} with PID {process.Id} in session {process.SessionId}");
+
+                    process.CloseMainWindow();
+                    process.WaitForExit((int)TimeSpan.FromSeconds(1).TotalMilliseconds);
+
+                    if (process.HasExited)
+                    {
+                        session.Log("process ended gracefully");
+                        continue;
+                    }
+
+                    session.Log("terminating process forcefully");
+
+                    process.Kill();
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"unexpected error: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ActionResult.Success;
         }
 
         [CustomAction]
