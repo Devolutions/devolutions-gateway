@@ -1,9 +1,5 @@
 use std::path::PathBuf;
 
-use windows::core::PCWSTR;
-use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
-
-use win_api_wrappers::utils::WideString;
 
 /// Guard for created temporary file. Associated file is deleted on drop.
 pub struct TmpFileGuard(PathBuf);

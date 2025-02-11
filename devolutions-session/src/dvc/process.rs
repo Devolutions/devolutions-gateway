@@ -442,6 +442,9 @@ impl WinApiProcessBuilder {
         session_id: u32,
         io_notification_tx: Sender<ServerChannelEvent>,
     ) -> Result<WinApiProcess, ExecError> {
+        let process_span = info_span!("process", session_id = session_id);
+        let _process_guard = process_span.enter();
+
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
             .trim_end()
             .to_string();
@@ -449,7 +452,9 @@ impl WinApiProcessBuilder {
 
         info!(
             session_id,
-            "Starting process: `{command_line}`; cwd:`{current_directory}`"
+            command = command_line,
+            working_dir = current_directory,
+            "Starting new process"
         );
 
         let mut command_line_wide = WideString::from(command_line);
@@ -461,6 +466,9 @@ impl WinApiProcessBuilder {
 
         let mut process_information = PROCESS_INFORMATION::default();
 
+        let io_span = info_span!("io_setup", session_id = session_id);
+        let _io_guard = io_span.enter();
+
         let IoRedirectionPipes {
             stdout_read_pipe,
             stdout_write_pipe,
@@ -469,6 +477,8 @@ impl WinApiProcessBuilder {
             stdin_read_pipe,
             stdin_write_pipe,
         } = IoRedirectionPipes::new()?;
+
+        info!(session_id, "IO redirection pipes created");
 
         let startup_info = STARTUPINFOW {
             cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
@@ -523,6 +533,9 @@ impl WinApiProcessBuilder {
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
 
         let join_handle = std::thread::spawn(move || {
+            let process_io_span = info_span!("process_io", session_id = session_id, pid = pid);
+            let _process_io_guard = process_io_span.enter();
+
             let mut process_ctx = WinApiProcessCtx {
                 session_id,
                 input_event_rx,
@@ -536,9 +549,11 @@ impl WinApiProcessBuilder {
 
             let notification = match process_ctx.start_io_loop() {
                 Ok(exit_code) => {
+                    info!(session_id, exit_code, "Process exited successfully");
                     ServerChannelEvent::SessionExited { session_id, exit_code }
                 }
                 Err(error) => {
+                    error!(session_id, %error, "Process failed");
                     ServerChannelEvent::SessionFailed { session_id, error }
                 }
             };
@@ -565,28 +580,49 @@ pub struct WinApiProcess {
 
 impl WinApiProcess {
     pub async fn abort_execution(&self, exit_code: u32) -> anyhow::Result<()> {
+        let abort_span = info_span!("abort_execution", exit_code = exit_code);
+        let _abort_guard = abort_span.enter();
+        
+        info!(exit_code, "Aborting process execution");
         self.input_event_tx
             .send(ProcessIoInputEvent::AbortExecution(exit_code))
             .await
     }
 
     pub async fn cancel_execution(&self) -> anyhow::Result<()> {
+        let cancel_span = info_span!("cancel_execution");
+        let _cancel_guard = cancel_span.enter();
+        
+        info!("Canceling process execution");
         self.input_event_tx.send(ProcessIoInputEvent::CancelExecution).await
     }
 
     pub async fn send_stdin(&self, data: Vec<u8>, last: bool) -> anyhow::Result<()> {
+        let stdin_span = info_span!("send_stdin", bytes = data.len(), last = last);
+        let _stdin_guard = stdin_span.enter();
+        
+        info!(bytes = data.len(), last, "Sending data to process stdin");
         self.input_event_tx
             .send(ProcessIoInputEvent::DataIn { data, last })
             .await
     }
 
     pub async fn shutdown(&self) -> anyhow::Result<()> {
+        let shutdown_span = info_span!("process_shutdown");
+        let _shutdown_guard = shutdown_span.enter();
+        
+        info!("Shutting down process");
         self.input_event_tx.send(ProcessIoInputEvent::TerminateIo).await?;
+        info!("Process shutdown complete");
         Ok(())
     }
 
     pub fn is_session_terminated(&self) -> bool {
-        self.join_handle.is_finished()
+        let terminated = self.join_handle.is_finished();
+        if terminated {
+            info!("Process session is terminated");
+        }
+        terminated
     }
 }
 

@@ -28,23 +28,40 @@ use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
 fn main() -> anyhow::Result<()> {
+    let main_span = info_span!("main", "Devolutions Session Main");
+    let _main_guard = main_span.enter();
+
     // Ensure per-user data dir exists.
+    let data_dir = get_data_dir();
+    info!(path = ?data_dir, "Creating data directory");
+    std::fs::create_dir_all(&data_dir).context("failed to create data directory")?;
 
-    std::fs::create_dir_all(get_data_dir()).context("failed to create data directory")?;
-
+    let config_span = info_span!("config", "Configuration Initialization");
+    let _config_guard = config_span.enter();
+    
+    info!("Initializing configuration");
     let conf = ConfHandle::init()
         .context("failed to initialize configuration")?
         .get_conf();
 
+    info!(verbosity_profile = ?conf.verbosity_profile, log_file = ?conf.log_file, "Configuration loaded");
+
     let _logger_guard = init_log(&conf);
+    drop(_config_guard);
 
     info!("Starting Devolutions Session");
 
+    let runtime_span = info_span!("runtime", "Runtime Initialization");
+    let _runtime_guard = runtime_span.enter();
+    
+    info!("Starting runtime and tasks");
     let (runtime, shutdown_handle, join_handle) = start(&conf)?;
 
+    info!("Setting up Ctrl-C handler");
     ctrlc::set_handler(move || {
+        let shutdown_span = info_span!("shutdown", "Shutdown Handler");
+        let _shutdown_guard = shutdown_span.enter();
         info!("Ctrl-C received, exiting");
-
         shutdown_handle.signal();
     })
     .expect("BUG: Failed to set Ctrl-C handler");

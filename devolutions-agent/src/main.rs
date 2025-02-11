@@ -100,7 +100,6 @@ Service!("agent", agent_service_main);
 
 fn main() {
     let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
-
     if let Some(cmd) = env::args().nth(1) {
         match cmd.as_str() {
             "create" => {

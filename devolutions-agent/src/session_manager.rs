@@ -253,12 +253,13 @@ fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &S
 
 /// Terminates Devolutions Session process in the target session.
 fn terminate_session_process(session: &Session) {
+    info!(%session, "Attempting to terminate session process");
     match terminate_process_by_name_in_session(SESSION_BINARY, session.id) {
         Ok(false) => {
-            trace!(%session, "Session process is not running");
+            debug!(%session, "Session process was not running");
         }
         Ok(true) => {
-            info!(%session, "Session process terminated");
+            info!(%session, "Session process terminated successfully");
         }
         Err(error) => {
             error!(%error, %session, "Failed to terminate session process");
@@ -268,18 +269,28 @@ fn terminate_session_process(session: &Session) {
 
 fn is_session_running_in_session(session: &Session) -> anyhow::Result<bool> {
     let is_running = is_process_running_in_session(SESSION_BINARY, session.id)?;
+    if is_running {
+        debug!(%session, "Session process is already running");
+    } else {
+        debug!(%session, "Session process is not running");
+    }
     Ok(is_running)
 }
 
 fn start_session_process(session: &Session) -> anyhow::Result<()> {
+    info!(%session, "Attempting to start session process");
+
     if !session_has_logged_in_user(session.id)? {
+        warn!(%session, "No logged in user found for session");
         anyhow::bail!("Session {} does not have a logged in user", session);
     }
+    debug!(%session, "Found logged in user for session");
 
     let session_app_path = session_app_path();
     let command_line = CommandLine::new(vec!["--session".to_owned(), session.to_string()]);
 
-    info!(%session, "Starting `{session_app_path}`");
+    info!(%session, "Resolved session app path: {}", session_app_path);
+    debug!(%session, "Command line arguments: {:?}", command_line);
 
     let mut startup_info = StartupInfo::default();
 
@@ -291,7 +302,9 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
     }
     startup_info.flags = STARTF_USESHOWWINDOW;
     startup_info.desktop = WideString::from("WinSta0\\Default");
+    debug!(%session, "Configured startup info with GUI access");
 
+    info!(%session, "Creating process: {} {:?}", session_app_path, command_line);
     let start_result = create_process_in_session(
         session.id,
         Some(session_app_path.as_std_path()),
@@ -307,22 +320,42 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
 
     match start_result {
         Ok(_) => {
-            info!(%session, "{SESSION_BINARY} started");
+            info!(%session, "{} started successfully", SESSION_BINARY);
             Ok(())
         }
         Err(error) => {
-            error!(%error, %session, "Failed to start {SESSION_BINARY}");
+            error!(%error, %session, "Failed to start {} with path: {}", SESSION_BINARY, session_app_path);
             Err(error)
         }
     }
 }
 
 fn session_app_path() -> Utf8PathBuf {
-    let mut current_dir = Utf8PathBuf::from_path_buf(std::env::current_exe().expect("BUG: can't get current exe path"))
+    let mut default_path = Utf8PathBuf::from_path_buf(std::env::current_exe().expect("BUG: can't get current exe path"))
         .expect("BUG: OS should always return valid UTF-8 executable path");
 
-    current_dir.pop();
-    current_dir.push(SESSION_BINARY);
+    default_path.pop();
+    default_path.push(SESSION_BINARY);
 
-    current_dir
+    info!("Checking for session binary in default path: {}", default_path);
+    if default_path.exists() {
+        info!("Found session binary in default path");
+        return default_path;
+    }
+    debug!("Session binary not found in default path");
+
+    if let Ok(env_path) = std::env::var("DEVOLUTIONS_SESSION_PATH") {
+        info!("Found DEVOLUTIONS_SESSION_PATH environment variable: {}", env_path);
+        let env_path = Utf8PathBuf::from(env_path);
+        if env_path.exists() {
+            info!("Found session binary in environment path");
+            return env_path;
+        }
+        warn!("Session binary not found at environment path: {}", env_path);
+    } else {
+        debug!("DEVOLUTIONS_SESSION_PATH environment variable not set");
+    }
+
+    error!("Session binary not found in any location");
+    panic!("DevolutionsSession.exe not found in default path ({}) or DEVOLUTIONS_SESSION_PATH", default_path);
 }

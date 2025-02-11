@@ -81,7 +81,7 @@ impl AgentService {
             .expect("failed to create runtime");
 
         let config = self.conf_handle.clone();
-
+        info!("Debug build =============================================");
         // create_futures needs to be run in the runtime in order to bind the sockets.
         let TasksCtx {
             tasks,

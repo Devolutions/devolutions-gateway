@@ -65,7 +65,9 @@ impl ConfHandle {
     ///
     /// It's best to call this only once to avoid inconsistencies.
     pub fn init() -> anyhow::Result<Self> {
+        info!("Loading configuration file");
         let conf_file = load_conf_file_or_generate_new()?;
+        info!("Converting configuration file to internal format");
         let conf = Conf::from_conf_file(&conf_file).context("invalid configuration file")?;
 
         Ok(Self {
@@ -89,13 +91,17 @@ impl ConfHandle {
 
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
+    info!(path = ?conf_file_path, "Saving configuration file");
     let json = serde_json::to_string_pretty(conf).context("failed JSON serialization of configuration")?;
     std::fs::write(&conf_file_path, json).with_context(|| format!("failed to write file at {conf_file_path}"))?;
+    info!("Configuration file saved successfully");
     Ok(())
 }
 
 fn get_conf_file_path() -> Utf8PathBuf {
-    get_data_dir().join("session.json")
+    let path = get_data_dir().join("session.json");
+    info!(path = ?path, "Configuration file path");
+    path
 }
 
 fn normalize_data_path(path: &Utf8Path, data_dir: &Utf8Path) -> Utf8PathBuf {
@@ -117,16 +123,22 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
     }
 }
 
-#[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it’s fine to write to stdout.
+#[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it's fine to write to stdout.
 pub(crate) fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
+    info!(path = ?conf_file_path, "Attempting to load configuration file");
 
     let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
-        Some(conf_file) => conf_file,
+        Some(conf_file) => {
+            info!("Existing configuration file loaded");
+            conf_file
+        }
         None => {
+            info!("No existing configuration found, generating defaults");
             let defaults = dto::ConfFile::generate_new();
             println!("Write default configuration to disk…");
             save_config(&defaults).context("failed to save configuration")?;
+            info!("Default configuration generated and saved");
             defaults
         }
     };
