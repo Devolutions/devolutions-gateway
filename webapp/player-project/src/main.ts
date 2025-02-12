@@ -88,7 +88,7 @@ function beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi) {
     };
   }
 
-  if (closeEvent.code !== 1000 || closeEvent.code !== 1005) {
+  if (closeEvent.code !== 1000 && closeEvent.code !== 1005) {
     showNotification(t('notifications.unknownError'), 'error');
     return {
       ...closeEvent,
