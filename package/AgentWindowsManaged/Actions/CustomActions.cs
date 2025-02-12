@@ -12,6 +12,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Claims;
+using System.Threading;
 using WixSharp;
 using File = System.IO.File;
 
@@ -441,7 +442,13 @@ namespace DevolutionsAgent.Actions
                 {
                     session.Log($"found instance of {processName} with PID {process.Id} in session {process.SessionId}");
 
-                    process.CloseMainWindow();
+                    if (!process.CloseMainWindow())
+                    {
+                        const string mutexId = "BF3262DE-F439-455F-B67F-9D32D9FD5E58";
+                        using EventWaitHandle quitEvent = new EventWaitHandle(false, EventResetMode.ManualReset, $"{mutexId}_{process.Id}");
+                        quitEvent.Set();
+                    }
+                    
                     process.WaitForExit((int)TimeSpan.FromSeconds(1).TotalMilliseconds);
 
                     if (process.HasExited)

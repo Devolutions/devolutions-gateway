@@ -1,10 +1,11 @@
 ﻿using Devolutions.Agent.Desktop.Properties;
-
+using Devolutions.Agent.Desktop.Service;
+using Devolutions.Pedm.Client.Model;
 using Microsoft.Toolkit.Uwp.Notifications;
-
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -14,14 +15,19 @@ using System.Runtime.Remoting.Channels.Ipc;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
+using Application = System.Windows.Forms.Application;
 
 namespace Devolutions.Agent.Desktop
 {
     internal static class Program
     {
-        private const string MutexId = "Local\\BF3262DE-F439-455F-B67F-9D32D9FD5E58";
+        private const string MutexId = "BF3262DE-F439-455F-B67F-9D32D9FD5E58";
+
+        private const string MutexName = $"Local\\{MutexId}";
 
         private static string[] Args { get; set; }
+
+        private static EventWaitHandle ExitEvent = new(false, EventResetMode.ManualReset, $"{MutexId}_{Process.GetCurrentProcess().Id}");
 
         internal static AppContext AppContext { get; private set; }
 
@@ -34,7 +40,7 @@ namespace Devolutions.Agent.Desktop
 
             Args = args;
 
-            using Mutex mutex = new(false, MutexId);
+            using Mutex mutex = new(false, MutexName);
             const string serviceUri = "RemotingServer";
 
             if (!mutex.WaitOne(0))
@@ -46,7 +52,7 @@ namespace Devolutions.Agent.Desktop
                     IpcChannel clientChannel = new();
                     ChannelServices.RegisterChannel(clientChannel, false);
                     SingleInstance app = (SingleInstance)Activator.GetObject(typeof(SingleInstance),
-                        $"ipc://{MutexId}/{serviceUri}");
+                        $"ipc://{MutexName}/{serviceUri}");
                     app.Execute(args);
                 }
                 catch (Exception e)
@@ -61,7 +67,7 @@ namespace Devolutions.Agent.Desktop
 
             try
             {
-                IpcChannel serverChannel = new(MutexId);
+                IpcChannel serverChannel = new(MutexName);
                 ChannelServices.RegisterChannel(serverChannel, false);
                 RemotingConfiguration.RegisterWellKnownServiceType(typeof(SingleInstance),
                     serviceUri, WellKnownObjectMode.Singleton);
@@ -71,6 +77,13 @@ namespace Devolutions.Agent.Desktop
                 Log.Error(e.ToString());
             }
 
+            Thread exitMonitor = new Thread(() =>
+            {
+                ExitEvent.WaitOne();
+                Application.Exit();
+            });
+
+            exitMonitor.Start();
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -79,6 +92,8 @@ namespace Devolutions.Agent.Desktop
             AppContext = new AppContext();
 
             Application.Run(AppContext);
+
+            ExitEvent.Set();
         }
 
         private static void Application_OnIdle(object sender, EventArgs e)
@@ -91,26 +106,85 @@ namespace Devolutions.Agent.Desktop
 
     public class AppContext : ApplicationContext
     {
+        private readonly ContextMenu contextMenu;
+
         private readonly SynchronizationContext synchronizationContext;
 
         private readonly NotifyIcon trayIcon;
 
         public AppContext()
         {
-            string title =
-                $"{Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyTitleAttribute>().Title} {Assembly.GetExecutingAssembly().GetName().Version}";
+            Version version = Assembly.GetExecutingAssembly().GetName().Version;
 
             this.synchronizationContext = new WindowsFormsSynchronizationContext();
+            this.contextMenu = new();
+            this.contextMenu.Popup += ContextMenuOnPopup;
             this.trayIcon = new NotifyIcon()
             {
                 Icon = Resources.AppIcon,
-                ContextMenu = new ContextMenu(new []
-                {
-                    new MenuItem(title) { Enabled = false},
-                    new MenuItem("Exit", OnExit_Click),
-                }),
+                ContextMenu = contextMenu,
+                Text = $"Devolutions Agent v{version.Major}.{version.Minor}.{version.Build}",
                 Visible = true,
             };
+        }
+
+        private void ContextMenuOnPopup(object sender, EventArgs e)
+        {
+            this.contextMenu.MenuItems.Clear();
+
+            if (Client.Available)
+            {
+                List<(Guid, string)> profiles = new List<(Guid, string)>();
+                profiles.Add((Guid.Empty, Resources.mnuProfileNone));
+
+                MenuItem mnuProfiles = new MenuItem(Resources.mnuProfiles);
+
+                GetProfilesMeResponse currentProfiles = null;
+
+                try
+                {
+                    currentProfiles = Client.CurrentProfiles();
+                    profiles.AddRange(currentProfiles.Available.Select(z => (z, Client.GetProfile(z).Name)));
+                }
+                catch (Exception exception)
+                {
+                    Program.Log.Error(exception.ToString());
+                }
+
+                foreach (var profile in profiles)
+                {
+                    MenuItem mnuProfile = new MenuItem(profile.Item2);
+                    mnuProfile.Tag = profile.Item1.ToString();
+
+                    if (profile.Item1 == currentProfiles?.Active)
+                    {
+                        mnuProfile.Checked = true;
+                    }
+
+                    mnuProfile.Click += (o, _) =>
+                    {
+                        try
+                        {
+                            Guid profileId = new Guid(((MenuItem) o).Tag.ToString());
+                            Client.SetCurrentProfile(profileId);
+                        }
+                        catch (Exception exception)
+                        {
+                            Program.Log.Error(exception.ToString());
+                        }
+                    };
+
+                    mnuProfiles.MenuItems.Add(mnuProfile);
+                }
+
+                this.contextMenu.MenuItems.Add(mnuProfiles);
+            }
+            else
+            {
+                this.contextMenu.MenuItems.Add(new MenuItem(Resources.mnuServiceUnavailable) { Enabled = false });
+            }
+
+            this.contextMenu.MenuItems.Add(new MenuItem(Resources.mnuExit, OnExit_Click));
         }
 
         internal void Dispatch(string[] args)
@@ -139,9 +213,31 @@ namespace Devolutions.Agent.Desktop
                 {
                     case "error":
                     {
-                        // TODO: Better error handling than just HRESULT conversion
-                        title = "Unexpected Error";
-                        text = new Win32Exception(int.Parse(commandArgs.First())).Message;
+                        if (int.TryParse(commandArgs.FirstOrDefault(), out int errorCode))
+                        {
+                            switch (errorCode)
+                            {
+                                case 1260:
+                                {
+                                    title = Resources.msgElevationBlocked;
+                                    text = Resources.msgElevationBlockedDescription;
+                                    break;
+                                }
+
+                                default:
+                                {
+                                    title = Resources.msgElevationFailed;
+                                    text = new Win32Exception(errorCode).Message;
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            title = Resources.msgElevationFailed;
+                            text = Resources.msgUnexpectedErrorDescription;
+                        }
+
                         break;
                     }
 
