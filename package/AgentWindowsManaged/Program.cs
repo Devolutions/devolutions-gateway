@@ -237,7 +237,7 @@ internal class Program
                         {
                             Type = SvcType.ownProcess,
                             // In contrast to Devolutions Gateway, Devolutions Agent uses LocalSystem
-                            // accout to be able to perform administrative operations
+                            // account to be able to perform administrative operations
                             // such as MSI installation (Updating, restarting DevolutionsGateway).
                             Interactive = false,
                             Vital = true,

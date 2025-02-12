@@ -69,5 +69,86 @@ namespace Devolutions.Agent.Desktop.Properties {
                 return ((System.Drawing.Icon)(obj));
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Exit.
+        /// </summary>
+        internal static string mnuExit {
+            get {
+                return ResourceManager.GetString("mnuExit", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to None.
+        /// </summary>
+        internal static string mnuProfileNone {
+            get {
+                return ResourceManager.GetString("mnuProfileNone", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Profiles.
+        /// </summary>
+        internal static string mnuProfiles {
+            get {
+                return ResourceManager.GetString("mnuProfiles", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Service unavailable.
+        /// </summary>
+        internal static string mnuServiceUnavailable {
+            get {
+                return ResourceManager.GetString("mnuServiceUnavailable", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Elevation Blocked.
+        /// </summary>
+        internal static string msgElevationBlocked {
+            get {
+                return ResourceManager.GetString("msgElevationBlocked", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Elevation blocked by the currently selected profile.
+        /// </summary>
+        internal static string msgElevationBlockedDescription {
+            get {
+                return ResourceManager.GetString("msgElevationBlockedDescription", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Elevation Failed.
+        /// </summary>
+        internal static string msgElevationFailed {
+            get {
+                return ResourceManager.GetString("msgElevationFailed", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Unexpected Error.
+        /// </summary>
+        internal static string msgUnexpectedError {
+            get {
+                return ResourceManager.GetString("msgUnexpectedError", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to An unexpected error occurred.
+        /// </summary>
+        internal static string msgUnexpectedErrorDescription {
+            get {
+                return ResourceManager.GetString("msgUnexpectedErrorDescription", resourceCulture);
+            }
+        }
     }
 }
