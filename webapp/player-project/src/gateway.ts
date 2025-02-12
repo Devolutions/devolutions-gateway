@@ -1,4 +1,4 @@
-import { Logger } from "./logging";
+import { Logger } from './logging';
 
 export class GatewayAccessApi {
   recordingInfo = null;

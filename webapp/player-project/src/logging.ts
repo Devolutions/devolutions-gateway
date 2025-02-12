@@ -21,19 +21,11 @@ export namespace Logger {
     enabled = false;
   };
 
-  const formatMessage = (
-    logLevel: LogLevel,
-    message: string,
-    args: unknown[]
-  ): string => {
+  const formatMessage = (logLevel: LogLevel, message: string, args: unknown[]): string => {
     const timestamp = new Date().toISOString();
     const formattedArgs = args.length
       ? ` ${args
-          .map((arg) =>
-            typeof arg === 'object' && arg !== null
-              ? JSON.stringify(arg, null, 2)
-              : String(arg)
-          )
+          .map((arg) => (typeof arg === 'object' && arg !== null ? JSON.stringify(arg, null, 2) : String(arg)))
           .join(' ')}`
       : '';
     return `[${timestamp}] ${logLevel}: ${message}${formattedArgs}`;

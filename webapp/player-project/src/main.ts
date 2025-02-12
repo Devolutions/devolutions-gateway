@@ -4,13 +4,12 @@ import { getPlayer } from './players/index.js';
 import { cleanUpStreamers, getShadowPlayer } from './streamers/index.js';
 import './ws-proxy.ts';
 import { setupI18n, t } from './i18n';
+import { LogLevel, Logger } from './logging.ts';
 import { OnBeforeClose as BeforeWebsocketClose } from './ws-proxy.ts';
-import { Logger, LogLevel } from './logging.ts';
 
 async function main() {
   Logger.setLevel(LogLevel.DEBUG);
-  const { sessionId, token, gatewayAccessUrl, isActive, language } =
-    getSessionDetails();
+  const { sessionId, token, gatewayAccessUrl, isActive, language } = getSessionDetails();
   Logger.info('Accessed From URL', window.location.href);
   Logger.debug('Session started', {
     sessionId,
@@ -40,9 +39,7 @@ async function playSessionShadowing(gatewayAccessApi) {
   try {
     const recordingInfo = await gatewayAccessApi.fetchRecordingInfo();
     const fileType = getFileType(recordingInfo);
-    BeforeWebsocketClose((closeEvent) =>
-      beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi)
-    );
+    BeforeWebsocketClose((closeEvent) => beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi));
 
     getShadowPlayer(fileType).play(gatewayAccessApi);
   } catch (error) {
