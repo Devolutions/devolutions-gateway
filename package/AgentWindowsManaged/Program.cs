@@ -253,13 +253,14 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
-                    new (Features.PEDM_FEATURE, DevolutionsPedmShellExtDll),
-                    new (Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix),
                     new (Features.SESSION_FEATURE, DevolutionsSession)
                 },
                 Dirs = new[]
                 {
-                    new Dir(Features.PEDM_FEATURE, "desktop", new Files(Features.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*"))
+                    new Dir(Features.PEDM_FEATURE, "desktop", new Files(Features.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
+                    new Dir(Features.PEDM_FEATURE, "contextmenu", 
+                        new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll), 
+                        new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix))
                 }
             })),
         };
