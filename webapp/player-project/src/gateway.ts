@@ -1,3 +1,5 @@
+import { Logger } from "./logging";
+
 export class GatewayAccessApi {
   recordingInfo = null;
   gatewayAccessUrl: string;
@@ -16,6 +18,7 @@ export class GatewayAccessApi {
 
   async fetchRecordingInfo() {
     const response = await fetch(this.videoSrcInfoUrl());
+    Logger.debug('Fetching recording info', { response });
     if (!response.ok) {
       throw new Error(`Request failed. Returned status of ${response.status}`);
     }
