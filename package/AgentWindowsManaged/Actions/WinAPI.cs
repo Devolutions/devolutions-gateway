@@ -23,6 +23,8 @@ internal static class WinAPI
 
     internal static uint GENERIC_WRITE = 0x40000000;
 
+    internal static uint MOVEFILE_REPLACE_EXISTING = 0x1;
+
     internal static uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x04;
 
     internal const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
@@ -263,7 +265,7 @@ internal static class WinAPI
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool MoveFileEx(
         [MarshalAs(UnmanagedType.LPWStr)] string lpExistingFileName,
-        IntPtr lpNewFileName,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpNewFileName,
         uint dwFlags
     );
 

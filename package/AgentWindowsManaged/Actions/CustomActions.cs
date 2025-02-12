@@ -61,7 +61,7 @@ namespace DevolutionsAgent.Actions
                     $"{Path.Combine(Path.GetTempPath(), session.Get(AgentProperties.installId).ToString())}.zip";
                 using ZipArchive archive = ZipFile.Open(zipFile, ZipArchiveMode.Create);
 
-                WinAPI.MoveFileEx(zipFile, IntPtr.Zero, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+                WinAPI.MoveFileEx(zipFile, null, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
 
                 foreach (string configFile in ConfigFiles)
                 {
@@ -278,7 +278,7 @@ namespace DevolutionsAgent.Actions
             try
             {
                 string installDir = session.Property(AgentProperties.InstallDir);
-                string dllPath = Path.Combine(installDir, Includes.SHELL_EXT_BINARY_NAME);
+                string dllPath = Path.Combine(installDir, "contextmenu", Includes.SHELL_EXT_BINARY_NAME);
 
                 if (!File.Exists(dllPath))
                 {
@@ -286,6 +286,9 @@ namespace DevolutionsAgent.Actions
                     return ActionResult.Failure;
                 }
 
+                string destinationDllPath = Path.Combine(installDir, Includes.SHELL_EXT_BINARY_NAME);
+                File.Copy(dllPath, destinationDllPath, true);
+                
                 string clsidPath = $"CLSID\\{Includes.SHELL_EXT_CSLID:B}";
 
                 using RegistryKey clsidKey = Registry.ClassesRoot.CreateSubKey(clsidPath);
@@ -306,7 +309,7 @@ namespace DevolutionsAgent.Actions
                     return ActionResult.Failure;
                 }
 
-                inprocKey.SetValue("", dllPath, RegistryValueKind.String);
+                inprocKey.SetValue("", destinationDllPath, RegistryValueKind.String);
                 inprocKey.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
 
                 const string explorerCommandDefaultText = "Run Elevated";
@@ -327,7 +330,7 @@ namespace DevolutionsAgent.Actions
                     commandPath.SetValue("", explorerCommandDefaultText, RegistryValueKind.String);
                     commandPath.SetValue("ExplorerCommandHandler", $"{Includes.SHELL_EXT_CSLID:B}",
                         RegistryValueKind.String);
-                    commandPath.SetValue("MUIVerb", $"{dllPath},-150", RegistryValueKind.String);
+                    commandPath.SetValue("MUIVerb", $"{destinationDllPath},-150", RegistryValueKind.String);
                 }
 
                 return ActionResult.Success;
@@ -561,6 +564,14 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
+                string installDir = session.Property(AgentProperties.InstallDir);
+                string dllPath = Path.Combine(installDir, Includes.SHELL_EXT_BINARY_NAME);
+
+                if (!ScheduleFileDeletion(session, dllPath, true))
+                {
+                    session.Log($"failed to schedule file {dllPath} for deletion");
+                }
+
                 Registry.ClassesRoot.DeleteSubKeyTree($"CLSID\\{Includes.SHELL_EXT_CSLID:B}", false);
 
                 foreach (string extension in explorerCommandExtensions)
@@ -577,6 +588,43 @@ namespace DevolutionsAgent.Actions
             }
 
             return ActionResult.Success;
+        }
+
+        private static bool ScheduleFileDeletion(Session session, string filePath, bool moveToTempDirectory)
+        {
+            bool moveResult = false;
+
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    return moveResult;
+                }
+
+                if (moveToTempDirectory)
+                {
+                    string tempPath = Path.GetTempFileName();
+
+                    // Move the file to the temporary directory. It can be moved even if loaded into memory and locked.
+                    if (!WinAPI.MoveFileEx(filePath, tempPath, WinAPI.MOVEFILE_REPLACE_EXISTING))
+                    {
+                        return moveResult;
+                    }
+
+                    moveResult = WinAPI.MoveFileEx(tempPath, null, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+                }
+                else
+                {
+                    moveResult = WinAPI.MoveFileEx(filePath, null, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+                }
+
+                return moveResult;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to schedule file deletion: {e}");
+                return false;
+            }
         }
     }
 }
