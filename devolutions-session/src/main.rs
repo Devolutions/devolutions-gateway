@@ -98,9 +98,7 @@ pub fn start(config: &Conf) -> anyhow::Result<(Runtime, ShutdownHandle, JoinHand
 async fn spawn_tasks(config: &Conf) -> anyhow::Result<Tasks> {
     let mut tasks = Tasks::new();
 
-    if config.debug.enable_unstable {
-        tasks.register(DvcIoTask::default());
-    }
+    tasks.register(DvcIoTask::default());
 
     Ok(tasks)
 }
