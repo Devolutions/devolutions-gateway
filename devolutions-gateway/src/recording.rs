@@ -596,7 +596,7 @@ impl RecordingManagerTask {
 
             // Notify all the streamers that recording has ended.
             if let Some(notify) = self.recording_end_notifier.get(&id) {
-                notify.notify_one();
+                notify.notify_waiters();
             }
 
             info!(%id, "Start video remuxing operation");
