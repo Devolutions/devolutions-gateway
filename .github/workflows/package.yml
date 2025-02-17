@@ -29,7 +29,7 @@ on:
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
@@ -157,7 +157,7 @@ jobs:
           - os: macos
             runner: macos-latest
           - os: linux
-            runner: ubuntu-20.04
+            runner: ubuntu-latest
         exclude:
           - project: devolutions-gateway
             os: macos

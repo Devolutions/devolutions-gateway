@@ -54,7 +54,7 @@ jobs:
 
   lipo:
     name: build universal ${{ matrix.tool }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     strategy:
       matrix:
@@ -66,10 +66,10 @@ jobs:
 
       - name: Configure runner
         run: |
-          wget -q https://github.com/awakecoding/llvm-prebuilt/releases/download/v2021.2.4/cctools-x86_64-ubuntu-20.04.tar.xz
-          tar -xf cctools-x86_64-ubuntu-20.04.tar.xz -C /tmp
-          sudo mv /tmp/cctools-x86_64-ubuntu-20.04/bin/lipo /usr/local/bin
-          rm -r cctools-x86_64-ubuntu-20.04.tar.xz
+          wget -q https://github.com/awakecoding/llvm-prebuilt/releases/download/v2025.1.0/cctools-x86_64-ubuntu-24.04.tar.xz
+          tar -xf cctools-x86_64-ubuntu-24.04.tar.xz -C /tmp
+          sudo mv /tmp/cctools-x86_64-ubuntu-24.04/bin/lipo /usr/local/bin
+          rm -r cctools-x86_64-ubuntu-24.04.tar.xz
 
       - name: Lipo
         shell: pwsh

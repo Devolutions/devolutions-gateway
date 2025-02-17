@@ -17,7 +17,7 @@ on:
 jobs:
   preflight:
     name: preflight
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
@@ -144,7 +144,7 @@ jobs:
             - os: windows
               runner: windows-2022
             - os: linux
-              runner: ubuntu-20.04
+              runner: ubuntu-latest
 
       steps:
         - name: Checkout ${{ github.repository }}
@@ -292,7 +292,7 @@ jobs:
 
   jetsocat-lipo:
     name: jetsocat macos universal
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     needs: [preflight, jetsocat, jetsocat-merge]
 
     steps:
@@ -302,10 +302,10 @@ jobs:
 
       - name: Configure runner
         run: |
-          wget -q https://github.com/awakecoding/llvm-prebuilt/releases/download/v2021.2.4/cctools-x86_64-ubuntu-20.04.tar.xz
-          tar -xf cctools-x86_64-ubuntu-20.04.tar.xz -C /tmp
-          sudo mv /tmp/cctools-x86_64-ubuntu-20.04/bin/lipo /usr/local/bin
-          rm -r cctools-x86_64-ubuntu-20.04.tar.xz
+          wget -q https://github.com/awakecoding/llvm-prebuilt/releases/download/v2025.1.0/cctools-x86_64-ubuntu-24.04.tar.xz
+          tar -xf cctools-x86_64-ubuntu-24.04.tar.xz -C /tmp
+          sudo mv /tmp/cctools-x86_64-ubuntu-24.04/bin/lipo /usr/local/bin
+          rm -r cctools-x86_64-ubuntu-24.04.tar.xz
 
       - name: Lipo
         shell: pwsh
@@ -989,7 +989,7 @@ jobs:
 
   onedrive:
     name: OneDrive
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
       - preflight # required for needs.preflight.outputs
