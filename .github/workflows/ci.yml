@@ -473,7 +473,11 @@ jobs:
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
-    needs: [preflight, devolutions-gateway-powershell, devolutions-gateway-web-ui]
+    needs:
+      - preflight
+      - devolutions-gateway-powershell
+      - devolutions-gateway-web-ui
+      - devolutions-gateway-player
     if: always() # The webapp can’t be build without secrets that we don’t provide for PRs coming from forks.
     strategy:
       matrix:
@@ -944,7 +948,6 @@ jobs:
       - check-dependencies
       - jetsocat-lipo
       - devolutions-gateway-powershell
-      - devolutions-gateway-player
       - devolutions-gateway
       - devolutions-gateway-merge
       - devolutions-pedm-desktop
