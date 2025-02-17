@@ -1137,6 +1137,7 @@ pub mod dto {
         /// The interval in seconds before a Ping message is sent to the other end.
         ///
         /// Default value is 45.
+        #[serde(default = "ws_keep_alive_interval_default_value")]
         pub ws_keep_alive_interval: u64,
 
         /// Enable unstable features which may break at any point
@@ -1156,7 +1157,7 @@ pub mod dto {
                 capture_path: None,
                 lib_xmf_path: None,
                 enable_unstable: false,
-                ws_keep_alive_interval: 45,
+                ws_keep_alive_interval: ws_keep_alive_interval_default_value(),
             }
         }
     }
@@ -1165,6 +1166,10 @@ pub mod dto {
         pub fn is_default(&self) -> bool {
             Self::default().eq(self)
         }
+    }
+
+    const fn ws_keep_alive_interval_default_value() -> u64 {
+        45
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
