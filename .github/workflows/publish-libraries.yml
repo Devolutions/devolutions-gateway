@@ -14,7 +14,7 @@ on:
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     outputs:
       dry-run: ${{ steps.get-dry-run.outputs.dry-run }}
 
@@ -90,7 +90,7 @@ jobs:
 
   npm-build:
     name: NPM package build
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -115,7 +115,7 @@ jobs:
 
   nuget-publish:
     name: Publish NuGet packages
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     environment: publish-prod
     if: needs.preflight.outputs.dry-run == 'false'
     needs:
@@ -156,7 +156,7 @@ jobs:
 
   npm-publish:
     name: Publish NPM packages
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     environment: publish-prod
     if: needs.preflight.outputs.dry-run == 'false'
     needs:
