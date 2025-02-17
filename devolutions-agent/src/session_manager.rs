@@ -23,7 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
 const SESSION_BINARY: &str = "DevolutionsSession.exe";
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum SessionKind {
+enum SessionKind {
     /// Console session. For example, when you connect to a user session on the local computer
     /// by switching users on the computer.
     Console,
@@ -98,7 +98,7 @@ impl SessionManagerCtx {
     }
 }
 
-pub(crate) struct SessionManager {
+pub struct SessionManager {
     ctx: RwLock<SessionManagerCtx>,
     service_event_tx: mpsc::Sender<AgentServiceEvent>,
     service_event_rx: mpsc::Receiver<AgentServiceEvent>,
@@ -117,7 +117,7 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
-    pub(crate) fn service_event_tx(&self) -> mpsc::Sender<AgentServiceEvent> {
+    pub fn service_event_tx(&self) -> mpsc::Sender<AgentServiceEvent> {
         self.service_event_tx.clone()
     }
 }

@@ -5,15 +5,15 @@ use {ceviche as _, ctrlc as _};
 extern crate tracing;
 
 pub mod config;
-mod log;
-mod remote_desktop;
-pub mod service;
+pub mod log;
+pub mod remote_desktop;
 
 #[cfg(windows)]
-mod session_manager;
+pub mod session_manager;
 
 #[cfg(windows)]
-mod updater;
+pub mod updater;
 
 pub enum CustomAgentServiceEvent {}
+
 pub type AgentServiceEvent = ceviche::ServiceEvent<CustomAgentServiceEvent>;

@@ -17,15 +17,17 @@ use {
 #[macro_use]
 extern crate tracing;
 
+mod service;
+
 use std::env;
 use std::sync::mpsc;
 
 use ceviche::controller::*;
 use ceviche::Service;
-
 use devolutions_agent::config::ConfHandle;
-use devolutions_agent::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 use devolutions_agent::AgentServiceEvent;
+
+use self::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
 const BAD_CONFIG_ERR_CODE: u32 = 1;
 const START_FAILED_ERR_CODE: u32 = 2;
