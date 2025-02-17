@@ -10,12 +10,12 @@ use tokio::sync::oneshot;
 
 use crate::config::ConfHandle;
 
-pub(crate) struct RemoteDesktopTask {
+pub struct RemoteDesktopTask {
     conf_handle: ConfHandle,
 }
 
 impl RemoteDesktopTask {
-    pub(crate) fn new(conf_handle: ConfHandle) -> Self {
+    pub fn new(conf_handle: ConfHandle) -> Self {
         Self { conf_handle }
     }
 }

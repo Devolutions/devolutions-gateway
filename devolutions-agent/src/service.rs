@@ -1,15 +1,15 @@
 use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc;
 
-use crate::config::ConfHandle;
-use crate::log::AgentLog;
-use crate::remote_desktop::RemoteDesktopTask;
-#[cfg(windows)]
-use crate::session_manager::SessionManager;
-#[cfg(windows)]
-use crate::updater::UpdaterTask;
-use crate::AgentServiceEvent;
 use anyhow::Context;
+use devolutions_agent::config::ConfHandle;
+use devolutions_agent::log::AgentLog;
+use devolutions_agent::remote_desktop::RemoteDesktopTask;
+#[cfg(windows)]
+use devolutions_agent::session_manager::SessionManager;
+#[cfg(windows)]
+use devolutions_agent::updater::UpdaterTask;
+use devolutions_agent::AgentServiceEvent;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 #[cfg(windows)]
@@ -36,7 +36,7 @@ enum AgentState {
     },
 }
 
-pub struct AgentService {
+pub(crate) struct AgentService {
     conf_handle: ConfHandle,
     state: AgentState,
     _logger_guard: LoggerGuard,
@@ -44,7 +44,7 @@ pub struct AgentService {
 }
 
 impl AgentService {
-    pub fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
+    pub(crate) fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
         let conf = conf_handle.get_conf();
 
         let logger_guard = devolutions_log::init::<AgentLog>(
@@ -74,7 +74,7 @@ impl AgentService {
         })
     }
 
-    pub fn start(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn start(&mut self) -> anyhow::Result<()> {
         let runtime = runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -119,7 +119,7 @@ impl AgentService {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         match std::mem::replace(&mut self.state, AgentState::Stopped) {
             AgentState::Stopped => {
                 info!("Attempted to stop agent service, but it's already stopped");
@@ -165,7 +165,7 @@ impl AgentService {
         }
     }
 
-    pub fn service_event_tx(&self) -> Option<mpsc::Sender<AgentServiceEvent>> {
+    pub(crate) fn service_event_tx(&self) -> Option<mpsc::Sender<AgentServiceEvent>> {
         self.service_event_tx.clone()
     }
 }
