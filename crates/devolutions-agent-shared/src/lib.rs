@@ -18,20 +18,14 @@ cfg_if! {
         const COMPANY_DIR: &str = "Devolutions";
         const PROGRAM_DIR: &str = "Agent";
         const APPLICATION_DIR: &str = "Devolutions\\Agent";
-
-        pub const GATEWAY_SERVICE_NAME: &str = "DevolutionsGateway";
     } else if #[cfg(target_os = "macos")] {
         const COMPANY_DIR: &str = "Devolutions";
         const PROGRAM_DIR: &str = "Agent";
         const APPLICATION_DIR: &str = "Devolutions Agent";
-
-        pub const GATEWAY_SERVICE_NAME: &str = "devolutions-agent";
     } else {
         const COMPANY_DIR: &str = "devolutions";
         const PROGRAM_DIR: &str = "agent";
         const APPLICATION_DIR: &str = "devolutions-agent";
-
-        pub const GATEWAY_SERVICE_NAME: &str = "devolutions-agent";
     }
 }
 

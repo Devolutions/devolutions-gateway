@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
@@ -10,13 +13,10 @@ use devolutions_gateway::DgwState;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;
-use std::sync::Arc;
-use std::time::Duration;
 use tap::prelude::*;
 use tokio::runtime::{self, Runtime};
 
-pub(crate) use devolutions_agent_shared::GATEWAY_SERVICE_NAME as SERVICE_NAME;
-
+pub(crate) const SERVICE_NAME: &str = "devolutions-gateway";
 pub(crate) const DISPLAY_NAME: &str = "Devolutions Gateway";
 pub(crate) const DESCRIPTION: &str = "Devolutions Gateway service";
 

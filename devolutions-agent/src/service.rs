@@ -16,9 +16,9 @@ use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 use devolutions_pedm::PedmTask;
 use std::time::Duration;
 
-pub const SERVICE_NAME: &str = "devolutions-agent";
-pub const DISPLAY_NAME: &str = "Devolutions Agent";
-pub const DESCRIPTION: &str = "Devolutions Agent service";
+pub(crate) const SERVICE_NAME: &str = "devolutions-agent";
+pub(crate) const DISPLAY_NAME: &str = "Devolutions Agent";
+pub(crate) const DESCRIPTION: &str = "Devolutions Agent service";
 
 struct TasksCtx {
     /// Spawned service tasks
