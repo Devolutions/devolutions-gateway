@@ -1,8 +1,5 @@
 #!/bin/sh
 
-# System-wide package configuration.
-DEFAULTS_FILE="/etc/default/devolutions-gateway"
-
 if [ ! -d /etc/devolutions-gateway ]; then
 	/bin/mkdir /etc/devolutions-gateway
 	/bin/chmod 655 /etc/devolutions-gateway
@@ -10,7 +7,7 @@ fi
 
 if [ -d /run/systemd/system ]; then
 	/usr/bin/devolutions-gateway service register >/dev/null
-	/usr/bin/devolutions-gateway service --config-init-only >/dev/null
-	systemctl restart devolutions-gateway >/dev/null 2>&1
 	systemctl daemon-reload
+	/usr/bin/devolutions-gateway --config-init-only >/dev/null
+	systemctl enable --now devolutions-gateway >/dev/null 2>&1
 fi

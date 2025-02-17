@@ -9,9 +9,6 @@ if [ "$action" != "purge" ] ; then
   exit 0
 fi
 
-# System-wide package configuration.
-DEFAULTS_FILE="/etc/default/devolutions-gateway"
-
-if [ -s "$DEFAULTS_FILE" ]; then
-  rm "$DEFAULTS_FILE" || exit 1
+if [ -d /etc/devolutions-gateway ]; then
+  rm -rf /etc/devolutions-gateway
 fi
