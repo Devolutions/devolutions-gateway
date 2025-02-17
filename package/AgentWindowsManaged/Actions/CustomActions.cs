@@ -229,26 +229,27 @@ namespace DevolutionsAgent.Actions
             return ActionResult.Success;
         }
 
-        static ActionResult EnableAgentFeature(Session session, string feature)
+        static ActionResult ToggleAgentFeature(Session session, string feature, bool enable)
         {
             string path = Path.Combine(ProgramDataDirectory, "agent.json");
 
             try
             {
                 Dictionary<string, object> config = [];
+
                 try
                 {
-                    using var reader = new StreamReader(path);
+                    using StreamReader reader = new StreamReader(path);
                     config = JsonConvert.DeserializeObject<Dictionary<string, object>>(reader.ReadToEnd());
                 }
                 catch (Exception)
                 {
-                    // ignored. Previous config is either invalid or non existent.
+                    // ignored. Previous config is either invalid or non-existent.
                 }
 
-                config[feature] = new Dictionary<string, bool> {{"Enabled", true}};
+                config[feature] = new Dictionary<string, bool> {{"Enabled", enable}};
 
-                using var writer = new StreamWriter(path);
+                using StreamWriter writer = new StreamWriter(path);
                 writer.Write(JsonConvert.SerializeObject(config));
 
                 return ActionResult.Success;
@@ -263,13 +264,25 @@ namespace DevolutionsAgent.Actions
         [CustomAction]
         public static ActionResult InstallPedm(Session session)
         {
-            return EnableAgentFeature(session, "Pedm");
+            return ToggleAgentFeature(session, "Pedm", true);
         }
 
         [CustomAction]
         public static ActionResult InstallSession(Session session)
         {
-            return EnableAgentFeature(session, "Session");
+            return ToggleAgentFeature(session, "Session", true);
+        }
+
+        [CustomAction]
+        public static ActionResult UninstallPedm(Session session)
+        {
+            return ToggleAgentFeature(session, "Pedm", false);
+        }
+
+        [CustomAction]
+        public static ActionResult UninstallSession(Session session)
+        {
+            return ToggleAgentFeature(session, "Session", false);
         }
 
         [CustomAction]
