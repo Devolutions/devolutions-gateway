@@ -105,7 +105,7 @@ internal static class AgentActions
         CustomActions.CreateProgramDataPedmDirectories,
         Return.check,
         When.After, Step.CreateFolders,
-        Condition.Always,
+        Features.PEDM_FEATURE.BeingInstall(),
         Sequence.InstallExecuteSequence);
 
     /// <summary>
@@ -239,13 +239,26 @@ internal static class AgentActions
         CustomActions.InstallPedm
     )
     {
-        Id = new Id("installPedm"),
+        Id = new Id($"CA.{nameof(installPedm)}"),
         Feature = Features.PEDM_FEATURE,
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
-        Step = Step.InstallFiles,
+        Step = new Step(initAgentConfigIfNeeded.Id),
         When = When.After,
         Condition = Features.PEDM_FEATURE.BeingInstall(),
+    };
+
+    private static readonly ElevatedManagedAction uninstallPedm = new(
+        CustomActions.UninstallPedm
+    )
+    {
+        Id = new Id($"CA.{nameof(uninstallPedm)}"),
+        Feature = Features.PEDM_FEATURE,
+        Sequence = Sequence.InstallExecuteSequence,
+        Return = Return.check,
+        Step = Step.StopServices,
+        When = When.After,
+        Condition = Features.PEDM_FEATURE.BeingUninstall(),
     };
 
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
@@ -300,9 +313,22 @@ internal static class AgentActions
         Feature = Features.SESSION_FEATURE,
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
-        Step = Step.InstallFiles,
+        Step = new Step(installPedm.Id),
         When = When.After,
         Condition = Features.SESSION_FEATURE.BeingInstall(),
+    };
+
+    private static readonly ElevatedManagedAction uninstallSession = new(
+        CustomActions.UninstallSession
+    )
+    {
+        Id = new Id($"CA.{nameof(uninstallSession)}"),
+        Feature = Features.SESSION_FEATURE,
+        Sequence = Sequence.InstallExecuteSequence,
+        Return = Return.check,
+        Step = new Step(uninstallPedm.Id),
+        When = When.After,
+        Condition = Features.SESSION_FEATURE.BeingUninstall(),
     };
 
     private static string UseProperties(IEnumerable<IWixProperty> properties)
@@ -336,11 +362,14 @@ internal static class AgentActions
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
+        initAgentConfigIfNeeded,
         installPedm,
+        uninstallPedm,
         registerExplorerCommand,
         registerExplorerCommandRollback,
         unregisterExplorerCommand,
         installSession,
+        uninstallSession,
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,
         shutdownDesktopApp,
