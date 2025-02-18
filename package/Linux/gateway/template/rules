@@ -1,25 +1,10 @@
 #!/usr/bin/make -f
 
-WEBAPP_DIR := $$(pwd)/debian/devolutions-gateway/usr/share/devolutions-gateway/webapp
-LIBXMF_DIR := $$(pwd)/debian/devolutions-gateway/usr/lib/devolutions-gateway
-
 %:
 	dh $@
-override_dh_auto_clean:
-override_dh_auto_configure:
-override_dh_auto_build:
-override_dh_auto_test:
-override_dh_auto_install:
-override_dh_usrlocal:
-	install -D -m 0755 {{ executable }} $$(pwd)/debian/devolutions-gateway/usr/bin/devolutions-gateway
-override_dh_install:
-	dh_install
-	mkdir -p $(WEBAPP_DIR)
-	cp -r {{ dgateway_webclient }} $(WEBAPP_DIR)
-	cp -r {{ dgateway_webplayer }} $(WEBAPP_DIR)
-	mkdir -p $(LIBXMF_DIR)
-	cp {{ dgateway_libxmf }} $(LIBXMF_DIR)/libxmf.so
+
 override_dh_shlibdeps:
 	{{ dh_shlibdeps }}
+
 override_dh_installchangelogs:
 	dh_installchangelogs {{ upstream_changelog }}

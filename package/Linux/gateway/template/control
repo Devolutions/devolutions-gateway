@@ -2,7 +2,7 @@ Source: devolutions-gateway
 Section: non-free/net
 Priority: optional
 Maintainer: {{ packager }} <{{ email }}>
-Build-Depends: debhelper (>= 8.0.0)
+Build-Depends: debhelper-compat (= 13)
 Standards-Version: 3.9.4
 Homepage: {{ website }}
 

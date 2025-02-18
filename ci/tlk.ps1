@@ -643,9 +643,9 @@ class TlkRecipe
         $Env:DEBEMAIL = $Email
 
         $Executable = $null
-        $DGatewayWebClient = $null
-        $DGatewayWebPlayer = $null
-        $DGatewayLibXmf = $null
+        $DGatewayWebClient = $null  # path to the webapp client directory
+        $DGatewayWebPlayer = $null  # path to the webapp player directory
+        $DGatewayLibXmf = $null  # path to libxmf.so
 
         switch ($this.Product) {
             "gateway" {
@@ -726,9 +726,6 @@ class TlkRecipe
         # debian/docs
         Set-Content -Path "$OutputDebianPath/docs" -Value ""
 
-        # debian/compat
-        Set-Content -Path "$OutputDebianPath/compat" -Value "10"
-
         # debian/README.debian
         Remove-Item -Path "$OutputDebianPath/README.debian" -ErrorAction 'SilentlyContinue'
 
@@ -746,19 +743,12 @@ class TlkRecipe
         switch ($this.Product) {
             "gateway" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    executable = $Executable
-                    dgateway_webclient = $DGatewayWebClient
-                    dgateway_webplayer = $DGatewayWebPlayer
-                    dgateway_libxmf = $DGatewayLibXmf
-                    platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
                     upstream_changelog = $DebUpstreamChangelogFile
                 } -OutputFile $RulesFile
             }
             "agent" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    executable = $Executable
-                    platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
                     upstream_changelog = $DebUpstreamChangelogFile
                 } -OutputFile $RulesFile
@@ -821,12 +811,22 @@ class TlkRecipe
 
         $ScriptPath = Join-Path $InputPackagePath "$($this.Product)/debian"
         $PostInstFile = Join-Path $ScriptPath 'postinst'
-        $PreRmFile = Join-Path $ScriptPath 'prerm'
-        $PostRmFile = Join-Path $ScriptPath 'postrm'
-        
-        @($PostInstFile, $PreRmFile, $PostRmFile) | % {
-            $OutputFile = Join-Path $OutputDebianPath (Split-Path $_ -Leaf)
-            Copy-Item $_ $OutputFile
+
+        # Copy to output/product/debian
+        Copy-Item $PostInstFile $OutputDebianPath -Force
+        Copy-Item "$ScriptPath/install" $OutputDebianPath -Force
+
+        # Copy to output/product
+        Copy-Item $Executable $OutputPackagePath -Force
+
+        if ($this.Product -eq "gateway") {
+            # Copy to output/gateway/debian
+            Copy-Item "$ScriptPath/service" $OutputDebianPath -Force
+
+            # Copy to output/gateway
+            Copy-Item $DGatewayWebClient "$OutputPackagePath/client" -Force
+            Copy-Item $DGatewayWebPlayer "$OutputPackagePath/player" -Force
+            Copy-Item $DGatewayLibXmf "$OutputPackagePath/libxmf.so" -Force
         }
 
         $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
@@ -837,6 +837,7 @@ class TlkRecipe
 
         # Disable dpkg-buildpackage stripping as the binary is already stripped.
         $Env:DEB_BUILD_OPTIONS = "nostrip"
+
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
         $RpmUpstreamChangelogFile = Join-Path $OutputPath "changelog_rpm_upstream"
@@ -849,31 +850,23 @@ class TlkRecipe
 
         Write-Host("output destination: $OutputPath/${RpmPkgNameTarget}.rpm")
         $FpmArgs = @(
-            '--force',
-            '--verbose',
-            '-s', 'dir',
-            '-t', 'rpm',
-            '-p', "$OutputPath/${RpmPkgNameTarget}.rpm",
-            '-n', $PkgName,
-            '-v', $PackageVersion,
-            '-d', 'glibc',
-            '--maintainer', "$Packager <$Email>",
-            '--description', $Description,
-            '--url', $Website,
+            '--force'
+            '--verbose'
+            '-s', 'dir'
+            '-t', 'rpm'
+            '-p', "$OutputPath/${RpmPkgNameTarget}.rpm"
+            '-n', $PkgName
+            '-v', $PackageVersion
+            '-d', 'glibc'
+            '--maintainer', "$Packager <$Email>"
+            '--description', $Description
+            '--url', $Website
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
-            '--rpm-changelog', $RpmPackagingChangelogFile
-        )
-
-        if ($this.Product -eq "gateway") {
-            $FpmArgs += @(
-                '--after-install', $PostInstFile,
-                '--before-remove', $PreRmFile,
-                '--after-remove', $PostRmFile
-            )
-        }
-
-        $FpmArgs += @(
+            '--rpm-changelog', $RpmPackagingChangelogFile,
+             '--after-install', "$InputPackagePath/$($this.Product)/rpm/postinst"
+            '--before-remove', "$InputPackagePath/$($this.Product)/rpm/prerm"
+            '--after-remove', "$InputPackagePath/$($this.Product)/rpm/postrm"
             '--'
             "$Executable=/usr/bin/$PkgName"
             "$RpmUpstreamChangelogFile=/usr/share/doc/$PkgName/ChangeLog"
