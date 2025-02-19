@@ -8,12 +8,11 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _agent-installer_: disable restart manager in Agent MSI ([#1214](https://github.com/Devolutions/devolutions-gateway/issues/1214)) ([0177aed842](https://github.com/Devolutions/devolutions-gateway/commit/0177aed842570009d11d902fd2ca52f966e74fc8)) 
 
-  The restart manager is intended to reduce reboots due to locked files;
-  and will attempt to shutdown and relaunch executables that are using
-  files the installer will delete and recreate. It prompts the user
-  interactively in this case and offers them the choice to attempt a
-  shutdown/restart of the relevant applications (requires that the
-  applications integrate with the restart manager) or to allow a reboot.
+  The restart manager is intended to reduce the number of reboots caused by
+  locked files. It attempts to shutdown and relaunch executables that are using
+  locked files required by the installer. An interactive prompt is shown to the
+  user offering a choice between shutdown/restart of the application (as long as
+  the application is integrated with the restart manager) or to reboot.
 
 ### Bug Fixes
 
@@ -30,9 +29,9 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   The PEDM/Session feature toggle was manipulating `agent.json` _after_
   `InstallFiles`.
   
-  The action that does an initialization of the `agent.json` was not
-  actually added to the custom actions, and in any case it was sequenced
-  _before_ `StartServices` (which is _after_ `InstallFiles`).
+  The action that initializes `agent.json` was not actually added to the custom
+  actions, and in any case it was sequenced _before_ `StartServices` (which is
+  _after_ `InstallFiles`).
 
 ## 2025.1.1 (2025-02-05)
 
