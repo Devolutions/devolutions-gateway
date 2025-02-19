@@ -1,0 +1,4 @@
+devolutions-gateway /usr/bin/
+client /usr/share/devolutions-gateway/webapp/
+player /usr/share/devolutions-gateway/webapp/
+libxmf.so /usr/lib/devolutions-gateway/
