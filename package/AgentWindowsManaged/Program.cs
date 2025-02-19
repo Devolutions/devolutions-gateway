@@ -420,6 +420,13 @@ internal class Program
             e.Result = ActionResult.UserExit;
         }
 
-        e.Session["ADDLOCAL"] = Helpers.AppSearch.InstalledFeatures.Select(x => x.FeatureName).JoinBy(",");
+        FeatureList features = new FeatureList(Helpers.AppSearch.InstalledFeatures);
+
+        if (installedVersion is null)
+        {
+            features.Add(Features.AGENT_UPDATER_FEATURE.Id);
+        }
+
+        e.Session["ADDLOCAL"] = features.ToString();
     }
 }
