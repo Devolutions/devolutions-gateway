@@ -17,11 +17,9 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Bug Fixes
 
-- _dgw_: fix an issue where 'Unknown error' was displayed at te end of recording playback ([#1220](https://github.com/Devolutions/devolutions-gateway/issues/1220)) ([46a551848d](https://github.com/Devolutions/devolutions-gateway/commit/46a551848da5d125b344176e616c610e7ea520af)) 
+- _dgw_: fix an issue where 'Unknown error' was displayed at the end of recording playback ([#1220](https://github.com/Devolutions/devolutions-gateway/issues/1220)) ([46a551848d](https://github.com/Devolutions/devolutions-gateway/commit/46a551848da5d125b344176e616c610e7ea520af)) 
 
-- _dgw_: fix an issue where recording ended but the streaming task was keeping running ([#1222](https://github.com/Devolutions/devolutions-gateway/issues/1222)) ([404ba8aa11](https://github.com/Devolutions/devolutions-gateway/commit/404ba8aa11a33b3772ee359a76d0c911f84992f3)) 
-
-  This was resulting in streaming client not received correct update of the streaming state.
+- _dgw_: fix an issue where recording ended but the streaming task was not terminated ([#1222](https://github.com/Devolutions/devolutions-gateway/issues/1222)) ([404ba8aa11](https://github.com/Devolutions/devolutions-gateway/commit/404ba8aa11a33b3772ee359a76d0c911f84992f3)) 
 
 - _dgw_: revert service name to "devolutions-gateway" on Linux ([#1226](https://github.com/Devolutions/devolutions-gateway/issues/1226)) ([5b4c2160f4](https://github.com/Devolutions/devolutions-gateway/commit/5b4c2160f4ca19c76a1eb9ec3d615604b99d47ed)) 
 
