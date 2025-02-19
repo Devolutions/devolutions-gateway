@@ -7,10 +7,3 @@ if [ ! -d /etc/devolutions-agent ]; then
 	/bin/mkdir /etc/devolutions-agent
 	/bin/chmod 655 /etc/devolutions-agent
 fi
-
-if [ -d /run/systemd/system ]; then
-	/usr/bin/devolutions-agent service register >/dev/null
-	/usr/bin/devolutions-agent service config init >/dev/null
-	systemctl restart devolutions-agent >/dev/null 2>&1
-	systemctl daemon-reload
-fi
