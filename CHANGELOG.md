@@ -2,7 +2,38 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
-## 2025.1.2 (2025-02-05)
+## 2025.1.2 (2025-02-20)
+
+### Features
+
+- _agent-installer_: disable restart manager in Agent MSI ([#1214](https://github.com/Devolutions/devolutions-gateway/issues/1214)) ([0177aed842](https://github.com/Devolutions/devolutions-gateway/commit/0177aed842570009d11d902fd2ca52f966e74fc8)) 
+
+  The restart manager is intended to reduce the number of reboots caused by
+  locked files. It attempts to shutdown and relaunch executables that are using
+  locked files required by the installer. An interactive prompt is shown to the
+  user offering a choice between shutdown/restart of the application (as long as
+  the application is integrated with the restart manager) or to reboot.
+
+### Bug Fixes
+
+- _dgw_: fix an issue where 'Unknown error' was displayed at the end of recording playback ([#1220](https://github.com/Devolutions/devolutions-gateway/issues/1220)) ([46a551848d](https://github.com/Devolutions/devolutions-gateway/commit/46a551848da5d125b344176e616c610e7ea520af)) 
+
+- _dgw_: fix an issue where recording ended but the streaming task was not terminated ([#1222](https://github.com/Devolutions/devolutions-gateway/issues/1222)) ([404ba8aa11](https://github.com/Devolutions/devolutions-gateway/commit/404ba8aa11a33b3772ee359a76d0c911f84992f3)) 
+
+- _dgw_: revert service name to "devolutions-gateway" on Linux ([#1226](https://github.com/Devolutions/devolutions-gateway/issues/1226)) ([5b4c2160f4](https://github.com/Devolutions/devolutions-gateway/commit/5b4c2160f4ca19c76a1eb9ec3d615604b99d47ed)) 
+
+  The service name was mistakenly renamed to "devolutions-agent" in the previous release.
+
+- _agent-installer_: prevent invalid configuration due to installer sequencing ([#1229](https://github.com/Devolutions/devolutions-gateway/issues/1229)) ([d102dc22fb](https://github.com/Devolutions/devolutions-gateway/commit/d102dc22fb17373f2a3f841032fa9208e016f607)) 
+
+  The PEDM/Session feature toggle was manipulating `agent.json` _after_
+  `InstallFiles`.
+  
+  The action that initializes `agent.json` was not actually added to the custom
+  actions, and in any case it was sequenced _before_ `StartServices` (which is
+  _after_ `InstallFiles`).
+
+## 2025.1.1 (2025-02-05)
 
 ### Bug Fixes
 
