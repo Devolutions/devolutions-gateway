@@ -806,8 +806,18 @@ class TlkRecipe
         Copy-Item $PostInstFile $OutputDebianPath -Force
         Copy-Item "$ScriptPath/install" $OutputDebianPath -Force
 
+        # print contents of debian directory
+        Write-Host "Contents of output debian directory: $OutputDebianPath"
+        Get-ChildItem -Path $OutputDebianPath | ForEach-Object { Write-Host $_.FullName }
+
+        # print contents of parent of Executable
+        Write-Host "Contents of parent directory of Executable: $Executable"
+        Get-ChildItem -Path (Split-Path $Executable) | ForEach-Object { Write-Host $_.FullName }
+
         # Copy to output/product
+        Write-Host "Copying $Executable to $OutputPackagePath"
         Copy-Item $Executable $OutputPackagePath -Force
+
 
         if ($this.Product -eq "gateway") {
             # Copy to output/gateway/debian
