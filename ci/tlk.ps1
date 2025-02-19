@@ -740,20 +740,10 @@ class TlkRecipe
 
         $DebUpstreamChangelogFile = Join-Path $OutputPath "changelog_deb_upstream"
         
-        switch ($this.Product) {
-            "gateway" {
-                Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    dh_shlibdeps = $DhShLibDepsOverride
-                    upstream_changelog = $DebUpstreamChangelogFile
-                } -OutputFile $RulesFile
-            }
-            "agent" {
-                Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
-                    dh_shlibdeps = $DhShLibDepsOverride
-                    upstream_changelog = $DebUpstreamChangelogFile
-                } -OutputFile $RulesFile
-            }
-        }
+        Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
+            dh_shlibdeps = $DhShLibDepsOverride
+            upstream_changelog = $DebUpstreamChangelogFile
+        } -OutputFile $RulesFile
 
         # debian/control
         $ControlFile = Join-Path $OutputDebianPath "control"
@@ -863,7 +853,7 @@ class TlkRecipe
             '--url', $Website
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
-            '--rpm-changelog', $RpmPackagingChangelogFile,
+            '--rpm-changelog', $RpmPackagingChangelogFile
              '--after-install', "$InputPackagePath/$($this.Product)/rpm/postinst"
             '--before-remove', "$InputPackagePath/$($this.Product)/rpm/prerm"
             '--after-remove', "$InputPackagePath/$($this.Product)/rpm/postrm"
@@ -885,10 +875,17 @@ class TlkRecipe
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
             $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
+            Write-Host "OutputPath: $OutputPath"
+            Write-Host "TargetOutputPath: $TargetOutputPath"
+            Write-Host "DebPkgNameTarget: $DebPkgNameTarget"
+            Write-Host "OutputPath contents:"
+            Get-ChildItem -Path $OutputPath | ForEach-Object { Write-Host $_.FullName }
             New-Item -Path $TargetOutputPath -ItemType 'Directory' -Force | Out-Null
             Copy-Item "$OutputPath/${DebPkgNameTarget}.deb" "$TargetOutputPath/${DebPkgNameTarget}.deb"
             Copy-Item "$OutputPath/${DebPkgNameTarget}.changes" "$TargetOutputPath/${DebPkgNameTarget}.changes"
             Copy-Item "$OutputPath/${RpmPkgNameTarget}.rpm" "$TargetOutputPath/${RpmPkgNameTarget}.rpm"
+            Write-Host "TargetOutputPath contents:"
+            Get-ChildItem -Path $TargetOutputPath | ForEach-Object { Write-Host $_.FullName }
         }
 
         Pop-Location
