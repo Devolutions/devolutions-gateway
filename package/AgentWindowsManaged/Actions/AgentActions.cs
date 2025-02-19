@@ -235,30 +235,15 @@ internal static class AgentActions
         Execute = Execute.rollback,
     };
 
-    private static readonly ElevatedManagedAction installPedm = new(
-        CustomActions.InstallPedm
+    private static readonly ElevatedManagedAction configureFeatures = new(
+        CustomActions.ConfigureFeatures
     )
     {
-        Id = new Id($"CA.{nameof(installPedm)}"),
-        Feature = Features.PEDM_FEATURE,
+        Id = new Id($"CA.{nameof(configureFeatures)}"),
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
-        Step = new Step(initAgentConfigIfNeeded.Id),
-        When = When.After,
-        Condition = Features.PEDM_FEATURE.BeingInstall(),
-    };
-
-    private static readonly ElevatedManagedAction uninstallPedm = new(
-        CustomActions.UninstallPedm
-    )
-    {
-        Id = new Id($"CA.{nameof(uninstallPedm)}"),
-        Feature = Features.PEDM_FEATURE,
-        Sequence = Sequence.InstallExecuteSequence,
-        Return = Return.check,
-        Step = Step.StopServices,
-        When = When.After,
-        Condition = Features.PEDM_FEATURE.BeingUninstall(),
+        Step = Step.StartServices,
+        When = When.Before
     };
 
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
@@ -305,32 +290,6 @@ internal static class AgentActions
         Condition = Features.PEDM_FEATURE.BeingUninstall(),
     };
 
-    private static readonly ElevatedManagedAction installSession = new(
-        CustomActions.InstallSession
-    )
-    {
-        Id = new Id("installSession"),
-        Feature = Features.SESSION_FEATURE,
-        Sequence = Sequence.InstallExecuteSequence,
-        Return = Return.check,
-        Step = new Step(installPedm.Id),
-        When = When.After,
-        Condition = Features.SESSION_FEATURE.BeingInstall(),
-    };
-
-    private static readonly ElevatedManagedAction uninstallSession = new(
-        CustomActions.UninstallSession
-    )
-    {
-        Id = new Id($"CA.{nameof(uninstallSession)}"),
-        Feature = Features.SESSION_FEATURE,
-        Sequence = Sequence.InstallExecuteSequence,
-        Return = Return.check,
-        Step = new Step(uninstallPedm.Id),
-        When = When.After,
-        Condition = Features.SESSION_FEATURE.BeingUninstall(),
-    };
-
     private static string UseProperties(IEnumerable<IWixProperty> properties)
     {
         if (!properties?.Any() ?? false)
@@ -358,18 +317,15 @@ internal static class AgentActions
         checkNetFxInstalledVersion,
         getInstallDirFromRegistry,
         setArpInstallLocation,
+        configureFeatures,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
         initAgentConfigIfNeeded,
-        installPedm,
-        uninstallPedm,
         registerExplorerCommand,
         registerExplorerCommandRollback,
         unregisterExplorerCommand,
-        installSession,
-        uninstallSession,
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,
         shutdownDesktopApp,

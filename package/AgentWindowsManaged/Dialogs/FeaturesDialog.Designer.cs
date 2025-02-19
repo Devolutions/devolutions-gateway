@@ -35,7 +35,6 @@ namespace DevolutionsAgent.Dialogs
             this.description = new System.Windows.Forms.Label();
             this.featuresTree = new System.Windows.Forms.ListView();
             this.label3 = new System.Windows.Forms.Label();
-            this.reset = new System.Windows.Forms.LinkLabel();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -63,7 +62,6 @@ namespace DevolutionsAgent.Dialogs
             this.middlePanel.Controls.Add(this.descriptionPanel);
             this.middlePanel.Controls.Add(this.featuresTree);
             this.middlePanel.Controls.Add(this.label3);
-            this.middlePanel.Controls.Add(this.reset);
             this.middlePanel.Location = new System.Drawing.Point(0, 65);
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(494, 241);
@@ -99,9 +97,9 @@ namespace DevolutionsAgent.Dialogs
             this.featuresTree.CheckBoxes = true;
             this.featuresTree.HideSelection = false;
             this.featuresTree.Location = new System.Drawing.Point(14, 28);
-            this.featuresTree.Name = "featuresTree";
             this.featuresTree.MultiSelect = false;
-            this.featuresTree.Size = new System.Drawing.Size(270, 186);
+            this.featuresTree.Name = "featuresTree";
+            this.featuresTree.Size = new System.Drawing.Size(280, 186);
             this.featuresTree.TabIndex = 0;
             this.featuresTree.UseCompatibleStateImageBehavior = false;
             this.featuresTree.View = System.Windows.Forms.View.List;
@@ -118,19 +116,6 @@ namespace DevolutionsAgent.Dialogs
             this.label3.Size = new System.Drawing.Size(98, 13);
             this.label3.TabIndex = 1;
             this.label3.Text = "[CustomizeDlgText]";
-            // 
-            // reset
-            // 
-            this.reset.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.reset.AutoSize = true;
-            this.reset.BackColor = System.Drawing.Color.Transparent;
-            this.reset.Location = new System.Drawing.Point(17, 220);
-            this.reset.Name = "reset";
-            this.reset.Size = new System.Drawing.Size(105, 13);
-            this.reset.TabIndex = 9;
-            this.reset.TabStop = true;
-            this.reset.Text = "[CustomizeDlgReset]";
-            this.reset.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.Reset_LinkClicked);
             // 
             // topBorder
             // 
@@ -305,7 +290,6 @@ namespace DevolutionsAgent.Dialogs
         private Panel bottomPanel;
         private Panel descriptionPanel;
         private Label description;
-        private LinkLabel reset;
         private Label label3;
         private Panel border1;
         private Panel topBorder;

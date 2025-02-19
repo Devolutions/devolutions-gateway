@@ -2,7 +2,6 @@ using DevolutionsAgent.Dialogs;
 using Microsoft.Deployment.WindowsInstaller;
 using System;
 using System.Drawing;
-using System.Runtime.InteropServices;
 using System.Security.Principal;
 using DevolutionsAgent.Helpers;
 using DevolutionsAgent.Properties;
@@ -15,7 +14,7 @@ public partial class ProgressDialog : AgentDialog, IProgressDialog
 {
     private static Icon shieldIcon;
 
-    public static Icon ShieldLarge => shieldIcon ??= StockIcon.GetStockIcon(StockIcon.SIID_SHIELD, StockIcon.SHGSI_LARGEICON);
+    public static Icon ShieldLarge => shieldIcon ??= StockIcon.GetStockIcon(StockIcon.StockIconId.Shield);
 
     public ProgressDialog()
     {

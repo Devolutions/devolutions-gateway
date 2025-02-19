@@ -1,5 +1,6 @@
 using Microsoft.Deployment.WindowsInstaller;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -12,20 +13,24 @@ namespace DevolutionsAgent.Dialogs;
 
 public partial class FeaturesDialog : AgentDialog
 {
-    FeatureItem[] features;
+    private FeatureItem[] features;
+
+    private ImageList imageList = new ImageList();
 
     public FeaturesDialog()
     {
         InitializeComponent();
-
         this.label1.MakeTransparentOn(banner);
         this.label2.MakeTransparentOn(banner);
+
+        this.imageList.ImageSize = new Size(1, 20);
 
         this.featuresTree.Columns.Clear();
         this.featuresTree.Columns.Add(string.Empty, -1, HorizontalAlignment.Left);
         this.featuresTree.Columns.Add(string.Empty, -1, HorizontalAlignment.Left);
         this.featuresTree.View = View.Details;
         this.featuresTree.HeaderStyle = ColumnHeaderStyle.None;
+        this.featuresTree.SmallImageList = this.imageList;
     }
 
     private void FeaturesDialog_Load(object sender, EventArgs e)
@@ -35,65 +40,76 @@ public partial class FeaturesDialog : AgentDialog
         BuildFeaturesHierarchy();
     }
 
+    private ListViewItem CreateFeatureListItem(FeatureItem featureItem, bool addLocal, bool remove, int level = 0)
+    {
+        ListViewItem view = new ListViewItem
+        {
+            Text = featureItem.Title,
+            Tag = featureItem
+        };
+
+        featureItem.View = view;
+
+        if (addLocal)
+        {
+            view.Checked = true;
+        }
+
+        if (remove)
+        {
+            view.Checked = false;
+        }
+
+        if (featureItem.DisallowAbsent)
+        {
+            view.Checked = true;
+            view.ForeColor = SystemColors.GrayText;
+        }
+
+        if (Features.ExperimentalFeatures.Any(x => x.Id == featureItem.Name))
+        {
+            view.UseItemStyleForSubItems = false;
+            view.SubItems.Add(I18n(Strings.ExperimentalLabel));
+            view.SubItems[1].BackColor = Color.Yellow;
+        }
+
+        view.IndentCount = level * 10;
+
+        return view;
+    }
+
     private void BuildFeaturesHierarchy()
     {
         this.features = Runtime.Session.Features;
-        
-        FeatureItem[] rootItems = this.features.OrderBy(x => x.Title).ToArray();
 
         string[] addLocal = Runtime.Session["ADDLOCAL"].Split(',');
         string[] remove = Runtime.Session["REMOVE"].Split(',');
 
-        foreach (FeatureItem rootItem in rootItems)
+        List<FeatureItem> featureItems = new();
+
+        foreach (FeatureItem featureItem in this.features.OrderBy(x => x.Title).Where(x => x.Parent is null))
         {
-            ListViewItem view = new ListViewItem
+            if (!featureItem.ParentName.IsEmpty())
             {
-                Text = rootItem.Title,
-                Tag = rootItem
-            };
-
-            if (rootItem.DisallowAbsent)
-            {
-                view.ForeColor = SystemColors.GrayText;
-                view.BackColor = SystemColors.InactiveBorder;
+                continue;
             }
 
-            rootItem.View = view;
+            featureItem.View = CreateFeatureListItem(featureItem, addLocal.Contains(featureItem.Name), remove.Contains(featureItem.Name));
+            featureItems.Add(featureItem);
 
-            if (addLocal.Contains(rootItem.Name))
+            foreach (FeatureItem childFeature in this.features.Where(x => x.ParentName == featureItem.Name))
             {
-                view.Checked = true;
-            }
-
-            if (remove.Contains(rootItem.Name))
-            {
-                view.Checked = false;
-            }
-
-            if (rootItem.DisallowAbsent)
-            {
-                view.Checked = true;
-            }
-
-            if (Features.ExperimentalFeatures.Any(x => x.Id == rootItem.Name))
-            {
-                view.UseItemStyleForSubItems = false;
-                view.SubItems.Add(I18n(Strings.ExperimentalLabel));
-                view.SubItems[1].BackColor = Color.Yellow;
+                childFeature.View = CreateFeatureListItem(childFeature, addLocal.Contains(childFeature.Name), remove.Contains(childFeature.Name), level: 1);
+                featureItems.Add(childFeature);
             }
         }
 
-        rootItems.Where(x => x.Display != FeatureDisplay.hidden)
+        featureItems.Where(x => x.Display != FeatureDisplay.hidden)
                  .Select(x => x.View)
                  .Cast<ListViewItem>()
                  .ForEach(featuresTree.Items.Add);
 
         this.featuresTree.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
-    }
-
-    private void Reset_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-    {
-        features.ForEach(ResetViewChecked);
     }
 
     // ReSharper disable once RedundantOverriddenMember
@@ -150,20 +166,5 @@ public partial class FeaturesDialog : AgentDialog
     private static bool IsViewChecked(FeatureItem feature)
     {
         return feature.View is ListViewItem {Checked: true};
-    }
-
-    private static void ResetViewChecked(FeatureItem feature)
-    {
-        if (feature.View is not ListViewItem item)
-        {
-            return;
-        }
-
-        item.Checked = DefaultIsToBeInstalled(feature);
-    }
-
-    private static bool DefaultIsToBeInstalled(FeatureItem feature)
-    {
-        return feature.RequestedState != InstallState.Absent;
     }
 }

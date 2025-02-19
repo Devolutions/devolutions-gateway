@@ -27,6 +27,14 @@
           "text": "Install the Devolutions Agent service"
         },
         {
+          "id": "FeatureAgentUpdaterName",
+          "text": "Devolutions Gateway Updater"
+        },
+        {
+          "id": "FeatureAgentUpdaterDescription",
+          "text": "Enable the Devolutions Gateway updater"
+        },
+        {
           "id": "FeaturePedmName",
           "text": "Devolutions PEDM"
         },

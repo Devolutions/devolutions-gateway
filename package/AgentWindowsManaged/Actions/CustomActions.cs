@@ -262,27 +262,16 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
-        public static ActionResult InstallPedm(Session session)
+        public static ActionResult ConfigureFeatures(Session session)
         {
-            return ToggleAgentFeature(session, "Pedm", true);
-        }
+            foreach (Feature feature in (Feature[]) [Features.SESSION_FEATURE, Features.PEDM_FEATURE, Features.AGENT_UPDATER_FEATURE])
+            {
+                bool enable = session.IsFeatureEnabled(feature.Id);
+                string jsonId = feature.Id.Substring(Features.FEATURE_ID_PREFIX.Length);
+                ToggleAgentFeature(session, jsonId, enable);
+            }
 
-        [CustomAction]
-        public static ActionResult InstallSession(Session session)
-        {
-            return ToggleAgentFeature(session, "Session", true);
-        }
-
-        [CustomAction]
-        public static ActionResult UninstallPedm(Session session)
-        {
-            return ToggleAgentFeature(session, "Pedm", false);
-        }
-
-        [CustomAction]
-        public static ActionResult UninstallSession(Session session)
-        {
-            return ToggleAgentFeature(session, "Session", false);
+            return ActionResult.Success;
         }
 
         [CustomAction]
