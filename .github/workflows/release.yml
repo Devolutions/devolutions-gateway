@@ -226,7 +226,7 @@ jobs:
         shell: pwsh
         run: |
           # workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
-          # FIXME: I suspect this line is no longer useful anymore.
+          # FIXME: I suspect this line is no longer required.
           Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
           # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
