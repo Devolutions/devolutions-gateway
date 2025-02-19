@@ -815,8 +815,12 @@ class TlkRecipe
         Get-ChildItem -Path (Split-Path $Executable) | ForEach-Object { Write-Host $_.FullName }
 
         # Copy to output/product
-        Write-Host "Copying $Executable to $OutputPackagePath"
-        Copy-Item $Executable $OutputPackagePath -Force
+        $binName = switch ($this.Product) {
+            "gateway" { "devolutions-gateway" }
+            "agent" { "devolutions-agent" }
+        }
+        Write-Host "Copying $Executable to $binName"
+        Copy-Item $Executable "$OutputPackagePath/$binName" -Force
 
 
         if ($this.Product -eq "gateway") {
