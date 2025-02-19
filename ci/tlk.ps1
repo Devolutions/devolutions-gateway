@@ -806,22 +806,13 @@ class TlkRecipe
         Copy-Item $PostInstFile $OutputDebianPath -Force
         Copy-Item "$ScriptPath/install" $OutputDebianPath -Force
 
-        # print contents of debian directory
-        Write-Host "Contents of output debian directory: $OutputDebianPath"
-        Get-ChildItem -Path $OutputDebianPath | ForEach-Object { Write-Host $_.FullName }
-
-        # print contents of parent of Executable
-        Write-Host "Contents of parent directory of Executable: $Executable"
-        Get-ChildItem -Path (Split-Path $Executable) | ForEach-Object { Write-Host $_.FullName }
-
         # Copy to output/product
         $binName = switch ($this.Product) {
             "gateway" { "devolutions-gateway" }
             "agent" { "devolutions-agent" }
         }
-        Write-Host "Copying $Executable to $binName"
-        Copy-Item $Executable "$OutputPackagePath/$binName" -Force
 
+        Copy-Item $Executable "$OutputPackagePath/$binName" -Force
 
         if ($this.Product -eq "gateway") {
             # Copy to output/gateway/debian
@@ -852,7 +843,6 @@ class TlkRecipe
         $s = New-Changelog -Format 'RpmPackaging' -InputFile $UpstreamChangelogFile -Packager $Packager -Email $Email
         Set-Content -Path $RpmPackagingChangelogFile -Value $s
 
-        Write-Host("output destination: $OutputPath/${RpmPkgNameTarget}.rpm")
         $FpmArgs = @(
             '--force'
             '--verbose'
@@ -889,17 +879,10 @@ class TlkRecipe
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
             $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
-            Write-Host "OutputPath: $OutputPath"
-            Write-Host "TargetOutputPath: $TargetOutputPath"
-            Write-Host "DebPkgNameTarget: $DebPkgNameTarget"
-            Write-Host "OutputPath contents:"
-            Get-ChildItem -Path $OutputPath | ForEach-Object { Write-Host $_.FullName }
             New-Item -Path $TargetOutputPath -ItemType 'Directory' -Force | Out-Null
             Copy-Item "$OutputPath/${DebPkgNameTarget}.deb" "$TargetOutputPath/${DebPkgNameTarget}.deb"
             Copy-Item "$OutputPath/${DebPkgNameTarget}.changes" "$TargetOutputPath/${DebPkgNameTarget}.changes"
             Copy-Item "$OutputPath/${RpmPkgNameTarget}.rpm" "$TargetOutputPath/${RpmPkgNameTarget}.rpm"
-            Write-Host "TargetOutputPath contents:"
-            Get-ChildItem -Path $TargetOutputPath | ForEach-Object { Write-Host $_.FullName }
         }
 
         Pop-Location
