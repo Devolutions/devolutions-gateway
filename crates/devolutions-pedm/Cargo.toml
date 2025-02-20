@@ -38,6 +38,7 @@ tower-http = { version = "0.5", features = ["timeout"] }
 parking_lot = "0.12"
 cfg-if = "1.0"
 uuid = "1"
+dunce = "1.0"
 
 [lints]
 workspace = true

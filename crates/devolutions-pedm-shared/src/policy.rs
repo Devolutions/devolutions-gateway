@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -147,8 +146,8 @@ where
     for<'a> PathBuf: From<&'a T>,
 {
     fn is_match(&self, base: &T) -> bool {
-        let base = fs::canonicalize(PathBuf::from(base));
-        let data = self.data.canonicalize();
+        let base = dunce::canonicalize(PathBuf::from(base));
+        let data = dunce::canonicalize(&self.data);
 
         match (base, data) {
             (Ok(base), Ok(data)) => match &self.kind {

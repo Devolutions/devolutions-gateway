@@ -22,6 +22,7 @@ devolutions-pedm-client-http = { path = "./devolutions-pedm-client-http", option
 tower = { version = "0.3", optional = true } # old version required for OpenAPI generator
 pin-project = { version = "1.1", optional = true }
 uuid = { version = "1", features = ["v4", "serde"]}
+dunce = "1.0"
 
 [features]
 pedm_client = ["hyper", "serde_json", "tokio", "win-api-wrappers", "policy", "serde", "devolutions-pedm-client-http", "tower", "pin-project", "anyhow"]
