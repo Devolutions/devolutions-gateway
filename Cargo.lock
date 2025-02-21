@@ -1255,6 +1255,7 @@ dependencies = [
  "devolutions-gateway-task",
  "devolutions-pedm-shared",
  "digest",
+ "dunce",
  "hyper 1.5.0",
  "hyper-util",
  "parking_lot",
@@ -1305,6 +1306,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "devolutions-pedm-client-http",
+ "dunce",
  "glob",
  "hyper 0.14.31",
  "pin-project 1.1.7",

@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use axum::{Extension, Json};
@@ -77,8 +76,7 @@ fn win_canonicalize(path: &Path, token: Option<&Token>) -> Result<PathBuf, Error
     let environment = environment_block(token, false)?;
 
     let path = expand_environment_path(path, &environment)?;
-
-    Ok(fs::canonicalize(path)?)
+    Ok(dunce::canonicalize(path)?)
 }
 
 pub(crate) async fn post_launch(
