@@ -210,8 +210,8 @@ jobs:
         if: runner.os == 'Linux'
         with:
           sysroots: |
-            - ubuntu-20.04-amd64
-            - ubuntu-20.04-arm64
+            - ubuntu-18.04-amd64
+            - ubuntu-18.04-arm64
           cargo_env_scripts: true
 
       - name: Configure Linux (arm) runner
@@ -270,7 +270,7 @@ jobs:
             $LinuxArch = @{'x86_64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
             $RustArch = @{'x86_64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
             $RustTarget = "$RustArch-unknown-linux-gnu"
-            $Env:SYSROOT_NAME = "ubuntu-20.04-$LinuxArch"
+            $Env:SYSROOT_NAME = "ubuntu-18.04-$LinuxArch"
             . "$HOME/.cargo/cbake/${RustTarget}-enter.ps1"
             $Env:AWS_LC_SYS_CMAKE_BUILDER="true"
           }
@@ -556,8 +556,8 @@ jobs:
         if: runner.os == 'Linux'
         with:
           sysroots: |
-            - ubuntu-20.04-amd64
-            - ubuntu-20.04-arm64
+            - ubuntu-18.04-amd64
+            - ubuntu-18.04-arm64
           cargo_env_scripts: true
 
       - name: Configure Linux runner
@@ -605,7 +605,7 @@ jobs:
             $LinuxArch = @{'x86_64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
             $RustArch = @{'x86_64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
             $RustTarget = "$RustArch-unknown-linux-gnu"
-            $Env:SYSROOT_NAME = "ubuntu-20.04-$LinuxArch"
+            $Env:SYSROOT_NAME = "ubuntu-18.04-$LinuxArch"
             . "$HOME/.cargo/cbake/${RustTarget}-enter.ps1"
             $Env:AWS_LC_SYS_CMAKE_BUILDER="true"
           }
@@ -752,8 +752,8 @@ jobs:
         if: runner.os == 'Linux'
         with:
           sysroots: |
-            - ubuntu-20.04-amd64
-            - ubuntu-20.04-arm64
+            - ubuntu-18.04-amd64
+            - ubuntu-18.04-arm64
           cargo_env_scripts: true
 
       - name: Configure Linux runner
@@ -820,7 +820,7 @@ jobs:
             $LinuxArch = @{'x86_64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
             $RustArch = @{'x86_64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
             $RustTarget = "$RustArch-unknown-linux-gnu"
-            $Env:SYSROOT_NAME = "ubuntu-20.04-$LinuxArch"
+            $Env:SYSROOT_NAME = "ubuntu-18.04-$LinuxArch"
             . "$HOME/.cargo/cbake/${RustTarget}-enter.ps1"
             $Env:AWS_LC_SYS_CMAKE_BUILDER="true"
           }
