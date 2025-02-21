@@ -2,8 +2,8 @@ param(
     [parameter(Mandatory = $true)]
     [ValidateSet('gateway', 'agent', 'jetsocat', 'session', 'pedm')]
     [string] $Product,
-    [ValidateSet('x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'aarch64-apple-darwin')]
-    [string] $Target,
+    [ValidateSet('infer', 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'aarch64-apple-darwin')]
+    [string] $Target = 'infer',
     [ValidateSet('dev', 'release', 'production')]
     [string] $Profile = 'dev',
     [string] $OutputDir = 'output',
@@ -32,10 +32,10 @@ Import-Module (Join-Path $PSScriptRoot 'Build')
 function Invoke-Build() {
     param(
         [parameter(Mandatory = $true)]
-        [ValidateSet('gateway', 'agent', 'jetsocat', 'session', 'pedm')]
+        [ValidateSet('gateway', 'agent', 'jetsocat', 'session', 'pedm', '')]
         [string] $Product,
-        [ValidateSet('x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'aarch64-apple-darwin')]
-        # The Cargo target triplet. Inferred from system if omitted.
+        [ValidateSet('infer', 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'aarch64-apple-darwin')]
+        # The Cargo target triplet. Defaults to `infer`.
         [string] $Target,
         [ValidateSet('dev', 'release', 'production')]
         # The Cargo profile to use, as defined in the workspace Cargo.toml.
@@ -92,11 +92,11 @@ function Invoke-Build() {
     $repoDir = Split-Path -Parent $PSScriptRoot
     
     $cargoOutPath = Join-Path $repoDir 'target'
-    if (!$isNativeTarget) {
-        # If we are on native, we can just use the target/profile directory.
-        # This is the same one that's used with `cargo build` when `target` is not specified.
-        # This allows for reuse of the  build from `cargo build` with no args.
+    if ($Target -ne 'infer' -and !$isNativeTarget) {
         # When we are on non-native, we specify the target explicitly.
+        # This outputs to target/{triplet}/profile.
+        #
+        # If we were to be on native, we can just use the target/profile directory directly. Doing so allows us to reuse the build from `cargo build` with no args.
         $cArgs += '--target', $nativeTarget
         $cargoOutPath = Join-Path $repoDir $nativeTarget
     }
@@ -181,4 +181,5 @@ function Get-PackageName {
     }
 }
 
-Invoke-Build -Product $Product -Target $Target -Profile $Profile -OutputDir $OutputDir -Static $Static -Symbols $Symbols -Strip $Strip -StripPath $StripPath
+Invoke-Build -Product $Product -Target $Target -Profile $Profile -OutputDir $OutputDir -Static:($Static.IsPresent) -Symbols:($Symbols.IsPresent) -Strip:($Strip.IsPresent) -StripPath $StripPath
+
