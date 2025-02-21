@@ -10,7 +10,7 @@ else {
 }
 $outputPath = Join-Path $outputPath 'DevolutionsGateway'
 
-Remove-Item -Path $outputPath -Recurse -Force -ErrorAction Stop
+Remove-Item -Path $outputPath -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -Path $outputPath -ItemType 'Directory' -Force | Out-Null
 
 @('bin', 'Public', 'Private') | % {
