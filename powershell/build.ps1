@@ -1,48 +1,54 @@
+$Env:NUGET_CERT_REVOCATION_MODE = 'offline'
 
-$ModuleName = 'DevolutionsGateway'
 Push-Location $PSScriptRoot
 
 if (Test-Path Env:PSMODULE_OUTPUT_PATH) {
-    $PSModuleOutputPath = $Env:PSMODULE_OUTPUT_PATH
-} else {
-    $PSModuleOutputPath = Join-Path $PSScriptRoot 'package'
+    $outputPath = $Env:PSMODULE_OUTPUT_PATH
 }
+else {
+    $outputPath = Join-Path $PSScriptRoot 'package'
+}
+$outputPath = Join-Path $outputPath 'DevolutionsGateway'
 
-Remove-Item -Path "$PSModuleOutputPath\$ModuleName" -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -Path "$PSModuleOutputPath\$ModuleName" -ItemType 'Directory' -Force | Out-Null
+Remove-Item -Path $outputPath -Recurse -Force -ErrorAction Stop
+New-Item -Path $outputPath -ItemType 'Directory' -Force | Out-Null
 
 @('bin', 'Public', 'Private') | % {
-    New-Item -Path "$PSModuleOutputPath\$ModuleName\$_" -ItemType 'Directory' -Force | Out-Null
+    New-Item -Path (Join-Path $outputPath $_) -ItemType 'Directory' -Force | Out-Null
 }
-
-$Env:NUGET_CERT_REVOCATION_MODE='offline' 
 
 & dotnet nuget add source "https://api.nuget.org/v3/index.json" -n "nuget.org" | Out-Null
 
-& dotnet restore "$PSScriptRoot\$ModuleName\src" 2>&1>$null
+$gwDir = Join-Path $PSScriptRoot 'DevolutionsGateway'
+$srcDir = Join-Path $gwDir 'src'
 
-& dotnet publish "$PSScriptRoot\$ModuleName\src\$ModuleName.csproj" -f netstandard2.0 -c Release -o "$PSScriptRoot\$ModuleName\bin"
+$binDir = Join-Path $gwDir 'bin'  # the managed base path
+$runtimesDir = Join-Path $binDir 'runtimes'
 
-$ManagedBasePath = "$PSScriptRoot\$ModuleName\bin"
-Get-Item "$ManagedBasePath\runtimes\*\native*" | ForEach-Object {
-    $NativeDirName = $_.Parent.Name
-    Remove-Item "$ManagedBasePath\$NativeDirName" -Recurse -ErrorAction SilentlyContinue
-    Move-Item $_ "$ManagedBasePath\$NativeDirName" -Force
+& dotnet restore $srcDir 2>&1>$null
 
-    Get-ChildItem "$ManagedBasePath\$NativeDirName" -Recurse |
-        Where-Object { $_.Name -match '^lib' } | ForEach-Object {
+& dotnet publish (Join-Path $srcDir 'DevolutionsGateway.csproj') -f netstandard2.0 -c Release -o $binDir
+
+# Move and process native directories.
+Get-Item "$runtimesDir\*\native*" | ForEach-Object {
+    $nativeDir = Join-Path $binDir $_.Parent.Name
+    Remove-Item $nativeDir -Recurse -ErrorAction Stop
+    Move-Item $_ $nativeDir -Force
+
+    # Rename files.
+    Get-ChildItem $nativeDir -Recurse | Where-Object { $_.Name -match '^lib' } | ForEach-Object {
         $newName = $_.Name -replace '^lib', '' # Remove "lib" prefix
         Rename-Item $_.FullName -NewName $newName -Force
     }
 }
-Remove-Item "$ManagedBasePath\runtimes" -Recurse -ErrorAction SilentlyContinue
 
-Copy-Item "$PSScriptRoot\$ModuleName\bin" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
+Remove-Item $runtimesDir -Recurse -ErrorAction Stop
+Copy-Item $binDir -Destination $outputPath -Recurse -Force -ErrorAction Stop
 
-Copy-Item "$PSScriptRoot\$ModuleName\Private" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
-Copy-Item "$PSScriptRoot\$ModuleName\Public" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
+Copy-Item (Join-Path $gwDir 'Private') -Destination $outputPath -Recurse -Force -ErrorAction Stop
+Copy-Item (Join-Path $gwDir 'Public') -Destination $outputPath -Recurse -Force -ErrorAction Stop
 
-Copy-Item "$PSScriptRoot\$ModuleName\$ModuleName.psd1" -Destination "$PSModuleOutputPath\$ModuleName" -Force
-Copy-Item "$PSScriptRoot\$ModuleName\$ModuleName.psm1" -Destination "$PSModuleOutputPath\$ModuleName" -Force
+Copy-Item (Join-Path $gwDir 'DevolutionsGateway.psd1') -Destination $outputPath -Force -ErrorAction Stop
+Copy-Item (Join-Path $gwDir 'DevolutionsGateway.psm1') -Destination $outputPath -Force -ErrorAction Stop
 
 Pop-Location
