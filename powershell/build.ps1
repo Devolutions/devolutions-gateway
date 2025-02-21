@@ -32,7 +32,7 @@ $runtimesDir = Join-Path $binDir 'runtimes'
 # Move and process native directories.
 Get-Item "$runtimesDir\*\native*" | ForEach-Object {
     $nativeDir = Join-Path $binDir $_.Parent.Name
-    Remove-Item $nativeDir -Recurse -ErrorAction Stop
+    Remove-Item $nativeDir -Recurse -ErrorAction SilentlyContinue
     Move-Item $_ $nativeDir -Force
 
     # Rename files.
@@ -42,7 +42,7 @@ Get-Item "$runtimesDir\*\native*" | ForEach-Object {
     }
 }
 
-Remove-Item $runtimesDir -Recurse -ErrorAction Stop
+Remove-Item $runtimesDir -Recurse -ErrorAction SilentlyContinue
 Copy-Item $binDir -Destination $outputPath -Recurse -Force -ErrorAction Stop
 
 Copy-Item (Join-Path $gwDir 'Private') -Destination $outputPath -Recurse -Force -ErrorAction Stop
