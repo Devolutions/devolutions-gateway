@@ -141,7 +141,8 @@ pub fn spawn_websocket_keep_alive_logic<S>(
     mut ws: S,
     mut shutdown_signal: impl KeepAliveShutdown,
     interval: core::time::Duration,
-) where
+) -> tokio::task::JoinHandle<()>
+where
     S: Sink<WsWritePing> + Unpin + Send + 'static,
 {
     use futures_util::SinkExt as _;
@@ -149,7 +150,7 @@ pub fn spawn_websocket_keep_alive_logic<S>(
 
     let span = tracing::Span::current();
 
-    tokio::spawn(
+    let keep_alive_handle = tokio::spawn(
         async move {
             loop {
                 tokio::select! {
@@ -164,4 +165,6 @@ pub fn spawn_websocket_keep_alive_logic<S>(
         }
         .instrument(span),
     );
+
+    keep_alive_handle
 }

@@ -159,7 +159,8 @@ async fn setup_webm_streaming(
         encoder_threads: CpuCount::default(),
     };
 
-    let websocket_stream = crate::ws::handle(socket, Arc::clone(&shutdown_notify), Duration::from_secs(45));
+    let (websocket_stream, keep_alive) =
+        crate::ws::handle(socket, Arc::clone(&shutdown_notify), Duration::from_secs(45));
     let streaming_result = tokio::task::spawn_blocking(move || {
         webm_stream(
             websocket_stream,

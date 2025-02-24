@@ -132,7 +132,7 @@ async fn handle_fwd(
     source_addr: SocketAddr,
     with_tls: bool,
 ) {
-    let stream = crate::ws::handle(
+    let (stream, keep_alive) = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -163,6 +163,8 @@ async fn handle_fwd(
             error!(error = format!("{error:#}"), "WebSocket forwarding failure");
         });
     }
+
+    keep_alive.abort();
 }
 
 #[derive(TypedBuilder)]
@@ -428,7 +430,7 @@ async fn fwd_http(
         let subscriber_tx = state.subscriber_tx;
 
         client_ws.on_upgrade(move |client_ws| {
-            let client_stream = crate::ws::handle(
+            let (client_stream, keep_alive) = crate::ws::handle(
                 client_ws,
                 crate::ws::KeepAliveShutdownSignal(shutdown_signal),
                 Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -472,6 +474,8 @@ async fn fwd_http(
                         error!(error = format!("{error:#}"), "WebSocket forwarding failure");
                     });
                 }
+
+                keep_alive.abort();
             }
         })
     } else {

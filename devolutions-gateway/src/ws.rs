@@ -20,10 +20,13 @@ pub fn handle(
     ws: WebSocket,
     shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
-) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
+) -> (
+    impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    tokio::task::JoinHandle<()>,
+) {
     let ws = transport::Shared::new(ws);
 
-    transport::spawn_websocket_keep_alive_logic(
+    let keep_alive = transport::spawn_websocket_keep_alive_logic(
         ws.shared().with(|_: transport::WsWritePing| {
             future::ready(Result::<_, axum::Error>::Ok(ws::Message::Ping(Vec::new())))
         }),
@@ -31,7 +34,7 @@ pub fn handle(
         keep_alive_interval,
     );
 
-    websocket_compat(ws)
+    (websocket_compat(ws), keep_alive)
 }
 
 fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
