@@ -50,7 +50,7 @@ async fn handle_socket(
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
-    let stream = crate::ws::handle(
+    let (stream, keep_alive) = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         keep_alive_interval,
@@ -63,4 +63,5 @@ async fn handle_socket(
     if let Err(error) = result {
         error!(client = %source_addr, error = format!("{error:#}"), "JMUX failure");
     }
+    keep_alive.abort();
 }

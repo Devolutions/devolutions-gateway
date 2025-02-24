@@ -63,7 +63,7 @@ async fn handle_socket(
     active_recordings: Arc<ActiveRecordings>,
     source_addr: SocketAddr,
 ) {
-    let stream = crate::ws::handle(
+    let (stream, keep_alive) = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -82,6 +82,7 @@ async fn handle_socket(
     .await;
 
     if let Err(error) = result {
+        keep_alive.abort();
         error!(client = %source_addr, error = format!("{error:#}"), "RDP failure");
     }
 }
