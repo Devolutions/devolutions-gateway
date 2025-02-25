@@ -1,13 +1,12 @@
 Source: devolutions-agent
 Section: non-free/net
 Priority: optional
-Maintainer: {{ packager }} <{{ email }}>
+Maintainer: Benoît Cortier <bcortier@devolutions.net>
 Build-Depends: debhelper-compat (= 10)
 Standards-Version: 3.9.4
-Homepage: {{ website }}
+Homepage: https://devolutions.net
 
 Package: devolutions-agent
 Architecture: {{ arch }}
-Depends: {{ deps }}
-Description: {{ description }}
- {{ website }}
+Depends: libc6 (>= 2.31)
+Description: Agent companion service for Devolutions Gateway

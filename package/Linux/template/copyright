@@ -1,9 +1,7 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: {{ package }}
-Source: {{ website }}
+Source:  https://devolutions.net
 
 Files: *
-Copyright: {{ year }} {{ packager }}
+Copyright: {{ year }} Devolutions Inc.
 License: non-free
- .
-
