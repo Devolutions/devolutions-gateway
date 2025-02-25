@@ -117,7 +117,7 @@ function New-GatewayDeb() {
         -Packager 'Benoît Cortier' `
         -Email 'bcortier@devolutions.net' `
         -PackageName 'devolutions-gateway' `
-        -Distro 'flocal'
+        -Distro 'focal'
     Set-Content -Path "$debDir/changelog" -Value $s
 
     # Assets to be included in the package.
