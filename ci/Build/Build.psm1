@@ -73,7 +73,43 @@ function Set-EnvVarPath {
     }
 }
 
+# Merges tokens into a text template.
+#
+# Usage
+# Merge-Tokens -TemplateFile 'mytemplate' -Tokens @{ foo = 'bar' }
+function Merge-Tokens {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, Mandatory = $true, ParameterSetName = "TemplateValue")]
+        [string] $TemplateValue,
+        [Parameter(Mandatory = $true, ParameterSetName = "TemplateFile")]
+        [string] $TemplateFile,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [Hashtable] $Tokens,
+        [string] $OutputFile
+    )
+
+    if ($TemplateFile) {
+        $TemplateValue = Get-Content -Path $TemplateFile -Raw -Encoding UTF8
+    }
+
+    $TokenPattern = '{{([^}]+)}}'
+    $OutputValue = [regex]::Replace($TemplateValue, $TokenPattern, { param($Match)
+            $TokenName = $Match.Groups[1].Value.Trim()
+            $Tokens[$TokenName]
+        })
+
+    if ($OutputFile) {
+        $AsByteStream = if ($PSEdition -Eq 'Core') { @{AsByteStream = $true } } else { @{'Encoding' = 'Byte' } }
+        $OutputBytes = $([System.Text.Encoding]::UTF8).GetBytes($OutputValue)
+        Set-Content -Path $OutputFile -Value $OutputBytes @AsByteStream
+    }
+
+    $OutputValue
+}
+
 Export-ModuleMember -Function Get-NativeTarget
 Export-ModuleMember -Function Get-Version
 Export-ModuleMember -Function Get-PackageLanguages
 Export-ModuleMember -Function Set-EnvVarPath
+Export-ModuleMember -Function Merge-Tokens

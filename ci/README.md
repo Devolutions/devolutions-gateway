@@ -13,7 +13,8 @@ This folder contains PowerShell scripts for CI, building, and packaging.
 |--------------------|---------------------|--------------------------------------------------------|
 | Gateway            | Windows (regular)   | `build.ps1 gateway`<br />`copy-ps-module.ps1`<br />`package-gateway-windows.ps1` |
 | Gateway            | Windows (assembled) | `build.ps1 gateway`<br />`copy-ps-module.ps1`<br />`package-gateway-windows.ps1 -Generate`<br />`package-assembled.ps1 gateway` |
-| Gateway            | Linux               | `build.ps1 gateway`<br />`package-gateway-linux.ps1` (not available yet)  |
+| Gateway            | Ubuntu/Debian       | `build.ps1 gateway`<br />`package-gateway-deb.ps1`     |
+| Gateway            | RHEL                | `build.ps1 gateway`<br />`package-gateway-rpm.ps1`     |
 | Agent       | Windows (regular)          | `build.ps1 agent`  <br />`build.ps1 pedm`<br />`build.ps1 session`<br />`package-agent-windows.ps1`          |
 | Agent       | Windows (assembled)        | `build.ps1 agent`  <br />`build.ps1 pedm`<br />`build.ps1 session`<br />`package-agent-windows.ps1 -Generate`<br />`package-assembled.ps1 agent` |
 | Jetsocat    | Windows/macOS/Linux        | `build.ps1 jetsocat`<br />Jetsocat is not packaged.           |
