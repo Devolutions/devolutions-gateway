@@ -859,7 +859,7 @@ trait FromWin32<Win32Ty>: Sized {
     ///
     /// # Safety
     ///
-    /// The pointed Win32 struct must be a valid.
+    /// The pointed Win32 struct must be valid.
     ///
     /// Validity, in this context, means that it is possible to rely on the
     /// fields of the Win32 struct being initialized in a way that would not
