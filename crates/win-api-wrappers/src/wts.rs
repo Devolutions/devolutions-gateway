@@ -3,10 +3,10 @@ use windows::core::Owned;
 use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, ERROR_NO_TOKEN, HANDLE};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::RemoteDesktop::{
-    WTSDomainName, WTSEnumerateSessionsW, WTSFreeMemory, WTSLogoffSession, WTSQuerySessionInformationW,
-    WTSQueryUserToken, WTSSendMessageW, WTSUserName, WTSVirtualChannelClose, WTSVirtualChannelOpenEx,
-    WTSVirtualChannelQuery, WTSVirtualFileHandle, WTS_CHANNEL_OPTION_DYNAMIC, WTS_CONNECTSTATE_CLASS,
-    WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTS_INFO_CLASS, WTS_SESSION_INFOW,
+    self, WTSEnumerateSessionsW, WTSFreeMemory, WTSLogoffSession, WTSQuerySessionInformationW, WTSQueryUserToken,
+    WTSSendMessageW, WTSVirtualChannelClose, WTSVirtualChannelOpenEx, WTSVirtualChannelQuery, WTSVirtualFileHandle,
+    WTS_CHANNEL_OPTION_DYNAMIC, WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTS_INFO_CLASS,
+    WTS_SESSION_INFOW,
 };
 use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_RESULT;
@@ -97,16 +97,16 @@ impl Drop for WtsVirtualChannel {
 #[repr(i32)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WTSConnectState {
-    Active = windows::Win32::System::RemoteDesktop::WTSActive.0,
-    Connected = windows::Win32::System::RemoteDesktop::WTSConnected.0,
-    ConnectQuery = windows::Win32::System::RemoteDesktop::WTSConnectQuery.0,
-    Shadow = windows::Win32::System::RemoteDesktop::WTSShadow.0,
-    Disconnected = windows::Win32::System::RemoteDesktop::WTSDisconnected.0,
-    Idle = windows::Win32::System::RemoteDesktop::WTSIdle.0,
-    Listen = windows::Win32::System::RemoteDesktop::WTSListen.0,
-    Reset = windows::Win32::System::RemoteDesktop::WTSReset.0,
-    Down = windows::Win32::System::RemoteDesktop::WTSDown.0,
-    Init = windows::Win32::System::RemoteDesktop::WTSInit.0,
+    Active = RemoteDesktop::WTSActive.0,
+    Connected = RemoteDesktop::WTSConnected.0,
+    ConnectQuery = RemoteDesktop::WTSConnectQuery.0,
+    Shadow = RemoteDesktop::WTSShadow.0,
+    Disconnected = RemoteDesktop::WTSDisconnected.0,
+    Idle = RemoteDesktop::WTSIdle.0,
+    Listen = RemoteDesktop::WTSListen.0,
+    Reset = RemoteDesktop::WTSReset.0,
+    Down = RemoteDesktop::WTSDown.0,
+    Init = RemoteDesktop::WTSInit.0,
 }
 
 impl TryFrom<WTS_CONNECTSTATE_CLASS> for WTSConnectState {
@@ -114,16 +114,16 @@ impl TryFrom<WTS_CONNECTSTATE_CLASS> for WTSConnectState {
 
     fn try_from(v: WTS_CONNECTSTATE_CLASS) -> Result<Self, Self::Error> {
         match v {
-            windows::Win32::System::RemoteDesktop::WTSActive => Ok(WTSConnectState::Active),
-            windows::Win32::System::RemoteDesktop::WTSConnected => Ok(WTSConnectState::Connected),
-            windows::Win32::System::RemoteDesktop::WTSConnectQuery => Ok(WTSConnectState::ConnectQuery),
-            windows::Win32::System::RemoteDesktop::WTSShadow => Ok(WTSConnectState::Shadow),
-            windows::Win32::System::RemoteDesktop::WTSDisconnected => Ok(WTSConnectState::Disconnected),
-            windows::Win32::System::RemoteDesktop::WTSIdle => Ok(WTSConnectState::Idle),
-            windows::Win32::System::RemoteDesktop::WTSListen => Ok(WTSConnectState::Listen),
-            windows::Win32::System::RemoteDesktop::WTSReset => Ok(WTSConnectState::Reset),
-            windows::Win32::System::RemoteDesktop::WTSDown => Ok(WTSConnectState::Down),
-            windows::Win32::System::RemoteDesktop::WTSInit => Ok(WTSConnectState::Init),
+            RemoteDesktop::WTSActive => Ok(WTSConnectState::Active),
+            RemoteDesktop::WTSConnected => Ok(WTSConnectState::Connected),
+            RemoteDesktop::WTSConnectQuery => Ok(WTSConnectState::ConnectQuery),
+            RemoteDesktop::WTSShadow => Ok(WTSConnectState::Shadow),
+            RemoteDesktop::WTSDisconnected => Ok(WTSConnectState::Disconnected),
+            RemoteDesktop::WTSIdle => Ok(WTSConnectState::Idle),
+            RemoteDesktop::WTSListen => Ok(WTSConnectState::Listen),
+            RemoteDesktop::WTSReset => Ok(WTSConnectState::Reset),
+            RemoteDesktop::WTSDown => Ok(WTSConnectState::Down),
+            RemoteDesktop::WTSInit => Ok(WTSConnectState::Init),
             _ => Err(anyhow::anyhow!("Invalid WTS_CONNECTSTATE_CLASS: {}", v.0)),
         }
     }
@@ -188,11 +188,11 @@ pub fn log_off_session(session_id: u32, wait: bool) -> anyhow::Result<()> {
 }
 
 pub fn get_session_user_name(session_id: u32) -> anyhow::Result<String> {
-    query_session_information_string(session_id, WTSUserName)
+    query_session_information_string(session_id, RemoteDesktop::WTSUserName)
 }
 
 pub fn get_session_domain_name(session_id: u32) -> anyhow::Result<String> {
-    query_session_information_string(session_id, WTSDomainName)
+    query_session_information_string(session_id, RemoteDesktop::WTSDomainName)
 }
 
 pub fn send_message_to_session(
@@ -205,6 +205,8 @@ pub fn send_message_to_session(
     let title = WideString::from(title);
     let message = WideString::from(message);
     let mut result: MESSAGEBOX_RESULT = MESSAGEBOX_RESULT::default();
+
+    // FIXME: This is not a safety description + migrate away from WideString.
 
     // SAFETY:
     // - `title` and `message` constructed by us and will always have a `Some` value for the underlying buffer.
@@ -226,7 +228,7 @@ pub fn send_message_to_session(
     }
 
     // NOTE: WTS bug returns IDOK on timeout instead of IDTIMEOUT, if the message style is MB_OK (the default)
-    Ok(result.try_into()?)
+    result.try_into()
 }
 
 fn query_session_information_string(session_id: u32, info_class: WTS_INFO_CLASS) -> anyhow::Result<String> {
@@ -235,7 +237,7 @@ fn query_session_information_string(session_id: u32, info_class: WTS_INFO_CLASS)
     let mut string = PWSTR::null();
     let mut len: u32 = 0u32;
 
-    matches!(info_class, WTSUserName | WTSDomainName)
+    matches!(info_class, RemoteDesktop::WTSUserName | RemoteDesktop::WTSDomainName)
         .then(|| 0)
         .ok_or_else(|| anyhow!("info_class is an unsupported WTS_INFO_CLASS: {}", info_class.0))?;
 

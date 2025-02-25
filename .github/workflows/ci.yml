@@ -981,7 +981,7 @@ jobs:
         shell: pwsh
         run: |
           $Env:MIRIFLAGS = "${{ matrix.miriflags }}"
-          cargo +nightly test -p win-api-wrappers
+          cargo +nightly miri test -p win-api-wrappers
 
   success:
     name: Success

@@ -22,7 +22,7 @@ use now_proto_pdu::{
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::Process;
-use win_api_wrappers::security::acl::{RawSecurityAttributes, SecurityAttributes};
+use win_api_wrappers::security::acl::SecurityAttributesInit;
 use win_api_wrappers::utils::{Pipe, WideString};
 
 use crate::dvc::channel::{winapi_signaled_mpsc_channel, WinapiSignaledReceiver, WinapiSignaledSender};
@@ -541,17 +541,14 @@ impl WinApiProcessBuilder {
             ..Default::default()
         };
 
-        let security_attributes = RawSecurityAttributes::try_from(&SecurityAttributes {
-            security_descriptor: None,
-            inherit_handle: true,
-        })?;
+        let security_attributes = SecurityAttributesInit { inherit_handle: true }.init();
 
         // SAFETY: All parameters constructed above are valid and safe to use.
         unsafe {
             CreateProcessW(
                 PCWSTR::null(),
                 command_line_wide.as_pwstr(),
-                Some(security_attributes.as_raw() as *const _),
+                Some(security_attributes.as_ptr()),
                 None,
                 true,
                 Default::default(),
@@ -562,11 +559,10 @@ impl WinApiProcessBuilder {
             )?;
         }
 
-        // SAFETY: No preconditions.
-        unsafe {
-            // We don't need the thread handle, so we close it
-            CloseHandle(process_information.hThread)
-        }?;
+        // We don't need the thread handle, so we close it
+
+        // SAFETY: FFI call with no outstanding precondition.
+        unsafe { CloseHandle(process_information.hThread) }?;
 
         // Handles were duplicated by CreateProcessW, so we can close them immediately.
         // Explicitly drop handles just for clarity.

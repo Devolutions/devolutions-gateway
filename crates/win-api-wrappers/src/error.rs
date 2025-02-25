@@ -28,6 +28,7 @@ impl Error {
         }
     }
 
+    // FIXME: This function may be confusing. It may be best to mimick the windows crate.
     pub fn last_error() -> Self {
         Self::Win32(windows::core::Error::from_win32())
     }

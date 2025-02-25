@@ -49,19 +49,20 @@ impl Elevator for LocalAdminElevator {
         let owner_sid = Sid::from_well_known(WinBuiltinAdministratorsSid, None)?;
 
         let mut groups = token.groups()?;
-        groups.0.push(SidAndAttributes {
+
+        groups.push(SidAndAttributes {
             sid: Sid::from_well_known(WinLocalAccountAndAdministratorSid, None)?,
             #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
         });
 
-        groups.0.push(SidAndAttributes {
+        groups.push(SidAndAttributes {
             sid: owner_sid.clone(),
             #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY | SE_GROUP_OWNER) as u32,
         });
 
-        groups.0.push(SidAndAttributes {
+        groups.push(SidAndAttributes {
             sid: Sid::from_well_known(WinHighLabelSid, None)?,
             #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,

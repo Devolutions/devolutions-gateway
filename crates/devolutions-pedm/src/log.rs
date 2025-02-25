@@ -9,7 +9,7 @@ use devolutions_pedm_shared::policy::{ElevationResult, User};
 use std::fs;
 use std::io::{self, BufRead as _};
 use walkdir::WalkDir;
-use win_api_wrappers::identity::sid::Sid;
+use win_api_wrappers::identity::sid::{Sid, StringSid};
 use win_api_wrappers::raw::Win32::Security::WinBuiltinUsersSid;
 
 use crate::config;
@@ -23,11 +23,13 @@ fn log_path() -> Utf8PathBuf {
 
 fn log_path_for_user(user: &User) -> Result<Utf8PathBuf> {
     let mut dir = log_path();
+
     ensure_protected_directory(dir.as_std_path(), vec![Sid::from_well_known(WinBuiltinUsersSid, None)?])?;
 
     dir.push(&user.account_sid);
 
-    ensure_protected_directory(dir.as_std_path(), vec![Sid::try_from(user.account_sid.as_str())?])?;
+    let account_sid_string = StringSid::from_str(&user.account_sid)?;
+    ensure_protected_directory(dir.as_std_path(), vec![Sid::from_string_sid(&account_sid_string)?])?;
 
     Ok(dir)
 }

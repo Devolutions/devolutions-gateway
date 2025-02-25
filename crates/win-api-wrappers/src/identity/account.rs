@@ -1,194 +1,246 @@
 use std::fmt::Debug;
-use std::hash::Hash;
+use std::ops::{Deref, DerefMut};
 use std::ptr;
 
-use anyhow::{bail, Result};
-
-use crate::handle::HandleWrapper;
-use crate::token::Token;
-use crate::undoc::{
-    LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT,
-    LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
-};
-use crate::utils::{u32size_of, WideString};
-use crate::Error;
+use anyhow::{bail, Context as _};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_INVALID_SID, MAX_PATH, WIN32_ERROR};
 use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
 };
+use windows::Win32::Security;
 use windows::Win32::Security::Authentication::Identity::{
     GetUserNameExW, LsaFreeMemory, NameSamCompatible, EXTENDED_NAME_FORMAT,
 };
-use windows::Win32::Security::SECURITY_NT_AUTHORITY;
 use windows::Win32::System::GroupPolicy::PI_NOUI;
 use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, UnloadUserProfile, PROFILEINFOW};
 
-use super::sid::{RawSid, Sid};
+use crate::handle::HandleWrapper;
+use crate::identity::sid::Sid;
+use crate::scope_guard::ScopeGuard;
+use crate::str::{U16CStr, UnicodeStr};
+use crate::str::{U16CStrExt, U16CString};
+use crate::token::Token;
+use crate::undoc::{
+    LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT,
+    LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
+};
+use crate::utils::u32size_of;
 
-#[derive(Default, Debug, Hash, PartialEq, Eq, Clone)]
+/// Describes an account and the domain where is found.
+#[derive(Debug)]
 pub struct Account {
+    /// Security identifier for the account.
+    pub sid: Sid,
+    /// Account name that corresponds to the account SID.
+    pub name: U16CString,
+    /// Security identifier for the domain where the account is found.
     pub domain_sid: Sid,
-    pub domain_name: String,
-    pub account_sid: Sid,
-    pub account_name: String,
+    /// Name of the domain where the account is found.
+    pub domain_name: U16CString,
 }
 
-/// https://call4cloud.nl/wp-content/uploads/2023/05/flowcreateadmin.bmp
-/// https://github.com/tyranid/setsidmapping/blob/main/SetSidMapping/Program.cs
-pub fn create_virtual_identifier(domain_id: u32, domain_name: &str, token: Option<&Token>) -> Result<Sid> {
-    let sid = {
-        let mut sub_authority = vec![domain_id];
-        if let Some(token) = token {
-            let token_sid = token.sid_and_attributes()?.sid;
+#[derive(Debug)]
+pub struct AccountWithType {
+    inner: Account,
 
-            sub_authority.extend(token_sid.sub_authority.iter().skip(1));
-        }
+    /// SID_NAME_USE indicating the type of the account.
+    pub ty: Security::SID_NAME_USE,
+}
 
-        Sid {
-            revision: 1,
-            identifier_identity: SECURITY_NT_AUTHORITY,
-            sub_authority,
-        }
-    };
+impl Deref for AccountWithType {
+    type Target = Account;
 
-    let raw_sid = RawSid::try_from(&sid)?;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
-    let domain_name = WideString::from(domain_name);
-    let account_name = token
-        .map(virtual_account_name)
-        .transpose()?
-        .map(WideString::from)
-        .unwrap_or_default();
+impl DerefMut for AccountWithType {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl AccountWithType {
+    pub fn wrap(account: Account, ty: Security::SID_NAME_USE) -> Self {
+        Self { inner: account, ty }
+    }
+}
+
+/// Creates a virtual security identifier for a given domain
+///
+/// # References
+///
+/// - https://call4cloud.nl/wp-content/uploads/2023/05/flowcreateadmin.bmp
+/// - https://github.com/tyranid/setsidmapping/blob/main/SetSidMapping/Program.cs
+pub fn create_virtual_identifier(domain_id: u32, domain_name: &U16CStr, token: Option<&Token>) -> anyhow::Result<Sid> {
+    let mut sid = Sid::new((1, Security::SECURITY_NT_AUTHORITY), domain_id);
+
+    if let Some(token) = token {
+        let token_sid_and_attributes = token.sid_and_attributes()?;
+
+        token_sid_and_attributes
+            .sid
+            .as_slice()
+            .iter()
+            .skip(1)
+            .copied()
+            .for_each(|sub_authority| sid.push(sub_authority));
+    }
+
+    let account_name = token.map(virtual_account_name).transpose()?.unwrap_or_default();
+
+    let domain_name = UnicodeStr::new(domain_name).context("domain name")?;
+    let account_name = UnicodeStr::new(&account_name).context("account name")?;
 
     let input = LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT {
-        DomainName: domain_name.as_unicode_string()?,
-        AccountName: account_name.as_unicode_string()?,
-        Sid: raw_sid.as_psid(),
+        DomainName: domain_name.as_unicode_string(),
+        AccountName: account_name.as_unicode_string(),
+        Sid: sid.as_psid(),
         ..Default::default()
     };
 
-    let mut output = ptr::null_mut::<LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT>();
+    let mut output = ScopeGuard::new(
+        ptr::null_mut::<LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT>(),
+        |ptr| {
+            if !ptr.is_null() {
+                // SAFETY: Pointers allocated by LsaManageSidNameMapping must be freed using LsaFreeMemory.
+                let _ = unsafe { LsaFreeMemory(Some(ptr.cast())) };
+            }
+        },
+    );
 
-    // We ignore the result because it will almost run successfully while returning a failing code.
-    // SAFETY: Since `LsaSidNameMappingOperation_Add` is specified, `OpInput` will be read as a `LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT`.
+    // SAFETY:
+    // - When LsaSidNameMappingOperation_Add is specified, OpInput must be a LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT.
+    // - LsaManageSidNameMapping is not mutating DomainName nor AccountName.
     let _ = unsafe {
         LsaManageSidNameMapping(
             LsaSidNameMappingOperation_Add,
             &input as *const _ as *const _,
-            &mut output,
+            output.as_mut(),
         )
     };
 
-    if !output.is_null() {
-        // SAFETY: No preconditions, and `output` is non null.
-        unsafe {
-            LsaFreeMemory(Some(output.cast())).ok()?;
-        }
-    }
+    // We ignore the result because it will almost run successfully, but still returns a failing status code.
 
     Ok(sid)
 }
 
-pub fn create_virtual_account(virt_domain_id: u32, virt_domain_name: &str, token: &Token) -> Result<Account> {
+pub fn create_virtual_account(
+    virt_domain_id: u32,
+    virt_domain_name: &U16CStr,
+    token: &Token,
+) -> anyhow::Result<Account> {
     let domain_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, None)?;
     let account_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, Some(token))?;
 
-    if account_sid.is_valid()? {
+    if account_sid.is_valid() {
         Ok(Account {
             domain_sid,
-            account_sid,
-            account_name: virtual_account_name(token)?,
+            sid: account_sid,
+            name: virtual_account_name(token)?,
             domain_name: virt_domain_name.to_owned(),
         })
     } else {
-        bail!(Error::from_win32(ERROR_INVALID_SID))
+        bail!(crate::Error::from_win32(ERROR_INVALID_SID))
     }
 }
 
-pub fn get_username(format: EXTENDED_NAME_FORMAT) -> Result<String> {
+pub fn get_username(format: EXTENDED_NAME_FORMAT) -> windows::core::Result<U16CString> {
     let mut required_size = 0u32;
 
-    // Ignore return code since we care about size.
+    // Ignore return code since we only care about size.
     // SAFETY: No preconditions. Required size is valid.
     let _ = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size) };
 
-    let mut buf = Vec::with_capacity(required_size as usize);
+    let mut buf = vec![0u16; required_size as usize];
 
-    // SAFETY: `lpNameBuffer` is correctly sized and matches the size announced in `nSize` AKA `required_size`.
-    let success = unsafe { GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut required_size) };
+    // SAFETY: lpNameBuffer is correctly sized and matches the size announced in nSize AKA required_size.
+    let ret = unsafe { GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut required_size) };
 
-    if success.into() {
-        Ok(String::from_utf16(&buf[..required_size as usize])?)
-    } else {
-        bail!(Error::last_error())
+    if !ret.as_bool() {
+        return Err(windows::core::Error::from_win32());
     }
+
+    Ok(U16CString::from_vec_truncate(buf))
 }
 
-pub fn is_username_valid(server_name: Option<&String>, username: &str) -> Result<bool> {
-    let server_name = server_name.map(WideString::from);
-    let username = WideString::from(username);
+pub fn is_username_valid(server_name: Option<&U16CStr>, username: &U16CStr) -> anyhow::Result<bool> {
+    // consent.exe is using USER_INFO_4, so we do the same.
+    let mut user_info_4 = ScopeGuard::new(ptr::null_mut::<USER_INFO_4>(), |user_info_4| {
+        if !user_info_4.is_null() {
+            // SAFETY: Buffer allocated by NetUserGetInfo must be freed using NetApiBufferFree.
+            unsafe {
+                NetApiBufferFree(Some(user_info_4.cast()));
+            }
+        }
+    });
 
-    let mut out = ptr::null_mut::<USER_INFO_4>();
-
-    // 4 is arbitrary. consent.exe uses it so we do too
-    // SAFETY: `server_name` is either NULL which is defined or defined and NUL terminated.
-    // `username` is always valid and NUL terminated.
+    // SAFETY: When level is set to 4, USER_INFO_4 is returned.
     let status = unsafe {
         NetUserGetInfo(
-            server_name.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
+            server_name.map_or_else(PCWSTR::null, U16CStrExt::as_pcwstr),
             username.as_pcwstr(),
             4,
-            &mut out as *mut _ as *mut _,
+            user_info_4.as_mut_ptr().cast(),
         )
     };
 
-    if out.is_null() {
-        // SAFETY: No preconditions. `out` is non null.
-        unsafe {
-            NetApiBufferFree(Some(out.cast()));
-        }
-    }
-
-    // TODO: Support other errors and hardcheck on NERR_UserNotFound
+    // TODO: Support other errors and hardcheck on NERR_UserNotFound.
     if status == NERR_Success {
         Ok(true)
     } else if status == NERR_UserNotFound {
         Ok(false)
     } else {
-        bail!(Error::from_win32(WIN32_ERROR(status)))
+        bail!(crate::Error::from_win32(WIN32_ERROR(status)))
     }
 }
 
-pub fn virtual_account_name(token: &Token) -> Result<String> {
-    Ok(token.username(NameSamCompatible)?.replace('\\', "_"))
+pub fn virtual_account_name(token: &Token) -> anyhow::Result<U16CString> {
+    let mut name = token.username(NameSamCompatible)?;
+
+    // SAFETY: We ensure no interior nul value is inserted.
+    let u16_slice = unsafe { name.as_mut_slice() };
+
+    // Roughly equivalent to utf8str.replace('\\', '_').
+    u16_slice.iter_mut().for_each(|codepoint| {
+        if *codepoint == u16::from(b'\\') {
+            *codepoint = u16::from(b'_');
+        }
+    });
+
+    Ok(name)
 }
 
-pub fn create_profile(account_sid: &Sid, account_name: &str) -> Result<String> {
-    let mut buf: Vec<u16> = vec![0; MAX_PATH as usize];
+pub fn create_profile(account_sid: &Sid, account_name: &U16CStr) -> anyhow::Result<U16CString> {
+    let mut profile_path: Vec<u16> = vec![0u16; MAX_PATH as usize];
 
-    let account_sid = WideString::from(&account_sid.to_string());
-    let account_name = WideString::from(account_name);
+    let account_string_sid = account_sid.to_string_sid()?;
 
-    // SAFETY: `account_sid` and `account_name` are non NULL and NUL terminated. `buf` is big enough to receive profile path.
-    unsafe { CreateProfile(account_sid.as_pcwstr(), account_name.as_pcwstr(), buf.as_mut_slice()) }?;
+    // SAFETY: FFI call with no outstanding precondition.
+    unsafe {
+        CreateProfile(
+            account_string_sid.as_u16cstr().as_pcwstr(),
+            account_name.as_pcwstr(),
+            profile_path.as_mut_slice(),
+        )?
+    };
 
-    let raw_string = buf.into_iter().take_while(|x| *x != 0).collect::<Vec<_>>();
-
-    Ok(String::from_utf16(&raw_string)?)
+    Ok(U16CString::from_vec_truncate(profile_path))
 }
 
 pub struct ProfileInfo {
     token: Token,
-    username: WideString,
-    raw: PROFILEINFOW,
+    username: U16CString,
+    raw: PROFILEINFOW, // FIXME: Anti-pattern.
 }
 
 impl ProfileInfo {
-    pub fn from_token(token: Token, username: &str) -> Result<Self> {
+    pub fn from_token(token: Token, username: U16CString) -> anyhow::Result<Self> {
         let mut profile_info = Self {
             token,
-            username: WideString::from(username),
+            username,
             raw: PROFILEINFOW {
                 dwSize: u32size_of::<PROFILEINFOW>(),
                 dwFlags: PI_NOUI,
@@ -211,5 +263,30 @@ impl Drop for ProfileInfo {
         unsafe {
             let _ = UnloadUserProfile(self.token.handle().raw(), self.raw.hProfile);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::process::Process;
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn get_virtual_account_name() {
+        // Retrieve a non-pseudo-token with TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE access rights.
+        // Without these access rights, Windows will return an "Access is denied." error.
+        let current_process = Process::current_process();
+        let token = current_process
+            .token(Security::TOKEN_QUERY | Security::TOKEN_DUPLICATE | Security::TOKEN_IMPERSONATE)
+            .unwrap();
+
+        let account_name = virtual_account_name(&token).unwrap();
+        let account_name = account_name.as_ucstr().to_string_lossy();
+
+        // Check that the UTF-16 substring substition logic is working as expected.
+        assert!(account_name.contains('_'));
+        assert!(!account_name.contains('\\'));
     }
 }

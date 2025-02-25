@@ -6,6 +6,7 @@
 //!
 //! The policy is stored under `%ProgramData%\Devolutions\Agent\pedm\policy\`, and is only accessible by `NT AUTHORITY\SYSTEM`.
 //! It is possible to edit the policy via the named pipe API.
+
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use camino::Utf8PathBuf;
@@ -417,7 +418,7 @@ pub(crate) fn application_from_process(pid: u32) -> Result<Application> {
         .token(TOKEN_QUERY)?
         .sid_and_attributes()?
         .sid
-        .account(None)?
+        .lookup_account(None)?
         .to_user();
 
     application_from_path(path, proc_params.command_line, proc_params.working_directory, user)

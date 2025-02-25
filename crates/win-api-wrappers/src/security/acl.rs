@@ -1,464 +1,265 @@
-use std::alloc::Layout;
-use std::{ptr, slice};
+//! Helpers to work with ACL structures.
+//!
+//! # Implementation
+//!
+//! Relevant links:
+//! - <https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-acl>
+//! - <https://learn.microsoft.com/en-us/windows/win32/secauthz/creating-or-modifying-an-acl>
+//! - <https://learn.microsoft.com/en-us/windows/win32/secauthz/modifying-the-acls-of-an-object-in-c-->
+//! - <https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-initializeacl>
 
-use anyhow::{bail, Result};
+use core::ptr;
 
-use crate::identity::sid::{RawSid, Sid};
-use crate::utils::{u32size_of, WideString};
-use crate::Error;
-use windows::Win32::Foundation::{ERROR_INVALID_DATA, ERROR_INVALID_VARIANT, E_POINTER};
-use windows::Win32::Security::Authorization::{SetNamedSecurityInfoW, SE_OBJECT_TYPE};
-use windows::Win32::Security::{
-    AddAce, GetAce, InitializeAcl, ACE_FLAGS, ACE_HEADER, ACE_REVISION, ACL, ACL_REVISION, DACL_SECURITY_INFORMATION,
-    GROUP_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PROTECTED_SACL_SECURITY_INFORMATION, PSID, SACL_SECURITY_INFORMATION,
-    SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR_CONTROL, SE_DACL_AUTO_INHERITED, SE_DACL_DEFAULTED,
-    SE_DACL_PRESENT, SE_DACL_PROTECTED, SE_SACL_AUTO_INHERITED, SE_SACL_DEFAULTED, SE_SACL_PRESENT, SE_SACL_PROTECTED,
-    SID, UNPROTECTED_DACL_SECURITY_INFORMATION, UNPROTECTED_SACL_SECURITY_INFORMATION,
-};
-use windows::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, MAXDWORD, SECURITY_DESCRIPTOR_REVISION};
+use windows::Win32::Foundation::{LocalFree, HLOCAL};
+use windows::Win32::Security;
+use windows::Win32::System::Memory;
 
-pub enum AceType {
-    AccessAllowed(Sid),
-}
+use crate::identity::sid::Sid;
+use crate::utils::u32size_of;
 
-impl AceType {
-    pub fn kind(&self) -> u8 {
-        // Values for ACE types actually always fit in a u8 even though the type in windows crate is u32.
-        #[expect(clippy::cast_possible_truncation)]
-        match self {
-            AceType::AccessAllowed(_) => ACCESS_ALLOWED_ACE_TYPE as u8,
-        }
-    }
-
-    pub fn to_raw(&self) -> Result<Vec<u8>> {
-        Ok(match self {
-            AceType::AccessAllowed(sid) => RawSid::try_from(sid)?.buf,
-        })
-    }
-
-    pub fn from_raw(kind: u8, buf: &[u8]) -> Result<Self> {
-        let raw_sid = PSID(buf.as_ptr().cast_mut().cast());
-
-        Ok(match u32::from(kind) {
-            ACCESS_ALLOWED_ACE_TYPE => Self::AccessAllowed(Sid::try_from(raw_sid)?),
-            _ => bail!(Error::from_win32(ERROR_INVALID_VARIANT)),
-        })
-    }
-}
-
-pub struct Ace {
-    pub flags: ACE_FLAGS,
-    pub access_mask: u32,
-    pub data: AceType,
-}
-
-impl Ace {
-    pub fn to_raw(&self) -> Result<Vec<u8>> {
-        let body = self.data.to_raw()?;
-
-        let size = Layout::new::<ACE_HEADER>()
-            .extend(Layout::new::<u32>())?
-            .0
-            .extend(Layout::array::<u8>(body.len())?)?
-            .0
-            .pad_to_align()
-            .size();
-
-        let header = ACE_HEADER {
-            AceType: self.data.kind(),
-            AceFlags: self.flags.0.try_into()?,
-            AceSize: size.try_into()?,
-        };
-
-        let mut buf = vec![0; size];
-
-        let mut ptr = buf.as_mut_ptr();
-
-        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-        // SAFETY: Buffer is at least `size_of::<ACE_HEADER>` big.
-        unsafe {
-            ptr.cast::<ACE_HEADER>().write(header)
-        };
-
-        // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
-        ptr = unsafe { ptr.byte_add(size_of::<ACE_HEADER>()) };
-
-        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-        // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32>` big.
-        unsafe {
-            ptr.cast::<u32>().write(self.access_mask)
-        };
-
-        // SAFETY: We are adding to the pointer in byte aligned mode to access next field.
-        ptr = unsafe { ptr.byte_add(size_of::<u32>()) };
-
-        // SAFETY: Buffer is at least `size_of::<ACE_HEADER> + size_of::<u32> + body.len()` big.
-        unsafe { ptr.copy_from(body.as_ptr(), body.len()) };
-
-        Ok(buf)
-    }
-
-    /// Creates an `Ace` from a pointer to an `ACE_HEADER`.
-    ///
-    /// # Safety
-    ///
-    /// - if `ptr` is non null, it must point to a valid `ACE` which starts by an `ACE_HEADER`.
-    pub unsafe fn from_ptr(mut ptr: *const ACE_HEADER) -> Result<Self> {
-        // SAFETY: Assume that the pointer points to a valid ACE_HEADER if not null.
-        let header = unsafe { ptr.as_ref() }.ok_or_else(|| Error::NullPointer("ACE header"))?;
-
-        if (header.AceSize as usize) < size_of::<ACE_HEADER>() + size_of::<u32>() {
-            bail!(Error::from_win32(ERROR_INVALID_DATA));
-        }
-
-        // SAFETY: Assume that the header is followed by a 4 byte access mask.
-        ptr = unsafe { ptr.byte_add(size_of::<ACE_HEADER>()) };
-
-        // SAFETY: Assume that the header is followed by a 4 byte access mask.
-        #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-        let access_mask = unsafe { ptr.cast::<u32>().read() };
-
-        // SAFETY: Assume buffer is big enough to fit Ace data.
-        ptr = unsafe { ptr.byte_add(size_of::<u32>()) };
-
-        let body_size = header.AceSize as usize - size_of::<ACE_HEADER>() - size_of::<u32>();
-
-        // SAFETY: `body_size` must be >= 0 because of previous check. Pointer is valid.
-        let body = unsafe { slice::from_raw_parts(ptr.cast::<u8>(), body_size) };
-
-        Ok(Self {
-            flags: ACE_FLAGS(u32::from(header.AceFlags)),
-            access_mask,
-            data: AceType::from_raw(header.AceType, body)?,
-        })
-    }
-}
-
+/// Owned ACL freed by LocalFree on drop.
 pub struct Acl {
-    pub revision: ACE_REVISION,
-    pub aces: Vec<Ace>,
+    // INVARIANT: Valid pointer to a an initialized ACL structure.
+    // INVARIANT: The pointer must be freed using LocalFree.
+    ptr: HLOCAL,
 }
 
 impl Acl {
-    pub fn new() -> Self {
-        Self {
-            revision: ACL_REVISION,
-            aces: vec![],
-        }
-    }
+    pub fn new() -> windows::core::Result<Self> {
+        // https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-initializeacl
+        // > To calculate the initial size of an ACL, add the following together, and then align the result to the nearest DWORD:
+        // >     Size of the ACL structure.
+        // >     Size of each ACE structure that the ACL is to contain minus the SidStart member (DWORD) of the ACE.
+        // >     Length of the SID that each ACE is to contain.
+        //
+        // The pointer must be aligned with a DWORD = u32.
+        //
+        // The Windows heap managers have always performed heap allocations with a start address that is 8-byte aligned.
+        // (On 64-bit platforms the alignment is 16-bytes).
+        // Microsoft never documented it as a formal guarantee, but given its multi-decade consistency in practice,
+        // it’s essentially become a stable implementation detail.
 
-    pub fn with_aces(aces: Vec<Ace>) -> Self {
-        Self {
-            revision: ACL_REVISION,
-            aces,
-        }
-    }
+        // SAFETY: FFI call with no outstanding precondition.
+        let ptr = unsafe { Memory::LocalAlloc(Memory::LMEM_ZEROINIT, size_of::<Security::ACL>())? };
 
-    pub fn to_raw(&self) -> Result<Vec<u8>> {
-        let raw_aces = self.aces.iter().map(Ace::to_raw).collect::<Result<Vec<_>>>()?;
-        let size = size_of::<ACL>() + raw_aces.iter().map(Vec::len).sum::<usize>();
-
-        // Align on u32 boundary
-        let size = (size + size_of::<u32>() - 1) & !3;
-
-        let mut buf = vec![0; size];
-
-        // SAFETY: The buffer must be preallocated and it must be DWORD aligned.
-        unsafe { InitializeAcl(buf.as_mut_ptr().cast(), buf.len().try_into()?, self.revision) }?;
-
-        for raw_ace in raw_aces {
-            // SAFETY: No preconditions. Buffer is valid and `raw_ace` as well.
-            unsafe {
-                AddAce(
-                    buf.as_mut_ptr().cast(),
-                    self.revision,
-                    MAXDWORD, // Append to end of list
-                    raw_ace.as_ptr().cast(),
-                    raw_ace.len().try_into()?,
-                )
-            }?;
-        }
-
-        Ok(buf)
-    }
-}
-
-impl Default for Acl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TryFrom<&ACL> for Acl {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &ACL) -> Result<Self, Self::Error> {
-        Ok(Self {
-            revision: ACE_REVISION(u32::from(value.AclRevision)),
-            aces: (0..u32::from(value.AceCount))
-                .map(|i| {
-                    let mut ace = ptr::null_mut();
-
-                    // SAFETY: We assume `AceCount` is truthful and that `value` is well constructed.
-                    unsafe { GetAce(value, i, &mut ace) }?;
-
-                    // SAFETY: We assume the obtained `ACE` is valid and starts with an `ACE_HEADER`.
-                    unsafe { Ace::from_ptr(ace.cast_const().cast()) }
-                })
-                .collect::<Result<_>>()?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum InheritableAclKind {
-    Default,
-    Protected,
-    Inherit,
-}
-
-pub struct InheritableAcl {
-    pub kind: InheritableAclKind,
-    pub acl: Acl,
-}
-
-pub fn set_named_security_info(
-    target: &str,
-    object_type: SE_OBJECT_TYPE,
-    owner: Option<&Sid>,
-    group: Option<&Sid>,
-    dacl: Option<&InheritableAcl>,
-    sacl: Option<&InheritableAcl>,
-) -> Result<()> {
-    let target = WideString::from(target);
-
-    let mut security_info = OBJECT_SECURITY_INFORMATION(0);
-    if owner.is_some() {
-        security_info |= OWNER_SECURITY_INFORMATION;
-    }
-
-    if group.is_some() {
-        security_info |= GROUP_SECURITY_INFORMATION;
-    }
-
-    if let Some(dacl) = dacl {
-        security_info |= DACL_SECURITY_INFORMATION;
-        security_info |= match dacl.kind {
-            InheritableAclKind::Protected => PROTECTED_DACL_SECURITY_INFORMATION,
-            InheritableAclKind::Inherit | InheritableAclKind::Default => UNPROTECTED_DACL_SECURITY_INFORMATION,
-        };
-    }
-
-    if let Some(sacl) = sacl {
-        security_info |= SACL_SECURITY_INFORMATION;
-        security_info |= match sacl.kind {
-            InheritableAclKind::Protected => PROTECTED_SACL_SECURITY_INFORMATION,
-            InheritableAclKind::Inherit | InheritableAclKind::Default => UNPROTECTED_SACL_SECURITY_INFORMATION,
-        };
-    }
-
-    let owner = owner.map(RawSid::try_from).transpose()?;
-    let group = group.map(RawSid::try_from).transpose()?;
-    let dacl = dacl.map(|x| x.acl.to_raw()).transpose()?;
-    let sacl = sacl.map(|x| x.acl.to_raw()).transpose()?;
-
-    // SAFETY: No preconditions. `target` is valid and null terminated.
-    // We assume `RawSid` builds valid SIDs. We assume the ACL encoding builds valid ACLs.
-    unsafe {
-        SetNamedSecurityInfoW(
-            target.as_pcwstr(),
-            object_type,
-            security_info,
-            owner.as_ref().map(RawSid::as_psid).unwrap_or_default(),
-            group.as_ref().map(RawSid::as_psid).unwrap_or_default(),
-            dacl.as_ref().map(|x| x.as_ptr().cast()),
-            sacl.as_ref().map(|x| x.as_ptr().cast()),
-        )
-        .ok()?
-    };
-
-    Ok(())
-}
-
-pub struct SecurityDescriptor {
-    pub revision: u8,
-    pub owner: Option<Sid>,
-    pub group: Option<Sid>,
-    pub sacl: Option<InheritableAcl>,
-    pub dacl: Option<InheritableAcl>,
-}
-
-impl Default for SecurityDescriptor {
-    fn default() -> Self {
-        Self {
-            // This is a constant =1.
-            #[expect(clippy::cast_possible_truncation)]
-            revision: SECURITY_DESCRIPTOR_REVISION as u8,
-            owner: None,
-            group: None,
-            sacl: None,
-            dacl: None,
-        }
-    }
-}
-
-pub struct RawSecurityDescriptor {
-    _owner: Option<RawSid>,
-    _group: Option<RawSid>,
-    _sacl: Option<Vec<u8>>,
-    _dacl: Option<Vec<u8>>,
-    raw: SECURITY_DESCRIPTOR,
-}
-
-impl RawSecurityDescriptor {
-    pub fn as_raw(&self) -> &SECURITY_DESCRIPTOR {
-        &self.raw
-    }
-
-    pub fn as_raw_mut(&mut self) -> &mut SECURITY_DESCRIPTOR {
-        &mut self.raw
-    }
-}
-
-impl TryFrom<&SecurityDescriptor> for RawSecurityDescriptor {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &SecurityDescriptor) -> std::result::Result<Self, Self::Error> {
-        let owner = value.owner.as_ref().map(RawSid::try_from).transpose()?;
-        let group = value.group.as_ref().map(RawSid::try_from).transpose()?;
-        let sacl = value.sacl.as_ref().map(|x| x.acl.to_raw()).transpose()?;
-
-        let dacl = value.dacl.as_ref().map(|x| x.acl.to_raw()).transpose()?;
-
-        let mut control = SECURITY_DESCRIPTOR_CONTROL(0);
-        if let Some(kind) = value.sacl.as_ref().map(|x| x.kind) {
-            control |= SE_SACL_PRESENT;
-
-            control |= match kind {
-                InheritableAclKind::Protected => SE_SACL_PROTECTED,
-                InheritableAclKind::Inherit => SE_SACL_AUTO_INHERITED,
-                InheritableAclKind::Default => SE_SACL_DEFAULTED,
-            };
-        }
-
-        if let Some(kind) = value.dacl.as_ref().map(|x| x.kind) {
-            control |= SE_DACL_PRESENT;
-
-            control |= match kind {
-                InheritableAclKind::Protected => SE_DACL_PROTECTED,
-                InheritableAclKind::Inherit => SE_DACL_AUTO_INHERITED,
-                InheritableAclKind::Default => SE_DACL_DEFAULTED,
-            };
-        }
-
-        // TODO: Per remarks in https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-security_descriptor, `SECURITY_DESCRIPTOR` must be aligned
-        // on `malloc` or `LocalAlloc` boundaries.
-        // Per https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/malloc, `malloc` will align to 16 bytes on 64-bit platforms.
-        let raw = SECURITY_DESCRIPTOR {
-            Revision: value.revision,
-            Sbz1: 0,
-            Control: control,
-            Owner: owner.as_ref().map(RawSid::as_psid).unwrap_or_default(),
-            Group: group.as_ref().map(RawSid::as_psid).unwrap_or_default(),
-            Sacl: sacl
-                .as_ref()
-                .map_or_else(ptr::null_mut, |x| x.as_ptr().cast_mut().cast()),
-            Dacl: dacl
-                .as_ref()
-                .map_or_else(ptr::null_mut, |x| x.as_ptr().cast_mut().cast()),
-        };
+        // SAFETY: The buffer is u32-aligned (= DWORD-aligned), since both 8-byte and 16-byte alignments are stricter.
+        unsafe { Security::InitializeAcl(ptr.0.cast(), u32size_of::<Security::ACL>(), Security::ACL_REVISION)? };
 
         Ok(Self {
-            _owner: owner,
-            _group: group,
-            _sacl: sacl,
-            _dacl: dacl,
-            raw,
+            // ACL structure is properly initialized using InitializeAcl.
+            ptr,
         })
+    }
+
+    /// Wraps a ACL pointer
+    ///
+    /// # Safety
+    ///
+    /// - `ptr` must point to a valid, initialized ACL
+    /// - `ptr` must be freed by `LocalFree`
+    pub unsafe fn from_raw(ptr: *mut Security::ACL) -> Self {
+        Self {
+            ptr: HLOCAL(ptr.cast()),
+        }
+    }
+
+    pub fn as_ptr(&self) -> *const Security::ACL {
+        self.ptr.0.cast_const().cast()
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut Security::ACL {
+        self.ptr.0.cast()
     }
 }
 
-impl TryFrom<&SECURITY_DESCRIPTOR> for SecurityDescriptor {
-    type Error = anyhow::Error;
+impl std::ops::Deref for Acl {
+    type Target = AclRef;
 
-    fn try_from(value: &SECURITY_DESCRIPTOR) -> Result<Self, Self::Error> {
-        let acl_conv = |field: *mut ACL, present, prot, inherited| {
-            value
-                .Control
-                .contains(present)
-                .then(|| {
-                    Ok::<_, anyhow::Error>(InheritableAcl {
-                        kind: if value.Control.contains(prot) {
-                            InheritableAclKind::Protected
-                        } else if value.Control.contains(inherited) {
-                            InheritableAclKind::Inherit
-                        } else {
-                            InheritableAclKind::Default
-                        },
-                        // SAFETY: We assume `field` actually points to an `ACL`.
-                        acl: Acl::try_from(unsafe { field.as_ref() }.ok_or_else(|| Error::from_hresult(E_POINTER))?)?,
-                    })
-                })
-                .transpose()
+    fn deref(&self) -> &Self::Target {
+        // SAFETY:
+        // - BorrowedAcl representation is transparent over the ACL structure.
+        // - ptr is pointing to a valid ACL structure, per OwnedAcl invariants.
+        unsafe { self.as_ptr().cast::<AclRef>().as_ref().expect("non-null value") }
+    }
+}
+
+impl std::borrow::Borrow<AclRef> for Acl {
+    fn borrow(&self) -> &AclRef {
+        std::ops::Deref::deref(self)
+    }
+}
+
+impl Clone for Acl {
+    fn clone(&self) -> Self {
+        self.set_entries(&[]).expect("oom")
+    }
+}
+
+impl Drop for Acl {
+    fn drop(&mut self) {
+        // SAFETY: Per invariants: the pointer can be freed using LocalFree.
+        unsafe {
+            LocalFree(self.ptr);
+        }
+    }
+}
+
+#[repr(transparent)]
+pub struct AclRef {
+    inner: Security::ACL,
+}
+
+impl AclRef {
+    /// Creates a new access control list (ACL) by merging new access control or
+    /// audit control information into an existing ACL structure.
+    ///
+    /// Calling this function with no entry is effectively as creating an owned copy of the ACL object.
+    pub fn set_entries(&self, explicit_entries: &[ExplicitAccess]) -> windows::core::Result<Acl> {
+        let mut new_acl: *mut Security::ACL = ptr::null_mut();
+
+        let explicit_entries: Option<Vec<Security::Authorization::EXPLICIT_ACCESS_W>> =
+            (!explicit_entries.is_empty()).then(|| explicit_entries.iter().map(|x| x.as_raw()).collect());
+
+        // SAFETY: FFI call with no outstanding precondition.
+        let ret = unsafe {
+            Security::Authorization::SetEntriesInAclW(explicit_entries.as_deref(), Some(self.as_ref()), &mut new_acl)
         };
 
-        let sacl = acl_conv(value.Sacl, SE_SACL_PRESENT, SE_SACL_PROTECTED, SE_SACL_AUTO_INHERITED)?;
-        let dacl = acl_conv(value.Dacl, SE_DACL_PRESENT, SE_DACL_PROTECTED, SE_DACL_AUTO_INHERITED)?;
+        if ret.is_err() {
+            return Err(windows::core::Error::from(ret));
+        }
 
-        Ok(Self {
-            revision: value.Revision,
-            // SAFETY: We assume `Owner` points to a valid `SID`.
-            owner: unsafe { value.Owner.0.cast::<SID>().as_ref() }
-                .map(Sid::try_from)
-                .transpose()?,
-            // SAFETY: We assume `Group` points to a valid `SID`.
-            group: unsafe { value.Group.0.cast::<SID>().as_ref() }
-                .map(Sid::try_from)
-                .transpose()?,
-            sacl,
-            dacl,
-        })
+        // SAFETY:
+        // - SetEntriesInAclW will return a valid pointer to an initialized ACL structure.
+        // - The pointer must be free-able with LocalFree.
+        unsafe { Ok(Acl::from_raw(new_acl)) }
+    }
+}
+
+impl AsRef<Security::ACL> for AclRef {
+    fn as_ref(&self) -> &Security::ACL {
+        &self.inner
+    }
+}
+
+impl ToOwned for AclRef {
+    type Owned = Acl;
+
+    fn to_owned(&self) -> Self::Owned {
+        self.set_entries(&[]).expect("oom")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Trustee {
+    Sid(Sid),
+}
+
+#[derive(Debug, Clone)]
+pub struct ExplicitAccess {
+    pub access_permissions: u32,
+    pub access_mode: Security::Authorization::ACCESS_MODE,
+    pub inheritance: Security::ACE_FLAGS,
+    pub trustee: Trustee,
+}
+
+impl ExplicitAccess {
+    /// Returns a EXPLICIT_ACCESS_W structure that must not be mutated.
+    fn as_raw(&self) -> Security::Authorization::EXPLICIT_ACCESS_W {
+        let mut raw_trustee = Security::Authorization::TRUSTEE_W::default();
+
+        match &self.trustee {
+            Trustee::Sid(sid) => {
+                // Configure the trustee to use a SID
+                raw_trustee.TrusteeForm = Security::Authorization::TRUSTEE_IS_SID;
+                raw_trustee.TrusteeType = Security::Authorization::TRUSTEE_IS_UNKNOWN;
+                raw_trustee.ptstrName = windows::core::PWSTR(sid.as_raw().as_ptr().cast_mut().cast());
+            }
+        }
+
+        Security::Authorization::EXPLICIT_ACCESS_W {
+            grfAccessPermissions: self.access_permissions,
+            grfAccessMode: self.access_mode,
+            grfInheritance: self.inheritance,
+            Trustee: raw_trustee,
+        }
+    }
+}
+
+// FIXME: not sure it belongs to the "acl" module.
+pub struct SecurityAttributesInit {
+    pub inherit_handle: bool,
+}
+
+impl SecurityAttributesInit {
+    pub fn init(self) -> SecurityAttributes {
+        let ptr = Box::into_raw(Box::new(Security::SECURITY_ATTRIBUTES {
+            nLength: u32size_of::<Security::SECURITY_ATTRIBUTES>(),
+            lpSecurityDescriptor: ptr::null_mut(),
+            bInheritHandle: self.inherit_handle.into(),
+        }));
+
+        SecurityAttributes { ptr }
     }
 }
 
 pub struct SecurityAttributes {
-    pub security_descriptor: Option<SecurityDescriptor>,
-    pub inherit_handle: bool,
+    // INVARIANT: A pointer allocated using Box::new.
+    ptr: *mut Security::SECURITY_ATTRIBUTES,
 }
 
-pub struct RawSecurityAttributes {
-    _security_descriptor: Option<RawSecurityDescriptor>,
-    raw: SECURITY_ATTRIBUTES,
-}
+impl SecurityAttributes {
+    pub fn as_ptr(&self) -> *const Security::SECURITY_ATTRIBUTES {
+        self.ptr.cast_const()
+    }
 
-impl RawSecurityAttributes {
-    pub fn as_raw(&self) -> &SECURITY_ATTRIBUTES {
-        &self.raw
+    pub fn as_mut_ptr(&self) -> *mut Security::SECURITY_ATTRIBUTES {
+        self.ptr
     }
 }
 
-impl TryFrom<&SecurityAttributes> for RawSecurityAttributes {
-    type Error = anyhow::Error;
+impl Drop for SecurityAttributes {
+    fn drop(&mut self) {
+        // SAFETY: Per invariants, ptr is a ptr allocated using Box::new, and the Rust global allocator.
+        let _ = unsafe { Box::from_raw(self.ptr) };
+    }
+}
 
-    fn try_from(value: &SecurityAttributes) -> Result<Self, Self::Error> {
-        let mut security_descriptor = value
-            .security_descriptor
-            .as_ref()
-            .map(RawSecurityDescriptor::try_from)
-            .transpose()?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        let raw = SECURITY_ATTRIBUTES {
-            nLength: u32size_of::<SECURITY_ATTRIBUTES>(),
-            lpSecurityDescriptor: security_descriptor
-                .as_mut()
-                .map_or_else(ptr::null_mut, |x| x.as_raw_mut() as *mut _ as *mut _),
-            bInheritHandle: value.inherit_handle.into(),
-        };
+    use crate::token::Token;
 
-        Ok(Self {
-            _security_descriptor: security_descriptor,
-            raw,
-        })
+    use windows::Win32::{
+        Foundation::{GENERIC_ALL, GENERIC_READ, GENERIC_WRITE},
+        Security::{Authorization::GRANT_ACCESS, WinBuiltinUsersSid, NO_INHERITANCE},
+    };
+
+    #[test]
+    fn create_security_attributes() {
+        SecurityAttributesInit { inherit_handle: true }.init();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn create_acl() {
+        Acl::new()
+            .unwrap()
+            .set_entries(&[
+                ExplicitAccess {
+                    access_permissions: GENERIC_READ.0 | GENERIC_WRITE.0,
+                    access_mode: GRANT_ACCESS,
+                    inheritance: NO_INHERITANCE,
+                    trustee: Trustee::Sid(Sid::from_well_known(WinBuiltinUsersSid, None).unwrap()),
+                },
+                ExplicitAccess {
+                    access_permissions: GENERIC_ALL.0,
+                    access_mode: GRANT_ACCESS,
+                    inheritance: NO_INHERITANCE,
+                    trustee: Trustee::Sid(Token::current_process_token().sid_and_attributes().unwrap().sid),
+                },
+            ])
+            .unwrap();
     }
 }
