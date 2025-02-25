@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 
 %:
-	dh $@ --with-shlibdepends
+	dh $@
 
 override_dh_shlibdeps:
 	{{ dh_shlibdeps }}
