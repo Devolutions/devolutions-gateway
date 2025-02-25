@@ -8,7 +8,6 @@ param(
     [string] $PedmMsix,
     [parameter(Mandatory = $true)]
     [string] $SessionExe,
-    [string] $DesktopAgentDir,
     [string] $OutputDir
 )
 
@@ -22,10 +21,10 @@ Import-Module (Join-Path $PSScriptRoot 'Build')
 # Usage
 #
 # Regular build:
-# New-AgentMsi -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -DesktopAgentDir $DesktopAgentDir -OutputDir $OutputDir
+# New-AgentMsi -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -OutputDir $OutputDir
 #
 # Generate:
-# New-AgentMsi -Generate -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -DesktopAgentDir $DesktopAgentDir
+# New-AgentMsi -Generate -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe
 function New-AgentMsi() {
     param(
         # Generates additional files for the MSI. The MSI is not copied to the output directory if this is set. This produces files `package\WindowsManaged\Release\en-US` and `package\WindowsManaged\Release\fr-FR`.
@@ -42,8 +41,6 @@ function New-AgentMsi() {
         [parameter(Mandatory = $true)]
         # The path to the devolutions-session.exe file.
         [string] $SessionExe,
-        # The path to the dotnet/DesktopAgent directory.
-        [string] $DesktopAgentDir,
         # Only required if `Generate` is not set.
         [string] $OutputDir
     )
@@ -62,17 +59,17 @@ function New-AgentMsi() {
         }
     }
 
+    $repoDir = Split-Path -Parent $PSScriptRoot # currently in `ci`
+
     Set-EnvVarPath 'DAGENT_EXECUTABLE' $Exe
     Set-EnvVarPath 'DAGENT_PEDM_SHELL_EXT_DLL' $PedmDll
     Set-EnvVarPath 'DAGENT_PEDM_SHELL_EXT_MSIX' $PedmMsix
     Set-EnvVarPath 'DAGENT_SESSION_EXECUTABLE' $SessionExe
-    Set-EnvVarPath 'DAGENT_DESKTOP_AGENT_PATH' $DesktopAgentDir
+    Set-EnvVarPath 'DAGENT_DESKTOP_AGENT_PATH' "$repoDir\dotnet\DesktopAgent"
   
     $version = Get-Version
 
     Push-Location
-
-    $repoDir = Split-Path -Parent $PSScriptRoot # currently in `ci`
     Set-Location (Join-Path $repoDir 'package\AgentWindowsManaged')
 
     # Set the MSI version, which is read by `package/WindowsManaged/Program.cs`.
@@ -98,9 +95,9 @@ function New-AgentMsi() {
         # When called without `Generate` switch, such as in the regular CI flow, copy the MSI to the output directory.
         $msi = Join-Path 'Release' 'DevolutionsAgent.msi'
         Copy-Item -Path $msi -Destination $OutputDir -ErrorAction Stop
-        Write-Output "Copied MSI to $(Join-Path $OutputDir $msi)"
+        Write-Output "Copied MSI to $(Join-Path $OutputDir 'DevolutionsAgent.msi')"
     }
     Pop-Location
 }
 
-New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -DesktopAgentDir $DesktopAgentDir -OutputDir $OutputDir
+New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -OutputDir $OutputDir
