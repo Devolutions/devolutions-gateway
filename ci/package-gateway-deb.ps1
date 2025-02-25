@@ -1,11 +1,11 @@
 param(
     [string] $Bin,
     [parameter(Mandatory = $true)]
-    [string]$LibxmfFile,
+    [string] $LibxmfFile,
     [parameter(Mandatory = $true)]
-    [string]$WebClientDir,
+    [string] $WebClientDir,
     [parameter(Mandatory = $true)]
-    [string]$WebPlayerDir,
+    [string] $WebPlayerDir,
     [parameter(Mandatory = $true)]
     [string] $OutputDir
 )
@@ -97,7 +97,7 @@ function New-GatewayDeb() {
     # debian/copyright
     Merge-Tokens -TemplateFile 'package/Linux/template/copyright' -Tokens @{
         package = 'devolutions-gateway'
-        year         = $(Get-Date).Year
+        year    = $(Get-Date).Year
     } -OutputFile $(Join-Path $debDir 'copyright')
 
     # Upstream changelog. Eventually included as /usr/share/doc/devolutions-gateway/changelog.gz.
@@ -139,3 +139,5 @@ function New-GatewayDeb() {
 }
 
 New-GatewayDeb -Bin $Bin -LibXmfFile $LibXmfFile -WebClientDir $WebClientDir -WebPlayerDir $WebPlayerDir -OutputDir $OutputDir
+
+
