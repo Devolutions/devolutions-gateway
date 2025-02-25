@@ -282,7 +282,7 @@ internal static class AgentActions
         Id = new Id($"CA.{nameof(unregisterExplorerCommand)}"),
         Feature = Features.PEDM_FEATURE,
         Sequence = Sequence.InstallExecuteSequence,
-        Return = Return.check,
+        Return = Return.ignore,
         Execute = Execute.deferred,
         Impersonate = false,
         Step = Step.RemoveFiles,
