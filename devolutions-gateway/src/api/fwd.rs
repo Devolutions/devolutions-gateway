@@ -11,7 +11,6 @@ use devolutions_gateway_task::ShutdownSignal;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{field, Instrument as _};
-use transport::KeepAliveShutdown;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
@@ -132,7 +131,7 @@ async fn handle_fwd(
     source_addr: SocketAddr,
     with_tls: bool,
 ) {
-    let stream = crate::ws::handle(
+    let (stream, close_handle) = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -159,9 +158,12 @@ async fn handle_fwd(
         .await;
 
     if let Err(error) = result {
+        let _ = close_handle.server_error("forwarding failure").await;
         span.in_scope(|| {
             error!(error = format!("{error:#}"), "WebSocket forwarding failure");
         });
+    } else {
+        let _ = close_handle.normal_close();
     }
 }
 
@@ -413,7 +415,7 @@ async fn fwd_http(
         let conf = state.conf_handle.get_conf();
         let shutdown_signal = state.shutdown_signal;
 
-        let server_stream = tokio_tungstenite_websocket_handle(
+        let (server_stream, server_close_handle) = tokio_tungstenite_websocket_handle(
             server_ws,
             shutdown_signal.clone(),
             Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -428,7 +430,7 @@ async fn fwd_http(
         let subscriber_tx = state.subscriber_tx;
 
         client_ws.on_upgrade(move |client_ws| {
-            let client_stream = crate::ws::handle(
+            let (client_stream, client_close_handle) = crate::ws::handle(
                 client_ws,
                 crate::ws::KeepAliveShutdownSignal(shutdown_signal),
                 Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -468,9 +470,14 @@ async fn fwd_http(
                     .context("encountered a failure during WebSocket traffic proxying");
 
                 if let Err(error) = result {
+                    let _ = client_close_handle.server_error("WebSocket failure").await;
+                    let _ = server_close_handle.server_error("WebSocket failure").await;
                     span.in_scope(|| {
                         error!(error = format!("{error:#}"), "WebSocket forwarding failure");
                     });
+                } else {
+                    let _ = client_close_handle.normal_close();
+                    let _ = server_close_handle.normal_close();
                 }
             }
         })
@@ -561,7 +568,10 @@ async fn fwd_http(
         ws: tokio_tungstenite::WebSocketStream<S>,
         shutdown_signal: ShutdownSignal,
         keep_alive_interval: Duration,
-    ) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
+    ) -> (
+        impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        transport::CloseWebsocketHandle,
+    )
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -569,8 +579,8 @@ async fn fwd_http(
 
         let ws = transport::Shared::new(ws);
 
-        transport::spawn_websocket_keep_alive_logic(
-            ws.shared().with(|_: transport::WsWritePing| {
+        let close_frame_handle = transport::spawn_websocket_keep_alive_logic(
+            ws.shared().with(|_: transport::WsWriteMsg| {
                 core::future::ready(Result::<_, tungstenite::Error>::Ok(tungstenite::Message::Ping(
                     Vec::new(),
                 )))
@@ -579,7 +589,7 @@ async fn fwd_http(
             keep_alive_interval,
         );
 
-        tokio_tungstenite_websocket_compat(ws)
+        (tokio_tungstenite_websocket_compat(ws), close_frame_handle)
     }
 
     fn tokio_tungstenite_websocket_compat<S>(stream: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static

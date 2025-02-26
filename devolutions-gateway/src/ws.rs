@@ -1,6 +1,7 @@
 use core::future;
 use core::time;
 
+use axum::extract::ws::CloseFrame;
 use axum::extract::ws::{self, WebSocket};
 use devolutions_gateway_task::ShutdownSignal;
 use futures::{SinkExt as _, StreamExt as _};
@@ -20,18 +21,24 @@ pub fn handle(
     ws: WebSocket,
     shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
-) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
+) -> (impl AsyncRead + AsyncWrite + Unpin + Send + 'static, transport::CloseWebsocketHandle) {
     let ws = transport::Shared::new(ws);
 
-    transport::spawn_websocket_keep_alive_logic(
-        ws.shared().with(|_: transport::WsWritePing| {
-            future::ready(Result::<_, axum::Error>::Ok(ws::Message::Ping(Vec::new())))
+    let close_handle = transport::spawn_websocket_keep_alive_logic(
+        ws.shared().with(|message: transport::WsWriteMsg| {
+            future::ready(Result::<_, axum::Error>::Ok(match message {
+                transport::WsWriteMsg::Ping => ws::Message::Ping(vec![]),
+                transport::WsWriteMsg::Close(frame) => ws::Message::Close(Some(CloseFrame {
+                    code: frame.code,
+                    reason: std::borrow::Cow::Owned(frame.message),
+                })),
+            }))
         }),
         shutdown_signal,
         keep_alive_interval,
     );
 
-    websocket_compat(ws)
+    (websocket_compat(ws), close_handle)
 }
 
 fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
