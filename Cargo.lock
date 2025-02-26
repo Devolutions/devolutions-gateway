@@ -6648,6 +6648,7 @@ dependencies = [
  "anyhow",
  "axum 0.7.7",
  "cadeau",
+ "ebml-iterable",
  "futures",
  "futures-util",
  "num_cpus",
@@ -6822,7 +6823,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd9fbf173b4b38f2f8bbb0082a0d4cb21f263a70811f5fccb1663c421c66d9f9"
 dependencies = [
  "ebml-iterable",
- "futures",
 ]
 
 [[package]]
