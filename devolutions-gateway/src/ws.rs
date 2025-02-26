@@ -21,7 +21,10 @@ pub fn handle(
     ws: WebSocket,
     shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
-) -> (impl AsyncRead + AsyncWrite + Unpin + Send + 'static, transport::CloseWebsocketHandle) {
+) -> (
+    impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    transport::CloseWebsocketHandle,
+) {
     let ws = transport::Shared::new(ws);
 
     let close_handle = transport::spawn_websocket_keep_alive_logic(
