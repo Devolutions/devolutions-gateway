@@ -155,10 +155,10 @@ impl CloseWebsocketHandle {
         self.sender
             .send(WsCloseFrame {
                 code: 1000,
-                message: "EOF".to_string(),
+                message: String::new(),
             })
             .await
-            .map_err(|e| CloseError(e))
+            .map_err(CloseError)
     }
 
     pub async fn server_error(self, message: &str) -> Result<(), CloseError> {
@@ -168,7 +168,7 @@ impl CloseWebsocketHandle {
                 message: message.to_owned(),
             })
             .await
-            .map_err(|e| CloseError(e))
+            .map_err(CloseError)
     }
 }
 

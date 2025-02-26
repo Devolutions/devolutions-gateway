@@ -61,9 +61,9 @@ async fn handle_socket(
         .await;
 
     if let Err(error) = result {
-        close_handle.server_error("JMUX failure");
+        let _ = close_handle.server_error("JMUX failure").await;
         error!(client = %source_addr, error = format!("{error:#}"), "JMUX failure");
     } else {
-        close_handle.normal_close();
+        let _ = close_handle.normal_close().await;
     }
 }

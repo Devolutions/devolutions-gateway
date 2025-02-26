@@ -85,6 +85,6 @@ async fn handle_socket(
         let _ = close_handle.server_error("RDP failure").await;
         error!(client = %source_addr, error = format!("{error:#}"), "RDP failure");
     } else {
-        let _ = close_handle.normal_close();
+        let _ = close_handle.normal_close().await;
     }
 }

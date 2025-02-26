@@ -164,7 +164,7 @@ async fn handle_fwd(
             error!(error = format!("{error:#}"), "WebSocket forwarding failure");
         });
     } else {
-        let _ = close_handle.normal_close();
+        let _ = close_handle.normal_close().await;
     }
 }
 
@@ -477,8 +477,8 @@ async fn fwd_http(
                         error!(error = format!("{error:#}"), "WebSocket forwarding failure");
                     });
                 } else {
-                    let _ = client_close_handle.normal_close();
-                    let _ = server_close_handle.normal_close();
+                    let _ = client_close_handle.normal_close().await;
+                    let _ = server_close_handle.normal_close().await;
                 }
             }
         })
