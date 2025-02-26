@@ -22,7 +22,7 @@ use now_proto_pdu::{
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::Process;
-use win_api_wrappers::security::acl::SecurityAttributesInit;
+use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::utils::{Pipe, WideString};
 
 use crate::dvc::channel::{winapi_signaled_mpsc_channel, WinapiSignaledReceiver, WinapiSignaledSender};
@@ -541,7 +541,11 @@ impl WinApiProcessBuilder {
             ..Default::default()
         };
 
-        let security_attributes = SecurityAttributesInit { inherit_handle: true }.init();
+        let security_attributes = SecurityAttributesInit {
+            inherit_handle: true,
+            ..Default::default()
+        }
+        .init();
 
         // SAFETY: All parameters constructed above are valid and safe to use.
         unsafe {

@@ -15,6 +15,7 @@ mod lib_win {
     pub use error::Error;
 
     pub mod event;
+    pub mod fs;
     pub mod handle;
     pub mod identity;
     pub mod memory;

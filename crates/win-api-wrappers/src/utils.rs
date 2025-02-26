@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{ptr, slice};
 
-use anyhow::{bail, Context as _};
+use anyhow::bail;
 use uuid::Uuid;
 use windows::core::{Interface, PCSTR, PCWSTR, PSTR, PWSTR};
 use windows::Win32::Foundation::{
@@ -20,8 +20,8 @@ use windows::Win32::Security::{
     RevertToSelf, SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateDirectoryW, CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES,
-    FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
+    CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED,
+    FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT, COINIT_MULTITHREADED,
@@ -44,8 +44,7 @@ use windows::Win32::UI::Shell::{CommandLineToArgvW, IShellLinkW, ShellLink, SLGP
 
 use crate::handle::{Handle, HandleWrapper};
 use crate::process::Process;
-use crate::security::acl::{SecurityAttributes, SecurityAttributesInit};
-use crate::str::U16CStrExt as _;
+use crate::security::attributes::{SecurityAttributes, SecurityAttributesInit};
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::Error;
@@ -605,16 +604,6 @@ impl Link {
     }
 }
 
-// TODO: move to a fs module. No need to put everything into a "utils" module.
-pub fn create_directory(path: &Path, security_attributes: Option<&SecurityAttributes>) -> anyhow::Result<()> {
-    let path = crate::str::U16CString::from_os_str(path.as_os_str()).context("invalid path")?;
-
-    // SAFETY: FFI call with no outstanding preconditions.
-    unsafe { CreateDirectoryW(path.as_pcwstr(), security_attributes.map(|x| x.as_ptr())) }?;
-
-    Ok(())
-}
-
 pub struct Pipe {
     pub handle: Handle,
 }
@@ -638,7 +627,11 @@ impl Pipe {
 
     /// Creates anonymous synchronous pipe for stdin.
     pub fn new_sync_stdin_redirection_pipe() -> anyhow::Result<(Self, Self)> {
-        let security_attributes = SecurityAttributesInit { inherit_handle: true }.init();
+        let security_attributes = SecurityAttributesInit {
+            inherit_handle: true,
+            ..Default::default()
+        }
+        .init();
 
         let (read, write) = Self::new_anonymous(Some(&security_attributes), 0)?;
 
@@ -693,7 +686,11 @@ impl Pipe {
             );
         };
 
-        let security_attributes = SecurityAttributesInit { inherit_handle: true }.init();
+        let security_attributes = SecurityAttributesInit {
+            inherit_handle: true,
+            ..Default::default()
+        }
+        .init();
 
         // SAFETY: Pipe is created above and is valid.
         let write_endpoint = unsafe {

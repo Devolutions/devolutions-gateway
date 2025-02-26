@@ -30,9 +30,8 @@ use crate::security::acl::{Acl, AclRef};
 use crate::security::privilege::{self, find_token_with_privilege, lookup_privilege_value, TokenPrivileges};
 use crate::str::{U16CStr, U16CStrExt as _, U16CString, UnicodeStr};
 use crate::token_groups::TokenGroups;
-use crate::undoc;
 use crate::utils::u32size_of;
-use crate::{create_impersonation_context, Error};
+use crate::{create_impersonation_context, undoc, Error};
 
 #[derive(Debug)]
 pub struct Token {

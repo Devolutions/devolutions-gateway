@@ -6,13 +6,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tracing::info;
+use win_api_wrappers::fs::create_directory;
 use win_api_wrappers::identity::account::Account;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::netmgmt::get_local_admin_group_members;
 use win_api_wrappers::process::{create_process_as_user, ProcessInformation, StartupInfo};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::Token;
-use win_api_wrappers::utils::{create_directory, CommandLine};
+use win_api_wrappers::utils::CommandLine;
 
 // WinAPI's functions have many arguments, we wrap the same way.
 // TODO: maybe consider https://bon-rs.com/, for named function arguments-like ergonomics.

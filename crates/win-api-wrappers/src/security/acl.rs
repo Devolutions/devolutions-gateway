@@ -15,6 +15,7 @@ use windows::Win32::Security;
 use windows::Win32::System::Memory;
 
 use crate::identity::sid::Sid;
+use crate::str::{U16CStr, U16CStrExt as _};
 use crate::utils::u32size_of;
 
 /// Owned ACL freed by LocalFree on drop.
@@ -186,43 +187,77 @@ impl ExplicitAccess {
     }
 }
 
-// FIXME: not sure it belongs to the "acl" module.
-pub struct SecurityAttributesInit {
-    pub inherit_handle: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InheritableAclKind {
+    Default,
+    Protected,
+    Inherit,
 }
 
-impl SecurityAttributesInit {
-    pub fn init(self) -> SecurityAttributes {
-        let ptr = Box::into_raw(Box::new(Security::SECURITY_ATTRIBUTES {
-            nLength: u32size_of::<Security::SECURITY_ATTRIBUTES>(),
-            lpSecurityDescriptor: ptr::null_mut(),
-            bInheritHandle: self.inherit_handle.into(),
-        }));
-
-        SecurityAttributes { ptr }
-    }
+pub struct InheritableAcl {
+    pub kind: InheritableAclKind,
+    pub acl: Acl,
 }
 
-pub struct SecurityAttributes {
-    // INVARIANT: A pointer allocated using Box::new.
-    ptr: *mut Security::SECURITY_ATTRIBUTES,
-}
+pub fn set_named_security_info(
+    object_name: &U16CStr,
+    object_type: Security::Authorization::SE_OBJECT_TYPE,
+    owner: Option<&Sid>,
+    group: Option<&Sid>,
+    dacl: Option<&InheritableAcl>,
+    sacl: Option<&InheritableAcl>,
+) -> anyhow::Result<()> {
+    let mut security_info = Security::OBJECT_SECURITY_INFORMATION(0);
 
-impl SecurityAttributes {
-    pub fn as_ptr(&self) -> *const Security::SECURITY_ATTRIBUTES {
-        self.ptr.cast_const()
+    if owner.is_some() {
+        security_info |= Security::OWNER_SECURITY_INFORMATION;
     }
 
-    pub fn as_mut_ptr(&self) -> *mut Security::SECURITY_ATTRIBUTES {
-        self.ptr
+    if group.is_some() {
+        security_info |= Security::GROUP_SECURITY_INFORMATION;
     }
-}
 
-impl Drop for SecurityAttributes {
-    fn drop(&mut self) {
-        // SAFETY: Per invariants, ptr is a ptr allocated using Box::new, and the Rust global allocator.
-        let _ = unsafe { Box::from_raw(self.ptr) };
+    if let Some(dacl) = dacl {
+        security_info |= Security::DACL_SECURITY_INFORMATION;
+
+        match dacl.kind {
+            InheritableAclKind::Protected => security_info |= Security::PROTECTED_DACL_SECURITY_INFORMATION,
+            InheritableAclKind::Inherit | InheritableAclKind::Default => {
+                security_info |= Security::UNPROTECTED_DACL_SECURITY_INFORMATION
+            }
+        };
     }
+
+    if let Some(sacl) = sacl {
+        security_info |= Security::SACL_SECURITY_INFORMATION;
+
+        match sacl.kind {
+            InheritableAclKind::Protected => security_info |= Security::PROTECTED_SACL_SECURITY_INFORMATION,
+            InheritableAclKind::Inherit | InheritableAclKind::Default => {
+                security_info |= Security::UNPROTECTED_SACL_SECURITY_INFORMATION
+            }
+        };
+    }
+
+    // SAFETY:
+    // - When owner is Some, the SecurityInfo parameter includes the OWNER_SECURITY_INFORMATION flag.
+    // - When group is Some, the SecurityInfo parameter includes the GROUP_SECURITY_INFORMATION flag.
+    // - When dacl is Some, the SecurityInfo parameter includes the DACL_SECURITY_INFORMATION flag.
+    // - When sacl is Some, the SecurityInfo parameter includes the SACL_SECURITY_INFORMATION flag.
+    unsafe {
+        Security::Authorization::SetNamedSecurityInfoW(
+            object_name.as_pcwstr(),
+            object_type,
+            security_info,
+            owner.map(|x| x.as_psid_const()).unwrap_or_default(),
+            group.map(|x| x.as_psid_const()).unwrap_or_default(),
+            dacl.as_ref().map(|x| x.acl.as_ptr().cast()),
+            sacl.as_ref().map(|x| x.acl.as_ptr().cast()),
+        )
+        .ok()?
+    };
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -231,15 +266,9 @@ mod tests {
 
     use crate::token::Token;
 
-    use windows::Win32::{
-        Foundation::{GENERIC_ALL, GENERIC_READ, GENERIC_WRITE},
-        Security::{Authorization::GRANT_ACCESS, WinBuiltinUsersSid, NO_INHERITANCE},
-    };
-
-    #[test]
-    fn create_security_attributes() {
-        SecurityAttributesInit { inherit_handle: true }.init();
-    }
+    use windows::Win32::Foundation::{GENERIC_ALL, GENERIC_READ, GENERIC_WRITE};
+    use windows::Win32::Security::Authorization::GRANT_ACCESS;
+    use windows::Win32::Security::NO_INHERITANCE;
 
     #[test]
     #[cfg_attr(miri, ignore)]
@@ -251,7 +280,7 @@ mod tests {
                     access_permissions: GENERIC_READ.0 | GENERIC_WRITE.0,
                     access_mode: GRANT_ACCESS,
                     inheritance: NO_INHERITANCE,
-                    trustee: Trustee::Sid(Sid::from_well_known(WinBuiltinUsersSid, None).unwrap()),
+                    trustee: Trustee::Sid(Sid::from_well_known(Security::WinBuiltinUsersSid, None).unwrap()),
                 },
                 ExplicitAccess {
                     access_permissions: GENERIC_ALL.0,
