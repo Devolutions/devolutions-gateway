@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use channel_writer::{ChannelWriter, ChannelWriterError, ChannelWriterReceiver};
+use ebml_iterable::error::CorruptedFileError;
 use futures_util::SinkExt;
 use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
@@ -97,13 +98,28 @@ pub fn webm_stream(
         }
     }
 
+    const MAX_RETRY_COUNT: usize = 3;
+    // To make sure we don't retry forever
+    // Retry is set to 0 when we successfully read a tag
+    let mut retry_count = 0;
+
     let result = loop {
         match webm_itr.next() {
             Some(Err(IteratorError::InnerError(TagIteratorError::ReadError { source }))) => {
                 return Err(source.into());
             }
-            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. }))) | None => {
-                trace!("End of file reached, retrying");
+            Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. })))
+            // Sometimes the file is not currpted, it's just that specific tag is still on the fly
+            | Some(Err(IteratorError::InnerError(TagIteratorError::CorruptedFileData(
+                CorruptedFileError::InvalidTagData { .. },
+            ))))
+            | None => {
+                trace!("End of file reached or invalid tag data hit, retrying");
+                if retry_count >= MAX_RETRY_COUNT {
+                    anyhow::bail!("reached max retry count");
+                }
+
+                retry_count += 1;
                 match when_eof(&when_new_chunk_appended, Arc::clone(&stop_notifier)) {
                     Ok(WhenEofControlFlow::Continue) => {
                         webm_itr.rollback_to_last_successful_tag()?;
@@ -119,6 +135,7 @@ pub fn webm_stream(
                 }
             }
             Some(Ok(tag)) => {
+                retry_count = 0;
                 if webm_itr.previous_emitted_tag_postion() == cut_block_position {
                     if let Some(cut_block_hit_marker) = cut_block_hit_marker.take() {
                         encode_writer.mark_cut_block_hit(cut_block_hit_marker);
