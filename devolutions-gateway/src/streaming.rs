@@ -10,6 +10,7 @@ use futures::SinkExt;
 use terminal_streamer::terminal_stream;
 use tokio::fs::OpenOptions;
 use tokio::sync::Notify;
+use transport::WsCloseFrame;
 use uuid::Uuid;
 use video_streamer::config::CpuCount;
 use video_streamer::{webm_stream, ReOpenableFile};
@@ -159,7 +160,8 @@ async fn setup_webm_streaming(
         encoder_threads: CpuCount::default(),
     };
 
-    let websocket_stream = crate::ws::handle(socket, Arc::clone(&shutdown_notify), Duration::from_secs(45));
+    let (websocket_stream, close_handle) =
+        crate::ws::handle(socket, Arc::clone(&shutdown_notify), Duration::from_secs(45));
     let streaming_result = tokio::task::spawn_blocking(move || {
         webm_stream(
             websocket_stream,
@@ -179,9 +181,13 @@ async fn setup_webm_streaming(
             Err(anyhow::anyhow!("Streaming task failed"))
         }
         Ok(Err(e)) => {
+            let _ = close_handle.server_error("Streaming file failed").await?;
             error!(error = format!("{e:#}"), "Streaming file failed");
             Err(e)
         }
-        Ok(Ok(())) => Ok(()),
+        Ok(Ok(())) => {
+            let _ = close_handle.normal_close().await?;
+            Ok(())
+        }
     }
 }

@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -124,7 +125,14 @@ fn to_io_result<E: std::error::Error + Send + Sync + 'static>(res: Result<(), E>
     }
 }
 
-pub struct WsWritePing;
+pub struct WsCloseFrame {
+    pub code: u16,
+    pub message: String,
+}
+pub enum WsWriteMsg {
+    Ping,
+    Close(WsCloseFrame),
+}
 
 pub trait KeepAliveShutdown: Send + 'static {
     fn wait(&mut self) -> impl core::future::Future<Output = ()> + Send + '_;
@@ -136,27 +144,75 @@ impl KeepAliveShutdown for std::sync::Arc<tokio::sync::Notify> {
     }
 }
 
+pub struct CloseWebsocketHandle {
+    sender: tokio::sync::mpsc::Sender<WsCloseFrame>,
+}
+
+// Todo: maybe we should consider using 1014 to indicates Bad Gateway? https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code
+// Note: Never sends 1005 and 1006 manually, as specified in RFC6455, section 7.4.1
+impl CloseWebsocketHandle {
+    pub async fn normal_close(self) -> Result<(), CloseError> {
+        self.sender
+            .send(WsCloseFrame {
+                code: 1000,
+                message: "EOF".to_string(),
+            })
+            .await
+            .map_err(|e| CloseError(e))
+    }
+
+    pub async fn server_error(self, message: &str) -> Result<(), CloseError> {
+        self.sender
+            .send(WsCloseFrame {
+                code: 1011,
+                message: message.to_owned(),
+            })
+            .await
+            .map_err(|e| CloseError(e))
+    }
+
+}
+
+#[derive(Debug)]
+pub struct CloseError(tokio::sync::mpsc::error::SendError<WsCloseFrame>);
+
+impl Display for CloseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for CloseError {}
+
 /// Spawns a task running the WebSocket keep-alive logic and returns a shared handle to the WebSocket for the actual user payload
 pub fn spawn_websocket_keep_alive_logic<S>(
     mut ws: S,
     mut shutdown_signal: impl KeepAliveShutdown,
     interval: core::time::Duration,
-) where
-    S: Sink<WsWritePing> + Unpin + Send + 'static,
+) -> CloseWebsocketHandle
+where
+    S: Sink<WsWriteMsg> + Unpin + Send + 'static,
 {
     use futures_util::SinkExt as _;
     use tracing::Instrument as _;
 
     let span = tracing::Span::current();
+    let (close_frame_sender, mut close_frame_receiver) = tokio::sync::mpsc::channel(1);
 
     tokio::spawn(
         async move {
             loop {
                 tokio::select! {
                     () = tokio::time::sleep(interval) => {
-                        if ws.send(WsWritePing).await.is_err() {
+                        if ws.send(WsWriteMsg::Ping).await.is_err() {
                             break;
                         }
+                    }
+                    frame = close_frame_receiver.recv() => {
+                        if let Some(frame) = frame {
+                            let _ =ws.send(WsWriteMsg::Close(frame)).await;
+                        }
+                        break;
                     }
                     () = shutdown_signal.wait() => break,
                 }
@@ -164,4 +220,8 @@ pub fn spawn_websocket_keep_alive_logic<S>(
         }
         .instrument(span),
     );
+
+    CloseWebsocketHandle {
+        sender: close_frame_sender,
+    }
 }
