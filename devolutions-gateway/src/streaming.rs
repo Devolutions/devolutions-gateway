@@ -10,7 +10,6 @@ use futures::SinkExt;
 use terminal_streamer::terminal_stream;
 use tokio::fs::OpenOptions;
 use tokio::sync::Notify;
-use transport::WsCloseFrame;
 use uuid::Uuid;
 use video_streamer::config::CpuCount;
 use video_streamer::{webm_stream, ReOpenableFile};
@@ -181,12 +180,12 @@ async fn setup_webm_streaming(
             Err(anyhow::anyhow!("Streaming task failed"))
         }
         Ok(Err(e)) => {
-            let _ = close_handle.server_error("Streaming file failed").await?;
+            let _ = close_handle.server_error("Streaming file failed").await;
             error!(error = format!("{e:#}"), "Streaming file failed");
             Err(e)
         }
         Ok(Ok(())) => {
-            let _ = close_handle.normal_close().await?;
+            let _ = close_handle.normal_close().await;
             Ok(())
         }
     }
