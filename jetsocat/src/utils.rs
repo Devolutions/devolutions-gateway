@@ -161,10 +161,16 @@ where
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
 
     transport::spawn_websocket_keep_alive_logic(
-        ws.shared().with(|_: transport::WsWritePing| {
-            future::ready(Result::<_, tungstenite::Error>::Ok(tungstenite::Message::Ping(
-                Vec::new(),
-            )))
+        ws.shared().with(|message: transport::WsWriteMsg| {
+            future::ready(Result::<_, tungstenite::Error>::Ok(match message {
+                transport::WsWriteMsg::Ping => tungstenite::Message::Ping(Vec::new()),
+                transport::WsWriteMsg::Close(ws_close_frame) => {
+                    tungstenite::Message::Close(Some(tungstenite::protocol::frame::CloseFrame {
+                        code: ws_close_frame.code.into(),
+                        reason: std::borrow::Cow::Owned(ws_close_frame.message),
+                    }))
+                }
+            }))
         }),
         notify,
         Duration::from_secs(45),

@@ -92,7 +92,7 @@ async fn handle_jrec_push(
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
-    let stream = crate::ws::handle(
+    let (stream, close_handle) = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal.clone()),
         keep_alive_interval,
@@ -111,7 +111,10 @@ async fn handle_jrec_push(
         .await;
 
     if let Err(error) = result {
+        let _ = close_handle.server_error("WebSocket-JREC failure").await;
         error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-JREC failure");
+    } else {
+        let _ = close_handle.normal_close().await;
     }
 }
 
