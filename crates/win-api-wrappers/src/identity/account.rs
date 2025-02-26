@@ -18,8 +18,7 @@ use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, UnloadUserProfi
 use crate::handle::HandleWrapper;
 use crate::identity::sid::Sid;
 use crate::scope_guard::ScopeGuard;
-use crate::str::{U16CStr, UnicodeStr};
-use crate::str::{U16CStrExt, U16CString};
+use crate::str::{U16CStr, U16CStrExt, U16CString, UnicodeStr};
 use crate::token::Token;
 use crate::undoc::{
     LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT,

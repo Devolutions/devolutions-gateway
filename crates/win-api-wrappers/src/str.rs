@@ -103,24 +103,12 @@ mod win_ext {
         ///
         /// This function panics if `ptr` is null.
         unsafe fn from_pwstr(ptr: PWSTR) -> U16CString;
-
-        fn as_pwstr(&mut self) -> PWSTR;
-
-        fn as_pcwstr(&self) -> PCWSTR;
     }
 
     impl U16CStringExt for U16CString {
         unsafe fn from_pwstr(ptr: PWSTR) -> U16CString {
             // SAFETY: Same safety invariants as the function itself.
             unsafe { U16CString::from_ptr_str(ptr.as_ptr()) }
-        }
-
-        fn as_pwstr(&mut self) -> PWSTR {
-            PWSTR(self.as_mut_ptr())
-        }
-
-        fn as_pcwstr(&self) -> PCWSTR {
-            PCWSTR(self.as_ptr())
         }
     }
 

@@ -33,7 +33,7 @@ use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLE
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
 
 use crate::handle::{Handle, HandleWrapper};
-use crate::security::acl::SecurityAttributes;
+use crate::security::attributes::SecurityAttributes;
 use crate::security::privilege::{self, ScopedPrivileges};
 use crate::thread::Thread;
 use crate::token::Token;
