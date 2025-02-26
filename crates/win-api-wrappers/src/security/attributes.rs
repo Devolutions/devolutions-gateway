@@ -103,8 +103,6 @@ impl Drop for SecurityAttributes {
 
 #[cfg(test)]
 mod tests {
-    use crate::security::acl::Acl;
-
     use super::*;
 
     #[test]
@@ -119,11 +117,7 @@ mod tests {
     #[test]
     fn security_attributes_with_security_descriptor() {
         SecurityAttributesInit {
-            group: Some(Sid::from_well_known(Security::WinBuiltinUsersSid, None).unwrap()),
-            dacl: Some(InheritableAcl {
-                kind: InheritableAclKind::Default,
-                acl: Acl::new().unwrap(),
-            }),
+            group: Some(Sid::new((1, Security::SECURITY_AUTHENTICATION_AUTHORITY), 5)),
             ..Default::default()
         }
         .init();
