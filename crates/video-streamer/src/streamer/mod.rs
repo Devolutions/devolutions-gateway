@@ -116,7 +116,7 @@ pub fn webm_stream(
             | None => {
                 trace!("End of file reached or invalid tag data hit, retrying");
                 if retry_count >= MAX_RETRY_COUNT {
-                    anyhow::bail!("reached max retry count");
+                    anyhow::bail!("reached max retry count, the webm iterator cannot proceed with the current streaming file");
                 }
 
                 retry_count += 1;
