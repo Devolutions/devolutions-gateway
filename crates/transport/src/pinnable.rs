@@ -29,8 +29,7 @@ use std::{fmt, ops};
 /// }
 /// ```
 pub struct PinnableMutex<T: ?Sized>(parking_lot::Mutex<T>);
-impl<T: ?Sized + fmt::Debug> fmt::Debug for PinnableMutex<T>
-{
+impl<T: ?Sized + fmt::Debug> fmt::Debug for PinnableMutex<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.0, f)
     }
@@ -86,15 +85,13 @@ pub type PinMutexGuard<'a, T> = Pin<parking_lot::MutexGuard<'a, T>>;
 /// A mutex guard that is not pinned
 pub struct NoPinMutexGuard<'a, T: ?Sized>(parking_lot::MutexGuard<'a, T>);
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for NoPinMutexGuard<'_, T>
-{
+impl<T: ?Sized + fmt::Debug> fmt::Debug for NoPinMutexGuard<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + fmt::Display> fmt::Display for NoPinMutexGuard<'_, T>
-{
+impl<T: ?Sized + fmt::Display> fmt::Display for NoPinMutexGuard<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
@@ -108,8 +105,7 @@ impl<T: ?Sized> ops::Deref for NoPinMutexGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized + Unpin> ops::DerefMut for NoPinMutexGuard<'_, T>
-{
+impl<T: ?Sized + Unpin> ops::DerefMut for NoPinMutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
     }
