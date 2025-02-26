@@ -208,7 +208,7 @@ impl JobQueue for LibSqlJobQueue {
         // https://github.com/ulid/spec
         let id = Uuid::from(Ulid::new()).to_string();
 
-        let schedule_for = schedule_for.unwrap_or_else(|| OffsetDateTime::now_utc());
+        let schedule_for = schedule_for.unwrap_or_else(OffsetDateTime::now_utc);
 
         let params = (
             (":id", id),

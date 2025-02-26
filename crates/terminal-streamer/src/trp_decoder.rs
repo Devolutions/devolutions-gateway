@@ -20,7 +20,7 @@ pub fn decode_stream(
         info!("TRP decoder task finished");
     });
 
-    return Ok((task, AsyncReadChannel::new(rx)));
+    Ok((task, AsyncReadChannel::new(rx)))
 }
 
 struct AsyncReadChannel {

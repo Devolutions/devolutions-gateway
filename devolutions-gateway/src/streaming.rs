@@ -34,7 +34,7 @@ pub(crate) async fn stream_file(
     let path = Arc::new(path.to_owned());
     let upgrade_result = match streaming_type {
         StreamingType::Terminal => {
-            let shutdown_notify = shutdown_notify.clone();
+            let shutdown_notify = Arc::clone(&shutdown_notify);
             ws.on_upgrade(move |socket| async move {
                 if let Err(e) = setup_terminal_streaming(&path, socket, shutdown_notify, when_new_chunk_appended).await
                 {

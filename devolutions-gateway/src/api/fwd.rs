@@ -11,7 +11,6 @@ use devolutions_gateway_task::ShutdownSignal;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{field, Instrument as _};
-use transport::KeepAliveShutdown;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
@@ -122,6 +121,7 @@ async fn fwd_tls(
     Ok(response)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_fwd(
     ws: WebSocket,
     conf: Arc<Conf>,
