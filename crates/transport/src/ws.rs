@@ -170,7 +170,6 @@ impl CloseWebsocketHandle {
             .await
             .map_err(|e| CloseError(e))
     }
-
 }
 
 #[derive(Debug)]
