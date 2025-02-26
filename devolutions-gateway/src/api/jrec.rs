@@ -82,6 +82,7 @@ async fn jrec_push(
     Ok(response)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_jrec_push(
     ws: WebSocket,
     recordings: RecordingMessageSender,

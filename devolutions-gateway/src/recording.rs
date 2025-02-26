@@ -103,8 +103,6 @@ where
 
         #[cfg(windows)]
         {
-            use std::os::windows::fs::OpenOptionsExt as _;
-
             const FILE_SHARE_READ: u32 = 1;
 
             open_options.share_mode(FILE_SHARE_READ);
