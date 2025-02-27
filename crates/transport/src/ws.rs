@@ -129,6 +129,7 @@ pub struct WsCloseFrame {
     pub code: u16,
     pub message: String,
 }
+
 pub enum WsWriteMsg {
     Ping,
     Close(WsCloseFrame),
