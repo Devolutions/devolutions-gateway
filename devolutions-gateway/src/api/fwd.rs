@@ -471,8 +471,8 @@ async fn fwd_http(
                     .context("encountered a failure during WebSocket traffic proxying");
 
                 if let Err(error) = result {
-                    let _ = client_close_handle.server_error("WebSocket failure").await;
-                    let _ = server_close_handle.server_error("WebSocket failure").await;
+                    let _ = client_close_handle.server_error("proxy failure").await;
+                    let _ = server_close_handle.server_error("proxy failure").await;
                     span.in_scope(|| {
                         error!(error = format!("{error:#}"), "WebSocket forwarding failure");
                     });
