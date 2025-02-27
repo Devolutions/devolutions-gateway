@@ -12,7 +12,7 @@ workspace = true
 anyhow = "1"
 async-trait = "0.1"
 job-queue = { path = "../job-queue" }
-libsql = { git = "https://github.com/tursodatabase/libsql", rev = "6a7a3e50a14b3dac8b84e721006e82c5896ebdc9" }
+libsql = { git = "https://github.com/tursodatabase/libsql", rev = "9b04f1d57d8d098852fed5cd15d6526d89392c4b", default-features = false, features = ["core", "serde", "replication"] }
 serde = "1"
 time = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
