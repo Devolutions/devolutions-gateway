@@ -1,3 +1,5 @@
+//! For debugging webm video iterators
+
 use std::{env, io::Seek, path::Path, process::exit};
 use tracing::*;
 use video_streamer::debug;
@@ -72,6 +74,7 @@ const HELP: &str = "
 ";
 fn parse_arg<'a>(mut value: &[&'a str]) -> anyhow::Result<Args<'a>> {
     let mut arg = Args::default();
+
     loop {
         match value {
             ["--input" | "-i", input_path, rest @ ..] => {

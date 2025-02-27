@@ -20,12 +20,8 @@ tracing = "0.1"
 cadeau = { version = "0.5", features = ["dlopen"] }
 thiserror = "2"
 num_cpus = "1.16"
-
-# ebml-iterable and webm-iterable are not tools dedicated to the video streaming
-# so we fix the version to avoid any breaking changes, sometimes minor things could
-# break the video streamer.
-ebml-iterable = "0.6.3"
-webm-iterable = "0.6.4"
+ebml-iterable = "0.6"
+webm-iterable = "0.6"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
