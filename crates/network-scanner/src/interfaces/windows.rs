@@ -16,8 +16,8 @@ impl From<ipconfig::Adapter> for NetworkInterface {
         let mac_address: Option<MacAddr> = adapter.physical_address().and_then(|addr| addr.try_into().ok());
 
         NetworkInterface {
-            name: adapter.adapter_name().to_string(),
-            description: Some(adapter.description().to_string()),
+            name: adapter.adapter_name().to_owned(),
+            description: Some(adapter.description().to_owned()),
             mac_address,
             addresses: adapter
                 .prefixes()
