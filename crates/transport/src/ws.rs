@@ -148,9 +148,8 @@ pub struct CloseWebSocketHandle {
     sender: tokio::sync::mpsc::Sender<WsCloseFrame>,
 }
 
-// Todo: maybe we should consider using 1014 to indicates Bad Gateway? https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code
 // Note: Never sends 1005 and 1006 manually, as specified in RFC6455, section 7.4.1
-impl CloseWebsocketHandle {
+impl CloseWebSocketHandle {
     pub async fn normal_close(self) -> Result<(), CloseError> {
         self.sender
             .send(WsCloseFrame {
@@ -158,17 +157,24 @@ impl CloseWebsocketHandle {
                 message: String::new(),
             })
             .await
-            .map_err(CloseError)
+            .map_err(|_| CloseError)
     }
 
-    pub async fn server_error(self, message: &str) -> Result<(), CloseError> {
+    pub async fn server_error(self, message: String) -> Result<(), CloseError> {
+        self.sender
+            .send(WsCloseFrame { code: 1011, message })
+            .await
+            .map_err(|_| CloseError)
+    }
+
+    pub async fn bad_gateway(self) -> Result<(), CloseError> {
         self.sender
             .send(WsCloseFrame {
-                code: 1011,
-                message: message.to_owned(),
+                code: 1014,
+                message: String::new(),
             })
             .await
-            .map_err(CloseError)
+            .map_err(|_| CloseError)
     }
 }
 
@@ -188,7 +194,7 @@ pub fn spawn_websocket_keep_alive_logic<S>(
     mut ws: S,
     mut shutdown_signal: impl KeepAliveShutdown,
     interval: core::time::Duration,
-) -> CloseWebsocketHandle
+) -> CloseWebSocketHandle
 where
     S: Sink<WsWriteMsg> + Unpin + Send + 'static,
 {
@@ -220,7 +226,7 @@ where
         .instrument(span),
     );
 
-    CloseWebsocketHandle {
+    CloseWebSocketHandle {
         sender: close_frame_sender,
     }
 }

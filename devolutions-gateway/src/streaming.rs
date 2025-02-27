@@ -180,7 +180,7 @@ async fn setup_webm_streaming(
             Err(anyhow::anyhow!("Streaming task failed"))
         }
         Ok(Err(e)) => {
-            let _ = close_handle.server_error("Streaming file failed").await;
+            let _ = close_handle.server_error("Streaming file failed".to_owned()).await;
             error!(error = format!("{e:#}"), "Streaming file failed");
             Err(e)
         }
