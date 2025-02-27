@@ -109,7 +109,7 @@ pub fn webm_stream(
                 return Err(source.into());
             }
             Some(Err(IteratorError::InnerError(TagIteratorError::UnexpectedEOF { .. })))
-            // Sometimes the file is not currpted, it's just that specific tag is still on the fly
+            // Sometimes the file is not corrupted, it's just that specific tag is still on the fly
             | Some(Err(IteratorError::InnerError(TagIteratorError::CorruptedFileData(
                 CorruptedFileError::InvalidTagData { .. },
             ))))
