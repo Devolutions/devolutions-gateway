@@ -2917,7 +2917,7 @@ dependencies = [
 [[package]]
 name = "libsql"
 version = "0.6.0"
-source = "git+https://github.com/tursodatabase/libsql?rev=6a7a3e50a14b3dac8b84e721006e82c5896ebdc9#6a7a3e50a14b3dac8b84e721006e82c5896ebdc9"
+source = "git+https://github.com/tursodatabase/libsql?rev=9b04f1d57d8d098852fed5cd15d6526d89392c4b#9b04f1d57d8d098852fed5cd15d6526d89392c4b"
 dependencies = [
  "async-trait",
  "bitflags 2.6.0",
@@ -2932,16 +2932,17 @@ dependencies = [
 [[package]]
 name = "libsql-ffi"
 version = "0.5.0"
-source = "git+https://github.com/tursodatabase/libsql?rev=6a7a3e50a14b3dac8b84e721006e82c5896ebdc9#6a7a3e50a14b3dac8b84e721006e82c5896ebdc9"
+source = "git+https://github.com/tursodatabase/libsql?rev=9b04f1d57d8d098852fed5cd15d6526d89392c4b#9b04f1d57d8d098852fed5cd15d6526d89392c4b"
 dependencies = [
  "bindgen 0.66.1",
  "cc",
+ "glob",
 ]
 
 [[package]]
 name = "libsql-sys"
 version = "0.8.0"
-source = "git+https://github.com/tursodatabase/libsql?rev=6a7a3e50a14b3dac8b84e721006e82c5896ebdc9#6a7a3e50a14b3dac8b84e721006e82c5896ebdc9"
+source = "git+https://github.com/tursodatabase/libsql?rev=9b04f1d57d8d098852fed5cd15d6526d89392c4b#9b04f1d57d8d098852fed5cd15d6526d89392c4b"
 dependencies = [
  "bytes 1.8.0",
  "libsql-ffi",
