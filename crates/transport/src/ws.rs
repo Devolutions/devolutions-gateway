@@ -144,7 +144,7 @@ impl KeepAliveShutdown for std::sync::Arc<tokio::sync::Notify> {
     }
 }
 
-pub struct CloseWebsocketHandle {
+pub struct CloseWebSocketHandle {
     sender: tokio::sync::mpsc::Sender<WsCloseFrame>,
 }
 
