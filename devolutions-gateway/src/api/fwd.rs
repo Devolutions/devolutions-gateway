@@ -158,13 +158,23 @@ async fn handle_fwd(
         .instrument(span.clone())
         .await;
 
+    match &result {
+        Ok(_) => {
+            let _ = close_handle.normal_close().await;
+        }
+        Err(ForwardError::BadGateway(_)) => {
+            let _ = close_handle.bad_gateway().await;
+        }
+        Err(ForwardError::Other(_)) => {
+            let _ = close_handle.server_error("internal error".to_owned()).await;
+        }
+    };
+
     if let Err(error) = result {
-        let _ = close_handle.server_error("forwarding failure").await;
         span.in_scope(|| {
             error!(error = format!("{error:#}"), "WebSocket forwarding failure");
         });
     } else {
-        let _ = close_handle.normal_close().await;
     }
 }
 
@@ -179,11 +189,26 @@ struct Forward<S> {
     with_tls: bool,
 }
 
+#[derive(Debug)]
+pub enum ForwardError {
+    BadGateway(anyhow::Error),
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for ForwardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadGateway(error) => write!(f, "Bad Gateway: {}", error),
+            Self::Other(error) => write!(f, "{}", error),
+        }
+    }
+}
+
 impl<S> Forward<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    async fn run(self) -> anyhow::Result<()> {
+    async fn run(self) -> Result<(), ForwardError> {
         let Self {
             conf,
             claims,
@@ -196,19 +221,20 @@ where
 
         match claims.jet_rec {
             RecordingPolicy::None | RecordingPolicy::Stream => (),
-            RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
+            RecordingPolicy::Proxy => Err(ForwardError::Other(anyhow::anyhow!("recording policy not supported")))?,
         }
 
         let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {
-            anyhow::bail!("invalid connection mode")
+            Err(ForwardError::Other(anyhow::anyhow!("connection mode not supported")))?
         };
 
         let span = tracing::Span::current();
 
         trace!("Select and connect to target");
 
-        let ((server_stream, server_addr), selected_target) =
-            utils::successive_try(&targets, utils::tcp_connect).await?;
+        let ((server_stream, server_addr), selected_target) = utils::successive_try(&targets, utils::tcp_connect)
+            .await
+            .map_err(ForwardError::BadGateway)?;
 
         trace!(%selected_target, "Connected");
         span.record("target", selected_target.to_string());
@@ -227,7 +253,8 @@ where
 
             let server_stream = crate::tls::connect(selected_target.host(), server_stream)
                 .await
-                .context("TLS connect")?;
+                .context("TLS connect")
+                .map_err(ForwardError::BadGateway)?;
 
             info!("WebSocket-TLS forwarding");
 
@@ -256,6 +283,7 @@ where
                 .select_dissector_and_forward()
                 .await
                 .context("encountered a failure during plain tls traffic proxying")
+                .map_err(ForwardError::Other)
         } else {
             info!("WebSocket-TCP forwarding");
 
@@ -284,6 +312,7 @@ where
                 .select_dissector_and_forward()
                 .await
                 .context("encountered a failure during plain tcp traffic proxying")
+                .map_err(ForwardError::Other)
         }
     }
 }
@@ -471,8 +500,8 @@ async fn fwd_http(
                     .context("encountered a failure during WebSocket traffic proxying");
 
                 if let Err(error) = result {
-                    let _ = client_close_handle.server_error("proxy failure").await;
-                    let _ = server_close_handle.server_error("proxy failure").await;
+                    let _ = client_close_handle.server_error("proxy failure".to_owned()).await;
+                    let _ = server_close_handle.server_error("proxy failure".to_owned()).await;
                     span.in_scope(|| {
                         error!(error = format!("{error:#}"), "WebSocket forwarding failure");
                     });
@@ -571,7 +600,7 @@ async fn fwd_http(
         keep_alive_interval: Duration,
     ) -> (
         impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-        transport::CloseWebsocketHandle,
+        transport::CloseWebSocketHandle,
     )
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -581,10 +610,16 @@ async fn fwd_http(
         let ws = transport::Shared::new(ws);
 
         let close_frame_handle = transport::spawn_websocket_keep_alive_logic(
-            ws.shared().with(|_: transport::WsWriteMsg| {
-                core::future::ready(Result::<_, tungstenite::Error>::Ok(tungstenite::Message::Ping(
-                    Vec::new(),
-                )))
+            ws.shared().with(|message: transport::WsWriteMsg| {
+                core::future::ready(Result::<_, tungstenite::Error>::Ok(match message {
+                    transport::WsWriteMsg::Ping => tungstenite::Message::Ping(vec![]),
+                    transport::WsWriteMsg::Close(ws_close_frame) => {
+                        tungstenite::Message::Close(Some(tungstenite::protocol::CloseFrame {
+                            code: ws_close_frame.code.into(),
+                            reason: ws_close_frame.message.into(),
+                        }))
+                    }
+                }))
             }),
             crate::ws::KeepAliveShutdownSignal(shutdown_signal),
             keep_alive_interval,

@@ -23,7 +23,7 @@ pub fn handle(
     keep_alive_interval: time::Duration,
 ) -> (
     impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    transport::CloseWebsocketHandle,
+    transport::CloseWebSocketHandle,
 ) {
     let ws = transport::Shared::new(ws);
 
@@ -33,7 +33,7 @@ pub fn handle(
                 transport::WsWriteMsg::Ping => ws::Message::Ping(vec![]),
                 transport::WsWriteMsg::Close(frame) => ws::Message::Close(Some(CloseFrame {
                     code: frame.code,
-                    reason: std::borrow::Cow::Owned(frame.message),
+                    reason: frame.message.into(),
                 })),
             }))
         }),
