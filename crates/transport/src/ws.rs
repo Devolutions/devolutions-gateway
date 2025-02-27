@@ -209,7 +209,7 @@ where
                     }
                     frame = close_frame_receiver.recv() => {
                         if let Some(frame) = frame {
-                            let _ =ws.send(WsWriteMsg::Close(frame)).await;
+                            let _ = ws.send(WsWriteMsg::Close(frame)).await;
                         }
                         break;
                     }
