@@ -173,11 +173,11 @@ impl CloseWebsocketHandle {
 }
 
 #[derive(Debug)]
-pub struct CloseError(tokio::sync::mpsc::error::SendError<WsCloseFrame>);
+pub struct CloseError;
 
 impl Display for CloseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "WebSocket already closed")
     }
 }
 
