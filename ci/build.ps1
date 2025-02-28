@@ -182,4 +182,3 @@ function Get-PackageName {
 }
 
 Invoke-Build -Product $Product -Target $Target -Profile $Profile -OutputDir $OutputDir -Static:($Static.IsPresent) -Symbols:($Symbols.IsPresent) -Strip:($Strip.IsPresent) -StripPath $StripPath
-

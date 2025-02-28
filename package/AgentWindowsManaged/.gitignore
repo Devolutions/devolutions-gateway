@@ -3,3 +3,4 @@ Release
 wix
 fr-FR.*
 *_missing.json
+msbuild_*.log
