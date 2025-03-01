@@ -32,25 +32,22 @@ namespace DevolutionsGateway.Resources
         /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`
         /// </summary>
         /// <remarks>
-        /// Owner  : NT AUTHORITY\SYSTEM
-        /// Group  : NT AUTHORITY\SYSTEM
-        /// Access :
-        ///    NT AUTHORITY\SYSTEM Allow  FullControl
-        ///    NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize
-        ///    NT AUTHORITY\NETWORK SERVICE Allow Modify, Synchronize
-        ///    BUILTIN\Administrators Allow  FullControl
-        ///    BUILTIN\Users Allow ReadAndExecute, Synchronize
+            /// Local System (SY)	Full Access (FA)
+            /// Local Service (LS)	Read, Execute
+            /// Network Service (NS)	Read, Execute, Write, Delete Subfolders and Files
+            /// Administrators (BA)	Full Access (FA)
+            /// Users (BU)	Read, Execute
         /// </remarks>
-        internal static string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1301bf;;;NS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+        internal static string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1301ff;;;NS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
         /// <remarks>
         /// Owner  : NT AUTHORITY\SYSTEM
         /// Group  : NT AUTHORITY\SYSTEM
         /// Access :
-        ///    NT AUTHORITY\SYSTEM Allow  FullControl
-        ///    NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize
-        ///    NT AUTHORITY\NETWORK SERVICE Allow Write, ReadAndExecute, Synchronize
-        ///    BUILTIN\Administrators Allow  FullControl
+            /// Local System (SY)	Full Access (FA)
+            /// Local Service (LS)	Read, Execute, Modify (Write)
+            /// Network Service (NS)	Read, Execute, Modify (Write)
+            /// Administrators (BA)	Full Access (FA)
         /// </remarks>
         internal static string USERS_FILE_SDDL = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;0x1201bf;;;NS)(A;;FA;;;BA)";
     }
