@@ -44,7 +44,7 @@ pub fn remove_local_group_member(group_name: &U16CStr, security_identifier: &Sid
     };
 
     // SAFETY:
-    // - level is te to 0, and the buf parameter points to an array of LOCALGROUP_MEMBERS_INFO_0 structs.
+    // - level is set to 0, and the buf parameter points to an array of LOCALGROUP_MEMBERS_INFO_0 structs.
     // - lgrmi0_sid is never modified by NetLocalGroupDelMembers.
     // - buf points to a single struct, so totalentries is set to 1.
     let ret = unsafe {
