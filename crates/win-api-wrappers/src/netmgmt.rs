@@ -1,4 +1,4 @@
-use anyhow::{bail, Context as _};
+use anyhow::bail;
 use windows::Win32::Foundation::WIN32_ERROR;
 use windows::Win32::NetworkManagement::NetManagement;
 use windows::Win32::NetworkManagement::NetManagement::{
@@ -7,12 +7,10 @@ use windows::Win32::NetworkManagement::NetManagement::{
 use windows::Win32::Security::WinBuiltinAdministratorsSid;
 
 use crate::identity::sid::Sid;
-use crate::str::{U16CStr, U16CStrExt as _, U16CString};
+use crate::str::{U16CStr, U16CStrExt as _};
 use crate::Error;
 
-pub fn add_local_group_member(group_name: &str, security_identifier: &Sid) -> anyhow::Result<()> {
-    let group_name = U16CString::from_str(group_name).context("invalid group name")?;
-
+pub fn add_local_group_member(group_name: &U16CStr, security_identifier: &Sid) -> windows::core::Result<()> {
     let group_info = LOCALGROUP_MEMBERS_INFO_0 {
         lgrmi0_sid: security_identifier.as_psid_const(),
     };
@@ -20,12 +18,32 @@ pub fn add_local_group_member(group_name: &str, security_identifier: &Sid) -> an
     // SAFETY:
     // - level is set to 0, and the buf parameters points to an array of LOCALGROUP_MEMBERS_INFO_0.
     // - lgrmi0_sid is never modified by NetLocalGroupAddMembers.
-    let rc = unsafe {
+    let ret = unsafe {
         NetManagement::NetLocalGroupAddMembers(None, group_name.as_pcwstr(), 0, &group_info as *const _ as *const u8, 1)
     };
 
-    if rc != NetManagement::NERR_Success {
-        bail!(Error::from_win32(WIN32_ERROR(rc)))
+    if ret != NetManagement::NERR_Success {
+        return Err(windows::core::Error::from_hresult(windows::core::HRESULT::from_win32(
+            ret,
+        )));
+    }
+
+    Ok(())
+}
+
+pub fn remove_local_group_member(group_name: &U16CStr, security_identifier: &Sid) -> windows::core::Result<()> {
+    let mut group_info = LOCALGROUP_MEMBERS_INFO_0::default();
+    group_info.lgrmi0_sid = security_identifier.as_psid_const();
+
+    // SAFETY: group name holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
+    let ret = unsafe {
+        NetManagement::NetLocalGroupDelMembers(None, group_name.as_pcwstr(), 0, &group_info as *const _ as *const u8, 1)
+    };
+
+    if ret != NetManagement::NERR_Success {
+        return Err(windows::core::Error::from_hresult(windows::core::HRESULT::from_win32(
+            ret,
+        )));
     }
 
     Ok(())
