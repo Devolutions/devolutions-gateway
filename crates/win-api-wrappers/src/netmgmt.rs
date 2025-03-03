@@ -16,10 +16,17 @@ pub fn add_local_group_member(group_name: &U16CStr, security_identifier: &Sid) -
     };
 
     // SAFETY:
-    // - level is set to 0, and the buf parameters points to an array of LOCALGROUP_MEMBERS_INFO_0.
+    // - level is set to 0, and the buf parameter points to an array of LOCALGROUP_MEMBERS_INFO_0 structs.
     // - lgrmi0_sid is never modified by NetLocalGroupAddMembers.
+    // - buf points to a single struct, so totalentries is set to 1.
     let ret = unsafe {
-        NetManagement::NetLocalGroupAddMembers(None, group_name.as_pcwstr(), 0, &group_info as *const _ as *const u8, 1)
+        NetManagement::NetLocalGroupAddMembers(
+            None,
+            group_name.as_pcwstr(),
+            0,
+            &group_info as *const LOCALGROUP_MEMBERS_INFO_0 as *const u8,
+            1,
+        )
     };
 
     if ret != NetManagement::NERR_Success {
@@ -32,12 +39,22 @@ pub fn add_local_group_member(group_name: &U16CStr, security_identifier: &Sid) -
 }
 
 pub fn remove_local_group_member(group_name: &U16CStr, security_identifier: &Sid) -> windows::core::Result<()> {
-    let mut group_info = LOCALGROUP_MEMBERS_INFO_0::default();
-    group_info.lgrmi0_sid = security_identifier.as_psid_const();
+    let group_info = LOCALGROUP_MEMBERS_INFO_0 {
+        lgrmi0_sid: security_identifier.as_psid_const(),
+    };
 
-    // SAFETY: group name holds a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
+    // SAFETY:
+    // - level is te to 0, and the buf parameter points to an array of LOCALGROUP_MEMBERS_INFO_0 structs.
+    // - lgrmi0_sid is never modified by NetLocalGroupDelMembers.
+    // - buf points to a single struct, so totalentries is set to 1.
     let ret = unsafe {
-        NetManagement::NetLocalGroupDelMembers(None, group_name.as_pcwstr(), 0, &group_info as *const _ as *const u8, 1)
+        NetManagement::NetLocalGroupDelMembers(
+            None,
+            group_name.as_pcwstr(),
+            0,
+            &group_info as *const LOCALGROUP_MEMBERS_INFO_0 as *const u8,
+            1,
+        )
     };
 
     if ret != NetManagement::NERR_Success {
