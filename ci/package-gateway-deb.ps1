@@ -127,8 +127,8 @@ function New-GatewayDeb() {
     Copy-Item 'package/Linux/gateway/debian' $pkgDir -Recurse -Force -ErrorAction 'Stop'
 
     Copy-Item $Bin "$pkgDir/devolutions-gateway" -Force -ErrorAction 'Stop'
-    Copy-Item $WebClientDir $pkgDir -Force -ErrorAction 'Stop'
-    Copy-Item $WebPlayerDir $pkgDir -Force -ErrorAction 'Stop'
+    Copy-Item $WebClientDir $pkgDir -Recurse -Force -ErrorAction 'Stop'
+    Copy-Item $WebPlayerDir $pkgDir -Recurse -Force -ErrorAction 'Stop'
     Copy-Item $LibxmfFile $pkgDir -Force -ErrorAction 'Stop'
 
     Push-Location
