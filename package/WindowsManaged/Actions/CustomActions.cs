@@ -20,6 +20,7 @@ using File = System.IO.File;
 using DevolutionsGateway.Configuration;
 using static DevolutionsGateway.Actions.WinAPI;
 using System.Security.Principal;
+using System.Security.AccessControl;
 
 namespace DevolutionsGateway.Actions
 {
@@ -985,6 +986,27 @@ namespace DevolutionsGateway.Actions
             try
             {
                 SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+
+                // Files created before NetworkService was granted access to the program data directory
+                // don't retroactively inherit the new ACE
+                // We fix this by removing access rule protection on the files
+                // and then reapplying the ACL
+                DirectoryInfo dir = new DirectoryInfo(ProgramDataDirectory);
+
+                foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        FileSecurity fileSecurity = file.GetAccessControl();
+                        fileSecurity.SetAccessRuleProtection(false, false);
+                        file.SetAccessControl(fileSecurity);
+                    }
+                    catch (Exception e)
+                    {
+                        session.Log($"failed to reset permissions on path {file.FullName}: {e}");
+                    }
+                }
+
                 return ActionResult.Success;
             }
             catch (Exception e)
