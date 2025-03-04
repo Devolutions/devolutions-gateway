@@ -112,10 +112,10 @@ async fn handle_jrec_push(
         .await;
 
     if let Err(error) = result {
-        let _ = close_handle.server_error("forwarding failure".to_owned()).await;
+        close_handle.server_error("forwarding failure".to_owned()).await;
         error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-JREC failure");
     } else {
-        let _ = close_handle.normal_close().await;
+        close_handle.normal_close().await;
     }
 }
 

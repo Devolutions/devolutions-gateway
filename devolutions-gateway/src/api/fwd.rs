@@ -159,22 +159,15 @@ async fn handle_fwd(
         .await;
 
     match &result {
-        Ok(_) => {
-            let _ = close_handle.normal_close().await;
-        }
-        Err(ForwardError::BadGateway(_)) => {
-            let _ = close_handle.bad_gateway().await;
-        }
-        Err(ForwardError::Other(_)) => {
-            let _ = close_handle.server_error("internal error".to_owned()).await;
-        }
+        Ok(_) => close_handle.normal_close().await,
+        Err(ForwardError::BadGateway(_)) => close_handle.bad_gateway().await,
+        Err(ForwardError::Other(_)) => close_handle.server_error("internal error".to_owned()).await,
     };
 
     if let Err(error) = result {
         span.in_scope(|| {
             error!(error = format!("{error:#}"), "WebSocket forwarding failure");
         });
-    } else {
     }
 }
 
@@ -500,14 +493,14 @@ async fn fwd_http(
                     .context("encountered a failure during WebSocket traffic proxying");
 
                 if let Err(error) = result {
-                    let _ = client_close_handle.server_error("proxy failure".to_owned()).await;
-                    let _ = server_close_handle.server_error("proxy failure".to_owned()).await;
+                    client_close_handle.server_error("proxy failure".to_owned()).await;
+                    server_close_handle.server_error("proxy failure".to_owned()).await;
                     span.in_scope(|| {
                         error!(error = format!("{error:#}"), "WebSocket forwarding failure");
                     });
                 } else {
-                    let _ = client_close_handle.normal_close().await;
-                    let _ = server_close_handle.normal_close().await;
+                    client_close_handle.normal_close().await;
+                    server_close_handle.normal_close().await;
                 }
             }
         })

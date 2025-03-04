@@ -152,7 +152,8 @@ pub struct CloseWebSocketHandle {
 // Note: Never sends 1005 and 1006 manually, as specified in RFC6455, section 7.4.1
 impl CloseWebSocketHandle {
     pub async fn normal_close(self) {
-        let _ = self.sender
+        let _ = self
+            .sender
             .send(WsCloseFrame {
                 code: 1000,
                 message: String::new(),
@@ -160,34 +161,20 @@ impl CloseWebSocketHandle {
             .await;
     }
 
-    pub async fn server_error(self, message: String) -> Result<(), CloseError> {
-        self.sender
-            .send(WsCloseFrame { code: 1011, message })
-            .await
-            .map_err(|_| CloseError)
+    pub async fn server_error(self, message: String) {
+        let _ = self.sender.send(WsCloseFrame { code: 1011, message }).await;
     }
 
-    pub async fn bad_gateway(self) -> Result<(), CloseError> {
-        self.sender
+    pub async fn bad_gateway(self) {
+        let _ = self
+            .sender
             .send(WsCloseFrame {
                 code: 1014,
                 message: String::new(),
             })
-            .await
-            .map_err(|_| CloseError)
+            .await;
     }
 }
-
-#[derive(Debug)]
-pub struct CloseError;
-
-impl Display for CloseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WebSocket already closed")
-    }
-}
-
-impl std::error::Error for CloseError {}
 
 /// Spawns a task running the WebSocket keep-alive logic and returns a shared handle to the WebSocket for the actual user payload
 pub fn spawn_websocket_keep_alive_logic<S>(
