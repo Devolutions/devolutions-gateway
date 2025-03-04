@@ -151,14 +151,13 @@ pub struct CloseWebSocketHandle {
 
 // Note: Never sends 1005 and 1006 manually, as specified in RFC6455, section 7.4.1
 impl CloseWebSocketHandle {
-    pub async fn normal_close(self) -> Result<(), CloseError> {
-        self.sender
+    pub async fn normal_close(self) {
+        let _ = self.sender
             .send(WsCloseFrame {
                 code: 1000,
                 message: String::new(),
             })
-            .await
-            .map_err(|_| CloseError)
+            .await;
     }
 
     pub async fn server_error(self, message: String) -> Result<(), CloseError> {
