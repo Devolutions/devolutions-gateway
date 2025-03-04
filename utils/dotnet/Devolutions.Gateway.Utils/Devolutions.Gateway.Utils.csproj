@@ -20,6 +20,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Devolutions.Picky" Version="2024.7.11" />
+    <PackageReference Include="Devolutions.Picky" Version="2024.12.12" />
   </ItemGroup>
 </Project>
