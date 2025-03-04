@@ -218,7 +218,7 @@ where
         }
 
         let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {
-            Err(ForwardError::Other(anyhow::anyhow!("connection mode not supported")))?
+            return Err(ForwardError::Other(anyhow::anyhow!("connection mode not supported")))
         };
 
         let span = tracing::Span::current();
