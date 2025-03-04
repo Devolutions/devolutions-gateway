@@ -98,7 +98,7 @@ pub struct ThreadAttributeList(Vec<u8>);
 impl<'a> ThreadAttributeList {
     pub fn with_count(count: u32) -> Result<ThreadAttributeList> {
         // The output has a variable size.
-        // Therefore, we must call InitializeProcThreadAttributeList once with a zero-size, and check for the ERROR_MORE_DATA status.
+        // Therefore, we must call InitializeProcThreadAttributeList once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
         // At this point, we call InitializeProcThreadAttributeList again with a buffer of the correct size.
 
         let mut required_size = 0;
@@ -113,9 +113,12 @@ impl<'a> ThreadAttributeList {
         };
 
         // SAFETY: FFI call with no outstanding precondition.
-        if unsafe { windows::Win32::Foundation::GetLastError() } != windows::Win32::Foundation::ERROR_MORE_DATA {
-            return Err(anyhow::Error::new(err)
-                .context("first call to InitializeProcThreadAttributeList did not fail with ERROR_MORE_DATA"));
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err).context(
+                "first call to InitializeProcThreadAttributeList did not fail with ERROR_INSUFFICIENT_BUFFER",
+            ));
         }
 
         let mut allocated_length = required_size;
