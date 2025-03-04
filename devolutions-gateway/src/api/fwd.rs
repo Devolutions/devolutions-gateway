@@ -191,7 +191,7 @@ pub enum ForwardError {
 impl std::fmt::Display for ForwardError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BadGateway(error) => write!(f, "Bad Gateway: {}", error),
+            Self::BadGateway(error) => write!(f, "bad gateway: {error}"),
             Self::Other(error) => write!(f, "{}", error),
         }
     }
