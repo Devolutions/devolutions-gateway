@@ -161,7 +161,7 @@ async fn handle_fwd(
     match &result {
         Ok(_) => close_handle.normal_close().await,
         Err(ForwardError::BadGateway(_)) => close_handle.bad_gateway().await,
-        Err(ForwardError::Other(_)) => close_handle.server_error("internal error".to_owned()).await,
+        Err(ForwardError::Internal(_)) => close_handle.server_error("internal error".to_owned()).await,
     };
 
     if let Err(error) = result {
@@ -185,14 +185,14 @@ struct Forward<S> {
 #[derive(Debug)]
 pub enum ForwardError {
     BadGateway(anyhow::Error),
-    Other(anyhow::Error),
+    Internal(anyhow::Error),
 }
 
 impl std::fmt::Display for ForwardError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BadGateway(error) => write!(f, "bad gateway: {error}"),
-            Self::Other(error) => write!(f, "{}", error),
+            Self::Internal(error) => write!(f, "{}", error),
         }
     }
 }
@@ -214,11 +214,13 @@ where
 
         match claims.jet_rec {
             RecordingPolicy::None | RecordingPolicy::Stream => (),
-            RecordingPolicy::Proxy => Err(ForwardError::Other(anyhow::anyhow!("recording policy not supported")))?,
+            RecordingPolicy::Proxy => Err(ForwardError::Internal(anyhow::anyhow!(
+                "recording policy not supported"
+            )))?,
         }
 
         let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {
-            return Err(ForwardError::Other(anyhow::anyhow!("connection mode not supported")))
+            return Err(ForwardError::Internal(anyhow::anyhow!("connection mode not supported")));
         };
 
         let span = tracing::Span::current();
@@ -276,7 +278,7 @@ where
                 .select_dissector_and_forward()
                 .await
                 .context("encountered a failure during plain tls traffic proxying")
-                .map_err(ForwardError::Other)
+                .map_err(ForwardError::Internal)
         } else {
             info!("WebSocket-TCP forwarding");
 
@@ -305,7 +307,7 @@ where
                 .select_dissector_and_forward()
                 .await
                 .context("encountered a failure during plain tcp traffic proxying")
-                .map_err(ForwardError::Other)
+                .map_err(ForwardError::Internal)
         }
     }
 }
