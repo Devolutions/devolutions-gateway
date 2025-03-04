@@ -264,7 +264,7 @@ impl Sid {
         use std::alloc::Layout;
 
         // The output has a variable size.
-        // Therefore, we must call CreateWellKnownSid once with a zero-size, and check for the ERROR_MORE_DATA status.
+        // Therefore, we must call CreateWellKnownSid once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
         // At this point, we call CreateWellKnownSid again with a buffer of the correct size.
 
         let mut return_length = 0u32;
@@ -281,10 +281,11 @@ impl Sid {
         };
 
         // SAFETY: FFI call with no outstanding precondition.
-        if unsafe { windows::Win32::Foundation::GetLastError() } != windows::Win32::Foundation::ERROR_MORE_DATA {
-            return Err(
-                anyhow::Error::new(err).context("first call to CreateWellKnownSid did not fail with ERROR_MORE_DATA")
-            );
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err)
+                .context("first call to CreateWellKnownSid did not fail with ERROR_INSUFFICIENT_BUFFER"));
         }
 
         let allocated_length = return_length;
@@ -414,7 +415,7 @@ impl Sid {
         let mut sid_name_use = Security::SID_NAME_USE::default();
 
         // The output has a variable size.
-        // Therefore, we must call LookupAccountSidW once with a zero-size, and check for the ERROR_MORE_DATA status.
+        // Therefore, we must call LookupAccountSidW once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
         // At this point, we call LookupAccountSidW again with a buffer of the correct size.
 
         // SAFETY:
@@ -437,10 +438,11 @@ impl Sid {
         };
 
         // SAFETY: FFI call with no outstanding precondition.
-        if unsafe { windows::Win32::Foundation::GetLastError() } != windows::Win32::Foundation::ERROR_MORE_DATA {
-            return Err(
-                anyhow::Error::new(err).context("first call to LookupAccountSidW did not fail with ERROR_MORE_DATA")
-            );
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err)
+                .context("first call to LookupAccountSidW did not fail with ERROR_INSUFFICIENT_BUFFER"));
         }
 
         let mut account_name_buf = vec![0u16; account_name_size as usize];

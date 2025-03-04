@@ -232,7 +232,7 @@ impl Token {
         use std::alloc::Layout;
 
         // The output has a variable size.
-        // Therefore, we must call GetTokenInformation once with a zero-size, and check for the ERROR_MORE_DATA status.
+        // Therefore, we must call GetTokenInformation once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
         // At this point, we call GetTokenInformation again with a buffer of the correct size.
 
         let mut return_length = 0u32;
@@ -247,10 +247,11 @@ impl Token {
         };
 
         // SAFETY: FFI call with no outstanding precondition.
-        if unsafe { windows::Win32::Foundation::GetLastError() } != windows::Win32::Foundation::ERROR_MORE_DATA {
-            return Err(
-                anyhow::Error::new(err).context("first call to GetTokenInformation did not fail with ERROR_MORE_DATA")
-            );
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err)
+                .context("first call to GetTokenInformation did not fail with ERROR_INSUFFICIENT_BUFFER"));
         }
 
         // We try again, but allocate manually using the length specified in return_length for variable-sized structs.
