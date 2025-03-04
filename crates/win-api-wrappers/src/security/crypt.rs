@@ -6,9 +6,6 @@ use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
-
-use crate::utils::{nul_slice_wide_str, slice_from_ptr, u32size_of, SafeWindowsString, WideString};
-use crate::Error;
 use windows::core::HRESULT;
 use windows::Win32::Foundation::{
     CRYPT_E_BAD_MSG, ERROR_INCORRECT_SIZE, ERROR_INVALID_VARIANT, HANDLE, HWND, INVALID_HANDLE_VALUE, NTE_BAD_ALGID,
@@ -29,6 +26,9 @@ use windows::Win32::Security::WinTrust::{
     WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4, WTD_REVOKE_WHOLECHAIN,
     WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_USE_DEFAULT_OSVER_CHECK,
 };
+
+use crate::utils::{nul_slice_wide_str, slice_from_ptr, u32size_of, SafeWindowsString, WideString};
+use crate::Error;
 
 pub struct CatalogInfo {
     pub path: PathBuf,
@@ -164,11 +164,15 @@ impl CatalogAdminContext {
     }
 
     pub fn hash_file(&self, path: &Path) -> Result<Vec<u8>> {
+        // The output has a variable size.
+        // Therefore, we must call CryptCATAdminCalcHashFromFileHandle2 once with a zero-size, and check for the ERROR_MORE_DATA status.
+        // At this point, we call CryptCATAdminCalcHashFromFileHandle2 again with a buffer of the correct size.
+
         let file = File::open(path)?;
         let mut required_size = 0u32;
 
         // SAFETY: `hFile` must not be NULL and must be a valid file pointer. The `file` is not dropped so it should be valid.
-        let _ = unsafe {
+        let res = unsafe {
             CryptCATAdminCalcHashFromFileHandle2(
                 self.handle.0 as isize,
                 HANDLE(file.as_raw_handle().cast()),
@@ -178,7 +182,18 @@ impl CatalogAdminContext {
             )
         };
 
-        let mut hash = vec![0u8; required_size as usize];
+        let Err(err) = res else {
+            anyhow::bail!("first call to CryptCATAdminCalcHashFromFileHandle2 did not fail")
+        };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        if unsafe { windows::Win32::Foundation::GetLastError() } != windows::Win32::Foundation::ERROR_MORE_DATA {
+            return Err(anyhow::Error::new(err)
+                .context("first call to CryptCATAdminCalcHashFromFileHandle2 did not fail with ERROR_MORE_DATA"));
+        }
+
+        let mut allocated_length = required_size;
+        let mut hash = vec![0u8; allocated_length as usize];
 
         // SAFETY: `hFile` must not be NULL and must be a valid file pointer. The `file` is not dropped so it should be valid.
         // `hash` is valid and is of the size `required_size`.
@@ -186,11 +201,13 @@ impl CatalogAdminContext {
             CryptCATAdminCalcHashFromFileHandle2(
                 self.handle.0 as isize,
                 HANDLE(file.as_raw_handle().cast()),
-                &mut required_size,
+                &mut allocated_length,
                 Some(hash.as_mut_ptr()),
                 0,
             )
         }?;
+
+        debug_assert_eq!(allocated_length, required_size);
 
         hash.truncate(required_size as usize);
 

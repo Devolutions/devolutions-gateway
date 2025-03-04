@@ -231,12 +231,27 @@ impl Token {
     ) -> anyhow::Result<InitedBuffer<T>> {
         use std::alloc::Layout;
 
+        // The output has a variable size.
+        // Therefore, we must call GetTokenInformation once with a zero-size, and check for the ERROR_MORE_DATA status.
+        // At this point, we call GetTokenInformation again with a buffer of the correct size.
+
         let mut return_length = 0u32;
 
         // SAFETY:
         // - `info` is null and,
         // - `info_length` is set to 0.
-        let _ = unsafe { self.get_information_raw(info_class, ptr::null_mut(), 0, &mut return_length) };
+        let res = unsafe { self.get_information_raw(info_class, ptr::null_mut(), 0, &mut return_length) };
+
+        let Err(err) = res else {
+            anyhow::bail!("first call to GetTokenInformation did not fail")
+        };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        if unsafe { windows::Win32::Foundation::GetLastError() } != windows::Win32::Foundation::ERROR_MORE_DATA {
+            return Err(
+                anyhow::Error::new(err).context("first call to GetTokenInformation did not fail with ERROR_MORE_DATA")
+            );
+        }
 
         // We try again, but allocate manually using the length specified in return_length for variable-sized structs.
         // The value *can’t* live on the stack because of its DST nature.
@@ -255,7 +270,8 @@ impl Token {
                 info.as_mut_ptr().cast::<c_void>(),
                 allocated_length,
                 &mut return_length,
-            )?
+            )
+            .context("second call to GetTokenInformation")?
         };
 
         debug_assert_eq!(allocated_length, return_length);

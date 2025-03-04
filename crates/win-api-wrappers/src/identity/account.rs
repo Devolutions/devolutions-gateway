@@ -4,7 +4,7 @@ use std::ptr;
 
 use anyhow::{bail, Context as _};
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{ERROR_INVALID_SID, MAX_PATH, WIN32_ERROR};
+use windows::Win32::Foundation::{GetLastError, ERROR_INVALID_SID, ERROR_MORE_DATA, MAX_PATH, WIN32_ERROR};
 use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
 };
@@ -131,27 +131,47 @@ pub fn create_virtual_account(
     virt_domain_name: &U16CStr,
     token: &Token,
 ) -> anyhow::Result<Account> {
-    let domain_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, None)?;
-    let account_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, Some(token))?;
+    let domain_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, None)
+        .context("create virtual identifier for domain")?;
+
+    let account_sid = create_virtual_identifier(virt_domain_id, virt_domain_name, Some(token))
+        .context("create virtual identifier for account")?;
 
     if account_sid.is_valid() {
         Ok(Account {
             domain_sid,
             sid: account_sid,
-            name: virtual_account_name(token)?,
+            name: virtual_account_name(token).context("find virtual account name for token")?,
             domain_name: virt_domain_name.to_owned(),
         })
     } else {
-        bail!(crate::Error::from_win32(ERROR_INVALID_SID))
+        Err(anyhow::Error::new(crate::Error::from_win32(ERROR_INVALID_SID)).context("account SID is invalid"))
     }
 }
 
+/// Retrieves the name of the user or other security principal associated with the calling thread.
+/// You can specify the format of the returned name.
+///
+/// # Parameters
+///
+/// - `format`: The format of the name. It cannot be `NameUnknown`.
+///   If the user account is not in a domain, only `NameSamCompatible` is supported.
 pub fn get_username(format: EXTENDED_NAME_FORMAT) -> windows::core::Result<U16CString> {
+    // The output has a variable size.
+    // Therefore, we must call GetUserNameExW once with a zero-size, and check for the ERROR_MORE_DATA status.
+    // At this point, we call GetUserNameExW again with a buffer of the correct size.
+
     let mut required_size = 0u32;
 
-    // Ignore return code since we only care about size.
-    // SAFETY: No preconditions. Required size is valid.
-    let _ = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size) };
+    // SAFETY: lpNameBuffer being null is fine because nSize is set to 0.
+    let ret = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size) };
+
+    assert!(!ret.as_bool());
+
+    // SAFETY: FFI call with no outstanding precondition.
+    if unsafe { GetLastError() } != ERROR_MORE_DATA {
+        return Err(windows::core::Error::from_win32());
+    }
 
     let mut buf = vec![0u16; required_size as usize];
 
@@ -199,7 +219,7 @@ pub fn is_username_valid(server_name: Option<&U16CStr>, username: &U16CStr) -> a
 pub fn virtual_account_name(token: &Token) -> anyhow::Result<U16CString> {
     let mut name = token.username(NameSamCompatible)?;
 
-    // SAFETY: We ensure no interior nul value is inserted.
+    // SAFETY: We ensure no interior nul value is inserted in all of the code using u16_slice
     let u16_slice = unsafe { name.as_mut_slice() };
 
     // Roughly equivalent to utf8str.replace('\\', '_').
