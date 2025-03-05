@@ -31,6 +31,7 @@ impl Thread {
     pub fn get_by_id(id: u32, desired_access: THREAD_ACCESS_RIGHTS) -> Result<Self> {
         // SAFETY: No preconditions.
         let handle = unsafe { OpenThread(desired_access, false, id)? };
+
         // SAFETY: The handle is owned by us, we opened the resource above.
         let handle = unsafe { Handle::new_owned(handle)? };
 
@@ -96,14 +97,32 @@ pub struct ThreadAttributeList(Vec<u8>);
 
 impl<'a> ThreadAttributeList {
     pub fn with_count(count: u32) -> Result<ThreadAttributeList> {
-        let mut out_size = 0;
+        // The output has a variable size.
+        // Therefore, we must call InitializeProcThreadAttributeList once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
+        // At this point, we call InitializeProcThreadAttributeList again with a buffer of the correct size.
+
+        let mut required_size = 0;
 
         // SAFETY: No preconditions.
-        let _ = unsafe {
-            InitializeProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST::default(), count, 0, &mut out_size)
+        let res = unsafe {
+            InitializeProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST::default(), count, 0, &mut required_size)
         };
 
-        let mut buf = vec![0; out_size];
+        let Err(err) = res else {
+            anyhow::bail!("first call to InitializeProcThreadAttributeList did not fail")
+        };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err).context(
+                "first call to InitializeProcThreadAttributeList did not fail with ERROR_INSUFFICIENT_BUFFER",
+            ));
+        }
+
+        let mut allocated_length = required_size;
+        let mut buf = vec![0; allocated_length];
 
         // SAFETY: `lpAttributeList` points to a buffer of the `out_size`.
         unsafe {
@@ -111,9 +130,11 @@ impl<'a> ThreadAttributeList {
                 LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr().cast()),
                 count,
                 0,
-                &mut out_size,
+                &mut allocated_length,
             )?;
         };
+
+        debug_assert_eq!(allocated_length, required_size);
 
         Ok(ThreadAttributeList(buf))
     }

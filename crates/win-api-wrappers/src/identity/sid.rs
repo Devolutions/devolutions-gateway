@@ -263,14 +263,30 @@ impl Sid {
     pub fn from_well_known(sid_type: WELL_KNOWN_SID_TYPE, domain_sid: Option<&Sid>) -> anyhow::Result<Self> {
         use std::alloc::Layout;
 
+        // The output has a variable size.
+        // Therefore, we must call CreateWellKnownSid once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
+        // At this point, we call CreateWellKnownSid again with a buffer of the correct size.
+
         let mut return_length = 0u32;
 
         let domain_sid = domain_sid.map(Sid::as_psid_const).unwrap_or_default();
 
         // SAFETY: The domain SID is only used as an in parameter, and is actually never modified by CreateWellKnownSid.
-        let _ = unsafe {
+        let res = unsafe {
             Security::CreateWellKnownSid(sid_type, domain_sid, Security::PSID::default(), &mut return_length)
         };
+
+        let Err(err) = res else {
+            anyhow::bail!("first call to CreateWellKnownSid did not fail")
+        };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err)
+                .context("first call to CreateWellKnownSid did not fail with ERROR_INSUFFICIENT_BUFFER"));
+        }
 
         let allocated_length = return_length;
         let align = align_of::<Security::SID>();
@@ -279,7 +295,7 @@ impl Sid {
         // SAFETY: The layout initialization is checked using the Layout::from_size_align method.
         let mut sid = unsafe { RawBuffer::alloc_zeroed(layout).expect("oom") };
 
-        // SAFETY: FFI call with no outstanding precondition.
+        // SAFETY: The domain SID is only used as an in parameter, and is actually never modified by CreateWellKnownSid.
         unsafe {
             Security::CreateWellKnownSid(
                 sid_type,
@@ -398,10 +414,14 @@ impl Sid {
         let mut domain_name_size = 0u32;
         let mut sid_name_use = Security::SID_NAME_USE::default();
 
+        // The output has a variable size.
+        // Therefore, we must call LookupAccountSidW once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
+        // At this point, we call LookupAccountSidW again with a buffer of the correct size.
+
         // SAFETY:
         // - Since cchName is 0, it receives the required buffer size, including the terminating null character.
         // - Same for cchReferencedDomainName.
-        let _ = unsafe {
+        let res = unsafe {
             Security::LookupAccountSidW(
                 system_name.map_or_else(PCWSTR::null, U16CStrExt::as_pcwstr),
                 self,
@@ -412,6 +432,18 @@ impl Sid {
                 &mut sid_name_use,
             )
         };
+
+        let Err(err) = res else {
+            anyhow::bail!("first call to LookupAccountSidW did not fail")
+        };
+
+        // SAFETY: FFI call with no outstanding precondition.
+        if unsafe { windows::Win32::Foundation::GetLastError() }
+            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+        {
+            return Err(anyhow::Error::new(err)
+                .context("first call to LookupAccountSidW did not fail with ERROR_INSUFFICIENT_BUFFER"));
+        }
 
         let mut account_name_buf = vec![0u16; account_name_size as usize];
         let mut domain_name_buf = vec![0u16; domain_name_size as usize];
