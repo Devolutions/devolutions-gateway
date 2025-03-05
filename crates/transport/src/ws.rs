@@ -176,8 +176,14 @@ impl CloseWebSocketHandle {
     }
 }
 
-/// Spawns a task running the WebSocket keep-alive logic and returns a shared handle to the WebSocket for the actual user payload
-pub fn spawn_websocket_keep_alive_logic<S>(
+/// A background "sentinel" task responsible for keeping the WebSocket connection alive
+/// and handling close requests.
+///
+/// - Periodically sends Ping frames to ensure the connection remains active.
+/// - Listens for close requests, forwarding any received close frames to cleanly terminate
+///   the WebSocket communication.
+/// - Terminates when either the close signal is processed or if sending the Ping frame fails.
+pub fn spawn_websocket_sentinel_task<S>(
     mut ws: S,
     mut shutdown_signal: impl KeepAliveShutdown,
     interval: core::time::Duration,
