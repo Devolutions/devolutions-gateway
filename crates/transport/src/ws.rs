@@ -186,7 +186,7 @@ impl CloseWebSocketHandle {
 pub fn spawn_websocket_sentinel_task<S>(
     mut ws: S,
     mut shutdown_signal: impl KeepAliveShutdown,
-    interval: core::time::Duration,
+    keep_alive_interval: core::time::Duration,
 ) -> CloseWebSocketHandle
 where
     S: Sink<WsWriteMsg> + Unpin + Send + 'static,
@@ -201,7 +201,7 @@ where
         async move {
             loop {
                 tokio::select! {
-                    () = tokio::time::sleep(interval) => {
+                    () = tokio::time::sleep(keep_alive_interval) => {
                         if ws.send(WsWriteMsg::Ping).await.is_err() {
                             break;
                         }
