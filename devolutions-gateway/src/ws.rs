@@ -27,7 +27,7 @@ pub fn handle(
 ) {
     let ws = transport::Shared::new(ws);
 
-    let close_handle = transport::spawn_websocket_keep_alive_logic(
+    let close_handle = transport::spawn_websocket_sentinel_task(
         ws.shared().with(|message: transport::WsWriteMsg| {
             future::ready(Result::<_, axum::Error>::Ok(match message {
                 transport::WsWriteMsg::Ping => ws::Message::Ping(vec![]),

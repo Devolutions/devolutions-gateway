@@ -214,9 +214,11 @@ where
 
         match claims.jet_rec {
             RecordingPolicy::None | RecordingPolicy::Stream => (),
-            RecordingPolicy::Proxy => Err(ForwardError::Internal(anyhow::anyhow!(
-                "recording policy not supported"
-            )))?,
+            RecordingPolicy::Proxy => {
+                return Err(ForwardError::Internal(anyhow::anyhow!(
+                    "recording policy not supported"
+                )));
+            }
         }
 
         let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {
@@ -604,7 +606,7 @@ async fn fwd_http(
 
         let ws = transport::Shared::new(ws);
 
-        let close_frame_handle = transport::spawn_websocket_keep_alive_logic(
+        let close_frame_handle = transport::spawn_websocket_sentinel_task(
             ws.shared().with(|message: transport::WsWriteMsg| {
                 core::future::ready(Result::<_, tungstenite::Error>::Ok(match message {
                     transport::WsWriteMsg::Ping => tungstenite::Message::Ping(vec![]),

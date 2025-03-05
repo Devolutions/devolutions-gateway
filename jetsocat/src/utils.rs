@@ -160,7 +160,7 @@ where
 
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
 
-    transport::spawn_websocket_keep_alive_logic(
+    transport::spawn_websocket_sentinel_task(
         ws.shared().with(|message: transport::WsWriteMsg| {
             future::ready(Result::<_, tungstenite::Error>::Ok(match message {
                 transport::WsWriteMsg::Ping => tungstenite::Message::Ping(Vec::new()),
