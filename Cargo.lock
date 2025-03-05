@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-agent"
-version = "2025.1.2"
+version = "2025.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1132,7 +1132,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2025.1.2"
+version = "2025.1.3"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1323,7 +1323,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-pedm-shell-ext"
-version = "2025.1.2"
+version = "2025.1.3"
 dependencies = [
  "devolutions-pedm-shared",
  "embed-resource",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-session"
-version = "2025.1.2"
+version = "2025.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "jetsocat"
-version = "2025.1.2"
+version = "2025.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
