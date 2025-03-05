@@ -2,6 +2,63 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.1.3 (2025-03-05)
+
+### Bug Fixes
+
+- _agent-installer_: don't fail an uninstall if the shell extension can't be unregistered ([#1249](https://github.com/Devolutions/devolutions-gateway/issues/1249)) ([67bc5dfc01](https://github.com/Devolutions/devolutions-gateway/commit/67bc5dfc01edcde91c4fe1b57350dea8e74ed7f3)) 
+
+  An unexpected error unregistering the PEDM shell extension can cause an
+  uninstall to fail; this leads to a bad posture on the user machine.
+
+- _dgw_: fix a bug where shadowing player was sometimes failing with high frame rate ([#1253](https://github.com/Devolutions/devolutions-gateway/issues/1253)) ([e415a674d9](https://github.com/Devolutions/devolutions-gateway/commit/e415a674d9c7c1adc089c420566deff9feb29cf3)) 
+
+- _installer_: ensure NetworkService has proper file permissions ([#1260](https://github.com/Devolutions/devolutions-gateway/issues/1260)) ([956741757e](https://github.com/Devolutions/devolutions-gateway/commit/956741757e51157a0c03021d474164471f1f894b)) 
+
+  We've had sporadic issues where users cannot update the revocation list
+  due to a permissions error on the .jrl file (access denied deleting the
+  original file).
+  
+  Likely cause:
+  
+  - Gateway was installed and created this file(s) at or before version
+  2024.1.5
+  - In subsequent versions, we switched the service account to
+  `NetworkService` and updated the DACL applied to the top-level
+  %programdata%\Devolutions\Gateway directory
+  - However, files created previously did not retroactively inherit
+  `NetworkService`'s new ACL
+  - This doesn't matter for most files where `Users` has read and execute
+  permission
+  - Files that need `Modify` permission won't have it (for example, the
+  .jrl and existing log files)
+  
+  This version:
+  
+  - Updates the SDDL set on the top-level
+  %programdata%\Devolutions\Gateway directory to ensure that
+  `NetworkService` can delete subfolders and files
+  - Forcibly resets the ACL on files in the program data directory
+
+- _dgw_: fix WebSocket connection hanging at the end of communication ([#1243](https://github.com/Devolutions/devolutions-gateway/issues/1243)) ([a457fdc90c](https://github.com/Devolutions/devolutions-gateway/commit/a457fdc90c22e1bcac65f948ca19f1506166d3b1)) 
+
+  WebSocket close frames were not sent on session termination.
+  With this patch, we properly send WebSocket close frames when session terminates.
+
+- _dgw_: fix missing webapp in deb ([#1259](https://github.com/Devolutions/devolutions-gateway/issues/1259)) ([dd4f3d5ed2](https://github.com/Devolutions/devolutions-gateway/commit/dd4f3d5ed2045d86f33c2f51a10d49d35810d700)) 
+
+### Build
+
+- _dgw,agent_: target Ubuntu 18.04 ([#1241](https://github.com/Devolutions/devolutions-gateway/issues/1241)) ([27f12ef910](https://github.com/Devolutions/devolutions-gateway/commit/27f12ef9101f77e7960b75bb9c1e278391899abd)) 
+
+  Properly target ubuntu-18.04, including for the cadeau library which was
+  just released with ubuntu-18.04 targeting as well. By targeting
+  ubuntu-18.04, we are forward-compatible with ubuntu 20.04, 22.04, 24.04
+  but we are also compatible with RHEL8, which uses a version of
+  glibc older than ubuntu 20.04.
+
+- _dgw_: don't use libsql default features ([#1254](https://github.com/Devolutions/devolutions-gateway/issues/1254)) ([d05b9a91df](https://github.com/Devolutions/devolutions-gateway/commit/d05b9a91dfda45f88a2a648f03ec6c6330081b8e)) 
+
 ## 2025.1.2 (2025-02-20)
 
 ### Features
