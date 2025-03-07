@@ -313,8 +313,6 @@ impl Sid {
         // SAFETY: Assuming CreateWellKnownSid returned a valid SID.
         let sid = unsafe { Sid::from_raw(sid) };
 
-        unsafe { *core::ptr::null::<u8>() };
-
         Ok(sid)
     }
 
