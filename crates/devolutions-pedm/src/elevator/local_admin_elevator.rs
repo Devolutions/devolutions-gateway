@@ -8,24 +8,20 @@
 use anyhow::Context as _;
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
 use win_api_wrappers::raw::Win32::Foundation::LUID;
-use win_api_wrappers::raw::Win32::Security::{
-    WinBuiltinAdministratorsSid, WinHighLabelSid, WinLocalAccountAndAdministratorSid, TOKEN_SOURCE,
-};
-use win_api_wrappers::raw::Win32::System::SystemServices::{
-    SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
-};
+use win_api_wrappers::raw::Win32::Security;
+use win_api_wrappers::raw::Win32::System::SystemServices;
 use win_api_wrappers::security::privilege::DEFAULT_ADMIN_PRIVILEGES;
 use win_api_wrappers::token::Token;
 
 use crate::elevator::Elevator;
 
 pub(crate) struct LocalAdminElevator {
-    source: TOKEN_SOURCE,
+    source: Security::TOKEN_SOURCE,
 }
 
 impl LocalAdminElevator {
     pub(crate) fn new(source_name: &[u8; 8], source_identifier: LUID) -> Self {
-        let mut source = TOKEN_SOURCE {
+        let mut source = Security::TOKEN_SOURCE {
             SourceIdentifier: source_identifier,
             ..Default::default()
         };
@@ -44,28 +40,35 @@ impl LocalAdminElevator {
 
 impl Elevator for LocalAdminElevator {
     fn elevate_token(&self, token: &Token) -> anyhow::Result<Token> {
-        let stats = token.statistics()?;
+        let stats = token.statistics().context("fetch token status")?;
 
-        let owner_sid = Sid::from_well_known(WinBuiltinAdministratorsSid, None)?;
+        let owner_sid = Sid::from_well_known(Security::WinBuiltinAdministratorsSid, None)?;
 
-        let mut groups = token.groups()?;
+        let mut groups = token.groups().context("fetch token groups")?;
 
         groups.push(SidAndAttributes {
-            sid: Sid::from_well_known(WinLocalAccountAndAdministratorSid, None)?,
+            sid: Sid::from_well_known(Security::WinLocalAccountAndAdministratorSid, None)?,
             #[expect(clippy::cast_sign_loss)]
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
+            attributes: (SystemServices::SE_GROUP_ENABLED
+                | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
+                | SystemServices::SE_GROUP_MANDATORY) as u32,
         });
 
         groups.push(SidAndAttributes {
             sid: owner_sid.clone(),
             #[expect(clippy::cast_sign_loss)]
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY | SE_GROUP_OWNER) as u32,
+            attributes: (SystemServices::SE_GROUP_ENABLED
+                | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
+                | SystemServices::SE_GROUP_MANDATORY
+                | SystemServices::SE_GROUP_OWNER) as u32,
         });
 
         groups.push(SidAndAttributes {
-            sid: Sid::from_well_known(WinHighLabelSid, None)?,
+            sid: Sid::from_well_known(Security::WinHighLabelSid, None)?,
             #[expect(clippy::cast_sign_loss)]
-            attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32,
+            attributes: (SystemServices::SE_GROUP_ENABLED
+                | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
+                | SystemServices::SE_GROUP_MANDATORY) as u32,
         });
 
         let mut admin_token = Token::create_token(

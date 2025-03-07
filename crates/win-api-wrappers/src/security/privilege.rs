@@ -143,7 +143,7 @@ unsafe impl Send for TokenPrivileges {}
 // SAFETY: Just a POD with no thread-unsafe interior mutabilty.
 unsafe impl Sync for TokenPrivileges {}
 
-pub fn lookup_privilege_value(system_name: Option<&U16CStr>, name: &U16CStr) -> anyhow::Result<LUID> {
+pub fn lookup_privilege_value(system_name: Option<&U16CStr>, name: &U16CStr) -> windows::core::Result<LUID> {
     let mut luid = LUID::default();
 
     // SAFETY: system_name and name are valid UTF16 strings per U16CStr invariants.

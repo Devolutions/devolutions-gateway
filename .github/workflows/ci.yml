@@ -981,6 +981,29 @@ jobs:
           $Env:MIRIFLAGS = "${{ matrix.miriflags }}"
           cargo +nightly miri test -p win-api-wrappers
 
+  pedm-simulator:
+    name: PEDM simulator
+    runs-on: windows-2022
+    needs: preflight
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Prepare runner
+        run: rustup toolchain install nightly
+
+      - name: Prepare PEDM simulator build
+        run: ./crates/pedm-simulator/prepare.ps1
+
+      - name: Build PEDM simulator container
+        run: ./crates/pedm-simulator/build-container.ps1
+
+      - name: Run PEDM simulator (limited test)
+        run: ./crates/pedm-simulator/run-container.ps1
+
   success:
     name: Success
     runs-on: ubuntu-latest
@@ -999,6 +1022,7 @@ jobs:
       - dotnet-utils-tests
       - winapi-sanitizer-tests
       - winapi-miri
+      - pedm-simulator
 
     steps:
       - name: Check success

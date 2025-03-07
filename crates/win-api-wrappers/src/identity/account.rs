@@ -9,14 +9,13 @@ use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
 };
 use windows::Win32::Security;
-use windows::Win32::Security::Authentication::Identity::{
-    GetUserNameExW, LsaFreeMemory, NameSamCompatible, EXTENDED_NAME_FORMAT,
-};
+use windows::Win32::Security::Authentication::Identity;
 use windows::Win32::System::GroupPolicy::PI_NOUI;
 use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, UnloadUserProfile, PROFILEINFOW};
 
 use crate::handle::HandleWrapper;
 use crate::identity::sid::Sid;
+use crate::raw_buffer::RawBuffer;
 use crate::scope_guard::ScopeGuard;
 use crate::str::{U16CStr, U16CStrExt, U16CString, UnicodeStr};
 use crate::token::Token;
@@ -105,7 +104,7 @@ pub fn create_virtual_identifier(domain_id: u32, domain_name: &U16CStr, token: O
         |ptr| {
             if !ptr.is_null() {
                 // SAFETY: Pointers allocated by LsaManageSidNameMapping must be freed using LsaFreeMemory.
-                let _ = unsafe { LsaFreeMemory(Some(ptr.cast())) };
+                let _ = unsafe { Identity::LsaFreeMemory(Some(ptr.cast())) };
             }
         },
     );
@@ -156,7 +155,7 @@ pub fn create_virtual_account(
 ///
 /// - `format`: The format of the name. It cannot be `NameUnknown`.
 ///   If the user account is not in a domain, only `NameSamCompatible` is supported.
-pub fn get_username(format: EXTENDED_NAME_FORMAT) -> windows::core::Result<U16CString> {
+pub fn get_username(format: Identity::EXTENDED_NAME_FORMAT) -> windows::core::Result<U16CString> {
     // The output has a variable size.
     // Therefore, we must call GetUserNameExW once with a zero-size, and check for the ERROR_MORE_DATA status.
     // At this point, we call GetUserNameExW again with a buffer of the correct size.
@@ -164,7 +163,7 @@ pub fn get_username(format: EXTENDED_NAME_FORMAT) -> windows::core::Result<U16CS
     let mut required_size = 0u32;
 
     // SAFETY: lpNameBuffer being null is fine because nSize is set to 0.
-    let ret = unsafe { GetUserNameExW(format, PWSTR::null(), &mut required_size) };
+    let ret = unsafe { Identity::GetUserNameExW(format, PWSTR::null(), &mut required_size) };
 
     assert!(!ret.as_bool());
 
@@ -176,7 +175,7 @@ pub fn get_username(format: EXTENDED_NAME_FORMAT) -> windows::core::Result<U16CS
     let mut buf = vec![0u16; required_size as usize];
 
     // SAFETY: lpNameBuffer is correctly sized and matches the size announced in nSize AKA required_size.
-    let ret = unsafe { GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut required_size) };
+    let ret = unsafe { Identity::GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut required_size) };
 
     if !ret.as_bool() {
         return Err(windows::core::Error::from_win32());
@@ -217,7 +216,7 @@ pub fn is_username_valid(server_name: Option<&U16CStr>, username: &U16CStr) -> a
 }
 
 pub fn virtual_account_name(token: &Token) -> anyhow::Result<U16CString> {
-    let mut name = token.username(NameSamCompatible)?;
+    let mut name = token.username(Identity::NameSamCompatible)?;
 
     // SAFETY: We ensure no interior nul value is inserted in all of the code using u16_slice
     let u16_slice = unsafe { name.as_mut_slice() };
@@ -285,6 +284,143 @@ impl Drop for ProfileInfo {
     }
 }
 
+/// Retrieves a security identifier for the account and the name of the domain on which the account was found
+pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<AccountWithType> {
+    // The output has a variable size.
+    // Therefore, we must call LookupAccountNameW once with a zero-size, and check for the ERROR_INSUFFICIENT_BUFFER status.
+    // At this point, we call LookupAccountNameW again with a buffer of the correct size.
+
+    let mut sid_size: u32 = 0;
+    let mut domain_name_size: u32 = 0;
+    let mut sid_use = Security::SID_NAME_USE::default();
+
+    // SAFETY: Variable-sized parameters are provided as null pointers for the first call.
+    unsafe {
+        let _ = Security::LookupAccountNameW(
+            None,                            // local system
+            account_name.as_pcwstr(),        // account name to look up
+            Security::PSID(ptr::null_mut()), // no SID buffer yet
+            &mut sid_size,                   // receives required SID buffer size
+            PWSTR::null(),                   // no domain name buffer yet
+            &mut domain_name_size,           // receives required domain name length (characters)
+            &mut sid_use,                    // receives the SID type (user/group)
+        );
+    }
+
+    let sid_align = align_of::<Security::SID>();
+    let sid_layout = std::alloc::Layout::from_size_align(sid_size as usize, sid_align).expect("valid layout");
+
+    // SAFETY: The layout initialization is checked using the Layout::from_size_align method.
+    let mut sid = unsafe { RawBuffer::alloc_zeroed(sid_layout).expect("oom") };
+
+    let mut domain_name = vec![0u16; domain_name_size as usize];
+
+    // SAFETY: The buffers are sized based on the returned values by the first call.
+    unsafe {
+        Security::LookupAccountNameW(
+            None,
+            account_name.as_pcwstr(),
+            Security::PSID(sid.as_mut_ptr().cast()),
+            &mut sid_size,
+            PWSTR(domain_name.as_mut_ptr()),
+            &mut domain_name_size,
+            &mut sid_use,
+        )?;
+    }
+
+    // SAFETY: LookupAccountNameW returned with success, the SID struct is expected to be initialized.
+    let sid = unsafe { sid.assume_init::<Security::SID>() };
+
+    // SAFETY: Again, assuming LookupAccountNameW returned a valid SID.
+    let sid = unsafe { Sid::from_raw(sid) };
+
+    let account = Account {
+        sid: sid.clone(),
+        name: account_name.to_owned(),
+        domain_sid: sid,
+        domain_name: U16CString::from_vec_truncate(domain_name),
+    };
+
+    Ok(AccountWithType::wrap(account, sid_use))
+}
+
+pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
+    // Open the local security policy (LSA Policy)
+
+    let mut object_attrs = Identity::LSA_OBJECT_ATTRIBUTES::default();
+    object_attrs.Length = u32size_of::<Identity::LSA_OBJECT_ATTRIBUTES>();
+
+    let mut policy_handle = ScopeGuard::new(Identity::LSA_HANDLE::default(), |handle| {
+        // FIXME: maybe we should log the error here.
+        // SAFETY: handle is a handle to a Policy object returned by the LsaOpenPolicy function.
+        let _ = unsafe { Identity::LsaClose(handle) };
+    });
+
+    // SAFETY: FFI call with no outstanding precondition.
+    let open_policy_status = unsafe {
+        Identity::LsaOpenPolicy(
+            None,
+            &object_attrs,
+            Identity::POLICY_LOOKUP_NAMES as u32,
+            policy_handle.as_mut_ptr(),
+        )
+    };
+
+    if open_policy_status.is_err() {
+        // Convert NTSTATUS to a Win32 error code and return as an error
+        let error_code = unsafe { Identity::LsaNtStatusToWinError(open_policy_status) };
+        let error_code = WIN32_ERROR(error_code);
+
+        return Err(anyhow::Error::new(windows::core::Error::from(error_code)).context("LsaOpenPolicy failed"));
+    }
+
+    // Enumerate the rights/privileges assigned to the user account.
+
+    let mut rights = ScopeGuard::new(ptr::null_mut::<Identity::LSA_UNICODE_STRING>(), |ptr| {
+        if !ptr.is_null() {
+            // FIXME: maybe we should log the error here.
+            let _ = unsafe { Identity::LsaFreeMemory(Some(ptr as *const std::ffi::c_void)) };
+        }
+    });
+
+    let mut rights_count: u32 = 0;
+
+    let enum_status = unsafe {
+        Identity::LsaEnumerateAccountRights(
+            *policy_handle.as_ref(),
+            sid.as_psid_const(),
+            rights.as_mut_ptr(),
+            &mut rights_count,
+        )
+    };
+
+    let rights = if enum_status == windows::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND {
+        // The account doesn’t have any explicitly assigned rights.
+        Vec::new()
+    } else if enum_status.is_err() {
+        // Convert NTSTATUS to a Win32 error code and return as an error
+        let error_code = unsafe { Identity::LsaNtStatusToWinError(enum_status) };
+        let error_code = WIN32_ERROR(error_code);
+
+        return Err(
+            anyhow::Error::new(windows::core::Error::from(error_code)).context("LsaEnumerateAccountRights failed")
+        );
+    } else {
+        // SAFETY: We assume LsaEnumerateAccountRights is returing consistent values for rights and rights_count.
+        let rights = unsafe { std::slice::from_raw_parts(*rights.as_ref(), rights_count as usize) };
+
+        rights
+            .iter()
+            .map(|right| {
+                // SAFETY: We assume LsaEnumerateAccountRights is returning valid LSA_UNICODE_STRING structs.
+                unsafe { U16CString::from_ptr_truncate(right.Buffer.0.cast_const(), right.Length as usize) }
+            })
+            .collect()
+    };
+
+    Ok(rights)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +443,17 @@ mod tests {
         // Check that the UTF-16 substring substition logic is working as expected.
         assert!(account_name.contains('_'));
         assert!(!account_name.contains('\\'));
+    }
+
+    // Note that in order for this test to be completely reproducible, we would need to use a specific account
+    // that we know for sure has a specific set of rights.
+    // It’s still better than nothing.
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn lookup_and_enumerate_rights() {
+        let username = get_username(Identity::NameSamCompatible).unwrap();
+        let account = lookup_account_by_name(&username).unwrap();
+        let rights = enumerate_account_rights(&account.sid).unwrap();
+        print!("{rights:?}");
     }
 }

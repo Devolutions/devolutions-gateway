@@ -69,6 +69,16 @@ impl Token {
         })
     }
 
+    /// Helper for enabling a privilege.
+    pub fn enable_privilege(&mut self, privilege_name: &U16CStr) -> anyhow::Result<()> {
+        let luid = lookup_privilege_value(None, privilege_name).context("lookup privilege")?;
+
+        self.adjust_privileges(&TokenPrivilegesAdjustment::Enable(vec![luid]))
+            .context("enable privilege")?;
+
+        Ok(())
+    }
+
     #[expect(clippy::too_many_arguments)] // Wrapper around `NtCreateToken`, which has a lot of arguments.
     pub fn create_token(
         authentication_id: &LUID,
