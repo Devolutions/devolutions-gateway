@@ -1,0 +1,12 @@
+[package]
+name = "pedm-simulator"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+win-api-wrappers = { path = "../win-api-wrappers" }
+
+[lints]
+workspace = true
