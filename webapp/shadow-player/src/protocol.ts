@@ -1,9 +1,5 @@
 // Define the message types
-export type ServerMessage =
-  | ChunkMessage
-  | MetaDataMessage
-  | ErrorMessage
-  | EndMessage;
+export type ServerMessage = ChunkMessage | MetaDataMessage | ErrorMessage | EndMessage;
 
 export interface ChunkMessage {
   type: 'chunk';

@@ -1,5 +1,5 @@
-import { getStreamingWebsocketUrl } from './apiClient';
 import { ShadowPlayer } from '../src/streamer';
+import { getStreamingWebsocketUrl } from './apiClient';
 
 // Function to play the selected stream
 export async function playStream(id: string) {

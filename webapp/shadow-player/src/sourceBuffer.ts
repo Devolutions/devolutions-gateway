@@ -1,4 +1,3 @@
-
 export class ReactiveSourceBuffer {
   sourceBuffer: SourceBuffer;
   bufferQueue: Uint8Array[] = [];
@@ -8,9 +7,7 @@ export class ReactiveSourceBuffer {
   debug = false;
 
   constructor(mediaSource: MediaSource, codec: string, next: () => void) {
-    this.sourceBuffer = mediaSource.addSourceBuffer(
-      `video/webm; codecs="${codec}"`
-    );
+    this.sourceBuffer = mediaSource.addSourceBuffer(`video/webm; codecs="${codec}"`);
     this.next = next;
 
     this.sourceBuffer.addEventListener('updateend', () => {
@@ -37,11 +34,7 @@ export class ReactiveSourceBuffer {
   }
 
   private tryAppendBuffer() {
-    if (
-      !this.isAppending &&
-      !this.sourceBuffer.updating &&
-      this.bufferQueue.length > 0
-    ) {
+    if (!this.isAppending && !this.sourceBuffer.updating && this.bufferQueue.length > 0) {
       this.isAppending = true;
       try {
         const buffer = this.bufferQueue.shift() as Uint8Array;

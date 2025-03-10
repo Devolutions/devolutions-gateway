@@ -1,34 +1,24 @@
-import { GatewayAccessApi } from '../gateway';
+import '@devolutions/multi-video-player';
+import '@devolutions/multi-video-player/dist/multi-video-player.css';
+import { MultiVideoPlayer } from '@devolutions/multi-video-player';
+import type { GatewayAccessApi } from '../gateway';
 
-export function handleWebm(gatewayApi: GatewayAccessApi) {
-  const videoPlayer = document.createElement('video');
-  videoPlayer.id = 'videoPlayer';
-  videoPlayer.controls = true;
-  videoPlayer.autoplay = true;
-  videoPlayer.muted = true;
+export async function handleWebm(gatewayApi: GatewayAccessApi) {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await customElements.whenDefined('multi-video-player');
+  const videoPlayer = document.createElement('multi-video-player') as MultiVideoPlayer;
 
-  const videoSrcElement = document.createElement('source');
-  videoSrcElement.id = 'videoSrcElement';
-  videoSrcElement.type = 'video/webm';
-
-  videoPlayer.appendChild(videoSrcElement);
+  videoPlayer.setAttribute('width', '100%');
+  videoPlayer.setAttribute('height', '100%');
+  videoPlayer.setAttribute('controls', '');
+  videoPlayer.setAttribute('muted', '');
   document.body.appendChild(videoPlayer);
 
-  let currentIndex = 0;
-  const { recordingInfo } = gatewayApi.info();
-  const maxIndex = recordingInfo.files.length - 1;
-
-  const setVideoSource = (index) => {
-    const videoSrc = gatewayApi.staticRecordingUrl(recordingInfo.files[index].fileName);
-    videoSrcElement.setAttribute('src', videoSrc);
-    videoPlayer.load();
-    videoPlayer.play();
-  };
-
-  setVideoSource(currentIndex);
-
-  videoPlayer.onended = () => {
-    currentIndex = (currentIndex + 1) % (maxIndex + 1);
-    setVideoSource(currentIndex);
-  };
+  videoPlayer.play(
+    gatewayApi.info().recordingInfo.files.map((file) => ({
+      src: gatewayApi.staticRecordingUrl(file.fileName),
+      type: 'video/webm',
+      duration: file.duration,
+    })),
+  );
 }
