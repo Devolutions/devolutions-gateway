@@ -52,7 +52,7 @@ fn main() -> anyhow::Result<()> {
     let executable = args.next().context("executable name is missing from the environment")?;
 
     // Extract and remove --config-path argument if provided
-    let mut config_path: Option<String> = None;
+    let mut config_path = None;
     let mut remaining_args = Vec::new();
 
     while let Some(arg) = args.next() {
@@ -60,7 +60,6 @@ fn main() -> anyhow::Result<()> {
             if let Some(path) = args.next() {
                 config_path = Some(path);
             } else {
-                eprintln!("Error: --config-path requires a value");
                 return Err(anyhow::anyhow!("Missing value for --config-path"));
             }
         } else {
@@ -74,7 +73,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Parse remaining arguments for CLI actions
-    let action = match remaining_args.get(0).map(String::as_str) {
+    let action = match remaining_args.first().map(String::as_str) {
         Some("--service") => CliAction::Run { service_mode: true },
         Some("service") => match args.next().as_deref() {
             Some("register") => CliAction::RegisterService,
