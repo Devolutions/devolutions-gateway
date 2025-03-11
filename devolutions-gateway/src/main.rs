@@ -49,10 +49,32 @@ enum CliAction {
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args();
-
     let executable = args.next().context("executable name is missing from the environment")?;
 
-    let action = match args.next().as_deref() {
+    // Extract and remove --config-path argument if provided
+    let mut config_path: Option<String> = None;
+    let mut remaining_args = Vec::new();
+
+    while let Some(arg) = args.next() {
+        if arg == "--config-path" {
+            if let Some(path) = args.next() {
+                config_path = Some(path);
+            } else {
+                eprintln!("Error: --config-path requires a value");
+                return Err(anyhow::anyhow!("Missing value for --config-path"));
+            }
+        } else {
+            remaining_args.push(arg);
+        }
+    }
+
+    // Set the DGATEWAY_CONFIG_PATH if --config-path was provided
+    if let Some(path) = config_path {
+        std::env::set_var("DGATEWAY_CONFIG_PATH", &path);
+    }
+
+    // Parse remaining arguments for CLI actions
+    let action = match remaining_args.get(0).map(String::as_str) {
         Some("--service") => CliAction::Run { service_mode: true },
         Some("service") => match args.next().as_deref() {
             Some("register") => CliAction::RegisterService,
@@ -83,6 +105,10 @@ fn main() -> anyhow::Result<()> {
 
     Uninstall service:
         "{executable}" service unregister
+
+        
+    Options:
+        --config-path <CONFIG_PATH>
 "#
             )
         }
