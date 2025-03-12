@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
             if let Some(path) = args.next() {
                 config_path = Some(path);
             } else {
-                return Err(anyhow::anyhow!("Missing value for --config-path"));
+                return Err(anyhow::anyhow!("missing value for --config-path"));
             }
         } else {
             remaining_args.push(arg);
