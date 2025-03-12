@@ -1,3 +1,5 @@
+#![cfg(target_os = "windows")]
+
 use anyhow::Context as _;
 use win_api_wrappers::identity::account::{enumerate_account_rights, get_username, lookup_account_by_name};
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
