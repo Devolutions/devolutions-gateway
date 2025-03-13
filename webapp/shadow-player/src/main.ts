@@ -1,1 +1,1 @@
-export * from './streamer'
+export * from './streamer';

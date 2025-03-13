@@ -424,8 +424,12 @@ jobs:
       - name: Check
         working-directory: webapp/player-project
         run: biome check ./src
+      
+      - name: Install NPM dependencies for video player
+        working-directory: webapp/video-player
+        run: npm install
 
-      - name: Install NPM dependencies
+      - name: Install NPM dependencies for Recording Player
         working-directory: webapp/player-project
         run: npm install
 
