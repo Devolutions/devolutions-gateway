@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 
+use anyhow::{bail, Context};
 use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use windows::core::PCWSTR;
 use windows::Win32::System::Shutdown::{ExitWindowsEx, InitiateSystemShutdownExW, InitiateSystemShutdownW, LockWorkStation, EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, EWX_SHUTDOWN, SHUTDOWN_REASON};
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE, SW_RESTORE};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MessageBoxW, PostMessageW, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST};
 
 use devolutions_gateway_task::Task;
 use now_proto_pdu::{
-    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage, NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage, NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage
+    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage, NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage, NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage, SetKbdLayoutOption
 };
 use now_proto_pdu::ironrdp_core::IntoOwned;
 use win_api_wrappers::event::Event;
@@ -21,7 +22,7 @@ use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use super::process::ExecError;
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use win_api_wrappers::security::privilege::ScopedPrivileges;
 
@@ -128,7 +129,12 @@ async fn process_messages(
 
     let mut server_caps = NowChannelCapsetMsg::default()
         .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
-        .with_session_capset(NowSessionCapsetFlags::LOCK | NowSessionCapsetFlags::LOGOFF | NowSessionCapsetFlags::MSGBOX)
+        .with_session_capset(
+            NowSessionCapsetFlags::LOCK
+            | NowSessionCapsetFlags::LOGOFF
+            | NowSessionCapsetFlags::MSGBOX
+            | NowSessionCapsetFlags::SET_KBD_LAYOUT
+        )
         .with_exec_capset(
             NowExecCapsetFlags::STYLE_RUN
             | NowExecCapsetFlags::STYLE_PROCESS
@@ -408,6 +414,11 @@ impl MessageProcessor {
                 // SAFETY: No outstanding preconditions.
                 if let Err(error) = unsafe { LockWorkStation() } {
                     error!(%error, "Failed to lock workstation");
+                }
+            }
+            NowMessage::Session(NowSessionMessage::SetKbdLayout(message)) => {
+                if let Err(error) = set_kbd_layout(message.layout()) {
+                    error!(%error, "Failed to set keyboard layout");
                 }
             }
             NowMessage::System(NowSystemMessage::Shutdown(shutdown_msg)) => {
@@ -828,6 +839,49 @@ async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, s
     if let Err(error) = dvc_tx.send(msg.into()).await {
         error!(%error, "Failed to send error message");
     }
+}
+
+fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
+    // SAFETY: No outstanding preconditions.
+    let foreground_window = unsafe { GetForegroundWindow() };
+
+    if foreground_window.is_invalid() {
+        bail!("Failed to get foreground window handle");
+    }
+
+    let locale = match layout {
+        SetKbdLayoutOption::Next => isize::try_from(HKL_NEXT).expect("HKL_NEXT fits into isize"),
+        SetKbdLayoutOption::Prev => isize::try_from(HKL_PREV).expect("HKL_PREV fits into isize"),
+        SetKbdLayoutOption::Specific(layout) => {
+            // IMPORTANT: WM_INPUTLANGCHANGEREQUEST message only respects low word of the layout
+            // (locale) and high word (device) should be zero. Non-zero high word could produce
+            // unexpected results (e.g. switching to next layout instead of specific one).
+            //
+            // Loading locale via LoadKeyboardLayoutW and passing it to WM_INPUTLANGCHANGEREQUEST
+            // will not work as expected (even if dozen of sources suggest this approach) and
+            // easily breaks with some layouts.
+
+            let hex = u32::from_str_radix(layout, 16)
+                .context("Invalid keyboard layout value")?;
+            // device == (hex >> 16) && 0xFFFF
+            let locale = u16::try_from(hex & 0xFFFF).expect("locale <= 0xFFFF");
+
+            isize::try_from(locale).expect("locale fits into isize")
+        }
+    };
+
+
+    /// SAFETY: hwnd is valid window handle, therefore `PostMessageW` is safe to call.
+    unsafe {
+        PostMessageW(
+            foreground_window,
+            WM_INPUTLANGCHANGEREQUEST,
+            WPARAM(0),
+            LPARAM(locale)
+        ).context("Failed to post WM_INPUTLANGCHANGEREQUEST message")
+    }?;
+
+    Ok(())
 }
 
 #[link(name = "user32", kind = "dylib")]
