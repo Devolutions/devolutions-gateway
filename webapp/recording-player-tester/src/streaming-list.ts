@@ -1,4 +1,4 @@
-import { listRealtimeRecordings } from './api-client';
+import { listRecordins } from './api-client';
 import { openPlayer } from './player';
 
 const recordingList = document.getElementById('recordingList');
@@ -73,7 +73,9 @@ function updateList(currentRecordings: string[]) {
 }
 
 async function refresh() {
-  const list = await listRealtimeRecordings();
+  const list = await listRecordins({
+    active: true,
+  });
   updateList(list);
 }
 

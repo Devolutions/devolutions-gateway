@@ -42,9 +42,16 @@ export async function requestScopeToken(data: ScopeRequest): Promise<TokenRespon
 }
 
 // Function to list recordings
-export async function listRealtimeRecordings(): Promise<string[]> {
+export async function listRecordins({ active = false }): Promise<string[]> {
+  if (!active) {
+    console.log('Listing all recordings');
+  }
   const res = await requestScopeToken({ scope: 'gateway.recordings.read' });
-  const response = await fetch(`http://${GATEWAY_HOST}/jet/jrec/list?active=true`, {
+  const url = new URL(`http://${GATEWAY_HOST}/jet/jrec/list`);
+  if (active) {
+    url.searchParams.set('active', 'true');
+  }
+  const response = await fetch(url, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${res.token}`,
@@ -56,7 +63,9 @@ export async function listRealtimeRecordings(): Promise<string[]> {
     throw new Error(`Error ${response.status}: ${JSON.stringify(errorResponse)}`);
   }
 
-  return await response.json();
+  const result = await response.json();
+
+  return result;
 }
 
 interface PullTokenRequest extends CommonRequest {
@@ -111,16 +120,22 @@ export async function getInfoFile(uid: string): Promise<GetInfoFileResponse> {
   return await response.json();
 }
 
-export async function getStreamingPlayerUrl(uid: string, active = false): Promise<URL> {
+export async function getPlayerUrl({
+  uid,
+  active,
+  lang,
+}: {
+  uid: string;
+  active: boolean;
+  lang: string;
+}): Promise<URL> {
   const token = await requestPullToken({ jet_rop: 'pull', jet_aid: uid });
   const url = new_gateway_url();
   url.pathname = play_path(uid);
   url.searchParams.set('token', token.token);
-  url.searchParams.set('isActive', 'true');
+  url.searchParams.set('isActive', active.toString());
   url.searchParams.set('sessionId', uid);
-  if (active) {
-    url.searchParams.set('active', 'true');
-  }
+  url.searchParams.set('lang', lang);
   return url;
 }
 
