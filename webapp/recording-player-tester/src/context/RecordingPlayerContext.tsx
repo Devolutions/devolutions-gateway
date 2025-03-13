@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import { listRecordins } from '../api-client';
+import { listRecordings } from '../api-client';
 
 export interface Recording {
   id: string;
@@ -26,7 +26,7 @@ const contextCreator = () => {
 
   useEffect(() => {
     const fetchFinishedRecordings = async () => {
-      const response = await listRecordins({
+      const response = await listRecordings({
         active: false,
       });
       setRecordings(response);

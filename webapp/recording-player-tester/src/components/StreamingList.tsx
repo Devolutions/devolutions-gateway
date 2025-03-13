@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { listRecordins } from '../api-client';
+import { listRecordings } from '../api-client';
 import { useRecordingPlayerContext } from '../context/RecordingPlayerContext';
 
 export function StreamingList() {
@@ -9,7 +9,7 @@ export function StreamingList() {
   useEffect(() => {
     const refreshRecordings = async () => {
       try {
-        const list = await listRecordins({
+        const list = await listRecordings({
           active: true,
         });
         setStreamingRecordings(list);

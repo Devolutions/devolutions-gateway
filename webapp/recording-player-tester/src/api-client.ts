@@ -42,7 +42,7 @@ export async function requestScopeToken(data: ScopeRequest): Promise<TokenRespon
 }
 
 // Function to list recordings
-export async function listRecordins({ active = false }): Promise<string[]> {
+export async function listRecordings({ active = false }): Promise<string[]> {
   if (!active) {
     console.log('Listing all recordings');
   }

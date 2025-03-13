@@ -3,10 +3,10 @@ import { RecordingPlayer } from './RecordingPlayer';
 import { useRecordingPlayerContext } from '../context/RecordingPlayerContext';
 
 export const RightPanel: React.FC = () => {
-  const { showPlayer, setShowPlayer, selectedRecording: slectedRecording } = useRecordingPlayerContext();
+  const { showPlayer, setShowPlayer, selectedRecording } = useRecordingPlayerContext();
   useEffect(() => {
-    setShowPlayer(!!slectedRecording);
-  }, [slectedRecording, setShowPlayer]);
+    setShowPlayer(!!selectedRecording);
+  }, [selectedRecording, setShowPlayer]);
 
   return (
     <div className="flex flex-col flex-grow bg-gray-100 justify-center items-center">
