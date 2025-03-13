@@ -6,33 +6,59 @@ export interface OpenPlayerParams {
   language?: string;
 }
 
-// Export these functions for use in React components
 export function openPlayer(param: OpenPlayerParams | undefined = undefined) {
   if (param?.active) {
-    return openStreamingPlayer(param.recordingId, param.language);
+    openStreamingPlayer(param.recordingId, param.language);
+  } else {
+    openRecordingPlayer();
   }
-  return openRecordingPlayer();
 }
 
-export async function openStreamingPlayer(uuid: string, language?: string) {
-  const url = await api.getPlayerUrl(uuid, true);
+async function openStreamingPlayer(uuid: string, language?: string) {
+  const url = await api.getStreamingPlayerUrl(uuid, true);
   if (language) {
     url.searchParams.set('lang', language);
   }
-  return url.toString();
+
+  player().style.display = 'flex'; // Display the player div
+  iframeContent().innerHTML = `
+    <iframe src="${url}" frameborder="0" class="iframeContent" ></iframe>
+  `;
 }
 
-export function openRecordingPlayer() {
+function openRecordingPlayer() {
   const currentUrl = window.location.href;
   const url = new URL(currentUrl);
   // dummy, does not matter
   url.searchParams.set('token', '123456');
   url.searchParams.set('sessionId', '123456');
   url.pathname = '/jet/jrec/play';
-  return url.toString();
+  const finalUrl = url.toString();
+
+  player().style.display = 'flex'; // Display the player div
+  iframeContent().innerHTML = `
+    <iframe src="${finalUrl}" frameborder="0" class="iframeContent" ></iframe>
+  `;
 }
 
 export function closePlayer() {
-  // This function is now handled by React component state
-  return;
+  player().style.display = 'none'; // Hide the player div
+  iframeContent().innerHTML = ''; // Remove the iframe
+}
+
+function iframeContent() {
+  const iframeContent = player().querySelector('#frameWrapper');
+
+  if (!iframeContent) {
+    throw new Error('Iframe content not found');
+  }
+  return iframeContent;
+}
+
+function player() {
+  const player = document.getElementById('player');
+  if (!player) {
+    throw new Error('Player not found');
+  }
+  return player;
 }

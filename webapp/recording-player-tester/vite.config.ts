@@ -1,6 +1,4 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite'
 
 export default defineConfig({
   server: {
@@ -8,6 +6,5 @@ export default defineConfig({
       '/upload': 'http://localhost:3000',
       '/jet': 'http://localhost:3000',
     },
-  },
-  plugins: [react(),tailwindcss()],
-});
+  }
+})

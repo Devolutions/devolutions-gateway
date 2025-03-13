@@ -1,15 +1,15 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import express from "express";
 import multer from "multer";
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // Get the OS's temp directory
 const tempDir = os.tmpdir();
 
 // Global variable to store file handle (file path and metadata)
-const uploadedFileHandle = [];
+let uploadedFileHandle = null;
 
 // Setup Multer for file uploads, specifying destination folder as tempDir
 const upload = multer({
@@ -44,12 +44,12 @@ app.post("/upload", upload.single("file"), (req, res) => {
     }
 
     // Save the file handle globally
-    uploadedFileHandle.push({
+    uploadedFileHandle = {
       originalname: req.file.originalname,
       path: req.file.path,
       mimetype: req.file.mimetype,
       size: req.file.size,
-    });
+    };
 
     res.send(
       `File uploaded successfully: ${req.file.originalname}, saved at ${req.file.path}`
@@ -61,26 +61,24 @@ app.post("/upload", upload.single("file"), (req, res) => {
 
 const playerPath = path.join(fileURLToPath(import.meta.url), "../../../player");
 app.use("/jet/jrec/play", express.static(playerPath));
-
 app.get("/jet/jrec/pull/:sessionId/:fileName", (req, res) => {
-  if (uploadedFileHandle?.length === 0) {
+  if (!uploadedFileHandle) {
     return res.status(404).send("No file uploaded.");
   }
-
   console.log("File pulled invoked, fileName: ", req.params.fileName);
-
   if (req.params.fileName === "recording.json") {
     res.json({
       sessionId: req.params.sessionId,
       startTime: 1728335793,
       duration: 8,
-      files: uploadedFileHandle.map((file) => ({
-        fileName: file.originalname,
-        startTime: 1728335793,
-        duration: 8,
-      })),
+      files: [
+        {
+          fileName: uploadedFileHandle.originalname,
+          startTime: 1728335793,
+          duration: 8,
+        },
+      ],
     });
-
   } else if (req.params.fileName === uploadedFileHandle.originalname) {
     const { path, originalname, mimetype, size } = uploadedFileHandle;
     const fileStream = fs.createReadStream(path);
