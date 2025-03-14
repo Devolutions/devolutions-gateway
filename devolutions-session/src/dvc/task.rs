@@ -405,13 +405,13 @@ impl MessageProcessor {
                 let _ = tokio::task::spawn(process_msg_box_req(request, tx));
             }
             NowMessage::Session(NowSessionMessage::Logoff(_logoff_msg)) => {
-                // SAFETY: No outstanding preconditions.
+                // SAFETY: FFI call with no outstanding preconditions.
                 if let Err(error) = unsafe { ExitWindowsEx(EWX_LOGOFF, SHUTDOWN_REASON(0)) } {
                     error!(%error, "Failed to logoff user session");
                 }
             }
             NowMessage::Session(NowSessionMessage::Lock(_lock_msg)) => {
-                // SAFETY: No outstanding preconditions.
+                // SAFETY: FFI call with no outstanding preconditions.
                 if let Err(error) = unsafe { LockWorkStation() } {
                     error!(%error, "Failed to lock workstation");
                 }
@@ -842,11 +842,11 @@ async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, s
 }
 
 fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
-    // SAFETY: No outstanding preconditions.
+    // SAFETY: FFI call with no outstanding preconditions.
     let foreground_window = unsafe { GetForegroundWindow() };
 
     if foreground_window.is_invalid() {
-        bail!("Failed to get foreground window handle");
+        bail!("failed to get foreground window handle");
     }
 
     let locale = match layout {
@@ -862,7 +862,7 @@ fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
             // easily breaks with some layouts.
 
             let hex = u32::from_str_radix(layout, 16)
-                .context("Invalid keyboard layout value")?;
+                .context("invalid keyboard layout value")?;
             // device == (hex >> 16) && 0xFFFF
             let locale = u16::try_from(hex & 0xFFFF).expect("locale <= 0xFFFF");
 
@@ -871,14 +871,14 @@ fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
     };
 
 
-    /// SAFETY: hwnd is valid window handle, therefore `PostMessageW` is safe to call.
+    /// SAFETY: hwnd is valid window handle.
     unsafe {
         PostMessageW(
             foreground_window,
             WM_INPUTLANGCHANGEREQUEST,
-            WPARAM(0),
-            LPARAM(locale)
-        ).context("Failed to post WM_INPUTLANGCHANGEREQUEST message")
+            WPARAM(0), // wParam is not used.
+            LPARAM(locale) // lParam is locale (low word of layout identifier).
+        ).context("failed to post WM_INPUTLANGCHANGEREQUEST message")
     }?;
 
     Ok(())
