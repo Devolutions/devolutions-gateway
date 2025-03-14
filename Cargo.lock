@@ -3588,7 +3588,7 @@ dependencies = [
 [[package]]
 name = "now-proto-pdu"
 version = "0.1.0"
-source = "git+https://github.com/Devolutions/now-proto.git?rev=b9ee6dc28c08ecb90ae2ec55328f7bc8bd00ccd5#b9ee6dc28c08ecb90ae2ec55328f7bc8bd00ccd5"
+source = "git+https://github.com/Devolutions/now-proto.git?rev=8e82b88a3cbeb9b3f7fbf8edfcd62e620317c34c#8e82b88a3cbeb9b3f7fbf8edfcd62e620317c34c"
 dependencies = [
  "bitflags 2.6.0",
  "ironrdp-core 0.1.2",

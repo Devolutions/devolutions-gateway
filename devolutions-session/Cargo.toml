@@ -42,13 +42,12 @@ tempfile = { version = "3", optional = true }
 thiserror = { version = "1", optional = true }
 win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
-# TODO: This dependency points to fix/pdu-rust-bugfix branch - revision should point to master
+# TODO: This dependency points to feat/set-kbd-layout branch - revision should point to master
 # after the fix is merged
 [dependencies.now-proto-pdu]
 optional = true
 git = "https://github.com/Devolutions/now-proto.git"
-rev = "b9ee6dc28c08ecb90ae2ec55328f7bc8bd00ccd5"
-#path = "../../now-proto-2/crates/now-proto-pdu"
+rev = "8e82b88a3cbeb9b3f7fbf8edfcd62e620317c34c"
 version = "0.1"
 features = ["std"]
 
