@@ -83,6 +83,9 @@ pub(super) async fn get_heartbeat(
         trace!("System is supporting listing storage disks");
 
         let recording_path = dunce::canonicalize(&conf.recording_path)
+            .inspect_err(
+                |error| debug!(%error, recording_path = %conf.recording_path, "Failed to canonicalize recording path"),
+            )
             .unwrap_or_else(|_| conf.recording_path.clone().into_std_path_buf());
 
         let disks = Disks::new_with_refreshed_list();
