@@ -2,6 +2,24 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.1.4 (2025-03-18)
+
+### Features
+
+- _dgw_: add --config-path command-line option ([#1268](https://github.com/Devolutions/devolutions-gateway/issues/1268)) ([3bcff86239](https://github.com/Devolutions/devolutions-gateway/commit/3bcff862395594f9606cdc4a0fc2fe3dcd36ead2)) ([ARC-307](https://devolutions.atlassian.net/browse/ARC-307)) 
+
+### Bug Fixes
+
+- _dgw_: improve debug logs for recording path canonicalization ([#1273](https://github.com/Devolutions/devolutions-gateway/issues/1273)) ([6e74bcc425](https://github.com/Devolutions/devolutions-gateway/commit/6e74bcc4256e5b6c67f798d3835b5277cc245633)) 
+
+  It’s easier to diagnostic why canonicalization failed now.
+
+- _dgw_: reopen the certificate store for each request ([#1274](https://github.com/Devolutions/devolutions-gateway/issues/1274)) ([7c2c042106](https://github.com/Devolutions/devolutions-gateway/commit/7c2c04210693d5630861fae90cd0c20a1fe38a10)) ([DGW-256](https://devolutions.atlassian.net/browse/DGW-256)) 
+
+  When using the system certificate store, we now properly reopen the
+  store for each HTTP request, eliminating the need for restarting the
+  service when renewing the certificate.
+
 ## 2025.1.3 (2025-03-05)
 
 ### Bug Fixes
