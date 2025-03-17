@@ -83,7 +83,7 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
             store_name,
         } => {
             let resolver =
-                windows::ServerCertResolver::new(machine_hostname, cert_subject_name, store_location, &store_name)
+                windows::ServerCertResolver::new(machine_hostname, cert_subject_name, store_location, store_name)
                     .context("create ServerCertResolver")?;
             Ok(builder.with_cert_resolver(Arc::new(resolver)))
         }
@@ -118,7 +118,8 @@ pub mod windows {
     pub struct ServerCertResolver {
         machine_hostname: String,
         subject_name: String,
-        store: CertStore,
+        store_type: CertStoreType,
+        store_name: String,
     }
 
     impl ServerCertResolver {
@@ -126,7 +127,7 @@ pub mod windows {
             machine_hostname: String,
             cert_subject_name: String,
             store_type: dto::CertStoreLocation,
-            store_name: &str,
+            store_name: String,
         ) -> anyhow::Result<Self> {
             let store_type = match store_type {
                 dto::CertStoreLocation::LocalMachine => CertStoreType::LocalMachine,
@@ -134,12 +135,11 @@ pub mod windows {
                 dto::CertStoreLocation::CurrentService => CertStoreType::CurrentService,
             };
 
-            let store = CertStore::open(store_type, store_name).context("open Windows certificate store")?;
-
             Ok(Self {
                 machine_hostname,
                 subject_name: cert_subject_name,
-                store,
+                store_type,
+                store_name,
             })
         }
 
@@ -168,12 +168,16 @@ pub mod windows {
                 )
             }
 
+            let store = CertStore::open(self.store_type, &self.store_name).context("open Windows certificate store")?;
+
             // Look up certificate by subject.
             // TODO(perf): the resolution result could probably be cached.
-            let contexts = self
-                .store
-                .find_by_subject_str(&self.subject_name)
-                .context("failed to find server certificate from system store")?;
+            let mut contexts = store.find_by_subject_str(&self.subject_name).with_context(|| {
+                format!(
+                    "failed to find server certificate for {} from system store",
+                    self.subject_name
+                )
+            })?;
 
             anyhow::ensure!(
                 !contexts.is_empty(),
@@ -182,6 +186,20 @@ pub mod windows {
             );
 
             trace!(subject_name = %self.subject_name, count = contexts.len(), "Found certificate contexts");
+
+            // Sort certificates from the furthest to the earliest expiration
+            // time. Note that it appears the certificates are already returned
+            // in this order, but it is not a documented behavior. It really
+            // depends on the internal order maintained by the store, and there
+            // is no guarantee about what this order is, thus we implement the
+            // logic here anyway.
+            contexts.sort_by_cached_key(|ctx| match picky::x509::Cert::from_der(ctx.as_der()) {
+                Ok(cert) => cert.valid_not_before(),
+                Err(error) => {
+                    warn!(%error, "Failed to parse store certificate");
+                    picky::x509::date::UtcDate::ymd(1900, 1, 1).expect("hardcoded")
+                }
+            });
 
             // Attempt to acquire a private key and construct CngSigningKey.
             let (context, key) = contexts
