@@ -436,6 +436,8 @@ pub enum AccessScope {
     RecordingsRead,
     #[serde(rename = "gateway.update")]
     Update,
+    #[serde(rename = "gateway.preflight")]
+    Preflight,
 }
 
 #[derive(Clone, Deserialize)]

@@ -229,3 +229,38 @@ $ curl -v http://127.0.0.1:7171/jet/webapp/session-token --json '{ "content_type
 * Connection #0 to host 127.0.0.1 left intact
 eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJkc3RfYWx0IjpbXSwiZHN0X2hzdCI6InRjcDovL2xvY2FsaG9zdDo4ODg4IiwiZXhwIjoxNzAzMjYzMDExLCJpYXQiOjE3MDMyNjI5NTEsImpldF9haWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAiLCJqZXRfYXAiOiJyZHAiLCJqZXRfY20iOiJmd2QiLCJqZXRfZmx0IjpmYWxzZSwiamV0X3JlYyI6ZmFsc2UsImpldF90dGwiOjAsImp0aSI6ImMyZjAzMmU4LWNlZGMtNDk5Zi05ODYyLWExZWFlNjU5NGNiNCIsIm5iZiI6MTcwMzI2Mjk1MX0.WRwnQR-o6UNvIDCiskvOPiQ5XStriaGl4c4UfhZPdZY9hSN4nLajP_inWjbVR8V8h-WcuWZEo_p-s_0Ze6OnEpJ94HRw8e_ANEJ3JWCMrWB7MypWT4V3khPCk-SL29V-if2VUpwPq6Oc9ugpatCxHAJRcUD4FYxr1cy85jU__E3DwOceqGL1OUStfPVw5zqZvJQmZ2ndNO8K_6NhfC2PRSwmMYPPR_vKDeBFShSFQSHCWv2-X3Og5Mjm6R7vyMbvfKY7fs2zRQxwZBoUEaLhEimhqeVcsDH3dF8deN5DbnQ1nq2Eu_eWoJ4y3tBmwaZPMvIDHPq3STZRgehFkY5pqw
 ```
+
+## Preflight API
+
+Generate a scope token with the scope `gateway.preflight` or `*` using `tokengen` (or alternatively, the `New-DGatewayToken` cmdlet):
+
+```shell
+tokengen --provisioner-key <path/to/provisioner.key> scope 'gateway.preflight'
+```
+
+```pwsh
+New-DGatewayToken -Type SCOPE -Scope 'gateway.preflight'
+```
+
+Perform preflight operations using `curl`:
+
+```shell
+$ curl "127.0.0.1:7171/jet/preflight?token=$(cargo run --manifest-path ./tools/tokengen/Cargo.toml '--' sign --provisioner-key ./config/provisioner.key scope "gateway.preflight")" \
+  -X POST -H "Content-Type: application/json" \
+  --data '[
+    {"id": "a86ae982-e4be-4f84-8ff2-893d66df9bdd", "kind": "get-version"},
+    {"id": "ef1a3ae9-e55d-48b8-92b0-ae67c29b2e4e", "kind": "push-token", "token": "hello", "token_id": "3d1d3c45-e377-4713-b8d5-45b07514cf22"},
+    {"id": "55821d24-d1df-481c-8b88-66c06f879835", "kind": "lookup-host", "host_to_lookup": "devolutions.net"},
+    {"id": "8ec4ab6b-39a5-411d-b191-54df2d976820", "kind": "get-running-session-count"}
+  ]'
+```
+
+And here is how the response looks like:
+
+```
+[
+  {"operation_id":"a86ae982-e4be-4f84-8ff2-893d66df9bdd","kind":"version","version":"2025.1.3"},
+  {"operation_id":"55821d24-d1df-481c-8b88-66c06f879835","kind":"resolved-host","resolved_host":"devolutions.net","resolved_addresses":["20.24.122.172"]},
+  {"operation_id":"8ec4ab6b-39a5-411d-b191-54df2d976820","kind":"running-session-count","running_session_count":0}
+]
+```
