@@ -33,7 +33,6 @@ export class MultiVideoPlayer extends HTMLElement {
 
   private assignAttributes() {
     for (const [name, value] of this.attributesMap.entries()) {
-      console.log(name, value);
       if (this.videoElement) {
         if (['controls', 'autoplay', 'muted'].includes(name)) {
           if (this.hasAttribute(name)) {
