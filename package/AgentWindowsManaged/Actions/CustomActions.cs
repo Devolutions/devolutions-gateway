@@ -318,8 +318,14 @@ namespace DevolutionsAgent.Actions
 
                 foreach (string extension in explorerCommandExtensions)
                 {
-                    string fileClass = Registry.GetValue($"{Registry.ClassesRoot.Name}\\{extension}", "", extension)
-                        .ToString();
+                    object fileClass = Registry.GetValue($"{Registry.ClassesRoot.Name}\\{extension}", "", extension);
+
+                    if (fileClass is null)
+                    {
+                        session.Log($"couldn't find file class for extension {extension}");
+                        continue;
+                    }
+
                     using RegistryKey commandPath =
                         Registry.ClassesRoot.CreateSubKey($"{fileClass}\\shell\\{EXPLORER_COMMAND_VERB}");
 
@@ -578,8 +584,14 @@ namespace DevolutionsAgent.Actions
 
                 foreach (string extension in explorerCommandExtensions)
                 {
-                    string fileClass = Registry.GetValue($"{Registry.ClassesRoot.Name}\\{extension}", "", extension)
-                        .ToString();
+                    object fileClass = Registry.GetValue($"{Registry.ClassesRoot.Name}\\{extension}", "", extension);
+
+                    if (fileClass is null)
+                    {
+                        session.Log($"couldn't find file class for extension {extension}");
+                        continue;
+                    }
+
                     Registry.ClassesRoot.DeleteSubKeyTree($"{fileClass}\\shell\\{EXPLORER_COMMAND_VERB}", false);
                 }
             }
