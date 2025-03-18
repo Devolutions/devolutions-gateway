@@ -135,7 +135,7 @@ npm run build
 ```
 
 For testing purposes:
-you can checkout it's built output path in Vite config file and use 'npx http-server' to serve the videos in ./example-videos
+you can checkout its built output path in Vite config file and use 'npx http-server' to serve the videos in ./example-videos
 You can run server.js to serve those video
 
 ```bash
