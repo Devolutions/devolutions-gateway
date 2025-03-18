@@ -12,4 +12,4 @@ workspace = true
 proxy-socks = { path = "../proxy-socks" }
 proxy-http = { path = "../proxy-http" }
 proxy-types = { path = "../proxy-types" }
-tokio = { version = "1.43", features = ["rt", "net", "rt-multi-thread", "macros"] }
+tokio = { version = "1.44", features = ["rt", "net", "rt-multi-thread", "macros"] }

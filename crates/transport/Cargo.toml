@@ -9,7 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
-tokio = { version = "1.43", features = ["io-util", "sync", "rt", "macros", "time"] }
+tokio = { version = "1.44", features = ["io-util", "sync", "rt", "macros", "time"] }
 futures-core = "0.3"
 futures-sink = "0.3"
 futures-util = { version = "0.3", features = ["sink"] }
