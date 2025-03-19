@@ -42,14 +42,11 @@ tempfile = { version = "3", optional = true }
 thiserror = { version = "1", optional = true }
 win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
-# TODO: This dependency points to fix/pdu-rust-bugfix branch - revision should point to master
+# TODO: This dependency points to feat/set-kbd-layout branch - revision should point to master
 # after the fix is merged
 [dependencies.now-proto-pdu]
 optional = true
-git = "https://github.com/Devolutions/now-proto.git"
-rev = "b9ee6dc28c08ecb90ae2ec55328f7bc8bd00ccd5"
-#path = "../../now-proto-2/crates/now-proto-pdu"
-version = "0.1"
+version = "0.2"
 features = ["std"]
 
 [target.'cfg(windows)'.build-dependencies]
@@ -64,4 +61,5 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_System_Console",
+    "Win32_UI_Input_KeyboardAndMouse",
 ]

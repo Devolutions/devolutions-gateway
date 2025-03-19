@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use win_api_wrappers::{semaphore::Semaphore};
+use win_api_wrappers::semaphore::Semaphore;
 use windows::Win32::Foundation::HANDLE;
 
 const IO_CHANNEL_SIZE: usize = 100;
@@ -58,10 +58,7 @@ pub fn winapi_signaled_mpsc_channel<T>() -> anyhow::Result<(WinapiSignaledSender
         .try_into()
         .expect("Channel size is too large for underlying WinAPI semaphore");
 
-    let semaphore = Semaphore::new_unnamed(
-        0,
-        maximum_count,
-    )?;
+    let semaphore = Semaphore::new_unnamed(0, maximum_count)?;
 
     let (tx, rx) = mpsc::channel(IO_CHANNEL_SIZE);
 

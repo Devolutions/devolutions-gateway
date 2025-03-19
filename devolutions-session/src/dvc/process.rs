@@ -1,20 +1,18 @@
 use tokio::sync::mpsc::Sender;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, BOOL, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HANDLE, HWND, LPARAM, WAIT_EVENT,
-    WAIT_OBJECT_0, WPARAM,
+    CloseHandle, GetLastError, BOOL, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0,
+    WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::Console::{AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT};
 use windows::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, GetProcessHandleFromHwnd, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW
+    CreateProcessW, GetExitCodeProcess, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_CONSOLE,
+    CREATE_NEW_PROCESS_GROUP, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
 };
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostMessageW, PostThreadMessageW, WM_CLOSE, WM_QUIT};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, WM_QUIT};
 
-use now_proto_pdu::{
-    NowExecDataStreamKind, NowProtoError, NowStatusError,
-};
+use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::Process;
@@ -24,7 +22,6 @@ use win_api_wrappers::utils::{Pipe, WideString};
 use crate::dvc::channel::{winapi_signaled_mpsc_channel, WinapiSignaledReceiver, WinapiSignaledSender};
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::{ensure_overlapped_io_result, IoRedirectionPipes};
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
@@ -67,12 +64,30 @@ pub enum ProcessIoInputEvent {
 #[derive(Debug)]
 pub enum ServerChannelEvent {
     CloseChannel,
-    SessionStarted { session_id: u32 },
-    SessionDataOut { session_id: u32, stream: NowExecDataStreamKind, last: bool, data: Vec<u8> },
-    SessionCancelSuccess { session_id: u32 },
-    SessionCancelFailed { session_id: u32, error: NowStatusError },
-    SessionExited { session_id: u32, exit_code: u32 },
-    SessionFailed { session_id: u32, error: ExecError },
+    SessionStarted {
+        session_id: u32,
+    },
+    SessionDataOut {
+        session_id: u32,
+        stream: NowExecDataStreamKind,
+        last: bool,
+        data: Vec<u8>,
+    },
+    SessionCancelSuccess {
+        session_id: u32,
+    },
+    SessionCancelFailed {
+        session_id: u32,
+        error: NowStatusError,
+    },
+    SessionExited {
+        session_id: u32,
+        exit_code: u32,
+    },
+    SessionFailed {
+        session_id: u32,
+        error: ExecError,
+    },
 }
 
 pub struct WinApiProcessCtx {
@@ -162,7 +177,8 @@ impl WinApiProcessCtx {
 
         // Signal client side about started execution
 
-        self.io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        self.io_notification_tx
+            .blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
 
         info!(session_id, "Process IO is ready for async loop execution");
         loop {
@@ -230,9 +246,8 @@ impl WinApiProcessCtx {
 
                             // Acknowledge client that cancel request has been processed
                             // successfully.
-                            self.io_notification_tx.blocking_send(
-                                ServerChannelEvent::SessionCancelSuccess { session_id },
-                            )?;
+                            self.io_notification_tx
+                                .blocking_send(ServerChannelEvent::SessionCancelSuccess { session_id })?;
 
                             // wait for process to exit
                             continue;
@@ -297,24 +312,26 @@ impl WinApiProcessCtx {
                                 // EOF on stdout pipe, close it and send EOF message to message_tx
                                 self.stdout_read_pipe = None;
 
-                                self.io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                                    session_id,
-                                    stream: NowExecDataStreamKind::Stdout,
-                                    last: true,
-                                    data: Vec::new()
-                                })?;
+                                self.io_notification_tx
+                                    .blocking_send(ServerChannelEvent::SessionDataOut {
+                                        session_id,
+                                        stream: NowExecDataStreamKind::Stdout,
+                                        last: true,
+                                        data: Vec::new(),
+                                    })?;
                             }
                             _code => return Err(err.into()),
                         }
                         continue;
                     }
 
-                    self.io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                        session_id,
-                        stream: NowExecDataStreamKind::Stdout,
-                        last: false,
-                        data: stdout_buffer[..bytes_read as usize].to_vec()
-                    })?;
+                    self.io_notification_tx
+                        .blocking_send(ServerChannelEvent::SessionDataOut {
+                            session_id,
+                            stream: NowExecDataStreamKind::Stdout,
+                            last: false,
+                            data: stdout_buffer[..bytes_read as usize].to_vec(),
+                        })?;
 
                     // Schedule next overlapped read
                     // SAFETY: pipe is valid to read from, as long as it is not closed.
@@ -358,25 +375,26 @@ impl WinApiProcessCtx {
                             ERROR_HANDLE_EOF | ERROR_BROKEN_PIPE => {
                                 // EOF on stderr pipe, close it and send EOF message to message_tx
                                 self.stderr_read_pipe = None;
-                                self.io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                                    session_id,
-                                    stream: NowExecDataStreamKind::Stderr,
-                                    last: true,
-                                    data: Vec::new()
-                                })?;
-
+                                self.io_notification_tx
+                                    .blocking_send(ServerChannelEvent::SessionDataOut {
+                                        session_id,
+                                        stream: NowExecDataStreamKind::Stderr,
+                                        last: true,
+                                        data: Vec::new(),
+                                    })?;
                             }
                             _code => return Err(err.into()),
                         }
                         continue;
                     }
 
-                    self.io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                        session_id,
-                        stream: NowExecDataStreamKind::Stderr,
-                        last: false,
-                        data: stderr_buffer[..bytes_read as usize].to_vec()
-                    })?;
+                    self.io_notification_tx
+                        .blocking_send(ServerChannelEvent::SessionDataOut {
+                            session_id,
+                            stream: NowExecDataStreamKind::Stderr,
+                            last: false,
+                            data: stderr_buffer[..bytes_read as usize].to_vec(),
+                        })?;
 
                     // Schedule next overlapped read
                     // SAFETY: pipe is valid to read from, as long as it is not closed.
@@ -535,12 +553,8 @@ impl WinApiProcessBuilder {
             };
 
             let notification = match process_ctx.start_io_loop() {
-                Ok(exit_code) => {
-                    ServerChannelEvent::SessionExited { session_id, exit_code }
-                }
-                Err(error) => {
-                    ServerChannelEvent::SessionFailed { session_id, error }
-                }
+                Ok(exit_code) => ServerChannelEvent::SessionExited { session_id, exit_code },
+                Err(error) => ServerChannelEvent::SessionFailed { session_id, error },
             };
 
             if let Err(error) = io_notification_tx.blocking_send(notification) {
@@ -608,7 +622,6 @@ unsafe extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL 
         // Continue enumeration.
         return true.into();
     }
-
 
     // Get thread id
     let thread_id = GetWindowThreadProcessId(hwnd, None);

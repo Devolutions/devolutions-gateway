@@ -1,17 +1,12 @@
 use std::path::PathBuf;
 
-use windows::core::PCWSTR;
-use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
-
-use win_api_wrappers::utils::WideString;
-
 /// Guard for created temporary file. Associated file is deleted on drop.
 pub struct TmpFileGuard(PathBuf);
 
 impl TmpFileGuard {
     pub fn new(extension: &str) -> anyhow::Result<Self> {
         // Create empty temporary file and release the handle.
-        let (file, path) = tempfile::Builder::new()
+        let (_file, path) = tempfile::Builder::new()
             .prefix("devolutions-")
             .suffix(&format!(".{}", extension))
             .tempfile()?

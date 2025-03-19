@@ -1,4 +1,5 @@
-use now_proto_pdu::{ironrdp_core::{Decode, DecodeError, DecodeErrorKind, ReadCursor, IntoOwned}, NowMessage};
+use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor};
+use now_proto_pdu::NowMessage;
 
 /// Reconstructs Now messages from a stream of bytes.
 pub struct NowMessageDissector {
@@ -33,7 +34,10 @@ impl NowMessageDissector {
                     let pos = cursor.pos();
                     self.pdu_body_buffer.drain(0..pos);
                 }
-                Err(DecodeError { kind: DecodeErrorKind::NotEnoughBytes { .. }, .. }) => {
+                Err(DecodeError {
+                    kind: DecodeErrorKind::NotEnoughBytes { .. },
+                    ..
+                }) => {
                     // Need more data to read the message
                     break;
                 }
