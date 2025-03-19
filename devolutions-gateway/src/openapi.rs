@@ -3,6 +3,8 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 
+use crate::api::preflight::PreflightAlertStatus;
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -23,6 +25,7 @@ use uuid::Uuid;
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::trigger_update_check,
+        crate::api::preflight::post_preflight,
         // crate::api::net::get_net_config,
     ),
     components(schemas(
@@ -44,6 +47,13 @@ use uuid::Uuid;
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
         crate::api::update::UpdateResponse,
+        PreflightOperation,
+        PreflightOperationKind,
+        Credentials,
+        CredentialsKind,
+        PreflightResult,
+        PreflightResultKind,
+        PreflightAlertStatus,
         // crate::api::net::NetworkInterface,
         SessionTokenContentType,
         SessionTokenSignRequest,
@@ -288,3 +298,144 @@ impl Modify for SubscriberSecurityAddon {
     security(("subscriber_token" = [])),
 )]
 fn post_subscriber_message() {}
+
+#[allow(unused)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize)]
+struct PreflightOperation {
+    /// Unique ID identifying the preflight operation
+    id: Uuid,
+    /// The type of preflight operation to perform
+    kind: PreflightOperationKind,
+    /// A unique ID identifying the token
+    ///
+    /// Required for "push-token" kind.
+    token_id: Option<Uuid>,
+    /// The token to be pushed on the proxy-side
+    ///
+    /// Required for "push-token" kind.
+    token: Option<String>,
+    /// A unique ID identifying the credentials
+    ///
+    /// Required for "push-credentials" kind.
+    credentials_id: Option<Uuid>,
+    /// The credentials to be pushed on the proxy-side
+    ///
+    /// Required for "push-credentials" kind.
+    credentials: Option<Credentials>,
+    /// The hostname to perform DNS lookup on
+    ///
+    /// Required for "lookup-host" kind.
+    host_to_lookup: Option<String>,
+}
+
+#[allow(unused)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize)]
+struct Credentials {
+    /// The kind of credentials
+    kind: CredentialsKind,
+    /// Username for the credentials
+    ///
+    /// Required for "username-password" kind.
+    username: Option<String>,
+    /// Password for the credentials
+    ///
+    /// Required for "username-password" kind.
+    password: Option<String>,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize)]
+enum CredentialsKind {
+    #[serde(rename = "username-password")]
+    UsernamePassword,
+}
+
+#[allow(unused)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize)]
+pub(crate) enum PreflightOperationKind {
+    #[serde(rename = "get-version")]
+    GetVersion,
+    #[serde(rename = "get-agent-version")]
+    GetAgentVersion,
+    #[serde(rename = "get-running-session-count")]
+    GetRunningSessionCount,
+    #[serde(rename = "get-recording-storage-health")]
+    GetRecordingStorageHealth,
+    #[serde(rename = "push-token")]
+    PushToken,
+    #[serde(rename = "push-credentials")]
+    PushCredentials,
+    #[serde(rename = "lookup-host")]
+    LookupHost,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize)]
+pub(crate) struct PreflightResult {
+    /// The ID of the preflight operation associated to this result
+    operation_id: Uuid,
+    /// The type of preflight result
+    kind: PreflightResultKind,
+    /// Service version
+    ///
+    /// Set for "version" kind.
+    version: Option<String>,
+    /// Agent service version, if installed
+    ///
+    /// Set for "agent-version" kind.
+    agent_version: Option<String>,
+    /// Number of running sessions
+    ///
+    /// Set for "running-session-count" kind.
+    running_session_count: Option<usize>,
+    /// Whether the recording storage is writeable or not
+    ///
+    /// Set for "recording-storage-health" kind.
+    recording_storage_is_writeable: Option<bool>,
+    /// The total space of the disk used to store recordings, in bytes
+    ///
+    /// Set for "recording-storage-health" kind.
+    recording_storage_total_space: Option<u64>,
+    /// The remaining available space to store recordings, in bytes
+    ///
+    /// set for "recording-storage-health" kind.
+    recording_storage_available_space: Option<u64>,
+    /// Hostname that was resolved
+    ///
+    /// Set for "resolved-host" kind.
+    resolved_host: Option<String>,
+    /// Resolved IP addresses
+    ///
+    /// Set for "resolved-host" kind.
+    resolved_addresses: Option<Vec<String>>,
+    /// Alert status
+    ///
+    /// Set for "alert" kind.
+    alert_status: PreflightAlertStatus,
+    /// Message describing the problem
+    ///
+    /// Set for "alert" kind.
+    alert_message: String,
+}
+
+#[allow(unused)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub(crate) enum PreflightResultKind {
+    #[serde(rename = "version")]
+    Version,
+    #[serde(rename = "agent-version")]
+    AgentVersion,
+    #[serde(rename = "running-session-count")]
+    RunningSessionCount,
+    #[serde(rename = "recording-storage-health")]
+    RecordingStorageHealth,
+    #[serde(rename = "resolved-host")]
+    ResolvedHost,
+    #[serde(rename = "alert")]
+    Alert,
+}

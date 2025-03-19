@@ -8,6 +8,7 @@ pub mod jrec;
 pub mod jrl;
 pub mod kdc_proxy;
 pub mod net;
+pub mod preflight;
 pub mod rdp;
 pub mod session;
 pub mod sessions;
@@ -18,6 +19,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
     let mut router = axum::Router::new()
         .route("/jet/health", axum::routing::get(health::get_health))
         .route("/jet/heartbeat", axum::routing::get(heartbeat::get_heartbeat))
+        .route("/jet/preflight", axum::routing::post(preflight::post_preflight))
         .nest("/jet/jrl", jrl::make_router(state.clone()))
         .nest("/jet/jrec", jrec::make_router(state.clone()))
         .nest("/jet/config", config::make_router(state.clone()))

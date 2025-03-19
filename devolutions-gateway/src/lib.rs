@@ -15,6 +15,7 @@ pub mod openapi;
 
 pub mod api;
 pub mod config;
+pub mod credendials;
 pub mod extract;
 pub mod generic_client;
 pub mod http;
