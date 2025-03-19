@@ -46,9 +46,7 @@ win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 # after the fix is merged
 [dependencies.now-proto-pdu]
 optional = true
-git = "https://github.com/Devolutions/now-proto.git"
-rev = "8e82b88a3cbeb9b3f7fbf8edfcd62e620317c34c"
-version = "0.1"
+version = "0.2"
 features = ["std"]
 
 [target.'cfg(windows)'.build-dependencies]
@@ -63,4 +61,5 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_System_Console",
+    "Win32_UI_Input_KeyboardAndMouse",
 ]

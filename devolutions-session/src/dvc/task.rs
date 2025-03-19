@@ -5,26 +5,38 @@ use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use windows::core::PCWSTR;
-use windows::Win32::System::Shutdown::{ExitWindowsEx, InitiateSystemShutdownExW, InitiateSystemShutdownW, LockWorkStation, EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, EWX_SHUTDOWN, SHUTDOWN_REASON};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
+use windows::Win32::System::Shutdown::{
+    ExitWindowsEx, InitiateSystemShutdownW, LockWorkStation, EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT,
+    SHUTDOWN_REASON,
+};
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MessageBoxW, PostMessageW, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowThreadProcessId, MessageBoxW, PostMessageW, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT,
+    MESSAGEBOX_STYLE, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST,
+};
 
 use devolutions_gateway_task::Task;
-use now_proto_pdu::{
-    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage, NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage, NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage, SetKbdLayoutOption
-};
 use now_proto_pdu::ironrdp_core::IntoOwned;
+use now_proto_pdu::{
+    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
+    NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
+    NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
+    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage,
+    NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage,
+    SetKbdLayoutOption,
+};
 use win_api_wrappers::event::Event;
+use win_api_wrappers::security::privilege::ScopedPrivileges;
 use win_api_wrappers::utils::WideString;
 
 use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel, WinapiSignaledSender};
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
-use crate::dvc::process::{ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
-use super::process::ExecError;
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
-use win_api_wrappers::security::privilege::ScopedPrivileges;
+use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 
 // One minute heartbeat interval by default
 const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
@@ -37,8 +49,8 @@ const GENERIC_ERROR_CODE_OTHER: u32 = 0xFFFFFFFF;
 pub struct DvcIoTask {}
 
 /// # Architecture
-/// - If internal server error happens before Exec sesion start (e.g. MSPC channel error,
-///   WinAPI error unrelated to process start etc.), we should close chanel gracefully with
+/// - If internal server error happens before Exec session start (e.g. MSPC channel error,
+///   WinAPI error unrelated to process start etc.), we should close channel gracefully with
 ///   error reporting
 /// - If some nonerror happens after session start (e.g. session data, session cancel, session exit),
 ///   we should close exec session and send result to the client. (with exceptions below)
@@ -119,44 +131,38 @@ async fn process_messages(
 
     if client_caps.version().major != NowProtoVersion::CURRENT.major {
         let error = NowStatusError::new_proto(NowProtoError::ProtocolVersion);
-        let msg = NowChannelCloseMsg::from_error(error)
-            .expect("NowProtoError without message serialization always succeeds");
+        let msg =
+            NowChannelCloseMsg::from_error(error).expect("NowProtoError without message serialization always succeeds");
 
         dvc_tx.send(msg.into_owned().into()).await?;
 
         return Ok(());
     }
 
-    let mut server_caps = NowChannelCapsetMsg::default()
+    let server_caps = NowChannelCapsetMsg::default()
         .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
         .with_session_capset(
             NowSessionCapsetFlags::LOCK
-            | NowSessionCapsetFlags::LOGOFF
-            | NowSessionCapsetFlags::MSGBOX
-            | NowSessionCapsetFlags::SET_KBD_LAYOUT
+                | NowSessionCapsetFlags::LOGOFF
+                | NowSessionCapsetFlags::MSGBOX
+                | NowSessionCapsetFlags::SET_KBD_LAYOUT,
         )
         .with_exec_capset(
             NowExecCapsetFlags::STYLE_RUN
-            | NowExecCapsetFlags::STYLE_PROCESS
-            | NowExecCapsetFlags::STYLE_BATCH
-            | NowExecCapsetFlags::STYLE_PWSH
-            | NowExecCapsetFlags::STYLE_WINPS
+                | NowExecCapsetFlags::STYLE_PROCESS
+                | NowExecCapsetFlags::STYLE_BATCH
+                | NowExecCapsetFlags::STYLE_PWSH
+                | NowExecCapsetFlags::STYLE_WINPS,
         );
 
-    let heartbeat_interval = client_caps
-        .heartbeat_interval()
-        .unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
+    let heartbeat_interval = client_caps.heartbeat_interval().unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
 
     let downgraded_caps = client_caps.downgrade(&server_caps);
 
     // Send server capabilities back to the client.
     dvc_tx.send(server_caps.into()).await?;
 
-    let mut processor = MessageProcessor::new(
-        downgraded_caps,
-        dvc_tx.clone(),
-        io_notification_tx
-    );
+    let mut processor = MessageProcessor::new(downgraded_caps, dvc_tx.clone(), io_notification_tx);
 
     info!("DVC negotiation completed");
 
@@ -282,7 +288,10 @@ impl MessageProcessor {
         Ok(())
     }
 
-    pub(crate) async fn process_message(&mut self, message: NowMessage<'static>) -> anyhow::Result<ProcessMessageAction> {
+    pub(crate) async fn process_message(
+        &mut self,
+        message: NowMessage<'static>,
+    ) -> anyhow::Result<ProcessMessageAction> {
         match message {
             NowMessage::Channel(NowChannelMessage::Capset(_)) => {
                 warn!("Received unexpected exec capset message, ignoring...");
@@ -394,9 +403,7 @@ impl MessageProcessor {
                     }
                 };
 
-                process
-                    .send_stdin(data_msg.data().to_vec(), data_msg.is_last())
-                    .await?;
+                process.send_stdin(data_msg.data().to_vec(), data_msg.is_last()).await?;
             }
             NowMessage::Session(NowSessionMessage::MsgBoxReq(request)) => {
                 let tx = self.dvc_tx.clone();
@@ -439,16 +446,17 @@ impl MessageProcessor {
                     shutdown_flags |= EWX_FORCE;
                 }
 
-                let message = (!shutdown_msg.message().is_empty())
-                    .then(|| WideString::from(shutdown_msg.message()));
+                let message = (!shutdown_msg.message().is_empty()).then(|| WideString::from(shutdown_msg.message()));
 
-                let shutdown_result = unsafe { InitiateSystemShutdownW(
-                    PCWSTR::null(),
-                    message.map(|m| m.as_pcwstr()).unwrap_or(PCWSTR::null()),
-                    shutdown_msg.timeout().as_secs() as u32,
-                    shutdown_msg.is_force_shutdown(),
-                    shutdown_msg.is_reboot(),
-                ) };
+                let shutdown_result = unsafe {
+                    InitiateSystemShutdownW(
+                        PCWSTR::null(),
+                        message.map(|m| m.as_pcwstr()).unwrap_or(PCWSTR::null()),
+                        shutdown_msg.timeout().as_secs() as u32,
+                        shutdown_msg.is_force_shutdown(),
+                        shutdown_msg.is_reboot(),
+                    )
+                };
 
                 if let Err(err) = shutdown_result {
                     warn!(%err, "Failed to initiate system shutdown");
@@ -523,10 +531,7 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        let process = run_process.run(
-                exec_msg.session_id(),
-                self.io_notification_tx.clone(),
-        )?;
+        let process = run_process.run(exec_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(exec_msg.session_id(), process);
 
@@ -541,7 +546,7 @@ impl MessageProcessor {
 
         let parameters = format!("/c \"{}\"", tmp_file.path_string());
 
-        let mut run_batch  = WinApiProcessBuilder::new("cmd.exe")
+        let mut run_batch = WinApiProcessBuilder::new("cmd.exe")
             .with_temp_file(tmp_file)
             .with_command_line(&parameters);
 
@@ -549,10 +554,7 @@ impl MessageProcessor {
             run_batch = run_batch.with_current_directory(directory);
         }
 
-        let process = run_batch.run(
-                batch_msg.session_id(),
-                self.io_notification_tx.clone(),
-            )?;
+        let process = run_batch.run(batch_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(batch_msg.session_id(), process);
 
@@ -582,10 +584,7 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        let process = run_process.run(
-            winps_msg.session_id(),
-            self.io_notification_tx.clone(),
-        )?;
+        let process = run_process.run(winps_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
@@ -615,10 +614,7 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        let process = run_process.run(
-            winps_msg.session_id(),
-            self.io_notification_tx.clone(),
-        )?;
+        let process = run_process.run(winps_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
@@ -639,7 +635,6 @@ impl MessageProcessor {
 }
 
 fn append_ps_args(args: &mut Vec<String>, msg: &NowExecWinPsMsg<'_>) {
-
     if let Some(execution_policy) = msg.execution_policy() {
         args.push("-ExecutionPolicy".to_string());
         args.push(execution_policy.to_string());
@@ -682,7 +677,6 @@ fn append_ps_args(args: &mut Vec<String>, msg: &NowExecWinPsMsg<'_>) {
 }
 
 fn append_pwsh_args(args: &mut Vec<String>, msg: &NowExecPwshMsg<'_>) {
-
     if let Some(execution_policy) = msg.execution_policy() {
         args.push("-ExecutionPolicy".to_string());
         args.push(execution_policy.to_string());
@@ -724,12 +718,13 @@ fn append_pwsh_args(args: &mut Vec<String>, msg: &NowExecPwshMsg<'_>) {
     }
 }
 
-async fn process_msg_box_req(request: NowSessionMsgBoxReqMsg<'static>, dvc_tx: WinapiSignaledSender<NowMessage<'static>>) {
+async fn process_msg_box_req(
+    request: NowSessionMsgBoxReqMsg<'static>,
+    dvc_tx: WinapiSignaledSender<NowMessage<'static>>,
+) {
     info!("Processing message box request `{}`", request.request_id());
 
-    let title = WideString::from(
-        request.title().unwrap_or("Devolutions Session")
-    );
+    let title = WideString::from(request.title().unwrap_or("Devolutions Session"));
 
     let text = WideString::from(request.message());
 
@@ -750,14 +745,12 @@ async fn process_msg_box_req(request: NowSessionMsgBoxReqMsg<'static>, dvc_tx: W
                     timeout.as_millis() as u32,
                 )
             }
-            None => {
-                MessageBoxW(
-                    None,
-                    text.as_pcwstr(),
-                    title.as_pcwstr(),
-                    MESSAGEBOX_STYLE(request.style().value()),
-                )
-            }
+            None => MessageBoxW(
+                None,
+                text.as_pcwstr(),
+                title.as_pcwstr(),
+                MESSAGEBOX_STYLE(request.style().value()),
+            ),
         }
     };
 
@@ -810,7 +803,7 @@ async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, s
             make_status_error_failsafe(session_id, status)
         }
         ExecError::Aborted => {
-            info!(%session_id, "Process execution was abborted due to service shutdown");
+            info!(%session_id, "Process execution was aborted due to service shutdown");
             make_status_error_failsafe(session_id, NowStatusError::new_proto(NowProtoError::Aborted))
         }
         ExecError::Encode(error) => {
@@ -819,35 +812,26 @@ async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, s
             // Convert to anyhow for pretty formatting with source.
             let error = anyhow::Error::from(error);
 
-            make_generic_error_failsafe(
-                session_id,
-                GENERIC_ERROR_CODE_ENCODING,
-                format!("{error:#}")
-            )
+            make_generic_error_failsafe(session_id, GENERIC_ERROR_CODE_ENCODING, format!("{error:#}"))
         }
         ExecError::Other(error) => {
             error!(%error, session_id, "Process execution thread failed with unknown error");
 
-            make_generic_error_failsafe(
-                session_id,
-                GENERIC_ERROR_CODE_OTHER,
-                format!("{error:#}")
-            )
+            make_generic_error_failsafe(session_id, GENERIC_ERROR_CODE_OTHER, format!("{error:#}"))
         }
-    }.into_owned();
+    }
+    .into_owned();
 
     if let Err(error) = dvc_tx.send(msg.into()).await {
         error!(%error, "Failed to send error message");
     }
 }
 
-fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
-    // SAFETY: FFI call with no outstanding preconditions.
-    let foreground_window = unsafe { GetForegroundWindow() };
-
-    if foreground_window.is_invalid() {
-        bail!("failed to get foreground window handle");
-    }
+fn set_kbd_layout(layout: SetKbdLayoutOption<'_>) -> anyhow::Result<()> {
+    // In contrast what many sources suggest, HWND returned by `GetForegroundWindow` is not reliable
+    // for sending `WM_INPUTLANGCHANGEREQUEST` message to.
+    // `GetFocus` API should be used instead to find thread which have keyboard input focus.
+    let focused_window = get_focused_window()?;
 
     let locale = match layout {
         SetKbdLayoutOption::Next => isize::try_from(HKL_NEXT).expect("HKL_NEXT fits into isize"),
@@ -861,8 +845,7 @@ fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
             // will not work as expected (even if dozen of sources suggest this approach) and
             // easily breaks with some layouts.
 
-            let hex = u32::from_str_radix(layout, 16)
-                .context("invalid keyboard layout value")?;
+            let hex = u32::from_str_radix(layout, 16).context("invalid keyboard layout value")?;
             // device == (hex >> 16) && 0xFFFF
             let locale = u16::try_from(hex & 0xFFFF).expect("locale <= 0xFFFF");
 
@@ -870,18 +853,55 @@ fn set_kbd_layout(layout: SetKbdLayoutOption) -> anyhow::Result<()> {
         }
     };
 
-
-    /// SAFETY: hwnd is valid window handle.
+    // SAFETY: hwnd is valid window handle.
     unsafe {
         PostMessageW(
-            foreground_window,
+            focused_window,
             WM_INPUTLANGCHANGEREQUEST,
-            WPARAM(0), // wParam is not used.
-            LPARAM(locale) // lParam is locale (low word of layout identifier).
-        ).context("failed to post WM_INPUTLANGCHANGEREQUEST message")
+            WPARAM(0),      // wParam is not used.
+            LPARAM(locale), // lParam is locale (low word of layout identifier).
+        )
+        .context("failed to post WM_INPUTLANGCHANGEREQUEST message")
     }?;
 
     Ok(())
+}
+
+fn get_focused_window() -> anyhow::Result<HWND> {
+    // SAFETY: FFI call with no outstanding preconditions.
+    let foreground_window = unsafe { GetForegroundWindow() };
+
+    if foreground_window.is_invalid() {
+        bail!("Failed to get foreground window handle");
+    }
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    let foreground_thread = unsafe { GetWindowThreadProcessId(foreground_window, None) };
+
+    if foreground_thread == 0 {
+        bail!("Failed to get foreground window thread info");
+    }
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    let current_thread = unsafe { GetCurrentThreadId() };
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    if unsafe { AttachThreadInput(current_thread, foreground_thread, true) } == false {
+        bail!("Failed to attach thread input");
+    }
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    let focused_window = unsafe { GetFocus() };
+
+    // SAFETY: Threads were successfully attached above.
+    let _ = unsafe { AttachThreadInput(current_thread, foreground_thread, false) };
+
+    // Bail only after we detach threads to avoid leaking resources.
+    if focused_window.is_invalid() {
+        bail!("Failed to get focused window handle");
+    }
+
+    Ok(focused_window)
 }
 
 #[link(name = "user32", kind = "dylib")]
