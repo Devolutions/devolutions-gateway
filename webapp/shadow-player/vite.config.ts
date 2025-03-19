@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { defineConfig, UserConfig } from 'vite';
+import { UserConfig, defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 
 // Simple deep merge function

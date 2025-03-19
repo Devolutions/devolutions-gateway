@@ -11,7 +11,9 @@
       "*.min.css",
       "player/",
       "player-project/dist/",
-      "player-project/node_modules/"
+      "player-project/node_modules/",
+      "video-player/dist/",
+      "video-player/node_modules/"
     ]
   },
   "linter": {

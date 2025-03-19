@@ -53,7 +53,7 @@ function getSessionDetails() {
   const sessionId = windowURL.searchParams.get('sessionId');
   const token = windowURL.searchParams.get('token');
   const gatewayAccessUrl = windowURL.toString().split('/jet/jrec')[0];
-  const isActive = windowURL.searchParams.get('isActive') || false;
+  const isActive = windowURL.searchParams.get('isActive') === 'true';
   const language = windowURL.searchParams.get('lang');
 
   return { sessionId, token, gatewayAccessUrl, isActive, language };

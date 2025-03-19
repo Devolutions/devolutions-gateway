@@ -1,7 +1,7 @@
 import { ErrorMessage } from './protocol';
 import { ReactiveSourceBuffer } from './sourceBuffer';
-import { ServerWebSocket } from './websocket';
 import styles from './streamer.css?inline';
+import { ServerWebSocket } from './websocket';
 
 export type ShadowPlayerError =
   | {
@@ -27,17 +27,7 @@ export class ShadowPlayer extends HTMLElement {
   _replayButton: HTMLButtonElement | null = null;
 
   static get observedAttributes() {
-    return [
-      'src',
-      'autoplay',
-      'loop',
-      'muted',
-      'poster',
-      'preload',
-      'style',
-      'width',
-      'height',
-    ];
+    return ['src', 'autoplay', 'loop', 'muted', 'poster', 'preload', 'style', 'width', 'height'];
   }
 
   setDebug(debug: boolean) {
@@ -136,9 +126,7 @@ export class ShadowPlayer extends HTMLElement {
     const mediaSource = new MediaSource();
     this._src = value;
     this.videoElement.src = URL.createObjectURL(mediaSource);
-    mediaSource.addEventListener('sourceopen', () =>
-      this.handleSourceOpen(mediaSource)
-    );
+    mediaSource.addEventListener('sourceopen', () => this.handleSourceOpen(mediaSource));
   }
 
   private async handleSourceOpen(mediaSource: MediaSource) {
@@ -160,13 +148,9 @@ export class ShadowPlayer extends HTMLElement {
       }
       if (ev.type === 'metadata') {
         const codec = ev.codec;
-        reactiveSourceBuffer = new ReactiveSourceBuffer(
-          mediaSource,
-          codec,
-          () => {
-            websocket.send({ type: 'pull' });
-          }
-        );
+        reactiveSourceBuffer = new ReactiveSourceBuffer(mediaSource, codec, () => {
+          websocket.send({ type: 'pull' });
+        });
         this._buffer = reactiveSourceBuffer;
       }
 
