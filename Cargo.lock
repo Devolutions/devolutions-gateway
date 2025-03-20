@@ -5406,50 +5406,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sspi"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1734839082c6d33f8368b40a40d0d5cc1ed10fbde00dc8a404f64e70272ed3f6"
-dependencies = [
- "async-dnssd",
- "async-recursion",
- "bitflags 2.6.0",
- "byteorder",
- "cfg-if",
- "crypto-mac",
- "futures",
- "hmac",
- "lazy_static",
- "md-5",
- "md4",
- "num-bigint-dig",
- "num-derive",
- "num-traits",
- "oid",
- "picky",
- "picky-asn1 0.9.0",
- "picky-asn1-der 0.5.0",
- "picky-asn1-x509 0.13.0",
- "picky-krb 0.9.1",
- "rand",
- "rsa",
- "rustls 0.23.25",
- "serde",
- "serde_derive",
- "sha1",
- "sha2",
- "time",
- "tokio 1.44.1",
- "tracing",
- "url",
- "uuid",
- "windows 0.58.0",
- "windows-sys 0.52.0",
- "winreg 0.52.0",
- "zeroize",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
