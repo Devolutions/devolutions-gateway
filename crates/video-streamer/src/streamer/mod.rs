@@ -6,14 +6,13 @@ use futures_util::SinkExt;
 use iter::{IteratorError, WebmPositionedIterator};
 use protocol::{ProtocolCodeC, UserFriendlyError};
 use tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
-use tokio::sync::{mpsc, oneshot::error::RecvError, Mutex, Notify};
+use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::{mpsc, Mutex, Notify};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
-use webm_iterable::{
-    errors::{TagIteratorError, TagWriterError},
-    matroska_spec::{Master, MatroskaSpec},
-    WebmIterator,
-};
+use webm_iterable::errors::{TagIteratorError, TagWriterError};
+use webm_iterable::matroska_spec::{Master, MatroskaSpec};
+use webm_iterable::WebmIterator;
 
 pub(crate) mod block_tag;
 pub(crate) mod channel_writer;
@@ -23,7 +22,8 @@ pub(crate) mod reopenable_file;
 pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
-use crate::{reopenable::Reopenable, StreamingConfig};
+use crate::reopenable::Reopenable;
+use crate::StreamingConfig;
 use tokio::io::AsyncWriteExt;
 
 #[instrument(skip_all)]

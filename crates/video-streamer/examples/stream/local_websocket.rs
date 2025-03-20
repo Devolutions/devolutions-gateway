@@ -1,20 +1,14 @@
-use axum::{
-    extract::ws::{self, WebSocket, WebSocketUpgrade},
-    routing::get,
-    Router,
-};
-use futures::{stream::StreamExt, SinkExt};
-use std::{
-    io::{Error as IoError, ErrorKind},
-    sync::{Arc, Mutex},
-};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream},
-};
-use tokio_tungstenite::{
-    connect_async, tungstenite::protocol::Message as TungsteniteMessage, MaybeTlsStream, WebSocketStream,
-};
+use axum::extract::ws::{self, WebSocket, WebSocketUpgrade};
+use axum::routing::get;
+use axum::Router;
+use futures::stream::StreamExt;
+use futures::SinkExt;
+use std::io::{Error as IoError, ErrorKind};
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::protocol::Message as TungsteniteMessage;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::info;
 
 pub(crate) struct WebSocketClient {

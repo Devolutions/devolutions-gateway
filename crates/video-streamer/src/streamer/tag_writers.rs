@@ -1,12 +1,11 @@
 use anyhow::Context;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
-use webm_iterable::{
-    errors::TagWriterError,
-    matroska_spec::{Master, MatroskaSpec, SimpleBlock},
-    WebmWriter, WriteOptions,
-};
+use webm_iterable::errors::TagWriterError;
+use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
+use webm_iterable::{WebmWriter, WriteOptions};
 
-use crate::{debug::mastroka_spec_name, StreamingConfig};
+use crate::debug::mastroka_spec_name;
+use crate::StreamingConfig;
 
 use super::block_tag::VideoBlock;
 

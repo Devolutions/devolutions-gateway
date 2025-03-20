@@ -1,17 +1,20 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::unwrap_used)]
 
-use std::{env, path::Path, process::exit, sync::Arc};
+use std::env;
+use std::path::Path;
+use std::process::exit;
+use std::sync::Arc;
 
 use anyhow::Context;
 use cadeau::xmf;
 use local_websocket::create_local_websocket;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::{watch::Sender, Notify},
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::watch::Sender;
+use tokio::sync::Notify;
 use tracing::{error, info};
-use video_streamer::{config::CpuCount, webm_stream, ReOpenableFile, StreamingConfig};
+use video_streamer::config::CpuCount;
+use video_streamer::{webm_stream, ReOpenableFile, StreamingConfig};
 
 pub struct TokioSignal {
     signal: tokio::sync::watch::Receiver<()>,

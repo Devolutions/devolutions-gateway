@@ -8,10 +8,7 @@ use ::{
 };
 
 #[cfg(all(windows, feature = "dvc"))]
-use ::{
-    async_trait as _, ironrdp as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _,
-    windows as _,
-};
+use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _, windows as _};
 
 #[macro_use]
 extern crate tracing;
@@ -95,7 +92,7 @@ pub fn start(config: &Conf) -> anyhow::Result<(Runtime, ShutdownHandle, JoinHand
 }
 
 #[cfg(all(windows, feature = "dvc"))]
-async fn spawn_tasks(config: &Conf) -> anyhow::Result<Tasks> {
+async fn spawn_tasks(_config: &Conf) -> anyhow::Result<Tasks> {
     let mut tasks = Tasks::new();
 
     tasks.register(DvcIoTask::default());

@@ -18,8 +18,8 @@ const DVC_CHANNEL_NAME: &str = "Devolutions::Now::Agent";
 
 /// Run main DVC IO loop for `Devolutions::Now::Agent` channel.
 pub fn run_dvc_io(
-    mut write_rx: WinapiSignaledReceiver<NowMessage>,
-    read_tx: Sender<NowMessage>,
+    mut write_rx: WinapiSignaledReceiver<NowMessage<'static>>,
+    read_tx: Sender<NowMessage<'static>>,
     stop_event: Event,
 ) -> Result<(), anyhow::Error> {
     trace!("Opening DVC channel");
@@ -50,7 +50,7 @@ pub fn run_dvc_io(
     ensure_overlapped_io_result(read_result)?;
 
     loop {
-        let events = [read_event.raw(), write_rx.raw_event(), stop_event.raw()];
+        let events = [read_event.raw(), write_rx.raw_wait_handle(), stop_event.raw()];
 
         const WAIT_OBJECT_READ_DVC: WAIT_EVENT = WAIT_OBJECT_0;
         const WAIT_OBJECT_WRITE_DVC: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);
@@ -119,7 +119,7 @@ pub fn run_dvc_io(
                 trace!("DVC channel write event is signaled");
 
                 let message_to_write = write_rx.try_recv()?;
-                let message_bytes = ironrdp::core::encode_vec(&message_to_write)?;
+                let message_bytes = now_proto_pdu::ironrdp_core::encode_vec(&message_to_write)?;
 
                 let mut dw_written: u32 = 0;
 

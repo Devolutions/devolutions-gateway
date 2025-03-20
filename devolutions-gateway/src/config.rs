@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use std::env;
-use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
+use std::{env, fmt};
 
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};

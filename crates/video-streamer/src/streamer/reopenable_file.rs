@@ -1,5 +1,5 @@
-use std::io::{self, Read};
-use std::{io::Seek, path::PathBuf};
+use std::io::{self, Read, Seek};
+use std::path::PathBuf;
 
 use crate::reopenable::Reopenable;
 

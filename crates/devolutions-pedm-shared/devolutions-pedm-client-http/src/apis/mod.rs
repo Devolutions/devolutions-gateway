@@ -1,6 +1,4 @@
-use http;
-use hyper;
-use serde_json;
+use {http, hyper, serde_json};
 
 #[derive(Debug)]
 pub enum Error {

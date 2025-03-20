@@ -1,8 +1,6 @@
-use core::future;
-use core::time;
+use core::{future, time};
 
-use axum::extract::ws::CloseFrame;
-use axum::extract::ws::{self, WebSocket};
+use axum::extract::ws::{self, CloseFrame, WebSocket};
 use devolutions_gateway_task::ShutdownSignal;
 use futures::{SinkExt as _, StreamExt as _};
 use tap::Pipe as _;
