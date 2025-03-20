@@ -2,16 +2,9 @@ use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwne
 use now_proto_pdu::NowMessage;
 
 /// Reconstructs Now messages from a stream of bytes.
+#[derive(Default)]
 pub struct NowMessageDissector {
     pdu_body_buffer: Vec<u8>,
-}
-
-impl Default for NowMessageDissector {
-    fn default() -> Self {
-        Self {
-            pdu_body_buffer: Vec::new(),
-        }
-    }
 }
 
 impl NowMessageDissector {

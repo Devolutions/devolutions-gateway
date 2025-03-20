@@ -92,7 +92,7 @@ pub fn start(config: &Conf) -> anyhow::Result<(Runtime, ShutdownHandle, JoinHand
 }
 
 #[cfg(all(windows, feature = "dvc"))]
-async fn spawn_tasks(config: &Conf) -> anyhow::Result<Tasks> {
+async fn spawn_tasks(_config: &Conf) -> anyhow::Result<Tasks> {
     let mut tasks = Tasks::new();
 
     tasks.register(DvcIoTask::default());

@@ -262,6 +262,7 @@ enum ProcessMessageAction {
 struct MessageProcessor {
     dvc_tx: WinapiSignaledSender<NowMessage<'static>>,
     io_notification_tx: Sender<ServerChannelEvent>,
+    #[allow(dead_code)] // Not yet used.
     capabilities: NowChannelCapsetMsg,
     sessions: HashMap<u32, WinApiProcess>,
 }
@@ -409,7 +410,7 @@ impl MessageProcessor {
                 let tx = self.dvc_tx.clone();
 
                 // Spawn separate async task for message box to avoid blocking the IO loop.
-                let _ = tokio::task::spawn(process_msg_box_req(request, tx));
+                let _task = tokio::task::spawn(process_msg_box_req(request, tx));
             }
             NowMessage::Session(NowSessionMessage::Logoff(_logoff_msg)) => {
                 // SAFETY: FFI call with no outstanding preconditions.
@@ -448,11 +449,20 @@ impl MessageProcessor {
 
                 let message = (!shutdown_msg.message().is_empty()).then(|| WideString::from(shutdown_msg.message()));
 
+                let timeout = match u32::try_from(shutdown_msg.timeout().as_secs()) {
+                    Ok(timeout) => timeout,
+                    Err(_) => {
+                        error!("Invalid shutdown timeout");
+                        return Ok(ProcessMessageAction::Continue);
+                    }
+                };
+
+                // SAFETY: lpmessage is a valid null-terminated string.
                 let shutdown_result = unsafe {
                     InitiateSystemShutdownW(
                         PCWSTR::null(),
                         message.map(|m| m.as_pcwstr()).unwrap_or(PCWSTR::null()),
-                        shutdown_msg.timeout().as_secs() as u32,
+                        timeout,
                         shutdown_msg.is_force_shutdown(),
                         shutdown_msg.is_reboot(),
                     )
@@ -500,6 +510,7 @@ impl MessageProcessor {
         };
 
         if hinstance.0 as usize <= 32 {
+            #[allow(clippy::cast_sign_loss)] // Not relevant for error codes.
             let code = win_api_wrappers::Error::last_error().code() as u32;
             error!("ShellExecuteW failed, error code: {}", code);
 
@@ -601,7 +612,7 @@ impl MessageProcessor {
 
         append_pwsh_args(&mut params, &winps_msg);
 
-        params.push("-File".to_string());
+        params.push("-File".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
         let params_str = params.join(" ");
@@ -636,29 +647,29 @@ impl MessageProcessor {
 
 fn append_ps_args(args: &mut Vec<String>, msg: &NowExecWinPsMsg<'_>) {
     if let Some(execution_policy) = msg.execution_policy() {
-        args.push("-ExecutionPolicy".to_string());
-        args.push(execution_policy.to_string());
+        args.push("-ExecutionPolicy".to_owned());
+        args.push(execution_policy.to_owned());
     }
 
     if let Some(configuration_name) = msg.configuration_name() {
-        args.push("-ConfigurationName".to_string());
-        args.push(configuration_name.to_string());
+        args.push("-ConfigurationName".to_owned());
+        args.push(configuration_name.to_owned());
     }
 
     if msg.is_no_logo() {
-        args.push("-NoLogo".to_string());
+        args.push("-NoLogo".to_owned());
     }
 
     if msg.is_no_exit() {
-        args.push("-NoExit".to_string());
+        args.push("-NoExit".to_owned());
     }
 
     match msg.apartment_state() {
         Ok(Some(ComApartmentStateKind::Sta)) => {
-            args.push("-Sta".to_string());
+            args.push("-Sta".to_owned());
         }
         Ok(Some(ComApartmentStateKind::Mta)) => {
-            args.push("-Mta".to_string());
+            args.push("-Mta".to_owned());
         }
         Err(error) => {
             let session = msg.session_id();
@@ -668,39 +679,39 @@ fn append_ps_args(args: &mut Vec<String>, msg: &NowExecWinPsMsg<'_>) {
     }
 
     if msg.is_no_profile() {
-        args.push("-NoProfile".to_string());
+        args.push("-NoProfile".to_owned());
     }
 
     if msg.is_non_interactive() {
-        args.push("-NonInteractive".to_string());
+        args.push("-NonInteractive".to_owned());
     }
 }
 
 fn append_pwsh_args(args: &mut Vec<String>, msg: &NowExecPwshMsg<'_>) {
     if let Some(execution_policy) = msg.execution_policy() {
-        args.push("-ExecutionPolicy".to_string());
-        args.push(execution_policy.to_string());
+        args.push("-ExecutionPolicy".to_owned());
+        args.push(execution_policy.to_owned());
     }
 
     if let Some(configuration_name) = msg.configuration_name() {
-        args.push("-ConfigurationName".to_string());
-        args.push(configuration_name.to_string());
+        args.push("-ConfigurationName".to_owned());
+        args.push(configuration_name.to_owned());
     }
 
     if msg.is_no_logo() {
-        args.push("-NoLogo".to_string());
+        args.push("-NoLogo".to_owned());
     }
 
     if msg.is_no_exit() {
-        args.push("-NoExit".to_string());
+        args.push("-NoExit".to_owned());
     }
 
     match msg.apartment_state() {
         Ok(Some(ComApartmentStateKind::Sta)) => {
-            args.push("-Sta".to_string());
+            args.push("-Sta".to_owned());
         }
         Ok(Some(ComApartmentStateKind::Mta)) => {
-            args.push("-Mta".to_string());
+            args.push("-Mta".to_owned());
         }
         Err(error) => {
             let session = msg.session_id();
@@ -710,72 +721,85 @@ fn append_pwsh_args(args: &mut Vec<String>, msg: &NowExecPwshMsg<'_>) {
     }
 
     if msg.is_no_profile() {
-        args.push("-NoProfile".to_string());
+        args.push("-NoProfile".to_owned());
     }
 
     if msg.is_non_interactive() {
-        args.push("-NonInteractive".to_string());
+        args.push("-NonInteractive".to_owned());
     }
 }
 
-async fn process_msg_box_req(
-    request: NowSessionMsgBoxReqMsg<'static>,
-    dvc_tx: WinapiSignaledSender<NowMessage<'static>>,
-) {
+fn show_message_box<'a>(request: &NowSessionMsgBoxReqMsg<'static>) -> NowSessionMsgBoxRspMsg<'a> {
     info!("Processing message box request `{}`", request.request_id());
 
     let title = WideString::from(request.title().unwrap_or("Devolutions Session"));
 
     let text = WideString::from(request.message());
 
-    // TODO: Use undocumented `MessageBoxTimeout` instead
-    // or create custom window (?)
-    // SAFETY: `MessageBoxW` is always safe to call.
-    let result = unsafe {
-        match request.timeout() {
-            Some(timeout) => {
-                // Using undocumented message box with timeout API
-                // (stable since Windows XP).
-                MessageBoxTimeOutW(
-                    HWND::default(),
-                    text.as_pcwstr(),
-                    title.as_pcwstr(),
-                    MESSAGEBOX_STYLE(request.style().value()),
-                    0,
-                    timeout.as_millis() as u32,
+    let timeout = match request.timeout() {
+        Some(timeout) => match u32::try_from(timeout.as_millis()) {
+            Ok(timeout) => timeout,
+            Err(_) => {
+                return NowSessionMsgBoxRspMsg::new_error(
+                    request.request_id(),
+                    NowStatusError::new_proto(NowProtoError::InvalidRequest),
                 )
+                .expect("always fits into NowMessage frame");
             }
-            None => MessageBoxW(
+        },
+        None => 0,
+    };
+
+    let result = if timeout == 0 {
+        // SAFETY: text and title point to valid null-terminated strings.
+        unsafe {
+            MessageBoxW(
                 None,
                 text.as_pcwstr(),
                 title.as_pcwstr(),
                 MESSAGEBOX_STYLE(request.style().value()),
-            ),
+            )
+        }
+    } else {
+        // Using undocumented message box with timeout API
+        // (stable since Windows XP).
+
+        // SAFETY: text and title point to valid null-terminated strings.
+        unsafe {
+            MessageBoxTimeOutW(
+                HWND::default(),
+                text.as_pcwstr(),
+                title.as_pcwstr(),
+                MESSAGEBOX_STYLE(request.style().value()),
+                0,
+                timeout,
+            )
         }
     };
+
+    #[allow(clippy::cast_sign_loss)]
+    let message_box_response = result.0 as u32;
+
+    NowSessionMsgBoxRspMsg::new_success(request.request_id(), NowMsgBoxResponse::new(message_box_response))
+}
+
+async fn process_msg_box_req(
+    request: NowSessionMsgBoxReqMsg<'static>,
+    dvc_tx: WinapiSignaledSender<NowMessage<'static>>,
+) {
+    let response = show_message_box(&request).into_owned();
 
     if !request.is_response_expected() {
         return;
     }
 
-    #[allow(clippy::cast_sign_loss)]
-    let message_box_response = result.0 as u32;
-
-    let send_result = dvc_tx
-        .send(NowMessage::from(NowSessionMsgBoxRspMsg::new_success(
-            request.request_id(),
-            NowMsgBoxResponse::new(message_box_response),
-        )))
-        .await;
-
-    if let Err(error) = send_result {
+    if let Err(error) = dvc_tx.send(NowMessage::from(response)).await {
         error!(%error, "Failed to send MessageBox response");
     }
 }
 
 fn make_status_error_failsafe(session_id: u32, error: NowStatusError) -> NowExecResultMsg<'static> {
     NowExecResultMsg::new_error(session_id, error)
-        .map(|borrowed| borrowed.to_owned())
         .unwrap_or_else(|error| {
             warn!(%error, "Now status error message do not fit into NOW-PROTO error message; sending error without message");
             NowExecResultMsg::new_error(session_id, NowStatusError::new_generic(GENERIC_ERROR_CODE_TOO_LONG_ERROR))
@@ -789,7 +813,6 @@ fn make_generic_error_failsafe(session_id: u32, code: u32, message: String) -> N
     error
         .with_message(message.clone())
         .and_then(|error| NowExecResultMsg::new_error(session_id, error))
-        .map(|borrowed| borrowed.to_owned())
         .unwrap_or_else(|error| {
             warn!(%error, %code, %message, "Generic error message do not fit into NOW-PROTO error message; sending error without message");
             NowExecResultMsg::new_error(session_id, NowStatusError::new_generic(code))

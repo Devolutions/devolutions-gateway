@@ -37,6 +37,7 @@ pub enum ExecError {
 
 impl From<windows::core::Error> for ExecError {
     fn from(error: windows::core::Error) -> Self {
+        #[allow(clippy::cast_sign_loss)] // Not relevant for Windows error codes.
         ExecError::NowStatus(NowStatusError::new_winapi(error.code().0 as u32))
     }
 }
@@ -429,7 +430,7 @@ pub struct WinApiProcessBuilder {
 impl WinApiProcessBuilder {
     pub fn new(executable: &str) -> Self {
         Self {
-            executable: executable.to_string(),
+            executable: executable.to_owned(),
             command_line: String::new(),
             current_directory: String::new(),
             temp_files: Vec::new(),
@@ -444,13 +445,13 @@ impl WinApiProcessBuilder {
 
     #[must_use]
     pub fn with_command_line(mut self, command_line: &str) -> Self {
-        self.command_line = command_line.to_string();
+        self.command_line = command_line.to_owned();
         self
     }
 
     #[must_use]
     pub fn with_current_directory(mut self, current_directory: &str) -> Self {
-        self.current_directory = current_directory.to_string();
+        self.current_directory = current_directory.to_owned();
         self
     }
 
@@ -462,7 +463,7 @@ impl WinApiProcessBuilder {
     ) -> Result<WinApiProcess, ExecError> {
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
             .trim_end()
-            .to_string();
+            .to_owned();
         let current_directory = self.current_directory.clone();
 
         info!(
@@ -609,23 +610,22 @@ struct EnumWindowsContext {
     threads: Vec<u32>,
 }
 
-unsafe extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    // SAFETY: lparam.0 should be set to valid EnumWindowsContext memory by caller.
+extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    // SAFETY: lparam.0 set to valid EnumWindowsContext memory by caller (Windows itself).
     let enum_ctx = unsafe { &mut *(lparam.0 as *mut EnumWindowsContext) };
 
-    // SAFETY: No preconditions.
-
     let mut pid: u32 = 0;
-    GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut _));
-
+    // SAFETY: pid points to valid memory.
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut _));
+    }
     if pid == 0 || pid != enum_ctx.expected_pid {
         // Continue enumeration.
         return true.into();
     }
 
-    // Get thread id
-    let thread_id = GetWindowThreadProcessId(hwnd, None);
-
+    // SAFETY: FFI call with no outstanding preconditions.
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
     if thread_id == 0 {
         // Continue enumeration.
         return true.into();
