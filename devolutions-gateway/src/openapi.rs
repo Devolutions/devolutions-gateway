@@ -411,11 +411,11 @@ pub(crate) struct PreflightOutput {
     /// Alert status.
     ///
     /// Set for "alert" kind.
-    alert_status: PreflightAlertStatus,
+    alert_status: Option<PreflightAlertStatus>,
     /// Message describing the problem.
     ///
     /// Set for "alert" kind.
-    alert_message: String,
+    alert_message: Option<String>,
 }
 
 #[allow(unused)]
