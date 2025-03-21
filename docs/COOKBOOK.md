@@ -251,16 +251,18 @@ $ curl "127.0.0.1:7171/jet/preflight?token=$(cargo run --manifest-path ./tools/t
     {"id": "a86ae982-e4be-4f84-8ff2-893d66df9bdd", "kind": "get-version"},
     {"id": "ef1a3ae9-e55d-48b8-92b0-ae67c29b2e4e", "kind": "push-token", "token": "hello", "token_id": "3d1d3c45-e377-4713-b8d5-45b07514cf22"},
     {"id": "55821d24-d1df-481c-8b88-66c06f879835", "kind": "lookup-host", "host_to_lookup": "devolutions.net"},
-    {"id": "8ec4ab6b-39a5-411d-b191-54df2d976820", "kind": "get-running-session-count"}
+    {"id": "8ec4ab6b-39a5-411d-b191-54df2d976820", "kind": "get-running-session-count"},
+    {"id": "e02d8678-1bc8-4548-b555-548d663ffa1e", "kind": "unexisting-operation"}
   ]'
 ```
 
-And here is how the response looks like:
+And here is how the response may look like:
 
 ```
 [
-  {"operation_id":"a86ae982-e4be-4f84-8ff2-893d66df9bdd","kind":"version","version":"2025.1.3"},
-  {"operation_id":"55821d24-d1df-481c-8b88-66c06f879835","kind":"resolved-host","resolved_host":"devolutions.net","resolved_addresses":["20.24.122.172"]},
-  {"operation_id":"8ec4ab6b-39a5-411d-b191-54df2d976820","kind":"running-session-count","running_session_count":0}
+  {"operation_id":"e02d8678-1bc8-4548-b555-548d663ffa1e","kind":"alert","alert_status":"unsupported-operation","alert_message":"unsupported operation: unexisting-operation"},
+  {"operation_id":"a86ae982-e4be-4f84-8ff2-893d66df9bdd","kind":"version","version":"2025.1.4"},
+  {"operation_id":"8ec4ab6b-39a5-411d-b191-54df2d976820","kind":"running-session-count","running_session_count":0},
+  {"operation_id":"55821d24-d1df-481c-8b88-66c06f879835","kind":"resolved-host","resolved_host":"devolutions.net","resolved_addresses":["20.22.31.128"]}
 ]
 ```

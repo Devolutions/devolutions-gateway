@@ -51,8 +51,8 @@ use crate::api::preflight::PreflightAlertStatus;
         PreflightOperationKind,
         Credentials,
         CredentialsKind,
-        PreflightResult,
-        PreflightResultKind,
+        PreflightOutput,
+        PreflightOutputKind,
         PreflightAlertStatus,
         // crate::api::net::NetworkInterface,
         SessionTokenContentType,
@@ -300,33 +300,50 @@ impl Modify for SubscriberSecurityAddon {
 fn post_subscriber_message() {}
 
 #[allow(unused)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 struct PreflightOperation {
     /// Unique ID identifying the preflight operation
     id: Uuid,
     /// The type of preflight operation to perform
     kind: PreflightOperationKind,
-    /// A unique ID identifying the token
-    ///
-    /// Required for "push-token" kind.
-    token_id: Option<Uuid>,
     /// The token to be pushed on the proxy-side
     ///
     /// Required for "push-token" kind.
     token: Option<String>,
-    /// A unique ID identifying the credentials
+    /// A unique ID identifying the session for which the credentials should be used
     ///
     /// Required for "push-credentials" kind.
-    credentials_id: Option<Uuid>,
-    /// The credentials to be pushed on the proxy-side
+    association_id: Option<Uuid>,
+    /// The credentials to use to authorize the client at the proxy-level
     ///
     /// Required for "push-credentials" kind.
-    credentials: Option<Credentials>,
+    proxy_credentials: Option<Credentials>,
+    /// The credentials to use against the target server
+    ///
+    /// Required for "push-credentials" kind.
+    target_credentials: Option<Credentials>,
     /// The hostname to perform DNS lookup on
     ///
     /// Required for "lookup-host" kind.
     host_to_lookup: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+enum PreflightOperationKind {
+    #[serde(rename = "get-version")]
+    GetVersion,
+    #[serde(rename = "get-agent-version")]
+    GetAgentVersion,
+    #[serde(rename = "get-running-session-count")]
+    GetRunningSessionCount,
+    #[serde(rename = "get-recording-storage-health")]
+    GetRecordingStorageHealth,
+    #[serde(rename = "push-token")]
+    PushToken,
+    #[serde(rename = "push-credentials")]
+    PushCredentials,
+    #[serde(rename = "lookup-host")]
+    LookupHost,
 }
 
 #[allow(unused)]
@@ -352,33 +369,13 @@ enum CredentialsKind {
     UsernamePassword,
 }
 
-#[allow(unused)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize)]
-pub(crate) enum PreflightOperationKind {
-    #[serde(rename = "get-version")]
-    GetVersion,
-    #[serde(rename = "get-agent-version")]
-    GetAgentVersion,
-    #[serde(rename = "get-running-session-count")]
-    GetRunningSessionCount,
-    #[serde(rename = "get-recording-storage-health")]
-    GetRecordingStorageHealth,
-    #[serde(rename = "push-token")]
-    PushToken,
-    #[serde(rename = "push-credentials")]
-    PushCredentials,
-    #[serde(rename = "lookup-host")]
-    LookupHost,
-}
-
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
-pub(crate) struct PreflightResult {
+pub(crate) struct PreflightOutput {
     /// The ID of the preflight operation associated to this result
     operation_id: Uuid,
     /// The type of preflight result
-    kind: PreflightResultKind,
+    kind: PreflightOutputKind,
     /// Service version
     ///
     /// Set for "version" kind.
@@ -425,7 +422,7 @@ pub(crate) struct PreflightResult {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 #[serde(tag = "kind")]
-pub(crate) enum PreflightResultKind {
+pub(crate) enum PreflightOutputKind {
     #[serde(rename = "version")]
     Version,
     #[serde(rename = "agent-version")]
