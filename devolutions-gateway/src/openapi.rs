@@ -421,7 +421,6 @@ pub(crate) struct PreflightOutput {
 #[allow(unused)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
-#[serde(tag = "kind")]
 pub(crate) enum PreflightOutputKind {
     #[serde(rename = "version")]
     Version,
