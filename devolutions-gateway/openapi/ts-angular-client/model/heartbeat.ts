@@ -11,15 +11,15 @@
 
 export interface Heartbeat { 
     /**
-     * Agent version, if installed
+     * Agent version, if installed.
      */
     agent_version?: string | null;
     /**
-     * This Gateway\'s hostname
+     * This Gateway\'s hostname.
      */
     hostname: string;
     /**
-     * This Gateway\'s unique ID
+     * This Gateway\'s unique ID.
      */
     id?: string | null;
     /**
@@ -35,11 +35,11 @@ export interface Heartbeat {
      */
     recording_storage_total_space?: number | null;
     /**
-     * Number of running sessions
+     * Number of running sessions.
      */
     running_session_count: number;
     /**
-     * Gateway service version
+     * Gateway service version.
      */
     version: string;
 }
