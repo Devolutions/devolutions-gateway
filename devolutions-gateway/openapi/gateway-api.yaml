@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.3.6
+  version: 2025.1.4
 paths:
   /jet/config:
     patch:
@@ -337,6 +337,38 @@ paths:
       security:
       - scope_token:
         - gateway.jrl.read
+  /jet/preflight:
+    post:
+      tags:
+      - Preflight
+      summary: Performs a batch of preflight operations
+      operationId: PostPreflight
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/PreflightOperation'
+        required: true
+      responses:
+        '200':
+          description: Preflight outputs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PreflightOutput'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      security:
+      - scope_token:
+        - gateway.preflight
   /jet/session/{id}/terminate:
     post:
       tags:
@@ -507,6 +539,7 @@ components:
       - gateway.recording.delete
       - gateway.recordings.read
       - gateway.update
+      - gateway.preflight
     AppTokenContentType:
       type: string
       enum:
@@ -591,6 +624,31 @@ components:
       enum:
       - rdv
       - fwd
+    Credentials:
+      type: object
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/CredentialsKind'
+        password:
+          type: string
+          description: |-
+            Password for the credentials.
+
+            Required for "username-password" kind.
+          nullable: true
+        username:
+          type: string
+          description: |-
+            Username for the credentials.
+
+            Required for "username-password" kind.
+          nullable: true
+    CredentialsKind:
+      type: string
+      enum:
+      - username-password
     DataEncoding:
       type: string
       enum:
@@ -622,15 +680,15 @@ components:
       properties:
         agent_version:
           type: string
-          description: Agent version, if installed
+          description: Agent version, if installed.
           nullable: true
         hostname:
           type: string
-          description: This Gateway's hostname
+          description: This Gateway's hostname.
         id:
           type: string
           format: uuid
-          description: This Gateway's unique ID
+          description: This Gateway's unique ID.
           nullable: true
         recording_storage_available_space:
           type: integer
@@ -659,11 +717,11 @@ components:
           minimum: 0
         running_session_count:
           type: integer
-          description: Number of running sessions
+          description: Number of running sessions.
           minimum: 0
         version:
           type: string
-          description: Gateway service version
+          description: Gateway service version.
     Identity:
       type: object
       required:
@@ -707,6 +765,162 @@ components:
         internal_url:
           type: string
           description: URL to use on local network
+    PreflightAlertStatus:
+      type: string
+      enum:
+      - general-failure
+      - unsupported-operation
+      - invalid-parameters
+      - internal-server-error
+      - host-lookup-failure
+      - agent-version-lookup-failure
+    PreflightOperation:
+      type: object
+      required:
+      - id
+      - kind
+      properties:
+        association_id:
+          type: string
+          format: uuid
+          description: |-
+            A unique ID identifying the session for which the credentials should be used.
+
+            Required for "push-credentials" kind.
+          nullable: true
+        host_to_lookup:
+          type: string
+          description: |-
+            The hostname to perform DNS lookup on.
+
+            Required for "lookup-host" kind.
+          nullable: true
+        id:
+          type: string
+          format: uuid
+          description: Unique ID identifying the preflight operation.
+        kind:
+          $ref: '#/components/schemas/PreflightOperationKind'
+        proxy_credentials:
+          allOf:
+          - $ref: '#/components/schemas/Credentials'
+          nullable: true
+        target_credentials:
+          allOf:
+          - $ref: '#/components/schemas/Credentials'
+          nullable: true
+        token:
+          type: string
+          description: |-
+            The token to be pushed on the proxy-side.
+
+            Required for "push-token" kind.
+          nullable: true
+    PreflightOperationKind:
+      type: string
+      enum:
+      - get-version
+      - get-agent-version
+      - get-running-session-count
+      - get-recording-storage-health
+      - push-token
+      - push-credentials
+      - lookup-host
+    PreflightOutput:
+      type: object
+      required:
+      - operation_id
+      - kind
+      properties:
+        agent_version:
+          type: string
+          description: |-
+            Agent service version, if installed.
+
+            Set for "agent-version" kind.
+          nullable: true
+        alert_message:
+          type: string
+          description: |-
+            Message describing the problem.
+
+            Set for "alert" kind.
+          nullable: true
+        alert_status:
+          allOf:
+          - $ref: '#/components/schemas/PreflightAlertStatus'
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/PreflightOutputKind'
+        operation_id:
+          type: string
+          format: uuid
+          description: The ID of the preflight operation associated to this result.
+        recording_storage_available_space:
+          type: integer
+          format: int64
+          description: |-
+            The remaining available space to store recordings, in bytes.
+
+            set for "recording-storage-health" kind.
+          nullable: true
+          minimum: 0
+        recording_storage_is_writeable:
+          type: boolean
+          description: |-
+            Whether the recording storage is writeable or not.
+
+            Set for "recording-storage-health" kind.
+          nullable: true
+        recording_storage_total_space:
+          type: integer
+          format: int64
+          description: |-
+            The total space of the disk used to store recordings, in bytes.
+
+            Set for "recording-storage-health" kind.
+          nullable: true
+          minimum: 0
+        resolved_addresses:
+          type: array
+          items:
+            type: string
+          description: |-
+            Resolved IP addresses.
+
+            Set for "resolved-host" kind.
+          nullable: true
+        resolved_host:
+          type: string
+          description: |-
+            Hostname that was resolved.
+
+            Set for "resolved-host" kind.
+          nullable: true
+        running_session_count:
+          type: integer
+          description: |-
+            Number of running sessions.
+
+            Set for "running-session-count" kind.
+          nullable: true
+          minimum: 0
+        version:
+          type: string
+          description: |-
+            Service version.
+
+            Set for "version" kind.
+          nullable: true
+    PreflightOutputKind:
+      type: string
+      enum:
+      - version
+      - agent-version
+      - running-session-count
+      - recording-storage-health
+      - resolved-host
+      - alert
     PubKeyFormat:
       type: string
       enum:
@@ -768,7 +982,7 @@ components:
           $ref: '#/components/schemas/SessionTokenContentType'
         destination:
           type: string
-          description: Destination host
+          description: Destination host.
           nullable: true
         krb_kdc:
           type: string
@@ -797,12 +1011,12 @@ components:
           minimum: 0
         protocol:
           type: string
-          description: 'Protocol for the session (e.g.: "rdp")'
+          description: 'Protocol for the session (e.g.: "rdp").'
           nullable: true
         session_id:
           type: string
           format: uuid
-          description: Unique ID for this session
+          description: Unique ID for this session.
           nullable: true
     SubProvisionerKey:
       type: object

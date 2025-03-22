@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.3.6
+  version: 2025.1.4
 paths:
   /dgw/subscriber:
     post:
@@ -39,7 +39,7 @@ components:
   schemas:
     SubscriberMessage:
       type: object
-      description: Message produced on various Gateway events
+      description: Message produced on various Gateway events.
       required:
       - kind
       - timestamp
@@ -54,15 +54,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubscriberSessionInfo'
-          description: Session list associated to this event
+          description: Session list associated to this event.
           nullable: true
         timestamp:
           type: string
           format: date-time
-          description: Date and time this message was produced
+          description: Date and time this message was produced.
     SubscriberMessageKind:
       type: string
-      description: Event type for messages
+      description: Event type for messages.
       enum:
       - session.started
       - session.ended

@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2024.3.6
+2025.1.4
 :toc: left
 :numbered:
 :toclevels: 4
@@ -1102,6 +1102,106 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Preflight]
+=== Preflight
+
+
+[.postPreflight]
+==== postPreflight
+
+`POST /jet/preflight`
+
+Performs a batch of preflight operations
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/preflight/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| PreflightOperation
+|  <<PreflightOperation>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+array[<<PreflightOutput>>]
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Preflight outputs
+| List[<<PreflightOutput>>] 
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/preflight/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Sessions]
 === Sessions
 
@@ -1638,6 +1738,7 @@ endif::internal-generation[]
 | gateway.recording.delete
 | gateway.recordings.read
 | gateway.update
+| gateway.preflight
 
 |===
 
@@ -1823,6 +1924,60 @@ Service configuration diagnostic
 |===
 
 
+[#Credentials]
+=== _Credentials_ 
+
+
+
+
+[.fields-Credentials]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| kind
+| X
+| 
+|  <<CredentialsKind>>  
+| 
+|    username-password,  
+
+| password
+| 
+| X
+|   String  
+| Password for the credentials.  Required for \"username-password\" kind.
+|     
+
+| username
+| 
+| X
+|   String  
+| Username for the credentials.  Required for \"username-password\" kind.
+|     
+
+|===
+
+
+
+[#CredentialsKind]
+=== _CredentialsKind_ 
+
+
+
+
+
+
+[.fields-CredentialsKind]
+[cols="1"]
+|===
+| Enum Values
+
+| username-password
+
+|===
+
+
 [#DataEncoding]
 === _DataEncoding_ 
 
@@ -1889,21 +2044,21 @@ Service configuration diagnostic
 | 
 | X
 |   String  
-| Agent version, if installed
+| Agent version, if installed.
 |     
 
 | hostname
 | X
 | 
 |   String  
-| This Gateway's hostname
+| This Gateway's hostname.
 |     
 
 | id
 | 
 | X
 |   UUID  
-| This Gateway's unique ID
+| This Gateway's unique ID.
 | uuid    
 
 | recording_storage_available_space
@@ -1931,14 +2086,14 @@ Service configuration diagnostic
 | X
 | 
 |   Integer  
-| Number of running sessions
+| Number of running sessions.
 |     
 
 | version
 | X
 | 
 |   String  
-| Gateway service version
+| Gateway service version.
 |     
 
 |===
@@ -2037,6 +2192,239 @@ Service configuration diagnostic
 
 |===
 
+
+
+[#PreflightAlertStatus]
+=== _PreflightAlertStatus_ 
+
+
+
+
+
+
+[.fields-PreflightAlertStatus]
+[cols="1"]
+|===
+| Enum Values
+
+| general-failure
+| unsupported-operation
+| invalid-parameters
+| internal-server-error
+| host-lookup-failure
+| agent-version-lookup-failure
+
+|===
+
+
+[#PreflightOperation]
+=== _PreflightOperation_ 
+
+
+
+
+[.fields-PreflightOperation]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| association_id
+| 
+| X
+|   UUID  
+| A unique ID identifying the session for which the credentials should be used.  Required for \"push-credentials\" kind.
+| uuid    
+
+| host_to_lookup
+| 
+| X
+|   String  
+| The hostname to perform DNS lookup on.  Required for \"lookup-host\" kind.
+|     
+
+| id
+| X
+| 
+|   UUID  
+| Unique ID identifying the preflight operation.
+| uuid    
+
+| kind
+| X
+| 
+|  <<PreflightOperationKind>>  
+| 
+|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, push-token, push-credentials, lookup-host,  
+
+| proxy_credentials
+| 
+| X
+| <<Credentials>>    
+| 
+|     
+
+| target_credentials
+| 
+| X
+| <<Credentials>>    
+| 
+|     
+
+| token
+| 
+| X
+|   String  
+| The token to be pushed on the proxy-side.  Required for \"push-token\" kind.
+|     
+
+|===
+
+
+
+[#PreflightOperationKind]
+=== _PreflightOperationKind_ 
+
+
+
+
+
+
+[.fields-PreflightOperationKind]
+[cols="1"]
+|===
+| Enum Values
+
+| get-version
+| get-agent-version
+| get-running-session-count
+| get-recording-storage-health
+| push-token
+| push-credentials
+| lookup-host
+
+|===
+
+
+[#PreflightOutput]
+=== _PreflightOutput_ 
+
+
+
+
+[.fields-PreflightOutput]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| agent_version
+| 
+| X
+|   String  
+| Agent service version, if installed.  Set for \"agent-version\" kind.
+|     
+
+| alert_message
+| 
+| X
+|   String  
+| Message describing the problem.  Set for \"alert\" kind.
+|     
+
+| alert_status
+| 
+| X
+|  <<PreflightAlertStatus>>  
+| 
+|    general-failure, unsupported-operation, invalid-parameters, internal-server-error, host-lookup-failure, agent-version-lookup-failure,  
+
+| kind
+| X
+| 
+|  <<PreflightOutputKind>>  
+| 
+|    version, agent-version, running-session-count, recording-storage-health, resolved-host, alert,  
+
+| operation_id
+| X
+| 
+|   UUID  
+| The ID of the preflight operation associated to this result.
+| uuid    
+
+| recording_storage_available_space
+| 
+| X
+|   Long  
+| The remaining available space to store recordings, in bytes.  set for \"recording-storage-health\" kind.
+| int64    
+
+| recording_storage_is_writeable
+| 
+| X
+|   Boolean  
+| Whether the recording storage is writeable or not.  Set for \"recording-storage-health\" kind.
+|     
+
+| recording_storage_total_space
+| 
+| X
+|   Long  
+| The total space of the disk used to store recordings, in bytes.  Set for \"recording-storage-health\" kind.
+| int64    
+
+| resolved_addresses
+| 
+| X
+|   List   of <<string>>
+| Resolved IP addresses.  Set for \"resolved-host\" kind.
+|     
+
+| resolved_host
+| 
+| X
+|   String  
+| Hostname that was resolved.  Set for \"resolved-host\" kind.
+|     
+
+| running_session_count
+| 
+| X
+|   Integer  
+| Number of running sessions.  Set for \"running-session-count\" kind.
+|     
+
+| version
+| 
+| X
+|   String  
+| Service version.  Set for \"version\" kind.
+|     
+
+|===
+
+
+
+[#PreflightOutputKind]
+=== _PreflightOutputKind_ 
+
+
+
+
+
+
+[.fields-PreflightOutputKind]
+[cols="1"]
+|===
+| Enum Values
+
+| version
+| agent-version
+| running-session-count
+| recording-storage-health
+| resolved-host
+| alert
+
+|===
 
 
 [#PubKeyFormat]
@@ -2171,7 +2559,7 @@ Information about an ongoing Gateway session
 | 
 | X
 |   String  
-| Destination host
+| Destination host.
 |     
 
 | krb_kdc
@@ -2199,14 +2587,14 @@ Information about an ongoing Gateway session
 | 
 | X
 |   String  
-| Protocol for the session (e.g.: \"rdp\")
+| Protocol for the session (e.g.: \"rdp\").
 |     
 
 | session_id
 | 
 | X
 |   UUID  
-| Unique ID for this session
+| Unique ID for this session.
 | uuid    
 
 |===

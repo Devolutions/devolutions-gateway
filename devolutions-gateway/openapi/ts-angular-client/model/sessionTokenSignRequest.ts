@@ -13,7 +13,7 @@ import { SessionTokenContentType } from './sessionTokenContentType';
 export interface SessionTokenSignRequest { 
     content_type: SessionTokenContentType;
     /**
-     * Destination host
+     * Destination host.
      */
     destination?: string | null;
     /**
@@ -29,11 +29,11 @@ export interface SessionTokenSignRequest {
      */
     lifetime: number;
     /**
-     * Protocol for the session (e.g.: \"rdp\")
+     * Protocol for the session (e.g.: \"rdp\").
      */
     protocol?: string | null;
     /**
-     * Unique ID for this session
+     * Unique ID for this session.
      */
     session_id?: string | null;
 }
