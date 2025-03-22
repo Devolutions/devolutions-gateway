@@ -1,69 +1,64 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use axum::extract::State;
 use axum::Json;
 use devolutions_agent_shared::get_installed_agent_version;
+use serde::de;
+use tracing::{Instrument as _, Span};
 use uuid::Uuid;
 
-use crate::credendials::Password;
+use crate::config::Conf;
+use crate::credendials::Credentials;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
+use crate::session::SessionMessageSender;
 use crate::DgwState;
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+const OP_GET_VERSION: &str = "get-version";
+const OP_GET_AGENT_VERSION: &str = "get-agent-version";
+const OP_GET_RUNNING_SESSION_COUNT: &str = "get-running-session-count";
+const OP_GET_RECORDING_STORAGE_HEALTH: &str = "get-recording-storage-health";
+const OP_PUSH_TOKEN: &str = "push-token";
+const OP_PUSH_CREDENTIALS: &str = "push-credentials";
+const OP_LOOKUP_HOST: &str = "lookup-host";
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct PreflightOperation {
     id: Uuid,
+    kind: String,
     #[serde(flatten)]
-    kind: PreflightOperationKind,
+    params: serde_json::Map<String, serde_json::Value>,
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind")]
-pub(crate) enum PreflightOperationKind {
-    #[serde(rename = "get-version")]
-    GetVersion,
-    #[serde(rename = "get-agent-version")]
-    GetAgentVersion,
-    #[serde(rename = "get-running-session-count")]
-    GetRunningSessionCount,
-    #[serde(rename = "get-recording-storage-health")]
-    GetRecordingStorageHealth,
-    #[serde(rename = "push-token")]
-    PushToken { token_id: Uuid, token: String },
-    #[serde(rename = "push-credentials")]
-    PushCredentials {
-        credentials_id: Uuid,
-        credentials: Credentials,
-    },
-    #[serde(rename = "lookup-host")]
-    LookupHost {
-        #[serde(rename = "host_to_lookup")]
-        host: String,
-    },
+struct PushTokenParams {
+    token: String,
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind")]
-pub(crate) enum Credentials {
-    #[serde(rename = "username-password")]
-    UsernamePassword { username: String, password: Password },
+struct PushCredentialsParams {
+    association_id: Uuid,
+    proxy_credentials: Credentials,
+    target_credentials: Credentials,
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Deserialize)]
+struct LookupHostParams {
+    #[serde(rename = "host_to_lookup")]
+    host: String,
+}
+
 #[derive(Serialize)]
-pub(crate) struct PreflightResult {
+pub(crate) struct PreflightOutput {
     operation_id: Uuid,
     #[serde(flatten)]
-    kind: PreflightResultKind,
+    kind: PreflightOutputKind,
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 #[serde(tag = "kind")]
-pub(crate) enum PreflightResultKind {
+pub(crate) enum PreflightOutputKind {
     #[serde(rename = "version")]
     Version {
         /// Gateway service version
@@ -118,6 +113,10 @@ pub(crate) enum PreflightResultKind {
 pub(crate) enum PreflightAlertStatus {
     #[serde(rename = "general-failure")]
     GeneralFailure,
+    #[serde(rename = "unsupported-operation")]
+    UnsupportedOperation,
+    #[serde(rename = "invalid-parameters")]
+    InvalidParams,
     #[serde(rename = "internal-server-error")]
     InternalServerError,
     #[serde(rename = "host-lookup-failure")]
@@ -126,7 +125,42 @@ pub(crate) enum PreflightAlertStatus {
     AgentVersionLookupFailure,
 }
 
-/// Performs a heartbeat check
+struct PreflightError {
+    status: PreflightAlertStatus,
+    message: String,
+}
+
+impl PreflightError {
+    fn new(status: PreflightAlertStatus, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
+    fn invalid_params(error: impl std::error::Error) -> Self {
+        Self::new(PreflightAlertStatus::InvalidParams, format!("{error:#}"))
+    }
+}
+
+#[derive(Clone)]
+struct Outputs(Arc<parking_lot::Mutex<Vec<PreflightOutput>>>);
+
+impl Outputs {
+    fn with_capacity(capacity: usize) -> Self {
+        Self(Arc::new(parking_lot::Mutex::new(Vec::with_capacity(capacity))))
+    }
+
+    fn push(&self, output: PreflightOutput) {
+        self.0.lock().push(output);
+    }
+
+    fn take(&self) -> Vec<PreflightOutput> {
+        std::mem::take(&mut self.0.lock())
+    }
+}
+
+/// Performs a batch of preflight operations
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     operation_id = "PostPreflight",
@@ -134,7 +168,7 @@ pub(crate) enum PreflightAlertStatus {
     path = "/jet/preflight",
     request_body = [PreflightOperation],
     responses(
-        (status = 200, description = "Preflight results", body = [PreflightResult]),
+        (status = 200, description = "Preflight outputs", body = [PreflightOutput]),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -147,115 +181,151 @@ pub(super) async fn post_preflight(
     }): State<DgwState>,
     _scope: PreflightScope,
     Json(operations): Json<Vec<PreflightOperation>>,
-) -> Result<Json<Vec<PreflightResult>>, HttpError> {
+) -> Result<Json<Vec<PreflightOutput>>, HttpError> {
     debug!(?operations, "Preflight operations");
 
-    // TODO: parallelize the work here, using tasks.
-    // Especially important for DNS resolution.
+    let outputs = Outputs::with_capacity(operations.len());
 
-    let conf = conf_handle.get_conf();
+    let handles = operations
+        .into_iter()
+        .map(|operation| {
+            tokio::spawn({
+                let span = Span::current();
+                let outputs = outputs.clone();
+                let conf = conf_handle.get_conf();
+                let sessions = sessions.clone();
 
-    let mut results = Vec::with_capacity(operations.len());
+                async move {
+                    let operation_id = operation.id;
+                    trace!(%operation.id, "Process preflight operation");
 
-    for operation in operations {
-        match operation.kind {
-            PreflightOperationKind::GetVersion => results.push(PreflightResult {
+                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions).await {
+                        outputs.push(PreflightOutput {
+                            operation_id,
+                            kind: PreflightOutputKind::Alert {
+                                status: error.status,
+                                message: error.message,
+                            },
+                        });
+                    }
+                }
+                .instrument(span)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(Json(outputs.take()))
+}
+
+async fn handle_operation(
+    operation: PreflightOperation,
+    outputs: &Outputs,
+    conf: &Conf,
+    sessions: &SessionMessageSender,
+) -> Result<(), PreflightError> {
+    match operation.kind.as_str() {
+        OP_GET_VERSION => outputs.push(PreflightOutput {
+            operation_id: operation.id,
+            kind: PreflightOutputKind::Version {
+                version: env!("CARGO_PKG_VERSION"),
+            },
+        }),
+        OP_GET_AGENT_VERSION => {
+            let version = get_installed_agent_version()
+                .inspect_err(|error| warn!(%operation.id, %error, "Failed to get Agent version"))
+                .map_err(|e| PreflightError::new(PreflightAlertStatus::AgentVersionLookupFailure, e.to_string()))?;
+
+            outputs.push(PreflightOutput {
                 operation_id: operation.id,
-                kind: PreflightResultKind::Version {
-                    version: env!("CARGO_PKG_VERSION"),
+                kind: PreflightOutputKind::AgentVersion {
+                    version: version.map(|x| x.fmt_without_revision()),
                 },
-            }),
-            PreflightOperationKind::GetAgentVersion => match get_installed_agent_version() {
-                Ok(version) => results.push(PreflightResult {
-                    operation_id: operation.id,
-                    kind: PreflightResultKind::AgentVersion {
-                        version: version.map(|x| x.fmt_without_revision()),
-                    },
-                }),
-                Err(error) => {
-                    warn!(error = %error, "Failed to get Agent version");
-                    results.push(PreflightResult {
-                        operation_id: operation.id,
-                        kind: PreflightResultKind::Alert {
-                            status: PreflightAlertStatus::AgentVersionLookupFailure,
-                            message: "failed to get Agent version".to_owned(),
-                        },
-                    })
-                }
-            },
-            PreflightOperationKind::GetRunningSessionCount => match sessions.get_running_session_count().await {
-                Ok(count) => results.push(PreflightResult {
-                    operation_id: operation.id,
-                    kind: PreflightResultKind::RunningSessionCount { count },
-                }),
-                Err(error) => {
-                    warn!(%operation.id, error = format!("{error:#}"), "Failed to count running sessions");
-                    results.push(PreflightResult {
-                        operation_id: operation.id,
-                        kind: PreflightResultKind::Alert {
-                            status: PreflightAlertStatus::InternalServerError,
-                            message: "failed to count running sessions".to_owned(),
-                        },
-                    })
-                }
-            },
-            PreflightOperationKind::GetRecordingStorageHealth => {
-                let recording_storage_result =
-                    crate::api::heartbeat::recording_storage_health(conf.recording_path.as_std_path());
+            });
+        }
+        OP_GET_RUNNING_SESSION_COUNT => {
+            let count = sessions
+                .get_running_session_count()
+                .await
+                .inspect_err(
+                    |error| warn!(%operation.id, error = format!("{error:#}"), "Failed to count running sessions"),
+                )
+                .map_err(|_| {
+                    PreflightError::new(
+                        PreflightAlertStatus::InternalServerError,
+                        "failed to count running sessions",
+                    )
+                })?;
 
-                results.push(PreflightResult {
-                    operation_id: operation.id,
-                    kind: PreflightResultKind::RecordingStorageHealth {
-                        recording_storage_is_writeable: recording_storage_result.recording_storage_is_writeable,
-                        recording_storage_total_space: recording_storage_result.recording_storage_total_space,
-                        recording_storage_available_space: recording_storage_result.recording_storage_available_space,
-                    },
-                });
-            }
-            PreflightOperationKind::PushToken { token_id, token } => {
-                results.push(PreflightResult {
-                    operation_id: operation.id,
-                    kind: PreflightResultKind::Alert {
-                        status: PreflightAlertStatus::GeneralFailure,
-                        message: "unimplemented".to_owned(),
-                    },
-                });
-            }
-            PreflightOperationKind::PushCredentials {
-                credentials_id,
-                credentials,
-            } => {
-                results.push(PreflightResult {
-                    operation_id: operation.id,
-                    kind: PreflightResultKind::Alert {
-                        status: PreflightAlertStatus::GeneralFailure,
-                        message: "unimplemented".to_owned(),
-                    },
-                });
-            }
-            PreflightOperationKind::LookupHost { host } => match tokio::net::lookup_host((host.as_str(), 0)).await {
-                Ok(addresses) => {
-                    results.push(PreflightResult {
-                        operation_id: operation.id,
-                        kind: PreflightResultKind::ResolvedHost {
-                            host: host.clone(),
-                            addresses: addresses.map(|addr| addr.ip()).collect(),
-                        },
-                    });
-                }
-                Err(error) => {
-                    warn!(%operation.id, error = format!("{error:#}"), %host, "Failed to lookup host");
-                    results.push(PreflightResult {
-                        operation_id: operation.id,
-                        kind: PreflightResultKind::Alert {
-                            status: PreflightAlertStatus::HostLookupFailure,
-                            message: format!("failed to lookup host {host}"),
-                        },
-                    });
-                }
-            },
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::RunningSessionCount { count },
+            });
+        }
+        OP_GET_RECORDING_STORAGE_HEALTH => {
+            let recording_storage_result =
+                crate::api::heartbeat::recording_storage_health(conf.recording_path.as_std_path());
+
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::RecordingStorageHealth {
+                    recording_storage_is_writeable: recording_storage_result.recording_storage_is_writeable,
+                    recording_storage_total_space: recording_storage_result.recording_storage_total_space,
+                    recording_storage_available_space: recording_storage_result.recording_storage_available_space,
+                },
+            });
+        }
+        OP_PUSH_TOKEN => {
+            let PushTokenParams { .. } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+
+            return Err(PreflightError::new(
+                PreflightAlertStatus::GeneralFailure,
+                "unimplemented",
+            ));
+        }
+        OP_PUSH_CREDENTIALS => {
+            let PushCredentialsParams { .. } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+
+            return Err(PreflightError::new(
+                PreflightAlertStatus::GeneralFailure,
+                "unimplemented",
+            ));
+        }
+        OP_LOOKUP_HOST => {
+            let LookupHostParams { host } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+
+            let addresses = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), %host, "Failed to lookup host"))
+                .map_err(|_| {
+                    PreflightError::new(
+                        PreflightAlertStatus::HostLookupFailure,
+                        format!("failed to lookup host {host}"),
+                    )
+                })?;
+
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::ResolvedHost {
+                    host: host.clone(),
+                    addresses: addresses.map(|addr| addr.ip()).collect(),
+                },
+            });
+        }
+        unsupported_op => {
+            return Err(PreflightError::new(
+                PreflightAlertStatus::UnsupportedOperation,
+                format!("unsupported operation: {unsupported_op}"),
+            ))
         }
     }
 
-    Ok(Json(results))
+    Ok(())
+}
+
+fn from_params<T: de::DeserializeOwned>(params: serde_json::Map<String, serde_json::Value>) -> serde_json::Result<T> {
+    serde_json::from_value(serde_json::Value::Object(params))
 }

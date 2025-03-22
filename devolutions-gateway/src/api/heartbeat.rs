@@ -10,28 +10,28 @@ use devolutions_agent_shared::get_installed_agent_version;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub(crate) struct Heartbeat {
-    /// This Gateway's unique ID
+    /// This Gateway's unique ID.
     id: Option<Uuid>,
-    /// This Gateway's hostname
+    /// This Gateway's hostname.
     hostname: String,
-    /// Gateway service version
+    /// Gateway service version.
     version: &'static str,
-    /// Agent version, if installed
+    /// Agent version, if installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     agent_version: Option<String>,
-    /// Number of running sessions
+    /// Number of running sessions.
     running_session_count: usize,
-    /// Whether the recording storage is writeable or not
+    /// Whether the recording storage is writeable or not.
     ///
     /// Since v2024.1.6.
     #[cfg_attr(feature = "openapi", schema(value_type = Option<bool>))]
     recording_storage_is_writeable: bool,
-    /// The total space of the disk used to store recordings, in bytes
+    /// The total space of the disk used to store recordings, in bytes.
     ///
     /// Since v2024.1.6.
     #[serde(skip_serializing_if = "Option::is_none")]
     recording_storage_total_space: Option<u64>,
-    /// The remaining available space to store recordings, in bytes
+    /// The remaining available space to store recordings, in bytes.
     ///
     /// Since v2024.1.6.
     #[serde(skip_serializing_if = "Option::is_none")]
