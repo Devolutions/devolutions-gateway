@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
-use std::{error::Error, path::Path};
+use std::error::Error;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use tokengen::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};

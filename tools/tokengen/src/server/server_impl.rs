@@ -1,15 +1,11 @@
-use axum::{
-    extract::{Extension, Json},
-    routing::post,
-    Router,
-};
+use axum::extract::{Extension, Json};
+use axum::routing::post;
+use axum::Router;
 use serde::{Deserialize, Serialize};
-use std::{
-    env,
-    error::Error,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::env;
+use std::error::Error;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{generate_token, ApplicationProtocol, RecordingOperation, SubCommandArgs};
@@ -37,7 +33,7 @@ pub(crate) async fn get_delegate_key_path() -> Result<Option<PathBuf>, Box<dyn E
     let gateway_json_contents = tokio::fs::read_to_string(&gateway_json_path).await?;
     let gateway_config: serde_json::Value = serde_json::from_str(&gateway_json_contents)?;
 
-    let delegate_private_key_file = gateway_config.get("DelegationPrivateKeyFile ").and_then(|v| v.as_str());
+    let delegate_private_key_file = gateway_config.get("DelegationPrivateKeyFile").and_then(|v| v.as_str());
 
     let delegate_key_path = delegate_private_key_file.map(PathBuf::from);
     let delegate_key_path = delegate_key_path.map(|p| {
