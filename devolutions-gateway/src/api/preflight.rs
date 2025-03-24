@@ -5,11 +5,12 @@ use axum::extract::State;
 use axum::Json;
 use devolutions_agent_shared::get_installed_agent_version;
 use serde::de;
+use time::Duration;
 use tracing::{Instrument as _, Span};
 use uuid::Uuid;
 
 use crate::config::Conf;
-use crate::credendials::Credentials;
+use crate::credential::{AppCredentialMapping, CredentialStoreHandle};
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -19,9 +20,11 @@ const OP_GET_VERSION: &str = "get-version";
 const OP_GET_AGENT_VERSION: &str = "get-agent-version";
 const OP_GET_RUNNING_SESSION_COUNT: &str = "get-running-session-count";
 const OP_GET_RECORDING_STORAGE_HEALTH: &str = "get-recording-storage-health";
-const OP_PUSH_TOKEN: &str = "push-token";
-const OP_PUSH_CREDENTIALS: &str = "push-credentials";
-const OP_LOOKUP_HOST: &str = "lookup-host";
+const OP_PROVISION_TOKEN: &str = "provision-token";
+const OP_PROVISION_CREDENTIALS: &str = "provision-credentials";
+const OP_RESOLVE_HOST: &str = "resolve-host";
+
+const DEFAULT_TTL: Duration = Duration::minutes(15);
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct PreflightOperation {
@@ -32,20 +35,22 @@ pub(crate) struct PreflightOperation {
 }
 
 #[derive(Debug, Deserialize)]
-struct PushTokenParams {
+struct ProvisionTokenParams {
     token: String,
+    time_to_live: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
-struct PushCredentialsParams {
-    association_id: Uuid,
-    proxy_credentials: Credentials,
-    target_credentials: Credentials,
+struct ProvisionCredentialsParams {
+    token: String,
+    #[serde(flatten)]
+    mapping: AppCredentialMapping,
+    time_to_live: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
-struct LookupHostParams {
-    #[serde(rename = "host_to_lookup")]
+struct ResolveHostParams {
+    #[serde(rename = "host_to_resolve")]
     host: String,
 }
 
@@ -106,21 +111,26 @@ pub(crate) enum PreflightOutputKind {
         #[serde(rename = "alert_message")]
         message: String,
     },
+    #[serde(rename = "ack")]
+    Ack,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub(crate) enum PreflightAlertStatus {
+    #[expect(unused)]
     #[serde(rename = "general-failure")]
     GeneralFailure,
+    #[serde(rename = "info")]
+    Info,
     #[serde(rename = "unsupported-operation")]
     UnsupportedOperation,
     #[serde(rename = "invalid-parameters")]
     InvalidParams,
     #[serde(rename = "internal-server-error")]
     InternalServerError,
-    #[serde(rename = "host-lookup-failure")]
-    HostLookupFailure,
+    #[serde(rename = "host-resolution-failure")]
+    HostResolutionFailure,
     #[serde(rename = "agent-version-lookup-failure")]
     AgentVersionLookupFailure,
 }
@@ -177,7 +187,10 @@ impl Outputs {
 ))]
 pub(super) async fn post_preflight(
     State(DgwState {
-        conf_handle, sessions, ..
+        conf_handle,
+        sessions,
+        credential_store,
+        ..
     }): State<DgwState>,
     _scope: PreflightScope,
     Json(operations): Json<Vec<PreflightOperation>>,
@@ -194,12 +207,14 @@ pub(super) async fn post_preflight(
                 let outputs = outputs.clone();
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
+                let credential_store = credential_store.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions).await {
+                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credential_store).await
+                    {
                         outputs.push(PreflightOutput {
                             operation_id,
                             kind: PreflightOutputKind::Alert {
@@ -226,6 +241,7 @@ async fn handle_operation(
     outputs: &Outputs,
     conf: &Conf,
     sessions: &SessionMessageSender,
+    credential_store: &CredentialStoreHandle,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -278,32 +294,59 @@ async fn handle_operation(
                 },
             });
         }
-        OP_PUSH_TOKEN => {
-            let PushTokenParams { .. } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+        OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
+            let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
+                let ProvisionTokenParams { token, time_to_live } =
+                    from_params(operation.params).map_err(PreflightError::invalid_params)?;
+                (token, time_to_live, None)
+            } else {
+                let ProvisionCredentialsParams {
+                    token,
+                    mapping,
+                    time_to_live,
+                } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+                (token, time_to_live, Some(mapping))
+            };
 
-            return Err(PreflightError::new(
-                PreflightAlertStatus::GeneralFailure,
-                "unimplemented",
-            ));
-        }
-        OP_PUSH_CREDENTIALS => {
-            let PushCredentialsParams { .. } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+            let time_to_live = time_to_live
+                .map(i64::from)
+                .map(Duration::minutes)
+                .unwrap_or(DEFAULT_TTL);
 
-            return Err(PreflightError::new(
-                PreflightAlertStatus::GeneralFailure,
-                "unimplemented",
-            ));
+            let previous_entry = credential_store
+                .insert(token, mapping, time_to_live)
+                .inspect_err(
+                    |error| warn!(%operation.id, error = format!("{error:#}"), "Failed to count running sessions"),
+                )
+                .map_err(|e| PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}")))?;
+
+            if previous_entry.is_some() {
+                outputs.push(PreflightOutput {
+                    operation_id: operation.id,
+                    kind: PreflightOutputKind::Alert {
+                        status: PreflightAlertStatus::Info,
+                        message: "an existing credential entry was replaced".to_owned(),
+                    },
+                });
+            }
+
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::Ack,
+            });
         }
-        OP_LOOKUP_HOST => {
-            let LookupHostParams { host } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
+        OP_RESOLVE_HOST => {
+            let ResolveHostParams { host } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
 
             let addresses = tokio::net::lookup_host((host.as_str(), 0))
                 .await
-                .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), %host, "Failed to lookup host"))
+                .inspect_err(
+                    |error| warn!(%operation.id, error = format!("{error:#}"), %host, "Failed to resolve host"),
+                )
                 .map_err(|_| {
                     PreflightError::new(
-                        PreflightAlertStatus::HostLookupFailure,
-                        format!("failed to lookup host {host}"),
+                        PreflightAlertStatus::HostResolutionFailure,
+                        format!("failed to resolve host {host}"),
                     )
                 })?;
 

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
+use devolutions_gateway::credential::CredentialStoreHandle;
 use devolutions_gateway::listener::GatewayListener;
 use devolutions_gateway::log::GatewayLog;
 use devolutions_gateway::recording::recording_message_channel;
@@ -236,6 +237,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let job_queue_ctx = devolutions_gateway::job_queue::JobQueueCtx::init(conf.job_queue_database.as_std_path())
         .await
         .context("failed to initialize job queue context")?;
+    let credential_store = CredentialStoreHandle::new();
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -246,6 +248,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         shutdown_signal: tasks.shutdown_signal.clone(),
         recordings: recording_manager_handle.clone(),
         job_queue_handle: job_queue_ctx.job_queue_handle.clone(),
+        credential_store: credential_store.clone(),
     };
 
     conf.listeners
@@ -274,6 +277,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     }
 
     tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
+
+    tasks.register(devolutions_gateway::credential::CleanupTask {
+        handle: credential_store,
+    });
 
     tasks.register(devolutions_log::LogDeleterTask::<GatewayLog>::new(
         conf.log_file.clone(),

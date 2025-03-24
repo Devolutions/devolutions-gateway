@@ -1238,6 +1238,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tracing",
  "tracing-cov-mark",
+ "tracing-subscriber",
  "transport",
  "tungstenite",
  "typed-builder",

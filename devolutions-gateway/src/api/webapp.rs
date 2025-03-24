@@ -157,7 +157,7 @@ pub(crate) async fn sign_app_token(
             .get(authorization.username())
             .ok_or_else(|| HttpError::unauthorized().msg("user not found"))?;
 
-        let password_hash = PasswordHash::new(user.password_hash.get())
+        let password_hash = PasswordHash::new(user.password_hash.expose_secret())
             .map_err(HttpError::internal().with_msg("invalid password hash").err())?;
 
         argon2::Argon2::default()
