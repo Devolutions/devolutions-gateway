@@ -106,6 +106,8 @@ pub(crate) enum PreflightOutputKind {
         #[serde(rename = "alert_message")]
         message: String,
     },
+    #[serde(rename = "ack")]
+    Ack,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -281,10 +283,10 @@ async fn handle_operation(
         OP_PUSH_TOKEN => {
             let PushTokenParams { .. } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
 
-            return Err(PreflightError::new(
-                PreflightAlertStatus::GeneralFailure,
-                "unimplemented",
-            ));
+            outputs.push(PreflightOutput {
+                operation_id: operation.id,
+                kind: PreflightOutputKind::Ack,
+            });
         }
         OP_PUSH_CREDENTIALS => {
             let PushCredentialsParams { .. } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
