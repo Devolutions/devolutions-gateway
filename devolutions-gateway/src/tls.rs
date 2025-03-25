@@ -194,7 +194,7 @@ pub mod windows {
             // is no guarantee about what this order is, thus we implement the
             // logic here anyway.
             contexts.sort_by_cached_key(|ctx| match picky::x509::Cert::from_der(ctx.as_der()) {
-                Ok(cert) => cert.valid_not_before(),
+                Ok(cert) => cert.valid_not_after(),
                 Err(error) => {
                     warn!(%error, "Failed to parse store certificate");
                     picky::x509::date::UtcDate::ymd(1900, 1, 1).expect("hardcoded")
@@ -204,6 +204,7 @@ pub mod windows {
             // Attempt to acquire a private key and construct CngSigningKey.
             let (context, key) = contexts
                 .into_iter()
+                .rev() // Revert for: closer to farthest -> farthest to closer
                 .find_map(|ctx| {
                     let key = ctx.acquire_key().ok()?;
                     CngSigningKey::new(key).ok().map(|key| (ctx, key))
