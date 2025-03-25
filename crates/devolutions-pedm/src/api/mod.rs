@@ -146,7 +146,7 @@ pub fn openapi() -> OpenApi {
         ..OpenApi::default()
     };
 
-    aide::r#gen::in_context(|ctx| {
+    aide::generate::in_context(|ctx| {
         ctx.schema = schemars::r#gen::SchemaGenerator::new(schemars::r#gen::SchemaSettings::openapi3());
     });
 

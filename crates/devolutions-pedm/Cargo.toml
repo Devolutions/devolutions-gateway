@@ -11,7 +11,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
-axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query", "tracing", "tower-log", "form", "original-uri", "matched-path"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "tracing", "tower-log", "form", "original-uri", "matched-path"] }
 base16ct = { version = "0.2", features = ["std", "alloc"] }
 base64 = "0.22"
 chrono = "0.4"
@@ -33,7 +33,7 @@ camino = { version = "1" }
 async-trait = "0.1"
 tracing = "0.1"
 walkdir = "2.5"
-aide = { version = "0.13", features = ["axum", "axum-extra"] }
+aide = { version = "0.14", features = ["axum", "axum-extra", "axum-json", "axum-tokio"] }
 tower-http = { version = "0.5", features = ["timeout"] }
 parking_lot = "0.12"
 cfg-if = "1.0"
