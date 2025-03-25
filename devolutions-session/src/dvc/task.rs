@@ -40,6 +40,7 @@ use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiPr
 
 // One minute heartbeat interval by default
 const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
+const HANDSHAKE_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(5);
 
 const GENERIC_ERROR_CODE_ENCODING: u32 = 0x00000001;
 const GENERIC_ERROR_CODE_TOO_LONG_ERROR: u32 = 0x00000002;
@@ -47,15 +48,6 @@ const GENERIC_ERROR_CODE_OTHER: u32 = 0xFFFFFFFF;
 
 #[derive(Default)]
 pub struct DvcIoTask {}
-
-/// # Architecture
-/// - If internal server error happens before Exec session start (e.g. MSPC channel error,
-///   WinAPI error unrelated to process start etc.), we should close channel gracefully with
-///   error reporting
-/// - If some nonerror happens after session start (e.g. session data, session cancel, session exit),
-///   we should close exec session and send result to the client. (with exceptions below)
-/// - If session channels IO fail we should trigger DVC termination to avoid leaking resources.
-/// - Messages serialized in place before sending over mpsc channel.
 
 #[async_trait]
 impl Task for DvcIoTask {
@@ -122,7 +114,7 @@ async fn process_messages(
                 }
             }
         }
-        _timeout = tokio::time::sleep(std::time::Duration::from_secs(5)) =>
+        _timeout = tokio::time::sleep(HANDSHAKE_TIMEOUT) =>
         {
             error!("Timeout waiting for DVC negotiation");
             return Ok(());
@@ -198,7 +190,6 @@ async fn process_messages(
                                 dvc_tx.send(message.into()).await?;
                             }
                             ServerChannelEvent::SessionDataOut { session_id, stream, last, data } => {
-                                // TODO: error handling for encoding
                                 let message = NowExecDataMsg::new(session_id, stream, last, data)?;
                                 dvc_tx.send(message.into()).await?;
                             }
@@ -519,10 +510,7 @@ impl MessageProcessor {
 
         let message = NowExecResultMsg::new_success(session_id, 0).into_owned().into();
 
-        if let Err(error) = self.dvc_tx.send(message).await {
-            // TODO: Critical channel error at this point?
-            error!(%error, "Failed to send execution result message");
-        }
+        self.dvc_tx.send(message).await?;
 
         // We do not need to track this session, as it is fire-and-forget.
 

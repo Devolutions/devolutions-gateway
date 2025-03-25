@@ -11,12 +11,6 @@ impl NowMessageDissector {
     pub fn dissect(&mut self, data_chunk: &[u8]) -> Result<Vec<NowMessage<'static>>, anyhow::Error> {
         let mut messages = Vec::new();
 
-        // TODO: This is not optimized:
-        // - if data_chunk enough for a whole message, we can avoid
-        //   pushing it to the buffer and directly decode it.
-        // - if data_chunk is empty after all messages were decoded, we can avoid `drain` and
-        // clear the buffer instead.
-
         self.pdu_body_buffer.extend_from_slice(data_chunk);
 
         loop {
@@ -25,6 +19,13 @@ impl NowMessageDissector {
                 Ok(message) => {
                     messages.push(message.into_owned());
                     let pos = cursor.pos();
+
+                    if pos == self.pdu_body_buffer.len() {
+                        // All messages were read, clear the buffer
+                        self.pdu_body_buffer.clear();
+                        return Ok(messages);
+                    }
+                    // Remove the read bytes from the buffer
                     self.pdu_body_buffer.drain(0..pos);
                 }
                 Err(DecodeError {

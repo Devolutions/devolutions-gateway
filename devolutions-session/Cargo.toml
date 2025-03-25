@@ -42,8 +42,6 @@ tempfile = { version = "3", optional = true }
 thiserror = { version = "1", optional = true }
 win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
-# TODO: This dependency points to feat/set-kbd-layout branch - revision should point to master
-# after the fix is merged
 [dependencies.now-proto-pdu]
 optional = true
 version = "0.2"
