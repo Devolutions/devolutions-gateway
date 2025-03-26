@@ -60,6 +60,7 @@ pub struct MultiHasher {
 }
 
 impl MultiHasher {
+    #[must_use]
     pub fn chain_update(mut self, data: &[u8]) -> Self {
         self.update(data);
         self
