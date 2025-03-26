@@ -9,7 +9,6 @@ use tracing::info;
 use win_api_wrappers::fs::create_directory;
 use win_api_wrappers::identity::account::Account;
 use win_api_wrappers::identity::sid::Sid;
-use win_api_wrappers::netmgmt::get_local_admin_group_members;
 use win_api_wrappers::process::{create_process_as_user, ProcessInformation, StartupInfo};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::Token;
@@ -52,29 +51,6 @@ pub fn start_process(
         current_directory,
         startup_info,
     )
-}
-
-fn is_member_of_administrators_group_directly(user_sid: &Sid) -> anyhow::Result<bool> {
-    Ok(get_local_admin_group_members()?.contains(user_sid))
-}
-
-fn is_member_of_administrators(user_token: &Token) -> anyhow::Result<bool> {
-    if is_member_of_administrators_group_directly(&user_token.sid_and_attributes()?.sid)? {
-        return Ok(true);
-    }
-
-    let local_admin_sids = get_local_admin_group_members()?;
-    let group_sids_and_attributes = user_token.groups()?;
-
-    for user_group_sid_and_attributes in group_sids_and_attributes.iter() {
-        for admin_sid in &local_admin_sids {
-            if admin_sid == user_group_sid_and_attributes.sid {
-                return Ok(true);
-            }
-        }
-    }
-
-    Ok(false)
 }
 
 #[derive(Default)]
