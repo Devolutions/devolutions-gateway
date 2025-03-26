@@ -106,6 +106,9 @@ jobs:
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
+      - name: Install nightly rustfmt
+        run: rustup component add --toolchain nightly rustfmt
+
       - name: Check formatting
         run: |
           cargo +nightly fmt --all -- --check
