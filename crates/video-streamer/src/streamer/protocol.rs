@@ -1,7 +1,5 @@
-use tokio_util::{
-    bytes::{self, Buf, BufMut},
-    codec,
-};
+use tokio_util::bytes::{self, Buf, BufMut};
+use tokio_util::codec;
 
 #[derive(Debug)]
 pub(crate) enum Codec {

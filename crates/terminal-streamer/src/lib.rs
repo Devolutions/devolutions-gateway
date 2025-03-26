@@ -4,12 +4,11 @@ pub mod trp_decoder;
 #[macro_use]
 extern crate tracing;
 
-use std::{future::Future, sync::Arc};
+use std::future::Future;
+use std::sync::Arc;
 
-use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, BufReader},
-    sync::Notify,
-};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::sync::Notify;
 
 pub trait TerminalStreamSocket {
     fn send(&mut self, value: String) -> impl Future<Output = anyhow::Result<()>> + Send;

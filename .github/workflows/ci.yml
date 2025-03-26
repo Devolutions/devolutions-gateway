@@ -106,11 +106,14 @@ jobs:
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
+      - name: Install nightly rustfmt
+        run: rustup component add --toolchain nightly rustfmt
+
       - name: Check formatting
         run: |
-          cargo fmt --all -- --check
+          cargo +nightly fmt --all -- --check
           if ! [ $? -eq 0 ] ; then
-              echo "::error::Bad formatting, please run 'cargo +stable fmt --all'"
+              echo "::error::Bad formatting, please run 'cargo +nightly fmt --all'"
               exit 1
           fi
 

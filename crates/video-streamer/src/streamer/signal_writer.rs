@@ -1,4 +1,5 @@
-use std::{sync::Arc, task::Poll};
+use std::sync::Arc;
+use std::task::Poll;
 
 pub struct SignalWriter<W> {
     writer: W,
