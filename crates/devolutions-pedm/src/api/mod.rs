@@ -39,24 +39,24 @@ use win_api_wrappers::utils::Pipe;
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
 
-mod elevate_session;
-mod elevate_temporary;
-mod launch;
-mod logs;
-mod policy;
-mod revoke;
-mod status;
+pub mod elevate_session;
+pub mod elevate_temporary;
+pub mod launch;
+pub mod logs;
+pub mod policy;
+pub mod revoke;
+pub mod status;
 
 #[derive(Debug, Clone)]
-struct NamedPipeConnectInfo {
-    pub(crate) user: User,
-    pub(crate) token: Arc<Token>,
-    pub(crate) pipe_process_id: u32,
+pub struct NamedPipeConnectInfo {
+    pub user: User,
+    pub token: Arc<Token>,
+    pub pipe_process_id: u32,
 }
 
 #[derive(Debug, Clone)]
 struct RawNamedPipeConnectInfo {
-    pub(crate) handle: Handle,
+    pub handle: Handle,
 }
 
 impl Connected<&NamedPipeServer> for RawNamedPipeConnectInfo {
@@ -124,7 +124,7 @@ fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
     Ok(pipe)
 }
 
-pub(crate) fn api_router() -> ApiRouter {
+pub fn api_router() -> ApiRouter {
     ApiRouter::new()
         .api_route("/elevate/temporary", post(post_elevate_temporary))
         .api_route("/elevate/session", post(post_elevate_session))
@@ -155,7 +155,7 @@ pub fn openapi() -> OpenApi {
     api
 }
 
-pub(crate) async fn serve(pipe_name: &'static str) -> Result<()> {
+pub async fn serve(pipe_name: &'static str) -> Result<()> {
     let app = api_router();
 
     let mut make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();

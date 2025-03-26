@@ -1,7 +1,7 @@
 //! Module in charge of elevating tokens.
 
-mod local_admin_elevator;
-mod virtual_account_elevator;
+pub mod local_admin_elevator;
+pub mod virtual_account_elevator;
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -101,7 +101,7 @@ fn validate_elevation(
     validation
 }
 
-pub(crate) fn try_start_elevated(
+pub fn try_start_elevated(
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,

@@ -6,7 +6,7 @@ use crate::{elevations, policy};
 
 use super::NamedPipeConnectInfo;
 
-pub(crate) async fn post_elevate_session(
+pub async fn post_elevate_session(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
 ) -> Result<(), Error> {
     let policy = policy::policy().read();

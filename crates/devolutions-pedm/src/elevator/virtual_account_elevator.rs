@@ -38,14 +38,14 @@ unsafe impl Sync for VirtualAccountElevation {}
 // SAFETY: `*mut u16` from `profile` not used.
 unsafe impl Send for VirtualAccountElevation {}
 
-pub(crate) struct VirtualAccountElevator {
+pub struct VirtualAccountElevator {
     domain: String,
     rid: u32,
     tokens: RwLock<HashMap<Sid, VirtualAccountElevation>>,
 }
 
 impl VirtualAccountElevator {
-    pub(crate) fn new(domain: String, rid: u32) -> Self {
+    pub fn new(domain: String, rid: u32) -> Self {
         Self {
             domain,
             rid,

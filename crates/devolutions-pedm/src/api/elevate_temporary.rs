@@ -12,11 +12,11 @@ use super::NamedPipeConnectInfo;
 
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct ElevateTemporaryPayload {
-    pub(crate) seconds: u64,
+pub struct ElevateTemporaryPayload {
+    pub seconds: u64,
 }
 
-pub(crate) async fn post_elevate_temporary(
+pub async fn post_elevate_temporary(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     Json(payload): Json<ElevateTemporaryPayload>,
 ) -> Result<(), Error> {

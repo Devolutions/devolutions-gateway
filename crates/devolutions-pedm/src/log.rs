@@ -34,7 +34,7 @@ fn log_path_for_user(user: &User) -> Result<Utf8PathBuf> {
     Ok(dir)
 }
 
-pub(crate) fn log_elevation(res: &ElevationResult) -> Result<()> {
+pub fn log_elevation(res: &ElevationResult) -> Result<()> {
     let mut log_path = log_path_for_user(&res.request.asker.user)?;
 
     let cur_time = Local::now();
@@ -51,7 +51,7 @@ pub(crate) fn log_elevation(res: &ElevationResult) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn query_logs(user: Option<&User>) -> Result<Vec<ElevationResult>> {
+pub fn query_logs(user: Option<&User>) -> Result<Vec<ElevationResult>> {
     let log_path = user.map_or_else(|| Ok(log_path()), log_path_for_user)?;
 
     let mut logs = vec![];
