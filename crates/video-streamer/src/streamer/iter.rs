@@ -3,11 +3,9 @@ use std::io::Seek;
 use anyhow::Context;
 use cadeau::xmf::vpx::is_key_frame;
 use thiserror::Error;
-use webm_iterable::{
-    errors::TagIteratorError,
-    matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock},
-    WebmIterator,
-};
+use webm_iterable::errors::TagIteratorError;
+use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
+use webm_iterable::WebmIterator;
 
 use crate::reopenable::Reopenable;
 
