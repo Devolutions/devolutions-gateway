@@ -20,7 +20,7 @@ async fn get_profiles(Extension(named_pipe_info): Extension<NamedPipeConnectInfo
 
     let policy = policy::policy().read();
 
-    Ok(Json(policy.profiles().map(|p| p.id.clone()).collect()))
+    Ok(Json(policy.profiles().map(|p| p.id).collect()))
 }
 
 async fn post_profiles(
