@@ -12,7 +12,7 @@ use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_
 
 #[macro_use]
 extern crate tracing;
-use devolutions_session::{get_data_dir, init_log, Conf, ConfHandle};
+use devolutions_session::{get_data_dir, init_log, ConfHandle};
 
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 
@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Starting Devolutions Session");
 
-    let (runtime, shutdown_handle, join_handle) = start(&conf)?;
+    let (runtime, shutdown_handle, join_handle) = start()?;
 
     ctrlc::set_handler(move || {
         info!("Ctrl-C received, exiting");
@@ -55,14 +55,14 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start(config: &Conf) -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<()>)> {
+pub fn start() -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<()>)> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("failed to create runtime");
 
     // NOTE: `spawn_tasks` should be always called from within the tokio runtime.
-    let tasks = runtime.block_on(spawn_tasks(config))?;
+    let tasks = runtime.block_on(spawn_tasks())?;
 
     trace!("Devolutions Session tasks created");
 
@@ -92,7 +92,7 @@ pub fn start(config: &Conf) -> anyhow::Result<(Runtime, ShutdownHandle, JoinHand
 }
 
 #[cfg(all(windows, feature = "dvc"))]
-async fn spawn_tasks(_config: &Conf) -> anyhow::Result<Tasks> {
+async fn spawn_tasks() -> anyhow::Result<Tasks> {
     let mut tasks = Tasks::new();
 
     tasks.register(DvcIoTask::default());
@@ -101,7 +101,7 @@ async fn spawn_tasks(_config: &Conf) -> anyhow::Result<Tasks> {
 }
 
 #[cfg(not(all(windows, feature = "dvc")))]
-async fn spawn_tasks(_config: &Conf) -> anyhow::Result<Tasks> {
+async fn spawn_tasks() -> anyhow::Result<Tasks> {
     Ok(Tasks::new())
 }
 

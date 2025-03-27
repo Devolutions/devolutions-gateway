@@ -14,16 +14,16 @@ pub struct Semaphore {
 impl Semaphore {
     pub fn new_unnamed(initial_count: u32, maximum_count: u32) -> anyhow::Result<Self> {
         if maximum_count == 0 {
-            anyhow::bail!("Maximum count must be greater than 0");
+            anyhow::bail!("maximum count must be greater than 0");
         }
 
         if initial_count > maximum_count {
-            anyhow::bail!("Initial count must be less than or equal to maximum count");
+            anyhow::bail!("initial count must be less than or equal to maximum count");
         }
 
-        let initial_count = i32::try_from(initial_count).context("Semaphore initial count is too large")?;
+        let initial_count = i32::try_from(initial_count).context("semaphore initial count is too large")?;
 
-        let maximum_count = i32::try_from(maximum_count).context("Semaphore maximum count is too large")?;
+        let maximum_count = i32::try_from(maximum_count).context("semaphore maximum count is too large")?;
 
         // SAFETY: All parameters are checked for validity above:
         // - initial_count is always <= maximum_count.
@@ -43,11 +43,11 @@ impl Semaphore {
         self.handle.raw()
     }
 
-    pub fn release(&self, release_count: u32) -> anyhow::Result<u32> {
-        let release_count = i32::try_from(release_count).context("Semaphore release count is too large")?;
+    pub fn release(&self, release_count: u16) -> anyhow::Result<u32> {
+        let release_count = i32::from(release_count);
 
         if release_count == 0 {
-            anyhow::bail!("Semaphore release count must be greater than 0");
+            anyhow::bail!("semaphore release count must be greater than 0");
         }
 
         let mut previous_count = 0;
@@ -58,6 +58,6 @@ impl Semaphore {
         unsafe {
             ReleaseSemaphore(self.handle.raw(), release_count, Some(&mut previous_count))?;
         }
-        Ok(previous_count.try_into().expect("Semaphore count is negative"))
+        Ok(previous_count.try_into().expect("semaphore count is negative"))
     }
 }

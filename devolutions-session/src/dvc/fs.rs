@@ -32,7 +32,7 @@ impl TmpFileGuard {
 impl Drop for TmpFileGuard {
     fn drop(&mut self) {
         // We can't use `MoveFileExW` for scheduled deletion by OS via MOVEFILE_DELAY_UNTIL_REBOOT
-        // because it requires administrative rights rights to work, however devolutions-session
+        // because it requires administrative rights to work, however devolutions-session
         // is running under non-elevated user account.
         // (see [MSDN](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexa#remarks)).
 

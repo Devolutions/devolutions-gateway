@@ -807,6 +807,7 @@ fn make_generic_error_failsafe(session_id: u32, code: u32, message: String) -> N
                 .expect("generic error without message always fits into NowMessage frame")
         })
 }
+
 async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, session_id: u32, error: ExecError) {
     let msg = match error {
         ExecError::NowStatus(status) => {
