@@ -17,7 +17,7 @@ use win_api_wrappers::utils::CommandLine;
 // WinAPI's functions have many arguments, we wrap the same way.
 // TODO: maybe consider https://bon-rs.com/, for named function arguments-like ergonomics.
 #[expect(clippy::too_many_arguments)]
-pub fn start_process(
+pub(crate) fn start_process(
     token: &Token,
     executable_path: Option<&Path>,
     command_line: Option<&CommandLine>,
@@ -54,19 +54,19 @@ pub fn start_process(
 }
 
 #[derive(Default)]
-pub struct MultiHasher {
+pub(crate) struct MultiHasher {
     sha1: Sha1,
     sha256: Sha256,
 }
 
 impl MultiHasher {
     #[must_use]
-    pub fn chain_update(mut self, data: &[u8]) -> Self {
+    pub(crate) fn chain_update(mut self, data: &[u8]) -> Self {
         self.update(data);
         self
     }
 
-    pub fn finalize(self) -> Hash {
+    pub(crate) fn finalize(self) -> Hash {
         let sha1 = self.sha1.finalize();
         let sha256 = self.sha256.finalize();
 
@@ -84,7 +84,7 @@ impl Update for MultiHasher {
     }
 }
 
-pub fn file_hash(path: &Path) -> anyhow::Result<Hash> {
+pub(crate) fn file_hash(path: &Path) -> anyhow::Result<Hash> {
     let data = fs::read(path)?;
 
     let mut hasher = MultiHasher::default();
@@ -92,7 +92,7 @@ pub fn file_hash(path: &Path) -> anyhow::Result<Hash> {
     Ok(hasher.finalize())
 }
 
-pub fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> anyhow::Result<()> {
+pub(crate) fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> anyhow::Result<()> {
     // FIXME: Underlying behaviour of security primitives must be corrected before this can work
 
     // let owner = Sid::from_well_known(WinLocalSystemSid, None)?;
@@ -144,7 +144,7 @@ pub fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> anyhow::Res
     Ok(())
 }
 
-pub trait AccountExt {
+pub(crate) trait AccountExt {
     fn to_user(&self) -> User;
 }
 

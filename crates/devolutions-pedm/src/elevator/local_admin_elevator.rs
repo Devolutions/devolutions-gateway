@@ -15,12 +15,12 @@ use win_api_wrappers::token::Token;
 
 use crate::elevator::Elevator;
 
-pub struct LocalAdminElevator {
+pub(crate) struct LocalAdminElevator {
     source: Security::TOKEN_SOURCE,
 }
 
 impl LocalAdminElevator {
-    pub fn new(source_name: &[u8; 8], source_identifier: LUID) -> Self {
+    pub(crate) fn new(source_name: &[u8; 8], source_identifier: LUID) -> Self {
         let mut source = Security::TOKEN_SOURCE {
             SourceIdentifier: source_identifier,
             ..Default::default()

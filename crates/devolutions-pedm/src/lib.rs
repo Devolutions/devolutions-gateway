@@ -1,17 +1,22 @@
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
-pub mod api;
-pub mod config;
-pub mod elevations;
-pub mod elevator;
-pub mod error;
-pub mod log;
-pub mod policy;
-pub mod utils;
-use tokio::select;
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "windows")] {
+        pub mod api;
+        mod config;
+        mod elevations;
+        mod elevator;
+        mod error;
+        mod log;
+        mod policy;
+        mod utils;
+        use tokio::select;
 
-use tracing::error;
+        use tracing::error;
+    }
+}
+
 pub struct PedmTask {}
 
 impl PedmTask {

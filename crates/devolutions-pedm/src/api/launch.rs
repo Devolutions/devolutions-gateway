@@ -21,19 +21,19 @@ use super::NamedPipeConnectInfo;
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
-pub struct StartupInfoDto {
-    pub desktop: Option<String>,
-    pub title: Option<String>,
-    pub x: u32,
-    pub y: u32,
-    pub x_size: u32,
-    pub y_size: u32,
-    pub x_count_chars: u32,
-    pub y_count_chars: u32,
-    pub fill_attribute: u32,
-    pub flags: u32,
-    pub show_window: u16,
-    pub parent_pid: Option<u32>,
+pub(crate) struct StartupInfoDto {
+    pub(crate) desktop: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) x: u32,
+    pub(crate) y: u32,
+    pub(crate) x_size: u32,
+    pub(crate) y_size: u32,
+    pub(crate) x_count_chars: u32,
+    pub(crate) y_count_chars: u32,
+    pub(crate) fill_attribute: u32,
+    pub(crate) flags: u32,
+    pub(crate) show_window: u16,
+    pub(crate) parent_pid: Option<u32>,
 }
 
 impl From<&StartupInfoDto> for StartupInfo {
@@ -57,19 +57,19 @@ impl From<&StartupInfoDto> for StartupInfo {
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
-pub struct LaunchPayload {
-    pub executable_path: Option<PathBuf>,
-    pub command_line: Option<String>,
-    pub creation_flags: u32,
-    pub working_directory: Option<PathBuf>,
-    pub startup_info: Option<StartupInfoDto>,
+pub(crate) struct LaunchPayload {
+    pub(crate) executable_path: Option<PathBuf>,
+    pub(crate) command_line: Option<String>,
+    pub(crate) creation_flags: u32,
+    pub(crate) working_directory: Option<PathBuf>,
+    pub(crate) startup_info: Option<StartupInfoDto>,
 }
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
-pub struct LaunchResponse {
-    pub process_id: u32,
-    pub thread_id: u32,
+pub(crate) struct LaunchResponse {
+    pub(crate) process_id: u32,
+    pub(crate) thread_id: u32,
 }
 
 fn win_canonicalize(path: &Path, token: Option<&Token>) -> Result<PathBuf, Error> {
@@ -79,7 +79,7 @@ fn win_canonicalize(path: &Path, token: Option<&Token>) -> Result<PathBuf, Error
     Ok(dunce::canonicalize(path)?)
 }
 
-pub async fn post_launch(
+pub(crate) async fn post_launch(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     Json(mut payload): Json<LaunchPayload>,
 ) -> Result<Json<LaunchResponse>, Error> {

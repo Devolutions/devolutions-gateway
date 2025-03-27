@@ -13,7 +13,7 @@ use win_api_wrappers::raw::Win32::Foundation::{
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
-pub enum Error {
+pub(crate) enum Error {
     AccessDenied,
     NotFound,
     InvalidParameter,
@@ -53,7 +53,7 @@ impl IntoResponse for Error {
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
-pub struct ErrorResponse {
+pub(crate) struct ErrorResponse {
     kind: Error,
     win32_error: u32,
 }

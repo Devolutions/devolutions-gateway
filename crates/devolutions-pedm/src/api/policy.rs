@@ -89,19 +89,19 @@ async fn delete_profiles_id(
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct GetProfilesMeResponse {
-    pub active: Uuid,
-    pub available: Vec<Uuid>,
+    pub(crate) active: Uuid,
+    pub(crate) available: Vec<Uuid>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct PathIdParameter {
-    pub id: Uuid,
+    pub(crate) id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct OptionalId {
-    pub id: Option<Uuid>,
+    pub(crate) id: Option<Uuid>,
 }
 
 async fn get_me(
@@ -137,8 +137,8 @@ async fn put_me(
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct Assignment {
-    pub profile: Profile,
-    pub users: Vec<User>,
+    pub(crate) profile: Profile,
+    pub(crate) users: Vec<User>,
 }
 
 async fn get_assignments(
@@ -182,7 +182,7 @@ async fn put_assignments_id(
     Ok(())
 }
 
-pub fn policy_router() -> ApiRouter {
+pub(crate) fn policy_router() -> ApiRouter {
     ApiRouter::new()
         .api_route("/me", get(get_me).put(put_me))
         .api_route("/profiles", get(get_profiles).post(post_profiles))
