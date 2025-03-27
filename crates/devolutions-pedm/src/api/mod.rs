@@ -140,7 +140,7 @@ pub(crate) fn api_router() -> ApiRouter {
 pub fn openapi() -> OpenApi {
     let mut api = OpenApi {
         info: Info {
-            title: "Devolutions PEDM API".to_string(),
+            title: "Devolutions PEDM API".to_owned(),
             ..Info::default()
         },
         ..OpenApi::default()
