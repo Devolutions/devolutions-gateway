@@ -1,32 +1,40 @@
-use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor};
+use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf};
 use now_proto_pdu::NowMessage;
 
 /// Reconstructs Now messages from a stream of bytes.
 #[derive(Default)]
 pub struct NowMessageDissector {
-    pdu_body_buffer: Vec<u8>,
+    start_pos: usize,
+    pdu_body_buffer: WriteBuf,
 }
 
 impl NowMessageDissector {
     pub fn dissect(&mut self, data_chunk: &[u8]) -> Result<Vec<NowMessage<'static>>, anyhow::Error> {
         let mut messages = Vec::new();
 
-        self.pdu_body_buffer.extend_from_slice(data_chunk);
+        self.pdu_body_buffer.write_slice(data_chunk);
 
         loop {
-            let mut cursor = ReadCursor::new(&self.pdu_body_buffer);
+            let usable_chunk_size = self
+                .pdu_body_buffer
+                .filled_len()
+                .checked_sub(self.start_pos)
+                .expect("start_pos is greater than filled_len");
+            let mut cursor = ReadCursor::new(&self.pdu_body_buffer.filled()[self.start_pos..]);
+
             match NowMessage::decode(&mut cursor) {
                 Ok(message) => {
                     messages.push(message.into_owned());
                     let pos = cursor.pos();
 
-                    if pos == self.pdu_body_buffer.len() {
+                    if pos == usable_chunk_size {
                         // All messages were read, clear the buffer
                         self.pdu_body_buffer.clear();
+                        self.start_pos = 0;
                         return Ok(messages);
                     }
                     // Remove the read bytes from the buffer
-                    self.pdu_body_buffer.drain(0..pos);
+                    self.start_pos += pos;
                 }
                 Err(DecodeError {
                     kind: DecodeErrorKind::NotEnoughBytes { .. },
