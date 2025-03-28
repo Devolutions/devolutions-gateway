@@ -1,24 +1,18 @@
 use tokio::sync::mpsc::Sender;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, BOOL, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HANDLE, HWND, LPARAM, WAIT_EVENT,
-    WAIT_OBJECT_0, WPARAM,
+    CloseHandle, GetLastError, BOOL, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0,
+    WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::Console::{
-    AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
-};
 use windows::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, GetProcessHandleFromHwnd, TerminateProcess, WaitForMultipleObjects, INFINITE,
-    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
+    CreateProcessW, GetExitCodeProcess, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_CONSOLE,
+    CREATE_NEW_PROCESS_GROUP, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
 };
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, PostMessageW, WM_CLOSE};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, WM_QUIT};
 
-use now_proto_pdu::{
-    NowExecCancelRspMsg, NowExecDataFlags, NowExecDataMsg, NowExecResultMsg, NowMessage, NowSeverity, NowStatus,
-    NowStatusCode, NowVarBuf,
-};
+use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::Process;
@@ -28,29 +22,35 @@ use win_api_wrappers::utils::{Pipe, WideString};
 use crate::dvc::channel::{winapi_signaled_mpsc_channel, WinapiSignaledReceiver, WinapiSignaledSender};
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::{ensure_overlapped_io_result, IoRedirectionPipes};
-use crate::dvc::status::{ExecAgentError, ExecResultKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
+    #[error(transparent)]
+    NowStatus(NowStatusError),
     #[error("Execution was aborted by user")]
     Aborted,
-    #[error(transparent)]
-    Windows(#[from] windows::core::Error),
-    #[error("Execution failed with agent error: {}", .0.0)]
-    Agent(ExecAgentError),
+    #[error("Failed to encode now-proto message")]
+    Encode(#[from] now_proto_pdu::ironrdp_core::EncodeError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
 
-impl From<ExecAgentError> for ExecError {
-    fn from(error: ExecAgentError) -> Self {
-        ExecError::Agent(error)
+impl From<windows::core::Error> for ExecError {
+    fn from(error: windows::core::Error) -> Self {
+        #[allow(clippy::cast_sign_loss)] // Not relevant for Windows error codes.
+        ExecError::NowStatus(NowStatusError::new_winapi(error.code().0 as u32))
+    }
+}
+
+impl<T: Send + Sync + 'static> From<tokio::sync::mpsc::error::SendError<T>> for ExecError {
+    fn from(error: tokio::sync::mpsc::error::SendError<T>) -> Self {
+        ExecError::Other(error.into())
     }
 }
 
 #[derive(Debug)]
 pub enum ProcessIoInputEvent {
-    AbortExecution(NowStatus),
+    AbortExecution(u32),
     CancelExecution,
     DataIn {
         data: Vec<u8>,
@@ -63,19 +63,45 @@ pub enum ProcessIoInputEvent {
 
 /// Message, sent from Process IO thread to task to finalize process execution.
 #[derive(Debug)]
-pub enum ProcessIoNotification {
-    Terminated { session_id: u32 },
+pub enum ServerChannelEvent {
+    CloseChannel,
+    SessionStarted {
+        session_id: u32,
+    },
+    SessionDataOut {
+        session_id: u32,
+        stream: NowExecDataStreamKind,
+        last: bool,
+        data: Vec<u8>,
+    },
+    SessionCancelSuccess {
+        session_id: u32,
+    },
+    SessionCancelFailed {
+        session_id: u32,
+        error: NowStatusError,
+    },
+    SessionExited {
+        session_id: u32,
+        exit_code: u32,
+    },
+    SessionFailed {
+        session_id: u32,
+        error: ExecError,
+    },
 }
 
 pub struct WinApiProcessCtx {
     session_id: u32,
 
-    dvc_tx: WinapiSignaledSender<NowMessage>,
     input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
+    io_notification_tx: Sender<ServerChannelEvent>,
 
     stdout_read_pipe: Option<Pipe>,
     stderr_read_pipe: Option<Pipe>,
     stdin_write_pipe: Option<Pipe>,
+
+    pid: u32,
 
     // NOTE: Order of fields is important, as process_handle must be dropped last in automatically
     // generated destructor, after all pipes were closed.
@@ -84,7 +110,7 @@ pub struct WinApiProcessCtx {
 
 impl WinApiProcessCtx {
     // Returns process exit code.
-    pub fn start_io_loop(&mut self) -> Result<u16, ExecError> {
+    pub fn start_io_loop(&mut self) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
         info!(session_id, "Process IO loop has started");
@@ -96,7 +122,7 @@ impl WinApiProcessCtx {
         let wait_events = vec![
             stdout_read_event.raw(),
             stderr_read_event.raw(),
-            self.input_event_rx.raw_event(),
+            self.input_event_rx.raw_wait_handle(),
             self.process.handle.raw(),
         ];
 
@@ -109,9 +135,6 @@ impl WinApiProcessCtx {
 
         let mut stdout_buffer = vec![0u8; 4 * 1024];
         let mut stderr_buffer = vec![0u8; 4 * 1024];
-
-        let mut stdout_first_chunk = true;
-        let mut stderr_first_chunk = true;
 
         let mut overlapped_stdout = OVERLAPPED {
             hEvent: stdout_read_event.raw(),
@@ -153,6 +176,11 @@ impl WinApiProcessCtx {
 
         ensure_overlapped_io_result(stderr_read_result)?;
 
+        // Signal client side about started execution
+
+        self.io_notification_tx
+            .blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+
         info!(session_id, "Process IO is ready for async loop execution");
         loop {
             // SAFETY: No preconditions.
@@ -162,12 +190,6 @@ impl WinApiProcessCtx {
                 WAIT_OBJECT_PROCESS_EXIT => {
                     info!(session_id, "Process has signaled exit");
 
-                    // Restore Ctrl+C handler for current process, in case it was disabled by
-                    // CancelExecution event.
-
-                    // SAFETY: No preconditions.
-                    unsafe { SetConsoleCtrlHandler(None, false)? };
-
                     let mut code: u32 = 0;
                     // SAFETY: process_handle is valid and `code` is a valid stack memory, therefore
                     // it is safe to call GetExitCodeProcess.
@@ -175,7 +197,8 @@ impl WinApiProcessCtx {
                         GetExitCodeProcess(self.process.handle.raw(), &mut code as *mut _)?;
                     }
 
-                    return Ok(u16::try_from(code).unwrap_or(0xFFFF));
+                    // Return standard Windows exit code.
+                    return Ok(code);
                 }
                 WAIT_OBJECT_INPUT_MESSAGE => {
                     let process_io_message = self.input_event_rx.try_recv()?;
@@ -183,12 +206,12 @@ impl WinApiProcessCtx {
                     trace!(session_id, ?process_io_message, "Received process IO message");
 
                     match process_io_message {
-                        ProcessIoInputEvent::AbortExecution(status) => {
+                        ProcessIoInputEvent::AbortExecution(exit_code) => {
                             info!(session_id, "Aborting process execution by user request");
 
                             // Terminate process with requested status.
                             // SAFETY: No preconditions.
-                            unsafe { TerminateProcess(self.process.handle.raw(), status.code().0.into())? };
+                            unsafe { TerminateProcess(self.process.handle.raw(), exit_code)? };
 
                             return Err(ExecError::Aborted);
                         }
@@ -196,8 +219,8 @@ impl WinApiProcessCtx {
                             info!(session_id, "Cancelling process execution by user request");
 
                             let mut windows_enum_ctx = EnumWindowsContext {
-                                expected_process: self.process.handle.raw(),
-                                windows: Vec::new(),
+                                expected_pid: self.pid,
+                                threads: Default::default(),
                             };
 
                             // SAFETY: EnumWindows is safe to call with valid callback function
@@ -212,71 +235,23 @@ impl WinApiProcessCtx {
                             }?;
 
                             // For GUI windows - send WM_CLOSE message
-                            if !windows_enum_ctx.windows.is_empty() {
+                            if !windows_enum_ctx.threads.is_empty() {
                                 // Send cancel message to all windows
-                                for hwnd in windows_enum_ctx.windows {
-                                    // SAFETY: No preconditions.
-                                    let _ = unsafe { PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) };
+                                for thread in windows_enum_ctx.threads {
+                                    // SAFETY: No outstanding preconditions.
+                                    let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
                                 }
-
-                                // Acknowledge client that cancel request was sent.
-                                self.dvc_tx.blocking_send(
-                                    NowExecCancelRspMsg::new(
-                                        session_id,
-                                        NowStatus::new(NowSeverity::Info, NowStatusCode::SUCCESS),
-                                    )
-                                    .into(),
-                                )?;
-
-                                // Wait for process to exit
-                                continue;
                             }
 
-                            // For console applications - send CTRL+C
-                            // SAFETY: No preconditions.
+                            // TODO: Figure out how to send CTRL+C to console applications.
 
-                            let pid = self.process.pid();
+                            // Acknowledge client that cancel request has been processed
+                            // successfully.
+                            self.io_notification_tx
+                                .blocking_send(ServerChannelEvent::SessionCancelSuccess { session_id })?;
 
-                            // SAFETY: No preconditions.
-                            if pid != 0 && unsafe { AttachConsole(pid) }.is_ok() {
-                                // Disable Ctrl+C handler for current process. Will be re-enabled,
-                                // when process exits (see WAIT_OBJECT_PROCESS_EXIT above).
-                                // SAFETY: No preconditions.
-                                unsafe { SetConsoleCtrlHandler(None, true)? };
-
-                                // Send Ctrl+C to console application
-                                // SAFETY: No preconditions.
-                                unsafe { GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)? };
-
-                                // Detach from console
-                                // SAFETY: No preconditions.
-                                unsafe { FreeConsole()? };
-
-                                // Acknowledge client that cancel request was sent successfully.
-                                self.dvc_tx.blocking_send(
-                                    NowExecCancelRspMsg::new(
-                                        session_id,
-                                        NowStatus::new(NowSeverity::Info, NowStatusCode::SUCCESS)
-                                            .with_kind(ExecResultKind::SESSION_ERROR_AGENT.0)
-                                            .expect("BUG: Status kind is out of range"),
-                                    )
-                                    .into(),
-                                )?;
-
-                                // wait for process to exit
-                                continue;
-                            }
-
-                            // Neither GUI nor console application, send cancel response with error
-                            self.dvc_tx.blocking_send(
-                                NowExecCancelRspMsg::new(
-                                    session_id,
-                                    NowStatus::new(NowSeverity::Error, NowStatusCode::FAILURE)
-                                        .with_kind(ExecResultKind::SESSION_ERROR_AGENT.0)
-                                        .expect("BUG: Status kind is out of range"),
-                                )
-                                .into(),
-                            )?;
+                            // wait for process to exit
+                            continue;
                         }
                         ProcessIoInputEvent::DataIn { data, last } => {
                             trace!(session_id, "Received data to write to stdin pipe");
@@ -318,13 +293,6 @@ impl WinApiProcessCtx {
                         continue;
                     };
 
-                    let flags = if stdout_first_chunk {
-                        stdout_first_chunk = false;
-                        NowExecDataFlags::FIRST | NowExecDataFlags::STDOUT
-                    } else {
-                        NowExecDataFlags::STDOUT
-                    };
-
                     let mut bytes_read: u32 = 0;
 
                     // SAFETY: Destination buffer is valid during the lifetime of this function,
@@ -344,28 +312,27 @@ impl WinApiProcessCtx {
                             ERROR_HANDLE_EOF | ERROR_BROKEN_PIPE => {
                                 // EOF on stdout pipe, close it and send EOF message to message_tx
                                 self.stdout_read_pipe = None;
-                                let exec_message = NowExecDataMsg::new(
-                                    flags | NowExecDataFlags::LAST,
-                                    session_id,
-                                    NowVarBuf::new(Vec::new())
-                                        .expect("BUG: empty buffer should always fit into NowVarBuf"),
-                                );
 
-                                self.dvc_tx.blocking_send(exec_message.into())?;
+                                self.io_notification_tx
+                                    .blocking_send(ServerChannelEvent::SessionDataOut {
+                                        session_id,
+                                        stream: NowExecDataStreamKind::Stdout,
+                                        last: true,
+                                        data: Vec::new(),
+                                    })?;
                             }
                             _code => return Err(err.into()),
                         }
                         continue;
                     }
 
-                    let data_message = NowExecDataMsg::new(
-                        flags,
-                        session_id,
-                        NowVarBuf::new(stdout_buffer[..bytes_read as usize].to_vec())
-                            .expect("BUG: read buffer should always fit into NowVarBuf"),
-                    );
-
-                    self.dvc_tx.blocking_send(data_message.into())?;
+                    self.io_notification_tx
+                        .blocking_send(ServerChannelEvent::SessionDataOut {
+                            session_id,
+                            stream: NowExecDataStreamKind::Stdout,
+                            last: false,
+                            data: stdout_buffer[..bytes_read as usize].to_vec(),
+                        })?;
 
                     // Schedule next overlapped read
                     // SAFETY: pipe is valid to read from, as long as it is not closed.
@@ -390,13 +357,6 @@ impl WinApiProcessCtx {
                         continue;
                     };
 
-                    let flags = if stderr_first_chunk {
-                        stderr_first_chunk = false;
-                        NowExecDataFlags::FIRST | NowExecDataFlags::STDERR
-                    } else {
-                        NowExecDataFlags::STDERR
-                    };
-
                     let mut bytes_read: u32 = 0;
 
                     // SAFETY: Destination buffer is valid during the lifetime of this function,
@@ -416,28 +376,26 @@ impl WinApiProcessCtx {
                             ERROR_HANDLE_EOF | ERROR_BROKEN_PIPE => {
                                 // EOF on stderr pipe, close it and send EOF message to message_tx
                                 self.stderr_read_pipe = None;
-                                let exec_message = NowExecDataMsg::new(
-                                    flags | NowExecDataFlags::LAST,
-                                    session_id,
-                                    NowVarBuf::new(Vec::new())
-                                        .expect("BUG: empty buffer should always fit into NowVarBuf"),
-                                );
-
-                                self.dvc_tx.blocking_send(exec_message.into())?;
+                                self.io_notification_tx
+                                    .blocking_send(ServerChannelEvent::SessionDataOut {
+                                        session_id,
+                                        stream: NowExecDataStreamKind::Stderr,
+                                        last: true,
+                                        data: Vec::new(),
+                                    })?;
                             }
                             _code => return Err(err.into()),
                         }
                         continue;
                     }
 
-                    let data_message = NowExecDataMsg::new(
-                        flags,
-                        session_id,
-                        NowVarBuf::new(stderr_buffer.as_slice())
-                            .expect("BUG: read buffer should always fit into NowVarBuf"),
-                    );
-
-                    self.dvc_tx.blocking_send(data_message.into())?;
+                    self.io_notification_tx
+                        .blocking_send(ServerChannelEvent::SessionDataOut {
+                            session_id,
+                            stream: NowExecDataStreamKind::Stderr,
+                            last: false,
+                            data: stderr_buffer[..bytes_read as usize].to_vec(),
+                        })?;
 
                     // Schedule next overlapped read
                     // SAFETY: pipe is valid to read from, as long as it is not closed.
@@ -472,7 +430,7 @@ pub struct WinApiProcessBuilder {
 impl WinApiProcessBuilder {
     pub fn new(executable: &str) -> Self {
         Self {
-            executable: executable.to_string(),
+            executable: executable.to_owned(),
             command_line: String::new(),
             current_directory: String::new(),
             temp_files: Vec::new(),
@@ -486,14 +444,14 @@ impl WinApiProcessBuilder {
     }
 
     #[must_use]
-    pub fn with_command_line(mut self, command_line: String) -> Self {
-        self.command_line = command_line;
+    pub fn with_command_line(mut self, command_line: &str) -> Self {
+        self.command_line = command_line.to_owned();
         self
     }
 
     #[must_use]
-    pub fn with_current_directory(mut self, current_directory: String) -> Self {
-        self.current_directory = current_directory;
+    pub fn with_current_directory(mut self, current_directory: &str) -> Self {
+        self.current_directory = current_directory.to_owned();
         self
     }
 
@@ -501,12 +459,11 @@ impl WinApiProcessBuilder {
     pub fn run(
         self,
         session_id: u32,
-        dvc_tx: WinapiSignaledSender<NowMessage>,
-        io_notification_tx: Sender<ProcessIoNotification>,
-    ) -> anyhow::Result<WinApiProcess> {
+        io_notification_tx: Sender<ServerChannelEvent>,
+    ) -> Result<WinApiProcess, ExecError> {
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
             .trim_end()
-            .to_string();
+            .to_owned();
         let current_directory = self.current_directory.clone();
 
         info!(
@@ -555,7 +512,7 @@ impl WinApiProcessBuilder {
                 Some(security_attributes.as_ptr()),
                 None,
                 true,
-                Default::default(),
+                NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
                 None,
                 current_directory_wide.as_pcwstr(),
                 &startup_info as *const _,
@@ -576,8 +533,10 @@ impl WinApiProcessBuilder {
 
         let process_handle = Process::from(
             // SAFETY: process_information is valid and contains valid process handle.
-            unsafe { Handle::new_owned(process_information.hProcess)? },
+            unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
         );
+
+        let pid = process_information.dwProcessId;
 
         // Create channel for `task` -> `Process IO thread` communication
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
@@ -585,64 +544,22 @@ impl WinApiProcessBuilder {
         let join_handle = std::thread::spawn(move || {
             let mut process_ctx = WinApiProcessCtx {
                 session_id,
-                dvc_tx: dvc_tx.clone(),
                 input_event_rx,
+                io_notification_tx: io_notification_tx.clone(),
                 stdout_read_pipe: Some(stdout_read_pipe),
                 stderr_read_pipe: Some(stderr_read_pipe),
                 stdin_write_pipe: Some(stdin_write_pipe),
+                pid,
                 process: process_handle,
             };
 
-            let status = match process_ctx.start_io_loop() {
-                Ok(status) => {
-                    info!(session_id, "Process execution completed with exit code {}", status);
-                    NowStatus::new(NowSeverity::Info, NowStatusCode(status))
-                        .with_kind(ExecResultKind::EXITED.0)
-                        .expect("BUG: Status kind is out of range")
-                }
-                Err(ExecError::Aborted) => {
-                    info!(session_id, "Process execution aborted by user");
-
-                    NowStatus::new(NowSeverity::Info, NowStatusCode::SUCCESS)
-                        .with_kind(ExecResultKind::ABORTED.0)
-                        .expect("BUG: Status kind is out of range")
-                }
-                Err(ExecError::Windows(error)) => {
-                    error!(%error, session_id, "Process execution thread failed with WinAPI error");
-
-                    let code = match u16::try_from(error.code().0) {
-                        Ok(code) => NowStatusCode(code),
-                        Err(_) => NowStatusCode::FAILURE,
-                    };
-
-                    NowStatus::new(NowSeverity::Error, code)
-                        .with_kind(ExecResultKind::SESSION_ERROR_SYSETM.0)
-                        .expect("BUG: Status kind is out of range")
-                }
-                Err(ExecError::Agent(error)) => {
-                    error!(?error, session_id, "Process execution thread failed with agent error");
-
-                    NowStatus::new(NowSeverity::Error, NowStatusCode(error.0))
-                        .with_kind(ExecResultKind::SESSION_ERROR_AGENT.0)
-                        .expect("BUG: Status kind is out of range")
-                }
-                Err(ExecError::Other(error)) => {
-                    error!(%error, session_id, "Process execution thread failed with unknown error");
-
-                    NowStatus::new(NowSeverity::Error, NowStatusCode(ExecAgentError::OTHER.0))
-                        .with_kind(ExecResultKind::SESSION_ERROR_AGENT.0)
-                        .expect("BUG: Status kind is out of range")
-                }
+            let notification = match process_ctx.start_io_loop() {
+                Ok(exit_code) => ServerChannelEvent::SessionExited { session_id, exit_code },
+                Err(error) => ServerChannelEvent::SessionFailed { session_id, error },
             };
 
-            let message = NowExecResultMsg::new(session_id, status);
-
-            if let Err(error) = dvc_tx.blocking_send(message.into()) {
-                error!(%error, session_id, "Failed to send process result message over channel");
-            }
-
-            if let Err(error) = io_notification_tx.blocking_send(ProcessIoNotification::Terminated { session_id }) {
-                error!(%error, session_id, "Failed to send termination message to task; This may cause resource leak!");
+            if let Err(error) = io_notification_tx.blocking_send(notification) {
+                error!(%error, session_id, "Failed to send io notification to task; This may cause resource leak!");
             }
         });
 
@@ -662,9 +579,9 @@ pub struct WinApiProcess {
 }
 
 impl WinApiProcess {
-    pub async fn abort_execution(&self, status: NowStatus) -> anyhow::Result<()> {
+    pub async fn abort_execution(&self, exit_code: u32) -> anyhow::Result<()> {
         self.input_event_tx
-            .send(ProcessIoInputEvent::AbortExecution(status))
+            .send(ProcessIoInputEvent::AbortExecution(exit_code))
             .await
     }
 
@@ -689,25 +606,32 @@ impl WinApiProcess {
 }
 
 struct EnumWindowsContext {
-    expected_process: HANDLE,
-    windows: Vec<HWND>,
+    expected_pid: u32,
+    threads: Vec<u32>,
 }
 
-unsafe extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    // SAFETY: lparam.0 should be set to valid EnumWindowsContext memory by caller.
+extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    // SAFETY: lparam.0 set to valid EnumWindowsContext memory by caller (Windows itself).
     let enum_ctx = unsafe { &mut *(lparam.0 as *mut EnumWindowsContext) };
 
-    // SAFETY: No preconditions.
-    let process = unsafe { GetProcessHandleFromHwnd(hwnd) };
-
-    if process.is_invalid() {
+    let mut pid: u32 = 0;
+    // SAFETY: pid points to valid memory.
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut _));
+    }
+    if pid == 0 || pid != enum_ctx.expected_pid {
         // Continue enumeration.
         return true.into();
     }
 
-    if process == enum_ctx.expected_process {
-        enum_ctx.windows.push(hwnd);
+    // SAFETY: FFI call with no outstanding preconditions.
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
+    if thread_id == 0 {
+        // Continue enumeration.
+        return true.into();
     }
+
+    enum_ctx.threads.push(thread_id);
 
     true.into()
 }
