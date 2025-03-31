@@ -1,5 +1,5 @@
 use anyhow::Context;
-use network_scanner::interfaces::{self, get_network_interfaces, Filter};
+use network_scanner::interfaces::{get_network_interfaces, Filter};
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
