@@ -1,15 +1,17 @@
-#![allow(unused_crate_dependencies)]
+
+use anyhow::Context;
+use network_scanner::interfaces::{self, get_network_interfaces, Filter};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::SubscriberBuilder::default()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_line_number(true)
-        .init();
+pub async fn main() -> anyhow::Result<()> {
+    
+    let interfaces = get_network_interfaces(Filter::default())
+        .await
+        .context("Failed to get network interfaces")?;
 
-    let interfaces = network_scanner::interfaces::get_network_interfaces().await?;
     for interface in interfaces {
-        tracing::info!("{:?}", interface)
+        println!("{:#?}", interface);
     }
+
     Ok(())
 }

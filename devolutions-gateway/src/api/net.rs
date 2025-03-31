@@ -2,7 +2,7 @@ use crate::http::HttpError;
 use crate::token::{ApplicationProtocol, Protocol};
 use crate::DgwState;
 use axum::extract::ws::Message;
-use axum::extract::WebSocketUpgrade;
+use axum::extract::{Query, WebSocketUpgrade};
 use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::interfaces::{self, MacAddr};
@@ -26,7 +26,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
-    query_params: axum::extract::Query<NetworkScanQueryParams>,
+    query_params: Query<NetworkScanQueryParams>,
 ) -> Result<Response, HttpError> {
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
@@ -188,6 +188,12 @@ impl NetworkScanResponse {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct NetworkConfigParams {
+    pub ignore_ipv6: Option<bool>,
+    pub include_loopback: Option<bool>,
+}
+
 /// Lists network interfaces
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
@@ -203,8 +209,19 @@ impl NetworkScanResponse {
     ),
     security(("netscan_token" = [])),
 ))]
-pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
-    let interfaces = interfaces::get_network_interfaces()
+pub async fn get_net_config(
+    Query(params): Query<NetworkConfigParams>,
+    _token: crate::extract::NetScanToken,
+) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
+    let mut filter = interfaces::Filter::default();
+    if let Some(ignore_ipv6) = params.ignore_ipv6 {
+        filter.ignore_ipv6 = ignore_ipv6;
+    }
+    if let Some(include_loopback) = params.include_loopback {
+        filter.include_loopback = include_loopback;
+    }
+
+    let interfaces = interfaces::get_network_interfaces(filter)
         .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
@@ -225,7 +242,7 @@ pub struct InterfaceAddress {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
-    pub name: String,
+    pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
@@ -239,14 +256,20 @@ pub struct NetworkInterface {
     pub gateways: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub nameservers: Vec<IpAddr>,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub name: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<IpAddr>))]
+    pub ip_adresses: Vec<IpAddr>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
     fn from(iface: interfaces::NetworkInterface) -> Self {
         Self {
+            id: iface.id,
             name: iface.name,
             description: iface.description,
             mac_address: iface.mac_address,
+            ip_adresses: iface.ip_adresses,
             addresses: iface
                 .addresses
                 .into_iter()
