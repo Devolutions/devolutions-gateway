@@ -188,9 +188,12 @@ impl NetworkScanResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize,utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct NetworkConfigParams {
+    #[param(example = "false", default = "true")]
     pub ignore_ipv6: Option<bool>,
+    #[param(example = "false", default = "false")]
     pub include_loopback: Option<bool>,
 }
 
