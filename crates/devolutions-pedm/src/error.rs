@@ -11,6 +11,7 @@ use win_api_wrappers::raw::Win32::Foundation::{
     ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_INVALID_PARAMETER, E_UNEXPECTED,
 };
 
+/// The original crate-wide error type.
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) enum Error {

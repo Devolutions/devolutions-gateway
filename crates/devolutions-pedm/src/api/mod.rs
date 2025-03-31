@@ -1,31 +1,28 @@
-use std::fmt::Debug;
+use core::{fmt, task};
 use std::os::windows::io::AsRawHandle;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
-use aide::axum::routing::{get, post};
 use aide::axum::ApiRouter;
 use aide::openapi::{Info, OpenApi};
-use anyhow::Result;
 use axum::extract::connect_info::Connected;
 use axum::extract::{ConnectInfo, Request};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::Json;
-use devolutions_pedm_shared::policy::User;
-use elevate_session::post_elevate_session;
-use elevate_temporary::post_elevate_temporary;
-use hyper::body::Incoming;
+use axum::{Json, Router};
+use camino::Utf8PathBuf;
+use futures_util::future::BoxFuture;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
-use launch::post_launch;
-use logs::get_logs;
-use revoke::post_revoke;
-use status::get_status;
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+use tower::Layer;
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
-use tracing::error;
+use tracing::{error, info};
+
+use devolutions_pedm_shared::policy::User;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
@@ -36,15 +33,24 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
 use win_api_wrappers::utils::Pipe;
 
+use elevate_session::elevate_session;
+use elevate_temporary::elevate_temporary;
+use launch::post_launch;
+use revoke::post_revoke;
+use state::{AppState, AppStateError};
+use status::get_status;
+
+use crate::db::DbError;
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
 
 mod elevate_session;
 mod elevate_temporary;
+mod err;
 mod launch;
-mod logs;
 mod policy;
 mod revoke;
+pub(crate) mod state;
 mod status;
 
 #[derive(Debug, Clone)]
@@ -68,12 +74,12 @@ impl Connected<&NamedPipeServer> for RawNamedPipeConnectInfo {
 }
 
 async fn named_pipe_middleware(
-    ConnectInfo(raw_named_pipe_info): ConnectInfo<RawNamedPipeConnectInfo>,
+    ConnectInfo(info): ConnectInfo<RawNamedPipeConnectInfo>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, Error> {
     let pipe = Pipe {
-        handle: raw_named_pipe_info.handle.try_clone()?,
+        handle: info.handle.try_clone()?,
     };
 
     let token = Arc::new(pipe.client_primary_token()?);
@@ -88,7 +94,7 @@ async fn named_pipe_middleware(
     Ok(next.run(request).await)
 }
 
-fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
+fn create_pipe(pipe_name: &'static str) -> anyhow::Result<NamedPipeServer> {
     let pipe = ServerOptions::new().write_dac(true).create(pipe_name)?;
 
     let dacl = Acl::new()?.set_entries(&[
@@ -124,14 +130,13 @@ fn create_pipe(pipe_name: &'static str) -> Result<NamedPipeServer> {
     Ok(pipe)
 }
 
-pub(crate) fn api_router() -> ApiRouter {
+pub(crate) fn api_router() -> ApiRouter<AppState> {
     ApiRouter::new()
-        .api_route("/elevate/temporary", post(post_elevate_temporary))
-        .api_route("/elevate/session", post(post_elevate_session))
-        .api_route("/launch", post(post_launch))
-        .api_route("/revoke", post(post_revoke))
-        .api_route("/logs", get(get_logs))
-        .api_route("/status", get(get_status))
+        .api_route("/elevate/temporary", aide::axum::routing::post(elevate_temporary))
+        .api_route("/elevate/session", aide::axum::routing::post(elevate_session))
+        .api_route("/launch", aide::axum::routing::post(post_launch))
+        .api_route("/revoke", aide::axum::routing::post(post_revoke))
+        .api_route("/status", aide::axum::routing::get(get_status))
         .nest("/policy", policy::policy_router())
         .layer(middleware::from_fn(named_pipe_middleware))
         .layer(TimeoutLayer::new(Duration::from_secs(5)))
@@ -155,34 +160,176 @@ pub fn openapi() -> OpenApi {
     api
 }
 
-pub(crate) async fn serve(pipe_name: &'static str) -> Result<()> {
-    let app = api_router();
+/// A handler that is not part of the API.
+///
+async fn health_check() -> &'static str {
+    "OK"
+}
+
+pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) -> Result<(), ServeError> {
+    let state = AppState::load(config_path).await?;
+
+    // a plain Axum router
+    let hello_router = Router::new().route("/health", axum::routing::get(health_check));
+
+    let app = api_router()
+        .merge(ApiRouter::from(hello_router))
+        .layer(LogLayer::new(state.clone())) // apply to the merged router
+        .with_state(state.clone());
 
     let mut make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();
 
     let mut server = create_pipe(pipe_name)?;
+
+    // log the server startup
+    let run_id = state.db.log_server_startup(pipe_name).await?;
+    info!("Started server at {pipe_name} with run ID {run_id}");
+    info!(
+        "Starting request ID counter at {}",
+        state.req_counter.load(Ordering::Relaxed)
+    );
+
     loop {
         server.connect().await?;
         let client = server;
 
         server = create_pipe(pipe_name)?;
 
-        let tower_service = make_service.call(&client).await?;
+        let tower_service = make_service.call(&client).await.unwrap(); // return type is Infallible
         tokio::spawn(async move {
             let socket = TokioIo::new(client);
 
-            let hyper_service =
-                hyper::service::service_fn(move |request: Request<Incoming>| tower_service.clone().call(request));
+            let hyper_service = hyper::service::service_fn(move |req| tower_service.clone().call(req));
 
-            if let Err(error) = server::conn::auto::Builder::new(TokioExecutor::new())
+            if let Err(e) = server::conn::auto::Builder::new(TokioExecutor::new())
                 .http1_only()
                 .http1()
                 .keep_alive(false)
                 .serve_connection(socket, hyper_service)
                 .await
             {
-                error!(%error, "Failed to serve connection");
+                error!(%e, "Failed to serve connection");
             }
         });
+    }
+}
+
+#[derive(Debug)]
+pub enum ServeError {
+    TokioIo(tokio::io::Error),
+    Anyhow(String),
+    AppState(AppStateError),
+    Db(DbError),
+}
+
+impl core::error::Error for ServeError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::TokioIo(e) => Some(e),
+            Self::Anyhow(_) => None,
+            Self::AppState(e) => Some(e),
+            Self::Db(e) => Some(e),
+        }
+    }
+}
+
+impl fmt::Display for ServeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TokioIo(e) => e.fmt(f),
+            Self::Anyhow(s) => write!(f, "{s}"),
+            Self::AppState(e) => e.fmt(f),
+            Self::Db(e) => e.fmt(f),
+        }
+    }
+}
+
+impl From<tokio::io::Error> for ServeError {
+    fn from(e: tokio::io::Error) -> Self {
+        Self::TokioIo(e)
+    }
+}
+impl From<anyhow::Error> for ServeError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Anyhow(e.to_string())
+    }
+}
+impl From<AppStateError> for ServeError {
+    fn from(e: AppStateError) -> Self {
+        Self::AppState(e)
+    }
+}
+impl From<DbError> for ServeError {
+    fn from(e: DbError) -> Self {
+        Self::Db(e)
+    }
+}
+
+/// A layer that logs HTTP requests and responses to the database.
+#[derive(Clone)]
+struct LogLayer {
+    state: AppState,
+}
+
+impl LogLayer {
+    pub(crate) fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+impl<S> Layer<S> for LogLayer {
+    type Service = LogService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        LogService {
+            inner,
+            state: self.state.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct LogService<S> {
+    inner: S,
+    state: AppState,
+}
+
+impl<S> Service<Request> for LogService<S>
+where
+    S: Service<Request, Response = Response> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request) -> Self::Future {
+        let req_id = self.state.req_counter.fetch_add(1, Ordering::Relaxed) + 1;
+
+        // Make the request ID available to handlers.
+        req.extensions_mut().insert(req_id);
+
+        let db = Arc::clone(&self.state.db);
+        let method = req.method().clone();
+        let path = req.uri().path().to_owned();
+
+        let fut = self.inner.call(req);
+
+        Box::pin(async move {
+            let resp: Response = fut.await?;
+            let status_code = resp.status();
+            info!("request ID: {req_id}, status code: {}", status_code);
+            tokio::spawn(async move {
+                #[expect(clippy::cast_possible_wrap)]
+                db.log_http_request(req_id, method.as_str(), &path, status_code.as_u16() as i16)
+                    .await?;
+                Ok::<_, DbError>(())
+            });
+            Ok(resp)
+        })
     }
 }
