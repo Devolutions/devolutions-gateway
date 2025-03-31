@@ -188,7 +188,7 @@ impl NetworkScanResponse {
     }
 }
 
-#[derive(Debug, Deserialize,utoipa::IntoParams)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct NetworkConfigParams {
     #[param(example = "false", default = "true")]
