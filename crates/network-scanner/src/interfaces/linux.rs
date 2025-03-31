@@ -120,7 +120,6 @@ impl TryFrom<&LinkInfo> for NetworkInterface {
 }
 
 fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Result<NetworkInterface> {
-
     let routes = link_info
         .routes
         .iter()
