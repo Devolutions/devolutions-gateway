@@ -16,12 +16,12 @@ impl From<ipconfig::Adapter> for NetworkInterface {
         let mac_address: Option<MacAddr> = adapter.physical_address().and_then(|addr| addr.try_into().ok());
 
         NetworkInterface {
-            id: adapter.adapter_name().to_owned(),
+            id: Some(adapter.adapter_name().to_owned()),
             name: adapter.friendly_name().to_owned(),
             description: Some(adapter.description().to_owned()),
             mac_address,
-            ip_adresses: adapter.ip_addresses().iter().map(|ip| *ip).collect(),
-            addresses: adapter
+            ip_adresses: adapter.ip_addresses().to_vec(),
+            routes: adapter
                 .prefixes()
                 .iter()
                 .map(|(ip, prefix)| super::InterfaceAddress {
