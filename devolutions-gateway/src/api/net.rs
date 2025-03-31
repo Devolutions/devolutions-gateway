@@ -188,12 +188,9 @@ impl NetworkScanResponse {
     }
 }
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
+#[derive(Debug, Deserialize)]
 pub struct NetworkConfigParams {
-    #[param(example = "false", default = "true")]
     pub ignore_ipv6: Option<bool>,
-    #[param(example = "false", default = "false")]
     pub include_loopback: Option<bool>,
 }
 
@@ -203,6 +200,10 @@ pub struct NetworkConfigParams {
     operation_id = "GetNetConfig",
     tag = "Net",
     path = "/jet/net/config",
+    params(
+        (name = "ignore_ipv6", description = "Ignore IPv6 addresses", type = "boolean", example = false),
+        (name = "include_loopback", description = "Include loopback interfaces", type = "boolean", example = true),
+    ),
     responses(
         (status = 200, description = "Network interfaces", body = [Vec<NetworkInterface>]),
         (status = 400, description = "Bad request"),
