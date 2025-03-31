@@ -12,7 +12,7 @@ use rtnetlink::{new_connection, Handle};
 
 use super::InterfaceAddress;
 
-pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
+pub(crate) async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
     tokio::spawn(connection);
     let mut links_info = vec![];
@@ -47,15 +47,10 @@ pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
 
         let address = addresses
             .iter()
-            .map(|addr| AddressInfo::try_from(addr.clone()))
-            .collect::<Result<Vec<_>, _>>()
-            .inspect_err(|e| error!(error = format!("{e:#}"), "Failed to parse address info"));
+            .filter_map(|addr_msg| try_to_ip(addr_msg.clone()))
+            .collect::<Vec<_>>();
 
-        let Ok(address) = address else {
-            continue;
-        };
-
-        link.addresses = address;
+        link.ip_addresses = address;
         links_info.push(link);
     }
 
@@ -126,7 +121,7 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
         .filter_map(|route_info| {
             route_info.destination.map(|dest| InterfaceAddress {
                 ip: dest,
-                prefixlen: u32::try_from(route_info.destination_prefix).expect("u8 can safely be converted to u32"),
+                prefixlen: u32::from(route_info.destination_prefix),
             })
         })
         .collect();
@@ -137,11 +132,7 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
         .filter_map(|route_info| route_info.gateway)
         .collect::<Vec<_>>();
 
-    let ip_adresses = link_info
-        .addresses
-        .iter()
-        .map(|address_info| address_info.address)
-        .collect();
+    let ip_adresses = link_info.ip_addresses.clone();
 
     Ok(NetworkInterface {
         name: link_info.name.clone(),
@@ -162,7 +153,7 @@ struct LinkInfo {
     flags: Vec<LinkFlag>,
     name: String,
     index: u32,
-    addresses: Vec<AddressInfo>,
+    ip_addresses: Vec<IpAddr>,
     routes: Vec<RouteInfo>,
     dns_servers: Vec<IpAddr>,
 }
@@ -171,12 +162,6 @@ impl LinkInfo {
     fn can_access(&self, ip: IpAddr) -> bool {
         self.routes.iter().any(|route| route.can_access(ip))
     }
-}
-
-#[derive(Debug, Clone)]
-struct AddressInfo {
-    address: IpAddr,
-    prefix_len: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -257,31 +242,14 @@ impl TryFrom<RouteMessage> for RouteInfo {
     }
 }
 
-impl TryFrom<AddressMessage> for AddressInfo {
-    type Error = anyhow::Error;
-
-    fn try_from(value: AddressMessage) -> Result<Self, Self::Error> {
-        let addr = value
-            .attributes
-            .iter()
-            .find_map(|attr| {
-                if let AddressAttribute::Address(addr) = attr {
-                    Some(addr)
-                } else {
-                    None
-                }
-            })
-            .context("no address found")?;
-
-        let prefix_len = value.header.prefix_len;
-
-        let address_info = AddressInfo {
-            address: *addr,
-            prefix_len,
-        };
-
-        Ok(address_info)
-    }
+fn try_to_ip(addr_msg: AddressMessage) -> Option<IpAddr> {
+    addr_msg.attributes.iter().find_map(|attr| {
+        if let AddressAttribute::Address(addr) = attr {
+            Some(*addr)
+        } else {
+            None
+        }
+    })
 }
 
 async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
