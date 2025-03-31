@@ -120,32 +120,40 @@ impl TryFrom<&LinkInfo> for NetworkInterface {
 }
 
 fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Result<NetworkInterface> {
-    let mut addresses = Vec::new();
 
-    for address_info in &link_info.addresses {
-        addresses.push((address_info.address, u32::from(address_info.prefix_len)));
-    }
+    let routes = link_info
+        .routes
+        .iter()
+        .filter_map(|route_info| {
+            route_info.destination.map(|dest| InterfaceAddress {
+                ip: dest,
+                prefixlen: u32::try_from(route_info.destination_prefix).expect("u8 can safely be converted to u32"),
+            })
+        })
+        .collect();
 
     let gateways = link_info
         .routes
         .iter()
         .filter_map(|route_info| route_info.gateway)
+        .collect::<Vec<_>>();
+
+    let ip_adresses = link_info
+        .addresses
+        .iter()
+        .map(|address_info| address_info.address)
         .collect();
 
     Ok(NetworkInterface {
         name: link_info.name.clone(),
-        description: None,
         mac_address: link_info.mac.as_slice().try_into().ok(),
-        addresses: addresses
-            .into_iter()
-            .map(|(addr, prefix)| InterfaceAddress {
-                ip: addr,
-                prefixlen: prefix,
-            })
-            .collect(),
+        ip_adresses,
+        routes,
         operational_status: link_info.flags.contains(&LinkFlag::Up),
         gateways,
         dns_servers: link_info.dns_servers.clone(),
+        id: None,
+        description: None,
     })
 }
 

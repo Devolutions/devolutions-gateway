@@ -242,14 +242,18 @@ pub struct InterfaceAddress {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
-    pub id: String,
+    /// The id is a Windows specific concept, does not exist in linux
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The description of the interface, also Windows specific
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<MacAddr>,
+    // routes is the list of IP addresses and their prefix lengths that this interface routes to.
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
-    pub addresses: Vec<InterfaceAddress>,
+    pub routes: Vec<InterfaceAddress>,
     #[cfg_attr(feature = "openapi", schema(value_type = bool))]
     pub is_up: bool,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
@@ -258,6 +262,7 @@ pub struct NetworkInterface {
     pub nameservers: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub name: String,
+    // Assigned IP addresses to this interface
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<IpAddr>))]
     pub ip_adresses: Vec<IpAddr>,
 }
@@ -270,8 +275,8 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
             description: iface.description,
             mac_address: iface.mac_address,
             ip_adresses: iface.ip_adresses,
-            addresses: iface
-                .addresses
+            routes: iface
+                .routes
                 .into_iter()
                 .map(|addr| InterfaceAddress {
                     ip: addr.ip,

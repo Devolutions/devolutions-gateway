@@ -88,11 +88,12 @@ pub struct InterfaceAddress {
 
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
-    pub id: String,
+    // Linux interfaces does not come with an id
+    pub id: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub mac_address: Option<MacAddr>,
-    pub addresses: Vec<InterfaceAddress>,
+    pub routes: Vec<InterfaceAddress>,
     pub ip_adresses: Vec<IpAddr>,
     pub operational_status: bool,
     pub gateways: Vec<IpAddr>,
