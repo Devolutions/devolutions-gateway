@@ -356,7 +356,7 @@ impl core::error::Error for LoadPolicyError {
         match self {
             Self::Io(e, _) => Some(e),
             Self::Json(e) => Some(e),
-            Self::Other(e) => Some(e),
+            Self::Other(e) => Some(e.as_ref()),
         }
     }
 }
@@ -366,7 +366,7 @@ impl fmt::Display for LoadPolicyError {
         match self {
             Self::Io(e, path) => write!(f, "IO error while loading policy at {path}: {e}"),
             Self::Json(e) => e.fmt(f),
-            Self::Other(s) => e.fmt(f),
+            Self::Other(e) => e.fmt(f),
         }
     }
 }
@@ -378,7 +378,7 @@ impl From<serde_json::Error> for LoadPolicyError {
 }
 impl From<anyhow::Error> for LoadPolicyError {
     fn from(e: anyhow::Error) -> Self {
-        Self::Other(e.to_string())
+        Self::Other(e)
     }
 }
 

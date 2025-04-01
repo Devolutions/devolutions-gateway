@@ -227,7 +227,7 @@ impl core::error::Error for ServeError {
             Self::TokioIo(e) => Some(e),
             Self::AppState(e) => Some(e),
             Self::Db(e) => Some(e),
-            Self::Anyhow(e) => Some(e),
+            Self::Other(e) => Some(e.as_ref()),
         }
     }
 }
@@ -238,7 +238,7 @@ impl fmt::Display for ServeError {
             Self::TokioIo(e) => e.fmt(f),
             Self::AppState(e) => e.fmt(f),
             Self::Db(e) => e.fmt(f),
-            Self::Anyhow(s) => e.fmt(f),
+            Self::Other(e) => e.fmt(f),
         }
     }
 }
@@ -260,7 +260,7 @@ impl From<DbError> for ServeError {
 }
 impl From<anyhow::Error> for ServeError {
     fn from(e: anyhow::Error) -> Self {
-        Self::Anyhow(e.to_string())
+        Self::Other(e)
     }
 }
 
