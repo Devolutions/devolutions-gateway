@@ -24,11 +24,13 @@ pub async fn get_network_interfaces(filter: Filter) -> anyhow::Result<Vec<Networ
     result.map(|interfaces| {
         interfaces
             .into_iter()
-            .filter(|interface| filter.matches(interface))
-            .map(|mut interface| {
-                filter.clean(&mut interface);
-                interface
+            .filter(|interface| {
+                if !filter.include_loopback {
+                    return !filter::is_loop_back(interface);
+                }
+                true
             })
+            .map(|interface| filter::filter_out_ipv6_if(filter.ignore_ipv6, interface))
             .collect()
     })
 }

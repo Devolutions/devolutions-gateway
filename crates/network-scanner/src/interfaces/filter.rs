@@ -17,26 +17,23 @@ impl Default for Filter {
     }
 }
 
-impl Filter {
-    pub fn matches(&self, interface: &NetworkInterface) -> bool {
-        // 1. Loopback exclusion
-        if !self.include_loopback {
-            for addr in &interface.routes {
-                if let IpAddr::V4(ipv4) = addr.ip {
-                    if ipv4.octets()[0] == 127 {
-                        return false;
-                    }
-                }
+pub(crate) fn is_loop_back(interface: &NetworkInterface) -> bool {
+    for addr in &interface.routes {
+        if let IpAddr::V4(ipv4) = addr.ip {
+            if ipv4.octets()[0] == 127 {
+                return false;
             }
         }
-
-        true
     }
 
-    pub fn clean(&self, interfaces: &mut NetworkInterface) {
-        if self.ignore_ipv6 {
-            interfaces.routes.retain(|addr| matches!(addr.ip, IpAddr::V4(_)));
-            interfaces.ip_adresses.retain(|addr| matches!(addr, IpAddr::V4(_)));
-        }
+    return true;
+}
+
+pub(crate) fn filter_out_ipv6_if(ignore_ipv6: bool, mut interface: NetworkInterface) -> NetworkInterface {
+    if ignore_ipv6 {
+        interface.routes.retain(|addr| matches!(addr.ip, IpAddr::V4(_)));
+        interface.ip_adresses.retain(|addr| matches!(addr, IpAddr::V4(_)));
     }
+
+    interface
 }
