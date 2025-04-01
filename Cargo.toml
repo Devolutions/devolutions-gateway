@@ -30,6 +30,7 @@ lto = true
 strip = "symbols"
 
 [patch.crates-io]
+libsql = { git = "https://github.com/allan2/libsql", rev = "9364e90" }
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
 
 [workspace.lints.rust]
