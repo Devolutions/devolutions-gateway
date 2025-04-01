@@ -321,7 +321,7 @@ where
         Box::pin(async move {
             let resp: Response = fut.await?;
             let status_code = resp.status();
-            info!("request ID: {req_id}, status code: {}", status_code);
+            info!("request ID: {req_id}, status code: {status_code}");
             tokio::spawn(async move {
                 #[expect(clippy::cast_possible_wrap)]
                 db.log_http_request(req_id, method.as_str(), &path, status_code.as_u16() as i16)
