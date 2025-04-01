@@ -348,7 +348,7 @@ impl Policy {
 pub enum LoadPolicyError {
     Io(std::io::Error, Utf8PathBuf),
     Json(serde_json::Error),
-    Anyhow(String),
+    Other(anyhow::Error),
 }
 
 impl core::error::Error for LoadPolicyError {
@@ -356,7 +356,7 @@ impl core::error::Error for LoadPolicyError {
         match self {
             Self::Io(e, _) => Some(e),
             Self::Json(e) => Some(e),
-            Self::Anyhow(_) => None,
+            Self::Other(e) => Some(e),
         }
     }
 }
@@ -366,7 +366,7 @@ impl fmt::Display for LoadPolicyError {
         match self {
             Self::Io(e, path) => write!(f, "IO error while loading policy at {path}: {e}"),
             Self::Json(e) => e.fmt(f),
-            Self::Anyhow(s) => write!(f, "{s}"),
+            Self::Other(s) => e.fmt(f),
         }
     }
 }
@@ -378,7 +378,7 @@ impl From<serde_json::Error> for LoadPolicyError {
 }
 impl From<anyhow::Error> for LoadPolicyError {
     fn from(e: anyhow::Error) -> Self {
-        Self::Anyhow(e.to_string())
+        Self::Other(e.to_string())
     }
 }
 

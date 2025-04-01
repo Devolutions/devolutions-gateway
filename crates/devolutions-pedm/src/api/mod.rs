@@ -216,18 +216,18 @@ pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) ->
 #[derive(Debug)]
 pub enum ServeError {
     TokioIo(tokio::io::Error),
-    Anyhow(String),
     AppState(AppStateError),
     Db(DbError),
+    Other(anyhow::Error),
 }
 
 impl core::error::Error for ServeError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::TokioIo(e) => Some(e),
-            Self::Anyhow(_) => None,
             Self::AppState(e) => Some(e),
             Self::Db(e) => Some(e),
+            Self::Anyhow(e) => Some(e),
         }
     }
 }
@@ -236,9 +236,9 @@ impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TokioIo(e) => e.fmt(f),
-            Self::Anyhow(s) => write!(f, "{s}"),
             Self::AppState(e) => e.fmt(f),
             Self::Db(e) => e.fmt(f),
+            Self::Anyhow(s) => e.fmt(f),
         }
     }
 }
@@ -246,11 +246,6 @@ impl fmt::Display for ServeError {
 impl From<tokio::io::Error> for ServeError {
     fn from(e: tokio::io::Error) -> Self {
         Self::TokioIo(e)
-    }
-}
-impl From<anyhow::Error> for ServeError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Anyhow(e.to_string())
     }
 }
 impl From<AppStateError> for ServeError {
@@ -261,6 +256,11 @@ impl From<AppStateError> for ServeError {
 impl From<DbError> for ServeError {
     fn from(e: DbError) -> Self {
         Self::Db(e)
+    }
+}
+impl From<anyhow::Error> for ServeError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Anyhow(e.to_string())
     }
 }
 
