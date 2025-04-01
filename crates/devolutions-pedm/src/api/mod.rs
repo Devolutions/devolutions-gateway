@@ -160,8 +160,7 @@ pub fn openapi() -> OpenApi {
     api
 }
 
-/// A handler that is not part of the API.
-///
+/// A handler that is not part of the public API.
 async fn health_check() -> &'static str {
     "OK"
 }
