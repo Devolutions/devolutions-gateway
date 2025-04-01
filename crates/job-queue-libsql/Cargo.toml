@@ -19,3 +19,6 @@ tracing = "0.1"
 typed-builder = "0.19"
 ulid = { version = "1.1", features = ["uuid"] }
 uuid = "1.11"
+
+[patch.crates-io]
+libsql = { git = "https://github.com/allan2/libsql", branch = "ffi-windows-cp" }
