@@ -47,7 +47,7 @@ pub(crate) async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterf
 
         let address = addresses
             .iter()
-            .filter_map(|addr_msg| try_to_ip(addr_msg.clone()))
+            .filter_map(|addr_msg| extract_ip(addr_msg.clone()))
             .collect::<Vec<_>>();
 
         link.ip_addresses = address;
@@ -242,7 +242,7 @@ impl TryFrom<RouteMessage> for RouteInfo {
     }
 }
 
-fn try_to_ip(addr_msg: AddressMessage) -> Option<IpAddr> {
+fn extract_ip(addr_msg: AddressMessage) -> Option<IpAddr> {
     addr_msg.attributes.iter().find_map(|attr| {
         if let AddressAttribute::Address(addr) = attr {
             Some(*addr)
