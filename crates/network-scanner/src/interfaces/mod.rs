@@ -26,7 +26,7 @@ pub async fn get_network_interfaces(filter: Filter) -> anyhow::Result<Vec<Networ
             .into_iter()
             .filter(|interface| {
                 if !filter.include_loopback {
-                    return !filter::is_loop_back(interface);
+                    return filter::is_loop_back(interface);
                 }
                 true
             })
