@@ -44,8 +44,8 @@ pub async fn main() -> anyhow::Result<()> {
         TaskManager::new(),
     )?;
 
-    while let Some(ip) = receiver.recv().await {
-        tracing::info!("{} is alive", ip);
+    while let Some(ping_event) = receiver.recv().await {
+        tracing::info!(?ping_event);
     }
 
     tracing::info!("Elapsed time: {:?}", now.elapsed());
