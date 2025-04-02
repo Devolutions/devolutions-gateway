@@ -36,14 +36,21 @@ impl Task for PedmTask {
     const NAME: &'static str = "devolutions-pedm";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
-        select! {
-            res = api::serve(r"\\.\pipe\DevolutionsPEDM", None) => {
-                if let Err(e) = &res {
-                    error!(%e, "Named pipe server got error");
+        cfg_if::cfg_if! {
+            if #[cfg(target_os = "windows")] {
+                select! {
+                    res = api::serve(r"\\.\pipe\DevolutionsPEDM", None) => {
+                        if let Err(e) = &res {
+                            error!(%e, "Named pipe server got error");
+                        }
+                        res.map_err(Into::into)
+                    }
+                    _ = shutdown_signal.wait() => {
+                        Ok(())
+                    }
                 }
-                res.map_err(Into::into)
-            }
-            _ = shutdown_signal.wait() => {
+            } else {
+                shutdown_signal.wait().await;
                 Ok(())
             }
         }
