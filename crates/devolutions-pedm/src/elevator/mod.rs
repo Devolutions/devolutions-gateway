@@ -8,26 +8,36 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::{Context as _, Result};
+use parking_lot::RwLock;
+
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
-use local_admin_elevator::LocalAdminElevator;
-use virtual_account_elevator::VirtualAccountElevator;
 use win_api_wrappers::process::{ProcessInformation, StartupInfo};
-use win_api_wrappers::raw::Win32::Foundation::ERROR_INVALID_PARAMETER;
+use win_api_wrappers::raw::Win32::Foundation::{ERROR_INVALID_PARAMETER, LUID};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::{Token, TokenElevationType, TokenSecurityAttribute, TokenSecurityAttributeValues};
 use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
 use win_api_wrappers::utils::{environment_block, CommandLine};
 use win_api_wrappers::Error;
 
-use crate::policy::{self, application_from_path};
-use crate::utils::{start_process, AccountExt};
-use crate::{config, log};
+use local_admin_elevator::LocalAdminElevator;
+use virtual_account_elevator::VirtualAccountElevator;
 
-static LOCAL_ADMIN_ELEVATOR: LazyLock<LocalAdminElevator> =
-    LazyLock::new(|| LocalAdminElevator::new(config::LADM_SRC_NAME, config::LADM_SRC_LUID));
+use crate::log;
+use crate::policy::{self, application_from_path, Policy};
+use crate::utils::{start_process, AccountExt};
+
+static LOCAL_ADMIN_ELEVATOR: LazyLock<LocalAdminElevator> = LazyLock::new(|| {
+    LocalAdminElevator::new(
+        b"DevoPEDM",
+        LUID {
+            HighPart: 0,
+            LowPart: 0x1337,
+        },
+    )
+});
 
 static VIRTUAL_ACCOUNT_ELEVATOR: LazyLock<VirtualAccountElevator> =
-    LazyLock::new(|| VirtualAccountElevator::new(config::VADM_DOMAIN.to_owned(), config::VADM_RID));
+    LazyLock::new(|| VirtualAccountElevator::new("_DEPM".to_owned(), 99));
 
 trait Elevator {
     fn elevate_token(&self, token: &Token) -> Result<Token>;
@@ -40,10 +50,10 @@ fn elevator(method: ElevationMethod) -> &'static dyn Elevator {
     }
 }
 
-fn elevate_token(token: &Token) -> Result<Token> {
+fn elevate_token(policy: &RwLock<Policy>, token: &Token) -> Result<Token> {
     match token.elevation_type()? {
         TokenElevationType::Default => {
-            let policy = policy::policy().read();
+            let policy = policy.read();
             let elevation_method = policy
                 .user_current_profile(&token.sid_and_attributes()?.sid.lookup_account(None)?.to_user())
                 .context("user not assigned")?
@@ -56,6 +66,7 @@ fn elevate_token(token: &Token) -> Result<Token> {
 }
 
 fn validate_elevation(
+    policy: &RwLock<Policy>,
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
@@ -91,7 +102,7 @@ fn validate_elevation(
 
     let req = ElevationRequest::new(asker, target);
 
-    let validation = policy::policy().read().validate(client_token.session_id()?, &req);
+    let validation = policy.read().validate(client_token.session_id()?, &req);
 
     log::log_elevation(&ElevationResult {
         request: req,
@@ -102,6 +113,7 @@ fn validate_elevation(
 }
 
 pub(crate) fn try_start_elevated(
+    policy: &RwLock<Policy>,
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
@@ -111,6 +123,7 @@ pub(crate) fn try_start_elevated(
     startup_info: &mut StartupInfo,
 ) -> Result<ProcessInformation> {
     validate_elevation(
+        policy,
         client_token,
         client_pid,
         executable_path,
@@ -118,7 +131,7 @@ pub(crate) fn try_start_elevated(
         current_directory,
     )?;
 
-    let mut elevation = elevate_token(client_token)?.duplicate_impersonation()?;
+    let mut elevation = elevate_token(policy, client_token)?.duplicate_impersonation()?;
 
     let attribute = TokenSecurityAttribute {
         name: win_api_wrappers::str::u16cstr!("PEDM_TAGGED").to_owned(),

@@ -7,22 +7,25 @@
 //! The policy is stored under `%ProgramData%\Devolutions\Agent\pedm\policy\`, and is only accessible by `NT AUTHORITY\SYSTEM`.
 //! It is possible to edit the policy via the named pipe API.
 
-use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
-use camino::Utf8PathBuf;
-use devolutions_pedm_shared::policy::{
-    Application, Certificate, Configuration, ElevationRequest, Identifiable, Profile, Signature, Signer, User,
-};
-use parking_lot::RwLock;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use core::fmt;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use tracing::error;
+
+use anyhow::{anyhow, bail};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use camino::Utf8PathBuf;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use tracing::info;
 use uuid::Uuid;
+
+use devolutions_pedm_shared::policy;
+use devolutions_pedm_shared::policy::{
+    Application, Certificate, Configuration, ElevationRequest, Identifiable, Profile, Signature, Signer, User,
+};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, TOKEN_QUERY};
@@ -30,12 +33,9 @@ use win_api_wrappers::raw::Win32::System::Threading::{PROCESS_QUERY_INFORMATION,
 use win_api_wrappers::security::crypt::{authenticode_status, CryptProviderCertificate, SignerInfo};
 use win_api_wrappers::utils::CommandLine;
 
-use anyhow::{anyhow, bail, Result};
-
-use crate::config;
+use crate::data_dir;
 use crate::error::Error;
 use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHasher};
-use devolutions_pedm_shared::policy;
 
 pub(crate) struct IdList<T: Identifiable> {
     root_path: PathBuf,
@@ -50,7 +50,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         }
     }
 
-    pub(crate) fn load(&mut self) -> Result<()> {
+    pub(crate) fn load(&mut self) -> anyhow::Result<()> {
         self.data.clear();
 
         for dir_entry in fs::read_dir(self.path())? {
@@ -99,7 +99,7 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
         self.data.contains_key(id)
     }
 
-    fn add_internal(&mut self, entry: T, write: bool) -> Result<()> {
+    fn add_internal(&mut self, entry: T, write: bool) -> anyhow::Result<()> {
         if self.contains(entry.id()) {
             bail!(Error::InvalidParameter);
         }
@@ -113,16 +113,16 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
             serde_json::to_writer(writer, &entry)?;
         }
 
-        self.data.insert(entry.id().clone(), entry);
+        self.data.insert(*entry.id(), entry);
 
         Ok(())
     }
 
-    pub(crate) fn add(&mut self, entry: T) -> Result<()> {
+    pub(crate) fn add(&mut self, entry: T) -> anyhow::Result<()> {
         self.add_internal(entry, true)
     }
 
-    pub(crate) fn remove(&mut self, id: &Uuid) -> Result<()> {
+    pub(crate) fn remove(&mut self, id: &Uuid) -> anyhow::Result<()> {
         if !self.contains(id) {
             bail!(Error::NotFound);
         }
@@ -140,50 +140,59 @@ impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
 }
 
 pub(crate) struct Policy {
-    config_path: PathBuf,
+    /// The path to the policy configuration.
+    ///
+    /// The default is `C:\ProgramData\Devolutions\Agent\pedm\policy\config.json`.
+    /// It is written to when assignments are set.
+    config_path: Utf8PathBuf,
+    /// A hashmap of assignments.
+    ///
+    /// The key is the assignment ID. The value is the list of users assigned to the profile.
     config: Configuration,
     profiles: IdList<Profile>,
     current_profiles: HashMap<User, Uuid>,
 }
 
 impl Policy {
-    pub(crate) fn new() -> Result<Self> {
+    /// Loads the policy from disk configuration.
+    pub(crate) fn load() -> Result<Self, LoadPolicyError> {
+        let data_dir = data_dir();
+        let policy_path = data_dir.join("policy");
+
+        // load assignments
+
+        let config_path = policy_path.join("config.json");
+        let config = match fs::read_to_string(&config_path) {
+            Ok(s) => {
+                info!("Loading assignments from {config_path}");
+                serde_json::from_str(&s)?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                info!("Assignments not found at {config_path}. Initializing default assignments");
+                let c = Configuration::default();
+                fs::write(&config_path, serde_json::to_string(&c)?)
+                    .map_err(|e| LoadPolicyError::Io(e, config_path.clone()))?;
+                c
+            }
+            Err(e) => return Err(LoadPolicyError::Io(e, config_path)),
+        };
+
         let mut policy = Self {
-            config_path: policy_config_path().into_std_path_buf(),
-            config: Configuration::default(),
-            profiles: IdList::new(policy_profiles_path().into_std_path_buf()),
+            config_path,
+            config,
+            profiles: IdList::new(policy_path.join("profiles").into_std_path_buf()),
             current_profiles: HashMap::new(),
         };
 
         ensure_protected_directory(
-            config::data_dir().as_std_path(),
+            data_dir.as_std_path(),
             vec![Sid::from_well_known(WinBuiltinUsersSid, None)?],
         )?;
-
-        ensure_protected_directory(policy_path().as_std_path(), vec![])?;
+        ensure_protected_directory(policy_path.as_std_path(), vec![])?;
         ensure_protected_directory(policy.profiles.path(), vec![])?;
 
-        if !policy.config_path.exists() {
-            let config = Configuration::default();
-            fs::write(&policy.config_path, serde_json::to_string(&config)?)?;
-        }
-
-        policy.load()?;
-
+        policy.profiles.load()?;
         Ok(policy)
-    }
-
-    fn load_config(&mut self) {
-        match deserialize_file(&self.config_path) {
-            Ok(conf) => self.config = conf,
-            Err(error) => error!(%error, "Failed to load configuration"),
-        }
-    }
-
-    pub(crate) fn load(&mut self) -> Result<()> {
-        self.load_config();
-        self.profiles.load()?;
-        Ok(())
     }
 
     pub(crate) fn profile(&self, id: &Uuid) -> Option<&Profile> {
@@ -212,18 +221,19 @@ impl Policy {
             .collect()
     }
 
-    pub(crate) fn set_user_current_profile(&mut self, user: User, profile_id: Option<Uuid>) -> Result<()> {
-        if let Some(profile_id) = profile_id {
+    /// Sets the profile ID.
+    pub(crate) fn set_profile_id(&mut self, user: User, profile_id: Option<Uuid>) -> anyhow::Result<()> {
+        if let Some(id) = profile_id {
             if !self
                 .config
                 .assignments
-                .get(&profile_id)
+                .get(&id)
                 .is_some_and(|users| users.contains(&user))
             {
+                info!("Unknown profile Id");
                 bail!("Unknown profile Id");
             }
-
-            self.current_profiles.insert(user, profile_id);
+            self.current_profiles.insert(user, id);
         } else {
             self.current_profiles.remove(&user);
         }
@@ -232,7 +242,9 @@ impl Policy {
     }
 
     pub(crate) fn user_current_profile(&self, user: &User) -> Option<&Profile> {
+        info!("Getting current profile for user {:?}", user);
         let profile_id = self.current_profiles.get(user)?;
+        info!("User {:?} is using profile {}", user, profile_id);
 
         // Make sure the user's assigned profile is actually allowed.
         if !self
@@ -251,8 +263,8 @@ impl Policy {
         self.profiles.iter()
     }
 
-    pub(crate) fn add_profile(&mut self, profile: Profile) -> Result<()> {
-        let id = profile.id.clone();
+    pub(crate) fn add_profile(&mut self, profile: Profile) -> anyhow::Result<()> {
+        let id = profile.id;
         self.profiles.add(profile)?;
 
         self.set_assignments(id, vec![])?;
@@ -260,7 +272,7 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn replace_profile(&mut self, old_id: &Uuid, profile: Profile) -> Result<()> {
+    pub(crate) fn replace_profile(&mut self, old_id: &Uuid, profile: Profile) -> anyhow::Result<()> {
         if !self.profiles.contains(old_id) {
             bail!(Error::NotFound);
         } else if old_id != &profile.id && self.profiles.contains(&profile.id) {
@@ -271,7 +283,7 @@ impl Policy {
 
         self.remove_profile(old_id)?;
 
-        let new_id = profile.id.clone();
+        let new_id = profile.id;
         self.add_profile(profile)?;
 
         self.set_assignments(new_id, old_assignments)?;
@@ -279,7 +291,7 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn remove_profile(&mut self, id: &Uuid) -> Result<()> {
+    pub(crate) fn remove_profile(&mut self, id: &Uuid) -> anyhow::Result<()> {
         self.profiles.remove(id)?;
 
         self.config.assignments.remove(id);
@@ -291,7 +303,7 @@ impl Policy {
         &self.config.assignments
     }
 
-    pub(crate) fn set_assignments(&mut self, profile_id: Uuid, users: Vec<User>) -> Result<()> {
+    pub(crate) fn set_assignments(&mut self, profile_id: Uuid, users: Vec<User>) -> anyhow::Result<()> {
         if !self.profiles.contains(&profile_id) {
             bail!(Error::NotFound);
         }
@@ -316,7 +328,7 @@ impl Policy {
         Ok(())
     }
 
-    pub(crate) fn validate(&self, _session_id: u32, request: &ElevationRequest) -> Result<()> {
+    pub(crate) fn validate(&self, _session_id: u32, request: &ElevationRequest) -> anyhow::Result<()> {
         let profile = self
             .user_current_profile(&request.asker.user)
             .ok_or_else(|| anyhow!(Error::AccessDenied))?;
@@ -332,47 +344,45 @@ impl Policy {
     }
 }
 
-fn policy_path() -> Utf8PathBuf {
-    let mut dir = config::data_dir();
-    dir.push("policy");
-    dir
+#[derive(Debug)]
+pub enum LoadPolicyError {
+    Io(std::io::Error, Utf8PathBuf),
+    Json(serde_json::Error),
+    Other(anyhow::Error),
 }
 
-fn policy_config_path() -> Utf8PathBuf {
-    let mut dir = policy_path();
-    dir.push("config.json");
-    dir
+impl core::error::Error for LoadPolicyError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Io(e, _) => Some(e),
+            Self::Json(e) => Some(e),
+            Self::Other(e) => Some(e.as_ref()),
+        }
+    }
 }
 
-fn policy_profiles_path() -> Utf8PathBuf {
-    let mut dir = policy_path();
-    dir.push("profiles");
-    dir
+impl fmt::Display for LoadPolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(e, path) => write!(f, "IO error while loading policy at {path}: {e}"),
+            Self::Json(e) => e.fmt(f),
+            Self::Other(e) => e.fmt(f),
+        }
+    }
 }
 
-pub(crate) fn policy() -> &'static RwLock<Policy> {
-    static POLICY: OnceLock<RwLock<Policy>> = OnceLock::new();
-
-    POLICY.get_or_init(|| {
-        RwLock::new(
-            Policy::new()
-                .map_err(|error| error!(%error, "Failed to load policy"))
-                .expect("Failed to load policy"),
-        )
-    })
+impl From<serde_json::Error> for LoadPolicyError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
+}
+impl From<anyhow::Error> for LoadPolicyError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Other(e)
+    }
 }
 
-fn deserialize_file<T>(path: &Path) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-
-    Ok(serde_json::from_reader(reader)?)
-}
-
-pub(crate) fn load_signature(path: &Path) -> Result<Signature> {
+pub(crate) fn load_signature(path: &Path) -> anyhow::Result<Signature> {
     let wintrust_result = authenticode_status(path)?;
 
     // Windows only supports one signer, so getting the first is ok.
@@ -393,7 +403,7 @@ pub(crate) fn application_from_path(
     command_line: CommandLine,
     working_directory: PathBuf,
     user: User,
-) -> Result<Application> {
+) -> anyhow::Result<Application> {
     let signature = load_signature(&path)?;
     let hash = file_hash(&path)?;
 
@@ -407,7 +417,7 @@ pub(crate) fn application_from_path(
     })
 }
 
-pub(crate) fn application_from_process(pid: u32) -> Result<Application> {
+pub(crate) fn application_from_process(pid: u32) -> anyhow::Result<Application> {
     let process = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
 
     let path = process.exe_path()?;

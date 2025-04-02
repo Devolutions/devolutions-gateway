@@ -1,64 +1,85 @@
+use std::sync::Arc;
 use std::time::Duration;
 
+use aide::NoApi;
+use axum::extract::State;
 use axum::{Extension, Json};
+use hyper::StatusCode;
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
-use crate::error::Error;
-use crate::{elevations, policy};
+use crate::elevations;
+use crate::policy::Policy;
 
+use super::err::HandlerError;
+use super::state::Db;
 use super::NamedPipeConnectInfo;
 
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct ElevateTemporaryPayload {
+    /// The number of seconds to elevate the user for.
+    ///
+    /// This must be between 1 and `i32::MAX`.
     pub(crate) seconds: u64,
 }
 
-pub(crate) async fn post_elevate_temporary(
-    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+/// Temporarily elevates the user's session.
+pub(crate) async fn elevate_temporary(
+    Extension(req_id): Extension<i32>,
+    Extension(info): Extension<NamedPipeConnectInfo>,
+    NoApi(Db(db)): NoApi<Db>,
+    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
     Json(payload): Json<ElevateTemporaryPayload>,
-) -> Result<(), Error> {
-    let policy = policy::policy().read();
+) -> Result<(), HandlerError> {
+    // validate input
+    fn invalid_secs_err() -> HandlerError {
+        HandlerError::new(
+            StatusCode::BAD_REQUEST,
+            Some("number of seconds must be between 1 and 2,147,483,647"),
+        )
+    }
+    let seconds = i32::try_from(payload.seconds).map_err(|_| invalid_secs_err())?;
+    if seconds < 1 {
+        return Err(invalid_secs_err());
+    }
 
-    let profile = policy.user_current_profile(&named_pipe_info.user);
-    if profile.is_none() {
-        info!(user = ?named_pipe_info.user, "User tried to elevate temporarily, but wasn't assigned to profile");
-        return Err(Error::AccessDenied);
+    db.insert_elevate_tmp_request(req_id, seconds).await?;
+
+    let policy = policy.read();
+    if policy.user_current_profile(&info.user).is_none() {
+        return Err(HandlerError::new(
+            StatusCode::FORBIDDEN,
+            Some("user not assigned to profile"),
+        ));
     }
 
     let settings = policy
-        .user_current_profile(&named_pipe_info.user)
+        .user_current_profile(&info.user)
         .map(|p| &p.elevation_settings.temporary)
-        .ok_or(Error::AccessDenied)?;
+        .ok_or_else(|| {
+            HandlerError::new(
+                StatusCode::FORBIDDEN,
+                Some("could not get temporary elevation configuration"),
+            )
+        })?;
 
     if !settings.enabled {
-        info!(
-            user = ?named_pipe_info.user,
-            "User tried to elevate temporarily, but wasn't allowed",
-        );
-        return Err(Error::AccessDenied);
+        return Err(HandlerError::new(
+            StatusCode::FORBIDDEN,
+            Some("temporary elevation is not permitted"),
+        ));
     }
 
-    let req_duration = Duration::from_secs(payload.seconds);
-
-    if Duration::from_secs(settings.maximum_seconds) < req_duration {
-        info!(
-            user = ?named_pipe_info.user,
-            seconds = req_duration.as_secs(),
-            "User tried to elevate temporarily for too long"
-        );
-        return Err(Error::AccessDenied);
+    let duration = Duration::from_secs(payload.seconds);
+    if Duration::from_secs(settings.maximum_seconds) < duration {
+        return Err(HandlerError::new(
+            StatusCode::FORBIDDEN,
+            Some("requested duration exceeds maximum"),
+        ));
     }
-
-    info!(
-        user = ?named_pipe_info.user,
-        seconds = req_duration.as_secs(),
-        "Elevating user"
-    );
-
-    elevations::elevate_temporary(named_pipe_info.user, &req_duration);
+    elevations::elevate_temporary(info.user, &duration);
 
     Ok(())
 }
