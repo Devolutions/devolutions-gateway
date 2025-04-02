@@ -1,13 +1,14 @@
 use std::mem::MaybeUninit;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use network_scanner_net::runtime::Socket2Runtime;
 use network_scanner_net::socket::AsyncRawSocket;
 use network_scanner_proto::netbios::NetBiosPacket;
 use socket2::{Domain, SockAddr, Type};
+use tokio::sync::mpsc::{Receiver, Sender};
 
-use crate::ip_utils::IpAddrRange;
+use crate::ip_utils::IpV4AddrRange;
 use crate::task_utils::IpReceiver;
 use crate::{assume_init, ScannerError};
 
@@ -17,18 +18,22 @@ const MESSAGE: [u8; 50] = [
     0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x00, 0x00, 0x21, 0x00, 0x01,
 ];
 
+#[derive(Debug, Clone)]
+pub struct NetBiosResult {
+    ip: Ipv4Addr,
+    name: String,
+    mac_address: String,
+    group: Option<String>,
+}
+
 const NET_BIOS_PORT: u16 = 137;
 pub fn netbios_query_scan(
     runtime: Arc<Socket2Runtime>,
-    ip_range: IpAddrRange,
+    ip_range: IpV4AddrRange,
     single_query_duration: std::time::Duration,
     netbios_scan_interval: std::time::Duration,
     task_manager: crate::task_utils::TaskManager,
-) -> Result<IpReceiver, ScannerError> {
-    if ip_range.is_ipv6() {
-        return Err(ScannerError::DoesNotSupportIpv6("netbios".to_owned()));
-    }
-
+) -> Result<Receiver<NetBiosResult>, ScannerError> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
         for ip in ip_range.into_iter() {
@@ -44,9 +49,9 @@ pub fn netbios_query_scan(
 }
 
 pub(crate) fn netbios_query_one(
-    ip: IpAddr,
+    ip: Ipv4Addr,
     mut socket: AsyncRawSocket,
-    result_sender: crate::task_utils::IpSender,
+    result_sender: Sender<NetBiosResult>,
     duration: std::time::Duration,
     task_manager: crate::task_utils::TaskManager,
 ) {
@@ -58,16 +63,19 @@ pub(crate) fn netbios_query_one(
         let mut buf: [MaybeUninit<u8>; 1024] = [MaybeUninit::<u8>::uninit(); 1024];
         socket.recv(&mut buf).await?;
 
-        let IpAddr::V4(ipv4) = ip else {
-            anyhow::bail!("unreachable");
-        };
-
         // SAFETY: TODO: explain why it’s safe.
         let buf = unsafe { assume_init(&buf) };
 
-        let packet = NetBiosPacket::from(ipv4, buf);
+        let packet = NetBiosPacket::from(ip, buf);
 
-        result_sender.send((ipv4.into(), Some(packet.name()))).await?;
+        result_sender
+            .send(NetBiosResult {
+                ip,
+                name: packet.name(),
+                mac_address: packet.mac_address(),
+                group: packet.group()
+            })
+            .await?;
 
         anyhow::Result::<()>::Ok(())
     });

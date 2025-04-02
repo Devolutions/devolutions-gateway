@@ -166,7 +166,7 @@ impl TaskManager {
         self.spawn(|_| task);
     }
 
-    pub(crate) fn with_timeout(&self, duration: Duration) -> TimeoutManager {
+    pub(crate) fn with_timeout<TimeoutTaskResult>(&self, duration: Duration) -> TimeoutManager<TimeoutTaskResult> {
         TimeoutManager {
             task_manager: self.clone(),
             duration,
@@ -184,22 +184,26 @@ impl TaskManager {
     }
 }
 
-pub(crate) struct TimeoutManager {
+type TimeoutResult<R> = Result<R, tokio::time::error::Elapsed>;
+pub(crate) struct TimeoutManager<R> {
     task_manager: TaskManager,
     duration: Duration,
-    when_finish: Option<Box<dyn FnOnce() + Send + 'static>>,
+    when_finish: Option<Box<dyn FnOnce(TimeoutResult<R>) + Send + 'static>>,
 }
 
-impl TimeoutManager {
-    pub(crate) fn when_finish<F>(self, f: F) -> Self
+impl<R> TimeoutManager<R>
+where
+    R: Send + 'static,
+{
+    pub(crate) fn after_finish<F>(self, f: F) -> Self
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce(TimeoutResult<R>) + Send + 'static,
     {
         let Self {
             task_manager, duration, ..
         } = self;
 
-        let when_finish = Some(Box::new(f) as Box<dyn FnOnce() + Send + 'static>);
+        let when_finish = Some(Box::new(f) as Box<dyn FnOnce(TimeoutResult<R>) + Send + 'static>);
 
         Self {
             task_manager,
@@ -211,7 +215,7 @@ impl TimeoutManager {
     pub(crate) fn spawn<T, F>(self, task: T)
     where
         T: FnOnce(TaskManager) -> F + Send + 'static,
-        F: Future<Output = anyhow::Result<()>> + Send + 'static,
+        F: Future<Output = R> + Send + 'static,
     {
         let Self {
             task_manager,
@@ -221,9 +225,9 @@ impl TimeoutManager {
 
         task_manager.spawn(move |task_manager| async move {
             let future = task(task_manager);
-            let _ = tokio::time::timeout(duration, future).await;
+            let result = tokio::time::timeout(duration, future).await;
             if let Some(when_finish) = when_finish {
-                when_finish();
+                when_finish(result);
             }
             anyhow::Ok(())
         });

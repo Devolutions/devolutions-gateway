@@ -12,6 +12,19 @@ use tokio::time::timeout;
 use crate::create_echo_request;
 use crate::ip_utils::IpAddrRange;
 
+#[derive(Debug)]
+pub enum FailedReason {
+    Rejected,
+    TimedOut,
+}
+
+#[derive(Debug)]
+pub enum PingEvent {
+    Start { ip_addr: IpAddr },
+    Success { ip_addr: IpAddr, time: u128 },
+    Failed { reason: FailedReason },
+}
+
 pub fn ping_range(
     runtime: Arc<Socket2Runtime>,
     range: IpAddrRange,
@@ -19,7 +32,7 @@ pub fn ping_range(
     ping_wait_time: Duration,
     should_ping: impl Fn(IpAddr) -> bool + Send + Sync + 'static + Clone,
     task_manager: crate::task_utils::TaskManager,
-) -> anyhow::Result<tokio::sync::mpsc::Receiver<IpAddr>> {
+) -> anyhow::Result<tokio::sync::mpsc::Receiver<PingEvent>> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     let mut futures = vec![];
 
@@ -30,17 +43,25 @@ pub fn ping_range(
             Some(socket2::Protocol::ICMPV4),
         )?;
         let addr = SocketAddr::new(ip, 0);
-        let sender = sender.clone();
         let should_ping = should_ping.clone();
+        if !should_ping(ip) {
+            continue;
+        }
 
-        let ping_future = async move {
-            if !should_ping(ip) {
-                return anyhow::Ok(());
+        let sender_clone = sender.clone();
+
+        let ping_future = move || async move {
+            let _ = sender_clone.send(PingEvent::Start { ip_addr: addr.ip() }).await;
+            let start_time = std::time::Instant::now();
+            match try_ping(addr.into(), socket).await {
+                Err(_) => PingEvent::Failed {
+                    reason: FailedReason::Rejected,
+                },
+                Ok(_) => PingEvent::Success {
+                    ip_addr: ip,
+                    time: start_time.elapsed().as_millis(),
+                },
             }
-            if try_ping(addr.into(), socket).await.is_ok() {
-                sender.send(ip).await?;
-            }
-            anyhow::Ok(())
         };
 
         futures.push(ping_future);
@@ -48,7 +69,24 @@ pub fn ping_range(
 
     task_manager.spawn(move |task_manager| async move {
         for future in futures {
-            task_manager.with_timeout(ping_wait_time).spawn(|_| future);
+            let sender = sender.clone();
+
+            task_manager
+                .with_timeout(ping_wait_time)
+                .after_finish(move |result| {
+                    match result {
+                        Ok(event) => {
+                            let _ = sender.try_send(event);
+                        }
+                        Err(_) => {
+                            let _ = sender.try_send(PingEvent::Failed {
+                                reason: FailedReason::TimedOut,
+                            });
+                        }
+                    }
+                })
+                .spawn(|_| future());
+
             tokio::time::sleep(ping_interval).await;
         }
         anyhow::Ok(())
