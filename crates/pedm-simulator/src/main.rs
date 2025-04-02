@@ -26,19 +26,26 @@ fn main() -> anyhow::Result<()> {
         .context("open current process token")?;
 
     // Verify that the current account is assigned with the SE_CREATE_TOKEN_NAME privilege.
-    println!("Attempting to verify whether the current account is assigned with the SE_CREATE_TOKEN_NAME privilege");
+    println!("Retrieve the current account name...");
     let account_username =
         get_username(Security::Authentication::Identity::NameSamCompatible).context("retrieve account username")?;
     println!("Account name: {account_username:?}");
 
     match lookup_account_by_name(&account_username) {
         Ok(account) => {
+            // Verify that the current account is assigned with the SE_CREATE_TOKEN_NAME privilege.
+            println!(
+                "Attempting to verify whether the current account is assigned with the SE_CREATE_TOKEN_NAME privilege"
+            );
+
             let rights = enumerate_account_rights(&account.sid)
                 .with_context(|| format!("enumerate account rights for {account_username:?}"))?;
             let has_create_token_right = rights.iter().any(|right| right == u16cstr!("SeCreateTokenPrivilege"));
+            println!("Has SeCreateTokenPrivilege right? {has_create_token_right}");
 
             if expect_elevation {
                 assert!(has_create_token_right);
+                println!("Current user is assigned the SeCreateTokenPrivilege right. Enabling it...");
 
                 // SE_CREATE_TOKEN_NAME is required for performing the elevation.
                 let se_create_token_name_luid =
