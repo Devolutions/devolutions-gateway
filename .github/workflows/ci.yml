@@ -1013,10 +1013,10 @@ jobs:
       - name: Run PEDM simulator (container with limited user)
         run: ./crates/pedm-simulator/run-container.ps1
 
+      # It’s difficult to get realtime stdout/stderr when using psexec -s.
+      # Instead, the run-expect-elevation.ps1 script will redirect the output into a file that we can read afterwards.
       - name: Run PEDM simulator (as LocalSystem)
         run: |
-          # It’s difficult to get realtime stdout/stderr when using psexec -s.
-          # Instead, the run-expect-elevation.ps1 script will redirect the output into a file that we can read afterwards.
           $scriptPath = Resolve-Path -Path "./crates/pedm-simulator/run-expect-elevation.ps1"
           psexec -accepteula -s pwsh.exe $scriptPath
           Get-Content -Path ./crates/pedm-simulator/pedm-simulator_run-expect-elevation.out
