@@ -3,11 +3,9 @@ mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(target_os = "windows")]
-pub use windows::get_network_interfaces;
+mod filter;
 
-#[cfg(target_os = "linux")]
-pub use linux::get_network_interfaces;
+pub use filter::Filter;
 
 use std::net::IpAddr;
 
@@ -15,6 +13,26 @@ use std::net::IpAddr;
 pub enum MacAddr {
     Eui64([u8; 8]),
     Eui48([u8; 6]),
+}
+
+pub async fn get_network_interfaces(filter: Filter) -> anyhow::Result<Vec<NetworkInterface>> {
+    #[cfg(target_os = "windows")]
+    let result = { windows::get_network_interfaces().await };
+    #[cfg(target_os = "linux")]
+    let result = { linux::get_network_interfaces().await };
+
+    result.map(|interfaces| {
+        interfaces
+            .into_iter()
+            .filter(|interface| {
+                if !filter.include_loopback {
+                    return filter::is_loop_back(interface);
+                }
+                true
+            })
+            .map(|interface| filter::filter_out_ipv6_if(filter.ignore_ipv6, interface))
+            .collect()
+    })
 }
 
 impl TryFrom<&[u8]> for MacAddr {
@@ -72,10 +90,13 @@ pub struct InterfaceAddress {
 
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
+    // Linux interfaces does not come with an id
+    pub id: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub mac_address: Option<MacAddr>,
-    pub addresses: Vec<InterfaceAddress>,
+    pub routes: Vec<InterfaceAddress>,
+    pub ip_adresses: Vec<IpAddr>,
     pub operational_status: bool,
     pub gateways: Vec<IpAddr>,
     pub dns_servers: Vec<IpAddr>,

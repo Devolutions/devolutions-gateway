@@ -2,7 +2,7 @@ use crate::http::HttpError;
 use crate::token::{ApplicationProtocol, Protocol};
 use crate::DgwState;
 use axum::extract::ws::Message;
-use axum::extract::WebSocketUpgrade;
+use axum::extract::{Query, WebSocketUpgrade};
 use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::interfaces::{self, MacAddr};
@@ -26,7 +26,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
-    query_params: axum::extract::Query<NetworkScanQueryParams>,
+    query_params: Query<NetworkScanQueryParams>,
 ) -> Result<Response, HttpError> {
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
@@ -188,12 +188,22 @@ impl NetworkScanResponse {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct NetworkConfigParams {
+    pub ignore_ipv6: Option<bool>,
+    pub include_loopback: Option<bool>,
+}
+
 /// Lists network interfaces
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetNetConfig",
     tag = "Net",
     path = "/jet/net/config",
+    params(
+        (name = "ignore_ipv6", description = "Ignore IPv6 addresses", type = "boolean", example = false),
+        (name = "include_loopback", description = "Include loopback interfaces", type = "boolean", example = true),
+    ),
     responses(
         (status = 200, description = "Network interfaces", body = [Vec<NetworkInterface>]),
         (status = 400, description = "Bad request"),
@@ -203,8 +213,19 @@ impl NetworkScanResponse {
     ),
     security(("netscan_token" = [])),
 ))]
-pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
-    let interfaces = interfaces::get_network_interfaces()
+pub async fn get_net_config(
+    Query(params): Query<NetworkConfigParams>,
+    _token: crate::extract::NetScanToken,
+) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
+    let mut filter = interfaces::Filter::default();
+    if let Some(ignore_ipv6) = params.ignore_ipv6 {
+        filter.ignore_ipv6 = ignore_ipv6;
+    }
+    if let Some(include_loopback) = params.include_loopback {
+        filter.include_loopback = include_loopback;
+    }
+
+    let interfaces = interfaces::get_network_interfaces(filter)
         .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
@@ -225,30 +246,41 @@ pub struct InterfaceAddress {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
-    pub name: String,
+    /// The id is a Windows specific concept, does not exist in linux
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The description of the interface, also Windows specific
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<MacAddr>,
+    // routes is the list of IP addresses and their prefix lengths that this interface routes to.
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
-    pub addresses: Vec<InterfaceAddress>,
+    pub routes: Vec<InterfaceAddress>,
     #[cfg_attr(feature = "openapi", schema(value_type = bool))]
     pub is_up: bool,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub nameservers: Vec<IpAddr>,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub name: String,
+    // Assigned IP addresses to this interface
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<IpAddr>))]
+    pub ip_adresses: Vec<IpAddr>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
     fn from(iface: interfaces::NetworkInterface) -> Self {
         Self {
+            id: iface.id,
             name: iface.name,
             description: iface.description,
             mac_address: iface.mac_address,
-            addresses: iface
-                .addresses
+            ip_adresses: iface.ip_adresses,
+            routes: iface
+                .routes
                 .into_iter()
                 .map(|addr| InterfaceAddress {
                     ip: addr.ip,

@@ -3,7 +3,7 @@ use anyhow::Context;
 
 use super::MacAddr;
 
-pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
+pub(crate) async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     ipconfig::get_adapters()
         .context("failed to get network interfaces")?
         .into_iter()
@@ -16,10 +16,12 @@ impl From<ipconfig::Adapter> for NetworkInterface {
         let mac_address: Option<MacAddr> = adapter.physical_address().and_then(|addr| addr.try_into().ok());
 
         NetworkInterface {
-            name: adapter.adapter_name().to_owned(),
+            id: Some(adapter.adapter_name().to_owned()),
+            name: adapter.friendly_name().to_owned(),
             description: Some(adapter.description().to_owned()),
             mac_address,
-            addresses: adapter
+            ip_adresses: adapter.ip_addresses().to_vec(),
+            routes: adapter
                 .prefixes()
                 .iter()
                 .map(|(ip, prefix)| super::InterfaceAddress {
