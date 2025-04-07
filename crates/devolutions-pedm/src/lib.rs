@@ -40,8 +40,8 @@ impl Task for PedmTask {
             if #[cfg(target_os = "windows")] {
                 select! {
                     res = api::serve(r"\\.\pipe\DevolutionsPEDM", None) => {
-                        if let Err(e) = &res {
-                            error!(%e, "Named pipe server got error");
+                        if let Err(error) = &res {
+                            error!(%error, "Named pipe server got error");
                         }
                         res.map_err(Into::into)
                     }

@@ -200,14 +200,14 @@ pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) ->
 
             let hyper_service = hyper::service::service_fn(move |req| tower_service.clone().call(req));
 
-            if let Err(e) = server::conn::auto::Builder::new(TokioExecutor::new())
+            if let Err(error) = server::conn::auto::Builder::new(TokioExecutor::new())
                 .http1_only()
                 .http1()
                 .keep_alive(false)
                 .serve_connection(socket, hyper_service)
                 .await
             {
-                error!(%e, "Failed to serve connection");
+                error!(%error, "Failed to serve connection");
             }
         });
     }
