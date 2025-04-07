@@ -194,7 +194,7 @@ pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) ->
 
         server = create_pipe(pipe_name)?;
 
-        let tower_service = make_service.call(&client).await.unwrap(); // return type is Infallible
+        let Ok(tower_service) = make_service.call(&client).await;
         tokio::spawn(async move {
             let socket = TokioIo::new(client);
 
