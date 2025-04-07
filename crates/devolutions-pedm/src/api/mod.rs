@@ -180,7 +180,7 @@ pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) ->
 
     let mut server = create_pipe(pipe_name)?;
 
-    // log the server startup
+    // Log the server startup.
     let run_id = state.db.log_server_startup(pipe_name).await?;
     info!("Started server at {pipe_name} with run ID {run_id}");
     info!(
