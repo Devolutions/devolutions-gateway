@@ -208,7 +208,7 @@ dependencies = [
  "log",
  "pin-utils",
  "pkg-config",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "winapi",
 ]
 
@@ -372,7 +372,7 @@ dependencies = [
  "serde_urlencoded",
  "sha1",
  "sync_wrapper 1.0.2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-tungstenite",
  "tower 0.5.2",
  "tower-layer",
@@ -407,7 +407,7 @@ dependencies = [
  "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -492,7 +492,7 @@ dependencies = [
  "pin-project-lite 0.2.16",
  "serde",
  "serde_html_form",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tower 0.5.2",
  "tower-layer",
@@ -1193,7 +1193,7 @@ dependencies = [
  "sha2",
  "tap",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-rustls",
  "tracing",
  "uuid",
@@ -1273,7 +1273,7 @@ dependencies = [
  "terminal-streamer",
  "thiserror 1.0.69",
  "time",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-rustls",
  "tokio-test",
  "tokio-tungstenite",
@@ -1306,7 +1306,7 @@ name = "devolutions-gateway-task"
 version = "0.0.0"
 dependencies = [
  "async-trait",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -1317,7 +1317,7 @@ dependencies = [
  "async-trait",
  "camino",
  "devolutions-gateway-task",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -1349,7 +1349,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tower-http 0.5.2",
  "tower-service",
  "tracing",
@@ -1399,7 +1399,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tower 0.3.1",
  "uuid",
  "win-api-wrappers",
@@ -1414,7 +1414,7 @@ dependencies = [
  "embed-resource",
  "fs_extra",
  "parking_lot",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "win-api-wrappers",
  "windows-core 0.58.0",
 ]
@@ -1439,7 +1439,7 @@ dependencies = [
  "tap",
  "tempfile",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
  "win-api-wrappers",
  "windows 0.58.0",
@@ -2020,7 +2020,7 @@ dependencies = [
  "http 0.2.12",
  "indexmap 2.8.0",
  "slab",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tracing",
 ]
@@ -2039,7 +2039,7 @@ dependencies = [
  "http 1.3.1",
  "indexmap 2.8.0",
  "slab",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tracing",
 ]
@@ -2276,7 +2276,7 @@ dependencies = [
  "itoa",
  "pin-project-lite 0.2.16",
  "socket2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tower-service",
  "tracing",
  "want",
@@ -2299,7 +2299,7 @@ dependencies = [
  "itoa",
  "pin-project-lite 0.2.16",
  "smallvec",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "want",
 ]
 
@@ -2316,7 +2316,7 @@ dependencies = [
  "rustls 0.23.25",
  "rustls-native-certs",
  "rustls-pki-types",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-rustls",
  "tower-service",
 ]
@@ -2329,7 +2329,7 @@ checksum = "bbb958482e8c7be4bc3cf272a766a2b0bf1a6755e7a6ae777f017a31d11b13b1"
 dependencies = [
  "hyper 0.14.32",
  "pin-project-lite 0.2.16",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-io-timeout",
 ]
 
@@ -2342,7 +2342,7 @@ dependencies = [
  "bytes 1.10.1",
  "hyper 0.14.32",
  "native-tls",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-native-tls",
 ]
 
@@ -2361,7 +2361,7 @@ dependencies = [
  "libc",
  "pin-project-lite 0.2.16",
  "socket2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tower-service",
  "tracing",
 ]
@@ -2841,7 +2841,7 @@ dependencies = [
  "ironrdp-rdpsnd",
  "ironrdp-svc",
  "ironrdp-tokio",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-rustls",
  "tracing",
 ]
@@ -2862,7 +2862,7 @@ source = "git+https://github.com/Devolutions/IronRDP?rev=2e1a9ac88e38e7d92d89300
 dependencies = [
  "bytes 1.10.1",
  "ironrdp-async",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -2919,7 +2919,7 @@ dependencies = [
  "sysinfo",
  "test-utils",
  "tinyjson",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-tungstenite",
  "tracing",
  "tracing-appender",
@@ -2956,7 +2956,7 @@ dependencies = [
  "bytes 1.10.1",
  "futures-util",
  "jmux-proto",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tracing",
 ]
@@ -3106,7 +3106,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-stream",
  "tonic",
  "tonic-web",
@@ -3186,7 +3186,7 @@ dependencies = [
  "prost",
  "serde",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-stream",
  "tokio-util",
  "tonic",
@@ -3398,7 +3398,7 @@ name = "mock-net"
 version = "0.0.0"
 dependencies = [
  "loom",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -3443,7 +3443,7 @@ dependencies = [
  "pin-project 1.1.10",
  "rand 0.8.5",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tracing",
 ]
@@ -3526,7 +3526,7 @@ dependencies = [
  "futures",
  "libc",
  "log",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -3560,7 +3560,7 @@ dependencies = [
  "serde",
  "socket2",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
  "tracing-subscriber",
  "typed-builder",
@@ -3576,7 +3576,7 @@ dependencies = [
  "polling 3.7.4",
  "socket2",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
  "tracing-cov-mark",
  "tracing-subscriber",
@@ -3611,7 +3611,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-retry",
  "tokio-util",
  "tracing",
@@ -4505,7 +4505,7 @@ dependencies = [
  "proptest",
  "proxy-generators",
  "proxy-types",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -4515,7 +4515,7 @@ dependencies = [
  "proxy-http",
  "proxy-socks",
  "proxy-types",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -4525,7 +4525,7 @@ dependencies = [
  "proptest",
  "proxy-generators",
  "proxy-types",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-test",
 ]
 
@@ -4535,7 +4535,7 @@ version = "0.0.0"
 dependencies = [
  "proxy-http",
  "proxy-socks",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -4576,7 +4576,7 @@ dependencies = [
  "rustls 0.23.25",
  "socket2",
  "thiserror 2.0.12",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
  "web-time",
 ]
@@ -4857,7 +4857,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-rustls",
  "tokio-util",
  "tower 0.5.2",
@@ -4990,7 +4990,7 @@ dependencies = [
  "netlink-sys",
  "nix 0.27.1",
  "thiserror 1.0.69",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -5603,7 +5603,7 @@ dependencies = [
  "sha1",
  "sha2",
  "time",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
  "url",
  "uuid",
@@ -5734,7 +5734,7 @@ name = "terminal-streamer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
 ]
 
@@ -5746,7 +5746,7 @@ dependencies = [
  "futures-util",
  "portpicker",
  "proptest",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-tungstenite",
  "transport",
 ]
@@ -5909,9 +5909,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.44.1"
+version = "1.44.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f382da615b842244d4b8738c82ed1275e6c5dd90c459a30941cd07080b06c91a"
+checksum = "e6b88822cbe49de4185e3a4cbf8321dd487cf5fe0c5c65695fef6346371e9c48"
 dependencies = [
  "backtrace",
  "bytes 1.10.1",
@@ -5933,7 +5933,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30b74022ada614a1b4834de765f9bb43877f910cc8ce4be40e89042c9223a8bf"
 dependencies = [
  "pin-project-lite 0.2.16",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -5954,7 +5954,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
 dependencies = [
  "native-tls",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -5965,7 +5965,7 @@ checksum = "7f57eb36ecbe0fc510036adff84824dd3c24bb781e21bfa67b69d556aa85214f"
 dependencies = [
  "pin-project 1.1.10",
  "rand 0.8.5",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -5975,7 +5975,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
  "rustls 0.23.25",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -5986,7 +5986,7 @@ checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
 dependencies = [
  "futures-core",
  "pin-project-lite 0.2.16",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -5998,7 +5998,7 @@ dependencies = [
  "async-stream",
  "bytes 1.10.1",
  "futures-core",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-stream",
 ]
 
@@ -6014,7 +6014,7 @@ dependencies = [
  "rustls 0.23.25",
  "rustls-native-certs",
  "rustls-pki-types",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-native-tls",
  "tokio-rustls",
  "tungstenite",
@@ -6031,7 +6031,7 @@ dependencies = [
  "futures-io",
  "futures-sink",
  "pin-project-lite 0.2.16",
- "tokio 1.44.1",
+ "tokio 1.44.2",
 ]
 
 [[package]]
@@ -6087,7 +6087,7 @@ dependencies = [
  "percent-encoding",
  "pin-project 1.1.10",
  "prost",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-stream",
  "tower 0.4.13",
  "tower-layer",
@@ -6146,7 +6146,7 @@ dependencies = [
  "pin-project-lite 0.2.16",
  "rand 0.8.5",
  "slab",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tower-layer",
  "tower-service",
@@ -6163,7 +6163,7 @@ dependencies = [
  "futures-util",
  "pin-project-lite 0.2.16",
  "sync_wrapper 1.0.2",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -6232,7 +6232,7 @@ dependencies = [
  "mime_guess",
  "percent-encoding",
  "pin-project-lite 0.2.16",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-util",
  "tower-layer",
  "tower-service",
@@ -6422,7 +6422,7 @@ dependencies = [
  "pin-project-lite 0.2.16",
  "proptest",
  "test-utils",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tracing",
 ]
 
@@ -6647,7 +6647,7 @@ dependencies = [
  "futures-util",
  "num_cpus",
  "thiserror 2.0.12",
- "tokio 1.44.1",
+ "tokio 1.44.2",
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
