@@ -8,7 +8,7 @@ pub use config::Config;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
-        mod api;
+        pub mod api;
         mod db;
 
         mod elevations;
