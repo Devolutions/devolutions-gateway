@@ -4,18 +4,29 @@ use std::sync::Arc;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
-use bb8::Pool;
-use bb8_postgres::PostgresConnectionManager;
 use camino::Utf8PathBuf;
 use hyper::StatusCode;
 use parking_lot::RwLock;
-use tokio_postgres::config::SslMode;
-use tokio_postgres::NoTls;
 use tracing::info;
 
 use crate::config::{Config, ConfigError, DbBackend};
-use crate::db::{Database, DbError, LibsqlConn, PgPool};
+use crate::db::{Database, DbError};
 use crate::policy::{LoadPolicyError, Policy};
+
+#[cfg(feature = "libsql")]
+use crate::db::LibsqlConn;
+
+#[cfg(feature = "postgres")]
+use bb8::Pool;
+#[cfg(feature = "postgres")]
+use bb8_postgres::PostgresConnectionManager;
+#[cfg(feature = "postgres")]
+use tokio_postgres::config::SslMode;
+#[cfg(feature = "postgres")]
+use tokio_postgres::NoTls;
+
+#[cfg(feature = "postgres")]
+use crate::db::PgPool;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -38,6 +49,19 @@ impl AppState {
         }?;
 
         let db: Arc<dyn Database + Send + Sync> = match config.db {
+            #[cfg(feature = "libsql")]
+            DbBackend::Libsql => {
+                #[expect(clippy::unwrap_used)]
+                let c = config.libsql.unwrap(); // already checked by `Config::validate` at the end of the load function
+                let db_obj = libsql::Builder::new_local(&c.path)
+                    .build()
+                    .await
+                    .map_err(DbError::from)?;
+                let conn = db_obj.connect().map_err(DbError::from)?;
+                info!("Connecting to LibSQL database at {}", c.path);
+                Arc::new(LibsqlConn::new(conn))
+            }
+            #[cfg(feature = "postgres")]
             DbBackend::Postgres => {
                 #[expect(clippy::unwrap_used)]
                 let c = config.postgres.unwrap(); // already checked by `Config::validate` at the end of the load function
@@ -58,17 +82,6 @@ impl AppState {
 
                 info!("Connecting to Postgres database {} on host {}", c.dbname, c.host);
                 Arc::new(PgPool::new(pool))
-            }
-            DbBackend::Libsql => {
-                #[expect(clippy::unwrap_used)]
-                let c = config.libsql.unwrap(); // already checked by `Config::validate` at the end of the load function
-                let db_obj = libsql::Builder::new_local(&c.path)
-                    .build()
-                    .await
-                    .map_err(DbError::from)?;
-                let conn = db_obj.connect().map_err(DbError::from)?;
-                info!("Connecting to LibSQL database at {}", c.path);
-                Arc::new(LibsqlConn::new(conn))
             }
         };
 

@@ -43,13 +43,15 @@ impl OperationOutput for HandlerError {
     type Inner = (StatusCode, Json<HandlerError>);
 }
 
-impl From<tokio_postgres::Error> for HandlerError {
-    fn from(e: tokio_postgres::Error) -> Self {
+impl From<DbError> for HandlerError {
+    fn from(e: DbError) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, Some(e.to_string()))
     }
 }
-impl From<DbError> for HandlerError {
-    fn from(e: DbError) -> Self {
+
+#[cfg(feature = "postgres")]
+impl From<tokio_postgres::Error> for HandlerError {
+    fn from(e: tokio_postgres::Error) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, Some(e.to_string()))
     }
 }

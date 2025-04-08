@@ -23,7 +23,7 @@ impl Config {
     /// Creates a new config with the default values for a new setup.
     fn standard() -> Self {
         Self {
-            db: DbBackend::Libsql,
+            db: DbBackend::default(),
             postgres: None,
             libsql: Some(LibsqlConfig {
                 path: data_dir().join("pedm.sqlite"),
@@ -58,7 +58,9 @@ impl Config {
 
     fn validate(&self) -> Result<(), ConfigError> {
         match self.db {
+            #[cfg(feature = "libsql")]
             DbBackend::Libsql if self.libsql.is_none() => Err(ConfigError::MissingSection(DbBackend::Libsql)),
+            #[cfg(feature = "postgres")]
             DbBackend::Postgres if self.postgres.is_none() => Err(ConfigError::MissingSection(DbBackend::Postgres)),
             _ => Ok(()),
         }
@@ -68,15 +70,20 @@ impl Config {
 #[derive(Serialize, Deserialize, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum DbBackend {
-    #[default]
+    #[cfg_attr(feature = "libsql", default)]
+    #[cfg(feature = "libsql")]
     Libsql,
+    #[cfg_attr(all(feature = "postgres", not(feature = "libsql")), default)]
+    #[cfg(feature = "postgres")]
     Postgres,
 }
 
 impl fmt::Display for DbBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            #[cfg(feature = "libsql")]
             Self::Libsql => write!(f, "libsql"),
+            #[cfg(feature = "postgres")]
             Self::Postgres => write!(f, "postgres"),
         }
     }

@@ -1,11 +1,17 @@
 use async_trait::async_trait;
 
 mod err;
-mod libsql;
-mod pg;
 
 pub(crate) use err::DbError;
+
+#[cfg(feature = "libsql")]
+mod libsql;
+#[cfg(feature = "libsql")]
 pub(crate) use libsql::LibsqlConn;
+
+#[cfg(feature = "postgres")]
+mod pg;
+#[cfg(feature = "postgres")]
 pub(crate) use pg::PgPool;
 
 /// Abstracts database operations for backends such as Postgres or libSQL.
