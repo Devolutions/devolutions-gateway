@@ -7,32 +7,46 @@ use tracing::info;
 
 use crate::data_dir;
 
+/// Specifies the default pipe name.
+///
+/// This is a workaround for `serde(default)` not taking a raw string literal or escaped backslashes.
+fn default_pipe_name() -> String {
+    "\\\\.\\pipe\\DevolutionsPEDM".to_owned()
+}
+
 /// The application config.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct Config {
+pub struct Config {
     /// The selected database backend.
     ///
     /// Only one can be active at a given time.
-    pub(crate) db: DbBackend,
-    pub(crate) postgres: Option<PgConfig>,
-    pub(crate) libsql: Option<LibsqlConfig>,
+    pub db: DbBackend,
+    pub postgres: Option<PgConfig>,
+    pub libsql: Option<LibsqlConfig>,
+    /// Specify the pipe name, if desired.
+    ///
+    /// Backslashes must be escaped, like "\\\\.\\pipe\\foo".
+    /// This field is intentionally omitted from the example configuration.
+    #[serde(default = "default_pipe_name")]
+    pub pipe_name: String,
 }
 
 impl Config {
     /// Creates a new config with the default values for a new setup.
-    fn standard() -> Self {
+    pub fn standard() -> Self {
         Self {
             db: DbBackend::default(),
             postgres: None,
             libsql: Some(LibsqlConfig {
                 path: data_dir().join("pedm.sqlite"),
             }),
+            pipe_name: default_pipe_name(),
         }
     }
 
     /// Loads the config file from the specified path.
-    pub(crate) fn load_from_path(path: &Utf8Path) -> Result<Self, ConfigError> {
+    pub fn load_from_path(path: &Utf8Path) -> Result<Self, ConfigError> {
         match fs::read_to_string(path) {
             Ok(s) => {
                 info!("Loading config from {path}");
@@ -51,7 +65,7 @@ impl Config {
     }
 
     /// Loads the config file from the default path.
-    pub(crate) fn load_from_default_path() -> Result<Self, ConfigError> {
+    pub fn load_from_default_path() -> Result<Self, ConfigError> {
         let path = data_dir().join("config.toml");
         Self::load_from_path(&path)
     }
@@ -91,20 +105,20 @@ impl fmt::Display for DbBackend {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct LibsqlConfig {
+pub struct LibsqlConfig {
     /// The path to the SQLite database file.
-    pub(crate) path: Utf8PathBuf,
+    pub path: Utf8PathBuf,
 }
 
 // TODO: SSL support
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(crate) struct PgConfig {
-    pub(crate) host: String,
-    pub(crate) dbname: String,
-    pub(crate) port: Option<u16>, // 5432 if omitted
-    pub(crate) user: String,
-    pub(crate) password: Option<String>,
+pub struct PgConfig {
+    pub host: String,
+    pub dbname: String,
+    pub port: Option<u16>, // 5432 if omitted
+    pub user: String,
+    pub password: Option<String>,
 }
 
 #[derive(Debug)]

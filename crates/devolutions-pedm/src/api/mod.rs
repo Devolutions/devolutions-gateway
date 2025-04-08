@@ -12,7 +12,6 @@ use axum::extract::{ConnectInfo, Request};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::{Json, Router};
-use camino::Utf8PathBuf;
 use futures_util::future::BoxFuture;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
@@ -40,6 +39,7 @@ use revoke::post_revoke;
 use state::{AppState, AppStateError};
 use status::get_status;
 
+use crate::config::Config;
 use crate::db::DbError;
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
@@ -94,7 +94,7 @@ async fn named_pipe_middleware(
     Ok(next.run(request).await)
 }
 
-fn create_pipe(pipe_name: &'static str) -> anyhow::Result<NamedPipeServer> {
+fn create_pipe(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
     let pipe = ServerOptions::new().write_dac(true).create(pipe_name)?;
 
     let dacl = Acl::new()?.set_entries(&[
@@ -165,8 +165,8 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
-pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) -> Result<(), ServeError> {
-    let state = AppState::load(config_path).await?;
+pub async fn serve(config: Config) -> Result<(), ServeError> {
+    let state = AppState::load(&config).await?;
 
     // a plain Axum router
     let hello_router = Router::new().route("/health", axum::routing::get(health_check));
@@ -178,6 +178,7 @@ pub async fn serve(pipe_name: &'static str, config_path: Option<Utf8PathBuf>) ->
 
     let mut make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();
 
+    let pipe_name = &config.pipe_name;
     let mut server = create_pipe(pipe_name)?;
 
     // Log the server startup.

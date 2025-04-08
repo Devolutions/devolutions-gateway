@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
-use camino::Utf8PathBuf;
 use hyper::StatusCode;
 use parking_lot::RwLock;
 use tracing::info;
@@ -41,18 +40,12 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
-    pub(crate) async fn load(config_path: Option<Utf8PathBuf>) -> Result<Self, AppStateError> {
-        let config = if let Some(path) = config_path {
-            Config::load_from_path(&path)
-        } else {
-            Config::load_from_default_path()
-        }?;
-
+    pub(crate) async fn load(config: &Config) -> Result<Self, AppStateError> {
         let db: Arc<dyn Database + Send + Sync> = match config.db {
             #[cfg(feature = "libsql")]
             DbBackend::Libsql => {
                 #[expect(clippy::unwrap_used)]
-                let c = config.libsql.unwrap(); // already checked by `Config::validate` at the end of the load function
+                let c = config.libsql.as_ref().unwrap(); // already checked by `Config::validate` at the end of the load function
                 let db_obj = libsql::Builder::new_local(&c.path)
                     .build()
                     .await
@@ -64,15 +57,15 @@ impl AppState {
             #[cfg(feature = "postgres")]
             DbBackend::Postgres => {
                 #[expect(clippy::unwrap_used)]
-                let c = config.postgres.unwrap(); // already checked by `Config::validate` at the end of the load function
+                let c = config.postgres.as_ref().unwrap(); // already checked by `Config::validate` at the end of the load function
                 let mut pg_config = tokio_postgres::Config::new();
                 pg_config.host(&c.host);
                 pg_config.dbname(&c.dbname);
                 if let Some(n) = c.port {
                     pg_config.port(n);
                 }
-                pg_config.user(c.user);
-                if let Some(s) = c.password {
+                pg_config.user(&c.user);
+                if let Some(s) = &c.password {
                     pg_config.password(s);
                 }
                 pg_config.ssl_mode(SslMode::Disable);

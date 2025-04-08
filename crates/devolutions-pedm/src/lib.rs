@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 
+pub use config::Config;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
-        pub mod api;
+        mod api;
         mod db;
         mod config;
         mod elevations;
@@ -14,8 +15,10 @@ cfg_if::cfg_if! {
         mod log;
         mod policy;
         mod utils;
-        use tokio::select;
 
+        pub use api::serve;
+
+        use tokio::select;
         use tracing::error;
     }
 }
@@ -39,7 +42,7 @@ impl Task for PedmTask {
         cfg_if::cfg_if! {
             if #[cfg(target_os = "windows")] {
                 select! {
-                    res = api::serve(r"\\.\pipe\DevolutionsPEDM", None) => {
+                    res = serve(Config::standard()) => {
                         if let Err(error) = &res {
                             error!(%error, "Named pipe server got error");
                         }
