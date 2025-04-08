@@ -225,12 +225,9 @@ pub struct InterfaceAddress {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
-    /// Interface's name
     pub name: String,
-    /// Interface's address
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<Addr>))]
     pub addr: Vec<Addr>,
-    /// MAC Address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_addr: Option<String>,
     /// Interface's index
@@ -242,9 +239,7 @@ pub struct NetworkInterface {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Addr {
-    /// IPV4 Interface from the AFINET network interface family
     V4(V4IfAddr),
-    /// IPV6 Interface from the AFINET6 network interface family
     V6(V6IfAddr),
 }
 
@@ -271,29 +266,23 @@ where
     }
 }
 
-/// IPV4 Interface from the AFINET network interface family
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct V4IfAddr {
-    /// The IP address for this network interface
     pub ip: Ipv4Addr,
-    /// The broadcast address for this interface
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<Ipv4Addr>,
-    /// The netmask for this interface
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub netmask: Option<Netmask<Ipv4Addr>>,
 }
 
-/// IPV6 Interface from the AFINET6 network interface family
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct V6IfAddr {
-    /// The IP address for this network interface
     pub ip: Ipv6Addr,
-    /// The broadcast address for this interface
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<Ipv6Addr>,
-    /// The netmask for this interface
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub netmask: Option<Netmask<Ipv6Addr>>,
 }
 
