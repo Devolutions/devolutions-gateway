@@ -5,10 +5,11 @@ use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
 use axum::{Json, Router};
-use network_scanner::interfaces::{self, MacAddr};
+use network_scanner::interfaces;
 use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
-use std::net::IpAddr;
+use std::fmt;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new().route("/scan", axum::routing::get(handle_network_scan));
@@ -205,7 +206,6 @@ impl NetworkScanResponse {
 ))]
 pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
     let interfaces = interfaces::get_network_interfaces()
-        .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
         .map(NetworkInterface::from)
@@ -221,43 +221,113 @@ pub struct InterfaceAddress {
     pub prefixlen: u32,
 }
 
-/// Network interface configuration
+/// Interface's description
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
+    /// Interface's name
     pub name: String,
+    /// Interface's address
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Addr>))]
+    pub addr: Vec<Addr>,
+    /// MAC Address
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub mac_addr: Option<String>,
+    /// Interface's index
+    #[cfg_attr(feature = "openapi", schema(value_type = u32))]
+    pub index: u32,
+}
+
+/// Network interface address
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum Addr {
+    /// IPV4 Interface from the AFINET network interface family
+    V4(V4IfAddr),
+    /// IPV6 Interface from the AFINET6 network interface family
+    V6(V6IfAddr),
+}
+
+/// Netmask wrapper for IP address types
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Netmask<T>(pub T);
+
+impl<T: fmt::Display> fmt::Display for Netmask<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<T> Serialize for Netmask<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+/// IPV4 Interface from the AFINET network interface family
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct V4IfAddr {
+    /// The IP address for this network interface
+    pub ip: Ipv4Addr,
+    /// The broadcast address for this interface
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mac_address: Option<MacAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
-    pub addresses: Vec<InterfaceAddress>,
-    #[cfg_attr(feature = "openapi", schema(value_type = bool))]
-    pub is_up: bool,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub gateways: Vec<IpAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub nameservers: Vec<IpAddr>,
+    pub broadcast: Option<Ipv4Addr>,
+    /// The netmask for this interface
+    pub netmask: Netmask<Ipv4Addr>,
+}
+
+/// IPV6 Interface from the AFINET6 network interface family
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct V6IfAddr {
+    /// The IP address for this network interface
+    pub ip: Ipv6Addr,
+    /// The broadcast address for this interface
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broadcast: Option<Ipv6Addr>,
+    /// The netmask for this interface
+    pub netmask: Netmask<Ipv6Addr>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
     fn from(iface: interfaces::NetworkInterface) -> Self {
-        Self {
+        let addr = iface
+            .addr
+            .into_iter()
+            .map(|addr| {
+                match addr {
+                    interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
+                        ip: v4.ip,
+                        broadcast: v4.broadcast,
+                        netmask: Netmask(v4.netmask.unwrap_or(Ipv4Addr::new(255, 255, 255, 0))),
+                    }),
+                    interfaces::Addr::V6(v6) => {
+                        Addr::V6(V6IfAddr {
+                            ip: v6.ip,
+                            broadcast: v6.broadcast,
+                            netmask: Netmask(v6.netmask.unwrap_or_else(|| {
+                                // Default IPv6 netmask (equivalent to /64)
+                                Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0, 0, 0, 0)
+                            })),
+                        })
+                    }
+                }
+            })
+            .collect();
+
+        NetworkInterface {
             name: iface.name,
-            description: iface.description,
-            mac_address: iface.mac_address,
-            addresses: iface
-                .addresses
-                .into_iter()
-                .map(|addr| InterfaceAddress {
-                    ip: addr.ip,
-                    prefixlen: addr.prefixlen,
-                })
-                .collect(),
-            is_up: iface.operational_status,
-            gateways: iface.gateways,
-            nameservers: iface.dns_servers,
+            mac_addr: iface.mac_addr,
+            addr,
+            index: iface.index,
         }
     }
 }
