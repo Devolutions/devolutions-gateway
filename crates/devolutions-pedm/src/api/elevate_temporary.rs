@@ -9,11 +9,11 @@ use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::db::Db;
 use crate::elevations;
 use crate::policy::Policy;
 
 use super::err::HandlerError;
-use super::state::Db;
 use super::NamedPipeConnectInfo;
 
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]

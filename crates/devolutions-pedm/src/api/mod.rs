@@ -32,18 +32,12 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
 use win_api_wrappers::utils::Pipe;
 
-use elevate_session::elevate_session;
-use elevate_temporary::elevate_temporary;
-use launch::post_launch;
-use revoke::post_revoke;
-use state::{AppState, AppStateError};
-use status::get_status;
-
 use crate::config::Config;
-use crate::db::DbError;
+use crate::db::{Db, DbError, InitSchemaError};
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
 
+mod about;
 mod elevate_session;
 mod elevate_temporary;
 mod err;
@@ -52,6 +46,14 @@ mod policy;
 mod revoke;
 pub(crate) mod state;
 mod status;
+
+use about::about;
+use elevate_session::elevate_session;
+use elevate_temporary::elevate_temporary;
+use launch::post_launch;
+use revoke::post_revoke;
+use state::{AppState, AppStateError};
+use status::get_status;
 
 #[derive(Debug, Clone)]
 struct NamedPipeConnectInfo {
@@ -132,6 +134,7 @@ fn create_pipe(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
 
 pub(crate) fn api_router() -> ApiRouter<AppState> {
     ApiRouter::new()
+        .api_route("/about", aide::axum::routing::get(about))
         .api_route("/elevate/temporary", aide::axum::routing::post(elevate_temporary))
         .api_route("/elevate/session", aide::axum::routing::post(elevate_session))
         .api_route("/launch", aide::axum::routing::post(post_launch))
@@ -165,8 +168,12 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
+/// Initializes the appliation and starts the named pipe server.
 pub async fn serve(config: Config) -> Result<(), ServeError> {
-    let state = AppState::load(&config).await?;
+    let db = Db::new(&config).await?;
+    db.init_schema().await?;
+
+    let state = AppState::new(db, &config.pipe_name).await?;
 
     // a plain Axum router
     let hello_router = Router::new().route("/health", axum::routing::get(health_check));
@@ -182,11 +189,11 @@ pub async fn serve(config: Config) -> Result<(), ServeError> {
     let mut server = create_pipe(pipe_name)?;
 
     // Log the server startup.
-    let run_id = state.db.log_server_startup(pipe_name).await?;
-    info!("Started server at {pipe_name} with run ID {run_id}");
+    info!("Started named pipe server with name `{pipe_name}`");
     info!(
-        "Starting request ID counter at {}",
-        state.req_counter.load(Ordering::Relaxed)
+        "Run ID is {run_id}, request ID counter is {req_count}",
+        run_id = state.startup_info.run_id,
+        req_count = state.req_counter.load(Ordering::Relaxed)
     );
 
     loop {
@@ -219,6 +226,7 @@ pub enum ServeError {
     TokioIo(tokio::io::Error),
     AppState(AppStateError),
     Db(DbError),
+    InitSchema(InitSchemaError),
     Other(anyhow::Error),
 }
 
@@ -228,6 +236,7 @@ impl core::error::Error for ServeError {
             Self::TokioIo(e) => Some(e),
             Self::AppState(e) => Some(e),
             Self::Db(e) => Some(e),
+            Self::InitSchema(e) => Some(e),
             Self::Other(e) => Some(e.as_ref()),
         }
     }
@@ -239,6 +248,7 @@ impl fmt::Display for ServeError {
             Self::TokioIo(e) => e.fmt(f),
             Self::AppState(e) => e.fmt(f),
             Self::Db(e) => e.fmt(f),
+            Self::InitSchema(e) => e.fmt(f),
             Self::Other(e) => e.fmt(f),
         }
     }
@@ -257,6 +267,11 @@ impl From<AppStateError> for ServeError {
 impl From<DbError> for ServeError {
     fn from(e: DbError) -> Self {
         Self::Db(e)
+    }
+}
+impl From<InitSchemaError> for ServeError {
+    fn from(e: InitSchemaError) -> Self {
+        Self::InitSchema(e)
     }
 }
 impl From<anyhow::Error> for ServeError {

@@ -4,31 +4,18 @@ use std::sync::Arc;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
+use chrono::Utc;
 use hyper::StatusCode;
 use parking_lot::RwLock;
-use tracing::info;
 
-use crate::config::{Config, ConfigError, DbBackend};
-use crate::db::{Database, DbError};
+use crate::db::{Database, Db, DbError};
+use crate::model::StartupInfo;
 use crate::policy::{LoadPolicyError, Policy};
 
-#[cfg(feature = "libsql")]
-use crate::db::LibsqlConn;
-
-#[cfg(feature = "postgres")]
-use bb8::Pool;
-#[cfg(feature = "postgres")]
-use bb8_postgres::PostgresConnectionManager;
-#[cfg(feature = "postgres")]
-use tokio_postgres::config::SslMode;
-#[cfg(feature = "postgres")]
-use tokio_postgres::NoTls;
-
-#[cfg(feature = "postgres")]
-use crate::db::PgPool;
-
+/// Axum application state.
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) startup_info: StartupInfo,
     /// Request counter.
     ///
     /// The current count is the last used request ID.
@@ -40,59 +27,29 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
-    pub(crate) async fn load(config: &Config) -> Result<Self, AppStateError> {
-        let db: Arc<dyn Database + Send + Sync> = match config.db {
-            #[cfg(feature = "libsql")]
-            DbBackend::Libsql => {
-                #[expect(clippy::unwrap_used)]
-                let c = config.libsql.as_ref().unwrap(); // already checked by `Config::validate` at the end of the load function
-                let db_obj = libsql::Builder::new_local(&c.path)
-                    .build()
-                    .await
-                    .map_err(DbError::from)?;
-                let conn = db_obj.connect().map_err(DbError::from)?;
-                info!("Connecting to LibSQL database at {}", c.path);
-                Arc::new(LibsqlConn::new(conn))
-            }
-            #[cfg(feature = "postgres")]
-            DbBackend::Postgres => {
-                #[expect(clippy::unwrap_used)]
-                let c = config.postgres.as_ref().unwrap(); // already checked by `Config::validate` at the end of the load function
-                let mut pg_config = tokio_postgres::Config::new();
-                pg_config.host(&c.host);
-                pg_config.dbname(&c.dbname);
-                if let Some(n) = c.port {
-                    pg_config.port(n);
-                }
-                pg_config.user(&c.user);
-                if let Some(s) = &c.password {
-                    pg_config.password(s);
-                }
-                pg_config.ssl_mode(SslMode::Disable);
-
-                let mgr = PostgresConnectionManager::new(pg_config, NoTls);
-                let pool = Pool::builder().build(mgr).await.map_err(DbError::from)?;
-
-                info!("Connecting to Postgres database {} on host {}", c.dbname, c.host);
-                Arc::new(PgPool::new(pool))
-            }
-        };
-
+    pub(crate) async fn new(db: Db, pipe_name: &str) -> Result<Self, AppStateError> {
         let policy = Policy::load()?;
 
-        let last_req_id = db.get_latest_request_id().await?;
+        let last_req_id = db.get_last_request_id().await?;
+        let startup_time = Utc::now();
+        let run_id = db.log_server_startup(startup_time, pipe_name).await?;
+
+        let startup_info = StartupInfo {
+            run_id,
+            request_count: last_req_id,
+            start_time: startup_time,
+        };
 
         Ok(Self {
+            startup_info,
             req_counter: Arc::new(AtomicI32::new(last_req_id)),
-            db,
+            db: db.0,
             policy: Arc::new(RwLock::new(policy)),
         })
     }
 }
 
 /// Axum extractor for an object that is `Database`.
-pub(crate) struct Db(pub Arc<dyn Database + Send + Sync>);
-
 impl<S> FromRequestParts<S> for Db
 where
     AppState: FromRef<S>,
@@ -114,7 +71,6 @@ impl FromRef<AppState> for Arc<RwLock<Policy>> {
 
 #[derive(Debug)]
 pub enum AppStateError {
-    Config(ConfigError),
     LoadPolicy(LoadPolicyError),
     Db(DbError),
 }
@@ -122,7 +78,6 @@ pub enum AppStateError {
 impl error::Error for AppStateError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            Self::Config(e) => Some(e),
             Self::LoadPolicy(e) => Some(e),
             Self::Db(e) => Some(e),
         }
@@ -132,17 +87,12 @@ impl error::Error for AppStateError {
 impl fmt::Display for AppStateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Config(e) => e.fmt(f),
             Self::LoadPolicy(e) => e.fmt(f),
             Self::Db(e) => e.fmt(f),
         }
     }
 }
-impl From<ConfigError> for AppStateError {
-    fn from(e: ConfigError) -> Self {
-        Self::Config(e)
-    }
-}
+
 impl From<LoadPolicyError> for AppStateError {
     fn from(e: LoadPolicyError) -> Self {
         Self::LoadPolicy(e)

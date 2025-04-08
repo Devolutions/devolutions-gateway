@@ -3,6 +3,7 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
+use chrono::{DateTime, Utc};
 use tokio_postgres::NoTls;
 
 use super::{Database, DbError};
@@ -25,7 +26,22 @@ impl Deref for PgPool {
 
 #[async_trait]
 impl Database for PgPool {
-    async fn get_latest_request_id(&self) -> Result<i32, DbError> {
+    async fn get_schema_version(&self) -> Result<i16, DbError> {
+        Ok(self
+            .get()
+            .await?
+            .query_one("SELECT version FROM pedm_schema_version", &[])
+            .await?
+            .get(0))
+    }
+
+    async fn init_schema(&self) -> Result<(), DbError> {
+        let sql = include_str!("../../schema/pg.sql");
+        self.get().await?.batch_execute(sql).await?;
+        Ok(())
+    }
+
+    async fn get_last_request_id(&self) -> Result<i32, DbError> {
         Ok(self
             .get()
             .await?
@@ -35,13 +51,23 @@ impl Database for PgPool {
             .unwrap_or_default())
     }
 
-    async fn log_server_startup(&self, pipe_name: &str) -> Result<i32, DbError> {
+    async fn get_last_request_time(&self) -> Result<Option<DateTime<Utc>>, DbError> {
+        Ok(self
+            .get()
+            .await?
+            .query_opt("SELECT at FROM http_request ORDER BY id DESC LIMIT 1", &[])
+            .await?
+            .map(|r| r.get(0))
+            .unwrap_or_default())
+    }
+
+    async fn log_server_startup(&self, start_time: DateTime<Utc>, pipe_name: &str) -> Result<i32, DbError> {
         Ok(self
             .get()
             .await?
             .query_one(
-                "INSERT INTO pedm_run (pipe_name) VALUES ($1) RETURNING id",
-                &[&pipe_name],
+                "INSERT INTO pedm_run (start_time, pipe_name) VALUES ($1, $2) RETURNING id",
+                &[&start_time, &pipe_name],
             )
             .await?
             .get(0))
