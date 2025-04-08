@@ -11,7 +11,17 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "tracing", "tower-log", "form", "original-uri", "matched-path"] }
+axum = { version = "0.8", default-features = false, features = [
+  "http1",
+  "json",
+  "tokio",
+  "query",
+  "tracing",
+  "tower-log",
+  "form",
+  "original-uri",
+  "matched-path",
+] }
 base16ct = { version = "0.2", features = ["std", "alloc"] }
 base64 = "0.22"
 digest = "0.10"
@@ -25,13 +35,20 @@ sha2 = "0.10"
 tokio = { version = "1.44", features = ["net", "rt-multi-thread"] }
 tower-service = "0.3"
 win-api-wrappers = { path = "../win-api-wrappers" }
-devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["policy"]}
+devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = [
+  "policy",
+] }
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 camino = { version = "1", features = ["serde1"] }
 async-trait = "0.1"
 tracing = "0.1"
-aide = { version = "0.14", features = ["axum", "axum-extra", "axum-json", "axum-tokio"] }
+aide = { version = "0.14", features = [
+  "axum",
+  "axum-extra",
+  "axum-json",
+  "axum-tokio",
+] }
 tower-http = { version = "0.5", features = ["timeout"] }
 parking_lot = "0.12"
 cfg-if = "1.0"
@@ -39,12 +56,10 @@ uuid = "1"
 dunce = "1.0"
 tower = "0.5"
 futures-util = "0.3"
-toml = "0.8"
-libsql = { version = "0.9", optional = true, features = [ "core", "stream"] }
+libsql = { version = "0.9", optional = true, features = ["core", "stream"] }
 tokio-postgres = { version = "0.7", optional = true }
 bb8 = { version = "0.9.0", optional = true }
 bb8-postgres = { version = "0.9.0", optional = true }
-
 
 [features]
 default = ["libsql"]

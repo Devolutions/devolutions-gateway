@@ -9,7 +9,6 @@ use crate::data_dir;
 
 /// The application config.
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub(crate) struct Config {
     /// The selected database backend.
     ///
@@ -36,14 +35,14 @@ impl Config {
         match fs::read_to_string(path) {
             Ok(s) => {
                 info!("Loading config from {path}");
-                let c: Self = toml::from_str(&s)?;
+                let c: Self = serde_json::from_str(&s)?;
                 c.validate()?;
                 Ok(c)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 info!("Config not found at {path}. Initializing default config");
                 let c = Config::standard();
-                fs::write(path, toml::to_string(&c)?).map_err(|e| ConfigError::Io(e, path.into()))?;
+                fs::write(path, serde_json::to_string(&c)?).map_err(|e| ConfigError::Io(e, path.into()))?;
                 Ok(c)
             }
             Err(e) => Err(ConfigError::Io(e, path.into())),
@@ -108,8 +107,7 @@ pub(crate) struct PgConfig {
 #[derive(Debug)]
 pub enum ConfigError {
     Io(io::Error, Utf8PathBuf),
-    TomlDe(toml::de::Error),
-    TomlSer(toml::ser::Error),
+    Json(serde_json::Error),
     MissingSection(DbBackend),
 }
 
@@ -117,8 +115,7 @@ impl error::Error for ConfigError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Self::Io(e, _) => Some(e),
-            Self::TomlDe(e) => Some(e),
-            Self::TomlSer(e) => Some(e),
+            Self::Json(e) => Some(e),
             Self::MissingSection(_) => None,
         }
     }
@@ -128,20 +125,14 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e, path) => write!(f, "IO error while loading config at {path}: {e}"),
-            Self::TomlDe(e) => e.fmt(f),
-            Self::TomlSer(e) => e.fmt(f),
+            Self::Json(e) => e.fmt(f),
             Self::MissingSection(s) => write!(f, "{s} config section is missing"),
         }
     }
 }
 
-impl From<toml::de::Error> for ConfigError {
-    fn from(e: toml::de::Error) -> Self {
-        Self::TomlDe(e)
-    }
-}
-impl From<toml::ser::Error> for ConfigError {
-    fn from(e: toml::ser::Error) -> Self {
-        Self::TomlSer(e)
+impl From<serde_json::Error> for ConfigError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
     }
 }
