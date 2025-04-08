@@ -281,7 +281,7 @@ pub struct V4IfAddr {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<Ipv4Addr>,
     /// The netmask for this interface
-    pub netmask: Netmask<Ipv4Addr>,
+    pub netmask: Option<Netmask<Ipv4Addr>>,
 }
 
 /// IPV6 Interface from the AFINET6 network interface family
@@ -294,7 +294,7 @@ pub struct V6IfAddr {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<Ipv6Addr>,
     /// The netmask for this interface
-    pub netmask: Netmask<Ipv6Addr>,
+    pub netmask: Option<Netmask<Ipv6Addr>>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
@@ -307,16 +307,13 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
                     interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
                         ip: v4.ip,
                         broadcast: v4.broadcast,
-                        netmask: Netmask(v4.netmask.unwrap_or(Ipv4Addr::new(255, 255, 255, 0))),
+                        netmask: v4.netmask.map(|netmask| Netmask(netmask)),
                     }),
                     interfaces::Addr::V6(v6) => {
                         Addr::V6(V6IfAddr {
                             ip: v6.ip,
                             broadcast: v6.broadcast,
-                            netmask: Netmask(v6.netmask.unwrap_or_else(|| {
-                                // Default IPv6 netmask (equivalent to /64)
-                                Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0, 0, 0, 0)
-                            })),
+                            netmask: v6.netmask.map(|netmask| Netmask(netmask)),
                         })
                     }
                 }
