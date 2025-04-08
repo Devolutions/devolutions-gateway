@@ -9,6 +9,7 @@ use crate::data_dir;
 
 /// The application config.
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub(crate) struct Config {
     /// The selected database backend.
     ///
@@ -67,7 +68,7 @@ impl Config {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "PascalCase")]
 pub enum DbBackend {
     #[cfg_attr(feature = "libsql", default)]
     #[cfg(feature = "libsql")]
@@ -89,6 +90,7 @@ impl fmt::Display for DbBackend {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub(crate) struct LibsqlConfig {
     /// The path to the SQLite database file.
     pub(crate) path: Utf8PathBuf,
@@ -96,6 +98,7 @@ pub(crate) struct LibsqlConfig {
 
 // TODO: SSL support
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub(crate) struct PgConfig {
     pub(crate) host: String,
     pub(crate) dbname: String,

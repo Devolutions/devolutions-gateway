@@ -1,12 +1,12 @@
 {
-    "db": "libsql",
-    "libsql": {
-        "path": "C:/ProgramData/Devolutions/Agent/pedm/pedm.sqlite"
+    "Db": "Libsql",
+    "Libsql": {
+        "Path": "C:/ProgramData/Devolutions/Agent/pedm/pedm.sqlite"
     },
-    "postgres": {
-        "host": "192.168.0.100",
-        "dbname": "pedm",
-        "user": "pedm",
-        "password": "pedm"
+    "Postgres": {
+        "Host": "192.168.0.100",
+        "Dbname": "pedm",
+        "User": "pedm",
+        "Password": "pedm"
     }
 }
