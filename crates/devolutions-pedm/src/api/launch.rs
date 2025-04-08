@@ -1,9 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use aide::NoApi;
+use axum::extract::State;
 use axum::{Extension, Json};
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::{Process, StartupInfo};
 use win_api_wrappers::raw::Win32::Security::{WinLocalSystemSid, TOKEN_QUERY};
@@ -16,6 +21,7 @@ use win_api_wrappers::utils::{environment_block, expand_environment_path, Comman
 
 use crate::elevator;
 use crate::error::Error;
+use crate::policy::Policy;
 
 use super::NamedPipeConnectInfo;
 
@@ -81,6 +87,7 @@ fn win_canonicalize(path: &Path, token: Option<&Token>) -> Result<PathBuf, Error
 
 pub(crate) async fn post_launch(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
     Json(mut payload): Json<LaunchPayload>,
 ) -> Result<Json<LaunchResponse>, Error> {
     payload.executable_path = payload
@@ -126,6 +133,7 @@ pub(crate) async fn post_launch(
     startup_info.attribute_list = Some(Some(attributes.raw()));
 
     let proc_info = elevator::try_start_elevated(
+        &policy,
         &named_pipe_info.token,
         parent_pid,
         payload.executable_path.as_deref(),
