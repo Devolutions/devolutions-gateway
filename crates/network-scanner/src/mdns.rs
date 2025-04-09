@@ -86,7 +86,7 @@ pub fn mdns_query_scan(
         let receiver_clone = receiver.clone();
         task_manager
             .with_timeout(query_duration)
-            .after_finish(move |_| {
+            .when_finish(move || {
                 debug!(service_name = ?service_name_clone, "Stopping browse for service");
                 if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
                     warn!(error = %e, "Failed to stop browsing for service");
@@ -107,7 +107,7 @@ pub fn mdns_query_scan(
                         let port = msg.get_port();
 
                         for ip in msg.get_addresses() {
-                            let entry = ScanEntry::Regular {
+                            let entry = ScanEntry::Result {
                                 addr: *ip,
                                 hostname: Some(device_name.clone()),
                                 port,
