@@ -76,7 +76,7 @@ impl Database for PgPool {
     async fn log_http_request(&self, req_id: i32, method: &str, path: &str, status_code: i16) -> Result<(), DbError> {
         self.get()
             .await?
-            .query_one(
+            .execute(
                 "INSERT INTO http_request (id, method, path, status_code) VALUES ($1, $2, $3, $4)",
                 &[&req_id, &method, &path, &status_code],
             )
