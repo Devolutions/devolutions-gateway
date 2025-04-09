@@ -281,21 +281,17 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
         let addr = iface
             .addr
             .into_iter()
-            .map(|addr| {
-                match addr {
-                    interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
-                        ip: v4.ip,
-                        broadcast: v4.broadcast,
-                        netmask: v4.netmask.map(|netmask| Netmask(netmask)),
-                    }),
-                    interfaces::Addr::V6(v6) => {
-                        Addr::V6(V6IfAddr {
-                            ip: v6.ip,
-                            broadcast: v6.broadcast,
-                            netmask: v6.netmask.map(|netmask| Netmask(netmask)),
-                        })
-                    }
-                }
+            .map(|addr| match addr {
+                interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
+                    ip: v4.ip,
+                    broadcast: v4.broadcast,
+                    netmask: v4.netmask.map(|netmask| Netmask(netmask)),
+                }),
+                interfaces::Addr::V6(v6) => Addr::V6(V6IfAddr {
+                    ip: v6.ip,
+                    broadcast: v6.broadcast,
+                    netmask: v6.netmask.map(|netmask| Netmask(netmask)),
+                }),
             })
             .collect();
 
