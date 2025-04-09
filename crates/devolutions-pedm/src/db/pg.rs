@@ -57,8 +57,7 @@ impl Database for PgPool {
             .await?
             .query_opt("SELECT at FROM http_request ORDER BY id DESC LIMIT 1", &[])
             .await?
-            .map(|r| r.get(0))
-            .unwrap_or_default())
+            .map(|r| r.get(0)))
     }
 
     async fn log_server_startup(&self, start_time: DateTime<Utc>, pipe_name: &str) -> Result<i32, DbError> {
