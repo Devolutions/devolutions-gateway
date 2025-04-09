@@ -6,7 +6,7 @@ use hyper::StatusCode;
 use crate::db::DbError;
 
 /// An error type for route handlers.
-/// 
+///
 /// The error contains a status code and an optional error message.
 #[derive(Debug)]
 pub(crate) struct HandlerError(StatusCode, Option<String>);
