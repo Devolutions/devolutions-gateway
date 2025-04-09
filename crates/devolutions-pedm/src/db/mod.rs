@@ -108,12 +108,13 @@ impl Db {
                     })
                 }
             }
-            Err(db_err) => {
-                if db_err.is_table_does_not_exist() {
+            Err(error) => {
+                if error.is_table_does_not_exist() {
+                    info!("Initializing schema");
                     self.0.init_schema().await?;
                     Ok(())
                 } else {
-                    Err(db_err.into())
+                    Err(error.into())
                 }
             }
         }
