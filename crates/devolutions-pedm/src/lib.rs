@@ -1,16 +1,17 @@
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 
+use devolutions_gateway_task::{ShutdownSignal, Task};
+
+mod config;
+mod db;
 pub mod model;
 
 pub use config::Config;
-use devolutions_gateway_task::{ShutdownSignal, Task};
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
         pub mod api;
-        mod db;
-        mod config;
         mod elevations;
         mod elevator;
         mod error;
