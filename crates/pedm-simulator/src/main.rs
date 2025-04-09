@@ -4,6 +4,7 @@ use anyhow::Context as _;
 use win_api_wrappers::identity::account::{enumerate_account_rights, get_username, lookup_account_by_name};
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
 use win_api_wrappers::process::Process;
+use win_api_wrappers::raw::core::HRESULT;
 use win_api_wrappers::raw::Win32::Foundation::LUID;
 use win_api_wrappers::raw::Win32::Security;
 use win_api_wrappers::raw::Win32::System::SystemServices;
@@ -25,32 +26,63 @@ fn main() -> anyhow::Result<()> {
         .context("open current process token")?;
 
     // Verify that the current account is assigned with the SE_CREATE_TOKEN_NAME privilege.
-    let account_username = get_username(Security::Authentication::Identity::NameSamCompatible).unwrap();
+    println!("Retrieve the current account name...");
+    let account_username =
+        get_username(Security::Authentication::Identity::NameSamCompatible).context("retrieve account username")?;
     println!("Account name: {account_username:?}");
-    let account = lookup_account_by_name(&account_username).unwrap();
-    let rights = enumerate_account_rights(&account.sid).unwrap();
-    let has_create_token_right = rights.iter().any(|right| right == u16cstr!("SeCreateTokenPrivilege"));
 
-    if expect_elevation {
-        assert!(has_create_token_right);
+    match lookup_account_by_name(&account_username) {
+        Ok(account) => {
+            // Verify that the current account is assigned with the SE_CREATE_TOKEN_NAME privilege.
+            println!(
+                "Attempting to verify whether the current account is assigned with the SE_CREATE_TOKEN_NAME privilege"
+            );
 
-        // SE_CREATE_TOKEN_NAME is required for performing the elevation.
-        let se_create_token_name_luid = privilege::lookup_privilege_value(None, privilege::SE_CREATE_TOKEN_NAME)
-            .context("lookup SE_CREATE_TOKEN_NAME privilege")?;
-        token
-            .adjust_privileges(&TokenPrivilegesAdjustment::Enable(vec![se_create_token_name_luid]))
-            .context("enable SE_CREATE_TOKEN_NAME privilege")?;
+            let rights = enumerate_account_rights(&account.sid)
+                .with_context(|| format!("enumerate account rights for {account_username:?}"))?;
+            let has_create_token_right = rights.iter().any(|right| right == u16cstr!("SeCreateTokenPrivilege"));
+            println!("Has SeCreateTokenPrivilege right? {has_create_token_right}");
 
-        // Verify the SE_CREATE_TOKEN_NAME privilege is actually enabled.
-        let se_create_token_name_is_enabled = token
-            .privileges()
-            .context("list token privileges")?
-            .as_slice()
-            .iter()
-            .find(|privilege| privilege.Luid == se_create_token_name_luid)
-            .is_some();
+            if expect_elevation {
+                assert!(has_create_token_right);
+                println!("Current user is assigned the SeCreateTokenPrivilege right. Enabling it...");
 
-        assert!(se_create_token_name_is_enabled);
+                // SE_CREATE_TOKEN_NAME is required for performing the elevation.
+                let se_create_token_name_luid =
+                    privilege::lookup_privilege_value(None, privilege::SE_CREATE_TOKEN_NAME)
+                        .context("lookup SE_CREATE_TOKEN_NAME privilege")?;
+                token
+                    .adjust_privileges(&TokenPrivilegesAdjustment::Enable(vec![se_create_token_name_luid]))
+                    .context("enable SE_CREATE_TOKEN_NAME privilege")?;
+
+                // Verify the SE_CREATE_TOKEN_NAME privilege is actually enabled.
+                let se_create_token_name_is_enabled = token
+                    .privileges()
+                    .context("list token privileges")?
+                    .as_slice()
+                    .iter()
+                    .find(|privilege| privilege.Luid == se_create_token_name_luid)
+                    .is_some();
+
+                assert!(se_create_token_name_is_enabled);
+            }
+        }
+        Err(e) => {
+            println!("Failed to look up account for {account_username:?}: {e}");
+
+            // Possible issue when running this program using psexec -s, under `NT AUTHORITY\SYSTEM` (LocalSystem):
+            // - There is no direct domain credentials by default, unless the machine is domain joined and has a line-of-sight to the DC.
+            // - This context may not be able to see the same network resources or DC that the interactive user.
+            // Causing LookupAccountNameW to fail with a "no mapping" error.
+            // Let’s just go ahead with the elevation in this case, assuming LocalSystem is enough for all intents and purposes at this point.
+            if e.code() == HRESULT(0x80070534u32 as i32) {
+                println!("Got the 'no mapping' error; continuing...")
+            } else {
+                return Err(anyhow::Error::new(e).context(format!(
+                    "unexpected error when looking up the account for {account_username:?}"
+                )));
+            }
+        }
     }
 
     let token_source = build_token_source(LADM_SRC_NAME, LADM_SRC_LUID);
@@ -122,7 +154,7 @@ fn main() -> anyhow::Result<()> {
     } else {
         match res {
             Ok(_) => {
-                anyhow::bail!("admin token creation should have failed, because the current process is not elevated")
+                anyhow::bail!("admin token creation succeded, but this was not expected")
             }
             Err(e) => {
                 assert_eq!(e.to_string(), "no token found for SE_CREATE_TOKEN_NAME privilege");

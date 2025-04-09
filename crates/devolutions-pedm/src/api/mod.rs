@@ -186,6 +186,7 @@ pub async fn serve(config: Config) -> Result<(), ServeError> {
     let mut make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();
 
     let pipe_name = &config.pipe_name;
+    let pipe_name = &config.pipe_name;
     let mut server = create_pipe(pipe_name)?;
 
     // Log the server startup.
