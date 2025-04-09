@@ -22,6 +22,7 @@ pub(crate) struct AboutData {
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct StartupInfo {
     pub(crate) run_id: i32,
-    pub(crate) request_count: i32,
+    /// The request count at the time of the server startup.
+    pub(crate) startup_request_count: i32,
     pub(crate) start_time: DateTime<Utc>,
 }

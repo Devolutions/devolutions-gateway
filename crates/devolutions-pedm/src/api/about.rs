@@ -14,7 +14,7 @@ pub(crate) async fn about(
     NoApi(State(state)): NoApi<State<AppState>>,
     NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<AboutData>, HandlerError> {
-    let requests_received = state.req_counter.load(Ordering::Relaxed) - state.startup_info.request_count;
+    let requests_received = state.req_counter.load(Ordering::Relaxed) - state.startup_info.startup_request_count;
 
     Ok(Json(AboutData {
         startup_info: state.startup_info,
