@@ -20,6 +20,7 @@ pub enum DbError {
     /// For example, we may have a value that is `i16` in the data model but it is stored as `i64` in libSQL.
     #[cfg(feature = "libsql")]
     TryFromInt(TryFromIntError),
+    /// An error that occurs when parsing microseconds since epoch into `chrono::DateTime<Utc>`.
     #[cfg(feature = "libsql")]
     Timestamp(ParseTimestampError),
     #[cfg(feature = "postgres")]
@@ -106,8 +107,8 @@ impl DbError {
     }
 }
 
-#[cfg(feature = "libsql")]
 /// A custom error type equivalent for `chrono::LocalResult`.
+#[cfg(feature = "libsql")]
 #[derive(Debug)]
 pub enum ParseTimestampError {
     None,
@@ -127,7 +128,7 @@ impl fmt::Display for ParseTimestampError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "no timestamp found"),
-            Self::Ambiguous(dt1, dt2) => write!(f, "ambiguous timestamp: {dt1:?} or {dt2:?}"),
+            Self::Ambiguous(dt1, dt2) => write!(f, "ambiguous timestamp: {dt1} or {dt2}"),
         }
     }
 }
