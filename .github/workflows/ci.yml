@@ -1000,7 +1000,9 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Prepare runner
-        run: rustup toolchain install nightly
+        run: |
+          rustup toolchain install nightly
+          choco install pstools --yes
 
       - name: Prepare PEDM simulator build
         run: ./crates/pedm-simulator/prepare.ps1
@@ -1008,8 +1010,16 @@ jobs:
       - name: Build PEDM simulator container
         run: ./crates/pedm-simulator/build-container.ps1
 
-      - name: Run PEDM simulator (limited test)
+      - name: Run PEDM simulator (container with limited user)
         run: ./crates/pedm-simulator/run-container.ps1
+
+      # It’s difficult to get realtime stdout/stderr when using psexec -s.
+      # Instead, the run-expect-elevation.ps1 script will redirect the output into a file that we can read afterwards.
+      - name: Run PEDM simulator (as LocalSystem)
+        run: |
+          $scriptPath = Resolve-Path -Path "./crates/pedm-simulator/run-expect-elevation.ps1"
+          psexec -accepteula -s pwsh.exe $scriptPath
+          Get-Content -Path ./crates/pedm-simulator/pedm-simulator_run-expect-elevation.out
 
   success:
     name: Success
