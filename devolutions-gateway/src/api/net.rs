@@ -2,7 +2,7 @@ use crate::http::HttpError;
 use crate::token::{ApplicationProtocol, Protocol};
 use crate::DgwState;
 use axum::extract::ws::{Message, Utf8Bytes};
-use axum::extract::WebSocketUpgrade;
+use axum::extract::{RawQuery, WebSocketUpgrade};
 use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::interfaces;
@@ -27,9 +27,21 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
-    query_params: axum::extract::Query<NetworkScanQueryParams>,
+    RawQuery(query): RawQuery,
 ) -> Result<Response, HttpError> {
-    let scanner_params: NetworkScannerParams = query_params.0.into();
+    let query = query.unwrap_or_default();
+
+    // Use serde_qs to parse array parameters
+    // As suggested by serde_urlencoded author https://github.com/nox/serde_urlencoded/issues/85
+    let query_params = match serde_qs::from_str::<NetworkScanQueryParams>(&query) {
+        Ok(params) => Ok(params),
+        Err(e) => Err(HttpError::bad_request().build(e)),
+    }?;
+
+    let scanner_params: NetworkScannerParams = query_params.try_into().map_err(|e| {
+        error!(error = format!("{e:#}"), "Failed to parse query parameters");
+        HttpError::bad_request().build(e)
+    })?;
 
     let scanner = scanner::NetworkScanner::new(scanner_params).map_err(|e| {
         error!(error = format!("{e:#}"), "Failed to create network scanner");
@@ -61,7 +73,7 @@ pub async fn handle_network_scan(
                         break;
                     };
 
-                    let response = NetworkScanResponse::new(entry.addr, entry.port, entry.hostname, entry.service_type);
+                    let response: NetworkScanResponse = entry.into();
 
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
@@ -125,14 +137,32 @@ pub struct NetworkScanQueryParams {
     pub mdns_query_timeout: Option<u64>,
     /// The maximum duration for whole networking scan in milliseconds. Highly suggested!
     pub max_wait: Option<u64>,
+    /// The start and end IP address of the range to scan.
+    /// for example: 10.10.0.0-10.10.0.255
+    #[serde(default)]
+    pub ranges: Vec<String>,
+    /// The ports to scan. If not specified, the default ports will be used.
+    #[serde(default)]
+    pub ports: Vec<u16>,
+
+    #[serde(default)]
+    pub disable_ping_events: bool,
 }
 
 const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 5985, 5986];
 
-impl From<NetworkScanQueryParams> for NetworkScannerParams {
-    fn from(val: NetworkScanQueryParams) -> Self {
-        NetworkScannerParams {
-            ports: COMMON_PORTS.to_vec(),
+impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
+    type Error = anyhow::Error;
+    fn try_from(val: NetworkScanQueryParams) -> Result<Self, Self::Error> {
+        warn!(query=?val, "Network scan query parameters");
+
+        let ports = match val.ports.len() {
+            0 => COMMON_PORTS.to_vec(),
+            _ => val.ports,
+        };
+
+        Ok(NetworkScannerParams {
+            ports,
             ping_interval: val.ping_interval.unwrap_or(200),
             ping_timeout: val.ping_timeout.unwrap_or(500),
             broadcast_timeout: val.broadcast_timeout.unwrap_or(1000),
@@ -141,15 +171,48 @@ impl From<NetworkScanQueryParams> for NetworkScannerParams {
             max_wait_time: val.max_wait.unwrap_or(120 * 1000),
             netbios_interval: val.netbios_interval.unwrap_or(200),
             mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
+            ip_ranges: val
+                .ranges
+                .iter()
+                .map(IpAddrRange::try_from)
+                .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?,
+            disable_ping_event: val.disable_ping_events,
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanEvent {
+    #[serde(rename_all = "lowercase")]
+    PingStart { ip_addr: IpAddr },
+    #[serde(rename_all = "lowercase")]
+    PingFailed { ip_addr: IpAddr, reason: String },
+}
+
+impl From<scanner::ScanEvent> for ScanEvent {
+    fn from(event: scanner::ScanEvent) -> Self {
+        match event {
+            scanner::ScanEvent::PingStart { ip_addr } => Self::PingStart { ip_addr },
+            scanner::ScanEvent::PingFailed { ip_addr, reason } => Self::PingFailed {
+                ip_addr,
+                reason: reason.to_string(),
+            },
         }
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct NetworkScanResponse {
-    pub ip: IpAddr,
-    pub hostname: Option<String>,
-    pub protocol: ApplicationProtocol,
+#[serde(rename_all = "lowercase")]
+pub enum NetworkScanResponse {
+    #[serde(rename_all = "lowercase")]
+    Event(ScanEvent),
+    #[serde(rename_all = "lowercase")]
+    Entry {
+        ip: IpAddr,
+        hostname: Option<String>,
+        protocol: ApplicationProtocol,
+    },
 }
 
 impl NetworkScanResponse {
@@ -185,7 +248,21 @@ impl NetworkScanResponse {
                 _ => ApplicationProtocol::unknown(),
             }
         };
-        Self { ip, hostname, protocol }
+        Self::Entry { ip, hostname, protocol }
+    }
+}
+
+impl From<scanner::ScanEntry> for NetworkScanResponse {
+    fn from(entry: scanner::ScanEntry) -> Self {
+        match entry {
+            scanner::ScanEntry::ScanEvent(event) => Self::Event(event.into()),
+            scanner::ScanEntry::Result {
+                addr,
+                hostname,
+                port,
+                service_type,
+            } => Self::new(addr, port, hostname, service_type),
+        }
     }
 }
 

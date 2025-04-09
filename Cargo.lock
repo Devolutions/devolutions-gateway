@@ -1222,6 +1222,7 @@ dependencies = [
  "rustls-cng",
  "serde",
  "serde_json",
+ "serde_qs",
  "serde_urlencoded",
  "smol_str",
  "sysinfo",

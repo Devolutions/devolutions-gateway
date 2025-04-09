@@ -8,7 +8,7 @@ use std::future::Future;
 
 use tokio::sync::Mutex;
 
-use crate::ip_utils::{get_subnets, Subnet};
+use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
 use crate::scanner::{NetworkScanner, ScanEntry};
 
@@ -40,7 +40,11 @@ pub(crate) struct TaskExecutionContext {
     pub(crate) netbios_interval: Duration,   // in milliseconds
     pub(crate) mdns_query_timeout: Duration, // in milliseconds
 
-    pub(crate) subnets: Vec<Subnet>,
+    pub(crate) boardcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
+
+    pub(crate) range_to_ping: Vec<IpAddrRange>,
+
+    pub(crate) disable_ping_event: bool,
 }
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
@@ -59,7 +63,7 @@ impl TaskExecutionContext {
         let (port_sender, port_receiver) = tokio::sync::mpsc::channel(100);
         let port_receiver = Arc::new(Mutex::new(port_receiver));
 
-        let subnets = get_subnets()?;
+        let boardcast_subnet = get_subnets()?;
         let NetworkScanner {
             ports,
             ping_timeout,
@@ -71,8 +75,18 @@ impl TaskExecutionContext {
             netbios_interval,
             mdns_daemon,
             mdns_query_timeout,
+            ip_ranges,
+            disable_ping_event,
             ..
         } = network_scanner;
+
+        let ping_range = match ip_ranges.len() {
+            0 => boardcast_subnet
+                .iter()
+                .map(IpAddrRange::from)
+                .collect::<Vec<IpAddrRange>>(),
+            _ => ip_ranges,
+        };
 
         let res = Self {
             ip_sender,
@@ -89,8 +103,10 @@ impl TaskExecutionContext {
             port_scan_timeout,
             netbios_timeout,
             netbios_interval,
-            subnets,
+            boardcast_subnet,
+            range_to_ping: ping_range,
             mdns_query_timeout,
+            disable_ping_event,
         };
 
         Ok(res)

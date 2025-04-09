@@ -23,6 +23,10 @@ pub async fn scan_ports(
         sockets.push((socket, addr));
     }
 
+    if port.is_empty() {
+        anyhow::bail!("No ports to scan");
+    }
+
     let (sender, receiver) = tokio::sync::mpsc::channel(port.len());
     for (socket, addr) in sockets {
         let sender = sender.clone();

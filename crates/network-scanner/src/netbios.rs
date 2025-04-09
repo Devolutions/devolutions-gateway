@@ -1,5 +1,5 @@
 use std::mem::MaybeUninit;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use network_scanner_net::runtime::Socket2Runtime;
@@ -7,7 +7,7 @@ use network_scanner_net::socket::AsyncRawSocket;
 use network_scanner_proto::netbios::NetBiosPacket;
 use socket2::{Domain, SockAddr, Type};
 
-use crate::ip_utils::{IpAddrRange, IpV4AddrRange};
+use crate::ip_utils::IpV4AddrRange;
 use crate::task_utils::IpReceiver;
 use crate::{assume_init, ScannerError};
 
