@@ -1,8 +1,8 @@
 use crate::broadcast::asynchronous::broadcast;
 use crate::ip_utils::IpAddrRange;
 use crate::mdns::{self, MdnsDaemon};
-use crate::netbios::{netbios_query_scan, NetBiosResult};
-use crate::ping::{ping_range, PingEvent};
+use crate::netbios::netbios_query_scan;
+use crate::ping::{ping_range, PingFailedReason};
 use crate::port_discovery::{scan_ports, PortScanResult};
 use crate::task_utils::{ScanEntryReceiver, TaskExecutionContext, TaskExecutionRunner, TaskManager};
 use anyhow::Context;
@@ -51,7 +51,7 @@ impl NetworkScanner {
                       ports,
                       runtime,
                       port_scan_timeout,
-                      port_sender,
+                      result_sender: port_sender,
                       ..
                   }: TaskExecutionContext,
                   task_manager| async move {
@@ -91,7 +91,7 @@ impl NetworkScanner {
                                 let dns = ip_cache.read().get(&ip).cloned().flatten();
 
                                 port_sender
-                                    .send(ScanEntry::Regular {
+                                    .send(ScanEntry::Result {
                                         addr: ip,
                                         hostname: dns,
                                         port: socket_addr.port(),
@@ -120,11 +120,9 @@ impl NetworkScanner {
                 for subnet in subnets {
                     debug!(broadcasting_to_subnet = ?subnet);
                     let (runtime, ip_sender) = (Arc::clone(&runtime), ip_sender.clone());
-
                     task_manager.spawn(move |task_manager: TaskManager| async move {
                         let mut receiver =
                             broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
-
                         while let Some(ip) = receiver.recv().await {
                             trace!(broadcast_sent_ip = ?ip);
                             ip_sender.send((ip.into(), None)).await?;
@@ -150,17 +148,19 @@ impl NetworkScanner {
                 debug!(netbios_query_ip_ranges = ?ip_ranges);
 
                 for ip_range in ip_ranges {
-                    let IpAddrRange::V4(ip_range) = ip_range else {
-                        continue;
-                    };
                     let (runtime, ip_sender, task_manager) =
                         (Arc::clone(&runtime), ip_sender.clone(), task_manager.clone());
 
+                    let IpAddrRange::V4(ip_range) = ip_range else {
+                        continue;
+                    };
+
                     let mut receiver =
                         netbios_query_scan(runtime, ip_range, netbios_timeout, netbios_interval, task_manager)?;
+
                     while let Some(res) = receiver.recv().await {
-                        todo!()
-                        // ip_sender.send(res).await?;
+                        debug!(netbios_query_sent_ip = ?res.0);
+                        ip_sender.send(res).await?;
                     }
                 }
                 anyhow::Ok(())
@@ -175,6 +175,7 @@ impl NetworkScanner {
                       ip_sender,
                       subnets,
                       ip_cache,
+                      result_sender,
                       ..
                   }: TaskExecutionContext,
                   task_manager| async move {
@@ -186,7 +187,6 @@ impl NetworkScanner {
                 for ip_range in ip_ranges {
                     let (task_manager, runtime, ip_sender) =
                         (task_manager.clone(), Arc::clone(&runtime), ip_sender.clone());
-
                     let should_ping = should_ping.clone();
                     let mut receiver = ping_range(
                         runtime,
@@ -199,8 +199,22 @@ impl NetworkScanner {
 
                     while let Some(ip) = receiver.recv().await {
                         debug!(ping_sent_ip = ?ip);
-                        todo!()
-                        // ip_sender.send(ScanEntry::Ping(ip)).await?;
+                        match ip {
+                            crate::ping::PingEvent::Success { ip_addr, time } => {
+                                ip_sender.send((ip_addr, None)).await?;
+                                debug!(ping_success_ip = ?ip_addr, time = ?time);
+                            }
+                            crate::ping::PingEvent::Start { ip_addr } => {
+                                result_sender
+                                    .send(ScanEntry::ScanEvent(ScanEvent::PingStart { ip_addr }))
+                                    .await?;
+                            }
+                            crate::ping::PingEvent::Failed { ip_addr, reason } => {
+                                result_sender
+                                    .send(ScanEntry::ScanEvent(ScanEvent::PingFailed { ip_addr, reason }))
+                                    .await?;
+                            }
+                        }
                     }
                 }
                 anyhow::Ok(())
@@ -210,7 +224,7 @@ impl NetworkScanner {
         task_executor.run(
             move |TaskExecutionContext {
                       mdns_daemon,
-                      port_sender,
+                      result_sender: port_sender,
                       ip_cache,
                       ports,
                       mdns_query_timeout,
@@ -219,19 +233,30 @@ impl NetworkScanner {
                   task_manager| async move {
                 let mut receiver = mdns::mdns_query_scan(mdns_daemon, task_manager, mdns_query_timeout)?;
 
-                todo!();
-                // while let Some(mut entry) = receiver.recv().await {
-                //     if ip_cache.read().get(&entry.addr).is_none() {
-                //         ip_cache.write().insert(entry.addr, entry.hostname.clone());
-                //     }
+                while let Some(ScanEntry::Result {
+                    addr,
+                    hostname,
+                    port,
+                    service_type,
+                }) = receiver.recv().await
+                {
+                    if ip_cache.read().get(&addr).is_none() {
+                        ip_cache.write().insert(addr, hostname.clone());
+                    }
 
-                //     let dns_name = ip_cache.read().get(&entry.addr).cloned().flatten();
-                //     entry.hostname = dns_name;
+                    let dns_name = ip_cache.read().get(&addr).cloned().flatten();
 
-                //     if ports.contains(&entry.port) || entry.service_type.is_some() {
-                //         port_sender.send(entry).await?;
-                //     }
-                // }
+                    if ports.contains(&port) || service_type.is_some() {
+                        port_sender
+                            .send(ScanEntry::Result {
+                                addr,
+                                hostname: dns_name,
+                                port,
+                                service_type,
+                            })
+                            .await?;
+                    }
+                }
 
                 anyhow::Ok(())
             },
@@ -240,7 +265,7 @@ impl NetworkScanner {
         let TaskExecutionRunner {
             context:
                 TaskExecutionContext {
-                    port_receiver,
+                    result_receiver: port_receiver,
                     mdns_daemon,
                     ..
                 },
@@ -305,10 +330,15 @@ impl NetworkScanner {
 }
 
 #[derive(Debug)]
+pub enum ScanEvent {
+    PingStart { ip_addr: IpAddr },
+    PingFailed { ip_addr: IpAddr, reason: PingFailedReason },
+}
+
+#[derive(Debug)]
 pub enum ScanEntry {
-    Ping(PingEvent),
-    Netbios(NetBiosResult),
-    Regular {
+    ScanEvent(ScanEvent),
+    Result {
         // IP address of the device
         addr: IpAddr,
         // Hostname of the device

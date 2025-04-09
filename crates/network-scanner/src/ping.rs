@@ -13,7 +13,7 @@ use crate::create_echo_request;
 use crate::ip_utils::IpAddrRange;
 
 #[derive(Debug)]
-pub enum FailedReason {
+pub enum PingFailedReason {
     Rejected,
     TimedOut,
 }
@@ -22,7 +22,7 @@ pub enum FailedReason {
 pub enum PingEvent {
     Start { ip_addr: IpAddr },
     Success { ip_addr: IpAddr, time: u128 },
-    Failed { reason: FailedReason },
+    Failed { ip_addr: IpAddr, reason: PingFailedReason },
 }
 
 pub fn ping_range(
@@ -53,15 +53,37 @@ pub fn ping_range(
         let ping_future = move || async move {
             let _ = sender_clone.send(PingEvent::Start { ip_addr: addr.ip() }).await;
             let start_time = std::time::Instant::now();
-            match try_ping(addr.into(), socket).await {
-                Err(_) => PingEvent::Failed {
-                    reason: FailedReason::Rejected,
-                },
-                Ok(_) => PingEvent::Success {
-                    ip_addr: ip,
-                    time: start_time.elapsed().as_millis(),
-                },
-            }
+            let ping_future = try_ping(addr.into(), socket);
+            let ping_future = timeout(ping_wait_time, ping_future);
+            match ping_future.await {
+                Ok(Ok(_)) => {
+                    let elapsed = start_time.elapsed().as_millis();
+                    let _ = sender_clone
+                        .send(PingEvent::Success {
+                            ip_addr: addr.ip(),
+                            time: elapsed,
+                        })
+                        .await;
+                }
+                Ok(Err(_)) => {
+                    let _ = sender_clone
+                        .send(PingEvent::Failed {
+                            ip_addr: addr.ip(),
+                            reason: PingFailedReason::Rejected,
+                        })
+                        .await;
+                }
+                Err(_) => {
+                    let _ = sender_clone
+                        .send(PingEvent::Failed {
+                            ip_addr: addr.ip(),
+                            reason: PingFailedReason::TimedOut,
+                        })
+                        .await;
+                }
+            };
+
+            anyhow::Ok(())
         };
 
         futures.push(ping_future);
@@ -69,24 +91,7 @@ pub fn ping_range(
 
     task_manager.spawn(move |task_manager| async move {
         for future in futures {
-            let sender = sender.clone();
-
-            task_manager
-                .with_timeout(ping_wait_time)
-                .after_finish(move |result| {
-                    match result {
-                        Ok(event) => {
-                            let _ = sender.try_send(event);
-                        }
-                        Err(_) => {
-                            let _ = sender.try_send(PingEvent::Failed {
-                                reason: FailedReason::TimedOut,
-                            });
-                        }
-                    }
-                })
-                .spawn(|_| future());
-
+            task_manager.spawn_no_sub_task(future());
             tokio::time::sleep(ping_interval).await;
         }
         anyhow::Ok(())
