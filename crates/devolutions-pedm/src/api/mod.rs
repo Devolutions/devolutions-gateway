@@ -47,13 +47,13 @@ mod revoke;
 pub(crate) mod state;
 mod status;
 
-use about::about;
-use elevate_session::elevate_session;
-use elevate_temporary::elevate_temporary;
-use launch::post_launch;
-use revoke::post_revoke;
-use state::{AppState, AppStateError};
-use status::get_status;
+use self::about::about;
+use self::elevate_session::elevate_session;
+use self::elevate_temporary::elevate_temporary;
+use self::launch::post_launch;
+use self::revoke::post_revoke;
+use self::state::{AppState, AppStateError};
+use self::status::get_status;
 
 #[derive(Debug, Clone)]
 struct NamedPipeConnectInfo {
