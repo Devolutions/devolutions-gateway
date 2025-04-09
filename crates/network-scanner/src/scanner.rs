@@ -38,6 +38,10 @@ pub struct NetworkScanner {
     pub mdns_query_timeout: Duration,
     /// The overall maximum duration to wait for the entire scanning process to complete.
     pub max_wait_time: Duration,
+    /// The ranges of IP addresses to ping.
+    pub ip_ranges: Vec<IpAddrRange>,
+    /// The subnets to broadcast to.
+    pub disable_ping_event: bool,
 }
 
 impl NetworkScanner {
@@ -51,7 +55,7 @@ impl NetworkScanner {
                       ports,
                       runtime,
                       port_scan_timeout,
-                      result_sender: port_sender,
+                      result_sender,
                       ..
                   }: TaskExecutionContext,
                   task_manager| async move {
@@ -66,10 +70,10 @@ impl NetworkScanner {
 
                     ip_cache.write().insert(ip, host);
 
-                    let (runtime, ports, port_sender, ip_cache) = (
+                    let (runtime, ports, result_sender, ip_cache) = (
                         Arc::clone(&runtime),
                         ports.clone(),
-                        port_sender.clone(),
+                        result_sender.clone(),
                         Arc::clone(&ip_cache),
                     );
 
@@ -90,7 +94,7 @@ impl NetworkScanner {
                             if let PortScanResult::Open(socket_addr) = res {
                                 let dns = ip_cache.read().get(&ip).cloned().flatten();
 
-                                port_sender
+                                result_sender
                                     .send(ScanEntry::Result {
                                         addr: ip,
                                         hostname: dns,
@@ -112,12 +116,12 @@ impl NetworkScanner {
             move |TaskExecutionContext {
                       runtime,
                       ip_sender,
-                      subnets,
+                      boardcast_subnet,
                       broadcast_timeout,
                       ..
                   }: TaskExecutionContext,
                   task_manager| async move {
-                for subnet in subnets {
+                for subnet in boardcast_subnet {
                     debug!(broadcasting_to_subnet = ?subnet);
                     let (runtime, ip_sender) = (Arc::clone(&runtime), ip_sender.clone());
                     task_manager.spawn(move |task_manager: TaskManager| async move {
@@ -136,7 +140,7 @@ impl NetworkScanner {
 
         task_executor.run(
             move |TaskExecutionContext {
-                      subnets,
+                      boardcast_subnet: subnets,
                       netbios_timeout,
                       netbios_interval,
                       runtime,
@@ -173,18 +177,16 @@ impl NetworkScanner {
                       ping_timeout,
                       runtime,
                       ip_sender,
-                      subnets,
+                      range_to_ping,
                       ip_cache,
                       result_sender,
+                      disable_ping_event,
                       ..
                   }: TaskExecutionContext,
                   task_manager| async move {
-                let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
-                debug!(ping_ip_ranges = ?ip_ranges);
-
                 let should_ping = move |ip: IpAddr| -> bool { !ip_cache.read().contains_key(&ip) };
 
-                for ip_range in ip_ranges {
+                for ip_range in range_to_ping {
                     let (task_manager, runtime, ip_sender) =
                         (task_manager.clone(), Arc::clone(&runtime), ip_sender.clone());
                     let should_ping = should_ping.clone();
@@ -195,6 +197,7 @@ impl NetworkScanner {
                         ping_timeout,
                         should_ping,
                         task_manager,
+                        disable_ping_event,
                     )?;
 
                     while let Some(ip) = receiver.recv().await {
@@ -224,7 +227,7 @@ impl NetworkScanner {
         task_executor.run(
             move |TaskExecutionContext {
                       mdns_daemon,
-                      result_sender: port_sender,
+                      result_sender,
                       ip_cache,
                       ports,
                       mdns_query_timeout,
@@ -247,7 +250,7 @@ impl NetworkScanner {
                     let dns_name = ip_cache.read().get(&addr).cloned().flatten();
 
                     if ports.contains(&port) || service_type.is_some() {
-                        port_sender
+                        result_sender
                             .send(ScanEntry::Result {
                                 addr,
                                 hostname: dns_name,
@@ -300,6 +303,8 @@ impl NetworkScanner {
             netbios_timeout,
             netbios_interval,
             mdns_query_timeout,
+            ip_ranges,
+            disable_ping_event,
         }: NetworkScannerParams,
     ) -> anyhow::Result<Self> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
@@ -325,6 +330,8 @@ impl NetworkScanner {
             mdns_query_timeout,
             max_wait_time: max_wait,
             mdns_daemon: MdnsDaemon::new()?,
+            ip_ranges,
+            disable_ping_event,
         })
     }
 }
@@ -437,6 +444,8 @@ pub struct NetworkScannerParams {
     pub netbios_interval: u64,
     pub mdns_query_timeout: u64,
     pub max_wait_time: u64, // max_wait for entire scan duration in milliseconds, suggested!
+    pub ip_ranges: Vec<IpAddrRange>,
+    pub disable_ping_event: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -24,16 +24,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     let ping_wait_time = Duration::from_secs(1);
 
-    let should_ping = |ip: IpAddr| {
-        // if ip is even, ping it
-        ip.is_ipv4() && {
-            if let IpAddr::V4(v4) = ip {
-                v4.octets()[3] % 2 == 0
-            } else {
-                false
-            }
-        }
-    };
+    let should_ping = |_: IpAddr| true;
     let now = std::time::Instant::now();
     let mut receiver = ping_range(
         runtime,
@@ -42,6 +33,7 @@ pub async fn main() -> anyhow::Result<()> {
         ping_wait_time,
         should_ping,
         TaskManager::new(),
+        false,
     )?;
 
     while let Some(ping_event) = receiver.recv().await {

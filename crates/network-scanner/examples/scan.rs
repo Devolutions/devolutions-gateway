@@ -29,6 +29,8 @@ fn main() -> anyhow::Result<()> {
         mdns_query_timeout: 5 * 1000,
 
         max_wait_time: 10 * 1000,
+
+        ..Default::default()
     };
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {

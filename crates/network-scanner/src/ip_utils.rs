@@ -9,6 +9,28 @@ pub enum IpAddrRange {
     V6(IpV6AddrRange),
 }
 
+impl TryFrom<&str> for IpAddrRange {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let parts: Vec<&str> = value.split('-').collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid IP range format, expected 'lower-upper', got '{}'", value);
+        }
+        let lower = parts[0].parse::<IpAddr>()?;
+        let upper = parts[1].parse::<IpAddr>()?;
+        IpAddrRange::new(lower, upper)
+    }
+}
+
+impl TryFrom<&String> for IpAddrRange {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IpV4AddrRange {
     lower: Ipv4Addr,
@@ -173,16 +195,14 @@ pub struct Subnet {
 impl From<Subnet> for IpAddrRange {
     fn from(value: Subnet) -> Self {
         let (lower, upper) = calculate_subnet_bounds(value.ip, value.netmask);
-        IpAddrRange::new(lower.into(), upper.into())
-            .expect("Subnet bounds must be valid IPv4 addresses")
+        IpAddrRange::new(lower.into(), upper.into()).expect("Subnet bounds must be valid IPv4 addresses")
     }
 }
 
 impl From<&Subnet> for IpAddrRange {
     fn from(value: &Subnet) -> Self {
         let (lower, upper) = calculate_subnet_bounds(value.ip, value.netmask);
-        IpAddrRange::new(lower.into(), upper.into())
-            .expect("Subnet bounds must be valid IPv4 addresses")
+        IpAddrRange::new(lower.into(), upper.into()).expect("Subnet bounds must be valid IPv4 addresses")
     }
 }
 
@@ -212,8 +232,7 @@ fn calculate_subnet_bounds(ip: Ipv4Addr, netmask: Ipv4Addr) -> (Ipv4Addr, Ipv4Ad
 }
 
 pub fn get_subnets() -> anyhow::Result<Vec<Subnet>> {
-    let interfaces = network_interface::NetworkInterface::show()
-        .context("failed to get network interfaces")?;
+    let interfaces = network_interface::NetworkInterface::show().context("failed to get network interfaces")?;
 
     let subnets: Vec<_> = interfaces
         .into_iter()
@@ -224,8 +243,7 @@ pub fn get_subnets() -> anyhow::Result<Vec<Subnet>> {
                         // Skip loopback or link-local
                         if v4.ip.is_loopback() || v4.ip.is_link_local() {
                             return None;
-                        }
-                        // Only keep if broadcast is present
+                        } // Only keep if broadcast is present
                         if v4.broadcast.is_some() {
                             let netmask = v4.netmask?;
                             let broadcast = v4.broadcast?;
@@ -254,28 +272,39 @@ mod tests {
     #[test]
     fn test_iter_ipv4() {
         let lower = "10.10.0.0".parse::<Ipv4Addr>().unwrap();
-        let upper = "10.10.0.2".parse::<Ipv4Addr>().unwrap();
+        let upper = "10.10.0.30".parse::<Ipv4Addr>().unwrap();
         let range = IpAddrRange::new(lower.into(), upper.into()).unwrap();
 
         let mut iter = range.into_iter();
-        assert_eq!(iter.next(), Some("10.10.0.0".parse::<IpAddr>().unwrap()));
-        assert_eq!(iter.next(), Some("10.10.0.1".parse::<IpAddr>().unwrap()));
-        assert_eq!(iter.next(), Some("10.10.0.2".parse::<IpAddr>().unwrap()));
+        for i in 0..31 {
+            let expected = format!("10.10.0.{i}").parse::<Ipv4Addr>().unwrap();
+            assert_eq!(iter.next(), Some(IpAddr::V4(expected)));
+        }
         assert_eq!(iter.next(), None);
     }
 
     #[test]
     fn test_has_overlap() {
-        let r1 = IpAddrRange::new(
-            "192.168.1.0".parse().unwrap(),
-            "192.168.1.255".parse().unwrap(),
-        )
-        .unwrap();
-        let r2 = IpAddrRange::new(
-            "192.168.1.100".parse().unwrap(),
-            "192.168.2.10".parse().unwrap(),
-        )
-        .unwrap();
+        let r1 = IpAddrRange::new("192.168.1.0".parse().unwrap(), "192.168.1.255".parse().unwrap()).unwrap();
+        let r2 = IpAddrRange::new("192.168.1.100".parse().unwrap(), "192.168.2.10".parse().unwrap()).unwrap();
         assert!(r1.has_overlap(&r2));
+    }
+
+    #[test]
+    fn test_subnet_to_ip_range() {
+        let subnet = Subnet {
+            ip: Ipv4Addr::new(192, 168, 1, 0),
+            netmask: Ipv4Addr::new(255, 255, 255, 0),
+            broadcast: Ipv4Addr::new(192, 168, 1, 255),
+        };
+
+        let ip_range = IpAddrRange::from(subnet);
+
+        let mut iter = ip_range.into_iter();
+
+        for i in 0..256 {
+            let expected = format!("192.168.1.{i}").parse::<Ipv4Addr>().unwrap();
+            assert_eq!(iter.next(), Some(IpAddr::V4(expected)));
+        }
     }
 }
