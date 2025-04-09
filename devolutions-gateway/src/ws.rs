@@ -46,8 +46,8 @@ fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncW
     let ws_compat = ws
         .filter_map(|item| {
             item.map(|msg| match msg {
-                ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into_bytes())),
-                ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
+                ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into())),
+                ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data.into())),
                 ws::Message::Ping(_) | ws::Message::Pong(_) => None,
                 ws::Message::Close(_) => Some(transport::WsReadMsg::Close),
             })

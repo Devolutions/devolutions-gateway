@@ -6601,6 +6601,7 @@ name = "transport"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "bytes 1.10.1",
  "futures-core",
  "futures-sink",
  "futures-util",
