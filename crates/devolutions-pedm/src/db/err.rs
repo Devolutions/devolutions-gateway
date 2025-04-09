@@ -17,7 +17,7 @@ pub enum DbError {
     Libsql(libsql::Error),
     /// This is to handle some type conversions.
     ///
-    /// For example, we may have a value that is `i16` in the data model but it is stored as `i32` in libSQL.
+    /// For example, we may have a value that is `i16` in the data model but it is stored as `i64` in libSQL.
     #[cfg(feature = "libsql")]
     TryFromInt(TryFromIntError),
     #[cfg(feature = "libsql")]
