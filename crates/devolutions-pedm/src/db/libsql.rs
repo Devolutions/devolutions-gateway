@@ -38,10 +38,7 @@ impl Deref for LibsqlConn {
 #[async_trait]
 impl Database for LibsqlConn {
     async fn get_schema_version(&self) -> Result<i16, DbError> {
-        let version = self
-            .query_one("SELECT version FROM version", ())
-            .await?
-            .get::<i64>(0)?;
+        let version = self.query_one("SELECT version FROM version", ()).await?.get::<i64>(0)?;
         Ok(i16::try_from(version)?)
     }
 
