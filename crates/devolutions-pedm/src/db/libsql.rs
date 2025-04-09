@@ -39,7 +39,7 @@ impl Deref for LibsqlConn {
 impl Database for LibsqlConn {
     async fn get_schema_version(&self) -> Result<i16, DbError> {
         let version = self
-            .query_one("SELECT version FROM pedm_schema_version", ())
+            .query_one("SELECT version FROM version", ())
             .await?
             .get::<i64>(0)?;
         Ok(i16::try_from(version)?)
@@ -79,7 +79,7 @@ impl Database for LibsqlConn {
     async fn log_server_startup(&self, start_time: DateTime<Utc>, pipe_name: &str) -> Result<i32, DbError> {
         Ok(self
             .query_one(
-                "INSERT INTO pedm_run (start_time, pipe_name) VALUES (?1, ?2) RETURNING id",
+                "INSERT INTO run (start_time, pipe_name) VALUES (?1, ?2) RETURNING id",
                 params![start_time.timestamp_micros(), pipe_name],
             )
             .await?

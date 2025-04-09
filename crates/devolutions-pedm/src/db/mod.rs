@@ -160,7 +160,7 @@ impl From<DbError> for InitSchemaError {
 /// All queries required by the application are defined here. They must be implemented by each backend.
 #[async_trait]
 pub(crate) trait Database: Send + Sync {
-    /// Returns the schema version from the `pedm_schema_version` table.
+    /// Returns the schema version from the `version` table.
     async fn get_schema_version(&self) -> Result<i16, DbError>;
 
     /// Initializes the database schema.

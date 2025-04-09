@@ -30,7 +30,7 @@ impl Database for PgPool {
         Ok(self
             .get()
             .await?
-            .query_one("SELECT version FROM pedm_schema_version", &[])
+            .query_one("SELECT version FROM version", &[])
             .await?
             .get(0))
     }
@@ -66,7 +66,7 @@ impl Database for PgPool {
             .get()
             .await?
             .query_one(
-                "INSERT INTO pedm_run (start_time, pipe_name) VALUES ($1, $2) RETURNING id",
+                "INSERT INTO run (start_time, pipe_name) VALUES ($1, $2) RETURNING id",
                 &[&start_time, &pipe_name],
             )
             .await?

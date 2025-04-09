@@ -1,11 +1,11 @@
-CREATE TABLE IF NOT EXISTS pedm_schema_version
+CREATE TABLE IF NOT EXISTS version
 (
     version  smallint PRIMARY KEY,
     add_time timestamptz NOT NULL DEFAULT NOW()
 );
 
 /* The startup of the server */
-CREATE TABLE IF NOT EXISTS pedm_run
+CREATE TABLE IF NOT EXISTS run
 (
     id         int PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     start_time timestamptz NOT NULL DEFAULT NOW(),
@@ -28,4 +28,4 @@ CREATE TABLE IF NOT EXISTS elevate_tmp_request
     seconds int NOT NULL
 );
 
-INSERT INTO pedm_schema_version (version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO version (version) VALUES (1) ON CONFLICT DO NOTHING;

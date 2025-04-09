@@ -2,7 +2,7 @@
    Use `chrono::DateTime::timestamp_micros` when inserting or fetching timestamps in Rust.
 */
 
-CREATE TABLE IF NOT EXISTS pedm_schema_version
+CREATE TABLE IF NOT EXISTS version
 (
     version    integer PRIMARY KEY,
     updated_at integer NOT NULL DEFAULT (
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS pedm_schema_version
         )
 );
 
-CREATE TABLE IF NOT EXISTS pedm_run
+CREATE TABLE IF NOT EXISTS run
 (
     id         integer PRIMARY KEY AUTOINCREMENT,
     start_time integer NOT NULL DEFAULT (
@@ -36,4 +36,4 @@ CREATE TABLE IF NOT EXISTS elevate_tmp_request
     seconds integer NOT NULL
 );
 
-INSERT INTO pedm_schema_version (version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO version (version) VALUES (1) ON CONFLICT DO NOTHING;
