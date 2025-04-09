@@ -41,7 +41,7 @@ impl Database for LibsqlConn {
         let version = self
             .query_one("SELECT version FROM pedm_schema_version", ())
             .await?
-            .get::<i32>(0)?;
+            .get::<i64>(0)?;
         Ok(i16::try_from(version)?)
     }
 
