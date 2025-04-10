@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+
 use devolutions_pedm_shared::policy::{Hash, User};
 use digest::Update;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use tracing::info;
+
 use win_api_wrappers::fs::create_directory;
 use win_api_wrappers::identity::account::Account;
 use win_api_wrappers::identity::sid::Sid;

@@ -4,13 +4,14 @@ use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
 mod config;
+mod db;
+pub mod model;
+
 pub use config::Config;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
         pub mod api;
-        mod db;
-
         mod elevations;
         mod elevator;
         mod error;
