@@ -36,4 +36,4 @@ CREATE TABLE IF NOT EXISTS elevate_tmp_request
     seconds integer NOT NULL
 );
 
-INSERT INTO version (version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO version (version) VALUES (0) ON CONFLICT DO NOTHING;

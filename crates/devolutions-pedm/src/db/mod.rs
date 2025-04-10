@@ -31,7 +31,7 @@ use tokio_postgres::config::SslMode;
 #[cfg(feature = "postgres")]
 use tokio_postgres::NoTls;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i16 = 1;
+pub(crate) const CURRENT_SCHEMA_VERSION: i16 = 0;
 
 /// A wrapper around the database connection.
 #[derive(Clone)]
