@@ -24,7 +24,7 @@ pub async fn scan_ports(
     }
 
     if port.is_empty() {
-        anyhow::bail!("No ports to scan");
+        anyhow::bail!("no ports to scan");
     }
 
     let (sender, receiver) = tokio::sync::mpsc::channel(port.len());
