@@ -4,10 +4,11 @@ use aide::NoApi;
 use axum::extract::State;
 use axum::Json;
 
-use super::err::HandlerError;
-use super::state::AppState;
 use crate::db::Db;
 use crate::model::AboutData;
+
+use super::err::HandlerError;
+use super::state::AppState;
 
 /// Gets info about the current state of the application.
 pub(crate) async fn about(

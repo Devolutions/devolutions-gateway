@@ -3,10 +3,13 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use tracing::info;
 
 mod err;
 
-use chrono::{DateTime, Utc};
+use crate::config::DbBackend;
+use crate::Config;
 pub(crate) use err::DbError;
 
 #[cfg(feature = "libsql")]
@@ -27,10 +30,6 @@ use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::config::SslMode;
 #[cfg(feature = "postgres")]
 use tokio_postgres::NoTls;
-use tracing::info;
-
-use crate::config::DbBackend;
-use crate::Config;
 
 /// A wrapper around the database connection.
 #[derive(Clone)]
