@@ -36,7 +36,7 @@ impl AppState {
 
         let startup_info = StartupInfo {
             run_id,
-            startup_request_count: last_req_id,
+            request_count: last_req_id,
             start_time: startup_time,
         };
 
