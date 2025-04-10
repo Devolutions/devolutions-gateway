@@ -202,7 +202,7 @@ impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
             },
             toggles: scanner::ScannerToggles {
                 disable_ping_event: val.disable_ping_events,
-                disable_boardcast: val.disable_boardcast,
+                disable_broadcast: val.disable_boardcast,
                 disable_subnet_scan: val.disable_subnet_scan,
                 disable_zeroconf: val.disable_zeroconf,
                 disable_resolve_dns: val.disable_resolve_dns,
