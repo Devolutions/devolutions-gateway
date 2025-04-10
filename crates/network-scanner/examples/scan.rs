@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
         toggles: ScannerToggles {
             disable_broadcast: false,
             disable_subnet_scan: false,
-            disable_ping_event: false,
+            disable_ping_start: false,
             disable_resolve_dns: false,
             disable_zeroconf: false,
         },
