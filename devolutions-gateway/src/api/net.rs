@@ -9,6 +9,7 @@ use network_scanner::interfaces;
 use network_scanner::ip_utils::IpAddrRange;
 use network_scanner::scanner::{self, NetworkScannerParams, ScannerConfig};
 use serde::Serialize;
+use serde_querystring::{from_str, ParseMode};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -34,7 +35,7 @@ pub async fn handle_network_scan(
 
     // Use serde_qs to parse array parameters
     // As suggested by serde_urlencoded author https://github.com/nox/serde_urlencoded/issues/85
-    let query_params = match serde_qs::from_str::<NetworkScanQueryParams>(&query) {
+    let query_params = match from_str::<NetworkScanQueryParams>(&query, ParseMode::Duplicate) {
         Ok(params) => Ok(params),
         Err(e) => Err(HttpError::bad_request().build(e)),
     }?;
@@ -141,10 +142,10 @@ pub struct NetworkScanQueryParams {
     /// The start and end IP address of the range to scan.
     /// for example: 10.10.0.0-10.10.0.255
     #[serde(default)]
-    pub ranges: Vec<String>,
+    pub range: Vec<String>,
     /// The ports to scan. If not specified, the default ports will be used.
     #[serde(default)]
-    pub ports: Vec<u16>,
+    pub port: Vec<u16>,
 
     /// Disable the emission of ScanEvent::Ping for status start
     #[serde(default = "default_true")]
@@ -178,9 +179,9 @@ impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
     fn try_from(val: NetworkScanQueryParams) -> Result<Self, Self::Error> {
         warn!(query=?val, "Network scan query parameters");
 
-        let ports = match val.ports.len() {
+        let ports = match val.port.len() {
             0 => COMMON_PORTS.to_vec(),
-            _ => val.ports,
+            _ => val.port,
         };
 
         Ok(NetworkScannerParams {
@@ -195,7 +196,7 @@ impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
                 netbios_interval: val.netbios_interval.unwrap_or(200),
                 mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
                 ip_ranges: val
-                    .ranges
+                    .range
                     .iter()
                     .map(IpAddrRange::try_from)
                     .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?,
