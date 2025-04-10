@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use libsql::params::IntoParams;
 use libsql::{params, Row};
+use tracing::info;
 
 use super::err::ParseTimestampError;
-use super::{Database, DbError};
+use super::{Database, DbError, InitSchemaError};
 
 pub(crate) struct LibsqlConn(libsql::Connection);
 
@@ -45,6 +46,11 @@ impl Database for LibsqlConn {
     async fn init_schema(&self) -> Result<(), DbError> {
         let sql = include_str!("../../schema/libsql.sql");
         self.execute_batch(sql).await?;
+        Ok(())
+    }
+
+    async fn apply_pragmas(&self) -> Result<(), DbError> {
+        // TODO: run pragmas
         Ok(())
     }
 

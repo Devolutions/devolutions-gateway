@@ -31,6 +31,8 @@ use tokio_postgres::config::SslMode;
 #[cfg(feature = "postgres")]
 use tokio_postgres::NoTls;
 
+pub(crate) const CURRENT_SCHEMA_VERSION: i16 = 1;
+
 /// A wrapper around the database connection.
 #[derive(Clone)]
 pub(crate) struct Db(pub Arc<dyn Database + Send + Sync>);
@@ -94,29 +96,30 @@ impl Db {
     }
 
     /// Sets up the database.
+    ///
+    /// The schema version is checked. Tables are created if needed, such as for first run.
     pub(crate) async fn setup(&self) -> Result<(), InitSchemaError> {
         match self.0.get_schema_version().await {
             Ok(version) => {
                 info!("Schema version: {version}");
-                if version == 1 {
-                    Ok(())
-                } else {
-                    Err(InitSchemaError::VersionMismatch {
-                        expected: 1,
+                if version != CURRENT_SCHEMA_VERSION {
+                    return Err(InitSchemaError::VersionMismatch {
+                        expected: CURRENT_SCHEMA_VERSION,
                         actual: version,
-                    })
+                    });
                 }
             }
             Err(error) => {
                 if error.is_table_does_not_exist() {
                     info!("Initializing schema");
                     self.0.init_schema().await?;
-                    Ok(())
                 } else {
-                    Err(error.into())
+                    return Err(error.into());
                 }
             }
         }
+        self.0.apply_pragmas().await?;
+        Ok(())
     }
 }
 
@@ -167,6 +170,9 @@ pub(crate) trait Database: Send + Sync {
     ///
     /// This creates tables.
     async fn init_schema(&self) -> Result<(), DbError>;
+
+    /// Applies pragmas, if applicable.
+    async fn apply_pragmas(&self) -> Result<(), DbError>;
 
     /// Gets the latest request ID from the HTTP request table.
     ///

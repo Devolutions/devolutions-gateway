@@ -41,6 +41,11 @@ impl Database for PgPool {
         Ok(())
     }
 
+    async fn apply_pragmas(&self) -> Result<(), DbError> {
+        // nothing to do
+        Ok(())
+    }
+
     async fn get_last_request_id(&self) -> Result<i32, DbError> {
         Ok(self
             .get()
