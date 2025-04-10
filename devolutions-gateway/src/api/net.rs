@@ -5,10 +5,11 @@ use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
 use axum::{Json, Router};
-use network_scanner::interfaces::{self, MacAddr};
+use network_scanner::interfaces;
 use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
-use std::net::IpAddr;
+use std::fmt;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new().route("/scan", axum::routing::get(handle_network_scan));
@@ -205,7 +206,6 @@ impl NetworkScanResponse {
 ))]
 pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
     let interfaces = interfaces::get_network_interfaces()
-        .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
         .map(NetworkInterface::from)
@@ -216,48 +216,88 @@ pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
-pub struct InterfaceAddress {
-    pub ip: IpAddr,
-    pub prefixlen: u32,
-}
-
-/// Network interface configuration
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
     pub name: String,
+    pub addrs: Vec<Addr>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub mac_addr: Option<String>,
+    pub index: u32,
+}
+
+/// Network interface address
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum Addr {
+    V4(V4IfAddr),
+    V6(V6IfAddr),
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Netmask<T>(pub T);
+
+impl<T: fmt::Display> fmt::Display for Netmask<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<T> Serialize for Netmask<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct V4IfAddr {
+    pub ip: Ipv4Addr,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mac_address: Option<MacAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
-    pub addresses: Vec<InterfaceAddress>,
-    #[cfg_attr(feature = "openapi", schema(value_type = bool))]
-    pub is_up: bool,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub gateways: Vec<IpAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub nameservers: Vec<IpAddr>,
+    pub broadcast: Option<Ipv4Addr>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub netmask: Option<Netmask<Ipv4Addr>>,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct V6IfAddr {
+    pub ip: Ipv6Addr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broadcast: Option<Ipv6Addr>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub netmask: Option<Netmask<Ipv6Addr>>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
     fn from(iface: interfaces::NetworkInterface) -> Self {
-        Self {
+        let addr = iface
+            .addr
+            .into_iter()
+            .map(|addr| match addr {
+                interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
+                    ip: v4.ip,
+                    broadcast: v4.broadcast,
+                    netmask: v4.netmask.map(|netmask| Netmask(netmask)),
+                }),
+                interfaces::Addr::V6(v6) => Addr::V6(V6IfAddr {
+                    ip: v6.ip,
+                    broadcast: v6.broadcast,
+                    netmask: v6.netmask.map(|netmask| Netmask(netmask)),
+                }),
+            })
+            .collect();
+
+        NetworkInterface {
             name: iface.name,
-            description: iface.description,
-            mac_address: iface.mac_address,
-            addresses: iface
-                .addresses
-                .into_iter()
-                .map(|addr| InterfaceAddress {
-                    ip: addr.ip,
-                    prefixlen: addr.prefixlen,
-                })
-                .collect(),
-            is_up: iface.operational_status,
-            gateways: iface.gateways,
-            nameservers: iface.dns_servers,
+            mac_addr: iface.mac_addr,
+            addrs: addr,
+            index: iface.index,
         }
     }
 }
