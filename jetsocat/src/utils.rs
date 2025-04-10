@@ -193,8 +193,8 @@ where
         .filter_map(|item| {
             let mapped = item
                 .map(|msg| match msg {
-                    tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into_bytes())),
-                    tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
+                    tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into())),
+                    tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data.into())),
                     tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
                     tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
                     tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
