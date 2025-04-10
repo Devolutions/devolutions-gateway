@@ -59,7 +59,6 @@ pub(crate) struct TaskExecutionContext {
     pub(crate) ip_receiver: Arc<Mutex<IpReceiver>>,
 
     pub(crate) result_sender: ScanEntrySender,
-    pub(crate) result_receiver: Arc<Mutex<ScanEntryReceiver>>,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
@@ -79,12 +78,11 @@ pub(crate) struct TaskExecutionRunner {
 }
 
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
+    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<(Self, ScanEntryReceiver)> {
         let (ip_sender, ip_receiver) = tokio::sync::mpsc::channel(5);
         let ip_receiver = Arc::new(Mutex::new(ip_receiver));
 
-        let (port_sender, port_receiver) = tokio::sync::mpsc::channel(100);
-        let port_receiver = Arc::new(Mutex::new(port_receiver));
+        let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);
 
         let NetworkScanner {
             mdns_daemon,
@@ -98,8 +96,7 @@ impl TaskExecutionContext {
         let res = Self {
             ip_sender,
             ip_receiver,
-            result_sender: port_sender,
-            result_receiver: port_receiver,
+            result_sender,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
             mdns_daemon,
@@ -107,7 +104,7 @@ impl TaskExecutionContext {
             toggles,
         };
 
-        Ok(res)
+        Ok((res, result_receiver))
     }
 }
 
@@ -122,11 +119,15 @@ impl TaskExecutionRunner {
             .spawn_no_sub_task(task(context, self.task_manager.clone()));
     }
 
-    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<Self> {
-        Ok(Self {
-            context: TaskExecutionContext::new(scanner)?,
-            task_manager: TaskManager::new(),
-        })
+    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<(Self, ScanEntryReceiver)> {
+        let (context, receiver) = TaskExecutionContext::new(scanner)?;
+        Ok((
+            Self {
+                context,
+                task_manager: TaskManager::new(),
+            },
+            receiver,
+        ))
     }
 }
 

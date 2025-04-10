@@ -10,7 +10,6 @@ use std::fmt::Display;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use typed_builder::TypedBuilder;
 
 /// Represents a network scanner for discovering devices and their services over a network.
@@ -28,8 +27,8 @@ pub struct NetworkScanner {
 }
 
 impl NetworkScanner {
-    pub fn start(&self) -> anyhow::Result<Arc<NetworkScannerStream>> {
-        let mut task_executor = TaskExecutionRunner::new(self.clone())?;
+    pub fn start(&self) -> anyhow::Result<NetworkScannerStream> {
+        let (mut task_executor, result_receiver) = TaskExecutionRunner::new(self.clone())?;
 
         start_port_scan(&mut task_executor);
 
@@ -46,27 +45,27 @@ impl NetworkScanner {
         }
 
         let TaskExecutionRunner {
-            context:
-                TaskExecutionContext {
-                    result_receiver: port_receiver,
-                    mdns_daemon,
-                    ..
-                },
+            context: TaskExecutionContext { mdns_daemon, .. },
             task_manager,
         } = task_executor;
 
-        let scanner_stream = Arc::new(NetworkScannerStream {
-            result_receiver: port_receiver,
+        let task_manager_clone = task_manager.clone();
+        let mdns_daemon_clone = mdns_daemon.clone();
+
+        let scanner_stream = NetworkScannerStream {
+            result_receiver,
             task_manager,
             mdns_daemon,
-        });
+        };
 
-        let scanner_stream_clone = Arc::clone(&scanner_stream);
         let max_wait_time = Duration::from_millis(self.configs.max_wait_time);
 
         tokio::spawn(async move {
             tokio::time::sleep(max_wait_time).await;
-            scanner_stream_clone.stop();
+            task_manager_clone.stop();
+            if let Some(daemon) = &mdns_daemon_clone {
+                daemon.stop();
+            }
         });
 
         return Ok(scanner_stream);
@@ -394,24 +393,24 @@ pub enum ScanEntry {
 }
 
 pub struct NetworkScannerStream {
-    result_receiver: Arc<Mutex<ScanEntryReceiver>>,
+    result_receiver: ScanEntryReceiver,
     task_manager: TaskManager,
     mdns_daemon: Option<MdnsDaemon>,
 }
 
 impl NetworkScannerStream {
-    pub async fn recv(self: &Arc<Self>) -> Option<ScanEntry> {
+    pub async fn recv(self: &mut Self) -> Option<ScanEntry> {
         // The caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver.
-        self.result_receiver.lock().await.recv().await
+        self.result_receiver.recv().await
     }
 
-    pub async fn recv_timeout(self: &Arc<Self>, duration: Duration) -> anyhow::Result<Option<ScanEntry>> {
-        tokio::time::timeout(duration, self.result_receiver.lock().await.recv())
+    pub async fn recv_timeout(self: &mut Self, duration: Duration) -> anyhow::Result<Option<ScanEntry>> {
+        tokio::time::timeout(duration, self.result_receiver.recv())
             .await
             .context("recv_timeout timed out")
     }
 
-    pub fn stop(self: Arc<Self>) {
+    pub fn stop(self: &Self) {
         self.task_manager.stop();
         if let Some(daemon) = &self.mdns_daemon {
             daemon.stop();

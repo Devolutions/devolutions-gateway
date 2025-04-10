@@ -50,7 +50,7 @@ pub async fn handle_network_scan(
     })?;
 
     let res = ws.on_upgrade(move |mut websocket| async move {
-        let stream = match scanner.start() {
+        let mut stream = match scanner.start() {
             Ok(stream) => stream,
             Err(e) => {
                 error!(error = format!("{e:#}"), "Failed to start network scan");
