@@ -41,7 +41,6 @@ pub fn ping_range(
     ping_wait_time: Duration,
     should_ping: impl Fn(IpAddr) -> bool + Send + Sync + 'static + Clone,
     task_manager: crate::task_utils::TaskManager,
-    disable_ping_event: bool,
 ) -> anyhow::Result<tokio::sync::mpsc::Receiver<PingEvent>> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     let mut futures = vec![];
@@ -75,7 +74,7 @@ pub fn ping_range(
                         })
                         .await;
                 }
-                Ok(Err(_)) if !disable_ping_event => {
+                Ok(Err(_)) => {
                     let _ = sender_clone
                         .send(PingEvent::Failed {
                             ip_addr: addr.ip(),
@@ -84,16 +83,13 @@ pub fn ping_range(
                         .await;
                 }
                 Err(_) => {
-                    if !disable_ping_event {
-                        let _ = sender_clone
-                            .send(PingEvent::Failed {
-                                ip_addr: addr.ip(),
-                                reason: PingFailedReason::TimedOut,
-                            })
-                            .await;
-                    }
+                    let _ = sender_clone
+                        .send(PingEvent::Failed {
+                            ip_addr: addr.ip(),
+                            reason: PingFailedReason::TimedOut,
+                        })
+                        .await;
                 }
-                _ => {}
             };
 
             anyhow::Ok(())

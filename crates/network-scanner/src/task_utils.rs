@@ -10,12 +10,48 @@ use tokio::sync::Mutex;
 
 use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
-use crate::scanner::{NetworkScanner, ScanEntry};
+use crate::scanner::{NetworkScanner, ScanEntry, ScannerConfig, ScannerToggles};
 
 pub(crate) type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
 pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
 pub(crate) type ScanEntrySender = tokio::sync::mpsc::Sender<ScanEntry>;
 pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct ContextConfig {
+    pub(crate) boardcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
+    pub(crate) range_to_ping: Vec<IpAddrRange>,
+    pub ports: Vec<u16>,
+    pub ping_interval: Duration,
+    pub ping_timeout: Duration,
+    pub broadcast_timeout: Duration,
+    pub port_scan_timeout: Duration,
+    pub netbios_timeout: Duration,
+    pub netbios_interval: Duration,
+    pub mdns_query_timeout: Duration,
+}
+
+impl ContextConfig {
+    pub(crate) fn new(configs: ScannerConfig, toggles: &ScannerToggles, subnet: Vec<Subnet>) -> Self {
+        let range_to_ping = match configs.ip_ranges.len() {
+            0 if !toggles.disable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
+            _ => configs.ip_ranges.clone(),
+        };
+
+        Self {
+            boardcast_subnet: subnet,
+            range_to_ping,
+            ports: configs.ports,
+            ping_interval: Duration::from_millis(configs.ping_interval),
+            ping_timeout: Duration::from_millis(configs.ping_timeout),
+            broadcast_timeout: Duration::from_millis(configs.broadcast_timeout),
+            port_scan_timeout: Duration::from_millis(configs.port_scan_timeout),
+            netbios_timeout: Duration::from_millis(configs.netbios_timeout),
+            netbios_interval: Duration::from_millis(configs.netbios_interval),
+            mdns_query_timeout: Duration::from_millis(configs.mdns_query_timeout),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
@@ -27,24 +63,11 @@ pub(crate) struct TaskExecutionContext {
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
-    pub(crate) ports: Vec<u16>,
-
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub(crate) mdns_daemon: MdnsDaemon,
+    pub(crate) mdns_daemon: Option<MdnsDaemon>,
 
-    pub(crate) ping_interval: Duration,      // in milliseconds
-    pub(crate) ping_timeout: Duration,       // in milliseconds
-    pub(crate) broadcast_timeout: Duration,  // in milliseconds
-    pub(crate) port_scan_timeout: Duration,  // in milliseconds
-    pub(crate) netbios_timeout: Duration,    // in milliseconds
-    pub(crate) netbios_interval: Duration,   // in milliseconds
-    pub(crate) mdns_query_timeout: Duration, // in milliseconds
-
-    pub(crate) boardcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
-
-    pub(crate) range_to_ping: Vec<IpAddrRange>,
-
-    pub(crate) disable_ping_event: bool,
+    pub(crate) configs: ContextConfig,
+    pub(crate) toggles: ScannerToggles,
 }
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
@@ -63,50 +86,25 @@ impl TaskExecutionContext {
         let (port_sender, port_receiver) = tokio::sync::mpsc::channel(100);
         let port_receiver = Arc::new(Mutex::new(port_receiver));
 
-        let boardcast_subnet = get_subnets()?;
         let NetworkScanner {
-            ports,
-            ping_timeout,
-            ping_interval,
-            broadcast_timeout,
-            port_scan_timeout,
-            netbios_timeout,
-            runtime,
-            netbios_interval,
             mdns_daemon,
-            mdns_query_timeout,
-            ip_ranges,
-            disable_ping_event,
+            runtime,
+            configs,
+            toggles,
             ..
         } = network_scanner;
 
-        let ping_range = match ip_ranges.len() {
-            0 => boardcast_subnet
-                .iter()
-                .map(IpAddrRange::from)
-                .collect::<Vec<IpAddrRange>>(),
-            _ => ip_ranges,
-        };
-
+        let boardcast_subnet = get_subnets()?;
         let res = Self {
             ip_sender,
             ip_receiver,
             result_sender: port_sender,
             result_receiver: port_receiver,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
-            ports,
             runtime,
             mdns_daemon,
-            ping_interval,
-            ping_timeout,
-            broadcast_timeout,
-            port_scan_timeout,
-            netbios_timeout,
-            netbios_interval,
-            boardcast_subnet,
-            range_to_ping: ping_range,
-            mdns_query_timeout,
-            disable_ping_event,
+            configs: ContextConfig::new(configs, &toggles, boardcast_subnet),
+            toggles,
         };
 
         Ok(res)
