@@ -38,25 +38,21 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let scanner = NetworkScanner::new(params).unwrap();
-        let stream = scanner.start()?;
-        let stream_clone = stream.clone();
+        let mut stream = scanner.start()?;
         let now = std::time::Instant::now();
         tokio::task::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
                 tracing::info!("Ctrl-C received, stopping network scan");
-                stream.stop();
             }
         });
-        while let Ok(Some(res)) = timeout(Duration::from_secs(120), stream_clone.recv())
-            .await
-            .with_context(|| {
-                tracing::error!("Failed to receive from stream");
-                "Failed to receive from stream"
-            })
-        {
+        while let Ok(Some(res)) = timeout(Duration::from_secs(120), stream.recv()).await.with_context(|| {
+            tracing::error!("Failed to receive from stream");
+            "Failed to receive from stream"
+        }) {
             tracing::warn!("Result: {:?}", res);
         }
-        stream_clone.stop();
+
+        stream.stop();
         tracing::warn!("Network Scan finished. elapsed: {:?}", now.elapsed());
         anyhow::Result::<()>::Ok(())
     })?;
