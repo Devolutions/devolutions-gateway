@@ -249,7 +249,7 @@ impl NetworkScanner {
                     let ping_interval = configs.ping_interval;
                     let ping_timeout = configs.ping_timeout;
                     let range_to_ping = configs.range_to_ping;
-                    let disable_ping_event = toggles.disable_ping_event;
+                    let disable_ping_start = toggles.disable_ping_start;
 
                     for ip_range in range_to_ping {
                         let (task_manager, runtime, ip_sender) =
@@ -266,21 +266,15 @@ impl NetworkScanner {
 
                         while let Some(ping_event) = receiver.recv().await {
                             debug!(ping_sent_ip = ?ping_event);
-                            if let crate::ping::PingEvent::Success { ip_addr, .. } = ping_event {
-                                ip_sender.send((ip_addr, None)).await?;
-                            };
-
-                            if disable_ping_event {
-                                continue;
-                            }
 
                             match ping_event {
                                 crate::ping::PingEvent::Success { ip_addr, time } => {
+                                    ip_sender.send((ip_addr, None)).await?;
                                     result_sender
                                         .send(ScanEntry::ScanEvent(ScanEvent::PingSuccess { ip_addr, time }))
                                         .await?;
                                 }
-                                crate::ping::PingEvent::Start { ip_addr } => {
+                                crate::ping::PingEvent::Start { ip_addr } if !disable_ping_start => {
                                     result_sender
                                         .send(ScanEntry::ScanEvent(ScanEvent::PingStart { ip_addr }))
                                         .await?;
@@ -290,6 +284,7 @@ impl NetworkScanner {
                                         .send(ScanEntry::ScanEvent(ScanEvent::PingFailed { ip_addr, reason }))
                                         .await?;
                                 }
+                                _ => {}
                             }
                         }
                     }
@@ -471,7 +466,7 @@ impl Display for ScanMethod {
 
 #[derive(Debug, Clone)]
 pub struct ScannerToggles {
-    pub disable_ping_event: bool,
+    pub disable_ping_start: bool,
     pub disable_broadcast: bool,
     pub disable_subnet_scan: bool,
     pub disable_zeroconf: bool,

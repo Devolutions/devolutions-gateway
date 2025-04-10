@@ -146,9 +146,9 @@ pub struct NetworkScanQueryParams {
     #[serde(default)]
     pub ports: Vec<u16>,
 
-    /// Disable the emission of ScanEvent::Ping
+    /// Disable the emission of ScanEvent::Ping for status start
     #[serde(default = "default_true")]
-    pub disable_ping_events: bool,
+    pub disable_ping_start: bool,
 
     /// Disable the execution of broadcast scan
     #[serde(default)]
@@ -201,7 +201,7 @@ impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
                     .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?,
             },
             toggles: scanner::ScannerToggles {
-                disable_ping_event: val.disable_ping_events,
+                disable_ping_start: val.disable_ping_start,
                 disable_broadcast: val.disable_boardcast,
                 disable_subnet_scan: val.disable_subnet_scan,
                 disable_zeroconf: val.disable_zeroconf,
