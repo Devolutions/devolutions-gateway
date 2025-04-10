@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use network_scanner::scanner::{NetworkScanner, NetworkScannerParams};
+use network_scanner::scanner::{NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles};
 use tokio::time::timeout;
 
 fn main() -> anyhow::Result<()> {
@@ -15,22 +15,25 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let params = NetworkScannerParams {
-        ports: vec![22, 80, 443, 389, 636],
-        ping_interval: 20,
-        ping_timeout: 1000,
-
-        broadcast_timeout: 2000,
-
-        port_scan_timeout: 2000,
-
-        netbios_timeout: 1000,
-        netbios_interval: 20,
-
-        mdns_query_timeout: 5 * 1000,
-
-        max_wait_time: 10 * 1000,
-
-        ..Default::default()
+        configs: ScannerConfig {
+            ip_ranges: vec![],
+            ports: vec![22, 80, 443, 389, 636],
+            ping_interval: 20,
+            ping_timeout: 1000,
+            broadcast_timeout: 2000,
+            port_scan_timeout: 2000,
+            netbios_timeout: 1000,
+            netbios_interval: 20,
+            mdns_query_timeout: 5 * 1000,
+            max_wait_time: 10 * 1000,
+        },
+        toggles: ScannerToggles {
+            disable_boardcast: false,
+            disable_subnet_scan: false,
+            disable_ping_event: false,
+            disable_resolve_dns: false,
+            disable_zeroconf: false,
+        },
     };
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {

@@ -7,6 +7,7 @@ use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::interfaces;
 use network_scanner::scanner::{self, NetworkScannerParams};
+use network_scanner::ip_utils::IpAddrRange;
 use serde::Serialize;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -145,8 +146,29 @@ pub struct NetworkScanQueryParams {
     #[serde(default)]
     pub ports: Vec<u16>,
 
-    #[serde(default)]
+    /// Disable the emission of ScanEvent::Ping
+    #[serde(default = "default_true")]
     pub disable_ping_events: bool,
+
+    /// Disable the execution of broadcast scan
+    #[serde(default)]
+    pub disable_boardcast: bool,
+
+    /// Disable the ping scan on subnet
+    #[serde(default)]
+    pub disable_subnet_scan: bool,
+
+    /// Disable ZeroConf/mDNS
+    #[serde(default)]
+    pub disable_zeroconf: bool,
+
+    /// Disable resolve dns
+    #[serde(default)]
+    pub disable_resolve_dns: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 5985, 5986];
@@ -162,52 +184,83 @@ impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
         };
 
         Ok(NetworkScannerParams {
-            ports,
-            ping_interval: val.ping_interval.unwrap_or(200),
-            ping_timeout: val.ping_timeout.unwrap_or(500),
-            broadcast_timeout: val.broadcast_timeout.unwrap_or(1000),
-            port_scan_timeout: val.port_scan_timeout.unwrap_or(1000),
-            netbios_timeout: val.netbios_timeout.unwrap_or(1000),
-            max_wait_time: val.max_wait.unwrap_or(120 * 1000),
-            netbios_interval: val.netbios_interval.unwrap_or(200),
-            mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
-            ip_ranges: val
-                .ranges
-                .iter()
-                .map(IpAddrRange::try_from)
-                .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?,
-            disable_ping_event: val.disable_ping_events,
+            configs: ScannerConfig {
+                ports,
+                ping_interval: val.ping_interval.unwrap_or(200),
+                ping_timeout: val.ping_timeout.unwrap_or(500),
+                broadcast_timeout: val.broadcast_timeout.unwrap_or(1000),
+                port_scan_timeout: val.port_scan_timeout.unwrap_or(1000),
+                netbios_timeout: val.netbios_timeout.unwrap_or(1000),
+                max_wait_time: val.max_wait.unwrap_or(120 * 1000),
+                netbios_interval: val.netbios_interval.unwrap_or(200),
+                mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
+                ip_ranges: val
+                    .ranges
+                    .iter()
+                    .map(IpAddrRange::try_from)
+                    .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?,
+            },
+            toggles: scanner::ScannerToggles {
+                disable_ping_event: val.disable_ping_events,
+                disable_boardcast: val.disable_boardcast,
+                disable_subnet_scan: val.disable_subnet_scan,
+                disable_zeroconf: val.disable_zeroconf,
+                disable_resolve_dns: val.disable_resolve_dns,
+            },
         })
     }
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum Status {
+    Start,
+    Failed,
+    Success,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "protocol", rename_all = "lowercase")]
 pub enum ScanEvent {
-    #[serde(rename_all = "lowercase")]
-    PingStart { ip_addr: IpAddr },
-    #[serde(rename_all = "lowercase")]
-    PingFailed { ip_addr: IpAddr, reason: String },
+    Ping {
+        ip_addr: IpAddr,
+        status: Status,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        time: Option<u128>,
+    },
+    Dns {
+        ip_addr: IpAddr,
+        hostname: String,
+    },
 }
 
 impl From<scanner::ScanEvent> for ScanEvent {
     fn from(event: scanner::ScanEvent) -> Self {
         match event {
-            scanner::ScanEvent::PingStart { ip_addr } => Self::PingStart { ip_addr },
-            scanner::ScanEvent::PingFailed { ip_addr, reason } => Self::PingFailed {
+            scanner::ScanEvent::PingStart { ip_addr } => Self::Ping {
                 ip_addr,
-                reason: reason.to_string(),
+                status: Status::Start,
+                time: None,
             },
+            scanner::ScanEvent::PingSuccess { ip_addr, time } => Self::Ping {
+                ip_addr,
+                status: Status::Success,
+                time: Some(time),
+            },
+            scanner::ScanEvent::PingFailed { ip_addr, .. } => Self::Ping {
+                ip_addr,
+                status: Status::Failed,
+                time: None,
+            },
+            scanner::ScanEvent::Dns { ip_addr, hostname } => Self::Dns { ip_addr, hostname },
         }
     }
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(untagged, rename_all = "lowercase")]
 pub enum NetworkScanResponse {
-    #[serde(rename_all = "lowercase")]
     Event(ScanEvent),
-    #[serde(rename_all = "lowercase")]
     Entry {
         ip: IpAddr,
         hostname: Option<String>,

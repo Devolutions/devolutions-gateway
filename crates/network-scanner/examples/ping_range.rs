@@ -33,7 +33,6 @@ pub async fn main() -> anyhow::Result<()> {
         ping_wait_time,
         should_ping,
         TaskManager::new(),
-        false,
     )?;
 
     while let Some(ping_event) = receiver.recv().await {
