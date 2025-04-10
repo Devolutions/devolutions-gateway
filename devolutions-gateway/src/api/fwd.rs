@@ -7,6 +7,7 @@ use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::Router;
+use bytes::Bytes;
 use devolutions_gateway_task::ShutdownSignal;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -27,8 +28,8 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     use axum::routing::{self, get, MethodFilter};
 
     let router = Router::new()
-        .route("/tcp/:id", get(fwd_tcp))
-        .route("/tls/:id", get(fwd_tls));
+        .route("/tcp/{id}", get(fwd_tcp))
+        .route("/tls/{id}", get(fwd_tls));
 
     let router = if state.conf_handle.get_conf().debug.enable_unstable {
         let method_filter = MethodFilter::DELETE
@@ -39,7 +40,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
             .or(MethodFilter::PUT)
             .or(MethodFilter::TRACE);
 
-        router.route("/http/:id", routing::on(method_filter, fwd_http))
+        router.route("/http/{id}", routing::on(method_filter, fwd_http))
     } else {
         router
     };
@@ -609,7 +610,7 @@ async fn fwd_http(
         let close_frame_handle = transport::spawn_websocket_sentinel_task(
             ws.shared().with(|message: transport::WsWriteMsg| {
                 core::future::ready(Result::<_, tungstenite::Error>::Ok(match message {
-                    transport::WsWriteMsg::Ping => tungstenite::Message::Ping(vec![]),
+                    transport::WsWriteMsg::Ping => tungstenite::Message::Ping(Bytes::new()),
                     transport::WsWriteMsg::Close(ws_close_frame) => {
                         tungstenite::Message::Close(Some(tungstenite::protocol::CloseFrame {
                             code: ws_close_frame.code.into(),
@@ -639,8 +640,8 @@ async fn fwd_http(
             .filter_map(|item| {
                 let mapped = item
                     .map(|msg| match msg {
-                        tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into())),
-                        tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data.into())),
+                        tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(Bytes::from(s))),
+                        tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
                         tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
                         tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
                         tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
@@ -649,7 +650,11 @@ async fn fwd_http(
 
                 std::future::ready(mapped)
             })
-            .with(|item| core::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+            .with(|item| {
+                core::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(Bytes::from(
+                    item,
+                ))))
+            });
 
         transport::WsStream::new(compat)
     }

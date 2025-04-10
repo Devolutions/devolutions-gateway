@@ -14,7 +14,7 @@ use crate::token::AccessTokenClaims;
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    Router::new().route("/:token", post(kdc_proxy)).with_state(state)
+    Router::new().route("/{token}", post(kdc_proxy)).with_state(state)
 }
 
 async fn kdc_proxy(

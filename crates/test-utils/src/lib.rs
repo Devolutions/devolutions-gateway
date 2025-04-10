@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::tungstenite::Bytes;
 use transport::ErasedReadWrite;
 
 /// For sane Debug display
@@ -193,8 +194,8 @@ where
     let compat = stream.filter_map(|item| {
         let mapped = item
             .map(|msg| match msg {
-                tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into())),
-                tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data.into())),
+                tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(Bytes::from(s))),
+                tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
                 tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
                 tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
                 tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
@@ -213,8 +214,11 @@ where
 {
     use futures_util::SinkExt as _;
 
-    let compat =
-        sink.with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+    let compat = sink.with(|item| {
+        futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(Bytes::from(
+            item,
+        ))))
+    });
 
     transport::WsStream::new(compat)
 }
@@ -233,8 +237,8 @@ where
         .filter_map(|item| {
             let mapped = item
                 .map(|msg| match msg {
-                    tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into())),
-                    tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data.into())),
+                    tungstenite::Message::Text(s) => Some(transport::WsReadMsg::Payload(Bytes::from(s))),
+                    tungstenite::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
                     tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => None,
                     tungstenite::Message::Close(_) => Some(transport::WsReadMsg::Close),
                     tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
@@ -243,7 +247,11 @@ where
 
             core::future::ready(mapped)
         })
-        .with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+        .with(|item| {
+            futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(Bytes::from(
+                item,
+            ))))
+        });
 
     transport::WsStream::new(compat)
 }

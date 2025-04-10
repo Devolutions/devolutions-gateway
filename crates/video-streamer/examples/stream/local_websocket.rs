@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::protocol::Message as TungsteniteMessage;
+use tokio_tungstenite::tungstenite::Bytes;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::info;
 
@@ -29,7 +30,7 @@ impl WebSocketClient {
         self.ws
             .lock()
             .await
-            .send(TungsteniteMessage::Binary(message))
+            .send(TungsteniteMessage::Binary(Bytes::from(message)))
             .await
             .map_err(|e| IoError::new(ErrorKind::Other, e))
     }
@@ -102,7 +103,7 @@ fn websocket_compat(ws: WebSocket) -> impl AsyncRead + AsyncWrite + Unpin + Send
 
             core::future::ready(mapped)
         })
-        .with(|item| futures::future::ready(Ok::<_, axum::Error>(ws::Message::Binary(item))));
+        .with(|item| futures::future::ready(Ok::<_, axum::Error>(ws::Message::Binary(Bytes::from(item)))));
 
     transport::WsStream::new(ws_compat)
 }
@@ -143,7 +144,10 @@ mod tests {
         // Read the message on the client side
         let client_read = async {
             let message = client.next().await.unwrap().unwrap();
-            assert_eq!(message, TungsteniteMessage::Binary(server_to_client_message.to_vec()));
+            assert_eq!(
+                message,
+                TungsteniteMessage::Binary(Bytes::from_static(server_to_client_message))
+            );
         };
 
         // Run both tasks concurrently
