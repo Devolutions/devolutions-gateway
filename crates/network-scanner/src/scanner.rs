@@ -33,8 +33,8 @@ impl NetworkScanner {
 
         start_port_scan(&mut task_executor);
 
-        if !self.toggles.disable_boardcast {
-            start_boardcast(&mut task_executor);
+        if !self.toggles.disable_broadcast {
+            start_broadcast(&mut task_executor);
         }
 
         start_netbios(&mut task_executor);
@@ -167,7 +167,7 @@ impl NetworkScanner {
             );
         }
 
-        fn start_boardcast(task_executor: &mut TaskExecutionRunner) {
+        fn start_broadcast(task_executor: &mut TaskExecutionRunner) {
             task_executor.run(
                 move |TaskExecutionContext {
                           runtime,
@@ -176,14 +176,14 @@ impl NetworkScanner {
                           ..
                       }: TaskExecutionContext,
                       task_manager| async move {
-                    let boardcast_subnet = configs.boardcast_subnet;
-                    let boardcast_timeout = configs.broadcast_timeout;
-                    for subnet in boardcast_subnet {
+                    let broadcast_subnet = configs.broadcast_subnet;
+                    let broadcast_timeout = configs.broadcast_timeout;
+                    for subnet in broadcast_subnet {
                         debug!(broadcasting_to_subnet = ?subnet);
                         let (runtime, ip_sender) = (Arc::clone(&runtime), ip_sender.clone());
                         task_manager.spawn(move |task_manager: TaskManager| async move {
                             let mut receiver =
-                                broadcast(subnet.broadcast, boardcast_timeout, runtime, task_manager).await?;
+                                broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                             while let Some(ip) = receiver.recv().await {
                                 trace!(broadcast_sent_ip = ?ip);
                                 ip_sender.send((ip.into(), None)).await?;
@@ -207,7 +207,7 @@ impl NetworkScanner {
                       task_manager| async move {
                     let netbios_timeout = configs.netbios_timeout;
                     let netbios_interval = configs.netbios_interval;
-                    let subnets = configs.boardcast_subnet;
+                    let subnets = configs.broadcast_subnet;
 
                     let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
                     debug!(netbios_query_ip_ranges = ?ip_ranges);
@@ -309,8 +309,8 @@ impl NetworkScanner {
                           ..
                       },
                       task_manager| async move {
-                    // Since mDNS deamon is started at the point it's created, we set it to None in order to avoid resouce waste
-                    // Caller of the start_mdns function should garentee that the deamon exists
+                    // Since mDNS daemon is started at the point it's created, we set it to None in order to avoid resource waste
+                    // Caller of the start_mdns function should guarantee that the daemon exists
                     let mdns_daemon = match mdns_daemon {
                         Some(daemon) => daemon,
                         None => anyhow::bail!("mDNS daemon is not available but mDNS is enabled"),
@@ -413,8 +413,8 @@ impl NetworkScannerStream {
 
     pub fn stop(self: Arc<Self>) {
         self.task_manager.stop();
-        if let Some(deamon) = &self.mdns_daemon {
-            deamon.stop();
+        if let Some(daemon) = &self.mdns_daemon {
+            daemon.stop();
         };
     }
 }
@@ -473,7 +473,7 @@ impl Display for ScanMethod {
 #[derive(Debug, Clone)]
 pub struct ScannerToggles {
     pub disable_ping_event: bool,
-    pub disable_boardcast: bool,
+    pub disable_broadcast: bool,
     pub disable_subnet_scan: bool,
     pub disable_zeroconf: bool,
     pub disable_resolve_dns: bool,

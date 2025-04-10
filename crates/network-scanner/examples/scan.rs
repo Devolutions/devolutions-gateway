@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
             max_wait_time: 10 * 1000,
         },
         toggles: ScannerToggles {
-            disable_boardcast: false,
+            disable_broadcast: false,
             disable_subnet_scan: false,
             disable_ping_event: false,
             disable_resolve_dns: false,
