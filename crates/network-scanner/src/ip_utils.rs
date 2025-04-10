@@ -19,7 +19,12 @@ impl TryFrom<&str> for IpAddrRange {
         }
         let lower = parts[0].parse::<IpAddr>()?;
         let upper = parts[1].parse::<IpAddr>()?;
-        IpAddrRange::new(lower, upper)
+
+        match (lower, upper) {
+            (IpAddr::V4(lower), IpAddr::V4(upper)) => Ok(IpAddrRange::new_ipv4(lower, upper)),
+            (IpAddr::V6(lower), IpAddr::V6(upper)) => Ok(IpAddrRange::new_ipv6(lower, upper)),
+            _ => anyhow::bail!("IP address types do not match"),
+        }
     }
 }
 
@@ -35,14 +40,38 @@ impl TryFrom<&String> for IpAddrRange {
 pub struct IpV4AddrRange {
     lower: Ipv4Addr,
     upper: Ipv4Addr,
-    current: Option<Ipv4Addr>,
+}
+
+impl IntoIterator for IpV4AddrRange {
+    type Item = Ipv4Addr;
+
+    type IntoIter = IpV4RangeIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IpV4RangeIterator {
+            current: Some(self.lower),
+            upper: self.upper,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct IpV6AddrRange {
     lower: Ipv6Addr,
     upper: Ipv6Addr,
-    current: Option<Ipv6Addr>,
+}
+
+impl IntoIterator for IpV6AddrRange {
+    type Item = Ipv6Addr;
+
+    type IntoIter = IpV6RangeIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IpV6RangeIterator {
+            current: Some(self.lower),
+            upper: self.upper,
+        }
+    }
 }
 
 impl IpV4AddrRange {
@@ -52,11 +81,7 @@ impl IpV4AddrRange {
         } else {
             (lower, upper)
         };
-        Self {
-            lower,
-            upper,
-            current: Some(lower),
-        }
+        Self { lower, upper }
     }
 }
 
@@ -67,16 +92,20 @@ impl IpV6AddrRange {
         } else {
             (lower, upper)
         };
-        Self {
-            lower,
-            upper,
-            current: Some(lower),
-        }
+        Self { lower, upper }
     }
 }
 
-// Implement Iterator for IPv4 range
-impl Iterator for IpV4AddrRange {
+pub struct IpV4RangeIterator {
+    current: Option<Ipv4Addr>,
+    upper: Ipv4Addr,
+}
+pub struct IpV6RangeIterator {
+    current: Option<Ipv6Addr>,
+    upper: Ipv6Addr,
+}
+
+impl Iterator for IpV4RangeIterator {
     type Item = Ipv4Addr;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -90,8 +119,8 @@ impl Iterator for IpV4AddrRange {
     }
 }
 
-// Implement Iterator for IPv6 range
-impl Iterator for IpV6AddrRange {
+// // Implement Iterator for IPv6 range
+impl Iterator for IpV6RangeIterator {
     type Item = Ipv6Addr;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -107,12 +136,12 @@ impl Iterator for IpV6AddrRange {
 
 // Helper to create the appropriate enum variant
 impl IpAddrRange {
-    pub fn new(lower: IpAddr, upper: IpAddr) -> anyhow::Result<Self> {
-        match (lower, upper) {
-            (IpAddr::V4(l), IpAddr::V4(u)) => Ok(IpAddrRange::V4(IpV4AddrRange::new(l, u))),
-            (IpAddr::V6(l), IpAddr::V6(u)) => Ok(IpAddrRange::V6(IpV6AddrRange::new(l, u))),
-            _ => anyhow::bail!("IP range needs to be the same type (both IPv4 or both IPv6)"),
-        }
+    pub fn new_ipv4(lower: Ipv4Addr, upper: Ipv4Addr) -> Self {
+        IpAddrRange::V4(IpV4AddrRange::new(Ipv4Addr::from(upper), Ipv4Addr::from(lower)))
+    }
+
+    pub fn new_ipv6(lower: Ipv6Addr, upper: Ipv6Addr) -> Self {
+        IpAddrRange::V6(IpV6AddrRange::new(Ipv6Addr::from(upper), Ipv6Addr::from(lower)))
     }
 
     pub fn has_overlap(&self, other: &Self) -> bool {
@@ -135,16 +164,16 @@ impl IntoIterator for IpAddrRange {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            IpAddrRange::V4(range) => IpAddrRangeIter::V4(range),
-            IpAddrRange::V6(range) => IpAddrRangeIter::V6(range),
+            IpAddrRange::V4(range) => IpAddrRangeIter::V4(range.into_iter()),
+            IpAddrRange::V6(range) => IpAddrRangeIter::V6(range.into_iter()),
         }
     }
 }
 
 // Enum for the iterator
 pub enum IpAddrRangeIter {
-    V4(IpV4AddrRange),
-    V6(IpV6AddrRange),
+    V4(IpV4RangeIterator),
+    V6(IpV6RangeIterator),
 }
 
 impl Iterator for IpAddrRangeIter {
@@ -194,15 +223,14 @@ pub struct Subnet {
 
 impl From<Subnet> for IpAddrRange {
     fn from(value: Subnet) -> Self {
-        let (lower, upper) = calculate_subnet_bounds(value.ip, value.netmask);
-        IpAddrRange::new(lower.into(), upper.into()).expect("Subnet bounds must be valid IPv4 addresses")
+        Self::from(&value)
     }
 }
 
 impl From<&Subnet> for IpAddrRange {
     fn from(value: &Subnet) -> Self {
         let (lower, upper) = calculate_subnet_bounds(value.ip, value.netmask);
-        IpAddrRange::new(lower.into(), upper.into()).expect("Subnet bounds must be valid IPv4 addresses")
+        IpAddrRange::new_ipv4(lower.into(), upper.into())
     }
 }
 
@@ -214,7 +242,7 @@ impl TryFrom<V4IfAddr> for IpAddrRange {
         let V4IfAddr { ip, netmask, .. } = value;
         let netmask = netmask.ok_or_else(|| anyhow::anyhow!("No netmask found"))?;
         let (lower, upper) = calculate_subnet_bounds(ip, netmask);
-        IpAddrRange::new(lower.into(), upper.into())
+        Ok(IpAddrRange::new_ipv4(lower.into(), upper.into()))
     }
 }
 
@@ -273,7 +301,7 @@ mod tests {
     fn test_iter_ipv4() {
         let lower = "10.10.0.0".parse::<Ipv4Addr>().unwrap();
         let upper = "10.10.0.30".parse::<Ipv4Addr>().unwrap();
-        let range = IpAddrRange::new(lower.into(), upper.into()).unwrap();
+        let range = IpAddrRange::new_ipv4(lower.into(), upper.into());
 
         let mut iter = range.into_iter();
         for i in 0..31 {
@@ -285,8 +313,8 @@ mod tests {
 
     #[test]
     fn test_has_overlap() {
-        let r1 = IpAddrRange::new("192.168.1.0".parse().unwrap(), "192.168.1.255".parse().unwrap()).unwrap();
-        let r2 = IpAddrRange::new("192.168.1.100".parse().unwrap(), "192.168.2.10".parse().unwrap()).unwrap();
+        let r1 = IpAddrRange::new_ipv4("192.168.1.0".parse().unwrap(), "192.168.1.255".parse().unwrap());
+        let r2 = IpAddrRange::new_ipv4("192.168.1.100".parse().unwrap(), "192.168.2.10".parse().unwrap());
         assert!(r1.has_overlap(&r2));
     }
 

@@ -19,7 +19,7 @@ pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextConfig {
-    pub(crate) boardcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
+    pub(crate) broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
     pub(crate) range_to_ping: Vec<IpAddrRange>,
     pub ports: Vec<u16>,
     pub ping_interval: Duration,
@@ -39,7 +39,7 @@ impl ContextConfig {
         };
 
         Self {
-            boardcast_subnet: subnet,
+            broadcast_subnet: subnet,
             range_to_ping,
             ports: configs.ports,
             ping_interval: Duration::from_millis(configs.ping_interval),
@@ -94,7 +94,7 @@ impl TaskExecutionContext {
             ..
         } = network_scanner;
 
-        let boardcast_subnet = get_subnets()?;
+        let broadcast_subnet = get_subnets()?;
         let res = Self {
             ip_sender,
             ip_receiver,
@@ -103,7 +103,7 @@ impl TaskExecutionContext {
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
             mdns_daemon,
-            configs: ContextConfig::new(configs, &toggles, boardcast_subnet),
+            configs: ContextConfig::new(configs, &toggles, broadcast_subnet),
             toggles,
         };
 

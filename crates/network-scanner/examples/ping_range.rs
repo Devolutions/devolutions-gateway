@@ -13,10 +13,10 @@ pub async fn main() -> anyhow::Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    let lower = IpAddr::V4(Ipv4Addr::new(10, 10, 0, 0));
-    let upper = IpAddr::V4(Ipv4Addr::new(10, 10, 0, 125));
+    let lower = Ipv4Addr::new(10, 10, 0, 0);
+    let upper = Ipv4Addr::new(10, 10, 0, 125);
 
-    let range = network_scanner::ip_utils::IpAddrRange::new(lower, upper)?;
+    let range = network_scanner::ip_utils::IpAddrRange::new_ipv4(lower, upper);
 
     let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
 
