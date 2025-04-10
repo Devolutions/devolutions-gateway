@@ -6,7 +6,7 @@ use axum::extract::{RawQuery, WebSocketUpgrade};
 use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::interfaces;
-use network_scanner::scanner::{self, NetworkScannerParams};
+use network_scanner::scanner::{self, NetworkScannerParams, ScannerConfig};
 use network_scanner::ip_utils::IpAddrRange;
 use serde::Serialize;
 use std::fmt;
