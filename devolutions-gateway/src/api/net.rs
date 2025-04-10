@@ -218,11 +218,9 @@ pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
     pub name: String,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Addr>))]
-    pub addr: Vec<Addr>,
+    pub addrs: Vec<Addr>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_addr: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(value_type = u32))]
     pub index: u32,
 }
 
@@ -298,7 +296,7 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
         NetworkInterface {
             name: iface.name,
             mac_addr: iface.mac_addr,
-            addr,
+            addrs: addr,
             index: iface.index,
         }
     }
