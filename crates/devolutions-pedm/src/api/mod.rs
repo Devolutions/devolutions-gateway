@@ -171,7 +171,7 @@ async fn health_check() -> &'static str {
 /// Initializes the appliation and starts the named pipe server.
 pub async fn serve(config: Config) -> Result<(), ServeError> {
     let db = Db::new(&config).await?;
-    db.init_schema().await?;
+    db.setup().await?;
 
     let state = AppState::new(db, &config.pipe_name).await?;
 

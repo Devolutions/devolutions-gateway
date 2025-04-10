@@ -93,8 +93,8 @@ impl Db {
         Ok(Self(db))
     }
 
-    /// Initializes the database schema if needed.
-    pub(crate) async fn init_schema(&self) -> Result<(), InitSchemaError> {
+    /// Sets up the database.
+    pub(crate) async fn setup(&self) -> Result<(), InitSchemaError> {
         match self.0.get_schema_version().await {
             Ok(version) => {
                 info!("Schema version: {version}");
