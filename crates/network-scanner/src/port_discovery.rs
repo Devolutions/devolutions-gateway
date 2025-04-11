@@ -10,24 +10,24 @@ use crate::task_utils::TaskManager;
 
 pub async fn scan_ports(
     ip: impl Into<IpAddr>,
-    port: &[u16],
+    ports: &[u16],
     runtime: Arc<Socket2Runtime>,
     timeout: Duration,
     task_manager: TaskManager,
 ) -> anyhow::Result<tokio::sync::mpsc::Receiver<PortScanResult>> {
     let ip = ip.into();
     let mut sockets = vec![];
-    for p in port {
+    for p in ports {
         let addr = SockAddr::from(SocketAddr::from((ip, *p)));
         let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
         sockets.push((socket, addr));
     }
 
-    if port.is_empty() {
+    if ports.is_empty() {
         anyhow::bail!("no port to scan");
     }
 
-    let (sender, receiver) = tokio::sync::mpsc::channel(port.len());
+    let (sender, receiver) = tokio::sync::mpsc::channel(ports.len());
     for (socket, addr) in sockets {
         let sender = sender.clone();
         task_manager.spawn_no_sub_task(async move {
