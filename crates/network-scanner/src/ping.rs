@@ -21,8 +21,8 @@ pub enum PingFailedReason {
 impl std::fmt::Display for PingFailedReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PingFailedReason::Rejected => write!(f, "Ping rejected"),
-            PingFailedReason::TimedOut => write!(f, "Ping timed out"),
+            PingFailedReason::Rejected => write!(f, "ping rejected"),
+            PingFailedReason::TimedOut => write!(f, "ping timed out"),
         }
     }
 }
