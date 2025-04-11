@@ -218,6 +218,7 @@ pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
     pub name: String,
+    #[serde(rename = "addresses")]
     pub addrs: Vec<Addr>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_addr: Option<String>,
