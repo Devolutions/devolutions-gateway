@@ -169,7 +169,7 @@ const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 59
 impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
     type Error = anyhow::Error;
     fn try_from(val: NetworkScanQueryParams) -> Result<Self, Self::Error> {
-        warn!(query=?val, "Network scan query parameters");
+        debug!(query=?val, "Network scan query parameters");
 
         let ports = match val.ports.len() {
             0 => COMMON_PORTS.to_vec(),

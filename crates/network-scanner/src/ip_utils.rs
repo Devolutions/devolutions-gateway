@@ -242,7 +242,7 @@ impl TryFrom<V4IfAddr> for IpAddrRange {
         let V4IfAddr { ip, netmask, .. } = value;
         let netmask = netmask.ok_or_else(|| anyhow::anyhow!("No netmask found"))?;
         let (lower, upper) = calculate_subnet_bounds(ip, netmask);
-        Ok(IpAddrRange::new_ipv4(lower.into(), upper.into()))
+        Ok(IpAddrRange::new_ipv4(lower, upper))
     }
 }
 
