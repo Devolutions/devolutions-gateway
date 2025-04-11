@@ -1,15 +1,16 @@
 use crate::broadcast::asynchronous::broadcast;
 use crate::ip_utils::IpAddrRange;
-use crate::mdns::{self, MdnsDaemon};
+use crate::mdns::{self, MdnsDaemon, MdnsResult};
 use crate::netbios::netbios_query_scan;
 use crate::ping::{ping_range, PingFailedReason};
 use crate::port_discovery::{scan_ports, PortScanResult};
-use crate::task_utils::{ScanEntryReceiver, TaskExecutionContext, TaskExecutionRunner, TaskManager};
+use crate::task_utils::{TaskExecutionContext, TaskExecutionRunner, TaskManager};
 use anyhow::Context;
 use std::fmt::Display;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use typed_builder::TypedBuilder;
 
 /// Represents a network scanner for discovering devices and their services over a network.
@@ -21,9 +22,9 @@ pub struct NetworkScanner {
     pub(crate) mdns_daemon: Option<MdnsDaemon>,
 
     /// Configuration settings for the network scanner
-    pub(crate) configs: ScannerConfig,
+    pub(crate) config: ScannerConfig,
     /// Toggles for enabling or disabling specific features of the scanner.
-    pub(crate) toggles: ScannerToggles,
+    pub(crate) toggle: ScannerToggles,
 }
 
 impl NetworkScanner {
@@ -33,7 +34,7 @@ impl NetworkScanner {
         start_port_scan(&mut task_executor);
         start_dns_look_up(&mut task_executor);
 
-        if self.toggles.enable_broadcast {
+        if self.toggle.enable_broadcast {
             start_broadcast(&mut task_executor);
         }
 
@@ -41,7 +42,7 @@ impl NetworkScanner {
 
         start_ping(&mut task_executor);
 
-        if self.toggles.enable_zeroconf {
+        if self.toggle.enable_zeroconf {
             start_mdns(&mut task_executor);
         }
 
@@ -59,7 +60,7 @@ impl NetworkScanner {
             mdns_daemon,
         };
 
-        let max_wait_time = self.configs.max_wait_time;
+        let max_wait_time = self.config.max_wait_time;
 
         tokio::spawn(async move {
             tokio::time::sleep(max_wait_time).await;
@@ -100,6 +101,7 @@ impl NetworkScanner {
 
                         // Spawn a new task for each IP address
                         task_executor.spawn_no_sub_task(async move {
+                            trace!(ip = ?ip, host = ?host, "DNS lookup");
                             let (update_dns, ip, dns) = match existing_dns {
                                 Some(None) if host.is_some() => {
                                     // If the IP address is in the cache but DNS resolution was not successful before and we have a new host coming in, update
@@ -215,11 +217,12 @@ impl NetworkScanner {
                     let broadcast_subnet = configs.broadcast_subnet;
                     let broadcast_timeout = configs.broadcast_timeout;
                     for subnet in broadcast_subnet {
-                        debug!(broadcasting_to_subnet = ?subnet);
+                        trace!(broadcasting_to_subnet = ?subnet);
                         let (runtime, ip_sender) = (Arc::clone(&runtime), ip_sender.clone());
                         task_manager.spawn(move |task_manager: TaskManager| async move {
                             let mut receiver =
                                 broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
+
                             while let Some(ip) = receiver.recv().await {
                                 trace!(broadcast_sent_ip = ?ip);
                                 ip_sender.send((ip.into(), None))?;
@@ -260,7 +263,7 @@ impl NetworkScanner {
                             netbios_query_scan(runtime, ip_range, netbios_timeout, netbios_interval, task_manager)?;
 
                         while let Some(res) = receiver.recv().await {
-                            debug!(netbios_query_sent_ip = ?res.0);
+                            trace!(netbios_query_sent_ip = ?res.0);
                             ip_sender.send(res)?;
                         }
                     }
@@ -302,7 +305,7 @@ impl NetworkScanner {
                         )?;
 
                         while let Some(ping_event) = receiver.recv().await {
-                            debug!(ping_sent_ip = ?ping_event);
+                            trace!(ping_sent_ip = ?ping_event);
 
                             match ping_event {
                                 crate::ping::PingEvent::Success { ip_addr, time } => {
@@ -335,8 +338,8 @@ impl NetworkScanner {
                 move |TaskExecutionContext {
                           mdns_daemon,
                           result_sender,
-                          ip_cache,
                           configs,
+                          ip_sender,
                           ..
                       },
                       task_manager| async move {
@@ -352,24 +355,22 @@ impl NetworkScanner {
 
                     let mut receiver = mdns::mdns_query_scan(mdns_daemon, task_manager, mdns_query_timeout)?;
 
-                    while let Some(ScanEntry::Result {
+                    while let Some(MdnsResult {
                         addr,
                         hostname,
                         port,
                         service_type,
                     }) = receiver.recv().await
                     {
-                        if ip_cache.read().get(&addr).is_none() {
-                            ip_cache.write().insert(addr, hostname.clone());
-                        }
-
-                        let dns_name = ip_cache.read().get(&addr).cloned().flatten();
+                        // Let the DNS resolver to figure it out
+                        // We can send the result directly from here, but there's no harm to let port scanner to check wanted ports for that machine anyway
+                        ip_sender.send((addr, hostname.clone()))?;
 
                         if ports.contains(&port) || service_type.is_some() {
                             result_sender
                                 .send(ScanEntry::Result {
                                     addr,
-                                    hostname: dns_name,
+                                    hostname,
                                     port,
                                     service_type,
                                 })
@@ -383,23 +384,20 @@ impl NetworkScanner {
         }
     }
 
-    pub fn new(
-        NetworkScannerParams {
-            config: configs,
-            toggle: toggles,
-        }: NetworkScannerParams,
-    ) -> anyhow::Result<Self> {
+    pub fn new(NetworkScannerParams { config, toggle }: NetworkScannerParams) -> anyhow::Result<Self> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
 
-        let mdns_daemon = if toggles.enable_zeroconf {
+        let mdns_daemon = if toggle.enable_zeroconf {
             Some(MdnsDaemon::new()?)
         } else {
             None
         };
 
+        debug!(?config, ?toggle, "Starting network scanner");
+
         Ok(Self {
-            configs,
-            toggles,
+            config,
+            toggle,
             mdns_daemon,
             runtime,
         })
@@ -430,7 +428,7 @@ pub enum ScanEntry {
 }
 
 pub struct NetworkScannerStream {
-    result_receiver: ScanEntryReceiver,
+    result_receiver: mpsc::Receiver<ScanEntry>,
     task_manager: TaskManager,
     mdns_daemon: Option<MdnsDaemon>,
 }

@@ -6,17 +6,16 @@ use std::time::Duration;
 
 use std::future::Future;
 
+use tokio::sync::{broadcast, mpsc};
+
 use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
 use crate::scanner::{NetworkScanner, ScanEntry, ScannerConfig, ScannerToggles};
 
-pub(crate) type BoardcastSender = tokio::sync::broadcast::Sender<(IpAddr, Option<String>)>;
+pub(crate) type BoardcastSender = broadcast::Sender<(IpAddr, Option<String>)>;
 
-pub(crate) type IpHostSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
-pub(crate) type IpHostReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
-
-pub(crate) type ScanEntrySender = tokio::sync::mpsc::Sender<ScanEntry>;
-pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
+pub(crate) type IpHostSender = mpsc::Sender<(IpAddr, Option<String>)>;
+pub(crate) type IpHostReceiver = mpsc::Receiver<(IpAddr, Option<String>)>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextConfig {
@@ -51,7 +50,7 @@ impl ContextConfig {
     ) -> Self {
         let range_to_ping = match ip_ranges.len() {
             0 if toggles.enable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
-            _ => ip_ranges.clone(),
+            _ => ip_ranges,
         };
 
         Self {
@@ -75,7 +74,7 @@ pub(crate) struct TaskExecutionContext {
     pub(crate) ip_sender: BoardcastSender,
 
     // The final result sender that sends the result to the main thread
-    pub(crate) result_sender: ScanEntrySender,
+    pub(crate) result_sender: mpsc::Sender<ScanEntry>,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
@@ -95,16 +94,16 @@ pub(crate) struct TaskExecutionRunner {
 }
 
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<(Self, ScanEntryReceiver)> {
+    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<(Self, mpsc::Receiver<ScanEntry>)> {
         // Since the boarcast receiver does not implement Clone, we'll subscribe to the channel using the sender when we need it
-        let (ip_sender, _ip_receiver) = tokio::sync::broadcast::channel(100);
-        let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);
+        let (ip_sender, _ip_receiver) = broadcast::channel(100);
+        let (result_sender, result_receiver) = mpsc::channel(100);
 
         let NetworkScanner {
             mdns_daemon,
             runtime,
-            configs,
-            toggles,
+            config: configs,
+            toggle: toggles,
             ..
         } = network_scanner;
 
@@ -134,7 +133,7 @@ impl TaskExecutionRunner {
             .spawn_no_sub_task(task(context, self.task_manager.clone()));
     }
 
-    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<(Self, ScanEntryReceiver)> {
+    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<(Self, mpsc::Receiver<ScanEntry>)> {
         let (context, receiver) = TaskExecutionContext::new(scanner)?;
         Ok((
             Self {
