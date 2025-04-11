@@ -39,6 +39,7 @@ terminal-streamer = { path = "../crates/terminal-streamer" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
+serde-querystring = "0.3.0"
 
 # Utils, misc
 hostname = "0.4"
@@ -109,7 +110,6 @@ etherparse = "0.15"
 
 # For KDC proxy
 portpicker = "0.1"
-serde-querystring = "0.3.0"
 
 [target.'cfg(windows)'.dependencies]
 rustls-cng = { version = "0.5", default-features = false, features = ["logging", "tls12", "ring"] }
