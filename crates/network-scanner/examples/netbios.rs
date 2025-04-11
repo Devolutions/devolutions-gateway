@@ -16,8 +16,9 @@ pub async fn main() -> anyhow::Result<()> {
 
     let lower: Ipv4Addr = "10.10.0.0".parse()?;
     let upper: Ipv4Addr = "10.10.0.125".parse()?;
-    let ip_range =
-        network_scanner::ip_utils::IpAddrRange::new(std::net::IpAddr::V4(lower), std::net::IpAddr::V4(upper))?;
+
+    let ip_range = network_scanner::ip_utils::IpV4AddrRange::new(lower, upper);
+
     let single_query_duration = Duration::from_secs(1);
     let interval = Duration::from_millis(20);
     let mut receiver = network_scanner::netbios::netbios_query_scan(

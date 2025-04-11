@@ -1,8 +1,9 @@
 use anyhow::Context;
 use mdns_sd::ServiceEvent;
+use tokio::sync::mpsc;
 
-use crate::scanner::{ScanEntry, ServiceType};
-use crate::task_utils::{ScanEntryReceiver, TaskManager};
+use crate::scanner::ServiceType;
+use crate::task_utils::TaskManager;
 use crate::ScannerError;
 
 #[derive(Clone)]
@@ -60,13 +61,21 @@ const SERVICE_TYPES_INTERESTED: [ServiceType; 10] = [
     ServiceType::Vnc,
 ];
 
+#[derive(Debug, Clone)]
+pub struct MdnsResult {
+    pub addr: std::net::IpAddr,
+    pub hostname: Option<String>,
+    pub port: u16,
+    pub service_type: Option<ServiceType>,
+}
+
 pub fn mdns_query_scan(
     service_daemon: MdnsDaemon,
     task_manager: TaskManager,
     query_duration: std::time::Duration,
-) -> Result<ScanEntryReceiver, ScannerError> {
+) -> Result<mpsc::Receiver<MdnsResult>, ScannerError> {
     let service_daemon = service_daemon.get_service_daemon();
-    let (result_sender, result_receiver) = tokio::sync::mpsc::channel(255);
+    let (result_sender, result_receiver) = mpsc::channel(255);
 
     for service in SERVICE_TYPES_INTERESTED {
         let service_name: &str = service.into();
@@ -91,7 +100,7 @@ pub fn mdns_query_scan(
                 if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
                     warn!(error = %e, "Failed to stop browsing for service");
                 }
-                // Receive the last event (StopBrowse), preventing the receiver from being dropped,this will satisfy the sender side to avoid loging an error
+                // Receive the last event (StopBrowse), preventing the receiver from being dropped,this will satisfy the sender side to avoid logging an error
                 let _ = receiver_clone.recv_timeout(std::time::Duration::from_millis(10));
             })
             .spawn(move |_| async move {
@@ -106,9 +115,9 @@ pub fn mdns_query_scan(
 
                         let port = msg.get_port();
 
-                        for ip in msg.get_addresses() {
-                            let entry = ScanEntry {
-                                addr: *ip,
+                        for addr in msg.get_addresses() {
+                            let entry = MdnsResult {
+                                addr: *addr,
                                 hostname: Some(device_name.clone()),
                                 port,
                                 service_type: protocol,

@@ -6,41 +6,83 @@ use std::time::Duration;
 
 use std::future::Future;
 
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, mpsc};
 
-use crate::ip_utils::{get_subnets, Subnet};
+use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
-use crate::scanner::{NetworkScanner, ScanEntry};
+use crate::scanner::{NetworkScanner, ScanEntry, ScannerConfig, ScannerToggles};
 
-pub(crate) type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
-pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
-pub(crate) type ScanEntrySender = tokio::sync::mpsc::Sender<ScanEntry>;
-pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
+pub(crate) type BoardcastSender = broadcast::Sender<(IpAddr, Option<String>)>;
+
+pub(crate) type IpHostSender = mpsc::Sender<(IpAddr, Option<String>)>;
+pub(crate) type IpHostReceiver = mpsc::Receiver<(IpAddr, Option<String>)>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct ContextConfig {
+    pub(crate) broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
+    pub(crate) range_to_ping: Vec<IpAddrRange>,
+    pub ports: Vec<u16>,
+    pub ping_interval: Duration,
+    pub ping_timeout: Duration,
+    pub broadcast_timeout: Duration,
+    pub port_scan_timeout: Duration,
+    pub netbios_timeout: Duration,
+    pub netbios_interval: Duration,
+    pub mdns_query_timeout: Duration,
+}
+
+impl ContextConfig {
+    pub(crate) fn new(
+        ScannerConfig {
+            broadcast_timeout,
+            mdns_query_timeout,
+            netbios_timeout,
+            netbios_interval,
+            ping_timeout,
+            ping_interval,
+            port_scan_timeout,
+            ports,
+            ip_ranges,
+            ..
+        }: ScannerConfig,
+        toggles: &ScannerToggles,
+        subnet: Vec<Subnet>,
+    ) -> Self {
+        let range_to_ping = match ip_ranges.len() {
+            0 if toggles.enable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
+            _ => ip_ranges,
+        };
+
+        Self {
+            broadcast_subnet: subnet,
+            range_to_ping,
+            ports,
+            ping_interval,
+            ping_timeout,
+            broadcast_timeout,
+            port_scan_timeout,
+            netbios_timeout,
+            netbios_interval,
+            mdns_query_timeout,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
-    pub(crate) ip_sender: IpSender,
-    pub(crate) ip_receiver: Arc<Mutex<IpReceiver>>,
+    // The sender that gathers all the IP addresses from Ping, Boradcast, Netbios etc.. and send to port scanner and DNS resolver
+    pub(crate) ip_sender: BoardcastSender,
 
-    pub(crate) port_sender: ScanEntrySender,
-    pub(crate) port_receiver: Arc<Mutex<ScanEntryReceiver>>,
+    // The final result sender that sends the result to the main thread
+    pub(crate) result_sender: mpsc::Sender<ScanEntry>,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
-    pub(crate) ports: Vec<u16>,
-
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub(crate) mdns_daemon: MdnsDaemon,
+    pub(crate) mdns_daemon: Option<MdnsDaemon>,
 
-    pub(crate) ping_interval: Duration,      // in milliseconds
-    pub(crate) ping_timeout: Duration,       // in milliseconds
-    pub(crate) broadcast_timeout: Duration,  // in milliseconds
-    pub(crate) port_scan_timeout: Duration,  // in milliseconds
-    pub(crate) netbios_timeout: Duration,    // in milliseconds
-    pub(crate) netbios_interval: Duration,   // in milliseconds
-    pub(crate) mdns_query_timeout: Duration, // in milliseconds
-
-    pub(crate) subnets: Vec<Subnet>,
+    pub(crate) configs: ContextConfig,
+    pub(crate) toggles: ScannerToggles,
 }
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
@@ -52,48 +94,31 @@ pub(crate) struct TaskExecutionRunner {
 }
 
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
-        let (ip_sender, ip_receiver) = tokio::sync::mpsc::channel(5);
-        let ip_receiver = Arc::new(Mutex::new(ip_receiver));
+    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<(Self, mpsc::Receiver<ScanEntry>)> {
+        // Since the boarcast receiver does not implement Clone, we'll subscribe to the channel using the sender when we need it
+        let (ip_sender, _ip_receiver) = broadcast::channel(100);
+        let (result_sender, result_receiver) = mpsc::channel(100);
 
-        let (port_sender, port_receiver) = tokio::sync::mpsc::channel(100);
-        let port_receiver = Arc::new(Mutex::new(port_receiver));
-
-        let subnets = get_subnets()?;
         let NetworkScanner {
-            ports,
-            ping_timeout,
-            ping_interval,
-            broadcast_timeout,
-            port_scan_timeout,
-            netbios_timeout,
-            runtime,
-            netbios_interval,
             mdns_daemon,
-            mdns_query_timeout,
+            runtime,
+            config: configs,
+            toggle: toggles,
             ..
         } = network_scanner;
 
+        let broadcast_subnet = get_subnets()?;
         let res = Self {
             ip_sender,
-            ip_receiver,
-            port_sender,
-            port_receiver,
+            result_sender,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
-            ports,
             runtime,
             mdns_daemon,
-            ping_interval,
-            ping_timeout,
-            broadcast_timeout,
-            port_scan_timeout,
-            netbios_timeout,
-            netbios_interval,
-            subnets,
-            mdns_query_timeout,
+            configs: ContextConfig::new(configs, &toggles, broadcast_subnet),
+            toggles,
         };
 
-        Ok(res)
+        Ok((res, result_receiver))
     }
 }
 
@@ -108,11 +133,15 @@ impl TaskExecutionRunner {
             .spawn_no_sub_task(task(context, self.task_manager.clone()));
     }
 
-    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<Self> {
-        Ok(Self {
-            context: TaskExecutionContext::new(scanner)?,
-            task_manager: TaskManager::new(),
-        })
+    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<(Self, mpsc::Receiver<ScanEntry>)> {
+        let (context, receiver) = TaskExecutionContext::new(scanner)?;
+        Ok((
+            Self {
+                context,
+                task_manager: TaskManager::new(),
+            },
+            receiver,
+        ))
     }
 }
 
