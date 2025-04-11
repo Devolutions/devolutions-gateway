@@ -8,6 +8,8 @@ use crate::token::{
     JrlTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
 };
 
+use axum::extract::{FromRequest, RawQuery, Request};
+
 #[derive(Clone)]
 pub struct AccessToken(pub AccessTokenClaims);
 
@@ -365,5 +367,28 @@ where
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected BRIDGE)"))
         }
+    }
+}
+
+pub struct RepeatQuery<T>(pub(crate) T);
+
+#[async_trait]
+impl<T, S> FromRequest<S> for RepeatQuery<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let RawQuery(query) = RawQuery::from_request(req, state)
+            .await
+            .map_err(|e| HttpError::bad_request().build(e))?;
+
+        let query = query.unwrap_or_default();
+        let parsed_query = serde_querystring::from_str::<T>(&query, serde_querystring::ParseMode::Duplicate)
+            .map_err(|e| HttpError::bad_request().build(e))?;
+
+        Ok(RepeatQuery(parsed_query))
     }
 }

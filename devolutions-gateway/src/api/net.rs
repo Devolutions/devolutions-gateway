@@ -1,3 +1,4 @@
+use crate::extract::RepeatQuery;
 use crate::http::HttpError;
 use crate::token::{ApplicationProtocol, Protocol};
 use crate::DgwState;
@@ -9,9 +10,9 @@ use network_scanner::interfaces;
 use network_scanner::ip_utils::IpAddrRange;
 use network_scanner::scanner::{self, NetworkScannerParams, ScannerConfig};
 use serde::Serialize;
-use serde_querystring::{from_str, ParseMode};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new().route("/scan", axum::routing::get(handle_network_scan));
@@ -29,18 +30,9 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
-    RawQuery(query): RawQuery,
+    RepeatQuery(query): RepeatQuery<NetworkScanQueryParams>,
 ) -> Result<Response, HttpError> {
-    let query = query.unwrap_or_default();
-
-    // Use serde_qs to parse array parameters
-    // As suggested by serde_urlencoded author https://github.com/nox/serde_urlencoded/issues/85
-    let query_params = match from_str::<NetworkScanQueryParams>(&query, ParseMode::Duplicate) {
-        Ok(params) => Ok(params),
-        Err(e) => Err(HttpError::bad_request().build(e)),
-    }?;
-
-    let scanner_params: NetworkScannerParams = query_params.try_into().map_err(|e| {
+    let scanner_params: NetworkScannerParams = query.try_into().map_err(|e| {
         error!(error = format!("{e:#}"), "Failed to parse query parameters");
         HttpError::bad_request().build(e)
     })?;
@@ -141,31 +133,31 @@ pub struct NetworkScanQueryParams {
     pub max_wait: Option<u64>,
     /// The start and end IP address of the range to scan.
     /// for example: 10.10.0.0-10.10.0.255
-    #[serde(default)]
-    pub range: Vec<String>,
+    #[serde(default, rename = "range")]
+    pub ranges: Vec<String>,
     /// The ports to scan. If not specified, the default ports will be used.
-    #[serde(default)]
-    pub port: Vec<u16>,
+    #[serde(default, rename = "port")]
+    pub ports: Vec<u16>,
 
-    /// Disable the emission of ScanEvent::Ping for status start
+    /// Enable the emission of ScanEvent::Ping for status start
+    #[serde(default)]
+    pub enable_ping_start: bool,
+
+    /// Enable the execution of broadcast scan
     #[serde(default = "default_true")]
-    pub disable_ping_start: bool,
+    pub enable_broadcast: bool,
 
-    /// Disable the execution of broadcast scan
-    #[serde(default)]
-    pub disable_boardcast: bool,
+    /// Enable the ping scan on subnet
+    #[serde(default = "default_true")]
+    pub enable_subnet_scan: bool,
 
-    /// Disable the ping scan on subnet
-    #[serde(default)]
-    pub disable_subnet_scan: bool,
+    /// Enable ZeroConf/mDNS
+    #[serde(default = "default_true")]
+    pub enable_zeroconf: bool,
 
-    /// Disable ZeroConf/mDNS
-    #[serde(default)]
-    pub disable_zeroconf: bool,
-
-    /// Disable resolve dns
-    #[serde(default)]
-    pub disable_resolve_dns: bool,
+    /// Enable resolve dns
+    #[serde(default = "default_true")]
+    pub enable_resolve_dns: bool,
 }
 
 fn default_true() -> bool {
@@ -179,34 +171,44 @@ impl TryFrom<NetworkScanQueryParams> for NetworkScannerParams {
     fn try_from(val: NetworkScanQueryParams) -> Result<Self, Self::Error> {
         warn!(query=?val, "Network scan query parameters");
 
-        let ports = match val.port.len() {
+        let ports = match val.ports.len() {
             0 => COMMON_PORTS.to_vec(),
-            _ => val.port,
+            _ => val.ports,
         };
 
+        let ping_interval = Duration::from_millis(val.ping_interval.unwrap_or(200));
+        let ping_timeout = Duration::from_millis(val.ping_timeout.unwrap_or(500));
+        let broadcast_timeout = Duration::from_millis(val.broadcast_timeout.unwrap_or(1000));
+        let port_scan_timeout = Duration::from_millis(val.port_scan_timeout.unwrap_or(1000));
+        let netbios_timeout = Duration::from_millis(val.netbios_timeout.unwrap_or(1000));
+        let netbios_interval = Duration::from_millis(val.netbios_interval.unwrap_or(200));
+        let mdns_query_timeout = Duration::from_millis(val.mdns_query_timeout.unwrap_or(5 * 1000));
+        let max_wait_time = Duration::from_millis(val.max_wait.unwrap_or(120 * 1000));
+        let ip_ranges = val
+            .ranges
+            .iter()
+            .map(IpAddrRange::try_from)
+            .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?;
+
         Ok(NetworkScannerParams {
-            configs: ScannerConfig {
+            config: ScannerConfig {
                 ports,
-                ping_interval: val.ping_interval.unwrap_or(200),
-                ping_timeout: val.ping_timeout.unwrap_or(500),
-                broadcast_timeout: val.broadcast_timeout.unwrap_or(1000),
-                port_scan_timeout: val.port_scan_timeout.unwrap_or(1000),
-                netbios_timeout: val.netbios_timeout.unwrap_or(1000),
-                max_wait_time: val.max_wait.unwrap_or(120 * 1000),
-                netbios_interval: val.netbios_interval.unwrap_or(200),
-                mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
-                ip_ranges: val
-                    .range
-                    .iter()
-                    .map(IpAddrRange::try_from)
-                    .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?,
+                ping_interval,
+                ping_timeout,
+                broadcast_timeout,
+                port_scan_timeout,
+                netbios_timeout,
+                max_wait_time,
+                netbios_interval,
+                mdns_query_timeout,
+                ip_ranges,
             },
-            toggles: scanner::ScannerToggles {
-                disable_ping_start: val.disable_ping_start,
-                disable_broadcast: val.disable_boardcast,
-                disable_subnet_scan: val.disable_subnet_scan,
-                disable_zeroconf: val.disable_zeroconf,
-                disable_resolve_dns: val.disable_resolve_dns,
+            toggle: scanner::ScannerToggles {
+                enable_ping_start: val.enable_ping_start,
+                enable_broadcast: val.enable_broadcast,
+                enable_subnet_scan: val.enable_subnet_scan,
+                enable_zeroconf: val.enable_zeroconf,
+                enable_resolve_dns: val.enable_resolve_dns,
             },
         })
     }
@@ -415,12 +417,12 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
                 interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
                     ip: v4.ip,
                     broadcast: v4.broadcast,
-                    netmask: v4.netmask.map(|netmask| Netmask(netmask)),
+                    netmask: v4.netmask.map(Netmask),
                 }),
                 interfaces::Addr::V6(v6) => Addr::V6(V6IfAddr {
                     ip: v6.ip,
                     broadcast: v6.broadcast,
-                    netmask: v6.netmask.map(|netmask| Netmask(netmask)),
+                    netmask: v6.netmask.map(Netmask),
                 }),
             })
             .collect();

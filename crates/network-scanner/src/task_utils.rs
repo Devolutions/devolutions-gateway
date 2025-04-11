@@ -6,14 +6,15 @@ use std::time::Duration;
 
 use std::future::Future;
 
-use tokio::sync::Mutex;
-
 use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
 use crate::scanner::{NetworkScanner, ScanEntry, ScannerConfig, ScannerToggles};
 
-pub(crate) type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
-pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
+pub(crate) type BoardcastSender = tokio::sync::broadcast::Sender<(IpAddr, Option<String>)>;
+
+pub(crate) type IpHostSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
+pub(crate) type IpHostReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
+
 pub(crate) type ScanEntrySender = tokio::sync::mpsc::Sender<ScanEntry>;
 pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
 
@@ -32,32 +33,48 @@ pub(crate) struct ContextConfig {
 }
 
 impl ContextConfig {
-    pub(crate) fn new(configs: ScannerConfig, toggles: &ScannerToggles, subnet: Vec<Subnet>) -> Self {
-        let range_to_ping = match configs.ip_ranges.len() {
-            0 if !toggles.disable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
-            _ => configs.ip_ranges.clone(),
+    pub(crate) fn new(
+        ScannerConfig {
+            broadcast_timeout,
+            mdns_query_timeout,
+            netbios_timeout,
+            netbios_interval,
+            ping_timeout,
+            ping_interval,
+            port_scan_timeout,
+            ports,
+            ip_ranges,
+            ..
+        }: ScannerConfig,
+        toggles: &ScannerToggles,
+        subnet: Vec<Subnet>,
+    ) -> Self {
+        let range_to_ping = match ip_ranges.len() {
+            0 if toggles.enable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
+            _ => ip_ranges.clone(),
         };
 
         Self {
             broadcast_subnet: subnet,
             range_to_ping,
-            ports: configs.ports,
-            ping_interval: Duration::from_millis(configs.ping_interval),
-            ping_timeout: Duration::from_millis(configs.ping_timeout),
-            broadcast_timeout: Duration::from_millis(configs.broadcast_timeout),
-            port_scan_timeout: Duration::from_millis(configs.port_scan_timeout),
-            netbios_timeout: Duration::from_millis(configs.netbios_timeout),
-            netbios_interval: Duration::from_millis(configs.netbios_interval),
-            mdns_query_timeout: Duration::from_millis(configs.mdns_query_timeout),
+            ports,
+            ping_interval,
+            ping_timeout,
+            broadcast_timeout,
+            port_scan_timeout,
+            netbios_timeout,
+            netbios_interval,
+            mdns_query_timeout,
         }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
-    pub(crate) ip_sender: IpSender,
-    pub(crate) ip_receiver: Arc<Mutex<IpReceiver>>,
+    // The sender that gathers all the IP addresses from Ping, Boradcast, Netbios etc.. and send to port scanner and DNS resolver
+    pub(crate) ip_sender: BoardcastSender,
 
+    // The final result sender that sends the result to the main thread
     pub(crate) result_sender: ScanEntrySender,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
@@ -79,9 +96,8 @@ pub(crate) struct TaskExecutionRunner {
 
 impl TaskExecutionContext {
     pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<(Self, ScanEntryReceiver)> {
-        let (ip_sender, ip_receiver) = tokio::sync::mpsc::channel(5);
-        let ip_receiver = Arc::new(Mutex::new(ip_receiver));
-
+        // Since the boarcast receiver does not implement Clone, we'll subscribe to the channel using the sender when we need it
+        let (ip_sender, _ip_receiver) = tokio::sync::broadcast::channel(100);
         let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);
 
         let NetworkScanner {
@@ -95,7 +111,6 @@ impl TaskExecutionContext {
         let broadcast_subnet = get_subnets()?;
         let res = Self {
             ip_sender,
-            ip_receiver,
             result_sender,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
