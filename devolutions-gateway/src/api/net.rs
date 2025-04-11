@@ -1,7 +1,7 @@
 use crate::http::HttpError;
 use crate::token::{ApplicationProtocol, Protocol};
 use crate::DgwState;
-use axum::extract::ws::Message;
+use axum::extract::ws::{Message, Utf8Bytes};
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
 use axum::{Json, Router};
@@ -54,7 +54,7 @@ pub async fn handle_network_scan(
                         let _ = websocket
                             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                                 code: axum::extract::ws::close_code::NORMAL,
-                                reason: std::borrow::Cow::from("network scan finished successfully"),
+                                reason: Utf8Bytes::from_static("network scan finished successfully"),
                             })))
                             .await;
 
@@ -68,14 +68,14 @@ pub async fn handle_network_scan(
                         continue;
                     };
 
-                    if let Err(error) = websocket.send(Message::Text(response)).await {
+                    if let Err(error) = websocket.send(Message::Text(Utf8Bytes::from(response))).await {
                         warn!(%error, "Failed to send message");
 
                         // It is very likely that the websocket is already closed, but send it as a precaution.
                         let _ = websocket
                             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                                 code: axum::extract::ws::close_code::ABNORMAL,
-                                reason: std::borrow::Cow::from("network scan finished prematurely."),
+                                reason: Utf8Bytes::from_static("network scan finished prematurely."),
                             })))
                             .await;
 
@@ -99,7 +99,7 @@ pub async fn handle_network_scan(
 
         // In case the websocket is not closed yet.
         // If the logic above is correct, it’s not necessary.
-        let _ = websocket.close().await;
+        let _ = futures::SinkExt::close(&mut websocket).await;
 
         info!("Network scan finished");
     });

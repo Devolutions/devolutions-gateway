@@ -1,15 +1,15 @@
-use std::fmt::Display;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use bytes::Bytes;
 use futures_core::{ready, Stream};
 use futures_sink::Sink;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub enum WsReadMsg {
-    Payload(Vec<u8>),
+    Payload(Bytes),
     Close,
 }
 
@@ -18,7 +18,7 @@ pin_project! {
     pub struct WsStream<S> {
         #[pin]
         pub inner: S,
-        read_buf: Option<Vec<u8>>,
+        read_buf: Option<Bytes>,
     }
 }
 
@@ -64,11 +64,10 @@ where
 
         // TODO: can we get better performance with `unfilled_mut` and a bit of unsafe code?
         let dest = buf.initialize_unfilled_to(bytes_to_copy);
-        dest.copy_from_slice(&data[..bytes_to_copy]);
+        dest.copy_from_slice(&data.split_to(bytes_to_copy));
         buf.advance(bytes_to_copy);
 
-        if data.len() > bytes_to_copy {
-            data.drain(..bytes_to_copy);
+        if !data.is_empty() {
             *this.read_buf = Some(data);
         }
 

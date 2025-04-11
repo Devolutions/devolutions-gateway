@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use axum::async_trait;
+use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
 use job_queue_libsql::libsql;

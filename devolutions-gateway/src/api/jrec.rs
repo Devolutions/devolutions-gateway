@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -25,14 +24,14 @@ use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
-        .route("/push/:id", get(jrec_push))
-        .route("/delete/:id", delete(jrec_delete))
+        .route("/push/{id}", get(jrec_push))
+        .route("/delete/{id}", delete(jrec_delete))
         .route("/delete", delete(jrec_delete_many))
         .route("/list", get(list_recordings))
-        .route("/pull/:id/:filename", get(pull_recording_file))
+        .route("/pull/{id}/{filename}", get(pull_recording_file))
         .route("/play", get(get_player))
-        .route("/play/*path", get(get_player))
-        .route("/shadow/:id", get(shadow_recording))
+        .route("/play/{*path}", get(get_player))
+        .route("/shadow/{id}", get(shadow_recording))
         .with_state(state)
 }
 
@@ -314,7 +313,7 @@ impl DeleteRecordingsJob {
     pub const NAME: &'static str = "delete-recordings";
 }
 
-#[axum::async_trait]
+#[async_trait::async_trait]
 impl job_queue::Job for DeleteRecordingsJob {
     fn name(&self) -> &str {
         Self::NAME
@@ -511,11 +510,11 @@ enum StreamerCloseCode {
     Forbidden = 4003,
 }
 
-impl From<StreamerCloseCode> for CloseFrame<'_> {
+impl From<StreamerCloseCode> for CloseFrame {
     fn from(code: StreamerCloseCode) -> Self {
         CloseFrame {
             code: code as u16 as extract::ws::CloseCode,
-            reason: Cow::Borrowed(""),
+            reason: extract::ws::Utf8Bytes::from_static(""),
         }
     }
 }

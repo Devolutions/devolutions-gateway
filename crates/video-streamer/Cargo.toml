@@ -33,9 +33,9 @@ tokio = { version = "1.44", features = [
     "macros",
     "fs"
 ] }
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.26"
 transport = { path = "../transport" }
 
 [lints]

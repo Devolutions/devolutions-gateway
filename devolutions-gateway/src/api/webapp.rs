@@ -25,7 +25,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     if state.conf_handle.get_conf().web_app.enabled {
         Router::new()
             .route("/client", get(get_client))
-            .route("/client/*path", get(get_client))
+            .route("/client/{*path}", get(get_client))
             .route("/app-token", post(sign_app_token))
             .route("/session-token", post(sign_session_token))
     } else {

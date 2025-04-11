@@ -10,7 +10,7 @@ use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
-        .route("/:id/terminate", post(terminate_session))
+        .route("/{id}/terminate", post(terminate_session))
         .with_state(state)
 }
 

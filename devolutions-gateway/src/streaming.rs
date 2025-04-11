@@ -1,10 +1,9 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use axum::body::Body;
-use axum::extract::ws::{CloseFrame, WebSocket};
+use axum::extract::ws::{CloseFrame, Utf8Bytes, WebSocket};
 use axum::response::Response;
 use futures::SinkExt;
 use terminal_streamer::terminal_stream;
@@ -59,7 +58,9 @@ struct TerminalStreamSocketImpl(WebSocket);
 
 impl terminal_streamer::TerminalStreamSocket for TerminalStreamSocketImpl {
     async fn send(&mut self, value: String) -> Result<(), anyhow::Error> {
-        self.0.send(axum::extract::ws::Message::Text(value)).await?;
+        self.0
+            .send(axum::extract::ws::Message::Text(Utf8Bytes::from(value)))
+            .await?;
         Ok(())
     }
 
@@ -68,7 +69,7 @@ impl terminal_streamer::TerminalStreamSocket for TerminalStreamSocketImpl {
             .0
             .send(axum::extract::ws::Message::Close(Some(CloseFrame {
                 code: 1000,
-                reason: Cow::Borrowed("EOF"),
+                reason: Utf8Bytes::from_static("EOF"),
             })))
             .await;
         let _ = self.0.flush().await;
