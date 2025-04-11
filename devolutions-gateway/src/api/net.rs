@@ -226,13 +226,13 @@ pub enum Status {
 #[serde(tag = "protocol", rename_all = "lowercase")]
 pub enum ScanEvent {
     Ping {
-        ip_addr: IpAddr,
+        ip: IpAddr,
         status: Status,
         #[serde(skip_serializing_if = "Option::is_none")]
         time: Option<u128>,
     },
     Dns {
-        ip_addr: IpAddr,
+        ip: IpAddr,
         hostname: String,
     },
 }
@@ -241,21 +241,21 @@ impl From<scanner::ScanEvent> for ScanEvent {
     fn from(event: scanner::ScanEvent) -> Self {
         match event {
             scanner::ScanEvent::PingStart { ip_addr } => Self::Ping {
-                ip_addr,
+                ip: ip_addr,
                 status: Status::Start,
                 time: None,
             },
             scanner::ScanEvent::PingSuccess { ip_addr, time } => Self::Ping {
-                ip_addr,
+                ip: ip_addr,
                 status: Status::Success,
                 time: Some(time),
             },
             scanner::ScanEvent::PingFailed { ip_addr, .. } => Self::Ping {
-                ip_addr,
+                ip: ip_addr,
                 status: Status::Failed,
                 time: None,
             },
-            scanner::ScanEvent::Dns { ip_addr, hostname } => Self::Dns { ip_addr, hostname },
+            scanner::ScanEvent::Dns { ip_addr, hostname } => Self::Dns { ip: ip_addr, hostname },
         }
     }
 }
@@ -265,6 +265,8 @@ impl From<scanner::ScanEvent> for ScanEvent {
 pub enum NetworkScanResponse {
     Event(ScanEvent),
     Entry {
+        /// for backward compatibility
+        #[serde(rename = "ip")]
         ip: IpAddr,
         hostname: Option<String>,
         protocol: ApplicationProtocol,
