@@ -8,7 +8,7 @@ use network_scanner_proto::netbios::NetBiosPacket;
 use socket2::{Domain, SockAddr, Type};
 
 use crate::ip_utils::IpV4AddrRange;
-use crate::task_utils::IpReceiver;
+use crate::task_utils::IpHostReceiver;
 use crate::{assume_init, ScannerError};
 
 const MESSAGE: [u8; 50] = [
@@ -24,7 +24,7 @@ pub fn netbios_query_scan(
     single_query_duration: std::time::Duration,
     netbios_scan_interval: std::time::Duration,
     task_manager: crate::task_utils::TaskManager,
-) -> Result<IpReceiver, ScannerError> {
+) -> Result<IpHostReceiver, ScannerError> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
         for ip in ip_range.into_iter() {
@@ -42,7 +42,7 @@ pub fn netbios_query_scan(
 pub(crate) fn netbios_query_one(
     ip: Ipv4Addr,
     mut socket: AsyncRawSocket,
-    result_sender: crate::task_utils::IpSender,
+    result_sender: crate::task_utils::IpHostSender,
     duration: std::time::Duration,
     task_manager: crate::task_utils::TaskManager,
 ) {

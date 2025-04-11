@@ -31,8 +31,9 @@ impl NetworkScanner {
         let (mut task_executor, result_receiver) = TaskExecutionRunner::new(self.clone())?;
 
         start_port_scan(&mut task_executor);
+        start_dns_look_up(&mut task_executor);
 
-        if !self.toggles.disable_broadcast {
+        if self.toggles.enable_broadcast {
             start_broadcast(&mut task_executor);
         }
 
@@ -40,7 +41,7 @@ impl NetworkScanner {
 
         start_ping(&mut task_executor);
 
-        if !self.toggles.disable_zeroconf {
+        if self.toggles.enable_zeroconf {
             start_mdns(&mut task_executor);
         }
 
@@ -58,7 +59,7 @@ impl NetworkScanner {
             mdns_daemon,
         };
 
-        let max_wait_time = Duration::from_millis(self.configs.max_wait_time);
+        let max_wait_time = self.configs.max_wait_time;
 
         tokio::spawn(async move {
             tokio::time::sleep(max_wait_time).await;
@@ -70,64 +71,100 @@ impl NetworkScanner {
 
         return Ok(scanner_stream);
 
+        fn start_dns_look_up(task_executor: &mut TaskExecutionRunner) {
+            task_executor.run(
+                move |TaskExecutionContext {
+                          ip_cache,
+                          ip_sender,
+                          result_sender,
+                          toggles,
+                          ..
+                      }: TaskExecutionContext,
+                      task_executor| async move {
+                    let enable_dns_resolve = toggles.enable_resolve_dns;
+                    let mut ip_receiver = ip_sender.subscribe();
+
+                    while let Ok((ip, host)) = ip_receiver.recv().await {
+                        let ip_cache = Arc::clone(&ip_cache);
+                        let result_sender = result_sender.clone();
+                        let existing_dns = {
+                            let binding = ip_cache.read();
+                            binding.get(&ip).cloned()
+                        };
+                        // Write first, to aviod new incoming same IP address,
+                        // The host will be updated later to the correct one anyway
+                        // Put in it's now scope to avoid holding the lock for too long
+                        {
+                            ip_cache.write().insert(ip, host.clone());
+                        }
+
+                        // Spawn a new task for each IP address
+                        task_executor.spawn_no_sub_task(async move {
+                            let (update_dns, ip, dns) = match existing_dns {
+                                Some(None) if host.is_some() => {
+                                    // If the IP address is in the cache but DNS resolution was not successful before and we have a new host coming in, update
+                                    (true, ip, host)
+                                }
+                                None if enable_dns_resolve => {
+                                    // If the IP address is not in the cache, resolve the DNS
+                                    let resolve_dns = tokio::task::spawn_blocking(move || {
+                                        dns_lookup::lookup_addr(&ip).context("Failed to resolve DNS").ok()
+                                    })
+                                    .await
+                                    .context("Failed to spawn blocking task")?;
+
+                                    let one_or_the_other = resolve_dns.or(host);
+                                    (true, ip, one_or_the_other)
+                                }
+                                None => {
+                                    // If the IP address is not in the cache, just update
+                                    (true, ip, host)
+                                }
+                                _ => {
+                                    // If the IP address is already in the cache, do nothing
+                                    // Already exists DNS/ or DNS not exists but new host is None as well
+                                    (false, ip, host)
+                                }
+                            };
+
+                            if update_dns {
+                                if let Some(dns) = &dns {
+                                    result_sender
+                                        .send(ScanEntry::ScanEvent(ScanEvent::Dns {
+                                            ip_addr: ip,
+                                            hostname: dns.to_owned(),
+                                        }))
+                                        .await?;
+                                }
+                                ip_cache.write().insert(ip, dns);
+                            }
+
+                            anyhow::Ok(())
+                        });
+                    }
+
+                    anyhow::Ok(())
+                },
+            );
+        }
+
         fn start_port_scan(task_executor: &mut TaskExecutionRunner) {
             task_executor.run(
                 move |TaskExecutionContext {
                           ip_cache,
-                          ip_receiver,
                           runtime,
                           result_sender,
+                          ip_sender,
                           configs,
-                          toggles,
                           ..
                       }: TaskExecutionContext,
                       task_manager| async move {
                     let ip_cache = Arc::clone(&ip_cache);
 
                     let ports = configs.ports.clone();
-                    let disable_dns_resolve = toggles.disable_resolve_dns;
+                    let mut ip_receiver = ip_sender.subscribe();
 
-                    while let Some((ip, host)) = ip_receiver.lock().await.recv().await {
-                        // ==========================Check cache and dns resolve ==============================
-                        // The host is optional, it can be sent from a netbios query or a mDNS query that have hostname
-                        // Or if can be None if it's from a ping or broadcast scan
-
-                        // Check if the IP is already in the cache (if there is, that means we had it scanned before)
-                        let is_new = ip_cache.read().get(&ip).is_none();
-                        let updated_dns = if is_new {
-                            let resolve_dns = if !disable_dns_resolve {
-                                tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip))
-                                    .await?
-                                    .ok()
-                            } else {
-                                None
-                            };
-                            let final_dns = resolve_dns.or(host);
-                            ip_cache.write().insert(ip, final_dns.clone());
-                            final_dns
-                        } else if host.is_some() {
-                            // If the host is not None, we should update the cache with the new hostname
-                            ip_cache.write().insert(ip, host.clone());
-                            host
-                        } else {
-                            None
-                        };
-
-                        if let Some(dns) = updated_dns {
-                            result_sender
-                                .send(ScanEntry::ScanEvent(ScanEvent::Dns {
-                                    ip_addr: ip,
-                                    hostname: dns,
-                                }))
-                                .await?;
-                        }
-
-                        if !is_new {
-                            continue;
-                        }
-
-                        // ======================end of check cache and dns resolve =========================
-
+                    while let Ok((ip, _)) = ip_receiver.recv().await {
                         let (runtime, ports, result_sender, ip_cache, port_scan_timeout) = (
                             Arc::clone(&runtime),
                             ports.clone(),
@@ -185,7 +222,7 @@ impl NetworkScanner {
                                 broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                             while let Some(ip) = receiver.recv().await {
                                 trace!(broadcast_sent_ip = ?ip);
-                                ip_sender.send((ip.into(), None)).await?;
+                                ip_sender.send((ip.into(), None))?;
                             }
                             anyhow::Ok(())
                         });
@@ -208,14 +245,14 @@ impl NetworkScanner {
                     let netbios_interval = configs.netbios_interval;
                     let subnets = configs.broadcast_subnet;
 
-                    let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
-                    debug!(netbios_query_ip_ranges = ?ip_ranges);
+                    let subnet_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
+                    debug!(netbios_query_ip_ranges = ?subnet_ranges);
 
-                    for ip_range in ip_ranges {
+                    for subnet_range in subnet_ranges {
                         let (runtime, ip_sender, task_manager) =
                             (Arc::clone(&runtime), ip_sender.clone(), task_manager.clone());
 
-                        let IpAddrRange::V4(ip_range) = ip_range else {
+                        let IpAddrRange::V4(ip_range) = subnet_range else {
                             continue;
                         };
 
@@ -224,7 +261,7 @@ impl NetworkScanner {
 
                         while let Some(res) = receiver.recv().await {
                             debug!(netbios_query_sent_ip = ?res.0);
-                            ip_sender.send(res).await?;
+                            ip_sender.send(res)?;
                         }
                     }
                     anyhow::Ok(())
@@ -249,7 +286,7 @@ impl NetworkScanner {
                     let ping_interval = configs.ping_interval;
                     let ping_timeout = configs.ping_timeout;
                     let range_to_ping = configs.range_to_ping;
-                    let disable_ping_start = toggles.disable_ping_start;
+                    let enable_ping_start = toggles.enable_ping_start;
 
                     for ip_range in range_to_ping {
                         let (task_manager, runtime, ip_sender) =
@@ -269,12 +306,12 @@ impl NetworkScanner {
 
                             match ping_event {
                                 crate::ping::PingEvent::Success { ip_addr, time } => {
-                                    ip_sender.send((ip_addr, None)).await?;
+                                    ip_sender.send((ip_addr, None))?;
                                     result_sender
                                         .send(ScanEntry::ScanEvent(ScanEvent::PingSuccess { ip_addr, time }))
                                         .await?;
                                 }
-                                crate::ping::PingEvent::Start { ip_addr } if !disable_ping_start => {
+                                crate::ping::PingEvent::Start { ip_addr } if enable_ping_start => {
                                     result_sender
                                         .send(ScanEntry::ScanEvent(ScanEvent::PingStart { ip_addr }))
                                         .await?;
@@ -346,13 +383,18 @@ impl NetworkScanner {
         }
     }
 
-    pub fn new(NetworkScannerParams { configs, toggles }: NetworkScannerParams) -> anyhow::Result<Self> {
+    pub fn new(
+        NetworkScannerParams {
+            config: configs,
+            toggle: toggles,
+        }: NetworkScannerParams,
+    ) -> anyhow::Result<Self> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
 
-        let mdns_daemon = if toggles.disable_zeroconf {
-            None
-        } else {
+        let mdns_daemon = if toggles.enable_zeroconf {
             Some(MdnsDaemon::new()?)
+        } else {
+            None
         };
 
         Ok(Self {
@@ -466,32 +508,32 @@ impl Display for ScanMethod {
 
 #[derive(Debug, Clone)]
 pub struct ScannerToggles {
-    pub disable_ping_start: bool,
-    pub disable_broadcast: bool,
-    pub disable_subnet_scan: bool,
-    pub disable_zeroconf: bool,
-    pub disable_resolve_dns: bool,
+    pub enable_ping_start: bool,
+    pub enable_broadcast: bool,
+    pub enable_subnet_scan: bool,
+    pub enable_zeroconf: bool,
+    pub enable_resolve_dns: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct ScannerConfig {
     pub ports: Vec<u16>,
-    pub ping_interval: u64,
-    pub ping_timeout: u64,
-    pub broadcast_timeout: u64,
-    pub port_scan_timeout: u64,
-    pub netbios_timeout: u64,
-    pub netbios_interval: u64,
-    pub mdns_query_timeout: u64,
-    pub max_wait_time: u64,
+    pub ping_interval: Duration,
+    pub ping_timeout: Duration,
+    pub broadcast_timeout: Duration,
+    pub port_scan_timeout: Duration,
+    pub netbios_timeout: Duration,
+    pub netbios_interval: Duration,
+    pub mdns_query_timeout: Duration,
+    pub max_wait_time: Duration,
     pub ip_ranges: Vec<IpAddrRange>,
 }
 
 /// The parameters for configuring a network scanner. All fields are in milliseconds.
 #[derive(Debug, Clone, TypedBuilder)]
 pub struct NetworkScannerParams {
-    pub configs: ScannerConfig,
-    pub toggles: ScannerToggles,
+    pub config: ScannerConfig,
+    pub toggle: ScannerToggles,
 }
 
 #[derive(Debug, Clone, Copy)]

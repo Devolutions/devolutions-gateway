@@ -15,24 +15,24 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let params = NetworkScannerParams {
-        configs: ScannerConfig {
+        config: ScannerConfig {
             ip_ranges: vec![],
             ports: vec![22, 80, 443, 389, 636],
-            ping_interval: 20,
-            ping_timeout: 1000,
-            broadcast_timeout: 2000,
-            port_scan_timeout: 2000,
-            netbios_timeout: 1000,
-            netbios_interval: 20,
-            mdns_query_timeout: 5 * 1000,
-            max_wait_time: 10 * 1000,
+            ping_interval: Duration::from_millis(20),
+            ping_timeout: Duration::from_millis(1000),
+            broadcast_timeout: Duration::from_millis(2000),
+            port_scan_timeout: Duration::from_millis(2000),
+            netbios_timeout: Duration::from_millis(1000),
+            netbios_interval: Duration::from_millis(20),
+            mdns_query_timeout: Duration::from_millis(5 * 1000),
+            max_wait_time: Duration::from_millis(10 * 1000),
         },
-        toggles: ScannerToggles {
-            disable_broadcast: false,
-            disable_subnet_scan: false,
-            disable_ping_start: false,
-            disable_resolve_dns: false,
-            disable_zeroconf: false,
+        toggle: ScannerToggles {
+            enable_broadcast: true,
+            enable_ping_start: true,
+            enable_resolve_dns: true,
+            enable_subnet_scan: true,
+            enable_zeroconf: true,
         },
     };
     let rt = tokio::runtime::Runtime::new()?;
