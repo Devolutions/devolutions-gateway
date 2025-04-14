@@ -293,16 +293,16 @@ pub enum ScanEvent {
 
 #[derive(Debug, Serialize)]
 #[serde(untagged, rename_all = "lowercase")]
-pub enum TcpKockProbe {
+pub enum TcpKnockProbe {
     Number(u16),
     NamedApplication(Protocol),
 }
 
-impl From<MaybeNamedPort> for TcpKockProbe {
+impl From<MaybeNamedPort> for TcpKnockProbe {
     fn from(port: MaybeNamedPort) -> Self {
         match port {
-            MaybeNamedPort::Port(port) => TcpKockProbe::Number(port),
-            MaybeNamedPort::Named(named_port) => TcpKockProbe::NamedApplication(named_port.into()),
+            MaybeNamedPort::Port(port) => TcpKnockProbe::Number(port),
+            MaybeNamedPort::Named(named_port) => TcpKnockProbe::NamedApplication(named_port.into()),
         }
     }
 }
@@ -337,7 +337,7 @@ pub enum NetworkScanResponse {
         ip: IpAddr,
         #[serde(skip_serializing_if = "Option::is_none")]
         hostname: Option<String>,
-        protocol: TcpKockProbe,
+        protocol: TcpKnockProbe,
         status: Status,
     },
 }
