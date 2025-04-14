@@ -365,11 +365,40 @@ impl TryFrom<ScannerEvent> for NetworkScanResponse {
             ScannerEvent::Dns(DnsEvent::Success { ip, hostname }) => {
                 Ok(NetworkScanResponse::Event(ScanEvent::Host { ip, hostname }))
             }
-            ScannerEvent::Mdns(MdnsEvent::ServiceResolved { addr, device_name, .. }) => {
-                Ok(NetworkScanResponse::Event(ScanEvent::Host {
+            ScannerEvent::Mdns(MdnsEvent::ServiceResolved {
+                addr,
+                device_name,
+                protocol,
+                port,
+            }) => {
+                let protocol = match protocol {
+                    None => None,
+                    Some(protocol) => Some(match protocol {
+                        scanner::ServiceType::Rdp => Protocol::Rdp,
+                        scanner::ServiceType::Ard => Protocol::Ard,
+                        scanner::ServiceType::Vnc => Protocol::Vnc,
+                        scanner::ServiceType::Ssh => Protocol::Ssh,
+                        scanner::ServiceType::Sftp => Protocol::Sftp,
+                        scanner::ServiceType::Scp => Protocol::Scp,
+                        scanner::ServiceType::Telnet => Protocol::Telnet,
+                        scanner::ServiceType::Http => Protocol::Http,
+                        scanner::ServiceType::Https => Protocol::Https,
+                        scanner::ServiceType::Ldap => Protocol::Ldap,
+                        scanner::ServiceType::Ldaps => Protocol::Ldaps,
+                    }),
+                };
+
+                let protocol = match protocol {
+                    Some(protocol) => TcpKnockProbe::NamedApplication(protocol),
+                    None => TcpKnockProbe::Number(port),
+                };
+
+                Ok(NetworkScanResponse::Entry {
                     ip: addr,
-                    hostname: device_name,
-                }))
+                    hostname: Some(device_name),
+                    protocol,
+                    status: Status::Success,
+                })
             }
             ScannerEvent::NetBios(NetBiosEvent::Success { ip, name }) => {
                 Ok(NetworkScanResponse::Event(ScanEvent::Host {
