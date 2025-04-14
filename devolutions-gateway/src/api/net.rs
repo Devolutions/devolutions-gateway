@@ -420,17 +420,17 @@ impl EventFilter {
                         return false;
                     }
 
-                    return true;
+                    true
                 }
-                ScanEvent::Host { .. } => return true,
-                _ => return false,
+                ScanEvent::Host { .. } => true,
+                _ => false,
             },
             NetworkScanResponse::Entry { status, .. } => {
                 if matches!(status, Status::Failed) && !self.enable_failure {
                     return false;
                 }
 
-                return true;
+                true
             }
         }
     }
