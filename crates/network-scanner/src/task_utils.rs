@@ -8,20 +8,17 @@ use std::future::Future;
 
 use tokio::sync::{broadcast, mpsc};
 
+use crate::event_bus::{EventBus, ScannerEvent};
 use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
-use crate::scanner::{NetworkScanner, ScanEntry, ScannerConfig, ScannerToggles};
-
-pub(crate) type BoardcastSender = broadcast::Sender<(IpAddr, Option<String>)>;
-
-pub(crate) type IpHostSender = mpsc::Sender<(IpAddr, Option<String>)>;
-pub(crate) type IpHostReceiver = mpsc::Receiver<(IpAddr, Option<String>)>;
+use crate::named_port::MaybeNamedPort;
+use crate::scanner::{NetworkScanner, ScannerConfig, ScannerToggles};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextConfig {
     pub(crate) broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
     pub(crate) range_to_ping: Vec<IpAddrRange>,
-    pub ports: Vec<u16>,
+    pub ports: Vec<MaybeNamedPort>,
     pub ping_interval: Duration,
     pub ping_timeout: Duration,
     pub broadcast_timeout: Duration,
@@ -70,11 +67,7 @@ impl ContextConfig {
 
 #[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
-    // The sender that gathers all the IP addresses from Ping, Boradcast, Netbios etc.. and send to port scanner and DNS resolver
-    pub(crate) ip_sender: BoardcastSender,
-
-    // The final result sender that sends the result to the main thread
-    pub(crate) result_sender: mpsc::Sender<ScanEntry>,
+    pub(crate) event_bus: EventBus,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
@@ -88,16 +81,10 @@ pub(crate) struct TaskExecutionContext {
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
 type HandlesSender = crossbeam::channel::Sender<tokio::task::JoinHandle<anyhow::Result<()>>>;
 
-pub(crate) struct TaskExecutionRunner {
-    pub(crate) context: TaskExecutionContext,
-    pub(crate) task_manager: TaskManager,
-}
-
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<(Self, mpsc::Receiver<ScanEntry>)> {
+    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
         // Since the boarcast receiver does not implement Clone, we'll subscribe to the channel using the sender when we need it
-        let (ip_sender, _ip_receiver) = broadcast::channel(100);
-        let (result_sender, result_receiver) = mpsc::channel(100);
+        let event_bus = EventBus::new();
 
         let NetworkScanner {
             mdns_daemon,
@@ -108,9 +95,8 @@ impl TaskExecutionContext {
         } = network_scanner;
 
         let broadcast_subnet = get_subnets()?;
-        let res = Self {
-            ip_sender,
-            result_sender,
+        let context = Self {
+            event_bus: event_bus.clone(),
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
             mdns_daemon,
@@ -118,8 +104,13 @@ impl TaskExecutionContext {
             toggles,
         };
 
-        Ok((res, result_receiver))
+        Ok(context)
     }
+}
+
+pub(crate) struct TaskExecutionRunner {
+    pub(crate) context: TaskExecutionContext,
+    pub(crate) task_manager: TaskManager,
 }
 
 impl TaskExecutionRunner {
@@ -133,15 +124,12 @@ impl TaskExecutionRunner {
             .spawn_no_sub_task(task(context, self.task_manager.clone()));
     }
 
-    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<(Self, mpsc::Receiver<ScanEntry>)> {
-        let (context, receiver) = TaskExecutionContext::new(scanner)?;
-        Ok((
-            Self {
-                context,
-                task_manager: TaskManager::new(),
-            },
-            receiver,
-        ))
+    pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<Self> {
+        let context = TaskExecutionContext::new(scanner)?;
+        Ok(Self {
+            context,
+            task_manager: TaskManager::new(),
+        })
     }
 }
 

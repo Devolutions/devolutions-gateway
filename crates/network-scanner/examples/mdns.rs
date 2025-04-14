@@ -8,7 +8,7 @@ use network_scanner::task_utils::TaskManager;
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .with_thread_names(true)
         .init();
 

@@ -8,26 +8,39 @@ use crate::ScannerError;
 
 #[derive(Clone)]
 pub struct MdnsDaemon {
-    service_daemon: mdns_sd::ServiceDaemon,
+    service_daemon: Option<mdns_sd::ServiceDaemon>,
 }
 
 impl MdnsDaemon {
     pub fn new() -> Result<Self, ScannerError> {
-        let service_daemon = mdns_sd::ServiceDaemon::new()?;
-        Ok(Self { service_daemon })
+        Ok(Self { service_daemon: None })
     }
 
-    pub fn get_service_daemon(&self) -> mdns_sd::ServiceDaemon {
-        self.service_daemon.clone()
+    // Lazy initialization of the service daemon
+    pub fn get_service_daemon(&mut self) -> Result<mdns_sd::ServiceDaemon, ScannerError> {
+        Ok(match &self.service_daemon {
+            Some(deamon) => deamon.clone(),
+            None => {
+                let service_daemon =
+                    mdns_sd::ServiceDaemon::new().with_context(|| "Failed to create service daemon")?;
+                self.service_daemon = Some(service_daemon.clone());
+                service_daemon
+            }
+        })
     }
 
     pub fn stop(&self) {
-        let receiver = match self.service_daemon.shutdown() {
+        let service_daemon = match &self.service_daemon {
+            Some(deamon) => deamon.clone(),
+            None => return,
+        };
+
+        let receiver = match service_daemon.shutdown() {
             Ok(receiver) => receiver,
             Err(e) => {
                 // if e is try again, we should try again, but only once
                 let result = if matches!(e, mdns_sd::Error::Again) {
-                    self.service_daemon.shutdown()
+                    service_daemon.shutdown()
                 } else {
                     Err(e)
                 };
@@ -62,31 +75,32 @@ const SERVICE_TYPES_INTERESTED: [ServiceType; 10] = [
 ];
 
 #[derive(Debug, Clone)]
-pub struct MdnsResult {
-    pub addr: std::net::IpAddr,
-    pub hostname: Option<String>,
-    pub port: u16,
-    pub service_type: Option<ServiceType>,
+pub enum MdnsEvent {
+    ServiceResolved {
+        addr: std::net::IpAddr,
+        device_name: String,
+        port: u16,
+        protocol: Option<ServiceType>,
+    },
+    Start {
+        service_type: ServiceType,
+    },
 }
 
 pub fn mdns_query_scan(
-    service_daemon: MdnsDaemon,
+    mut service_daemon: MdnsDaemon,
     task_manager: TaskManager,
     query_duration: std::time::Duration,
-) -> Result<mpsc::Receiver<MdnsResult>, ScannerError> {
-    let service_daemon = service_daemon.get_service_daemon();
+) -> Result<mpsc::Receiver<MdnsEvent>, ScannerError> {
+    let daemon = service_daemon.get_service_daemon()?;
     let (result_sender, result_receiver) = mpsc::channel(255);
 
     for service in SERVICE_TYPES_INTERESTED {
         let service_name: &str = service.into();
         let service_name = format!("{}.local.", service_name);
-        let (result_sender, service_daemon, service_daemon_clone, service_name_clone) = (
-            result_sender.clone(),
-            service_daemon.clone(),
-            service_daemon.clone(),
-            service_name.clone(),
-        );
-        let receiver = service_daemon.browse(service_name.as_ref()).with_context(|| {
+        let (result_sender, daemon_clone, service_name_clone) =
+            (result_sender.clone(), daemon.clone(), service_name.clone());
+        let receiver = daemon.browse(service_name.as_ref()).with_context(|| {
             let err_msg = format!("failed to browse for service: {}", service_name);
             error!(error = err_msg);
             err_msg
@@ -96,8 +110,8 @@ pub fn mdns_query_scan(
         task_manager
             .with_timeout(query_duration)
             .when_finish(move || {
-                debug!(service_name = ?service_name_clone, "Stopping browse for service");
-                if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
+                debug!("Stopping browse for mDns service");
+                if let Err(e) = daemon_clone.stop_browse(service_name_clone.as_ref()) {
                     warn!(error = %e, "Failed to stop browsing for service");
                 }
                 // Receive the last event (StopBrowse), preventing the receiver from being dropped,this will satisfy the sender side to avoid logging an error
@@ -116,11 +130,11 @@ pub fn mdns_query_scan(
                         let port = msg.get_port();
 
                         for addr in msg.get_addresses() {
-                            let entry = MdnsResult {
+                            let entry = MdnsEvent::ServiceResolved {
                                 addr: *addr,
-                                hostname: Some(device_name.clone()),
+                                device_name: device_name.clone(),
                                 port,
-                                service_type: protocol,
+                                protocol,
                             };
 
                             if let Err(e) = result_sender.send(entry).await {

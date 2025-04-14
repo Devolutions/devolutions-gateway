@@ -11,9 +11,11 @@ use network_interface::Addr;
 use network_scanner_proto::icmp_v4;
 
 pub mod broadcast;
+pub mod event_bus;
 pub mod interfaces;
 pub mod ip_utils;
 pub mod mdns;
+pub mod named_port;
 pub mod netbios;
 pub mod ping;
 pub mod port_discovery;

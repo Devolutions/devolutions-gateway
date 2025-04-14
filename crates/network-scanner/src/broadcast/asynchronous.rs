@@ -10,6 +10,8 @@ use socket2::SockAddr;
 
 use crate::create_echo_request;
 
+use super::BroadcastEvent;
+
 /// Broadcasts a ping to the given ip address
 /// caller need to make sure that the ip address is a broadcast address
 /// The timeout is for the read, if for more than given time no packet is received, the stream will end
@@ -18,7 +20,7 @@ pub async fn broadcast(
     read_time_out: Duration,
     runtime: Arc<runtime::Socket2Runtime>,
     task_manager: crate::task_utils::TaskManager,
-) -> anyhow::Result<tokio::sync::mpsc::Receiver<Ipv4Addr>> {
+) -> anyhow::Result<tokio::sync::mpsc::Receiver<BroadcastEvent>> {
     let socket = runtime.new_socket(
         socket2::Domain::IPV4,
         socket2::Type::RAW,
@@ -32,6 +34,11 @@ pub async fn broadcast(
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
 
     task_manager.spawn_no_sub_task(async move {
+        sender
+            .send(BroadcastEvent::Start { brodcast_ip: ip })
+            .await
+            .context("failed to send broadcast start event")?;
+
         socket
             .send_to(&packet.to_bytes(true), &SockAddr::from(SocketAddr::new(ip.into(), 0)))
             .await?;
@@ -43,7 +50,7 @@ pub async fn broadcast(
 
     async fn loop_receive(
         mut socket: network_scanner_net::socket::AsyncRawSocket,
-        sender: tokio::sync::mpsc::Sender<Ipv4Addr>,
+        sender: tokio::sync::mpsc::Sender<BroadcastEvent>,
     ) -> anyhow::Result<()> {
         let mut buffer = [MaybeUninit::uninit(); icmp_v4::ICMPV4_MTU];
         loop {
@@ -52,7 +59,8 @@ pub async fn broadcast(
                     .as_socket_ipv4()
                     .context("unreachable: we only use ipv4 for broadcast")?
                     .ip();
-                sender.send(ip).await?;
+
+                sender.send(BroadcastEvent::Entry { ip }).await?;
             };
         }
     }

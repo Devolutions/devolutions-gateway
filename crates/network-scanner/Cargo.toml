@@ -23,6 +23,7 @@ tokio = { version = "1.44", features = ["rt", "sync", "time", "fs"] }
 tracing = "0.1"
 typed-builder = "0.19"
 serde = "1"
+derive_more = { version = "2.0.1", features = ["from"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 ipconfig = "0.3"

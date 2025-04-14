@@ -6,21 +6,22 @@ use anyhow::Context;
 use network_scanner_net::runtime::Socket2Runtime;
 use socket2::SockAddr;
 
+use crate::named_port::{MaybeNamedPort, NamedAddress};
 use crate::task_utils::TaskManager;
 
 pub async fn scan_ports(
     ip: impl Into<IpAddr>,
-    ports: &[u16],
+    ports: &[MaybeNamedPort],
     runtime: Arc<Socket2Runtime>,
     timeout: Duration,
     task_manager: TaskManager,
-) -> anyhow::Result<tokio::sync::mpsc::Receiver<PortScanResult>> {
+) -> anyhow::Result<tokio::sync::mpsc::Receiver<TcpKnockEvent>> {
     let ip = ip.into();
     let mut sockets = vec![];
-    for p in ports {
-        let addr = SockAddr::from(SocketAddr::from((ip, *p)));
+    for port in ports {
+        let named_addr = NamedAddress::new(ip, port.clone());
         let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
-        sockets.push((socket, addr));
+        sockets.push((socket, named_addr));
     }
 
     if ports.is_empty() {
@@ -28,26 +29,38 @@ pub async fn scan_ports(
     }
 
     let (sender, receiver) = tokio::sync::mpsc::channel(ports.len());
-    for (socket, addr) in sockets {
+    for (socket, named_addr) in sockets {
         let sender = sender.clone();
         task_manager.spawn_no_sub_task(async move {
-            let connect_future = socket.connect(&addr);
-            let addr = addr
-                .as_socket()
-                .context("failed to scan port: only IPv4/IPv6 addresses are supported")?;
+            let sock_addr: SockAddr = named_addr.as_ref().into();
+            let connect_future = socket.connect(&sock_addr);
+
+            let NamedAddress { ip, port } = named_addr;
 
             match tokio::time::timeout(timeout, connect_future).await {
                 Ok(Ok(())) => {
                     // Successfully connected to the port
-                    sender.send(PortScanResult::Open(addr)).await?;
+                    sender.send(TcpKnockEvent::Start { ip, port }).await?;
                 }
                 Ok(Err(_)) => {
                     // Failed to connect, but not due to a timeout (e.g., port is closed)
-                    sender.send(PortScanResult::Closed(addr)).await?;
+                    sender
+                        .send(TcpKnockEvent::Failed {
+                            ip,
+                            port,
+                            reason: PortScanFailedReason::Rejected,
+                        })
+                        .await?;
                 }
                 Err(_) => {
                     // Operation timed out
-                    sender.send(PortScanResult::Timeout(addr)).await?;
+                    sender
+                        .send(TcpKnockEvent::Failed {
+                            ip,
+                            port,
+                            reason: PortScanFailedReason::TimedOut,
+                        })
+                        .await?;
                 }
             }
 
@@ -58,30 +71,35 @@ pub async fn scan_ports(
     Ok(receiver)
 }
 
-#[derive(Debug)]
-pub enum PortScanResult {
-    Open(SocketAddr),
-    Closed(SocketAddr),
-    Timeout(SocketAddr),
+#[derive(Debug, Clone)]
+pub enum PortScanFailedReason {
+    Rejected,
+    TimedOut,
 }
 
-impl PortScanResult {
-    pub fn is_open(&self) -> bool {
-        matches!(self, PortScanResult::Open(_))
-    }
+#[derive(Debug, Clone)]
+pub enum TcpKnockEvent {
+    Start {
+        ip: IpAddr,
+        port: MaybeNamedPort,
+    },
+    Success {
+        ip: IpAddr,
+        port: MaybeNamedPort,
+    },
+    Failed {
+        ip: IpAddr,
+        port: MaybeNamedPort,
+        reason: PortScanFailedReason,
+    },
+}
 
-    pub fn is_closed(&self) -> bool {
-        matches!(self, PortScanResult::Closed(_))
-    }
-
-    pub fn is_timeout(&self) -> bool {
-        matches!(self, PortScanResult::Timeout(_))
-    }
-
-    pub fn unwrap_open(self) -> SocketAddr {
+impl TcpKnockEvent {
+    pub fn ip(&self) -> IpAddr {
         match self {
-            PortScanResult::Open(addr) => addr,
-            _ => panic!("unwrap_open called on non-open result"),
+            TcpKnockEvent::Start { ip, .. } => *ip,
+            TcpKnockEvent::Success { ip, .. } => *ip,
+            TcpKnockEvent::Failed { ip, .. } => *ip,
         }
     }
 }

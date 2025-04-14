@@ -4,6 +4,7 @@ use std::net::Ipv4Addr;
 use std::time::Duration;
 
 use network_scanner::task_utils::TaskManager;
+use tracing::info;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
@@ -29,8 +30,8 @@ pub async fn main() -> anyhow::Result<()> {
         TaskManager::new(),
     )?;
 
-    while let Some((ip, name)) = receiver.recv().await {
-        println!("{}: {:?}", ip, name);
+    while let Some(event) = receiver.recv().await {
+        info!(?event)
     }
 
     Ok(())

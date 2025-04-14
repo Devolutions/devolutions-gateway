@@ -12,7 +12,7 @@ use tokio::time::timeout;
 use crate::create_echo_request;
 use crate::ip_utils::IpAddrRange;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PingFailedReason {
     Rejected,
     TimedOut,
@@ -27,11 +27,11 @@ impl std::fmt::Display for PingFailedReason {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PingEvent {
-    Start { ip_addr: IpAddr },
-    Success { ip_addr: IpAddr, time: u128 },
-    Failed { ip_addr: IpAddr, reason: PingFailedReason },
+    Start { ip: IpAddr },
+    Success { ip: IpAddr, time: u128 },
+    Failed { ip: IpAddr, reason: PingFailedReason },
 }
 
 pub fn ping_range(
@@ -60,7 +60,7 @@ pub fn ping_range(
         let sender_clone = sender.clone();
 
         let ping_future = move || async move {
-            let _ = sender_clone.send(PingEvent::Start { ip_addr: addr.ip() }).await;
+            let _ = sender_clone.send(PingEvent::Start { ip: addr.ip() }).await;
             let start_time = std::time::Instant::now();
             let ping_future = try_ping(addr.into(), socket);
             let ping_future = timeout(ping_wait_time, ping_future);
@@ -69,7 +69,7 @@ pub fn ping_range(
                     let elapsed = start_time.elapsed().as_millis();
                     let _ = sender_clone
                         .send(PingEvent::Success {
-                            ip_addr: addr.ip(),
+                            ip: addr.ip(),
                             time: elapsed,
                         })
                         .await;
@@ -77,7 +77,7 @@ pub fn ping_range(
                 Ok(Err(_)) => {
                     let _ = sender_clone
                         .send(PingEvent::Failed {
-                            ip_addr: addr.ip(),
+                            ip: addr.ip(),
                             reason: PingFailedReason::Rejected,
                         })
                         .await;
@@ -85,7 +85,7 @@ pub fn ping_range(
                 Err(_) => {
                     let _ = sender_clone
                         .send(PingEvent::Failed {
-                            ip_addr: addr.ip(),
+                            ip: addr.ip(),
                             reason: PingFailedReason::TimedOut,
                         })
                         .await;
