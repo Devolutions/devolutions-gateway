@@ -10,7 +10,7 @@ pub use asynchronous::broadcast;
 
 #[derive(Debug, Clone)]
 pub enum BroadcastEvent {
-    Start { brodcast_ip: Ipv4Addr },
+    Start { broadcast_ip: Ipv4Addr },
     Entry { ip: Ipv4Addr },
 }
 

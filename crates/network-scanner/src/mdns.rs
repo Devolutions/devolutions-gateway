@@ -19,7 +19,7 @@ impl MdnsDaemon {
     // Lazy initialization of the service daemon
     pub fn get_service_daemon(&mut self) -> Result<mdns_sd::ServiceDaemon, ScannerError> {
         Ok(match &self.service_daemon {
-            Some(deamon) => deamon.clone(),
+            Some(daemon) => daemon.clone(),
             None => {
                 let service_daemon =
                     mdns_sd::ServiceDaemon::new().with_context(|| "Failed to create service daemon")?;
@@ -31,7 +31,7 @@ impl MdnsDaemon {
 
     pub fn stop(&self) {
         let service_daemon = match &self.service_daemon {
-            Some(deamon) => deamon.clone(),
+            Some(daemon) => daemon.clone(),
             None => return,
         };
 

@@ -31,7 +31,7 @@ impl NetworkScanner {
     pub fn start(&self) -> anyhow::Result<NetworkScannerStream> {
         let mut task_executor = TaskExecutionRunner::new(self.clone())?;
 
-        start_try_get_dns_name_for_serivce(&mut task_executor);
+        start_try_get_dns_name_for_service(&mut task_executor);
         start_port_scan(&mut task_executor);
         start_dns_look_up(&mut task_executor);
 
@@ -75,7 +75,7 @@ impl NetworkScanner {
 
         return Ok(scanner_stream);
 
-        fn start_try_get_dns_name_for_serivce(task_executor: &mut TaskExecutionRunner) {
+        fn start_try_get_dns_name_for_service(task_executor: &mut TaskExecutionRunner) {
             task_executor.run(
                 move |TaskExecutionContext {
                           event_bus, ip_cache, ..

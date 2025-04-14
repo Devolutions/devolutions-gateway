@@ -35,7 +35,7 @@ pub async fn broadcast(
 
     task_manager.spawn_no_sub_task(async move {
         sender
-            .send(BroadcastEvent::Start { brodcast_ip: ip })
+            .send(BroadcastEvent::Start { broadcast_ip: ip })
             .await
             .context("failed to send broadcast start event")?;
 

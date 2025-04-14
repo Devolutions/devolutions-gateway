@@ -56,7 +56,7 @@ macro_rules! define_splitable {
 #[derive(Debug, Clone)]
 pub enum RawIpEvent {
     Ping(PingEvent),
-    Boardcast(BroadcastEvent),
+    Broadcast(BroadcastEvent),
 }
 
 impl TryFrom<ScannerEvent> for TcpKnockEvent {
@@ -79,7 +79,7 @@ impl TryFrom<ScannerEvent> for RawIpEvent {
     fn try_from(value: ScannerEvent) -> Result<Self, Self::Error> {
         match value {
             ScannerEvent::Ping(ping_event) => Ok(RawIpEvent::Ping(ping_event)),
-            ScannerEvent::Broadcast(boardcast_event) => Ok(RawIpEvent::Boardcast(boardcast_event)),
+            ScannerEvent::Broadcast(broadcast_event) => Ok(RawIpEvent::Broadcast(broadcast_event)),
             _ => Err(()),
         }
     }
@@ -89,7 +89,7 @@ impl RawIpEvent {
     pub fn success(&self) -> Option<IpAddr> {
         match self {
             RawIpEvent::Ping(PingEvent::Success { ip, .. }) => Some(*ip),
-            RawIpEvent::Boardcast(BroadcastEvent::Entry { ip }) => Some(IpAddr::V4(*ip)),
+            RawIpEvent::Broadcast(BroadcastEvent::Entry { ip }) => Some(IpAddr::V4(*ip)),
             _ => None,
         }
     }
