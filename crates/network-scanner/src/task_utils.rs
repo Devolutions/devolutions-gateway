@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use std::future::Future;
 
-use tokio::sync::{broadcast, mpsc};
-
-use crate::event_bus::{EventBus, ScannerEvent};
+use crate::event_bus::EventBus;
 use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
 use crate::mdns::MdnsDaemon;
 use crate::named_port::MaybeNamedPort;

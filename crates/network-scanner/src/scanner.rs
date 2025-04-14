@@ -1,5 +1,5 @@
 use crate::broadcast::asynchronous::broadcast;
-use crate::event_bus::{EventBus, RawIpEvent, ScannerEvent, TypedReceiver};
+use crate::event_bus::{EventBus, RawIpEvent, TypedReceiver};
 use crate::ip_utils::IpAddrRange;
 use crate::mdns::{self, MdnsDaemon, MdnsEvent};
 use crate::named_port::MaybeNamedPort;
@@ -12,8 +12,6 @@ use std::fmt::Display;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
-use tracing::subscriber;
 use typed_builder::TypedBuilder;
 
 /// Represents a network scanner for discovering devices and their services over a network.
