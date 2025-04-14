@@ -3,12 +3,10 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use network_scanner::{
-    event_bus::{ScannerEvent, TypedReceiver},
-    named_port::{MaybeNamedPort, NamedPort},
-    port_discovery::TcpKnockEvent,
-    scanner::{DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles},
-};
+use network_scanner::event_bus::{ScannerEvent, TypedReceiver};
+use network_scanner::named_port::{MaybeNamedPort, NamedPort};
+use network_scanner::port_discovery::TcpKnockEvent;
+use network_scanner::scanner::{DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles};
 use tokio::time::timeout;
 
 fn main() -> anyhow::Result<()> {

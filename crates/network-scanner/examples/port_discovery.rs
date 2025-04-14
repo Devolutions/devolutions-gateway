@@ -2,10 +2,8 @@
 
 use std::time::Duration;
 
-use network_scanner::{
-    named_port::{MaybeNamedPort, NamedPort},
-    task_utils::TaskManager,
-};
+use network_scanner::named_port::{MaybeNamedPort, NamedPort};
+use network_scanner::task_utils::TaskManager;
 use tracing::info;
 
 #[tokio::main]
