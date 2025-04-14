@@ -73,6 +73,7 @@ function Convert-Path {
 #
 # Our .NET code expects environment variables so they are set by this function if they are not already set.
 # The package is particular about the input file names, but all of the proper renaming and linking is handled by this function.
+function New-AgentMsi() {
     param(
         # Generates additional files for the MSI. The MSI is not copied to the output directory if this is set. This produces files `package\WindowsManaged\Release\en-US` and `package\WindowsManaged\Release\fr-FR`.
         [switch] $Generate,
