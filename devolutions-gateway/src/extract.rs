@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::Extension;
@@ -12,7 +11,6 @@ use crate::token::{
 #[derive(Clone)]
 pub struct AccessToken(pub AccessTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AccessToken
 where
     S: Send + Sync,
@@ -31,7 +29,6 @@ where
 #[derive(Clone)]
 pub struct AssociationToken(pub AssociationTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AssociationToken
 where
     S: Send + Sync,
@@ -50,7 +47,6 @@ where
 #[derive(Clone)]
 pub struct JrlToken(pub JrlTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for JrlToken
 where
     S: Send + Sync,
@@ -69,7 +65,6 @@ where
 #[derive(Clone)]
 pub struct JrecToken(pub JrecTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for JrecToken
 where
     S: Send + Sync,
@@ -88,7 +83,6 @@ where
 #[derive(Clone)]
 pub struct JmuxToken(pub JmuxTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for JmuxToken
 where
     S: Send + Sync,
@@ -107,7 +101,6 @@ where
 #[derive(Clone)]
 pub struct ScopeToken(pub ScopeTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for ScopeToken
 where
     S: Send + Sync,
@@ -126,7 +119,6 @@ where
 #[derive(Clone, Copy)]
 pub struct SessionsReadScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for SessionsReadScope
 where
     S: Send + Sync,
@@ -145,7 +137,6 @@ where
 #[derive(Clone, Copy)]
 pub struct SessionTerminateScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for SessionTerminateScope
 where
     S: Send + Sync,
@@ -164,7 +155,6 @@ where
 #[derive(Clone, Copy)]
 pub struct AssociationsReadScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AssociationsReadScope
 where
     S: Send + Sync,
@@ -183,7 +173,6 @@ where
 #[derive(Clone, Copy)]
 pub struct DiagnosticsReadScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for DiagnosticsReadScope
 where
     S: Send + Sync,
@@ -202,7 +191,6 @@ where
 #[derive(Clone, Copy)]
 pub struct JrlReadScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for JrlReadScope
 where
     S: Send + Sync,
@@ -221,7 +209,6 @@ where
 #[derive(Clone, Copy)]
 pub struct ConfigWriteScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for ConfigWriteScope
 where
     S: Send + Sync,
@@ -240,7 +227,6 @@ where
 #[derive(Clone, Copy)]
 pub struct HeartbeatReadScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for HeartbeatReadScope
 where
     S: Send + Sync,
@@ -259,7 +245,6 @@ where
 #[derive(Clone, Copy)]
 pub struct RecordingDeleteScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for RecordingDeleteScope
 where
     S: Send + Sync,
@@ -278,7 +263,6 @@ where
 #[derive(Clone, Copy)]
 pub struct RecordingsReadScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for RecordingsReadScope
 where
     S: Send + Sync,
@@ -297,7 +281,6 @@ where
 #[derive(Clone, Copy)]
 pub struct UpdateScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for UpdateScope
 where
     S: Send + Sync,
@@ -316,7 +299,6 @@ where
 #[derive(Clone, Copy)]
 pub struct PreflightScope;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for PreflightScope
 where
     S: Send + Sync,
@@ -335,7 +317,6 @@ where
 #[derive(Clone)]
 pub struct WebAppToken(pub WebAppTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for WebAppToken
 where
     S: Send + Sync,
@@ -354,7 +335,6 @@ where
 #[derive(Clone, Copy)]
 pub struct NetScanToken;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for NetScanToken
 where
     S: Send + Sync,
@@ -373,7 +353,6 @@ where
 #[derive(Clone)]
 pub struct BridgeToken(pub BridgeTokenClaims);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for BridgeToken
 where
     S: Send + Sync,

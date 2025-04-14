@@ -1,6 +1,7 @@
 use core::{future, time};
 
 use axum::extract::ws::{self, CloseFrame, WebSocket};
+use bytes::Bytes;
 use devolutions_gateway_task::ShutdownSignal;
 use futures::{SinkExt as _, StreamExt as _};
 use tap::Pipe as _;
@@ -28,7 +29,7 @@ pub fn handle(
     let close_handle = transport::spawn_websocket_sentinel_task(
         ws.shared().with(|message: transport::WsWriteMsg| {
             future::ready(Result::<_, axum::Error>::Ok(match message {
-                transport::WsWriteMsg::Ping => ws::Message::Ping(vec![]),
+                transport::WsWriteMsg::Ping => ws::Message::Ping(Bytes::new()),
                 transport::WsWriteMsg::Close(frame) => ws::Message::Close(Some(CloseFrame {
                     code: frame.code,
                     reason: frame.message.into(),
@@ -46,7 +47,7 @@ fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncW
     let ws_compat = ws
         .filter_map(|item| {
             item.map(|msg| match msg {
-                ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into_bytes())),
+                ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(Bytes::from(s))),
                 ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
                 ws::Message::Ping(_) | ws::Message::Pong(_) => None,
                 ws::Message::Close(_) => Some(transport::WsReadMsg::Close),
@@ -54,7 +55,7 @@ fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncW
             .transpose()
             .pipe(future::ready)
         })
-        .with(|item| futures::future::ready(Ok::<_, axum::Error>(ws::Message::Binary(item))));
+        .with(|item| futures::future::ready(Ok::<_, axum::Error>(ws::Message::Binary(Bytes::from(item)))));
 
     transport::WsStream::new(ws_compat)
 }
