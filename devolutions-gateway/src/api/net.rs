@@ -169,7 +169,7 @@ pub struct NetworkScanQueryParams {
     #[serde(default = "default_true")]
     pub enable_resolve_dns: bool,
 
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub enable_failure: bool,
 }
 
