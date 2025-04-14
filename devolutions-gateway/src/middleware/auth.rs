@@ -102,6 +102,7 @@ pub async fn auth_middleware(
     struct TokenQueryParam<'a> {
         token: &'a str,
     }
+
     let method = request.method();
     let uri_path = request.uri().path();
 
