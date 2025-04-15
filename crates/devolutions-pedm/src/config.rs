@@ -46,7 +46,7 @@ impl Config {
     }
 
     /// Loads the config file from the specified path.
-    /// 
+    ///
     /// If the config file is not found, it will be written to disk at the specified path.
     pub fn load_from_path(path: &Utf8Path) -> Result<Self, ConfigError> {
         match fs::read_to_string(path) {
