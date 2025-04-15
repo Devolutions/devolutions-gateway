@@ -45,7 +45,7 @@ impl Task for PedmTask {
         cfg_if::cfg_if! {
             if #[cfg(target_os = "windows")] {
                 select! {
-                    res = serve(Config::standard()) => {
+                    res = serve(Config::load_from_default_path()?) => {
                         if let Err(error) = &res {
                             error!(%error, "Named pipe server got error");
                         }
