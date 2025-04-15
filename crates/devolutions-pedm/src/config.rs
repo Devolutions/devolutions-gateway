@@ -46,6 +46,8 @@ impl Config {
     }
 
     /// Loads the config file from the specified path.
+    ///
+    /// If the config file is not found, it will be written to disk at the specified path.
     pub fn load_from_path(path: &Utf8Path) -> Result<Self, ConfigError> {
         match fs::read_to_string(path) {
             Ok(s) => {
@@ -66,7 +68,7 @@ impl Config {
 
     /// Loads the config file from the default path.
     pub fn load_from_default_path() -> Result<Self, ConfigError> {
-        let path = data_dir().join("config.toml");
+        let path = data_dir().join("config.json");
         Self::load_from_path(&path)
     }
 
