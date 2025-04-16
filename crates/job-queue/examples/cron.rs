@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use job_queue::{DynJob, Job, JobCtx, JobQueue, JobQueueExt, JobReader, RunnerWaker, ScheduleFor, SpawnCallback};
 use job_queue_libsql::{libsql, LibSqlJobQueue}; // assume your modules
 use time::OffsetDateTime;
-use tokio;
 
 // A simple Job implementation.
 // We just print a message and then sleep.
@@ -58,7 +57,7 @@ impl JobReader for ExampleReader {
             .ok_or_else(|| anyhow::anyhow!("Missing 'message' field"))?;
 
         let job = ExampleJob {
-            message: message.to_string(),
+            message: message.to_owned(),
         };
 
         // Return the job as a boxed trait object.
@@ -167,7 +166,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     {
         let job1 = Box::new(ExampleJob {
-            message: "First queued job".to_string(),
+            message: "First queued job".to_owned(),
         }) as DynJob;
         queue.push_job(&job1, ScheduleFor::Now).await?;
     }
@@ -175,7 +174,7 @@ pub async fn main() -> anyhow::Result<()> {
     {
         // We'll schedule one a bit into the future.
         let job2 = Box::new(ExampleJob {
-            message: "Scheduled job in 10 seconds".to_string(),
+            message: "Scheduled job in 10 seconds".to_owned(),
         }) as DynJob;
         let future_time = OffsetDateTime::now_utc() + time::Duration::seconds(10);
         queue.push_job(&job2, ScheduleFor::Once(future_time)).await?;
@@ -183,9 +182,9 @@ pub async fn main() -> anyhow::Result<()> {
 
     {
         // We'll queue up a cron job that runs every 5 seconds.
-        let cron_schedule = "0/5 * * * * *".parse()?; 
+        let cron_schedule = "0/3 * * * * *".parse()?;
         let job3 = Box::new(ExampleJob {
-            message: "Recurring cron job every 5 seconds".to_string(),
+            message: "Recurring cron job every 3 seconds".to_owned(),
         }) as DynJob;
         queue.push_job(&job3, ScheduleFor::Cron(cron_schedule)).await?;
     }

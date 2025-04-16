@@ -225,11 +225,9 @@ impl JobQueue for LibSqlJobQueue {
                     .next()
                     .context("failed to get next cron date")?;
 
-                let offset_dt = OffsetDateTime::from_unix_timestamp(next_schdule_time.timestamp())
+                OffsetDateTime::from_unix_timestamp(next_schdule_time.timestamp())
                     .context("failed to convert timestamp to OffsetDateTime")?
-                    .replace_nanosecond(next_schdule_time.timestamp_subsec_nanos())?;
-
-                offset_dt
+                    .replace_nanosecond(next_schdule_time.timestamp_subsec_nanos())?
             }
         };
 
@@ -532,7 +530,6 @@ const MIGRATIONS: &[&str] = &[
 mod test {
     use super::*;
     use job_queue::{Job, JobQueueExt, JobReader, ScheduleFor};
-    use tokio;
 
     #[derive(Debug)]
     struct DummyJob;
@@ -543,7 +540,7 @@ mod test {
             "dummy"
         }
         fn write_json(&self) -> anyhow::Result<String> {
-            Ok("{}".to_string())
+            Ok("{}".to_owned())
         }
 
         async fn run(&mut self) -> anyhow::Result<()> {
@@ -610,7 +607,7 @@ mod test {
         let job: Box<dyn Job> = Box::new(DummyJob);
 
         queue
-            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Now)
+            .push_job_raw(job.name(), job.write_json()?, ScheduleFor::Now)
             .await?;
         let jobs = queue.claim_jobs(&DummyReader, 1).await?;
         assert_eq!(jobs.len(), 1);
@@ -622,7 +619,7 @@ mod test {
         let queue = setup_queue().await?;
         let job: Box<dyn Job> = Box::new(DummyJob);
         queue
-            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Now)
+            .push_job_raw(job.name(), job.write_json()?, ScheduleFor::Now)
             .await?;
 
         let jobs = queue.claim_jobs(&DummyReader, 1).await?;
@@ -644,7 +641,7 @@ mod test {
         let cron_expr = cron_clock::Schedule::from_str("0/5 * * * * *")?;
 
         queue
-            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr))
+            .push_job_raw(job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr))
             .await?;
 
         let mut rows = queue.conn.query("SELECT cron FROM job_queue", ()).await?;
@@ -664,7 +661,7 @@ mod test {
         // Create a cron job that runs every 5 seconds
         let cron_expr = cron_clock::Schedule::from_str("0/5 * * * * *")?;
         queue
-            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr))
+            .push_job_raw(job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr))
             .await?;
 
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
@@ -748,10 +745,10 @@ mod test {
         let cron_expr2 = cron_clock::Schedule::from_str("0 0 * * * *")?;
 
         queue
-            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr1))
+            .push_job_raw(job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr1))
             .await?;
         queue
-            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr2))
+            .push_job_raw(job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr2))
             .await?;
 
         // Now we should have two cron jobs

@@ -92,7 +92,7 @@ pub trait JobQueueExt {
 #[async_trait]
 impl<T: JobQueue + ?Sized> JobQueueExt for T {
     async fn push_job(&self, job: &DynJob, schedule_for: ScheduleFor) -> anyhow::Result<()> {
-        let job_name = job.name().to_string();
+        let job_name = job.name().to_owned();
         let job_def = job.write_json()?;
         self.push_job_raw(&job_name, job_def, schedule_for).await
     }
@@ -170,7 +170,7 @@ impl JobRunner<'_> {
             for job in jobs {
                 let job_id = job.id;
                 let failed_attempts = job.failed_attempts;
-                let job_name = job.job.name().to_string();
+                let job_name = job.job.name().to_owned();
 
                 if let Some(cron) = &job.cron {
                     let now = OffsetDateTime::now_utc();
@@ -181,7 +181,7 @@ impl JobRunner<'_> {
                         ?now,
                         "Re scheduling cron job"
                     );
-                    let _ = queue.schedule_next_cron_job(job_id.clone()).await.inspect_err(|e| {
+                    let _ = queue.schedule_next_cron_job(job_id).await.inspect_err(|e| {
                         error!(error = format!("{e:#}"), "Failed to schedule cron job");
                     });
                 }
