@@ -379,7 +379,7 @@ where
 {
     type Rejection = HttpError;
 
-    async fn from_request(req:Request, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let RawQuery(query) = RawQuery::from_request(req, state)
             .await
             .map_err(|e| HttpError::bad_request().build(e))?;
