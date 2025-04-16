@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -9,7 +10,7 @@ use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobQueueExt, JobReader, JobRunner, RunnerWaker, ScheduleFor};
 use job_queue_libsql::libsql;
 use time::OffsetDateTime;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 pub struct JobQueueCtx {
     notify_runner: Arc<Notify>,
@@ -236,7 +237,9 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         queue,
     } = ctx;
 
-    let reader = DgwJobReader;
+    let reader = DgwJobReader {
+        queue: Arc::new(Mutex::new(VecDeque::new())),
+    };
 
     let spawn = |mut ctx: JobCtx, callback: job_queue::SpawnCallback| {
         tokio::spawn(async move {
@@ -288,7 +291,36 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
     Ok(())
 }
 
-struct DgwJobReader;
+struct JobAcceptsQueue {
+    queue: Option<Arc<Mutex<VecDeque<String>>>>,
+}
+
+impl JobAcceptsQueue {
+    pub(crate) const NAME: &'static str = "job_accepts_queue";
+}
+
+#[async_trait]
+impl Job for JobAcceptsQueue {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn write_json(&self) -> anyhow::Result<String> {
+        // {"place_holder": "job_accepts_queue"}
+        let value = serde_json::json!({
+            "place_holder": "job_accepts_queue"
+        });
+        Ok(serde_json::to_string(&value)?)
+    }
+
+    async fn run(&mut self) -> anyhow::Result<()> {
+        todo!()
+    }
+}
+
+struct DgwJobReader {
+    queue: Arc<Mutex<VecDeque<String>>>,
+}
 
 impl JobReader for DgwJobReader {
     fn read_json(&self, name: &str, json: &str) -> anyhow::Result<job_queue::DynJob> {
@@ -304,6 +336,14 @@ impl JobReader for DgwJobReader {
                 let job: DeleteRecordingsJob =
                     serde_json::from_str(json).context("failed to deserialize DeleteRecordingsJob")?;
                 Ok(Box::new(job))
+            }
+            JobAcceptsQueue::NAME => {
+                let job = JobAcceptsQueue {
+                    queue: Some(Arc::clone(&self.queue)),
+                };
+
+                let job: Box<dyn Job> = Box::new(job);
+                Ok(job)
             }
             _ => anyhow::bail!("unknown job name: {name}"),
         }
