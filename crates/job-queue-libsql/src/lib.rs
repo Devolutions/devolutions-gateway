@@ -1,9 +1,11 @@
 #[macro_use]
 extern crate tracing;
 
+use std::str::FromStr;
+
 use anyhow::Context as _;
 use async_trait::async_trait;
-use job_queue::{DynJob, JobCtx, JobQueue, JobReader, RunnerWaker};
+use job_queue::{CronJobCompact, JobCtx, JobQueue, JobReader, RunnerWaker, ScheduleFor};
 use libsql::Connection;
 use time::OffsetDateTime;
 use ulid::Ulid;
@@ -198,25 +200,47 @@ impl JobQueue for LibSqlJobQueue {
         Ok(())
     }
 
-    async fn push_job(&self, job: &DynJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
+    async fn push_job_raw(&self, job_name: &str, job_def: String, schedule_for: ScheduleFor) -> anyhow::Result<()> {
         let sql_query = "INSERT INTO job_queue
-            (id, scheduled_for, failed_attempts, status, name, def)
-            VALUES (:id, :scheduled_for, :failed_attempts, :status, :name, jsonb(:def))";
+            (id, scheduled_for, failed_attempts, status, name, def, cron)
+            VALUES (:id, :scheduled_for, :failed_attempts, :status, :name, jsonb(:def), :cron)";
 
         // UUID v4 only provides randomness, which leads to fragmentation.
         // We use ULID instead to reduce index fragmentation.
         // https://github.com/ulid/spec
         let id = Uuid::from(Ulid::new()).to_string();
 
-        let schedule_for = schedule_for.unwrap_or_else(OffsetDateTime::now_utc);
+        let cron_expression = if let ScheduleFor::Cron(schedule) = &schedule_for {
+            Some(schedule.to_string())
+        } else {
+            None
+        };
+
+        let schedule_for = match &schedule_for {
+            ScheduleFor::Now => OffsetDateTime::now_utc(),
+            ScheduleFor::Once(date) => *date,
+            ScheduleFor::Cron(cron) => {
+                let next_schdule_time = cron
+                    .upcoming(chrono::Utc)
+                    .next()
+                    .context("failed to get next cron date")?;
+
+                let offset_dt = OffsetDateTime::from_unix_timestamp(next_schdule_time.timestamp())
+                    .context("failed to convert timestamp to OffsetDateTime")?
+                    .replace_nanosecond(next_schdule_time.timestamp_subsec_nanos())?;
+
+                offset_dt
+            }
+        };
 
         let params = (
             (":id", id),
             (":scheduled_for", schedule_for.unix_timestamp()),
             (":failed_attempts", 0),
             (":status", JobStatus::Queued as u32),
-            (":name", job.name()),
-            (":def", job.write_json()?),
+            (":cron", cron_expression),
+            (":name", job_name),
+            (":def", job_def),
         );
 
         trace!(%sql_query, ?params, "Pushing a new job");
@@ -230,6 +254,54 @@ impl JobQueue for LibSqlJobQueue {
         self.runner_waker.wake();
 
         Ok(())
+    }
+
+    async fn schedule_next_cron_job(&self, id: Uuid) -> anyhow::Result<u64> {
+        let mut rows = self
+            .conn
+            .query("SELECT cron FROM job_queue WHERE id = ?", [id.to_string()])
+            .await?;
+
+        let Some(row) = rows.next().await.context("failed to read the row")? else {
+            anyhow::bail!("no row returned");
+        };
+
+        let cron_expression = row.get::<String>(0).context("failed to read cron value")?;
+
+        let cron = cron_clock::Schedule::from_str(&cron_expression).context("failed to parse cron expression")?;
+
+        let next_schdule_time = cron
+            .upcoming(chrono::Utc)
+            .next()
+            .context("failed to get next cron date")?;
+
+        let offset_dt = OffsetDateTime::from_unix_timestamp(next_schdule_time.timestamp())
+            .context("failed to convert timestamp to OffsetDateTime")?
+            .replace_nanosecond(next_schdule_time.timestamp_subsec_nanos())?;
+
+        let sql_query = "UPDATE job_queue
+            SET scheduled_for = :scheduled_for,
+            status = :status
+            WHERE id = :id";
+
+        let params = (
+            (":scheduled_for", offset_dt.unix_timestamp()),
+            (":status", JobStatus::Queued as u32),
+            (":id", id.to_string()),
+        );
+
+        trace!(%sql_query, ?params, "Scheduling next cron job");
+        let changed = self
+            .conn
+            .execute(sql_query, params)
+            .await
+            .context("failed to execute SQL query")?;
+
+        // Notify the waker that a new job is ready for processing.
+        self.runner_waker.wake();
+        trace!("Scheduled next cron job");
+
+        Ok(changed)
     }
 
     async fn claim_jobs(&self, reader: &dyn JobReader, number_of_jobs: usize) -> anyhow::Result<Vec<JobCtx>> {
@@ -250,7 +322,7 @@ impl JobQueue for LibSqlJobQueue {
                 ORDER BY id
                 LIMIT :number_of_jobs
             )
-            RETURNING id, failed_attempts, name, json(def) as def";
+            RETURNING id, failed_attempts, name, json(def) as def, cron";
 
         let params = (
             (":running_status", JobStatus::Running as u32),
@@ -290,6 +362,14 @@ impl JobQueue for LibSqlJobQueue {
                         id: model.id,
                         failed_attempts: model.failed_attempts,
                         job,
+                        cron: model
+                            .cron
+                            .map(|c| {
+                                let cron =
+                                    cron_clock::Schedule::from_str(&c).context("failed to parse cron expression")?;
+                                anyhow::Ok(cron)
+                            })
+                            .transpose()?,
                     }),
                     Err(e) => {
                         error!(
@@ -313,6 +393,7 @@ impl JobQueue for LibSqlJobQueue {
             failed_attempts: u32,
             name: String,
             def: String,
+            cron: Option<String>,
         }
     }
 
@@ -401,6 +482,26 @@ impl JobQueue for LibSqlJobQueue {
 
         Ok(Some(scheduled_for))
     }
+
+    async fn get_cron_jobs(&self) -> anyhow::Result<Vec<CronJobCompact>> {
+        let sql_query = "SELECT id, name, cron FROM job_queue WHERE cron IS NOT NULL";
+
+        trace!(%sql_query, "Fetching cron jobs");
+
+        let mut rows = self
+            .conn
+            .query(sql_query, ())
+            .await
+            .context("failed to execute SQL query")?;
+
+        let mut jobs = Vec::new();
+        while let Some(row) = rows.next().await.context("failed to read the row")? {
+            let job = libsql::de::from_row::<'_, CronJobCompact>(&row).context("failed to deserialize row")?;
+            jobs.push(job);
+        }
+
+        Ok(jobs)
+    }
 }
 
 // Typically, migrations should not be modified once released, and we should only be appending to this list.
@@ -423,4 +524,260 @@ const MIGRATIONS: &[&str] = &[
     END;
 
     CREATE INDEX idx_scheduled_for ON job_queue(scheduled_for);",
+    // Migration 1
+    "ALTER TABLE job_queue ADD COLUMN cron TEXT;",
 ];
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use job_queue::{Job, JobQueueExt, JobReader, ScheduleFor};
+    use tokio;
+
+    #[derive(Debug)]
+    struct DummyJob;
+
+    #[async_trait::async_trait]
+    impl Job for DummyJob {
+        fn name(&self) -> &str {
+            "dummy"
+        }
+        fn write_json(&self) -> anyhow::Result<String> {
+            Ok("{}".to_string())
+        }
+
+        async fn run(&mut self) -> anyhow::Result<()> {
+            // Simulate some work
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            println!("Running DummyJob");
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct DummyReader;
+
+    #[async_trait::async_trait]
+    impl JobReader for DummyReader {
+        fn read_json(&self, _: &str, _: &str) -> anyhow::Result<Box<dyn Job>> {
+            Ok(Box::new(DummyJob))
+        }
+    }
+
+    async fn setup_queue() -> anyhow::Result<LibSqlJobQueue> {
+        let db = libsql::Builder::new_local(":memory:").build().await?;
+
+        let conn = db.connect()?;
+        let queue = LibSqlJobQueue::builder()
+            .conn(conn)
+            .runner_waker(RunnerWaker::new(|| {}))
+            .build();
+
+        queue.setup().await?;
+        Ok(queue)
+    }
+
+    #[tokio::test]
+    async fn test_setup_migration() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let mut rows = queue
+            .conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='job_queue'",
+                (),
+            )
+            .await?;
+        assert!(rows.next().await?.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_push_job() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let job: Box<dyn Job> = Box::new(DummyJob);
+
+        queue.push_job(&job, ScheduleFor::Now).await?;
+        let mut rows = queue.conn.query("SELECT COUNT(*) FROM job_queue", ()).await?;
+        let row = rows.next().await?.unwrap();
+        let count: i64 = row.get(0)?;
+        assert_eq!(count, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_claim_jobs() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let job: Box<dyn Job> = Box::new(DummyJob);
+
+        queue
+            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Now)
+            .await?;
+        let jobs = queue.claim_jobs(&DummyReader, 1).await?;
+        assert_eq!(jobs.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_job() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let job: Box<dyn Job> = Box::new(DummyJob);
+        queue
+            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Now)
+            .await?;
+
+        let jobs = queue.claim_jobs(&DummyReader, 1).await?;
+        let job_id = jobs[0].id;
+
+        queue.delete_job(job_id).await?;
+
+        let mut rows = queue.conn.query("SELECT COUNT(*) FROM job_queue", ()).await?;
+        let row = rows.next().await?.unwrap();
+        let count: i64 = row.get(0)?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cron_job_schedule() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let job: Box<dyn Job> = Box::new(DummyJob);
+        let cron_expr = cron_clock::Schedule::from_str("0/5 * * * * *")?;
+
+        queue
+            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr))
+            .await?;
+
+        let mut rows = queue.conn.query("SELECT cron FROM job_queue", ()).await?;
+        let row = rows.next().await?.context("no row returned")?;
+
+        let cron_val: String = row.get(0)?;
+
+        assert_eq!(cron_val, "0/5 * * * * *");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_schedule_next_cron_job() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let job: Box<dyn Job> = Box::new(DummyJob);
+
+        // Create a cron job that runs every 5 seconds
+        let cron_expr = cron_clock::Schedule::from_str("0/5 * * * * *")?;
+        queue
+            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr))
+            .await?;
+
+        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        // Check that the job was inserted correctly
+        let mut rows = queue.conn.query("SELECT * FROM job_queue", ()).await?;
+        let row = rows.next().await?.unwrap();
+        println!("Row: {:?}", row);
+
+        // Claim the job
+        let jobs = queue.claim_jobs(&DummyReader, 1).await?;
+        println!(
+            "Claimed jobs: {:?}",
+            jobs.iter().map(|j| (j.id, j.job.name())).collect::<Vec<_>>()
+        );
+        assert_eq!(jobs.len(), 1);
+        assert!(jobs[0].cron.is_some());
+        let job_id = jobs[0].id;
+
+        // get job by id
+        let mut rows = queue
+            .conn
+            .query("SELECT * FROM job_queue WHERE id = ?", [job_id.to_string()])
+            .await?;
+
+        println!("Row: {:?}", rows.next().await?.unwrap());
+
+        // Before rescheduling, the job's status should be Running (1)
+        let mut rows = queue
+            .conn
+            .query("SELECT status FROM job_queue WHERE id = ?", [job_id.to_string()])
+            .await?;
+        let row = rows.next().await?.unwrap();
+        let status: u32 = row.get(0)?;
+        assert_eq!(status, JobStatus::Running as u32);
+
+        // Schedule the next execution of the cron job
+        let affected = queue.schedule_next_cron_job(job_id).await?;
+        println!("Number of affected rows: {}", affected);
+
+        // After rescheduling, verify:
+        // 1. The job's status is Queued (0)
+        // 2. The scheduled_for timestamp is in the future
+        let mut rows = queue
+            .conn
+            .query(
+                "SELECT status, scheduled_for FROM job_queue WHERE id = ?",
+                [job_id.to_string()],
+            )
+            .await?;
+        let row = rows.next().await?.unwrap();
+        println!("Row: {:?}", row);
+        let status: u32 = row.get(0)?;
+        let scheduled_for: i64 = row.get(1)?;
+
+        // The scheduled time should be in the future
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        assert!(scheduled_for > now, "scheduled_for should be in the future");
+        assert_eq!(status, JobStatus::Queued as u32);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_cron_jobs() -> anyhow::Result<()> {
+        let queue = setup_queue().await?;
+        let job: Box<dyn Job> = Box::new(DummyJob);
+
+        // No cron jobs initially
+        let cron_jobs = queue.get_cron_jobs().await?;
+        assert_eq!(cron_jobs.len(), 0, "Should have no cron jobs initially");
+
+        // Add regular job (non-cron)
+        queue.push_job(&job, ScheduleFor::Now).await?;
+
+        // Verify cron jobs still empty
+        let cron_jobs = queue.get_cron_jobs().await?;
+        assert_eq!(cron_jobs.len(), 0, "Regular jobs should not appear in cron jobs list");
+
+        // Add two cron jobs with different schedules
+        let cron_expr1 = cron_clock::Schedule::from_str("0/5 * * * * *")?;
+        let cron_expr2 = cron_clock::Schedule::from_str("0 0 * * * *")?;
+
+        queue
+            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr1))
+            .await?;
+        queue
+            .push_job_raw(&job.name(), job.write_json()?, ScheduleFor::Cron(cron_expr2))
+            .await?;
+
+        // Now we should have two cron jobs
+        let cron_jobs = queue.get_cron_jobs().await?;
+        assert_eq!(cron_jobs.len(), 2, "Should have two cron jobs");
+
+        // Verify content of retrieved cron jobs
+        for job in &cron_jobs {
+            assert_eq!(job.name, "dummy", "Job name should be 'dummy'");
+            assert!(
+                job.cron == "0/5 * * * * *" || job.cron == "0 0 * * * *",
+                "Cron expression should match one of the inserted values"
+            );
+        }
+
+        // Ensure we have both cron expressions
+        let expressions: Vec<_> = cron_jobs.iter().map(|j| j.cron.as_str()).collect();
+        assert!(
+            expressions.contains(&"0/5 * * * * *"),
+            "Should contain first cron expression"
+        );
+        assert!(
+            expressions.contains(&"0 0 * * * *"),
+            "Should contain second cron expression"
+        );
+
+        Ok(())
+    }
+}

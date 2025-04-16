@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -29,6 +30,12 @@ pub trait JobReader: Send + Sync {
     fn read_json(&self, name: &str, json: &str) -> anyhow::Result<DynJob>;
 }
 
+pub enum ScheduleFor {
+    Now,
+    Once(OffsetDateTime),
+    Cron(cron_clock::Schedule),
+}
+
 #[async_trait]
 pub trait JobQueue: Send + Sync {
     /// Performs initial setup required before actually using the queue
@@ -44,7 +51,7 @@ pub trait JobQueue: Send + Sync {
     /// Pushes a new job into the queue
     ///
     /// This function should ideally call `RunnerWaker::wake()` once the job is enqueued.
-    async fn push_job(&self, job: &DynJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()>;
+    async fn push_job_raw(&self, job_name: &str, job_def: String, schedule_for: ScheduleFor) -> anyhow::Result<()>;
 
     /// Fetches at most `number_of_jobs` from the queue
     async fn claim_jobs(&self, reader: &dyn JobReader, number_of_jobs: usize) -> anyhow::Result<Vec<JobCtx>>;
@@ -62,12 +69,40 @@ pub trait JobQueue: Send + Sync {
 
     /// Retrieves the closest future scheduled date
     async fn next_scheduled_date(&self) -> anyhow::Result<Option<OffsetDateTime>>;
+
+    /// Reschedule the cron job
+    async fn schedule_next_cron_job(&self, id: Uuid) -> anyhow::Result<u64>;
+
+    /// Retrive cron jobs, used for re-scheduling or deleting
+    async fn get_cron_jobs(&self) -> anyhow::Result<Vec<CronJobCompact>>;
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CronJobCompact {
+    pub id: Uuid,
+    pub name: String,
+    pub cron: String,
+}
+
+#[async_trait]
+pub trait JobQueueExt {
+    async fn push_job(&self, job: &DynJob, schedule_for: ScheduleFor) -> anyhow::Result<()>;
+}
+
+#[async_trait]
+impl<T: JobQueue + ?Sized> JobQueueExt for T {
+    async fn push_job(&self, job: &DynJob, schedule_for: ScheduleFor) -> anyhow::Result<()> {
+        let job_name = job.name().to_string();
+        let job_def = job.write_json()?;
+        self.push_job_raw(&job_name, job_def, schedule_for).await
+    }
 }
 
 pub struct JobCtx {
     pub id: Uuid,
     pub failed_attempts: u32,
     pub job: DynJob,
+    pub cron: Option<cron_clock::Schedule>,
 }
 
 #[derive(Clone)]
@@ -135,21 +170,38 @@ impl JobRunner<'_> {
             for job in jobs {
                 let job_id = job.id;
                 let failed_attempts = job.failed_attempts;
+                let job_name = job.job.name().to_string();
+
+                if let Some(cron) = &job.cron {
+                    let now = OffsetDateTime::now_utc();
+                    debug!(
+                        job_id = %job_id,
+                        job_name = %job_name,
+                        cron = %cron,
+                        ?now,
+                        "Re scheduling cron job"
+                    );
+                    let _ = queue.schedule_next_cron_job(job_id.clone()).await.inspect_err(|e| {
+                        error!(error = format!("{e:#}"), "Failed to schedule cron job");
+                    });
+                }
 
                 let callback = Box::new({
                     let queue = Arc::clone(&queue);
                     let running_count = Arc::clone(&running_count);
                     let waker = waker.clone();
-
+                    let cron = job.cron.clone();
                     move |result: anyhow::Result<()>| {
                         let fut = async move {
-                            match result {
-                                Ok(()) => {
+                            match (result, cron) {
+                                // Regular run once job
+                                (Ok(()), None) => {
                                     if let Err(e) = queue.delete_job(job_id).await {
                                         error!(error = format!("{e:#}"), "Failed to delete job");
                                     }
                                 }
-                                Err(e) => {
+                                // Regular run once job that failed
+                                (Err(e), None) => {
                                     warn!(error = format!("{e:#}"), %job_id, "Job failed");
 
                                     let schedule_for =
@@ -158,6 +210,13 @@ impl JobRunner<'_> {
                                     if let Err(e) = queue.fail_job(job_id, schedule_for).await {
                                         error!(error = format!("{e:#}"), "Failed to mark job as failed")
                                     }
+                                }
+                                // Cron job that failed, delete anyway, we scheduled a new one
+                                (Err(e), Some(_)) => {
+                                    error!(error = format!("{e:#}"), "Failed to delete job");
+                                }
+                                (Ok(_), Some(_)) => {
+                                    // Cron job that succeeded, we don't need to do anything
                                 }
                             }
 

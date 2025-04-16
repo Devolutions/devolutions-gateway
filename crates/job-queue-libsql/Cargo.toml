@@ -11,11 +11,21 @@ workspace = true
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+chrono = "0.4.40"
+cron_clock = "0.8.0"
 job-queue = { path = "../job-queue" }
-libsql = { version = "0.9", default-features = false, features = ["core", "serde", "replication"] }
+libsql = { version = "0.9", default-features = false, features = [
+    "core",
+    "serde",
+    "replication",
+] }
 serde = "1"
 time = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
 typed-builder = "0.19"
 ulid = { version = "1.1", features = ["uuid"] }
 uuid = "1.11"
+
+
+[dev-dependencies]
+tokio = { version = "1", features = ["time", "macros", "rt-multi-thread"] }

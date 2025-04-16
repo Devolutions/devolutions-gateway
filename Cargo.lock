@@ -961,6 +961,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cron_clock"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a8699d8ed16e3db689f8ae04d8dc3c6666a4ba7e724e5a157884b7cc385d16b"
+dependencies = [
+ "chrono",
+ "nom",
+ "once_cell",
+]
+
+[[package]]
 name = "crossbeam"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3004,8 +3015,15 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "cron_clock",
+ "job-queue-libsql",
+ "libsql",
+ "serde",
+ "serde_json",
  "time",
+ "tokio 1.44.2",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -3015,10 +3033,13 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
+ "cron_clock",
  "job-queue",
  "libsql",
  "serde",
  "time",
+ "tokio 1.44.2",
  "tracing",
  "typed-builder",
  "ulid",

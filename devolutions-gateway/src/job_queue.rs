@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use axum::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
-use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
+use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobQueueExt, JobReader, JobRunner, RunnerWaker, ScheduleFor};
 use job_queue_libsql::libsql;
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, Notify};
@@ -173,9 +173,18 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
                 ChildTask::spawn({
                     let queue = Arc::clone(&queue);
 
+
                     async move {
                         for _ in 0..5 {
-                            match queue.push_job(&msg.job, msg.schedule_for).await {
+                            let schedule_for = match &msg.schedule_for {
+                                Some(schedule_for) => {
+                                    ScheduleFor::Once(*schedule_for)
+                                }
+                                None => {
+                                    ScheduleFor::Now
+                                }
+                            };
+                            match queue.push_job(&msg.job, schedule_for).await {
                                 Ok(()) => break,
                                 Err(e) => {
                                     warn!(error = format!("{e:#}"), "Failed to push job");
