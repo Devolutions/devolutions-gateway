@@ -86,7 +86,7 @@ ngrok = "0.13"
 # HTTP
 hyper = "1.6"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "macros"] }
 axum-extra = { version = "0.10", features = ["query", "async-read-body", "typed-header"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 tungstenite = "0.26" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
@@ -115,6 +115,7 @@ etherparse = "0.15"
 
 # For KDC proxy
 portpicker = "0.1"
+network-monitor = { version = "0.1.0", path = "../crates/network-monitor" }
 
 [target.'cfg(windows)'.dependencies]
 rustls-cng = { version = "0.5", default-features = false, features = ["logging", "tls12", "ring"] }

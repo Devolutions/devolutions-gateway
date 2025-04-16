@@ -7,6 +7,7 @@ pub mod jmux;
 pub mod jrec;
 pub mod jrl;
 pub mod kdc_proxy;
+pub mod monitoring;
 pub mod net;
 pub mod preflight;
 pub mod rdp;
@@ -31,7 +32,8 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/fwd", fwd::make_router(state.clone()))
         .nest("/jet/webapp", webapp::make_router(state.clone()))
         .nest("/jet/net", net::make_router(state.clone()))
-        .route("/jet/update", axum::routing::post(update::trigger_update_check));
+        .route("/jet/update", axum::routing::post(update::trigger_update_check))
+        .nest("/jet/monitoring", monitoring::make_router(state.clone()));
 
     if state.conf_handle.get_conf().web_app.enabled {
         router = router.route(

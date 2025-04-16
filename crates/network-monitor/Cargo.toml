@@ -4,6 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+devolutions-agent-shared = { path = "../devolutions-agent-shared" }
+serde = { version = "1", features = ["derive"] }
+camino = { version = "1", features = ["serde1"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tempdir = "0.3"
+tokio-test = "0.4"
 
 [lints]
 workspace = true
