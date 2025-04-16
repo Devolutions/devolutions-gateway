@@ -3,7 +3,7 @@ use crate::http::HttpError;
 use crate::token::Protocol;
 use crate::DgwState;
 use axum::extract::ws::{Message, Utf8Bytes};
-use axum::extract::{RawQuery, WebSocketUpgrade};
+use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::event_bus::ScannerEvent;
