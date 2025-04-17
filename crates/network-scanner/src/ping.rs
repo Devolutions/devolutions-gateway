@@ -12,6 +12,28 @@ use tokio::time::timeout;
 use crate::create_echo_request;
 use crate::ip_utils::IpAddrRange;
 
+#[derive(Debug, Clone)]
+pub enum PingFailedReason {
+    Rejected,
+    TimedOut,
+}
+
+impl std::fmt::Display for PingFailedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PingFailedReason::Rejected => write!(f, "ping rejected"),
+            PingFailedReason::TimedOut => write!(f, "ping timed out"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum PingEvent {
+    Start { ip: IpAddr },
+    Success { ip: IpAddr, time: u128 },
+    Failed { ip: IpAddr, reason: PingFailedReason },
+}
+
 pub fn ping_range(
     runtime: Arc<Socket2Runtime>,
     range: IpAddrRange,
@@ -19,7 +41,7 @@ pub fn ping_range(
     ping_wait_time: Duration,
     should_ping: impl Fn(IpAddr) -> bool + Send + Sync + 'static + Clone,
     task_manager: crate::task_utils::TaskManager,
-) -> anyhow::Result<tokio::sync::mpsc::Receiver<IpAddr>> {
+) -> anyhow::Result<tokio::sync::mpsc::Receiver<PingEvent>> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     let mut futures = vec![];
 
@@ -30,16 +52,46 @@ pub fn ping_range(
             Some(socket2::Protocol::ICMPV4),
         )?;
         let addr = SocketAddr::new(ip, 0);
-        let sender = sender.clone();
         let should_ping = should_ping.clone();
+        if !should_ping(ip) {
+            continue;
+        }
 
-        let ping_future = async move {
-            if !should_ping(ip) {
-                return anyhow::Ok(());
-            }
-            if try_ping(addr.into(), socket).await.is_ok() {
-                sender.send(ip).await?;
-            }
+        let sender_clone = sender.clone();
+
+        let ping_future = move || async move {
+            let _ = sender_clone.send(PingEvent::Start { ip: addr.ip() }).await;
+            let start_time = std::time::Instant::now();
+            let ping_future = try_ping(addr.into(), socket);
+            let ping_future = timeout(ping_wait_time, ping_future);
+            match ping_future.await {
+                Ok(Ok(_)) => {
+                    let elapsed = start_time.elapsed().as_millis();
+                    let _ = sender_clone
+                        .send(PingEvent::Success {
+                            ip: addr.ip(),
+                            time: elapsed,
+                        })
+                        .await;
+                }
+                Ok(Err(_)) => {
+                    let _ = sender_clone
+                        .send(PingEvent::Failed {
+                            ip: addr.ip(),
+                            reason: PingFailedReason::Rejected,
+                        })
+                        .await;
+                }
+                Err(_) => {
+                    let _ = sender_clone
+                        .send(PingEvent::Failed {
+                            ip: addr.ip(),
+                            reason: PingFailedReason::TimedOut,
+                        })
+                        .await;
+                }
+            };
+
             anyhow::Ok(())
         };
 
@@ -48,7 +100,7 @@ pub fn ping_range(
 
     task_manager.spawn(move |task_manager| async move {
         for future in futures {
-            task_manager.with_timeout(ping_wait_time).spawn(|_| future);
+            task_manager.spawn_no_sub_task(future());
             tokio::time::sleep(ping_interval).await;
         }
         anyhow::Ok(())

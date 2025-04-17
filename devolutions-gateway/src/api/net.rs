@@ -1,15 +1,24 @@
+use crate::extract::RepeatQuery;
 use crate::http::HttpError;
-use crate::token::{ApplicationProtocol, Protocol};
+use crate::token::Protocol;
 use crate::DgwState;
 use axum::extract::ws::{Message, Utf8Bytes};
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
 use axum::{Json, Router};
+use network_scanner::event_bus::ScannerEvent;
 use network_scanner::interfaces;
-use network_scanner::scanner::{self, NetworkScannerParams};
-use serde::Serialize;
+use network_scanner::ip_utils::IpAddrRange;
+use network_scanner::mdns::MdnsEvent;
+use network_scanner::named_port::{MaybeNamedPort, NamedPort};
+use network_scanner::netbios::NetBiosEvent;
+use network_scanner::ping::PingEvent;
+use network_scanner::port_discovery::TcpKnockEvent;
+use network_scanner::scanner::{self, DnsEvent, NetworkScannerParams, ScannerConfig, TcpKnockWithHost};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new().route("/scan", axum::routing::get(handle_network_scan));
@@ -27,9 +36,13 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
-    query_params: axum::extract::Query<NetworkScanQueryParams>,
+    RepeatQuery(query): RepeatQuery<NetworkScanQueryParams>,
 ) -> Result<Response, HttpError> {
-    let scanner_params: NetworkScannerParams = query_params.0.into();
+    let (scanner_params, filter) = query.try_into().map_err(
+        HttpError::bad_request()
+            .with_msg("failed to parse query parameters")
+            .err(),
+    )?;
 
     let scanner = scanner::NetworkScanner::new(scanner_params).map_err(|e| {
         error!(error = format!("{e:#}"), "Failed to create network scanner");
@@ -47,10 +60,12 @@ pub async fn handle_network_scan(
 
         info!("Network scan started");
 
+        let mut receiver = stream.subscribe::<NetworkScanResponse>().await;
+
         loop {
             tokio::select! {
-                result = stream.recv() => {
-                    let Some(entry) = result else {
+                result = receiver.recv() => {
+                    let Ok(response) = result else {
                         let _ = websocket
                             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                                 code: axum::extract::ws::close_code::NORMAL,
@@ -61,7 +76,9 @@ pub async fn handle_network_scan(
                         break;
                     };
 
-                    let response = NetworkScanResponse::new(entry.addr, entry.port, entry.hostname, entry.service_type);
+                    if !filter.should_emit(&response) {
+                        continue;
+                    }
 
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
@@ -125,67 +142,328 @@ pub struct NetworkScanQueryParams {
     pub mdns_query_timeout: Option<u64>,
     /// The maximum duration for whole networking scan in milliseconds. Highly suggested!
     pub max_wait: Option<u64>,
+    /// The start and end IP address of the range to scan.
+    /// for example: 10.10.0.0-10.10.0.255
+    #[serde(default, rename = "range")]
+    pub ranges: Vec<String>,
+    /// The ports to scan. If not specified, the default ports will be used.
+    #[serde(default, rename = "probe")]
+    pub probes: Vec<Probe>,
+
+    /// Enable the emission of ScanEvent::Ping for status start
+    #[serde(default)]
+    pub enable_ping_start: bool,
+
+    /// Enable the execution of broadcast scan
+    #[serde(default = "default_true")]
+    pub enable_broadcast: bool,
+
+    /// Enable the ping scan on subnet
+    #[serde(default = "default_true")]
+    pub enable_subnet_scan: bool,
+
+    /// Enable ZeroConf/mDNS
+    #[serde(default = "default_true")]
+    pub enable_zeroconf: bool,
+
+    /// Enable resolve dns
+    #[serde(default = "default_true")]
+    pub enable_resolve_dns: bool,
+
+    /// Enable Tcp port knocking and ping failure event
+    #[serde(default)]
+    pub enable_failure: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone)]
+pub enum Probe {
+    Ping,
+    Port(MaybeNamedPort),
+}
+
+impl TryFrom<&str> for Probe {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "ping" => Ok(Probe::Ping),
+            _ => MaybeNamedPort::try_from(value).map(Probe::Port),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Probe {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Probe::try_from(value.as_str()).map_err(serde::de::Error::custom)
+    }
 }
 
 const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 5985, 5986];
 
-impl From<NetworkScanQueryParams> for NetworkScannerParams {
-    fn from(val: NetworkScanQueryParams) -> Self {
-        NetworkScannerParams {
-            ports: COMMON_PORTS.to_vec(),
-            ping_interval: val.ping_interval.unwrap_or(200),
-            ping_timeout: val.ping_timeout.unwrap_or(500),
-            broadcast_timeout: val.broadcast_timeout.unwrap_or(1000),
-            port_scan_timeout: val.port_scan_timeout.unwrap_or(1000),
-            netbios_timeout: val.netbios_timeout.unwrap_or(1000),
-            max_wait_time: val.max_wait.unwrap_or(120 * 1000),
-            netbios_interval: val.netbios_interval.unwrap_or(200),
-            mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
+impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, EventFilter) {
+    type Error = anyhow::Error;
+    fn try_from(val: NetworkScanQueryParams) -> Result<Self, Self::Error> {
+        debug!(query=?val, "Network scan query parameters");
+
+        let probe: Vec<Probe> = match val.probes.len() {
+            0 => COMMON_PORTS.iter().map(|port| Probe::Port((*port).into())).collect(),
+            _ => val.probes,
+        };
+
+        let enable_ping_event = probe.iter().any(|probe| matches!(probe, Probe::Ping));
+        let ports = probe
+            .into_iter()
+            .filter_map(|probe| match probe {
+                Probe::Ping => None,
+                Probe::Port(port) => Some(port),
+            })
+            .collect::<Vec<_>>();
+
+        let ping_interval = Duration::from_millis(val.ping_interval.unwrap_or(200));
+        let ping_timeout = Duration::from_millis(val.ping_timeout.unwrap_or(500));
+        let broadcast_timeout = Duration::from_millis(val.broadcast_timeout.unwrap_or(1000));
+        let port_scan_timeout = Duration::from_millis(val.port_scan_timeout.unwrap_or(1000));
+        let netbios_timeout = Duration::from_millis(val.netbios_timeout.unwrap_or(1000));
+        let netbios_interval = Duration::from_millis(val.netbios_interval.unwrap_or(200));
+        let mdns_query_timeout = Duration::from_millis(val.mdns_query_timeout.unwrap_or(5 * 1000));
+        let max_wait_time = Duration::from_millis(val.max_wait.unwrap_or(120 * 1000));
+        let ip_ranges = val
+            .ranges
+            .iter()
+            .map(IpAddrRange::try_from)
+            .collect::<Result<Vec<IpAddrRange>, anyhow::Error>>()?;
+
+        let scanner_param = NetworkScannerParams {
+            config: ScannerConfig {
+                ports,
+                ping_interval,
+                ping_timeout,
+                broadcast_timeout,
+                port_scan_timeout,
+                netbios_timeout,
+                max_wait_time,
+                netbios_interval,
+                mdns_query_timeout,
+                ip_ranges,
+            },
+            toggle: scanner::ScannerToggles {
+                enable_broadcast: val.enable_broadcast,
+                enable_subnet_scan: val.enable_subnet_scan,
+                enable_zeroconf: val.enable_zeroconf,
+                enable_resolve_dns: val.enable_resolve_dns,
+            },
+        };
+
+        let event_filter = EventFilter {
+            enable_ping_event,
+            enable_failure: val.enable_failure,
+        };
+
+        Ok((scanner_param, event_filter))
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    Start,
+    Failed,
+    Success,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "protocol", rename_all = "lowercase")]
+pub enum ScanEvent {
+    Ping {
+        ip: IpAddr,
+        status: Status,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        time: Option<u128>,
+    },
+    Host {
+        ip: IpAddr,
+        hostname: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged, rename_all = "lowercase")]
+pub enum TcpKnockProbe {
+    Number(u16),
+    NamedApplication(Protocol),
+}
+
+impl From<MaybeNamedPort> for TcpKnockProbe {
+    fn from(port: MaybeNamedPort) -> Self {
+        match port {
+            MaybeNamedPort::Port(port) => TcpKnockProbe::Number(port),
+            MaybeNamedPort::Named(named_port) => TcpKnockProbe::NamedApplication(named_port.into()),
+        }
+    }
+}
+
+impl From<NamedPort> for Protocol {
+    fn from(named_port: NamedPort) -> Self {
+        match named_port {
+            NamedPort::Rdp => Protocol::Rdp,
+            NamedPort::Ard => Protocol::Ard,
+            NamedPort::Vnc => Protocol::Vnc,
+            NamedPort::Ssh => Protocol::Ssh,
+            NamedPort::Sshpwsh => Protocol::SshPwsh,
+            NamedPort::Sftp => Protocol::Sftp,
+            NamedPort::Scp => Protocol::Scp,
+            NamedPort::Telnet => Protocol::Telnet,
+            NamedPort::WinrmHttpPwsh => Protocol::WinrmHttpPwsh,
+            NamedPort::WinrmHttpsPwsh => Protocol::WinrmHttpsPwsh,
+            NamedPort::Http => Protocol::Http,
+            NamedPort::Https => Protocol::Https,
+            NamedPort::Ldap => Protocol::Ldap,
+            NamedPort::Ldaps => Protocol::Ldaps,
         }
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct NetworkScanResponse {
-    pub ip: IpAddr,
-    pub hostname: Option<String>,
-    pub protocol: ApplicationProtocol,
+#[serde(untagged, rename_all = "lowercase")]
+pub enum NetworkScanResponse {
+    Event(ScanEvent),
+    Entry {
+        ip: IpAddr,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hostname: Option<String>,
+        protocol: TcpKnockProbe,
+        status: Status,
+    },
 }
 
-impl NetworkScanResponse {
-    fn new(ip: IpAddr, port: u16, dns: Option<String>, service_type: Option<scanner::ServiceType>) -> Self {
-        let hostname = dns;
+impl TryFrom<ScannerEvent> for NetworkScanResponse {
+    type Error = ();
 
-        let protocol = if let Some(protocol) = service_type {
-            match protocol {
-                scanner::ServiceType::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
-                scanner::ServiceType::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
-                scanner::ServiceType::Http => ApplicationProtocol::Known(Protocol::Http),
-                scanner::ServiceType::Https => ApplicationProtocol::Known(Protocol::Https),
-                scanner::ServiceType::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
-                scanner::ServiceType::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
-                scanner::ServiceType::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
-                scanner::ServiceType::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
-                scanner::ServiceType::Ard => ApplicationProtocol::Known(Protocol::Ard),
-                scanner::ServiceType::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
-                scanner::ServiceType::Scp => ApplicationProtocol::Known(Protocol::Scp),
+    fn try_from(event: ScannerEvent) -> Result<Self, Self::Error> {
+        match event {
+            ScannerEvent::Ping(PingEvent::Success { ip, time }) => Ok(NetworkScanResponse::Event(ScanEvent::Ping {
+                ip,
+                status: Status::Success,
+                time: Some(time),
+            })),
+            ScannerEvent::Ping(PingEvent::Failed { ip, .. }) => Ok(NetworkScanResponse::Event(ScanEvent::Ping {
+                ip,
+                status: Status::Failed,
+                time: None,
+            })),
+            ScannerEvent::Ping(PingEvent::Start { ip }) => Ok(NetworkScanResponse::Event(ScanEvent::Ping {
+                ip,
+                status: Status::Start,
+                time: None,
+            })),
+            ScannerEvent::Dns(DnsEvent::Success { ip, hostname }) => {
+                Ok(NetworkScanResponse::Event(ScanEvent::Host { ip, hostname }))
             }
-        } else {
-            match port {
-                22 => ApplicationProtocol::Known(Protocol::Ssh),
-                23 => ApplicationProtocol::Known(Protocol::Telnet),
-                80 => ApplicationProtocol::Known(Protocol::Http),
-                443 => ApplicationProtocol::Known(Protocol::Https),
-                389 => ApplicationProtocol::Known(Protocol::Ldap),
-                636 => ApplicationProtocol::Known(Protocol::Ldaps),
-                3389 => ApplicationProtocol::Known(Protocol::Rdp),
-                5900 => ApplicationProtocol::Known(Protocol::Vnc),
-                5985 => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
-                5986 => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
-                _ => ApplicationProtocol::unknown(),
+            ScannerEvent::Mdns(MdnsEvent::ServiceResolved {
+                addr,
+                device_name,
+                protocol,
+                port,
+            }) => {
+                let protocol = match protocol {
+                    None => None,
+                    Some(protocol) => Some(match protocol {
+                        scanner::ServiceType::Rdp => Protocol::Rdp,
+                        scanner::ServiceType::Ard => Protocol::Ard,
+                        scanner::ServiceType::Vnc => Protocol::Vnc,
+                        scanner::ServiceType::Ssh => Protocol::Ssh,
+                        scanner::ServiceType::Sftp => Protocol::Sftp,
+                        scanner::ServiceType::Scp => Protocol::Scp,
+                        scanner::ServiceType::Telnet => Protocol::Telnet,
+                        scanner::ServiceType::Http => Protocol::Http,
+                        scanner::ServiceType::Https => Protocol::Https,
+                        scanner::ServiceType::Ldap => Protocol::Ldap,
+                        scanner::ServiceType::Ldaps => Protocol::Ldaps,
+                    }),
+                };
+
+                let protocol = match protocol {
+                    Some(protocol) => TcpKnockProbe::NamedApplication(protocol),
+                    None => TcpKnockProbe::Number(port),
+                };
+
+                Ok(NetworkScanResponse::Entry {
+                    ip: addr,
+                    hostname: Some(device_name),
+                    protocol,
+                    status: Status::Success,
+                })
             }
-        };
-        Self { ip, hostname, protocol }
+            ScannerEvent::NetBios(NetBiosEvent::Success { ip, name }) => {
+                Ok(NetworkScanResponse::Event(ScanEvent::Host {
+                    ip: ip.into(),
+                    hostname: name,
+                }))
+            }
+            ScannerEvent::TcpKnockWithHost(TcpKnockWithHost { tcp_knock, host }) => match tcp_knock {
+                TcpKnockEvent::Success { ip, port } => {
+                    let protocol = port.into();
+                    Ok(NetworkScanResponse::Entry {
+                        ip,
+                        hostname: host,
+                        protocol,
+                        status: Status::Success,
+                    })
+                }
+                TcpKnockEvent::Failed { ip, port, .. } => {
+                    let protocol = port.into();
+                    Ok(NetworkScanResponse::Entry {
+                        ip,
+                        hostname: host,
+                        protocol,
+                        status: Status::Failed,
+                    })
+                }
+                _ => Err(()),
+            },
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EventFilter {
+    // Emit ping event or not, we'll need ping event for tcp knock anyway, so we don't turn it off, instead, we just ignore the event
+    enable_ping_event: bool,
+    // Emit ping/tcp knock event failure or not
+    enable_failure: bool,
+}
+
+impl EventFilter {
+    fn should_emit(&self, response: &NetworkScanResponse) -> bool {
+        match response {
+            NetworkScanResponse::Event(scan_event) => match scan_event {
+                ScanEvent::Ping { status, .. } if self.enable_ping_event => {
+                    if matches!(status, Status::Failed) && !self.enable_failure {
+                        return false;
+                    }
+
+                    true
+                }
+                ScanEvent::Host { .. } => true,
+                _ => false,
+            },
+            NetworkScanResponse::Entry { status, .. } => {
+                if matches!(status, Status::Failed) && !self.enable_failure {
+                    return false;
+                }
+
+                true
+            }
+        }
     }
 }
 
@@ -284,12 +562,12 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
                 interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
                     ip: v4.ip,
                     broadcast: v4.broadcast,
-                    netmask: v4.netmask.map(|netmask| Netmask(netmask)),
+                    netmask: v4.netmask.map(Netmask),
                 }),
                 interfaces::Addr::V6(v6) => Addr::V6(V6IfAddr {
                     ip: v6.ip,
                     broadcast: v6.broadcast,
-                    netmask: v6.netmask.map(|netmask| Netmask(netmask)),
+                    netmask: v6.netmask.map(Netmask),
                 }),
             })
             .collect();

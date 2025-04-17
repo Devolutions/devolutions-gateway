@@ -6,6 +6,14 @@ use anyhow::Context;
 pub mod asynchronous;
 pub mod blocking;
 
+pub use asynchronous::broadcast;
+
+#[derive(Debug, Clone)]
+pub enum BroadcastEvent {
+    Start { broadcast_ip: Ipv4Addr },
+    Entry { ip: Ipv4Addr },
+}
+
 #[derive(Debug)]
 pub struct BroadcastResponseEntry {
     pub addr: Ipv4Addr,
