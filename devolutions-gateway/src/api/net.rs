@@ -15,7 +15,7 @@ use network_scanner::netbios::NetBiosEvent;
 use network_scanner::ping::PingEvent;
 use network_scanner::port_discovery::TcpKnockEvent;
 use network_scanner::scanner::{self, DnsEvent, NetworkScannerParams, ScannerConfig, TcpKnockWithHost};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
@@ -38,10 +38,11 @@ pub async fn handle_network_scan(
     ws: WebSocketUpgrade,
     RepeatQuery(query): RepeatQuery<NetworkScanQueryParams>,
 ) -> Result<Response, HttpError> {
-    let (scanner_params, filter) = query.try_into().map_err(|e| {
-        error!(error = format!("{e:#}"), "Failed to parse query parameters");
-        HttpError::bad_request().build(e)
-    })?;
+    let (scanner_params, filter) = query.try_into().map_err(
+        HttpError::bad_request()
+            .with_msg("failed to parse query parameters")
+            .err(),
+    )?;
 
     let scanner = scanner::NetworkScanner::new(scanner_params).map_err(|e| {
         error!(error = format!("{e:#}"), "Failed to create network scanner");
@@ -147,7 +148,7 @@ pub struct NetworkScanQueryParams {
     pub ranges: Vec<String>,
     /// The ports to scan. If not specified, the default ports will be used.
     #[serde(default, rename = "probe")]
-    pub probes: Vec<String>,
+    pub probes: Vec<Probe>,
 
     /// Enable the emission of ScanEvent::Ping for status start
     #[serde(default)]
@@ -169,6 +170,7 @@ pub struct NetworkScanQueryParams {
     #[serde(default = "default_true")]
     pub enable_resolve_dns: bool,
 
+    /// Enable Tcp port knocking and ping failure event
     #[serde(default)]
     pub enable_failure: bool,
 }
@@ -194,6 +196,16 @@ impl TryFrom<&str> for Probe {
     }
 }
 
+impl<'de> Deserialize<'de> for Probe {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Probe::try_from(value.as_str()).map_err(serde::de::Error::custom)
+    }
+}
+
 const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 5985, 5986];
 
 impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, EventFilter) {
@@ -203,16 +215,7 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, EventFilter) {
 
         let probe: Vec<Probe> = match val.probes.len() {
             0 => COMMON_PORTS.iter().map(|port| Probe::Port((*port).into())).collect(),
-            _ => val
-                .probes
-                .iter()
-                .map(|probe| {
-                    Probe::try_from(probe.as_str()).map_err(|e| {
-                        error!(error = format!("{e:#}"), "Failed to parse probe");
-                        anyhow::anyhow!("Failed to parse probe")
-                    })
-                })
-                .collect::<Result<Vec<_>, anyhow::Error>>()?,
+            _ => val.probes,
         };
 
         let enable_ping_event = probe.iter().any(|probe| matches!(probe, Probe::Ping));
@@ -310,7 +313,6 @@ impl From<MaybeNamedPort> for TcpKnockProbe {
 impl From<NamedPort> for Protocol {
     fn from(named_port: NamedPort) -> Self {
         match named_port {
-            NamedPort::Wayk => Protocol::Wayk,
             NamedPort::Rdp => Protocol::Rdp,
             NamedPort::Ard => Protocol::Ard,
             NamedPort::Vnc => Protocol::Vnc,
@@ -319,8 +321,8 @@ impl From<NamedPort> for Protocol {
             NamedPort::Sftp => Protocol::Sftp,
             NamedPort::Scp => Protocol::Scp,
             NamedPort::Telnet => Protocol::Telnet,
-            NamedPort::Winrmhttppwsh => Protocol::WinrmHttpPwsh,
-            NamedPort::Winrmhttpspwsh => Protocol::WinrmHttpsPwsh,
+            NamedPort::WinrmHttpPwsh => Protocol::WinrmHttpPwsh,
+            NamedPort::WinrmHttpsPwsh => Protocol::WinrmHttpsPwsh,
             NamedPort::Http => Protocol::Http,
             NamedPort::Https => Protocol::Https,
             NamedPort::Ldap => Protocol::Ldap,

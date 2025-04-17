@@ -5,7 +5,6 @@ use socket2::SockAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NamedPort {
-    Wayk,
     Rdp,
     Ard,
     Vnc,
@@ -14,8 +13,8 @@ pub enum NamedPort {
     Sftp,
     Scp,
     Telnet,
-    Winrmhttppwsh,
-    Winrmhttpspwsh,
+    WinrmHttpPwsh,
+    WinrmHttpsPwsh,
     Http,
     Https,
     Ldap,
@@ -25,7 +24,6 @@ pub enum NamedPort {
 impl Into<u16> for &NamedPort {
     fn into(self) -> u16 {
         match self {
-            NamedPort::Wayk => 12876,
             NamedPort::Rdp => 3389,
             NamedPort::Ard => 5900,
             NamedPort::Vnc => 5900,
@@ -34,8 +32,8 @@ impl Into<u16> for &NamedPort {
             NamedPort::Sftp => 22,
             NamedPort::Scp => 22,
             NamedPort::Telnet => 23,
-            NamedPort::Winrmhttppwsh => 5985,
-            NamedPort::Winrmhttpspwsh => 5986,
+            NamedPort::WinrmHttpPwsh => 5985,
+            NamedPort::WinrmHttpsPwsh => 5986,
             NamedPort::Http => 80,
             NamedPort::Https => 443,
             NamedPort::Ldap => 389,
@@ -49,13 +47,12 @@ impl TryFrom<u16> for NamedPort {
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
-            12876 => Ok(NamedPort::Wayk),
             3389 => Ok(NamedPort::Rdp),
             5900 => Ok(NamedPort::Ard), // Note: Same as VNC, will return Ard by convention
             22 => Ok(NamedPort::Ssh),   // Note: Same as Sshpwsh/Sftp/Scp, will return Ssh by convention
             23 => Ok(NamedPort::Telnet),
-            5985 => Ok(NamedPort::Winrmhttppwsh),
-            5986 => Ok(NamedPort::Winrmhttpspwsh),
+            5985 => Ok(NamedPort::WinrmHttpPwsh),
+            5986 => Ok(NamedPort::WinrmHttpsPwsh),
             80 => Ok(NamedPort::Http),
             443 => Ok(NamedPort::Https),
             389 => Ok(NamedPort::Ldap),
@@ -70,7 +67,6 @@ impl TryFrom<&str> for NamedPort {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "wayk" => Ok(NamedPort::Wayk),
             "rdp" => Ok(NamedPort::Rdp),
             "ard" => Ok(NamedPort::Ard),
             "vnc" => Ok(NamedPort::Vnc),
@@ -79,8 +75,8 @@ impl TryFrom<&str> for NamedPort {
             "sftp" => Ok(NamedPort::Sftp),
             "scp" => Ok(NamedPort::Scp),
             "telnet" => Ok(NamedPort::Telnet),
-            "winrmhttppwsh" => Ok(NamedPort::Winrmhttppwsh),
-            "winrmhttpspwsh" => Ok(NamedPort::Winrmhttpspwsh),
+            "winrmhttppwsh" => Ok(NamedPort::WinrmHttpPwsh),
+            "winrmhttpspwsh" => Ok(NamedPort::WinrmHttpsPwsh),
             "http" => Ok(NamedPort::Http),
             "https" => Ok(NamedPort::Https),
             "ldap" => Ok(NamedPort::Ldap),
