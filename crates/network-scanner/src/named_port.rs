@@ -1,6 +1,5 @@
 use std::net::{IpAddr, SocketAddr};
 
-use derive_more::From;
 use socket2::SockAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,10 +85,22 @@ impl TryFrom<&str> for NamedPort {
     }
 }
 
-#[derive(Debug, Clone, From)]
+#[derive(Debug, Clone)]
 pub enum MaybeNamedPort {
     Named(NamedPort),
     Port(u16),
+}
+
+impl From<NamedPort> for MaybeNamedPort {
+    fn from(named_port: NamedPort) -> Self {
+        MaybeNamedPort::Named(named_port)
+    }
+}
+
+impl From<u16> for MaybeNamedPort {
+    fn from(port: u16) -> Self {
+        MaybeNamedPort::Port(port)
+    }
 }
 
 impl TryFrom<&str> for MaybeNamedPort {

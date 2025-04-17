@@ -1,6 +1,5 @@
 use std::net::IpAddr;
 
-use derive_more::From;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::broadcast::BroadcastEvent;
@@ -16,7 +15,7 @@ macro_rules! define_scanner_event {
     ) => {
         pub trait Sendable {}
 
-        #[derive(Debug, Clone, From)]
+        #[derive(Debug, Clone)]
         pub enum ScannerEvent {
             $(
                 $variant($typ),
@@ -25,6 +24,12 @@ macro_rules! define_scanner_event {
 
         $(
             impl Sendable for $typ {}
+
+            impl From<$typ> for ScannerEvent {
+                fn from(event: $typ) -> Self {
+                    ScannerEvent::$variant(event)
+                }
+            }
         )*
 
     }
