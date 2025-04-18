@@ -156,6 +156,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .context("failed to bind TCP listener")?;
             let (socket, peer_addr) = listener.accept().await.context("TCP listener couldn't accept")?;
 
+            if let Err(error) = socket.set_nodelay(true) {
+                warn!(%error, "Failed to set TCP_NODELAY on the socket");
+            }
+
             info!(%peer_addr, "Accepted peer");
 
             Ok(Pipe {

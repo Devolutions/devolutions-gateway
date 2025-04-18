@@ -928,6 +928,10 @@ impl StreamResolverTask {
         match scheme {
             "tcp" => match TcpStream::connect((host, port)).await {
                 Ok(stream) => {
+                    if let Err(error) = stream.set_nodelay(true) {
+                        warn!(%error, "Failed to set TCP_NODELAY on the socket");
+                    }
+
                     internal_msg_tx
                         .send(InternalMessage::StreamResolved { channel, stream })
                         .await

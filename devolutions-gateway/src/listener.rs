@@ -115,6 +115,8 @@ async fn run_tcp_listener(listener: TcpListener, state: DgwState) -> anyhow::Res
     loop {
         match listener.accept().await.context("failed to accept connection") {
             Ok((stream, peer_addr)) => {
+                configure_tcp_socket(&stream);
+
                 let state = state.clone();
 
                 ChildTask::spawn(async move {
@@ -131,10 +133,6 @@ async fn run_tcp_listener(listener: TcpListener, state: DgwState) -> anyhow::Res
 
 #[instrument("tcp", skip_all, fields(client = %peer_addr))]
 async fn handle_tcp_peer(stream: TcpStream, state: DgwState, peer_addr: SocketAddr) -> anyhow::Result<()> {
-    if let Err(e) = stream.set_nodelay(true) {
-        error!("set_nodelay on TcpStream failed: {}", e);
-    }
-
     let mut peeked = [0; 4];
     let n_read = stream
         .peek(&mut peeked)
@@ -168,6 +166,8 @@ async fn run_http_listener(listener: TcpListener, state: DgwState) -> anyhow::Re
     loop {
         match listener.accept().await {
             Ok((stream, peer_addr)) => {
+                configure_tcp_socket(&stream);
+
                 let state = state.clone();
 
                 let fut = tokio::time::timeout(HTTP_CONNECTION_MAX_DURATION, async move {
@@ -195,6 +195,8 @@ async fn run_https_listener(listener: TcpListener, state: DgwState) -> anyhow::R
     loop {
         match listener.accept().await {
             Ok((stream, peer_addr)) => {
+                configure_tcp_socket(&stream);
+
                 let tls_acceptor = tls_conf.acceptor.clone();
                 let state = state.clone();
 
@@ -283,5 +285,11 @@ impl ToInternalUrl for ListenerUrls {
 impl ToInternalUrl for Url {
     fn to_internal_url(self) -> Url {
         self
+    }
+}
+
+fn configure_tcp_socket(socket: &TcpStream) {
+    if let Err(error) = socket.set_nodelay(true) {
+        warn!(%error, "Failed to set TCP_NODELAY on the socket");
     }
 }

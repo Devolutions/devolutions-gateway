@@ -73,6 +73,11 @@ macro_rules! impl_tcp_connect {
                 let dest_addr =
                     resolve_dest_addr($req_addr.to_dest_addr().with_context(|| "invalid target address")?).await?;
                 let $stream = TcpStream::connect(dest_addr).await?;
+
+                if let Err(error) = $stream.set_nodelay(true) {
+                    warn!(%error, "Failed to set TCP_NODELAY on the socket");
+                }
+
                 $operation.await
             }
         };
