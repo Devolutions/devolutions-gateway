@@ -21,14 +21,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    let router = Router::new().route("/scan", axum::routing::get(handle_network_scan));
-
-    let router = if state.conf_handle.get_conf().debug.enable_unstable {
-        // This route is currently unstable and disabled by default.
-        router.route("/config", axum::routing::get(get_net_config))
-    } else {
-        router
-    };
+    let router = Router::new()
+        .route("/scan", axum::routing::get(handle_network_scan))
+        .route("/config", axum::routing::get(get_net_config));
 
     router.with_state(state)
 }
