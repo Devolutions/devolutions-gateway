@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_query_args_inline() {
-        assert_eq!(query_args_inline_generic(2, '$'), "(1, 2)".to_owned());
-        assert_eq!(query_args_inline_generic(3, '$'), "(1, 2, 3)".to_owned());
+        assert_eq!(query_args_inline_generic(2, '$'), "($1, $2)".to_owned());
+        assert_eq!(query_args_inline_generic(3, '$'), "($1, $2, $3)".to_owned());
     }
 }
