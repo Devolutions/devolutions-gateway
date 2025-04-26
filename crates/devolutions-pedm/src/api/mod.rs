@@ -32,12 +32,14 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
 use win_api_wrappers::utils::Pipe;
 
+use crate::account::{diff_accounts, list_accounts, ListAccountsError};
 use crate::config::Config;
 use crate::db::{Db, DbError, InitSchemaError};
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
 
 mod about;
+mod account;
 mod elevate_session;
 mod elevate_temporary;
 mod err;
@@ -48,6 +50,7 @@ pub(crate) mod state;
 mod status;
 
 use self::about::about;
+use self::account::get_accounts;
 use self::elevate_session::elevate_session;
 use self::elevate_temporary::elevate_temporary;
 use self::launch::post_launch;
@@ -135,6 +138,7 @@ fn create_pipe(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
 pub(crate) fn api_router() -> ApiRouter<AppState> {
     ApiRouter::new()
         .api_route("/about", aide::axum::routing::get(about))
+        .api_route("/accounts", aide::axum::routing::get(get_accounts))
         .api_route("/elevate/temporary", aide::axum::routing::post(elevate_temporary))
         .api_route("/elevate/session", aide::axum::routing::post(elevate_session))
         .api_route("/launch", aide::axum::routing::post(post_launch))
@@ -172,6 +176,16 @@ async fn health_check() -> &'static str {
 pub async fn serve(config: Config) -> Result<(), ServeError> {
     let db = Db::new(&config).await?;
     db.setup().await?;
+
+    // Update the list of accounts in the database.
+
+    // SAFETY: uses `NetUserEnum` and `LookupAccountNameW` from `windows`
+    let accounts = unsafe { list_accounts()? };
+
+    let db_accounts = db.get_accounts().await?;
+    info!("Accounts retrieved successfully");
+    let diff = diff_accounts(&db_accounts, &accounts);
+    db.update_accounts(&diff).await?;
 
     let state = AppState::new(db, &config.pipe_name).await?;
 
@@ -227,6 +241,7 @@ pub enum ServeError {
     AppState(AppStateError),
     Db(DbError),
     InitSchema(InitSchemaError),
+    ListAccounts(ListAccountsError),
     Other(anyhow::Error),
 }
 
@@ -237,6 +252,7 @@ impl core::error::Error for ServeError {
             Self::AppState(e) => Some(e),
             Self::Db(e) => Some(e),
             Self::InitSchema(e) => Some(e),
+            Self::ListAccounts(e) => Some(e),
             Self::Other(e) => Some(e.as_ref()),
         }
     }
@@ -249,6 +265,7 @@ impl fmt::Display for ServeError {
             Self::AppState(e) => e.fmt(f),
             Self::Db(e) => e.fmt(f),
             Self::InitSchema(e) => e.fmt(f),
+            Self::ListAccounts(e) => e.fmt(f),
             Self::Other(e) => e.fmt(f),
         }
     }
@@ -272,6 +289,11 @@ impl From<DbError> for ServeError {
 impl From<InitSchemaError> for ServeError {
     fn from(e: InitSchemaError) -> Self {
         Self::InitSchema(e)
+    }
+}
+impl From<ListAccountsError> for ServeError {
+    fn from(e: ListAccountsError) -> Self {
+        Self::ListAccounts(e)
     }
 }
 impl From<anyhow::Error> for ServeError {
