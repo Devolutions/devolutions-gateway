@@ -180,20 +180,7 @@ impl CatalogAdminContext {
                 None,
                 0,
             )
-        };
-
-        let Err(err) = res else {
-            anyhow::bail!("first call to CryptCATAdminCalcHashFromFileHandle2 did not fail")
-        };
-
-        // SAFETY: FFI call with no outstanding precondition.
-        if unsafe { windows::Win32::Foundation::GetLastError() }
-            != windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
-        {
-            return Err(anyhow::Error::new(err).context(
-                "first call to CryptCATAdminCalcHashFromFileHandle2 did not fail with ERROR_INSUFFICIENT_BUFFER",
-            ));
-        }
+        }?;
 
         let mut allocated_length = required_size;
         let mut hash = vec![0u8; allocated_length as usize];
