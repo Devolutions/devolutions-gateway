@@ -172,7 +172,7 @@ impl CatalogAdminContext {
         let mut required_size = 0u32;
 
         // SAFETY: `hFile` must not be NULL and must be a valid file pointer. The `file` is not dropped so it should be valid.
-        let res = unsafe {
+        unsafe {
             CryptCATAdminCalcHashFromFileHandle2(
                 self.handle.0 as isize,
                 HANDLE(file.as_raw_handle().cast()),
