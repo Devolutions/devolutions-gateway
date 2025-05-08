@@ -197,4 +197,6 @@ pub(crate) trait Database: Send + Sync {
     async fn log_http_request(&self, req_id: i32, method: &str, path: &str, status_code: i16) -> Result<(), DbError>;
 
     async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
+
+    async fn insert_jit_elevation_result(&self) -> Result<(), DbError>;
 }

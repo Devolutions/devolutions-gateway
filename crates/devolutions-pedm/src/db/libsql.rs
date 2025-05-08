@@ -106,6 +106,10 @@ impl Database for LibsqlConn {
         .await?;
         Ok(())
     }
+
+    async fn insert_jit_elevation_result(&self) -> Result<(), DbError> {
+        Ok(())
+    }
 }
 
 /// Converts a timestamp in microseconds to a `DateTime<Utc>`.

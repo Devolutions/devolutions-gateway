@@ -5,7 +5,7 @@ mod virtual_account_elevator;
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context as _, Result};
 use parking_lot::RwLock;
@@ -22,6 +22,7 @@ use win_api_wrappers::Error;
 use local_admin_elevator::LocalAdminElevator;
 use virtual_account_elevator::VirtualAccountElevator;
 
+use crate::db;
 use crate::log;
 use crate::policy::{self, application_from_path, Policy};
 use crate::utils::{start_process, AccountExt};
@@ -67,6 +68,7 @@ fn elevate_token(policy: &RwLock<Policy>, token: &Token) -> Result<Token> {
 
 fn validate_elevation(
     policy: &RwLock<Policy>,
+    db: &Arc<(dyn db::Database + std::marker::Send + std::marker::Sync + 'static)>,
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
@@ -104,7 +106,7 @@ fn validate_elevation(
 
     let validation = policy.read().validate(client_token.session_id()?, &req);
 
-    log::log_elevation(&ElevationResult {
+    log::log_elevation(db, &ElevationResult {
         request: req,
         successful: validation.is_ok(),
     })?;
@@ -114,6 +116,7 @@ fn validate_elevation(
 
 pub(crate) fn try_start_elevated(
     policy: &RwLock<Policy>,
+    db: &Arc<(dyn db::Database + Send + Sync + 'static)>,
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
@@ -124,6 +127,7 @@ pub(crate) fn try_start_elevated(
 ) -> Result<ProcessInformation> {
     validate_elevation(
         policy,
+        db,
         client_token,
         client_pid,
         executable_path,

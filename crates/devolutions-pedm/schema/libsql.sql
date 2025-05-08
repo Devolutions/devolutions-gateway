@@ -36,4 +36,11 @@ CREATE TABLE IF NOT EXISTS elevate_tmp_request
     seconds integer NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS jit_elevation_result
+(
+    id  integer PRIMARY KEY,
+    success integer NOT NULL,
+    at integer NOT NULL DEFAULT ( CAST(strftime('%s', 'now') AS integer) * 1000000 + CAST(strftime('%f', 'now') * 1000000 AS integer) % 1000000)
+);
+
 INSERT INTO version (version) VALUES (0) ON CONFLICT DO NOTHING;
