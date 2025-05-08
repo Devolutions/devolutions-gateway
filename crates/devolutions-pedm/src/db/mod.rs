@@ -1,3 +1,7 @@
+//! This module defines the database trait, a backend-agnostic interface for databse operations.
+//!
+//! Trait methods are defined here. A suffix of `_tx` indicates that the method is part of a transaction but not committed.
+
 use core::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -7,7 +11,9 @@ use chrono::{DateTime, Utc};
 use tracing::info;
 
 mod err;
+mod util;
 
+use crate::account::{AccountWithId, AccountsDiff};
 use crate::config::DbBackend;
 use crate::Config;
 pub(crate) use err::DbError;
@@ -195,6 +201,12 @@ pub(crate) trait Database: Send + Sync {
     ///
     /// This is used in the `LogLayer` middleware. Note that this query will only be executed after the response is sent.
     async fn log_http_request(&self, req_id: i32, method: &str, path: &str, status_code: i16) -> Result<(), DbError>;
+
+    /// Gets accounts from the database, ordered by name.
+    async fn get_accounts(&self) -> Result<Vec<AccountWithId>, DbError>;
+
+    /// Updates accounts in the database.
+    async fn update_accounts(&self, diff: &AccountsDiff) -> Result<(), DbError>;
 
     async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
 }
