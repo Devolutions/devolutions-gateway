@@ -21,6 +21,7 @@ use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
 use tracing::{error, info};
 
+use devolutions_gateway_task::ShutdownSignal;
 use devolutions_pedm_shared::policy::User;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::identity::sid::Sid;
@@ -33,7 +34,7 @@ use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
 use win_api_wrappers::utils::Pipe;
 
 use crate::config::Config;
-use crate::db::{Db, DbError, InitSchemaError};
+use crate::db::{Db, DbAsyncBridgeTask, DbError, InitSchemaError};
 use crate::error::{Error, ErrorResponse};
 use crate::utils::AccountExt;
 
@@ -169,11 +170,14 @@ async fn health_check() -> &'static str {
 }
 
 /// Initializes the appliation and starts the named pipe server.
-pub async fn serve(config: Config) -> Result<(), ServeError> {
+pub async fn serve(config: Config, shutdown_signal: ShutdownSignal) -> Result<(), ServeError> {
     let db = Db::new(&config).await?;
     db.setup().await?;
 
-    let state = AppState::new(db, &config.pipe_name).await?;
+    let (db_handle, db_async_bridge_task) = DbAsyncBridgeTask::new(db.clone());
+    let _db_async_bridge_task = devolutions_gateway_task::spawn_task(db_async_bridge_task, shutdown_signal);
+
+    let state = AppState::new(db, db_handle, &config.pipe_name).await?;
 
     // a plain Axum router
     let hello_router = Router::new().route("/health", axum::routing::get(health_check));

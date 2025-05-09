@@ -44,8 +44,10 @@ impl Task for PedmTask {
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
         cfg_if::cfg_if! {
             if #[cfg(target_os = "windows")] {
+                let config = Config::load_from_default_path()?;
+
                 select! {
-                    res = serve(Config::load_from_default_path()?) => {
+                    res = serve(config, shutdown_signal.clone()) => {
                         if let Err(error) = &res {
                             error!(%error, "Named pipe server got error");
                         }

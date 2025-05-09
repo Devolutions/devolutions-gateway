@@ -8,7 +8,7 @@ use chrono::Utc;
 use hyper::StatusCode;
 use parking_lot::RwLock;
 
-use crate::db::{Database, Db, DbError};
+use crate::db::{Database, Db, DbError, DbHandle};
 use crate::model::StartupInfo;
 use crate::policy::{LoadPolicyError, Policy};
 
@@ -23,11 +23,12 @@ pub(crate) struct AppState {
     /// TODO: implement a check to ensure that there is only one PEDM instance running at any given time
     pub(crate) req_counter: Arc<AtomicI32>,
     pub(crate) db: Arc<dyn Database + Send + Sync>,
+    pub(crate) db_handle: DbHandle,
     pub(crate) policy: Arc<RwLock<Policy>>,
 }
 
 impl AppState {
-    pub(crate) async fn new(db: Db, pipe_name: &str) -> Result<Self, AppStateError> {
+    pub(crate) async fn new(db: Db, db_handle: DbHandle, pipe_name: &str) -> Result<Self, AppStateError> {
         let policy = Policy::load()?;
 
         let last_req_id = db.get_last_request_id().await?;
@@ -44,6 +45,7 @@ impl AppState {
             startup_info,
             req_counter: Arc::new(AtomicI32::new(last_req_id)),
             db: db.0,
+            db_handle,
             policy: Arc::new(RwLock::new(policy)),
         })
     }

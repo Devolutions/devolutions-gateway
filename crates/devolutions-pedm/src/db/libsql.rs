@@ -2,9 +2,9 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use devolutions_pedm_shared::policy::ElevationResult;
 use libsql::params::IntoParams;
 use libsql::{params, Row};
-use tracing::info;
 
 use super::err::ParseTimestampError;
 use super::{Database, DbError, InitSchemaError};
@@ -104,6 +104,11 @@ impl Database for LibsqlConn {
             params![req_id, seconds],
         )
         .await?;
+        Ok(())
+    }
+
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
+        // TODO: execute the SQL query.
         Ok(())
     }
 }

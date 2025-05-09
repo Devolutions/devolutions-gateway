@@ -19,6 +19,8 @@ use win_api_wrappers::thread::{ThreadAttributeList, ThreadAttributeType};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{environment_block, expand_environment_path, CommandLine, WideString};
 
+use crate::api::state::AppState;
+use crate::db::DbHandle;
 use crate::elevator;
 use crate::error::Error;
 use crate::policy::Policy;
@@ -87,7 +89,7 @@ fn win_canonicalize(path: &Path, token: Option<&Token>) -> Result<PathBuf, Error
 
 pub(crate) async fn post_launch(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(State(state)): NoApi<State<AppState>>,
     Json(mut payload): Json<LaunchPayload>,
 ) -> Result<Json<LaunchResponse>, Error> {
     payload.executable_path = payload
@@ -133,7 +135,8 @@ pub(crate) async fn post_launch(
     startup_info.attribute_list = Some(Some(attributes.raw()));
 
     let proc_info = elevator::try_start_elevated(
-        &policy,
+        &state.db_handle,
+        &state.policy,
         &named_pipe_info.token,
         parent_pid,
         payload.executable_path.as_deref(),

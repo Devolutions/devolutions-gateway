@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use tracing::info;
+use devolutions_gateway_task::{ShutdownSignal, Task};
+use devolutions_pedm_shared::policy::ElevationResult;
+use tracing::{info, warn};
 
 mod err;
 
@@ -197,4 +199,110 @@ pub(crate) trait Database: Send + Sync {
     async fn log_http_request(&self, req_id: i32, method: &str, path: &str, status_code: i16) -> Result<(), DbError>;
 
     async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
+
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError>;
+}
+
+// Bridge for DB operations from synchronous functions.
+// This may or may not be a temporary workaround.
+
+pub(crate) struct DbHandleError<T> {
+    pub(crate) db_error: Option<DbError>,
+    pub(crate) value: T,
+}
+
+#[derive(Clone)]
+pub(crate) struct DbHandle {
+    tx: tokio::sync::mpsc::Sender<DbRequest>,
+}
+
+impl DbHandle {
+    pub(crate) fn insert_jit_elevation_result(
+        &self,
+        result: ElevationResult,
+    ) -> Result<(), DbHandleError<ElevationResult>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        match self
+            .tx
+            .blocking_send(DbRequest::InsertJitElevationResult { result, tx })
+        {
+            Ok(()) => match rx.blocking_recv() {
+                Ok(db_result) => db_result,
+                Err(_) => {
+                    warn!("Did not receive the response from the async bridge task");
+                    Ok(())
+                }
+            },
+            Err(error) => {
+                let DbRequest::InsertJitElevationResult { result, .. } = error.0 else {
+                    unreachable!()
+                };
+
+                Err(DbHandleError {
+                    db_error: None,
+                    value: result,
+                })
+            }
+        }
+    }
+}
+
+pub(crate) enum DbRequest {
+    InsertJitElevationResult {
+        result: ElevationResult,
+        tx: tokio::sync::oneshot::Sender<Result<(), DbHandleError<ElevationResult>>>,
+    },
+}
+
+pub(crate) struct DbAsyncBridgeTask {
+    db: Db,
+    rx: tokio::sync::mpsc::Receiver<DbRequest>,
+}
+
+impl DbAsyncBridgeTask {
+    pub fn new(db: Db) -> (DbHandle, Self) {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        (DbHandle { tx }, Self { db, rx })
+    }
+}
+
+#[async_trait]
+impl Task for DbAsyncBridgeTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "db-async-bridge";
+
+    async fn run(mut self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+        loop {
+            tokio::select! {
+                req = self.rx.recv() => {
+                    let Some(req) = req else {
+                        break;
+                    };
+
+                    match req {
+                        DbRequest::InsertJitElevationResult { result, tx } => {
+                            match self.db.insert_jit_elevation_result(&result).await {
+                                Ok(()) => {
+                                    let _ = tx.send(Ok(()));
+                                }
+                                Err(error) => {
+                                    let _ = tx.send(Err(DbHandleError {
+                                       db_error: Some(error),
+                                       value: result,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ = shutdown_signal.wait() => {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
