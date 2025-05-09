@@ -1,6 +1,7 @@
 use devolutions_pedm_shared::policy::ElevationResult;
 
-// The previous function was commented out. The function call for `log_elevation` in `validate_elevation` still remains.
-pub(crate) fn log_elevation(_res: &ElevationResult) -> anyhow::Result<()> {
-    Ok(())
+use crate::db::DbHandle;
+
+pub(crate) fn log_elevation(db_handle: &DbHandle, result: ElevationResult) {
+    db_handle.insert_jit_elevation_result(result);
 }

@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use tracing::info;
+use devolutions_gateway_task::{ShutdownSignal, Task};
+use devolutions_pedm_shared::policy::ElevationRequest;
+use tracing::{error, info};
 
 mod err;
 
@@ -197,4 +199,77 @@ pub(crate) trait Database: Send + Sync {
     async fn log_http_request(&self, req_id: i32, method: &str, path: &str, status_code: i16) -> Result<(), DbError>;
 
     async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
+
+    async fn insert_jit_elevation_result(&self, result: &ElevationRequest) -> Result<(), DbError>;
+}
+
+// Bridge for DB operations from synchronous functions.
+// This may or may not be a temporary workaround.
+
+#[derive(Clone)]
+pub(crate) struct DbHandle {
+    tx: tokio::sync::mpsc::Sender<DbRequest>,
+}
+
+impl DbHandle {
+    pub(crate) fn insert_jit_elevation_result(&self, result: ElevationRequest) {
+        if let Err(error) = self.tx.blocking_send(DbRequest::InsertJitElevationResult(result)) {
+            if let DbRequest::InsertJitElevationResult(result) = error.0 {
+                // We also log the elevation result here, so it’s not completely lost.
+                error!(
+                    ?result,
+                    "DB sync bridge is down, failed to insert the JIT elevation result in the database"
+                );
+            }
+        }
+    }
+}
+
+enum DbRequest {
+    InsertJitElevationResult(ElevationRequest),
+}
+
+pub struct DbAsyncBridgeTask {
+    db: Db,
+    rx: tokio::sync::mpsc::Receiver<DbRequest>,
+}
+
+impl DbAsyncBridgeTask {
+    pub fn new(db: Db) -> (DbHandle, Self) {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        (DbHandle { tx }, Self { db, rx })
+    }
+}
+
+#[async_trait]
+impl Task for DbAsyncBridgeTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "db-async-bridge";
+
+    async fn run(mut self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+        loop {
+            tokio::select! {
+                req = self.rx.recv() => {
+                    let Some(req) = req else {
+                        break;
+                    };
+
+                    match req {
+                        DbRequest::InsertJitElevationResult(result) => {
+                            if let Err(error) = self.db.insert_jit_elevation_result(&result).await {
+                                // We also log the elevation result here, so it’s not completely lost.
+                                error!(%error, ?result, "Failed to insert the JIT elevation result in the database");
+                            }
+                        }
+                    }
+                }
+                _ = shutdown_signal.wait() => {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }

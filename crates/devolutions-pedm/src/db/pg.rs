@@ -98,4 +98,8 @@ impl Database for PgPool {
             .await?;
         Ok(())
     }
+
+    async fn insert_jit_elevation_result(&self, result: &ElevationRequest) -> Result<(), DbError> {
+        unimplemented!()
+    }
 }
