@@ -65,20 +65,6 @@ where
     }
 }
 
-/// Axum extractor for an object that is `DbHandle`.
-impl<S> FromRequestParts<S> for DbHandle
-where
-    AppState: FromRef<S>,
-    S: Send + Sync,
-{
-    type Rejection = (StatusCode, String);
-
-    async fn from_request_parts(_parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let app_state = AppState::from_ref(state);
-        Ok(app_state.db_handle.clone())
-    }
-}
-
 impl FromRef<AppState> for Arc<RwLock<Policy>> {
     fn from_ref(state: &AppState) -> Self {
         Arc::clone(&state.policy)

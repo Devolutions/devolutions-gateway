@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use chrono::{DateTime, Utc};
+use devolutions_pedm_shared::policy::ElevationResult;
 use tokio_postgres::NoTls;
 
 use super::{Database, DbError};
@@ -99,7 +100,7 @@ impl Database for PgPool {
         Ok(())
     }
 
-    async fn insert_jit_elevation_result(&self, result: &ElevationRequest) -> Result<(), DbError> {
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
         unimplemented!()
     }
 }

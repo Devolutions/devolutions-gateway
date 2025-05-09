@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use devolutions_pedm_shared::policy::ElevationRequest;
+use devolutions_pedm_shared::policy::ElevationResult;
 use libsql::params::IntoParams;
 use libsql::{params, Row};
 
@@ -107,7 +107,7 @@ impl Database for LibsqlConn {
         Ok(())
     }
 
-    async fn insert_jit_elevation_result(&self, result: &ElevationRequest) -> Result<(), DbError> {
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
         // TODO: execute the SQL query.
         Ok(())
     }

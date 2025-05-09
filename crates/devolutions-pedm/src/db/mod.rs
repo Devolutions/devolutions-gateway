@@ -5,8 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use devolutions_pedm_shared::policy::ElevationRequest;
-use tracing::{error, info};
+use devolutions_pedm_shared::policy::ElevationResult;
+use tracing::{info, warn};
 
 mod err;
 
@@ -200,11 +200,16 @@ pub(crate) trait Database: Send + Sync {
 
     async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
 
-    async fn insert_jit_elevation_result(&self, result: &ElevationRequest) -> Result<(), DbError>;
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError>;
 }
 
 // Bridge for DB operations from synchronous functions.
 // This may or may not be a temporary workaround.
+
+pub(crate) struct DbHandleError<T> {
+    pub(crate) db_error: Option<DbError>,
+    pub(crate) value: T,
+}
 
 #[derive(Clone)]
 pub(crate) struct DbHandle {
@@ -212,24 +217,45 @@ pub(crate) struct DbHandle {
 }
 
 impl DbHandle {
-    pub(crate) fn insert_jit_elevation_result(&self, result: ElevationRequest) {
-        if let Err(error) = self.tx.blocking_send(DbRequest::InsertJitElevationResult(result)) {
-            if let DbRequest::InsertJitElevationResult(result) = error.0 {
-                // We also log the elevation result here, so it’s not completely lost.
-                error!(
-                    ?result,
-                    "DB sync bridge is down, failed to insert the JIT elevation result in the database"
-                );
+    pub(crate) fn insert_jit_elevation_result(
+        &self,
+        result: ElevationResult,
+    ) -> Result<(), DbHandleError<ElevationResult>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        match self
+            .tx
+            .blocking_send(DbRequest::InsertJitElevationResult { result, tx })
+        {
+            Ok(()) => match rx.blocking_recv() {
+                Ok(db_result) => db_result,
+                Err(_) => {
+                    warn!("Did not receive the response from the async bridge task");
+                    Ok(())
+                }
+            },
+            Err(error) => {
+                let DbRequest::InsertJitElevationResult { result, .. } = error.0 else {
+                    unreachable!()
+                };
+
+                Err(DbHandleError {
+                    db_error: None,
+                    value: result,
+                })
             }
         }
     }
 }
 
-enum DbRequest {
-    InsertJitElevationResult(ElevationRequest),
+pub(crate) enum DbRequest {
+    InsertJitElevationResult {
+        result: ElevationResult,
+        tx: tokio::sync::oneshot::Sender<Result<(), DbHandleError<ElevationResult>>>,
+    },
 }
 
-pub struct DbAsyncBridgeTask {
+pub(crate) struct DbAsyncBridgeTask {
     db: Db,
     rx: tokio::sync::mpsc::Receiver<DbRequest>,
 }
@@ -256,10 +282,17 @@ impl Task for DbAsyncBridgeTask {
                     };
 
                     match req {
-                        DbRequest::InsertJitElevationResult(result) => {
-                            if let Err(error) = self.db.insert_jit_elevation_result(&result).await {
-                                // We also log the elevation result here, so it’s not completely lost.
-                                error!(%error, ?result, "Failed to insert the JIT elevation result in the database");
+                        DbRequest::InsertJitElevationResult { result, tx } => {
+                            match self.db.insert_jit_elevation_result(&result).await {
+                                Ok(()) => {
+                                    let _ = tx.send(Ok(()));
+                                }
+                                Err(error) => {
+                                    let _ = tx.send(Err(DbHandleError {
+                                       db_error: Some(error),
+                                       value: result,
+                                    }));
+                                }
                             }
                         }
                     }
