@@ -1,6 +1,6 @@
 use core::{error, fmt};
 use std::collections::{HashMap, HashSet};
-use std::num::ParseIntError;
+use std::num::{ParseIntError, TryFromIntError};
 use std::str::FromStr;
 use std::string::FromUtf16Error;
 
@@ -209,7 +209,6 @@ impl PartialEq<Account> for AccountWithId {
 ///
 /// `LookupAccountNameW` must be called to enable `ConvertSidToStringSidW` to work.
 #[cfg(target_os = "windows")]
-#[allow(clippy::cast_possible_truncation)]
 pub(crate) unsafe fn list_accounts() -> Result<Vec<Account>, ListAccountsError> {
     use windows::core::PWSTR;
     use windows::Win32::NetworkManagement::NetManagement::{
@@ -255,9 +254,9 @@ pub(crate) unsafe fn list_accounts() -> Result<Vec<Account>, ListAccountsError> 
         // SAFETY: `user.usri0_name` is a valid string.
         let name = unsafe { user.usri0_name.display() }.to_string();
         let mut sid = [0u8; SECURITY_MAX_SID_SIZE as usize];
-        let mut sid_size = sid.len() as u32;
+        let mut sid_size = u32::try_from(sid.len())?;
         let mut domain_name = [0u16; 256];
-        let mut domain_size = domain_name.len() as u32;
+        let mut domain_size = u32::try_from(domain_name.len())?;
         let domain_name = PWSTR(domain_name.as_mut_ptr());
         let mut sid_type = SID_NAME_USE(0);
         let sid = PSID(sid.as_mut_ptr().cast());
@@ -405,6 +404,7 @@ pub(crate) fn diff_accounts(old: &[AccountWithId], new: &[Account]) -> AccountsD
 pub enum ListAccountsError {
     FromUtf16(FromUtf16Error),
     ParseSid(ParseSidError),
+    TryFromInt(TryFromIntError),
     #[cfg(target_os = "windows")]
     Windows(windows_result::Error),
     /// Contains `nStatus`.
@@ -416,6 +416,7 @@ impl error::Error for ListAccountsError {
         match self {
             Self::FromUtf16(e) => Some(e),
             Self::ParseSid(e) => Some(e),
+            Self::TryFromInt(e) => Some(e),
             #[cfg(target_os = "windows")]
             Self::Windows(e) => Some(e),
             Self::NetUserEnumFail(_) => None,
@@ -428,6 +429,7 @@ impl fmt::Display for ListAccountsError {
         match self {
             Self::FromUtf16(e) => e.fmt(f),
             Self::ParseSid(e) => e.fmt(f),
+            Self::TryFromInt(e) => e.fmt(f),
             #[cfg(target_os = "windows")]
             Self::Windows(e) => e.fmt(f),
             Self::NetUserEnumFail(n) => {
@@ -445,6 +447,11 @@ impl From<FromUtf16Error> for ListAccountsError {
 impl From<ParseSidError> for ListAccountsError {
     fn from(e: ParseSidError) -> Self {
         Self::ParseSid(e)
+    }
+}
+impl From<TryFromIntError> for ListAccountsError {
+    fn from(e: TryFromIntError) -> Self {
+        Self::TryFromInt(e)
     }
 }
 #[cfg(target_os = "windows")]
