@@ -1,4 +1,4 @@
-import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { DesktopSize } from '@shared/models/desktop-size';
 
 export interface SessionTokenParameters {
   content_type: string;
@@ -16,7 +16,7 @@ export interface IronRDPConnectionParameters {
   password: string;
   domain?: string;
   port?: number;
-  gatewayAddress?: string;
+  gatewayAddress: string;
   token?: string;
   kdcToken?: string;
   screenSize?: DesktopSize;
@@ -30,15 +30,14 @@ export interface IronVNCConnectionParameters {
   host: string;
   username?: string;
   password: string;
-  domain?: string;
   port?: number;
   gatewayAddress?: string;
   token?: string;
-  kdcToken?: string;
   screenSize?: DesktopSize;
-  kdcUrl?: string;
-  kdcProxyUrl?: string;
-  preConnectionBlob?: string;
+  enabledEncodings?: string;
+  disableCursor: boolean;
+  disableExtendedClipboard: boolean;
+  ultraVirtualDisplay: boolean;
   sessionId?: string;
 }
 
@@ -46,15 +45,11 @@ export interface IronARDConnectionParameters {
   host: string;
   username: string;
   password: string;
-  domain?: string;
   port?: number;
   gatewayAddress?: string;
   token?: string;
-  kdcToken?: string;
-  screenSize?: DesktopSize;
-  kdcUrl?: string;
-  kdcProxyUrl?: string;
-  preConnectionBlob?: string;
+  resolutionQuality?: string;
+  ardQualityMode?: string;
   sessionId?: string;
 }
 

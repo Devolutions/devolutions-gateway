@@ -16,7 +16,7 @@
       </a>
     </div>
 
-    <div *ngIf="showMoreSettingsToggle" class="col-12 gateway-form-group">
+    <div [hidden]="!showMoreSettingsToggle" class="col-12 gateway-form-group">
 
       <web-client-screen-size-control [parentForm]="form"
                                       [inputFormData]="inputFormData"></web-client-screen-size-control>
@@ -30,6 +30,7 @@
         <web-client-pre-connection-blob-control [parentForm]="form"
                                                 [inputFormData]="inputFormData"></web-client-pre-connection-blob-control>
       </div>
+
     </div>
 
 </div>

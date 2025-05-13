@@ -64,14 +64,13 @@ export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy
     if (this.form) {
       this.clearForm();
 
-      this.formService.addControlToForm(
-        this.form,
-        'authMode',
+      this.formService.addControlToForm({
+        formGroup: this.form,
+        controlName: 'authMode',
         inputFormData,
-        true,
-        false,
-        SshAuthMode.Username_and_Password,
-      );
+        isRequired: true,
+        defaultValue: SshAuthMode.Username_and_Password,
+      });
 
       this.subscribeToAuthModeChanges();
     }

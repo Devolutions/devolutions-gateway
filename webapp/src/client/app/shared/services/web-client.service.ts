@@ -3,7 +3,7 @@ import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
-import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebSession } from '@shared/models/web-session.model';

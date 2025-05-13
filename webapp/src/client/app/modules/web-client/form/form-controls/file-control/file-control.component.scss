@@ -20,11 +20,11 @@
   font-size: 11px;
   font-family: Open Sans;
   font-weight: 400;
-  padding-left: 0px;
+  padding-left: 0;
   justify-content: flex-start;
   align-items: flex-start;
   gap: 10px;
-  display: inline-flex
+  display: inline-flex;
 }
 
 .highlight {
@@ -32,7 +32,7 @@
 }
 
 .gateway-form-group {
-  padding: 0px 0px 18px 0px;
+  padding: 0 0 18px 0;
 }
 
 .flex-row{

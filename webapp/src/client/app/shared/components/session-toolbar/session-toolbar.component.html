@@ -36,6 +36,16 @@
     </ng-container>
   </div>
 
+  <div class="session-toolbar-middle-group" *ngIf="checkboxes.length > 0">
+    <ng-container *ngFor="let checkbox of checkboxes; let i = index; let last = last">
+        <p-checkbox [(ngModel)]="checkbox.checked" (onChange)="checkbox.action(checkbox.checked)"
+                  [label]="checkbox.label" [binary]="true"></p-checkbox>
+
+        <div class="separator" *ngIf="checkboxes.length > 1 && !last"></div>
+
+    </ng-container>
+  </div>
+
   <div class="session-toolbar-right-group" *ngIf="rightButtons.length > 0">
     <ng-container *ngFor="let button of rightButtons; let i = index; let last = last">
       <p-button (click)="button.action()"

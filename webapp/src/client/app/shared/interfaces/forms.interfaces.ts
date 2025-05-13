@@ -1,4 +1,7 @@
 import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { ResolutionQuality } from '../enums/resolution-quality.enum';
+import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
+import { Encoding } from '../enums/encoding.enum';
 
 export interface HostnameObject {
   hostname: string;
@@ -33,9 +36,11 @@ export interface VncFormDataInput {
   hostname: string;
   username: string;
   password: string;
-  kdcUrl: string;
-  preConnectionBlob: string;
   protocol: number;
+  disableCursor: boolean;
+  enableExtendedClipboard: boolean;
+  ultraVirtualDisplay: boolean;
+  enabledEncodings: Encoding[];
   screenSize: ScreenSize;
   customWidth?: number;
   customHeight?: number;
@@ -47,9 +52,8 @@ export interface ArdFormDataInput {
   username: string;
   password: string;
   protocol: number;
-  screenSize: ScreenSize;
-  customWidth?: number;
-  customHeight?: number;
+  resolutionQuality: ResolutionQuality;
+  ardQualityMode: ArdQualityMode;
 }
 
 export interface TelnetFormDataInput {

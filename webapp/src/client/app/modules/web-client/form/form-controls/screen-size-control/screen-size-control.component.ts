@@ -49,9 +49,27 @@ export class ScreenSizeControlComponent extends BaseComponent implements OnInit 
 
   private addControlsToParentForm(): void {
     if (this.parentForm) {
-      this.formService.addControlToForm(this.parentForm, 'screenSize', this.inputFormData, false, false, null);
-      this.formService.addControlToForm(this.parentForm, 'customWidth', this.inputFormData, false, true);
-      this.formService.addControlToForm(this.parentForm, 'customHeight', this.inputFormData, false, true);
+      this.formService.addControlToForm({
+        formGroup: this.parentForm,
+        controlName: 'screenSize',
+        inputFormData: this.inputFormData,
+        isRequired: false,
+        defaultValue: ScreenSize.Default,
+      });
+      this.formService.addControlToForm({
+        formGroup: this.parentForm,
+        controlName: 'customWidth',
+        inputFormData: this.inputFormData,
+        isRequired: false,
+        isDisabled: true,
+      });
+      this.formService.addControlToForm({
+        formGroup: this.parentForm,
+        controlName: 'customHeight',
+        inputFormData: this.inputFormData,
+        isRequired: false,
+        isDisabled: true,
+      });
     }
   }
 

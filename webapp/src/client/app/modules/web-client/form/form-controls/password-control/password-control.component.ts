@@ -25,7 +25,12 @@ export class PasswordControlComponent extends BaseComponent implements OnInit {
 
   ngOnInit(): void {
     console.log('this is required', this.isRequired);
-    this.formService.addControlToForm(this.parentForm, this.formKey, this.inputFormData, this.isRequired);
+    this.formService.addControlToForm({
+      formGroup: this.parentForm,
+      controlName: this.formKey,
+      inputFormData: this.inputFormData,
+      isRequired: this.isRequired,
+    });
     this.toggleControl();
   }
 

@@ -1,7 +1,7 @@
 import { Component, ComponentRef, Type } from '@angular/core';
 import { v4 as uuidv4 } from 'uuid';
 
-import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
