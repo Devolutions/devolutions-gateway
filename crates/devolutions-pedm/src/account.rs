@@ -209,7 +209,7 @@ impl PartialEq<Account> for AccountWithId {
 ///
 /// `LookupAccountNameW` must be called to enable `ConvertSidToStringSidW` to work.
 #[cfg(target_os = "windows")]
-pub(crate) unsafe fn list_accounts() -> Result<Vec<Account>, ListAccountsError> {
+pub(crate) fn list_accounts() -> Result<Vec<Account>, ListAccountsError> {
     use windows::core::PWSTR;
     use windows::Win32::NetworkManagement::NetManagement::{
         NERR_Success, NetApiBufferFree, NetUserEnum, FILTER_NORMAL_ACCOUNT, MAX_PREFERRED_LENGTH, USER_INFO_0,
