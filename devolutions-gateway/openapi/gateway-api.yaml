@@ -808,7 +808,7 @@ components:
           description: |-
             Minimum persistance duration in seconds for the data provisioned via this operation.
 
-            Optional option for "provision-token" and "provision-credentials" kinds.
+            Optional parameter for "provision-token" and "provision-credentials" kinds.
           nullable: true
           minimum: 0
         token:

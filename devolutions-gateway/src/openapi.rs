@@ -324,7 +324,7 @@ struct PreflightOperation {
     host_to_resolve: Option<String>,
     /// Minimum persistance duration in seconds for the data provisioned via this operation.
     ///
-    /// Optional option for "provision-token" and "provision-credentials" kinds.
+    /// Optional parameter for "provision-token" and "provision-credentials" kinds.
     time_to_live: Option<u32>,
 }
 

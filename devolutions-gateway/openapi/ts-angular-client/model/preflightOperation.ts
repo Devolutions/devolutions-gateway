@@ -24,7 +24,7 @@ export interface PreflightOperation {
     proxy_credential?: AppCredential | null;
     target_credential?: AppCredential | null;
     /**
-     * Minimum persistance duration in seconds for the data provisioned via this operation.  Optional option for \"provision-token\" and \"provision-credentials\" kinds.
+     * Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\" and \"provision-credentials\" kinds.
      */
     time_to_live?: number | null;
     /**

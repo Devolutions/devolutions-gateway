@@ -52,7 +52,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="kind">kind (required).</param>
         /// <param name="proxyCredential">proxyCredential.</param>
         /// <param name="targetCredential">targetCredential.</param>
-        /// <param name="timeToLive">Minimum persistance duration in seconds for the data provisioned via this operation.  Optional option for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
+        /// <param name="timeToLive">Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
         /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kind..</param>
         public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
         {
@@ -92,9 +92,9 @@ namespace Devolutions.Gateway.Client.Model
         public AppCredential TargetCredential { get; set; }
 
         /// <summary>
-        /// Minimum persistance duration in seconds for the data provisioned via this operation.  Optional option for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds.
+        /// Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds.
         /// </summary>
-        /// <value>Minimum persistance duration in seconds for the data provisioned via this operation.  Optional option for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds.</value>
+        /// <value>Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds.</value>
         [DataMember(Name = "time_to_live", EmitDefaultValue = true)]
         public int? TimeToLive { get; set; }
 
