@@ -58,22 +58,22 @@ namespace Devolutions.Gateway.Client.Model
         GetRecordingStorageHealth = 4,
 
         /// <summary>
-        /// Enum PushToken for value: push-token
+        /// Enum ProvisionToken for value: provision-token
         /// </summary>
-        [EnumMember(Value = "push-token")]
-        PushToken = 5,
+        [EnumMember(Value = "provision-token")]
+        ProvisionToken = 5,
 
         /// <summary>
-        /// Enum PushCredentials for value: push-credentials
+        /// Enum ProvisionCredentials for value: provision-credentials
         /// </summary>
-        [EnumMember(Value = "push-credentials")]
-        PushCredentials = 6,
+        [EnumMember(Value = "provision-credentials")]
+        ProvisionCredentials = 6,
 
         /// <summary>
-        /// Enum LookupHost for value: lookup-host
+        /// Enum ResolveHost for value: resolve-host
         /// </summary>
-        [EnumMember(Value = "lookup-host")]
-        LookupHost = 7
+        [EnumMember(Value = "resolve-host")]
+        ResolveHost = 7
     }
 
     public static class PreflightOperationKindExtensions
@@ -93,12 +93,12 @@ namespace Devolutions.Gateway.Client.Model
                     return "get-running-session-count";
                 case PreflightOperationKind.GetRecordingStorageHealth:
                     return "get-recording-storage-health";
-                case PreflightOperationKind.PushToken:
-                    return "push-token";
-                case PreflightOperationKind.PushCredentials:
-                    return "push-credentials";
-                case PreflightOperationKind.LookupHost:
-                    return "lookup-host";
+                case PreflightOperationKind.ProvisionToken:
+                    return "provision-token";
+                case PreflightOperationKind.ProvisionCredentials:
+                    return "provision-credentials";
+                case PreflightOperationKind.ResolveHost:
+                    return "resolve-host";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }

@@ -9,15 +9,15 @@
  */
 
 
-export type PreflightOperationKind = 'get-version' | 'get-agent-version' | 'get-running-session-count' | 'get-recording-storage-health' | 'push-token' | 'push-credentials' | 'lookup-host';
+export type PreflightOperationKind = 'get-version' | 'get-agent-version' | 'get-running-session-count' | 'get-recording-storage-health' | 'provision-token' | 'provision-credentials' | 'resolve-host';
 
 export const PreflightOperationKind = {
     GetVersion: 'get-version' as PreflightOperationKind,
     GetAgentVersion: 'get-agent-version' as PreflightOperationKind,
     GetRunningSessionCount: 'get-running-session-count' as PreflightOperationKind,
     GetRecordingStorageHealth: 'get-recording-storage-health' as PreflightOperationKind,
-    PushToken: 'push-token' as PreflightOperationKind,
-    PushCredentials: 'push-credentials' as PreflightOperationKind,
-    LookupHost: 'lookup-host' as PreflightOperationKind
+    ProvisionToken: 'provision-token' as PreflightOperationKind,
+    ProvisionCredentials: 'provision-credentials' as PreflightOperationKind,
+    ResolveHost: 'resolve-host' as PreflightOperationKind
 };
 

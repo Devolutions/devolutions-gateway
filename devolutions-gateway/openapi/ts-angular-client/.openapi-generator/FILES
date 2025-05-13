@@ -16,14 +16,14 @@ configuration.ts
 encoder.ts
 index.ts
 model/accessScope.ts
+model/appCredential.ts
+model/appCredentialKind.ts
 model/appTokenContentType.ts
 model/appTokenSignRequest.ts
 model/clockDiagnostic.ts
 model/configDiagnostic.ts
 model/configPatch.ts
 model/connectionMode.ts
-model/credentials.ts
-model/credentialsKind.ts
 model/dataEncoding.ts
 model/deleteManyResult.ts
 model/heartbeat.ts

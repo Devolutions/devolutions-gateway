@@ -7,28 +7,28 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { AppCredential } from './appCredential';
 import { PreflightOperationKind } from './preflightOperationKind';
-import { Credentials } from './credentials';
 
 
 export interface PreflightOperation { 
     /**
-     * A unique ID identifying the session for which the credentials should be used.  Required for \"push-credentials\" kind.
+     * The hostname to perform DNS resolution on.  Required for \"resolve-host\" kind.
      */
-    association_id?: string | null;
-    /**
-     * The hostname to perform DNS lookup on.  Required for \"lookup-host\" kind.
-     */
-    host_to_lookup?: string | null;
+    host_to_resolve?: string | null;
     /**
      * Unique ID identifying the preflight operation.
      */
     id: string;
     kind: PreflightOperationKind;
-    proxy_credentials?: Credentials | null;
-    target_credentials?: Credentials | null;
+    proxy_credential?: AppCredential | null;
+    target_credential?: AppCredential | null;
     /**
-     * The token to be pushed on the proxy-side.  Required for \"push-token\" kind.
+     * Minimum persistance duration in seconds for the data provisioned via this operation.  Optional option for \"provision-token\" and \"provision-credentials\" kinds.
+     */
+    time_to_live?: number | null;
+    /**
+     * The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kind.
      */
     token?: string | null;
 }

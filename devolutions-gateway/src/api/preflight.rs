@@ -25,6 +25,7 @@ const OP_PROVISION_CREDENTIALS: &str = "provision-credentials";
 const OP_RESOLVE_HOST: &str = "resolve-host";
 
 const DEFAULT_TTL: Duration = Duration::minutes(15);
+const MAX_TTL: Duration = Duration::hours(2);
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct PreflightOperation {
@@ -312,6 +313,15 @@ async fn handle_operation(
                 .map(i64::from)
                 .map(Duration::seconds)
                 .unwrap_or(DEFAULT_TTL);
+
+            if time_to_live > MAX_TTL {
+                return Err(PreflightError {
+                    status: PreflightAlertStatus::InvalidParams,
+                    message: format!(
+                        "provided time_to_live ({time_to_live}) is exceeding the maximum TTL duration ({MAX_TTL})"
+                    ),
+                });
+            }
 
             let previous_entry = credential_store
                 .insert(token, mapping, time_to_live)

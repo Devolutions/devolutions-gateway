@@ -310,10 +310,6 @@ struct PreflightOperation {
     ///
     /// Required for "provision-token" and "provision-credentials" kind.
     token: Option<String>,
-    /// A unique ID identifying the session for which the credentials should be used.
-    ///
-    /// Required for "provision-credentials" kind.
-    association_id: Option<Uuid>,
     /// The credential to use to authorize the client at the proxy-level.
     ///
     /// Required for "provision-credentials" kind.
@@ -356,11 +352,11 @@ enum PreflightOperationKind {
 struct AppCredential {
     /// The kind of credentials.
     kind: AppCredentialKind,
-    /// Username for the credentials.
+    /// Username for the credential.
     ///
     /// Required for "username-password" kind.
     username: Option<String>,
-    /// Password for the credentials.
+    /// Password for the credential.
     ///
     /// Required for "username-password" kind.
     password: Option<String>,

@@ -9,14 +9,15 @@
  */
 
 
-export type PreflightAlertStatus = 'general-failure' | 'unsupported-operation' | 'invalid-parameters' | 'internal-server-error' | 'host-lookup-failure' | 'agent-version-lookup-failure';
+export type PreflightAlertStatus = 'general-failure' | 'info' | 'unsupported-operation' | 'invalid-parameters' | 'internal-server-error' | 'host-resolution-failure' | 'agent-version-lookup-failure';
 
 export const PreflightAlertStatus = {
     GeneralFailure: 'general-failure' as PreflightAlertStatus,
+    Info: 'info' as PreflightAlertStatus,
     UnsupportedOperation: 'unsupported-operation' as PreflightAlertStatus,
     InvalidParameters: 'invalid-parameters' as PreflightAlertStatus,
     InternalServerError: 'internal-server-error' as PreflightAlertStatus,
-    HostLookupFailure: 'host-lookup-failure' as PreflightAlertStatus,
+    HostResolutionFailure: 'host-resolution-failure' as PreflightAlertStatus,
     AgentVersionLookupFailure: 'agent-version-lookup-failure' as PreflightAlertStatus
 };
 

@@ -540,6 +540,31 @@ components:
       - gateway.recordings.read
       - gateway.update
       - gateway.preflight
+    AppCredential:
+      type: object
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/AppCredentialKind'
+        password:
+          type: string
+          description: |-
+            Password for the credential.
+
+            Required for "username-password" kind.
+          nullable: true
+        username:
+          type: string
+          description: |-
+            Username for the credential.
+
+            Required for "username-password" kind.
+          nullable: true
+    AppCredentialKind:
+      type: string
+      enum:
+      - username-password
     AppTokenContentType:
       type: string
       enum:
@@ -624,31 +649,6 @@ components:
       enum:
       - rdv
       - fwd
-    Credentials:
-      type: object
-      required:
-      - kind
-      properties:
-        kind:
-          $ref: '#/components/schemas/CredentialsKind'
-        password:
-          type: string
-          description: |-
-            Password for the credentials.
-
-            Required for "username-password" kind.
-          nullable: true
-        username:
-          type: string
-          description: |-
-            Username for the credentials.
-
-            Required for "username-password" kind.
-          nullable: true
-    CredentialsKind:
-      type: string
-      enum:
-      - username-password
     DataEncoding:
       type: string
       enum:
@@ -769,10 +769,11 @@ components:
       type: string
       enum:
       - general-failure
+      - info
       - unsupported-operation
       - invalid-parameters
       - internal-server-error
-      - host-lookup-failure
+      - host-resolution-failure
       - agent-version-lookup-failure
     PreflightOperation:
       type: object
@@ -780,20 +781,12 @@ components:
       - id
       - kind
       properties:
-        association_id:
-          type: string
-          format: uuid
-          description: |-
-            A unique ID identifying the session for which the credentials should be used.
-
-            Required for "push-credentials" kind.
-          nullable: true
-        host_to_lookup:
+        host_to_resolve:
           type: string
           description: |-
-            The hostname to perform DNS lookup on.
+            The hostname to perform DNS resolution on.
 
-            Required for "lookup-host" kind.
+            Required for "resolve-host" kind.
           nullable: true
         id:
           type: string
@@ -801,20 +794,29 @@ components:
           description: Unique ID identifying the preflight operation.
         kind:
           $ref: '#/components/schemas/PreflightOperationKind'
-        proxy_credentials:
+        proxy_credential:
           allOf:
-          - $ref: '#/components/schemas/Credentials'
+          - $ref: '#/components/schemas/AppCredential'
           nullable: true
-        target_credentials:
+        target_credential:
           allOf:
-          - $ref: '#/components/schemas/Credentials'
+          - $ref: '#/components/schemas/AppCredential'
           nullable: true
+        time_to_live:
+          type: integer
+          format: int32
+          description: |-
+            Minimum persistance duration in seconds for the data provisioned via this operation.
+
+            Optional option for "provision-token" and "provision-credentials" kinds.
+          nullable: true
+          minimum: 0
         token:
           type: string
           description: |-
-            The token to be pushed on the proxy-side.
+            The token to be stored on the proxy-side.
 
-            Required for "push-token" kind.
+            Required for "provision-token" and "provision-credentials" kind.
           nullable: true
     PreflightOperationKind:
       type: string
@@ -823,9 +825,9 @@ components:
       - get-agent-version
       - get-running-session-count
       - get-recording-storage-health
-      - push-token
-      - push-credentials
-      - lookup-host
+      - provision-token
+      - provision-credentials
+      - resolve-host
     PreflightOutput:
       type: object
       required:
