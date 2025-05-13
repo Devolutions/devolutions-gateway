@@ -23,6 +23,7 @@ export interface RdpFormDataInput {
   hostname: string;
   username: string;
   password: string;
+  enableDisplayControl: boolean;
   kdcUrl: string;
   preConnectionBlob: string;
   protocol: number;
