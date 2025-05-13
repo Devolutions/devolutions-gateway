@@ -310,7 +310,7 @@ async fn handle_operation(
 
             let time_to_live = time_to_live
                 .map(i64::from)
-                .map(Duration::minutes)
+                .map(Duration::seconds)
                 .unwrap_or(DEFAULT_TTL);
 
             let previous_entry = credential_store

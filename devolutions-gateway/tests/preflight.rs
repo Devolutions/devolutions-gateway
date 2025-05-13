@@ -14,7 +14,6 @@ use http_body_util::BodyExt as _;
 use serde_json::json;
 use tower::ServiceExt as _;
 use tracing_subscriber::util::SubscriberInitExt;
-// for `app.oneshot(...)`
 use uuid::Uuid;
 
 const CONFIG: &str = r#"{
@@ -78,7 +77,7 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
         "token": token,
         "proxy_credential": { "kind": "username-password", "username": "proxy_user", "password": "secret1" },
         "target_credential": { "kind": "username-password", "username": "target_user", "password": "secret2" },
-        "time_to_live": 5
+        "time_to_live": 15
     }]);
 
     let request = preflight_request(op)?;
@@ -94,6 +93,10 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
 
     let entry = state.credential_store.get(token_id).expect("the provisioned entry");
     assert_eq!(entry.token, token);
+
+    let now = time::OffsetDateTime::now_utc();
+    assert!(now + time::Duration::seconds(10) < entry.expires_at);
+    assert!(entry.expires_at < now + time::Duration::seconds(20));
 
     let mapping = entry.mapping.as_ref().expect("the provisioned mapping");
     assert!(matches!(mapping.proxy, AppCredential::UsernamePassword { .. }));

@@ -326,7 +326,7 @@ struct PreflightOperation {
     ///
     /// Required for "resolve-host" kind.
     host_to_resolve: Option<String>,
-    /// Minimum persistance duration in minutes for the credentials stored in the cache.
+    /// Minimum persistance duration in seconds for the data provisioned via this operation.
     ///
     /// Optional option for "provision-token" and "provision-credentials" kinds.
     time_to_live: Option<u32>,
