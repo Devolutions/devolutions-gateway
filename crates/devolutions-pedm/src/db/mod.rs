@@ -283,7 +283,7 @@ pub(crate) struct DbAsyncBridgeTask {
 }
 
 impl DbAsyncBridgeTask {
-    pub fn new(db: Db) -> (DbHandle, Self) {
+    pub(crate) fn new(db: Db) -> (DbHandle, Self) {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         (DbHandle { tx }, Self { db, rx })
     }

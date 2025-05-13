@@ -182,9 +182,8 @@ pub async fn serve(config: Config, shutdown_signal: ShutdownSignal) -> Result<()
 
     // Update the list of accounts in the database.
 
-    // SAFETY: uses `NetUserEnum` and `LookupAccountNameW` from `windows`
+    // Get the system's accounts and update if needed.
     let accounts = list_accounts()?;
-
     let db_accounts = db.get_accounts().await?;
     info!("Accounts retrieved successfully");
     let diff = diff_accounts(&db_accounts, &accounts);
