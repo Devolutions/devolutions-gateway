@@ -209,7 +209,6 @@ impl PartialEq<Account> for AccountWithId {
 ///
 /// `LookupAccountNameW` must be called to enable `ConvertSidToStringSidW` to work.
 #[cfg(target_os = "windows")]
-#[allow(clippy::multiple_unsafe_ops_per_block)]
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) unsafe fn list_accounts() -> Result<Vec<Account>, ListAccountsError> {
     use windows::core::PWSTR;
@@ -220,13 +219,16 @@ pub(crate) unsafe fn list_accounts() -> Result<Vec<Account>, ListAccountsError> 
     use windows::Win32::Security::{LookupAccountNameW, PSID, SECURITY_MAX_SID_SIZE, SID_NAME_USE};
 
     // SAFETY: uses `NetUserEnum` and `LookupAccountNameW` from `windows`
-    unsafe {
-        let mut buf: *mut u8 = std::ptr::null_mut();
-        let mut entries_read = 0;
-        let mut total_entries = 0;
 
+    let mut buf: *mut u8 = std::ptr::null_mut();
+    let mut entries_read = 0;
+    let mut total_entries = 0;
+
+    // SAFETY: `buf` is a null-initialized out-pointer that NetUserEnum will allocate.
+    // `entries_read` and `total_entries` are valid pointers to receive output counts.
+    let status = unsafe {
         // Get the list of user accounts.
-        let status = NetUserEnum(
+        NetUserEnum(
             None,
             0,
             FILTER_NORMAL_ACCOUNT,
@@ -235,48 +237,61 @@ pub(crate) unsafe fn list_accounts() -> Result<Vec<Account>, ListAccountsError> 
             &mut entries_read,
             &mut total_entries,
             None,
-        );
+        )
+    };
 
-        if status != NERR_Success {
-            return Err(ListAccountsError::NetUserEnumFail(status));
-        }
+    if status != NERR_Success {
+        return Err(ListAccountsError::NetUserEnumFail(status));
+    }
 
-        #[allow(clippy::cast_ptr_alignment)]
-        let users = std::slice::from_raw_parts(buf as *const USER_INFO_0, entries_read as usize);
+    #[expect(clippy::cast_ptr_alignment)]
+    // SAFETY: `buf` is guaranteed by `NetUserEnum` to point to an array of `USER_INFO_0` structs.
+    // We cast it and build a slice with `entries_read` elements, which was returned alongside `buf`.
+    // We expect the alignment to be correct because `USER_INFO_0` is a `#[repr(C)]` struct with a single field, so it is identical to the alignment of PWSTR.
+    let users = unsafe { std::slice::from_raw_parts(buf as *const USER_INFO_0, entries_read as usize) };
 
-        let mut accounts = Vec::with_capacity(users.len());
-        for user in users {
-            let username = user.usri0_name.display();
-            let mut sid = [0u8; SECURITY_MAX_SID_SIZE as usize];
-            let mut sid_size = sid.len() as u32;
-            let mut domain_name = [0u16; 256];
-            let mut domain_size = domain_name.len() as u32;
-            let mut sid_type = SID_NAME_USE(0);
-            let sid = PSID(sid.as_mut_ptr().cast());
+    let mut accounts = Vec::with_capacity(users.len());
+    for user in users {
+        // SAFETY: `user.usri0_name` is a valid string.
+        let name = unsafe { user.usri0_name.display() }.to_string();
+        let mut sid = [0u8; SECURITY_MAX_SID_SIZE as usize];
+        let mut sid_size = sid.len() as u32;
+        let mut domain_name = [0u16; 256];
+        let mut domain_size = domain_name.len() as u32;
+        let domain_name = PWSTR(domain_name.as_mut_ptr());
+        let mut sid_type = SID_NAME_USE(0);
+        let sid = PSID(sid.as_mut_ptr().cast());
 
+        // SAFETY: `user.usri0_name` is a valid string.
+        // `sid` and `domain_name` buffers are correctly sized and initialized.
+        // `sid_size` and `domain_size` are set to their respective buffer lengths.
+        // All pointers are valid for writes.
+        unsafe {
             LookupAccountNameW(
                 None,
                 user.usri0_name,
                 Some(sid),
                 &mut sid_size,
-                Some(PWSTR(domain_name.as_mut_ptr())),
+                Some(domain_name),
                 &mut domain_size,
                 &mut sid_type,
-            )?;
+            )
+        }?;
 
-            let mut sid_str: PWSTR = PWSTR::null();
-            ConvertSidToStringSidW(sid, &mut sid_str)?;
-
-            // convert to string
-            let s = sid_str.to_string()?;
-            accounts.push(Account {
-                name: username.to_string(),
-                sid: Sid::from_str(&s)?,
-            })
-        }
-        NetApiBufferFree(Some(buf as *mut _));
-        Ok(accounts)
+        let mut sid_str: PWSTR = PWSTR::null();
+        // SAFETY: `sid` is a valid buffer previously populated by `LookupAccountNameW`.
+        unsafe { ConvertSidToStringSidW(sid, &mut sid_str) }?;
+        // SAFETY: `sid_str` is a valid string.
+        let s = unsafe { sid_str.to_string() }?;
+        let sid = Sid::from_str(&s)?;
+        accounts.push(Account { name, sid })
     }
+
+    // SAFETY: `buf` was allocated by `NetUserEnum` and must be freed.
+    unsafe {
+        NetApiBufferFree(Some(buf as *mut _));
+    }
+    Ok(accounts)
 }
 
 /// A diff of changes between two lists of accounts.
