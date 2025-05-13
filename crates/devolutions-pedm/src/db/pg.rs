@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use devolutions_pedm_shared::policy::ElevationResult;
 use tokio_postgres::NoTls;
 
+use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions};
+
 use super::{Database, DbError};
 
 pub(crate) struct PgPool(Pool<PostgresConnectionManager<NoTls>>);
@@ -101,6 +103,13 @@ impl Database for PgPool {
     }
 
     async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
+        unimplemented!()
+    }
+
+    async fn get_jit_elevation_logs(
+        &self,
+        query_options: JitElevationLogQueryOptions,
+    ) -> Result<JitElevationLogPage, DbError> {
         unimplemented!()
     }
 }

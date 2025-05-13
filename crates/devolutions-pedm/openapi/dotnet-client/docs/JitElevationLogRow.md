@@ -1,15 +1,14 @@
-# Devolutions.Pedm.Client.Model.Certificate
+# Devolutions.Pedm.Client.Model.JitElevationLogRow
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**Base64** | **string** |  | 
-**Eku** | **List&lt;string&gt;** |  | 
-**Issuer** | **string** |  | 
-**SerialNumber** | **string** |  | 
-**Subject** | **string** |  | 
-**Thumbprint** | [**Hash**](Hash.md) |  | 
+**Id** | **long** |  | 
+**Success** | **long** |  | 
+**TargetPath** | **string** |  | 
+**Timestamp** | **long** |  | 
+**User** | [**User**](User.md) |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

@@ -1,4 +1,5 @@
 # Devolutions.Pedm.Client.Model.GetProfilesMeResponse
+Returns some information about the current user and active profiles.  If there is no active profile, the `active` UUID will be full of zeroes.
 
 ## Properties
 

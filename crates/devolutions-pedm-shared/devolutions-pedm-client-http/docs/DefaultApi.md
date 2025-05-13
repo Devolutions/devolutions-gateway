@@ -4,10 +4,11 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**about_get**](DefaultApi.md#about_get) | **Get** /about | 
 [**elevate_session_post**](DefaultApi.md#elevate_session_post) | **Post** /elevate/session | 
 [**elevate_temporary_post**](DefaultApi.md#elevate_temporary_post) | **Post** /elevate/temporary | 
 [**launch_post**](DefaultApi.md#launch_post) | **Post** /launch | 
-[**logs_get**](DefaultApi.md#logs_get) | **Get** /logs | 
+[**log_jit_get**](DefaultApi.md#log_jit_get) | **Get** /log/jit | 
 [**policy_assignments_get**](DefaultApi.md#policy_assignments_get) | **Get** /policy/assignments | 
 [**policy_assignments_id_put**](DefaultApi.md#policy_assignments_id_put) | **Put** /policy/assignments/{id} | 
 [**policy_me_get**](DefaultApi.md#policy_me_get) | **Get** /policy/me | 
@@ -20,6 +21,31 @@ Method | HTTP request | Description
 [**revoke_post**](DefaultApi.md#revoke_post) | **Post** /revoke | 
 [**status_get**](DefaultApi.md#status_get) | **Get** /status | 
 
+
+
+## about_get
+
+> models::AboutData about_get()
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**models::AboutData**](AboutData.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
 ## elevate_session_post
@@ -103,18 +129,21 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## logs_get
+## log_jit_get
 
-> Vec<models::ElevationResult> logs_get()
+> models::JitElevationLogPage log_jit_get(jit_elevation_log_query_options)
 
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Required | Notes
+------------- | ------------- | ------------- | ------------- | -------------
+**jit_elevation_log_query_options** | [**JitElevationLogQueryOptions**](JitElevationLogQueryOptions.md) |  | [required] |
 
 ### Return type
 
-[**Vec<models::ElevationResult>**](ElevationResult.md)
+[**models::JitElevationLogPage**](JitElevationLogPage.md)
 
 ### Authorization
 
@@ -122,7 +151,7 @@ No authorization required
 
 ### HTTP request headers
 
-- **Content-Type**: Not defined
+- **Content-Type**: application/json
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

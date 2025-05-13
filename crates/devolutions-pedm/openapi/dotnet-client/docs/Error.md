@@ -1,4 +1,5 @@
 # Devolutions.Pedm.Client.Model.Error
+The original crate-wide error type.
 
 ## Properties
 

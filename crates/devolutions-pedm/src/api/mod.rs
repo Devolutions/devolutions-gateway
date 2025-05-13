@@ -43,6 +43,7 @@ mod elevate_session;
 mod elevate_temporary;
 mod err;
 mod launch;
+mod log;
 mod policy;
 mod revoke;
 pub(crate) mod state;
@@ -141,6 +142,7 @@ pub(crate) fn api_router() -> ApiRouter<AppState> {
         .api_route("/launch", aide::axum::routing::post(post_launch))
         .api_route("/revoke", aide::axum::routing::post(post_revoke))
         .api_route("/status", aide::axum::routing::get(get_status))
+        .nest("/log", log::log_router())
         .nest("/policy", policy::policy_router())
         .layer(middleware::from_fn(named_pipe_middleware))
         .layer(TimeoutLayer::new(Duration::from_secs(5)))

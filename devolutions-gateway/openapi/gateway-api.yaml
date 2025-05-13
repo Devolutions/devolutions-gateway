@@ -816,7 +816,7 @@ components:
           description: |-
             The token to be stored on the proxy-side.
 
-            Required for "provision-token" and "provision-credentials" kind.
+            Required for "provision-token" and "provision-credentials" kinds.
           nullable: true
     PreflightOperationKind:
       type: string

@@ -4,10 +4,11 @@ All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
+| [**AboutGet**](DefaultApi.md#aboutget) | **GET** /about |  |
 | [**ElevateSessionPost**](DefaultApi.md#elevatesessionpost) | **POST** /elevate/session |  |
 | [**ElevateTemporaryPost**](DefaultApi.md#elevatetemporarypost) | **POST** /elevate/temporary |  |
 | [**LaunchPost**](DefaultApi.md#launchpost) | **POST** /launch |  |
-| [**LogsGet**](DefaultApi.md#logsget) | **GET** /logs |  |
+| [**LogJitGet**](DefaultApi.md#logjitget) | **GET** /log/jit |  |
 | [**PolicyAssignmentsGet**](DefaultApi.md#policyassignmentsget) | **GET** /policy/assignments |  |
 | [**PolicyAssignmentsIdPut**](DefaultApi.md#policyassignmentsidput) | **PUT** /policy/assignments/{id} |  |
 | [**PolicyMeGet**](DefaultApi.md#policymeget) | **GET** /policy/me |  |
@@ -19,6 +20,93 @@ All URIs are relative to *http://localhost*
 | [**PolicyProfilesPost**](DefaultApi.md#policyprofilespost) | **POST** /policy/profiles |  |
 | [**RevokePost**](DefaultApi.md#revokepost) | **POST** /revoke |  |
 | [**StatusGet**](DefaultApi.md#statusget) | **GET** /status |  |
+
+<a id="aboutget"></a>
+# **AboutGet**
+> AboutData AboutGet ()
+
+
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Pedm.Client.Api;
+using Devolutions.Pedm.Client.Client;
+using Devolutions.Pedm.Client.Model;
+
+namespace Example
+{
+    public class AboutGetExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
+
+            try
+            {
+                AboutData result = apiInstance.AboutGet();
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling DefaultApi.AboutGet: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the AboutGetWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    ApiResponse<AboutData> response = apiInstance.AboutGetWithHttpInfo();
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling DefaultApi.AboutGetWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+### Return type
+
+[**AboutData**](AboutData.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** |  |  -  |
+| **0** |  |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 <a id="elevatesessionpost"></a>
 # **ElevateSessionPost**
@@ -283,9 +371,9 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a id="logsget"></a>
-# **LogsGet**
-> List&lt;ElevationResult&gt; LogsGet ()
+<a id="logjitget"></a>
+# **LogJitGet**
+> JitElevationLogPage LogJitGet (JitElevationLogQueryOptions jitElevationLogQueryOptions)
 
 
 
@@ -300,7 +388,7 @@ using Devolutions.Pedm.Client.Model;
 
 namespace Example
 {
-    public class LogsGetExample
+    public class LogJitGetExample
     {
         public static void Main()
         {
@@ -310,15 +398,16 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
+            var jitElevationLogQueryOptions = new JitElevationLogQueryOptions(); // JitElevationLogQueryOptions | 
 
             try
             {
-                List<ElevationResult> result = apiInstance.LogsGet();
+                JitElevationLogPage result = apiInstance.LogJitGet(jitElevationLogQueryOptions);
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
             {
-                Debug.Print("Exception when calling DefaultApi.LogsGet: " + e.Message);
+                Debug.Print("Exception when calling DefaultApi.LogJitGet: " + e.Message);
                 Debug.Print("Status Code: " + e.ErrorCode);
                 Debug.Print(e.StackTrace);
             }
@@ -327,30 +416,34 @@ namespace Example
 }
 ```
 
-#### Using the LogsGetWithHttpInfo variant
+#### Using the LogJitGetWithHttpInfo variant
 This returns an ApiResponse object which contains the response data, status code and headers.
 
 ```csharp
 try
 {
-    ApiResponse<List<ElevationResult>> response = apiInstance.LogsGetWithHttpInfo();
+    ApiResponse<JitElevationLogPage> response = apiInstance.LogJitGetWithHttpInfo(jitElevationLogQueryOptions);
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
 }
 catch (ApiException e)
 {
-    Debug.Print("Exception when calling DefaultApi.LogsGetWithHttpInfo: " + e.Message);
+    Debug.Print("Exception when calling DefaultApi.LogJitGetWithHttpInfo: " + e.Message);
     Debug.Print("Status Code: " + e.ErrorCode);
     Debug.Print(e.StackTrace);
 }
 ```
 
 ### Parameters
-This endpoint does not need any parameter.
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **jitElevationLogQueryOptions** | [**JitElevationLogQueryOptions**](JitElevationLogQueryOptions.md) |  |  |
+
 ### Return type
 
-[**List&lt;ElevationResult&gt;**](ElevationResult.md)
+[**JitElevationLogPage**](JitElevationLogPage.md)
 
 ### Authorization
 
@@ -358,7 +451,7 @@ No authorization required
 
 ### HTTP request headers
 
- - **Content-Type**: Not defined
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 
@@ -629,7 +722,7 @@ No authorization required
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** |  |  -  |
+| **200** | Returns some information about the current user and active profiles.  If there is no active profile, the &#x60;active&#x60; UUID will be full of zeroes. |  -  |
 | **0** |  |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

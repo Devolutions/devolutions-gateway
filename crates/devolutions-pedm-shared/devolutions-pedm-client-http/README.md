@@ -26,10 +26,11 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
+*DefaultApi* | [**about_get**](docs/DefaultApi.md#about_get) | **Get** /about | 
 *DefaultApi* | [**elevate_session_post**](docs/DefaultApi.md#elevate_session_post) | **Post** /elevate/session | 
 *DefaultApi* | [**elevate_temporary_post**](docs/DefaultApi.md#elevate_temporary_post) | **Post** /elevate/temporary | 
 *DefaultApi* | [**launch_post**](docs/DefaultApi.md#launch_post) | **Post** /launch | 
-*DefaultApi* | [**logs_get**](docs/DefaultApi.md#logs_get) | **Get** /logs | 
+*DefaultApi* | [**log_jit_get**](docs/DefaultApi.md#log_jit_get) | **Get** /log/jit | 
 *DefaultApi* | [**policy_assignments_get**](docs/DefaultApi.md#policy_assignments_get) | **Get** /policy/assignments | 
 *DefaultApi* | [**policy_assignments_id_put**](docs/DefaultApi.md#policy_assignments_id_put) | **Put** /policy/assignments/{id} | 
 *DefaultApi* | [**policy_me_get**](docs/DefaultApi.md#policy_me_get) | **Get** /policy/me | 
@@ -45,20 +46,18 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
- - [Application](docs/Application.md)
+ - [AboutData](docs/AboutData.md)
  - [Assignment](docs/Assignment.md)
- - [AuthenticodeSignatureStatus](docs/AuthenticodeSignatureStatus.md)
- - [Certificate](docs/Certificate.md)
  - [ElevateTemporaryPayload](docs/ElevateTemporaryPayload.md)
  - [ElevationConfigurations](docs/ElevationConfigurations.md)
  - [ElevationKind](docs/ElevationKind.md)
  - [ElevationMethod](docs/ElevationMethod.md)
- - [ElevationRequest](docs/ElevationRequest.md)
- - [ElevationResult](docs/ElevationResult.md)
  - [Error](docs/Error.md)
  - [ErrorResponse](docs/ErrorResponse.md)
  - [GetProfilesMeResponse](docs/GetProfilesMeResponse.md)
- - [Hash](docs/Hash.md)
+ - [JitElevationLogPage](docs/JitElevationLogPage.md)
+ - [JitElevationLogQueryOptions](docs/JitElevationLogQueryOptions.md)
+ - [JitElevationLogRow](docs/JitElevationLogRow.md)
  - [LaunchPayload](docs/LaunchPayload.md)
  - [LaunchResponse](docs/LaunchResponse.md)
  - [OptionalId](docs/OptionalId.md)
@@ -66,8 +65,6 @@ Class | Method | HTTP request | Description
  - [Profile](docs/Profile.md)
  - [SessionElevationConfiguration](docs/SessionElevationConfiguration.md)
  - [SessionElevationStatus](docs/SessionElevationStatus.md)
- - [Signature](docs/Signature.md)
- - [Signer](docs/Signer.md)
  - [StartupInfoDto](docs/StartupInfoDto.md)
  - [StatusResponse](docs/StatusResponse.md)
  - [TemporaryElevationConfiguration](docs/TemporaryElevationConfiguration.md)

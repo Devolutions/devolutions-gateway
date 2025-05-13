@@ -3,6 +3,21 @@ info:
   title: Devolutions PEDM API
   version: ''
 paths:
+  /about:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AboutData'
   /elevate/temporary:
     post:
       requestBody:
@@ -63,23 +78,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '200':
           description: no content
-  /logs:
-    get:
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ElevationResult'
   /status:
     get:
       responses:
@@ -95,6 +93,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
+  /log/jit:
+    get:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JitElevationLogQueryOptions'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JitElevationLogPage'
   /policy/me:
     get:
       responses:
@@ -105,7 +124,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '200':
-          description: ''
+          description: |-
+            Returns some information about the current user and active profiles.
+
+            If there is no active profile, the `active` UUID will be full of zeroes.
           content:
             application/json:
               schema:
@@ -271,30 +293,34 @@ paths:
           description: no content
 components:
   schemas:
-    Application:
+    AboutData:
       type: object
       required:
-      - CommandLine
-      - Hash
-      - Path
-      - Signature
-      - User
-      - WorkingDirectory
+      - CurrentRequestCount
+      - RunId
+      - StartTime
+      - StartupRequestCount
       properties:
-        CommandLine:
-          type: array
-          items:
-            type: string
-        Hash:
-          $ref: '#/components/schemas/Hash'
-        Path:
+        CurrentRequestCount:
+          type: integer
+          format: int32
+        LastRequestTime:
+          description: |-
+            The time of the most recent request.
+
+            This can be `None` if `/about` is the first request made.
           type: string
-        Signature:
-          $ref: '#/components/schemas/Signature'
-        User:
-          $ref: '#/components/schemas/User'
-        WorkingDirectory:
+          format: date-time
+          nullable: true
+        RunId:
+          type: integer
+          format: int32
+        StartTime:
           type: string
+          format: date-time
+        StartupRequestCount:
+          type: integer
+          format: int32
     Assignment:
       type: object
       required:
@@ -307,45 +333,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/User'
-    AuthenticodeSignatureStatus:
-      type: string
-      enum:
-      - Valid
-      - Incompatible
-      - NotSigned
-      - HashMismatch
-      - NotSupportedFileFormat
-      - NotTrusted
-    Certificate:
-      type: object
-      required:
-      - Base64
-      - Eku
-      - Issuer
-      - SerialNumber
-      - Subject
-      - Thumbprint
-      properties:
-        Base64:
-          type: string
-        Eku:
-          type: array
-          items:
-            type: string
-        Issuer:
-          type: string
-        SerialNumber:
-          type: string
-        Subject:
-          type: string
-        Thumbprint:
-          $ref: '#/components/schemas/Hash'
     ElevateTemporaryPayload:
       type: object
       required:
       - Seconds
       properties:
         Seconds:
+          description: |-
+            The number of seconds to elevate the user for.
+
+            This must be between 1 and `i32::MAX`.
           type: integer
           format: int64
           minimum: 0.0
@@ -371,32 +368,8 @@ components:
       enum:
       - LocalAdmin
       - VirtualAccount
-    ElevationRequest:
-      type: object
-      required:
-      - Asker
-      - Target
-      - UnixTimestampSeconds
-      properties:
-        Asker:
-          $ref: '#/components/schemas/Application'
-        Target:
-          $ref: '#/components/schemas/Application'
-        UnixTimestampSeconds:
-          type: integer
-          format: int64
-          minimum: 0.0
-    ElevationResult:
-      type: object
-      required:
-      - Request
-      - Successful
-      properties:
-        Request:
-          $ref: '#/components/schemas/ElevationRequest'
-        Successful:
-          type: boolean
     Error:
+      description: The original crate-wide error type.
       type: string
       enum:
       - AccessDenied
@@ -417,6 +390,10 @@ components:
           format: int32
           minimum: 0.0
     GetProfilesMeResponse:
+      description: |-
+        Returns some information about the current user and active profiles.
+
+        If there is no active profile, the `active` UUID will be full of zeroes.
       type: object
       required:
       - Active
@@ -430,16 +407,78 @@ components:
           items:
             type: string
             format: uuid
-    Hash:
+    JitElevationLogPage:
       type: object
       required:
-      - Sha1
-      - Sha256
+      - Results
+      - TotalPages
+      - TotalRecords
       properties:
-        Sha1:
+        Results:
+          type: array
+          items:
+            $ref: '#/components/schemas/JitElevationLogRow'
+        TotalPages:
+          type: integer
+          format: int32
+          minimum: 0.0
+        TotalRecords:
+          type: integer
+          format: int32
+          minimum: 0.0
+    JitElevationLogQueryOptions:
+      type: object
+      required:
+      - EndTime
+      - PageNumber
+      - PageSize
+      - SortColumn
+      - SortDescending
+      - StartTime
+      properties:
+        EndTime:
+          type: integer
+          format: int64
+        PageNumber:
+          type: integer
+          format: int32
+          minimum: 0.0
+        PageSize:
+          type: integer
+          format: int32
+          minimum: 0.0
+        SortColumn:
           type: string
-        Sha256:
+        SortDescending:
+          type: boolean
+        StartTime:
+          type: integer
+          format: int64
+        User:
+          $ref: '#/components/schemas/User'
+          nullable: true
+    JitElevationLogRow:
+      type: object
+      required:
+      - Id
+      - Success
+      - TargetPath
+      - Timestamp
+      - User
+      properties:
+        Id:
+          type: integer
+          format: int64
+        Success:
+          type: integer
+          format: int64
+        TargetPath:
           type: string
+        Timestamp:
+          type: integer
+          format: int64
+        User:
+          $ref: '#/components/schemas/User'
     LaunchPayload:
       type: object
       required:
@@ -527,28 +566,6 @@ components:
       properties:
         Enabled:
           type: boolean
-    Signature:
-      type: object
-      required:
-      - Status
-      properties:
-        Certificates:
-          type: array
-          items:
-            $ref: '#/components/schemas/Certificate'
-          nullable: true
-        Signer:
-          $ref: '#/components/schemas/Signer'
-          nullable: true
-        Status:
-          $ref: '#/components/schemas/AuthenticodeSignatureStatus'
-    Signer:
-      type: object
-      required:
-      - Issuer
-      properties:
-        Issuer:
-          type: string
     StartupInfoDto:
       type: object
       required:

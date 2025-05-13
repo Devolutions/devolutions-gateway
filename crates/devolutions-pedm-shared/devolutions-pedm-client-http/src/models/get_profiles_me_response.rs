@@ -11,6 +11,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
+/// GetProfilesMeResponse : Returns some information about the current user and active profiles.  If there is no active profile, the `active` UUID will be full of zeroes.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GetProfilesMeResponse {
     #[serde(rename = "Active")]
@@ -20,6 +21,7 @@ pub struct GetProfilesMeResponse {
 }
 
 impl GetProfilesMeResponse {
+    /// Returns some information about the current user and active profiles.  If there is no active profile, the `active` UUID will be full of zeroes.
     pub fn new(active: uuid::Uuid, available: Vec<uuid::Uuid>) -> GetProfilesMeResponse {
         GetProfilesMeResponse { active, available }
     }

@@ -26,8 +26,9 @@ using OpenAPIDateConverter = Devolutions.Pedm.Client.Client.OpenAPIDateConverter
 namespace Devolutions.Pedm.Client.Model
 {
     /// <summary>
-    /// Defines Error
+    /// The original crate-wide error type.
     /// </summary>
+    /// <value>The original crate-wide error type.</value>
     [JsonConverter(typeof(StringEnumConverter))]
     public enum Error
     {
