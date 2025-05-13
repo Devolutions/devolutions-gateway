@@ -9,13 +9,8 @@ use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use chrono::{DateTime, Utc};
-<<<<<<< HEAD
-use futures_util::try_join;
-use tokio_postgres::types::ToSql;
-=======
 use devolutions_pedm_shared::policy::ElevationResult;
->>>>>>> origin/master
-use tokio_postgres::NoTls;
+use tokio_postgres::{types::ToSql, NoTls};
 
 use crate::account::{AccountWithId, AccountsDiff, DomainId, Sid};
 

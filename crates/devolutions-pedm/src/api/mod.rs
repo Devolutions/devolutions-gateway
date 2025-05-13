@@ -178,24 +178,17 @@ pub async fn serve(config: Config, shutdown_signal: ShutdownSignal) -> Result<()
     let db = Db::new(&config).await?;
     db.setup().await?;
 
-<<<<<<< HEAD
-    // Update the list of accounts in the database.
+    let (db_handle, db_async_bridge_task) = DbAsyncBridgeTask::new(db.clone());
+    let _db_async_bridge_task = devolutions_gateway_task::spawn_task(db_async_bridge_task, shutdown_signal);
 
-    // SAFETY: uses `NetUserEnum` and `LookupAccountNameW` from `windows`
+    // Get the system's accounts and update if needed.
     let accounts = list_accounts()?;
-
     let db_accounts = db.get_accounts().await?;
     info!("Accounts retrieved successfully");
     let diff = diff_accounts(&db_accounts, &accounts);
     db.update_accounts(&diff).await?;
 
-    let state = AppState::new(db, &config.pipe_name).await?;
-=======
-    let (db_handle, db_async_bridge_task) = DbAsyncBridgeTask::new(db.clone());
-    let _db_async_bridge_task = devolutions_gateway_task::spawn_task(db_async_bridge_task, shutdown_signal);
-
     let state = AppState::new(db, db_handle, &config.pipe_name).await?;
->>>>>>> origin/master
 
     // a plain Axum router
     let hello_router = Router::new().route("/health", axum::routing::get(health_check));

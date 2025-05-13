@@ -8,16 +8,11 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-<<<<<<< HEAD
+use devolutions_pedm_shared::policy::ElevationResult;
 use futures_util::{StreamExt, TryStreamExt};
 use libsql::params::IntoParams;
 use libsql::{params, Row, Value};
 use tracing::info;
-=======
-use devolutions_pedm_shared::policy::ElevationResult;
-use libsql::params::IntoParams;
-use libsql::{params, Row};
->>>>>>> origin/master
 
 use crate::account::{AccountWithId, AccountsDiff, DomainId, Sid};
 
