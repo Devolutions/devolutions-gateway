@@ -47,37 +47,30 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="PreflightOperation" /> class.
         /// </summary>
-        /// <param name="associationId">A unique ID identifying the session for which the credentials should be used.  Required for \&quot;push-credentials\&quot; kind..</param>
-        /// <param name="hostToLookup">The hostname to perform DNS lookup on.  Required for \&quot;lookup-host\&quot; kind..</param>
+        /// <param name="hostToResolve">The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind..</param>
         /// <param name="id">Unique ID identifying the preflight operation. (required).</param>
         /// <param name="kind">kind (required).</param>
-        /// <param name="proxyCredentials">proxyCredentials.</param>
-        /// <param name="targetCredentials">targetCredentials.</param>
-        /// <param name="token">The token to be pushed on the proxy-side.  Required for \&quot;push-token\&quot; kind..</param>
-        public PreflightOperation(Guid? associationId = default(Guid?), string hostToLookup = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), Credentials proxyCredentials = default(Credentials), Credentials targetCredentials = default(Credentials), string token = default(string))
+        /// <param name="proxyCredential">proxyCredential.</param>
+        /// <param name="targetCredential">targetCredential.</param>
+        /// <param name="timeToLive">Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds..</param>
+        /// <param name="token">The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kind..</param>
+        public PreflightOperation(string hostToResolve = default(string), Guid id = default(Guid), PreflightOperationKind kind = default(PreflightOperationKind), AppCredential proxyCredential = default(AppCredential), AppCredential targetCredential = default(AppCredential), int? timeToLive = default(int?), string token = default(string))
         {
             this.Id = id;
             this.Kind = kind;
-            this.AssociationId = associationId;
-            this.HostToLookup = hostToLookup;
-            this.ProxyCredentials = proxyCredentials;
-            this.TargetCredentials = targetCredentials;
+            this.HostToResolve = hostToResolve;
+            this.ProxyCredential = proxyCredential;
+            this.TargetCredential = targetCredential;
+            this.TimeToLive = timeToLive;
             this.Token = token;
         }
 
         /// <summary>
-        /// A unique ID identifying the session for which the credentials should be used.  Required for \&quot;push-credentials\&quot; kind.
+        /// The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind.
         /// </summary>
-        /// <value>A unique ID identifying the session for which the credentials should be used.  Required for \&quot;push-credentials\&quot; kind.</value>
-        [DataMember(Name = "association_id", EmitDefaultValue = true)]
-        public Guid? AssociationId { get; set; }
-
-        /// <summary>
-        /// The hostname to perform DNS lookup on.  Required for \&quot;lookup-host\&quot; kind.
-        /// </summary>
-        /// <value>The hostname to perform DNS lookup on.  Required for \&quot;lookup-host\&quot; kind.</value>
-        [DataMember(Name = "host_to_lookup", EmitDefaultValue = true)]
-        public string HostToLookup { get; set; }
+        /// <value>The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind.</value>
+        [DataMember(Name = "host_to_resolve", EmitDefaultValue = true)]
+        public string HostToResolve { get; set; }
 
         /// <summary>
         /// Unique ID identifying the preflight operation.
@@ -87,21 +80,28 @@ namespace Devolutions.Gateway.Client.Model
         public Guid Id { get; set; }
 
         /// <summary>
-        /// Gets or Sets ProxyCredentials
+        /// Gets or Sets ProxyCredential
         /// </summary>
-        [DataMember(Name = "proxy_credentials", EmitDefaultValue = true)]
-        public Credentials ProxyCredentials { get; set; }
+        [DataMember(Name = "proxy_credential", EmitDefaultValue = true)]
+        public AppCredential ProxyCredential { get; set; }
 
         /// <summary>
-        /// Gets or Sets TargetCredentials
+        /// Gets or Sets TargetCredential
         /// </summary>
-        [DataMember(Name = "target_credentials", EmitDefaultValue = true)]
-        public Credentials TargetCredentials { get; set; }
+        [DataMember(Name = "target_credential", EmitDefaultValue = true)]
+        public AppCredential TargetCredential { get; set; }
 
         /// <summary>
-        /// The token to be pushed on the proxy-side.  Required for \&quot;push-token\&quot; kind.
+        /// Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds.
         /// </summary>
-        /// <value>The token to be pushed on the proxy-side.  Required for \&quot;push-token\&quot; kind.</value>
+        /// <value>Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kinds.</value>
+        [DataMember(Name = "time_to_live", EmitDefaultValue = true)]
+        public int? TimeToLive { get; set; }
+
+        /// <summary>
+        /// The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kind.
+        /// </summary>
+        /// <value>The token to be stored on the proxy-side.  Required for \&quot;provision-token\&quot; and \&quot;provision-credentials\&quot; kind.</value>
         [DataMember(Name = "token", EmitDefaultValue = true)]
         public string Token { get; set; }
 
@@ -113,12 +113,12 @@ namespace Devolutions.Gateway.Client.Model
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("class PreflightOperation {\n");
-            sb.Append("  AssociationId: ").Append(AssociationId).Append("\n");
-            sb.Append("  HostToLookup: ").Append(HostToLookup).Append("\n");
+            sb.Append("  HostToResolve: ").Append(HostToResolve).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Kind: ").Append(Kind).Append("\n");
-            sb.Append("  ProxyCredentials: ").Append(ProxyCredentials).Append("\n");
-            sb.Append("  TargetCredentials: ").Append(TargetCredentials).Append("\n");
+            sb.Append("  ProxyCredential: ").Append(ProxyCredential).Append("\n");
+            sb.Append("  TargetCredential: ").Append(TargetCredential).Append("\n");
+            sb.Append("  TimeToLive: ").Append(TimeToLive).Append("\n");
             sb.Append("  Token: ").Append(Token).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
@@ -140,6 +140,12 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
+            // TimeToLive (int?) minimum
+            if (this.TimeToLive < (int?)0)
+            {
+                yield return new ValidationResult("Invalid value for TimeToLive, must be a value greater than or equal to 0.", new [] { "TimeToLive" });
+            }
+
             yield break;
         }
     }

@@ -9,8 +9,12 @@ use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use chrono::{DateTime, Utc};
+<<<<<<< HEAD
 use futures_util::try_join;
 use tokio_postgres::types::ToSql;
+=======
+use devolutions_pedm_shared::policy::ElevationResult;
+>>>>>>> origin/master
 use tokio_postgres::NoTls;
 
 use crate::account::{AccountWithId, AccountsDiff, DomainId, Sid};
@@ -327,6 +331,10 @@ ORDER BY n.name",
             )
             .await?;
         Ok(())
+    }
+
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
+        unimplemented!()
     }
 }
 

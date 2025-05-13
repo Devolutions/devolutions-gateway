@@ -13,8 +13,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
-use zeroize::Zeroize;
 
+use crate::credential::Password;
 use crate::recording::ActiveRecordings;
 use crate::target_addr::TargetAddr;
 
@@ -341,16 +341,18 @@ pub enum ConnectionMode {
     },
 }
 
-#[derive(Serialize, Deserialize, Zeroize, Clone)]
-#[zeroize(drop)]
+// TODO: It’s probably safe to drop these claims at this point.
+// The favored approach is going to be credentials pushing via the preflight route.
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CredsClaims {
     // Proxy credentials (client ↔ jet)
     pub prx_usr: String,
-    pub prx_pwd: String,
+    pub prx_pwd: Password,
 
     // Target credentials (jet ↔ server)
     pub dst_usr: String,
-    pub dst_pwd: String,
+    pub dst_pwd: Password,
 }
 
 /// Maximum duration in minutes for a session (aka time to live)
@@ -667,9 +669,10 @@ async fn cleanup_task(token_cache: Arc<TokenCache>, mut shutdown_signal: Shutdow
         }
 
         let clean_threshold = time::OffsetDateTime::now_utc().unix_timestamp() - i64::from(LEEWAY_SECS);
+
         token_cache
             .lock()
-            .retain(|_, src| src.expiration_timestamp > clean_threshold);
+            .retain(|_, src| clean_threshold < src.expiration_timestamp);
     }
 
     debug!("Task terminated");

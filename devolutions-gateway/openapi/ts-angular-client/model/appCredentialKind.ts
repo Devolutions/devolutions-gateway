@@ -9,9 +9,9 @@
  */
 
 
-export type CredentialsKind = 'username-password';
+export type AppCredentialKind = 'username-password';
 
-export const CredentialsKind = {
-    UsernamePassword: 'username-password' as CredentialsKind
+export const AppCredentialKind = {
+    UsernamePassword: 'username-password' as AppCredentialKind
 };
 

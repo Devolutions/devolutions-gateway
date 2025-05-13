@@ -165,14 +165,14 @@ Class | Method | HTTP request | Description
 ## Documentation for Models
 
  - [Model.AccessScope](docs/AccessScope.md)
+ - [Model.AppCredential](docs/AppCredential.md)
+ - [Model.AppCredentialKind](docs/AppCredentialKind.md)
  - [Model.AppTokenContentType](docs/AppTokenContentType.md)
  - [Model.AppTokenSignRequest](docs/AppTokenSignRequest.md)
  - [Model.ClockDiagnostic](docs/ClockDiagnostic.md)
  - [Model.ConfigDiagnostic](docs/ConfigDiagnostic.md)
  - [Model.ConfigPatch](docs/ConfigPatch.md)
  - [Model.ConnectionMode](docs/ConnectionMode.md)
- - [Model.Credentials](docs/Credentials.md)
- - [Model.CredentialsKind](docs/CredentialsKind.md)
  - [Model.DataEncoding](docs/DataEncoding.md)
  - [Model.DeleteManyResult](docs/DeleteManyResult.md)
  - [Model.Heartbeat](docs/Heartbeat.md)

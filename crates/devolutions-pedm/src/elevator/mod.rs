@@ -22,6 +22,7 @@ use win_api_wrappers::Error;
 use local_admin_elevator::LocalAdminElevator;
 use virtual_account_elevator::VirtualAccountElevator;
 
+use crate::db::DbHandle;
 use crate::log;
 use crate::policy::{self, application_from_path, Policy};
 use crate::utils::{start_process, AccountExt};
@@ -66,6 +67,7 @@ fn elevate_token(policy: &RwLock<Policy>, token: &Token) -> Result<Token> {
 }
 
 fn validate_elevation(
+    db_handle: &DbHandle,
     policy: &RwLock<Policy>,
     client_token: &Token,
     client_pid: u32,
@@ -104,15 +106,18 @@ fn validate_elevation(
 
     let validation = policy.read().validate(client_token.session_id()?, &req);
 
-    log::log_elevation(&ElevationResult {
+    let elevation_result = ElevationResult {
         request: req,
         successful: validation.is_ok(),
-    })?;
+    };
+
+    log::log_elevation(db_handle, elevation_result);
 
     validation
 }
 
 pub(crate) fn try_start_elevated(
+    db_handle: &DbHandle,
     policy: &RwLock<Policy>,
     client_token: &Token,
     client_pid: u32,
@@ -123,6 +128,7 @@ pub(crate) fn try_start_elevated(
     startup_info: &mut StartupInfo,
 ) -> Result<ProcessInformation> {
     validate_elevation(
+        db_handle,
         policy,
         client_token,
         client_pid,

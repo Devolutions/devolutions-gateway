@@ -12,6 +12,7 @@ use devolutions_pedm_shared::client::{self};
 use devolutions_pedm_shared::desktop;
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use win_api_wrappers::fs::get_system32_path;
 use win_api_wrappers::process::{Module, Process};
 use win_api_wrappers::raw::core::{
     implement, interface, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
@@ -218,6 +219,32 @@ fn find_main_explorer(session: u32) -> Option<u32> {
     })
 }
 
+fn resolve_msi(path: &Path) -> Option<LaunchPayload> {
+    if !matches!(path.extension().and_then(|e| e.to_str()), Some(ext) if ext.eq_ignore_ascii_case("msi")) {
+        return None;
+    }
+
+    let system32 = get_system32_path().ok()?;
+    let msiexec_path = Path::new(&system32).join("msiexec.exe");
+
+    let environment = environment_block(None, false).ok()?;
+
+    let exe_path = expand_environment_path(&msiexec_path, &environment).ok()?;
+
+    // By inspecting elevated .msi files launched from Explorer, we see that Explorer invokes %systemroot%\system32\msiexec,
+    // with the command line "%systemroot%\system32\msiexec" /i "{path-to-msi}".
+    // We achieve the same in the PEDM module by using the same command if the file extension is .msi.
+    // The .msi extension is already being trapped by the shell extension, but previously we would call
+    // CreateProcess on the .msi causing "file is not a valid Win32 executable".
+    Some(LaunchPayload {
+        executable_path: exe_path.as_os_str().to_str().map(str::to_owned),
+        command_line: Some(format!("\"{}\" /i \"{}\"", exe_path.display(), path.display())),
+        working_directory: None,
+        creation_flags: 0,
+        startup_info: None,
+    })
+}
+
 fn resolve_lnk(path: &Path) -> Option<LaunchPayload> {
     let link = Link::new(path);
 
@@ -253,13 +280,16 @@ fn start_listener() {
                     match command {
                         ChannelCommand::Exit => break,
                         ChannelCommand::Elevate(path) => {
-                            let mut payload = resolve_lnk(&path).unwrap_or_else(|| LaunchPayload {
-                                executable_path: path.as_os_str().to_str().map(str::to_owned),
-                                command_line: None,
-                                working_directory: None,
-                                creation_flags: 0,
-                                startup_info: None,
-                            });
+                            let mut payload =
+                                resolve_lnk(&path)
+                                    .or_else(|| resolve_msi(&path))
+                                    .unwrap_or_else(|| LaunchPayload {
+                                        executable_path: path.as_os_str().to_str().map(str::to_owned),
+                                        command_line: None,
+                                        working_directory: None,
+                                        creation_flags: 0,
+                                        startup_info: None,
+                                    });
 
                             payload.startup_info = Some(StartupInfoDto {
                                 parent_pid: find_main_explorer(

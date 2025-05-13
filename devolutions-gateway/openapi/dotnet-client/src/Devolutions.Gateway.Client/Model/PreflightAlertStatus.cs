@@ -40,34 +40,40 @@ namespace Devolutions.Gateway.Client.Model
         GeneralFailure = 1,
 
         /// <summary>
+        /// Enum Info for value: info
+        /// </summary>
+        [EnumMember(Value = "info")]
+        Info = 2,
+
+        /// <summary>
         /// Enum UnsupportedOperation for value: unsupported-operation
         /// </summary>
         [EnumMember(Value = "unsupported-operation")]
-        UnsupportedOperation = 2,
+        UnsupportedOperation = 3,
 
         /// <summary>
         /// Enum InvalidParameters for value: invalid-parameters
         /// </summary>
         [EnumMember(Value = "invalid-parameters")]
-        InvalidParameters = 3,
+        InvalidParameters = 4,
 
         /// <summary>
         /// Enum InternalServerError for value: internal-server-error
         /// </summary>
         [EnumMember(Value = "internal-server-error")]
-        InternalServerError = 4,
+        InternalServerError = 5,
 
         /// <summary>
-        /// Enum HostLookupFailure for value: host-lookup-failure
+        /// Enum HostResolutionFailure for value: host-resolution-failure
         /// </summary>
-        [EnumMember(Value = "host-lookup-failure")]
-        HostLookupFailure = 5,
+        [EnumMember(Value = "host-resolution-failure")]
+        HostResolutionFailure = 6,
 
         /// <summary>
         /// Enum AgentVersionLookupFailure for value: agent-version-lookup-failure
         /// </summary>
         [EnumMember(Value = "agent-version-lookup-failure")]
-        AgentVersionLookupFailure = 6
+        AgentVersionLookupFailure = 7
     }
 
     public static class PreflightAlertStatusExtensions
@@ -81,14 +87,16 @@ namespace Devolutions.Gateway.Client.Model
             {
                 case PreflightAlertStatus.GeneralFailure:
                     return "general-failure";
+                case PreflightAlertStatus.Info:
+                    return "info";
                 case PreflightAlertStatus.UnsupportedOperation:
                     return "unsupported-operation";
                 case PreflightAlertStatus.InvalidParameters:
                     return "invalid-parameters";
                 case PreflightAlertStatus.InternalServerError:
                     return "internal-server-error";
-                case PreflightAlertStatus.HostLookupFailure:
-                    return "host-lookup-failure";
+                case PreflightAlertStatus.HostResolutionFailure:
+                    return "host-resolution-failure";
                 case PreflightAlertStatus.AgentVersionLookupFailure:
                     return "agent-version-lookup-failure";
                 default:

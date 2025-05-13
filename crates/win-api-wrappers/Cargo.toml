@@ -34,6 +34,7 @@ features = [
     "Win32_System_Environment",
     "Win32_System_GroupPolicy",
     "Win32_System_IO",
+    "Win32_System_SystemInformation",
     "Win32_System_Kernel",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",

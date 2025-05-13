@@ -2,6 +2,8 @@
 Devolutions.Gateway.Client.sln
 README.md
 docs/AccessScope.md
+docs/AppCredential.md
+docs/AppCredentialKind.md
 docs/AppTokenContentType.md
 docs/AppTokenSignRequest.md
 docs/ClockDiagnostic.md
@@ -9,8 +11,6 @@ docs/ConfigApi.md
 docs/ConfigDiagnostic.md
 docs/ConfigPatch.md
 docs/ConnectionMode.md
-docs/Credentials.md
-docs/CredentialsKind.md
 docs/DataEncoding.md
 docs/DeleteManyResult.md
 docs/DiagnosticsApi.md
@@ -67,14 +67,14 @@ src/Devolutions.Gateway.Client/Client/WebRequestPathBuilder.cs
 src/Devolutions.Gateway.Client/Devolutions.Gateway.Client.csproj
 src/Devolutions.Gateway.Client/Model/AbstractOpenAPISchema.cs
 src/Devolutions.Gateway.Client/Model/AccessScope.cs
+src/Devolutions.Gateway.Client/Model/AppCredential.cs
+src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
 src/Devolutions.Gateway.Client/Model/AppTokenSignRequest.cs
 src/Devolutions.Gateway.Client/Model/ClockDiagnostic.cs
 src/Devolutions.Gateway.Client/Model/ConfigDiagnostic.cs
 src/Devolutions.Gateway.Client/Model/ConfigPatch.cs
 src/Devolutions.Gateway.Client/Model/ConnectionMode.cs
-src/Devolutions.Gateway.Client/Model/Credentials.cs
-src/Devolutions.Gateway.Client/Model/CredentialsKind.cs
 src/Devolutions.Gateway.Client/Model/DataEncoding.cs
 src/Devolutions.Gateway.Client/Model/DeleteManyResult.cs
 src/Devolutions.Gateway.Client/Model/Heartbeat.cs

@@ -28,10 +28,10 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Defines CredentialsKind
+    /// Defines AppCredentialKind
     /// </summary>
     [JsonConverter(typeof(StringEnumConverter))]
-    public enum CredentialsKind
+    public enum AppCredentialKind
     {
         /// <summary>
         /// Enum UsernamePassword for value: username-password
@@ -40,16 +40,16 @@ namespace Devolutions.Gateway.Client.Model
         UsernamePassword = 1
     }
 
-    public static class CredentialsKindExtensions
+    public static class AppCredentialKindExtensions
     {
         /// <summary>
         /// Returns the value as string for a given variant
         /// </summary>
-        public static string ToValue(this CredentialsKind variant)
+        public static string ToValue(this AppCredentialKind variant)
         {
             switch (variant)
             {
-                case CredentialsKind.UsernamePassword:
+                case AppCredentialKind.UsernamePassword:
                     return "username-password";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");

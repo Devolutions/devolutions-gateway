@@ -8,10 +8,16 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+<<<<<<< HEAD
 use futures_util::{StreamExt, TryStreamExt};
 use libsql::params::IntoParams;
 use libsql::{params, Row, Value};
 use tracing::info;
+=======
+use devolutions_pedm_shared::policy::ElevationResult;
+use libsql::params::IntoParams;
+use libsql::{params, Row};
+>>>>>>> origin/master
 
 use crate::account::{AccountWithId, AccountsDiff, DomainId, Sid};
 
@@ -312,6 +318,11 @@ ORDER BY n.name";
             params![req_id, seconds],
         )
         .await?;
+        Ok(())
+    }
+
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
+        // TODO: execute the SQL query.
         Ok(())
     }
 }

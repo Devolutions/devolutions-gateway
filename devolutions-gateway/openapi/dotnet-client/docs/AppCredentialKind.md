@@ -1,4 +1,4 @@
-# Devolutions.Gateway.Client.Model.CredentialsKind
+# Devolutions.Gateway.Client.Model.AppCredentialKind
 
 ## Properties
 

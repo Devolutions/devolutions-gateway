@@ -28,29 +28,29 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Credentials
+    /// AppCredential
     /// </summary>
-    [DataContract(Name = "Credentials")]
-    public partial class Credentials : IValidatableObject
+    [DataContract(Name = "AppCredential")]
+    public partial class AppCredential : IValidatableObject
     {
 
         /// <summary>
         /// Gets or Sets Kind
         /// </summary>
         [DataMember(Name = "kind", IsRequired = true, EmitDefaultValue = true)]
-        public CredentialsKind Kind { get; set; }
+        public AppCredentialKind Kind { get; set; }
         /// <summary>
-        /// Initializes a new instance of the <see cref="Credentials" /> class.
+        /// Initializes a new instance of the <see cref="AppCredential" /> class.
         /// </summary>
         [JsonConstructorAttribute]
-        protected Credentials() { }
+        protected AppCredential() { }
         /// <summary>
-        /// Initializes a new instance of the <see cref="Credentials" /> class.
+        /// Initializes a new instance of the <see cref="AppCredential" /> class.
         /// </summary>
         /// <param name="kind">kind (required).</param>
-        /// <param name="password">Password for the credentials.  Required for \&quot;username-password\&quot; kind..</param>
-        /// <param name="username">Username for the credentials.  Required for \&quot;username-password\&quot; kind..</param>
-        public Credentials(CredentialsKind kind = default(CredentialsKind), string password = default(string), string username = default(string))
+        /// <param name="password">Password for the credential.  Required for \&quot;username-password\&quot; kind..</param>
+        /// <param name="username">Username for the credential.  Required for \&quot;username-password\&quot; kind..</param>
+        public AppCredential(AppCredentialKind kind = default(AppCredentialKind), string password = default(string), string username = default(string))
         {
             this.Kind = kind;
             this.Password = password;
@@ -58,16 +58,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Password for the credentials.  Required for \&quot;username-password\&quot; kind.
+        /// Password for the credential.  Required for \&quot;username-password\&quot; kind.
         /// </summary>
-        /// <value>Password for the credentials.  Required for \&quot;username-password\&quot; kind.</value>
+        /// <value>Password for the credential.  Required for \&quot;username-password\&quot; kind.</value>
         [DataMember(Name = "password", EmitDefaultValue = true)]
         public string Password { get; set; }
 
         /// <summary>
-        /// Username for the credentials.  Required for \&quot;username-password\&quot; kind.
+        /// Username for the credential.  Required for \&quot;username-password\&quot; kind.
         /// </summary>
-        /// <value>Username for the credentials.  Required for \&quot;username-password\&quot; kind.</value>
+        /// <value>Username for the credential.  Required for \&quot;username-password\&quot; kind.</value>
         [DataMember(Name = "username", EmitDefaultValue = true)]
         public string Username { get; set; }
 
@@ -78,7 +78,7 @@ namespace Devolutions.Gateway.Client.Model
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("class Credentials {\n");
+            sb.Append("class AppCredential {\n");
             sb.Append("  Kind: ").Append(Kind).Append("\n");
             sb.Append("  Password: ").Append(Password).Append("\n");
             sb.Append("  Username: ").Append(Username).Append("\n");
