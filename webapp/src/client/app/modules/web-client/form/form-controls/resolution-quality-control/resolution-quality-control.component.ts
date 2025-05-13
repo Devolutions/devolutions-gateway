@@ -23,7 +23,7 @@ export class ResolutionQualityControlComponent extends BaseComponent implements 
   }
 
   ngOnInit(): void {
-    this.resolutionQualityOptions = this.formService.getResoltuionQualityOptions();
+    this.resolutionQualityOptions = this.formService.getResolutionQualityOptions();
     this.formService.addControlToForm({
       formGroup: this.parentForm,
       controlName: 'resolutionQuality',

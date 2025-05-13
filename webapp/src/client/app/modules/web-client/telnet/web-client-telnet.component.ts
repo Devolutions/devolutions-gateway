@@ -150,7 +150,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       return;
     }
 
-    this.remoteTerminal.onStatusChange((v) => {
+    this.remoteTerminal.status.subscribe((v) => {
       if (v === TerminalConnectionStatus.connected) {
         // connected only indicates connection to Gateway is successful
         this.remoteTerminal.writeToTerminal('connecting... \r\n');
@@ -215,9 +215,8 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     }
 
     // TODO: The `onStatusChange` must take `PartialObserver`.
-    this.remoteTerminal.onStatusChange(
-      /*{
-      next:*/ (status): void => {
+    this.remoteTerminal.status.subscribe({
+      next: (status): void => {
         switch (status) {
           case TerminalConnectionStatus.connected:
             this.handleSessionStarted();
@@ -231,9 +230,8 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
             break;
         }
       },
-      /* error: (err) => this.handleSubscriptionError(err),
-    }*/
-    );
+      error: (err) => this.handleSubscriptionError(err),
+    });
   }
 
   private handleSessionStarted(): void {

@@ -92,7 +92,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     },
     {
       label: 'Toggle Cursor Kind',
-      icon: 'dvl-icon dvl-icon-toggle',
+      icon: 'dvl-icon dvl-icon-cursor',
       action: () => this.toggleCursorKind(),
     },
   ];
@@ -105,14 +105,13 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
-  // TODO: uncomment when adding support Unicode keyboard for RDP
-  // checkboxes = [
-  //   {
-  //     label: 'Unicode Keyboard Mode',
-  //     checked: false,
-  //     action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
-  //   },
-  // ];
+  checkboxes = [
+    {
+      label: 'Unicode Keyboard Mode',
+      checked: false,
+      action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
+    },
+  ];
 
   protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;
@@ -397,8 +396,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     }
 
     const config = configBuilder.build();
-
-    this.setKeyboardUnicodeMode(true);
 
     from(this.remoteClient.connect(config))
       .pipe(

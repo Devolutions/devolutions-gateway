@@ -39,7 +39,7 @@ export class WebFormService extends BaseComponent {
   //   return SharingApprovalMode.getSelectItems();
   // }
 
-  getResoltuionQualityOptions(): SelectItem[] {
+  getResolutionQualityOptions(): SelectItem[] {
     return ResolutionQuality.getSelectItems();
   }
 

@@ -24,7 +24,7 @@ import { DefaultSshPort, WebClientService } from '@shared/services/web-client.se
 import { WebSessionService } from '@shared/services/web-session.service';
 
 import {
-  // LoggingLevel,
+  LoggingLevel,
   SSHTerminal,
   TerminalConnectionStatus,
   loggingService as sshLoggingService,
@@ -70,7 +70,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
   }
 
   ngOnInit(): void {
-    // sshLoggingService.setLevel(LoggingLevel.DEBUG);
+    sshLoggingService.setLevel(LoggingLevel.DEBUG);
     this.removeWebClientGuiElement();
   }
 
