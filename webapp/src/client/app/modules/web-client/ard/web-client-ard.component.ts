@@ -93,14 +93,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
-  checkboxes = [
-    {
-      label: 'Unicode Keyboard Mode',
-      checked: true,
-      action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
-    },
-  ];
-
   protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;
   private remoteClient: UserInteraction;

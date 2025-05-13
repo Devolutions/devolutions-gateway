@@ -105,13 +105,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
-  checkboxes = [
-    {
-      label: 'Unicode Keyboard Mode',
-      checked: true,
-      action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
-    },
-  ];
+  // TODO: uncomment when adding support Unicode keyboard for RDP
+  // checkboxes = [
+  //   {
+  //     label: 'Unicode Keyboard Mode',
+  //     checked: false,
+  //     action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
+  //   },
+  // ];
 
   protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;

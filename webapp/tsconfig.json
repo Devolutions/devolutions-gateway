@@ -46,6 +46,6 @@
     //"strictInjectionParameters": true,
     //"strictInputAccessModifiers": true,
     "strictTemplates": false,
-    "schemas": ["CUSTOM_ELEMENT_SCHEMA"]
+    "schemas": ["CUSTOM_ELEMENTS_SCHEMA"]
   }
 }

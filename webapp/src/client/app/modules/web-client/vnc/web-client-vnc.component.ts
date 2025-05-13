@@ -113,14 +113,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
-  checkboxes = [
-    {
-      label: 'Unicode Keyboard Mode',
-      checked: true,
-      action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
-    },
-  ];
-
   protected removeElement: Subject<unknown> = new Subject();
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
@@ -341,7 +333,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       hostname,
       username,
       password,
-      disableCursor,
+      enableCursor,
       enableExtendedClipboard,
       enabledEncodings,
       ultraVirtualDisplay,
@@ -364,7 +356,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       screenSize: desktopScreenSize,
       sessionId,
       enabledEncodings: enabledEncodings.join(','),
-      disableCursor,
+      disableCursor: !enableCursor,
       disableExtendedClipboard: !enableExtendedClipboard,
       ultraVirtualDisplay,
     };
@@ -413,7 +405,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     if (connectionParameters.enabledEncodings !== '') {
       configBuilder.withExtension(enabledEncodings(connectionParameters.enabledEncodings));
     } else {
-      configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings()));
+      configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
     }
 
     const config = configBuilder.build();

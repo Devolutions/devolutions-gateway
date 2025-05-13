@@ -23,12 +23,11 @@ namespace Encoding {
     );
   }
 
-  export function getAllEncodings(): string {
+  export function getAllEncodings(): string[] {
     return (
       Object.values(Encoding)
         // Filter out properties that are not from enum values (like function `getSelectItems`).
         .filter((value) => typeof value === 'string')
-        .join(',')
     );
   }
 }

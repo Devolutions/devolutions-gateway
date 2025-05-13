@@ -6,11 +6,11 @@ import { WebFormService } from '@shared/services/web-form.service';
 import { ArdQualityMode } from '@shared/enums/ard-quality-mode.enum';
 
 @Component({
-  selector: 'web-client-disable-cursor-control',
-  templateUrl: 'disable-cursor-control.component.html',
-  styleUrls: ['disable-cursor-control.component.scss'],
+  selector: 'web-client-enable-cursor-control',
+  templateUrl: 'enable-cursor-control.component.html',
+  styleUrls: ['enable-cursor-control.component.scss'],
 })
-export class DisableCursorControlComponent extends BaseComponent implements OnInit {
+export class EnableCursorControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
   @Input() inputFormData;
 
@@ -21,10 +21,10 @@ export class DisableCursorControlComponent extends BaseComponent implements OnIn
   ngOnInit(): void {
     this.formService.addControlToForm({
       formGroup: this.parentForm,
-      controlName: 'disableCursor',
+      controlName: 'enableCursor',
       inputFormData: this.inputFormData,
       isRequired: false,
-      defaultValue: false,
+      defaultValue: true,
     });
   }
 }

@@ -28,7 +28,7 @@ export class EnabledEncodingsControlComponent extends BaseComponent implements O
       controlName: 'enabledEncodings',
       inputFormData: this.inputFormData,
       isRequired: false,
-      defaultValue: [Encoding.Raw, Encoding.Zlib],
+      defaultValue: Encoding.getAllEncodings(),
     });
   }
 }

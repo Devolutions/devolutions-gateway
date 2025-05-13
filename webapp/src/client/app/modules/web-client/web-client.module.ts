@@ -35,12 +35,12 @@ import { CheckboxModule } from 'primeng/checkbox';
 // import { RequestSharedSessionControlComponent } from './form/form-controls/request-shared-session-control/request-shared-session-control.component';
 // import { SharingApprovalModeControlComponent } from './form/form-controls/sharing-approval-mode-control/sharing-approval-mode-control.component';
 import { EnabledEncodingsControlComponent } from './form/form-controls/enabled-encodings-control/enabled-encodings-control.component';
-import { DisableCursorControlComponent } from './form/form-controls/disable-cursor-control/disable-cursor-control.component';
 import { ExtendedClipboardControlComponent } from './form/form-controls/extended-clipboard-control/extended-clipboard-control.component';
 import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
 import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 import { WasmInitResolver } from '@gateway/shared/resolvers/wasm-init.resolver';
+import { EnableCursorControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-cursor-control/enable-cursor-control.component';
 
 const routes: Routes = [
   {
@@ -82,7 +82,7 @@ const routes: Routes = [
     KdcUrlControlComponent,
     PreConnectionBlobControlComponent,
     EnabledEncodingsControlComponent,
-    DisableCursorControlComponent,
+    EnableCursorControlComponent,
     // TODO: iDRAC and VMWare support
     // VmIdControlComponent,
     // ForceFirmwareV7ControlComponent,
