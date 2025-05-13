@@ -10,7 +10,9 @@ use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use chrono::{DateTime, Utc};
 use devolutions_pedm_shared::policy::ElevationResult;
-use tokio_postgres::{types::ToSql, NoTls};
+use futures_util::try_join;
+use tokio_postgres::types::ToSql;
+use tokio_postgres::NoTls;
 
 use crate::account::{AccountWithId, AccountsDiff, DomainId, Sid};
 
