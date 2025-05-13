@@ -7,8 +7,10 @@ import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms'
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { SelectItem } from 'primeng/api';
-import { ArdFormDataInput, FormDataUnion } from '../interfaces/forms.interfaces';
 import { ExtraSessionParameter } from './web-session.service';
+import { ResolutionQuality } from '../enums/resolution-quality.enum';
+import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
+import { Encoding } from '../enums/encoding.enum';
 
 @Injectable({ providedIn: 'root' })
 export class WebFormService extends BaseComponent {
@@ -32,6 +34,23 @@ export class WebFormService extends BaseComponent {
     return of(ScreenSize.getSelectItems());
   }
 
+  // TODO: uncomment when adding support for iDRAC
+  // getSharingApprovalModeOptions(): SelectItem[] {
+  //   return SharingApprovalMode.getSelectItems();
+  // }
+
+  getResolutionQualityOptions(): SelectItem[] {
+    return ResolutionQuality.getSelectItems();
+  }
+
+  getArdQualityModeOptions(): SelectItem[] {
+    return ArdQualityMode.getSelectItems();
+  }
+
+  getSupportedEncodings(): SelectItem[] {
+    return Encoding.getSelectItems();
+  }
+
   setExtraSessionParameter(extraSessionParameter: ExtraSessionParameter): void {
     this.extraSessionParameter = extraSessionParameter;
   }
@@ -40,18 +59,28 @@ export class WebFormService extends BaseComponent {
     return this.extraSessionParameter;
   }
 
-  addControlToForm(
-    formGroup: FormGroup,
-    controlName: string,
-    inputFormData?: unknown,
-    isRequired = true,
-    isDisabled = false,
-    defaultValue: string | number | null = '',
-    additionalValidator?: ValidatorFn | ValidatorFn[],
-  ): void {
+  addControlToForm(options: {
+    formGroup: FormGroup;
+    controlName: string;
+    inputFormData?: unknown;
+    isRequired?: boolean;
+    isDisabled?: boolean;
+    defaultValue?: string | string[] | number | boolean | null;
+    additionalValidator?: ValidatorFn | ValidatorFn[];
+  }): void {
+    const {
+      formGroup,
+      controlName,
+      inputFormData,
+      isRequired = true,
+      isDisabled = false,
+      defaultValue = '',
+      additionalValidator,
+    } = options;
+
     if (!formGroup) return;
 
-    const initialValue: string | number | null = inputFormData?.[controlName] ?? defaultValue;
+    const initialValue: string | string[] | number | boolean | null = inputFormData?.[controlName] ?? defaultValue;
 
     if (controlName in formGroup.controls) {
       isDisabled ? formGroup.controls[controlName].disable() : formGroup.controls[controlName].enable();

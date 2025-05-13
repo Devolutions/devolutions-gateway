@@ -19,7 +19,11 @@ export class UsernameControlComponent extends BaseComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.formService.addControlToForm(this.parentForm, 'username', this.inputFormData);
+    this.formService.addControlToForm({
+      formGroup: this.parentForm,
+      controlName: 'username',
+      inputFormData: this.inputFormData,
+    });
     this.toggleControl();
   }
 

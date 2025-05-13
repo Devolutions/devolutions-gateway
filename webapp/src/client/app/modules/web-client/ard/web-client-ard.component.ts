@@ -18,7 +18,6 @@ import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
-import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { SessionEventType } from '@shared/enums/session-event-type.enum';
 import { IronARDConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { ArdFormDataInput } from '@shared/interfaces/forms.interfaces';
@@ -27,12 +26,15 @@ import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 
-import { DesktopSize, SessionEvent, UserInteraction, UserIronRdpError } from '@devolutions/iron-remote-gui-vnc';
-import '@devolutions/iron-remote-gui-vnc/iron-remote-gui-vnc.umd.cjs';
+import { SessionEvent, UserInteraction, IronError } from '@devolutions/iron-remote-desktop';
+import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
+import { Backend, resolutionQuality, ardQualityMode } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, DVL_WARNING_ICON, JET_ARD_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
+import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
+import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -54,13 +56,16 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   @ViewChild('sessionArdContainer') sessionContainerElement: ElementRef;
-  @ViewChild('ironGuiElementVnc') ironGuiElement: ElementRef;
+  @ViewChild('ironRemoteDesktopElement') ironRemoteDesktopElement: ElementRef;
+
+  backendRef = Backend;
 
   screenScale = ScreenScale;
   formData: ArdFormDataInput;
   ardError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
+  cursorOverrideActive = false;
 
   middleToolbarButtons = [
     {
@@ -72,6 +77,11 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       label: 'Actual Size',
       icon: 'dvl-icon dvl-icon-screen',
       action: () => this.scaleTo(this.screenScale.Real),
+    },
+    {
+      label: 'Toggle Cursor Kind',
+      icon: 'dvl-icon dvl-icon-toggle',
+      action: () => this.toggleCursorKind(),
     },
   ];
 
@@ -140,11 +150,25 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     scale === ScreenScale.Full ? this.toggleFullscreen() : this.remoteClient.setScale(scale.valueOf());
   }
 
+  setKeyboardUnicodeMode(useUnicode: boolean): void {
+    this.remoteClient.setKeyboardUnicodeMode(useUnicode);
+  }
+
+  toggleCursorKind(): void {
+    if (this.cursorOverrideActive) {
+      this.remoteClient.setCursorStyleOverride(null);
+    } else {
+      this.remoteClient.setCursorStyleOverride('url("assets/images/crosshair.png") 7 7, default');
+    }
+
+    this.cursorOverrideActive = !this.cursorOverrideActive;
+  }
+
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.ironGuiElement?.nativeElement) {
-          this.ironGuiElement.nativeElement.remove();
+        if (this.ironRemoteDesktopElement?.nativeElement) {
+          this.ironRemoteDesktopElement.nativeElement.remove();
         }
       },
       error: (err): void => {
@@ -228,11 +252,11 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   private initiateRemoteClientListener(): void {
     this.remoteClientEventListener = (event: Event) => this.readyRemoteClientEventListener(event);
-    this.renderer.listen(this.ironGuiElement.nativeElement, 'ready', this.remoteClientEventListener);
+    this.renderer.listen(this.ironRemoteDesktopElement.nativeElement, 'ready', this.remoteClientEventListener);
   }
 
   private removeRemoteClientListener(): void {
-    if (this.ironGuiElement && this.remoteClientEventListener) {
+    if (this.ironRemoteDesktopElement && this.remoteClientEventListener) {
       this.renderer.destroy();
     }
   }
@@ -249,7 +273,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     this.getFormData()
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
         switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.fetchTokens(params)),
         catchError((error) => {
@@ -272,27 +295,22 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   }
 
   private fetchParameters(formData: ArdFormDataInput): Observable<IronARDConnectionParameters> {
-    const { hostname, username, password } = formData;
+    const { hostname, username, password, resolutionQuality, ardQualityMode } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultArdPort);
 
     const sessionId: string = uuidv4();
     const gatewayHttpAddress: URL = new URL(JET_ARD_URL + `/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
 
-    const desktopScreenSize: DesktopSize =
-      this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
-
     const connectionParameters: IronARDConnectionParameters = {
-      username: username,
-      password: password,
+      username,
+      password,
       host: extractedData.hostname,
       port: extractedData.port,
-      domain: '',
-      gatewayAddress: gatewayAddress,
-      screenSize: desktopScreenSize,
-      preConnectionBlob: '',
-      kdcUrl: '',
-      sessionId: sessionId,
+      gatewayAddress,
+      resolutionQuality,
+      ardQualityMode,
+      sessionId,
     };
     return of(connectionParameters);
   }
@@ -301,27 +319,28 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     return this.webClientService.fetchArdToken(params);
   }
 
-  private setScreenSizeScale(screenSize: ScreenSize): Observable<void> {
-    if (screenSize === ScreenSize.FullScreen) {
-      this.scaleTo(this.screenScale.Full);
-    }
-    return of(undefined);
-  }
-
   private callConnect(connectionParameters: IronARDConnectionParameters): void {
-    this.remoteClient.setKeyboardUnicodeMode(true);
-    this.remoteClient
-      .connect(
-        connectionParameters.username,
-        connectionParameters.password,
-        connectionParameters.host,
-        connectionParameters.gatewayAddress,
-        connectionParameters.domain,
-        connectionParameters.token,
-        connectionParameters.screenSize,
-        connectionParameters.preConnectionBlob,
-        connectionParameters.kdcProxyUrl,
-      )
+    const configBuilder = this.remoteClient
+      .configBuilder()
+      .withUsername(connectionParameters.username)
+      .withPassword(connectionParameters.password)
+      .withDestination(connectionParameters.host)
+      .withProxyAddress(connectionParameters.gatewayAddress)
+      .withAuthToken(connectionParameters.token);
+
+    if (connectionParameters.resolutionQuality != null) {
+      configBuilder.withExtension(resolutionQuality(connectionParameters.resolutionQuality));
+    }
+
+    if (connectionParameters.ardQualityMode != null) {
+      configBuilder.withExtension(ardQualityMode(connectionParameters.ardQualityMode));
+    }
+
+    const config = configBuilder.build();
+
+    this.setKeyboardUnicodeMode(true);
+
+    from(this.remoteClient.connect(config))
       .pipe(
         // @ts-ignore // update iron-remote-gui rxjs to 7.8.1
         takeUntil(this.destroyed$),
@@ -333,7 +352,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   }
 
   private initSessionEventHandler(): void {
-    this.remoteClient.sessionListener.subscribe({
+    this.remoteClient.onSessionEvent({
       next: (event: SessionEvent): void => {
         switch (event.type) {
           case SessionEventType.STARTED:
@@ -371,7 +390,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     this.webClientConnectionSuccess();
   }
 
-  private notifyUser(event: SessionEvent, errorData: UserIronRdpError | string): void {
+  private notifyUser(event: SessionEvent, errorData: IronError | string): void {
     const eventType = event.type.valueOf();
     this.ardError = {
       kind: this.getMessage(errorData),
@@ -388,12 +407,12 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     console.error('Error in session event subscription', error);
   }
 
-  private handleIronRDPError(error: UserIronRdpError | string): void {
+  private handleIronRDPError(error: IronError | string): void {
     this.notifyUserAboutError(error);
     this.disableComponentStatus();
   }
 
-  private notifyUserAboutError(error: UserIronRdpError | string): void {
+  private notifyUserAboutError(error: IronError | string): void {
     this.ardError = {
       kind: this.getMessage(error),
       backtrace: typeof error !== 'string' ? error?.backtrace() : '',
@@ -402,7 +421,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
-  private getMessage(errorData: UserIronRdpError | string): string {
+  private getMessage(errorData: IronError | string): string {
     let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
     if (typeof errorData === 'string') {
       return errorData;

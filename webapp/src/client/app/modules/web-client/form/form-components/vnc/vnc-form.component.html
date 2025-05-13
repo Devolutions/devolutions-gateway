@@ -21,4 +21,39 @@
                                  [inputFormData]="inputFormData"
                                  [isEnabled]="showPasswordInput()"></web-client-password-control>
   </div>
+
+  <div class="col-12 gateway-form-group">
+    <a href="#" (click)="toggleMoreSettings($event)">More Settings
+        <span *ngIf="!showMoreSettings" >+</span>
+        <span *ngIf="showMoreSettings">-</span>
+    </a>
+  </div>
+
+  <div [hidden]="!showMoreSettings" class="col-12 gateway-form-group">
+
+    <web-client-screen-size-control [parentForm]="form"
+                                    [inputFormData]="inputFormData"></web-client-screen-size-control>
+
+    <div class="col-12 gateway-form-group">
+      <web-client-ultra-virtual-display-control [parentForm]="form"
+                                                [inputFormData]="inputFormData"></web-client-ultra-virtual-display-control>
+    </div>
+
+    <div class="col-12 gateway-form-group">
+      <web-client-enabled-encodings-control [parentForm]="form"
+                                            [inputFormData]="inputFormData"></web-client-enabled-encodings-control>
+    </div>
+
+    <div class="col-12 gateway-form-group">
+      <web-client-enable-cursor-control [parentForm]="form"
+                                         [inputFormData]="inputFormData"></web-client-enable-cursor-control>
+    </div>
+
+    <div class="col-12 gateway-form-group">
+      <web-client-extended-clipboard-control [parentForm]="form"
+                                             [inputFormData]="inputFormData"></web-client-extended-clipboard-control>
+    </div>
+    
+  </div>
+
 </div>

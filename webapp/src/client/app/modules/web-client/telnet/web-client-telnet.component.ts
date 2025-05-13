@@ -214,6 +214,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       return;
     }
 
+    // TODO: The `onStatusChange` must take `PartialObserver`.
     this.remoteTerminal.status.subscribe({
       next: (status): void => {
         switch (status) {

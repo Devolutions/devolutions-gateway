@@ -18,15 +18,13 @@ export class KdcUrlControlComponent extends BaseComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.formService.addControlToForm(
-      this.parentForm,
-      'kdcUrl',
-      this.inputFormData,
-      false,
-      false,
-      '',
-      this.kdcServerUrlValidator(),
-    );
+    this.formService.addControlToForm({
+      formGroup: this.parentForm,
+      controlName: 'kdcUrl',
+      inputFormData: this.inputFormData,
+      isRequired: false,
+      additionalValidator: this.kdcServerUrlValidator,
+    });
   }
 
   kdcServerUrlValidator(): ValidatorFn {

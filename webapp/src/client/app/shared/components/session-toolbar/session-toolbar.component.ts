@@ -27,6 +27,12 @@ export class SessionToolbarComponent {
     action: () => void;
   }[] = [];
 
+  @Input() checkboxes: {
+    label: string;
+    checked: boolean;
+    action: (checked: boolean) => void;
+  }[] = [];
+
   isFullScreenMode = false;
   showToolbarDiv = true;
   loading = true;

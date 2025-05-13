@@ -28,8 +28,10 @@ import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 
-import { DesktopSize, SessionEvent, UserInteraction, UserIronRdpError } from '@devolutions/iron-remote-gui';
-import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
+import { DesktopSize } from '@shared/models/desktop-size';
+import { Backend, preConnectionBlob, kdcProxyUrl, displayControl } from '@devolutions/iron-remote-desktop-rdp';
+import { SessionEvent, UserInteraction, IronError } from '@devolutions/iron-remote-desktop';
+import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 
@@ -53,13 +55,16 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   @ViewChild('sessionRdpContainer') sessionContainerElement: ElementRef;
-  @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
+  @ViewChild('ironRemoteDesktopElement') ironRemoteDesktopElement: ElementRef;
+
+  backendRef = Backend;
 
   screenScale = ScreenScale;
   formData: RdpFormDataInput;
   rdpError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
+  cursorOverrideActive = false;
 
   leftToolbarButtons = [
     {
@@ -85,6 +90,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       icon: 'dvl-icon dvl-icon-screen',
       action: () => this.scaleTo(this.screenScale.Real),
     },
+    {
+      label: 'Toggle Cursor Kind',
+      icon: 'dvl-icon dvl-icon-cursor',
+      action: () => this.toggleCursorKind(),
+    },
   ];
 
   rightToolbarButtons = [
@@ -92,6 +102,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       label: 'Close Session',
       icon: 'dvl-icon dvl-icon-close',
       action: () => this.startTerminationProcess(),
+    },
+  ];
+
+  checkboxes = [
+    {
+      label: 'Unicode Keyboard Mode',
+      checked: false,
+      action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
     },
   ];
 
@@ -165,11 +183,25 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     }
   }
 
+  setKeyboardUnicodeMode(useUnicode: boolean): void {
+    this.remoteClient.setKeyboardUnicodeMode(useUnicode);
+  }
+
+  toggleCursorKind(): void {
+    if (this.cursorOverrideActive) {
+      this.remoteClient.setCursorStyleOverride(null);
+    } else {
+      this.remoteClient.setCursorStyleOverride('url("assets/images/crosshair.png") 7 7, default');
+    }
+
+    this.cursorOverrideActive = !this.cursorOverrideActive;
+  }
+
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.ironGuiElement?.nativeElement) {
-          this.ironGuiElement.nativeElement.remove();
+        if (this.ironRemoteDesktopElement?.nativeElement) {
+          this.ironRemoteDesktopElement.nativeElement.remove();
         }
       },
       error: (err): void => {
@@ -253,11 +285,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   private initiateRemoteClientListener(): void {
     this.remoteClientEventListener = (event: Event) => this.readyRemoteClientEventListener(event);
-    this.renderer.listen(this.ironGuiElement.nativeElement, 'ready', this.remoteClientEventListener);
+    this.renderer.listen(this.ironRemoteDesktopElement.nativeElement, 'ready', this.remoteClientEventListener);
   }
 
   private removeRemoteClientListener(): void {
-    if (this.ironGuiElement && this.remoteClientEventListener) {
+    if (this.ironRemoteDesktopElement && this.remoteClientEventListener) {
       this.renderer.destroy();
     }
   }
@@ -307,12 +339,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
     const connectionParameters: IronRDPConnectionParameters = {
       username: extractedData.username,
-      password: password,
+      password,
       host: hostname,
       domain: extractedData.domain,
       gatewayAddress: this.getWebSocketUrl(),
       screenSize: desktopScreenSize,
-      preConnectionBlob: preConnectionBlob,
+      preConnectionBlob,
       kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88'),
     };
     return of(connectionParameters);
@@ -337,18 +369,35 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private callConnect(connectionParameters: IronRDPConnectionParameters): void {
-    this.remoteClient
-      .connect(
-        connectionParameters.username,
-        connectionParameters.password,
-        connectionParameters.host,
-        connectionParameters.gatewayAddress,
-        connectionParameters.domain,
-        connectionParameters.token,
-        connectionParameters.screenSize,
-        connectionParameters.preConnectionBlob,
-        connectionParameters.kdcProxyUrl,
-      )
+    const configBuilder = this.remoteClient
+      .configBuilder()
+      .withUsername(connectionParameters.username)
+      .withPassword(connectionParameters.password)
+      .withDestination(connectionParameters.host)
+      .withProxyAddress(connectionParameters.gatewayAddress)
+      .withAuthToken(connectionParameters.token);
+
+    if (connectionParameters.domain != null) {
+      configBuilder.withServerDomain(connectionParameters.domain);
+    }
+
+    if (connectionParameters.screenSize != null) {
+      configBuilder.withDesktopSize(connectionParameters.screenSize);
+    }
+
+    configBuilder.withExtension(displayControl(true));
+
+    if (connectionParameters.preConnectionBlob != null) {
+      configBuilder.withExtension(preConnectionBlob(connectionParameters.preConnectionBlob));
+    }
+
+    if (connectionParameters.kdcProxyUrl != null) {
+      configBuilder.withExtension(kdcProxyUrl(connectionParameters.kdcProxyUrl));
+    }
+
+    const config = configBuilder.build();
+
+    from(this.remoteClient.connect(config))
       .pipe(
         // @ts-ignore // update iron-remote-gui rxjs to 7.8.1
         takeUntil(this.destroyed$),
@@ -360,7 +409,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private initSessionEventHandler(): void {
-    this.remoteClient.sessionListener.subscribe({
+    this.remoteClient.onSessionEvent({
       next: (event: SessionEvent): void => {
         switch (event.type) {
           case SessionEventType.STARTED:
@@ -398,7 +447,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     this.webClientConnectionSuccess();
   }
 
-  private notifyUser(event: SessionEvent, errorData: UserIronRdpError | string): void {
+  private notifyUser(event: SessionEvent, errorData: IronError | string): void {
     const eventType = event.type.valueOf();
     this.rdpError = {
       kind: this.getMessage(errorData),
@@ -415,12 +464,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     console.error('Error in session event subscription', error);
   }
 
-  private handleIronRDPError(error: UserIronRdpError | string): void {
+  private handleIronRDPError(error: IronError | string): void {
     this.notifyUserAboutError(error);
     this.disableComponentStatus();
   }
 
-  private notifyUserAboutError(error: UserIronRdpError | string): void {
+  private notifyUserAboutError(error: IronError | string): void {
     this.rdpError = {
       kind: this.getMessage(error),
       backtrace: typeof error !== 'string' ? error?.backtrace() : '',
@@ -429,7 +478,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
-  private getMessage(errorData: UserIronRdpError | string): string {
+  private getMessage(errorData: IronError | string): string {
     let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
 
     if (typeof errorData === 'string') {

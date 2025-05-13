@@ -29,6 +29,8 @@ export class VncFormComponent extends BaseComponent implements OnInit {
     showPasswordInput: true,
   };
 
+  showMoreSettings = false;
+
   constructor(
     private formService: WebFormService,
     private cdr: ChangeDetectorRef,
@@ -45,7 +47,13 @@ export class VncFormComponent extends BaseComponent implements OnInit {
     if (this.form) {
       this.clearForm();
 
-      this.formService.addControlToForm(this.form, 'authMode', inputFormData, true, false, VncAuthMode.VNC_Password);
+      this.formService.addControlToForm({
+        formGroup: this.form,
+        controlName: 'authMode',
+        inputFormData,
+        isRequired: true,
+        defaultValue: VncAuthMode.VNC_Password,
+      });
 
       this.subscribeToAuthModeChanges();
     }
@@ -63,6 +71,11 @@ export class VncFormComponent extends BaseComponent implements OnInit {
 
   showPasswordInput(): boolean {
     return this.formInputVisibility.showPasswordInput;
+  }
+
+  toggleMoreSettings(event: Event): void {
+    event.preventDefault();
+    this.showMoreSettings = !this.showMoreSettings;
   }
 
   private initializeFormOptions(): void {
