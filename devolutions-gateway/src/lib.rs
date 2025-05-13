@@ -15,7 +15,7 @@ pub mod openapi;
 
 pub mod api;
 pub mod config;
-pub mod credendials;
+pub mod credential;
 pub mod extract;
 pub mod generic_client;
 pub mod http;
@@ -52,6 +52,7 @@ pub struct DgwState {
     pub shutdown_signal: devolutions_gateway_task::ShutdownSignal,
     pub recordings: recording::RecordingMessageSender,
     pub job_queue_handle: job_queue::JobQueueHandle,
+    pub credential_store: credential::CredentialStoreHandle,
 }
 
 #[doc(hidden)]
@@ -74,6 +75,7 @@ impl DgwState {
         let (subscriber_tx, subscriber_rx) = subscriber::subscriber_channel();
         let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
+        let credential_store = credential::CredentialStoreHandle::new();
 
         let state = Self {
             conf_handle,
@@ -84,6 +86,7 @@ impl DgwState {
             shutdown_signal,
             recordings: recording_manager_handle,
             job_queue_handle,
+            credential_store,
         };
 
         let handles = MockHandles {

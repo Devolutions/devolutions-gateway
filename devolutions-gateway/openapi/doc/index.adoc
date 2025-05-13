@@ -1743,6 +1743,60 @@ endif::internal-generation[]
 |===
 
 
+[#AppCredential]
+=== _AppCredential_ 
+
+
+
+
+[.fields-AppCredential]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| kind
+| X
+| 
+|  <<AppCredentialKind>>  
+| 
+|    username-password,  
+
+| password
+| 
+| X
+|   String  
+| Password for the credential.  Required for \"username-password\" kind.
+|     
+
+| username
+| 
+| X
+|   String  
+| Username for the credential.  Required for \"username-password\" kind.
+|     
+
+|===
+
+
+
+[#AppCredentialKind]
+=== _AppCredentialKind_ 
+
+
+
+
+
+
+[.fields-AppCredentialKind]
+[cols="1"]
+|===
+| Enum Values
+
+| username-password
+
+|===
+
+
 [#AppTokenContentType]
 === _AppTokenContentType_ 
 
@@ -1920,60 +1974,6 @@ Service configuration diagnostic
 
 | rdv
 | fwd
-
-|===
-
-
-[#Credentials]
-=== _Credentials_ 
-
-
-
-
-[.fields-Credentials]
-[cols="2,1,1,2,4,1"]
-|===
-| Field Name| Required| Nullable | Type| Description | Format
-
-| kind
-| X
-| 
-|  <<CredentialsKind>>  
-| 
-|    username-password,  
-
-| password
-| 
-| X
-|   String  
-| Password for the credentials.  Required for \"username-password\" kind.
-|     
-
-| username
-| 
-| X
-|   String  
-| Username for the credentials.  Required for \"username-password\" kind.
-|     
-
-|===
-
-
-
-[#CredentialsKind]
-=== _CredentialsKind_ 
-
-
-
-
-
-
-[.fields-CredentialsKind]
-[cols="1"]
-|===
-| Enum Values
-
-| username-password
 
 |===
 
@@ -2208,10 +2208,11 @@ Service configuration diagnostic
 | Enum Values
 
 | general-failure
+| info
 | unsupported-operation
 | invalid-parameters
 | internal-server-error
-| host-lookup-failure
+| host-resolution-failure
 | agent-version-lookup-failure
 
 |===
@@ -2228,18 +2229,11 @@ Service configuration diagnostic
 |===
 | Field Name| Required| Nullable | Type| Description | Format
 
-| association_id
-| 
-| X
-|   UUID  
-| A unique ID identifying the session for which the credentials should be used.  Required for \"push-credentials\" kind.
-| uuid    
-
-| host_to_lookup
+| host_to_resolve
 | 
 | X
 |   String  
-| The hostname to perform DNS lookup on.  Required for \"lookup-host\" kind.
+| The hostname to perform DNS resolution on.  Required for \"resolve-host\" kind.
 |     
 
 | id
@@ -2254,27 +2248,34 @@ Service configuration diagnostic
 | 
 |  <<PreflightOperationKind>>  
 | 
-|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, push-token, push-credentials, lookup-host,  
+|    get-version, get-agent-version, get-running-session-count, get-recording-storage-health, provision-token, provision-credentials, resolve-host,  
 
-| proxy_credentials
+| proxy_credential
 | 
 | X
-| <<Credentials>>    
+| <<AppCredential>>    
 | 
 |     
 
-| target_credentials
+| target_credential
 | 
 | X
-| <<Credentials>>    
+| <<AppCredential>>    
 | 
 |     
+
+| time_to_live
+| 
+| X
+|   Integer  
+| Minimum persistance duration in seconds for the data provisioned via this operation.  Optional parameter for \"provision-token\" and \"provision-credentials\" kinds.
+| int32    
 
 | token
 | 
 | X
 |   String  
-| The token to be pushed on the proxy-side.  Required for \"push-token\" kind.
+| The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kind.
 |     
 
 |===
@@ -2298,9 +2299,9 @@ Service configuration diagnostic
 | get-agent-version
 | get-running-session-count
 | get-recording-storage-health
-| push-token
-| push-credentials
-| lookup-host
+| provision-token
+| provision-credentials
+| resolve-host
 
 |===
 
@@ -2335,7 +2336,7 @@ Service configuration diagnostic
 | X
 |  <<PreflightAlertStatus>>  
 | 
-|    general-failure, unsupported-operation, invalid-parameters, internal-server-error, host-lookup-failure, agent-version-lookup-failure,  
+|    general-failure, info, unsupported-operation, invalid-parameters, internal-server-error, host-resolution-failure, agent-version-lookup-failure,  
 
 | kind
 | X

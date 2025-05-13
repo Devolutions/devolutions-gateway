@@ -7,21 +7,21 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
-import { CredentialsKind } from './credentialsKind';
+import { AppCredentialKind } from './appCredentialKind';
 
 
-export interface Credentials { 
-    kind: CredentialsKind;
+export interface AppCredential { 
+    kind: AppCredentialKind;
     /**
-     * Password for the credentials.  Required for \"username-password\" kind.
+     * Password for the credential.  Required for \"username-password\" kind.
      */
     password?: string | null;
     /**
-     * Username for the credentials.  Required for \"username-password\" kind.
+     * Username for the credential.  Required for \"username-password\" kind.
      */
     username?: string | null;
 }
-export namespace Credentials {
+export namespace AppCredential {
 }
 
 

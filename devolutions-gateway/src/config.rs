@@ -15,7 +15,7 @@ use tokio_rustls::rustls::pki_types;
 use url::Url;
 use uuid::Uuid;
 
-use crate::credendials::Password;
+use crate::credential::Password;
 use crate::listener::ListenerUrls;
 use crate::target_addr::TargetAddr;
 use crate::token::Subkey;
@@ -586,7 +586,7 @@ fn read_pfx_file(
     use std::cmp::Ordering;
 
     let crypto_context = password
-        .map(|pwd| Pkcs12CryptoContext::new_with_password(pwd.get()))
+        .map(|pwd| Pkcs12CryptoContext::new_with_password(pwd.expose_secret()))
         .unwrap_or_else(Pkcs12CryptoContext::new_without_password);
     let parsing_params = Pkcs12ParsingParams::default();
 

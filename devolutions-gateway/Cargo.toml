@@ -124,3 +124,4 @@ rstest = "0.24"
 devolutions-gateway-generators = { path = "../crates/devolutions-gateway-generators" }
 http-body-util = "0.1"
 tracing-cov-mark = { path = "../crates/tracing-cov-mark" }
+tracing-subscriber = "0.3"

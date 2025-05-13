@@ -49,8 +49,8 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::api::update::UpdateResponse,
         PreflightOperation,
         PreflightOperationKind,
-        Credentials,
-        CredentialsKind,
+        AppCredential,
+        AppCredentialKind,
         PreflightOutput,
         PreflightOutputKind,
         PreflightAlertStatus,
@@ -306,26 +306,26 @@ struct PreflightOperation {
     id: Uuid,
     /// The type of preflight operation to perform.
     kind: PreflightOperationKind,
-    /// The token to be pushed on the proxy-side.
+    /// The token to be stored on the proxy-side.
     ///
-    /// Required for "push-token" kind.
+    /// Required for "provision-token" and "provision-credentials" kinds.
     token: Option<String>,
-    /// A unique ID identifying the session for which the credentials should be used.
+    /// The credential to use to authorize the client at the proxy-level.
     ///
-    /// Required for "push-credentials" kind.
-    association_id: Option<Uuid>,
-    /// The credentials to use to authorize the client at the proxy-level.
+    /// Required for "provision-credentials" kind.
+    proxy_credential: Option<AppCredential>,
+    /// The credential to use against the target server.
     ///
-    /// Required for "push-credentials" kind.
-    proxy_credentials: Option<Credentials>,
-    /// The credentials to use against the target server.
+    /// Required for "provision-credentials" kind.
+    target_credential: Option<AppCredential>,
+    /// The hostname to perform DNS resolution on.
     ///
-    /// Required for "push-credentials" kind.
-    target_credentials: Option<Credentials>,
-    /// The hostname to perform DNS lookup on.
+    /// Required for "resolve-host" kind.
+    host_to_resolve: Option<String>,
+    /// Minimum persistance duration in seconds for the data provisioned via this operation.
     ///
-    /// Required for "lookup-host" kind.
-    host_to_lookup: Option<String>,
+    /// Optional parameter for "provision-token" and "provision-credentials" kinds.
+    time_to_live: Option<u32>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -338,25 +338,25 @@ enum PreflightOperationKind {
     GetRunningSessionCount,
     #[serde(rename = "get-recording-storage-health")]
     GetRecordingStorageHealth,
-    #[serde(rename = "push-token")]
-    PushToken,
-    #[serde(rename = "push-credentials")]
-    PushCredentials,
-    #[serde(rename = "lookup-host")]
-    LookupHost,
+    #[serde(rename = "provision-token")]
+    ProvisionToken,
+    #[serde(rename = "provision-credentials")]
+    ProvisionCredentials,
+    #[serde(rename = "resolve-host")]
+    ResolveHost,
 }
 
 #[allow(unused)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
-struct Credentials {
+struct AppCredential {
     /// The kind of credentials.
-    kind: CredentialsKind,
-    /// Username for the credentials.
+    kind: AppCredentialKind,
+    /// Username for the credential.
     ///
     /// Required for "username-password" kind.
     username: Option<String>,
-    /// Password for the credentials.
+    /// Password for the credential.
     ///
     /// Required for "username-password" kind.
     password: Option<String>,
@@ -364,7 +364,7 @@ struct Credentials {
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
-enum CredentialsKind {
+enum AppCredentialKind {
     #[serde(rename = "username-password")]
     UsernamePassword,
 }
