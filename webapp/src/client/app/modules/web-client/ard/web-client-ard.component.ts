@@ -56,7 +56,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   @ViewChild('sessionArdContainer') sessionContainerElement: ElementRef;
-  @ViewChild('ironRemoteDesktopElementVnc') ironRemoteDesktopElementVnc: ElementRef;
+  @ViewChild('ironRemoteDesktopElement') ironRemoteDesktopElement: ElementRef;
 
   backendRef = Backend;
 
@@ -167,8 +167,8 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
-        if (this.ironRemoteDesktopElementVnc?.nativeElement) {
-          this.ironRemoteDesktopElementVnc.nativeElement.remove();
+        if (this.ironRemoteDesktopElement?.nativeElement) {
+          this.ironRemoteDesktopElement.nativeElement.remove();
         }
       },
       error: (err): void => {
@@ -252,11 +252,11 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   private initiateRemoteClientListener(): void {
     this.remoteClientEventListener = (event: Event) => this.readyRemoteClientEventListener(event);
-    this.renderer.listen(this.ironRemoteDesktopElementVnc.nativeElement, 'ready', this.remoteClientEventListener);
+    this.renderer.listen(this.ironRemoteDesktopElement.nativeElement, 'ready', this.remoteClientEventListener);
   }
 
   private removeRemoteClientListener(): void {
-    if (this.ironRemoteDesktopElementVnc && this.remoteClientEventListener) {
+    if (this.ironRemoteDesktopElement && this.remoteClientEventListener) {
       this.renderer.destroy();
     }
   }
