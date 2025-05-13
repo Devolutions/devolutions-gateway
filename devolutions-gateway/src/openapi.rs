@@ -308,7 +308,7 @@ struct PreflightOperation {
     kind: PreflightOperationKind,
     /// The token to be stored on the proxy-side.
     ///
-    /// Required for "provision-token" and "provision-credentials" kind.
+    /// Required for "provision-token" and "provision-credentials" kinds.
     token: Option<String>,
     /// The credential to use to authorize the client at the proxy-level.
     ///
