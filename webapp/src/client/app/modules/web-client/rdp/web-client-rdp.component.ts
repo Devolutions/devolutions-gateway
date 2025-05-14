@@ -64,6 +64,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   rdpError: { kind: string; backtrace: string };
   isFullScreenMode = false;
   showToolbarDiv = true;
+  useUnicodeKeyboard = false;
   cursorOverrideActive = false;
 
   leftToolbarButtons = [
@@ -90,10 +91,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       icon: 'dvl-icon dvl-icon-screen',
       action: () => this.scaleTo(this.screenScale.Real),
     },
+  ];
+
+  middleToolbarToggleButtons = [
     {
       label: 'Toggle Cursor Kind',
       icon: 'dvl-icon dvl-icon-cursor',
       action: () => this.toggleCursorKind(),
+      isActive: () => !this.cursorOverrideActive,
     },
   ];
 
@@ -108,8 +113,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   checkboxes = [
     {
       label: 'Unicode Keyboard Mode',
-      checked: false,
-      action: (checked: boolean) => this.setKeyboardUnicodeMode(checked),
+      action: () => {
+        this.useUnicodeKeyboard = !this.useUnicodeKeyboard;
+        this.setKeyboardUnicodeMode(this.useUnicodeKeyboard);
+      },
+      isChecked: () => this.useUnicodeKeyboard,
     },
   ];
 

@@ -76,3 +76,7 @@
   flex-direction: column;
   height: 100%;
 }
+
+::ng-deep .p-button-inactive .p-button-icon {
+  color: gray !important;
+}

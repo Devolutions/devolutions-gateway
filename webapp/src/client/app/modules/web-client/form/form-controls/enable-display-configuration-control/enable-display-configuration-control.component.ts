@@ -2,6 +2,7 @@ import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
+import { ArdQualityMode } from '@shared/enums/ard-quality-mode.enum';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
