@@ -3,7 +3,6 @@ import { FormGroup } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
-import { ArdQualityMode } from '@shared/enums/ard-quality-mode.enum';
 
 @Component({
   selector: 'web-client-enable-display-configuration-control',
