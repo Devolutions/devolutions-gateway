@@ -2,9 +2,9 @@ import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { SelectItem } from 'primeng/api';
 
+import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
-import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
 
 @Component({
   selector: 'web-client-ard-quality-mode-control',

@@ -9,6 +9,7 @@ import { ArdFormComponent } from '@gateway/modules/web-client/form/form-componen
 import { RdpFormComponent } from '@gateway/modules/web-client/form/form-components/rdp/rdp-form.component';
 import { SshFormComponent } from '@gateway/modules/web-client/form/form-components/ssh/ssh-form.component';
 import { VncFormComponent } from '@gateway/modules/web-client/form/form-components/vnc/vnc-form.component';
+import { EnableCursorControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-cursor-control/enable-cursor-control.component';
 import { KdcUrlControlComponent } from '@gateway/modules/web-client/form/form-controls/kdc-url-control/kdc-url-control.component';
 import { PasswordControlComponent } from '@gateway/modules/web-client/form/form-controls/password-control/password-control.component';
 import { PreConnectionBlobControlComponent } from '@gateway/modules/web-client/form/form-controls/preconnection-blob/pre-connection-blob-control.component';
@@ -18,16 +19,14 @@ import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-cli
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
+import { WasmInitResolver } from '@gateway/shared/resolvers/wasm-init.resolver';
 import { DynamicTabComponent } from '@shared/components/dynamic-tab/dynamic-tab.component';
 import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
 import { SessionToolbarComponent } from '@shared/components/session-toolbar/session-toolbar.component';
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
 import { SharedModule } from '@shared/shared.module';
-import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
-import { NetScanComponent } from './net-scan/net-scan.component';
-import { WebClientRdpComponent } from './rdp/web-client-rdp.component';
-import { WebClientComponent } from './web-client.component';
 import { CheckboxModule } from 'primeng/checkbox';
+import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 // TODO: uncomment when adding support for iDRAC and VMWare
 // import { VmIdControlComponent } from './form/form-controls/vm-id-control/vm-id-control.component';
 // import { ForceFirmwareV7ControlComponent } from './form/form-controls/force-firmware-v7-control/force-firmware-v7-control.component';
@@ -36,11 +35,12 @@ import { CheckboxModule } from 'primeng/checkbox';
 // import { SharingApprovalModeControlComponent } from './form/form-controls/sharing-approval-mode-control/sharing-approval-mode-control.component';
 import { EnabledEncodingsControlComponent } from './form/form-controls/enabled-encodings-control/enabled-encodings-control.component';
 import { ExtendedClipboardControlComponent } from './form/form-controls/extended-clipboard-control/extended-clipboard-control.component';
-import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
+import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
-import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
-import { WasmInitResolver } from '@gateway/shared/resolvers/wasm-init.resolver';
-import { EnableCursorControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-cursor-control/enable-cursor-control.component';
+import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
+import { NetScanComponent } from './net-scan/net-scan.component';
+import { WebClientRdpComponent } from './rdp/web-client-rdp.component';
+import { WebClientComponent } from './web-client.component';
 
 const routes: Routes = [
   {

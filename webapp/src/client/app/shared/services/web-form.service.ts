@@ -7,10 +7,10 @@ import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms'
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { SelectItem } from 'primeng/api';
-import { ExtraSessionParameter } from './web-session.service';
-import { ResolutionQuality } from '../enums/resolution-quality.enum';
 import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
 import { Encoding } from '../enums/encoding.enum';
+import { ResolutionQuality } from '../enums/resolution-quality.enum';
+import { ExtraSessionParameter } from './web-session.service';
 
 @Injectable({ providedIn: 'root' })
 export class WebFormService extends BaseComponent {

@@ -1,7 +1,6 @@
 import { Component, ComponentRef, Type } from '@angular/core';
 import { v4 as uuidv4 } from 'uuid';
 
-import { DesktopSize } from '@shared/models/desktop-size';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
@@ -10,6 +9,7 @@ import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { BaseComponent } from '../bases/base.component';
 import {
   ArdFormDataInput,

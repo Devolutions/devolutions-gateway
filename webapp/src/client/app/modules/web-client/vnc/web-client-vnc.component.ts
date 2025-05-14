@@ -27,8 +27,8 @@ import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 
+import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
 import { DesktopSize } from '@shared/models/desktop-size';
-import { SessionEvent, UserInteraction, IronError } from '@devolutions/iron-remote-desktop';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
@@ -39,9 +39,9 @@ import {
 } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { Encoding } from '@shared/enums/encoding.enum';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
-import { Encoding } from '@shared/enums/encoding.enum';
 
 enum UserIronRdpErrorKind {
   General = 0,
