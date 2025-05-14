@@ -13,26 +13,41 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JitElevationLogRow {
+    #[serde(rename = "AskerPath", skip_serializing_if = "Option::is_none")]
+    pub asker_path: Option<String>,
     #[serde(rename = "Id")]
     pub id: i64,
     #[serde(rename = "Success")]
     pub success: i64,
-    #[serde(rename = "TargetPath")]
-    pub target_path: String,
+    #[serde(rename = "TargetCommandLine", skip_serializing_if = "Option::is_none")]
+    pub target_command_line: Option<String>,
+    #[serde(rename = "TargetHash", skip_serializing_if = "Option::is_none")]
+    pub target_hash: Option<models::Hash>,
+    #[serde(rename = "TargetPath", skip_serializing_if = "Option::is_none")]
+    pub target_path: Option<String>,
+    #[serde(rename = "TargetSignature", skip_serializing_if = "Option::is_none")]
+    pub target_signature: Option<models::Signature>,
+    #[serde(rename = "TargetWorkingDirectory", skip_serializing_if = "Option::is_none")]
+    pub target_working_directory: Option<String>,
     #[serde(rename = "Timestamp")]
     pub timestamp: i64,
-    #[serde(rename = "User")]
-    pub user: models::User,
+    #[serde(rename = "User", skip_serializing_if = "Option::is_none")]
+    pub user: Option<models::User>,
 }
 
 impl JitElevationLogRow {
-    pub fn new(id: i64, success: i64, target_path: String, timestamp: i64, user: models::User) -> JitElevationLogRow {
+    pub fn new(id: i64, success: i64, timestamp: i64) -> JitElevationLogRow {
         JitElevationLogRow {
+            asker_path: None,
             id,
             success,
-            target_path,
+            target_command_line: None,
+            target_hash: None,
+            target_path: None,
+            target_signature: None,
+            target_working_directory: None,
             timestamp,
-            user,
+            user: None,
         }
     }
 }

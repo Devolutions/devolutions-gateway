@@ -4,6 +4,8 @@ README.md
 api/openapi.yaml
 docs/AboutData.md
 docs/Assignment.md
+docs/AuthenticodeSignatureStatus.md
+docs/Certificate.md
 docs/DefaultApi.md
 docs/ElevateTemporaryPayload.md
 docs/ElevationConfigurations.md
@@ -12,6 +14,7 @@ docs/ElevationMethod.md
 docs/Error.md
 docs/ErrorResponse.md
 docs/GetProfilesMeResponse.md
+docs/Hash.md
 docs/JitElevationLogPage.md
 docs/JitElevationLogQueryOptions.md
 docs/JitElevationLogRow.md
@@ -19,9 +22,12 @@ docs/LaunchPayload.md
 docs/LaunchResponse.md
 docs/OptionalId.md
 docs/PathIdParameter.md
+docs/PathIntIdPath.md
 docs/Profile.md
 docs/SessionElevationConfiguration.md
 docs/SessionElevationStatus.md
+docs/Signature.md
+docs/Signer.md
 docs/StartupInfoDto.md
 docs/StatusResponse.md
 docs/TemporaryElevationConfiguration.md
@@ -49,6 +55,8 @@ src/Devolutions.Pedm.Client/Devolutions.Pedm.Client.csproj
 src/Devolutions.Pedm.Client/Model/AboutData.cs
 src/Devolutions.Pedm.Client/Model/AbstractOpenAPISchema.cs
 src/Devolutions.Pedm.Client/Model/Assignment.cs
+src/Devolutions.Pedm.Client/Model/AuthenticodeSignatureStatus.cs
+src/Devolutions.Pedm.Client/Model/Certificate.cs
 src/Devolutions.Pedm.Client/Model/ElevateTemporaryPayload.cs
 src/Devolutions.Pedm.Client/Model/ElevationConfigurations.cs
 src/Devolutions.Pedm.Client/Model/ElevationKind.cs
@@ -56,6 +64,7 @@ src/Devolutions.Pedm.Client/Model/ElevationMethod.cs
 src/Devolutions.Pedm.Client/Model/Error.cs
 src/Devolutions.Pedm.Client/Model/ErrorResponse.cs
 src/Devolutions.Pedm.Client/Model/GetProfilesMeResponse.cs
+src/Devolutions.Pedm.Client/Model/Hash.cs
 src/Devolutions.Pedm.Client/Model/JitElevationLogPage.cs
 src/Devolutions.Pedm.Client/Model/JitElevationLogQueryOptions.cs
 src/Devolutions.Pedm.Client/Model/JitElevationLogRow.cs
@@ -63,9 +72,12 @@ src/Devolutions.Pedm.Client/Model/LaunchPayload.cs
 src/Devolutions.Pedm.Client/Model/LaunchResponse.cs
 src/Devolutions.Pedm.Client/Model/OptionalId.cs
 src/Devolutions.Pedm.Client/Model/PathIdParameter.cs
+src/Devolutions.Pedm.Client/Model/PathIntIdPath.cs
 src/Devolutions.Pedm.Client/Model/Profile.cs
 src/Devolutions.Pedm.Client/Model/SessionElevationConfiguration.cs
 src/Devolutions.Pedm.Client/Model/SessionElevationStatus.cs
+src/Devolutions.Pedm.Client/Model/Signature.cs
+src/Devolutions.Pedm.Client/Model/Signer.cs
 src/Devolutions.Pedm.Client/Model/StartupInfoDto.cs
 src/Devolutions.Pedm.Client/Model/StatusResponse.cs
 src/Devolutions.Pedm.Client/Model/TemporaryElevationConfiguration.cs

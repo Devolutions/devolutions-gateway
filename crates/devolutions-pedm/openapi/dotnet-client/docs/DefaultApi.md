@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 | [**ElevateTemporaryPost**](DefaultApi.md#elevatetemporarypost) | **POST** /elevate/temporary |  |
 | [**LaunchPost**](DefaultApi.md#launchpost) | **POST** /launch |  |
 | [**LogJitGet**](DefaultApi.md#logjitget) | **GET** /log/jit |  |
+| [**LogJitIdGet**](DefaultApi.md#logjitidget) | **GET** /log/jit/{id} |  |
 | [**PolicyAssignmentsGet**](DefaultApi.md#policyassignmentsget) | **GET** /policy/assignments |  |
 | [**PolicyAssignmentsIdPut**](DefaultApi.md#policyassignmentsidput) | **PUT** /policy/assignments/{id} |  |
 | [**PolicyMeGet**](DefaultApi.md#policymeget) | **GET** /policy/me |  |
@@ -18,6 +19,7 @@ All URIs are relative to *http://localhost*
 | [**PolicyProfilesIdGet**](DefaultApi.md#policyprofilesidget) | **GET** /policy/profiles/{id} |  |
 | [**PolicyProfilesIdPut**](DefaultApi.md#policyprofilesidput) | **PUT** /policy/profiles/{id} |  |
 | [**PolicyProfilesPost**](DefaultApi.md#policyprofilespost) | **POST** /policy/profiles |  |
+| [**PolicyUsersGet**](DefaultApi.md#policyusersget) | **GET** /policy/users |  |
 | [**RevokePost**](DefaultApi.md#revokepost) | **POST** /revoke |  |
 | [**StatusGet**](DefaultApi.md#statusget) | **GET** /status |  |
 
@@ -452,6 +454,98 @@ No authorization required
 ### HTTP request headers
 
  - **Content-Type**: application/json
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** |  |  -  |
+| **0** |  |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="logjitidget"></a>
+# **LogJitIdGet**
+> JitElevationLogRow LogJitIdGet (long id)
+
+
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Pedm.Client.Api;
+using Devolutions.Pedm.Client.Client;
+using Devolutions.Pedm.Client.Model;
+
+namespace Example
+{
+    public class LogJitIdGetExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
+            var id = 789L;  // long | 
+
+            try
+            {
+                JitElevationLogRow result = apiInstance.LogJitIdGet(id);
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling DefaultApi.LogJitIdGet: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the LogJitIdGetWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    ApiResponse<JitElevationLogRow> response = apiInstance.LogJitIdGetWithHttpInfo(id);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling DefaultApi.LogJitIdGetWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **id** | **long** |  |  |
+
+### Return type
+
+[**JitElevationLogRow**](JitElevationLogRow.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 
@@ -1256,6 +1350,93 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 | **200** | no content |  -  |
+| **0** |  |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="policyusersget"></a>
+# **PolicyUsersGet**
+> List&lt;User&gt; PolicyUsersGet ()
+
+
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Pedm.Client.Api;
+using Devolutions.Pedm.Client.Client;
+using Devolutions.Pedm.Client.Model;
+
+namespace Example
+{
+    public class PolicyUsersGetExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
+
+            try
+            {
+                List<User> result = apiInstance.PolicyUsersGet();
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling DefaultApi.PolicyUsersGet: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the PolicyUsersGetWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    ApiResponse<List<User>> response = apiInstance.PolicyUsersGetWithHttpInfo();
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling DefaultApi.PolicyUsersGetWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+### Return type
+
+[**List&lt;User&gt;**](User.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** |  |  -  |
 | **0** |  |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

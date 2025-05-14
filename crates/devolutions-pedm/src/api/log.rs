@@ -1,10 +1,29 @@
 use crate::api::{AppState, Db, NamedPipeConnectInfo};
 use crate::error::Error;
-use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions};
+use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 use aide::axum::ApiRouter;
 use aide::NoApi;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::{Extension, Json};
+
+use super::policy::PathIntIdPath;
+
+async fn get_jit_elevation_log_id(
+    Path(id): Path<PathIntIdPath>,
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    NoApi(State(_state)): NoApi<State<AppState>>,
+    NoApi(Db(db)): NoApi<Db>,
+) -> Result<Json<JitElevationLogRow>, Error> {
+    let row = db.get_jit_elevation_log(id.id).await?.ok_or_else(|| Error::NotFound)?;
+
+    if !named_pipe_info.token.is_elevated()? {
+        if !row.user.as_ref().map_or(true, |u| u != &named_pipe_info.user) {
+            return Err(Error::AccessDenied);
+        }
+    }
+
+    Ok(Json(row))
+}
 
 async fn get_jit_elevation_logs(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
@@ -23,5 +42,7 @@ async fn get_jit_elevation_logs(
 }
 
 pub(crate) fn log_router() -> ApiRouter<AppState> {
-    ApiRouter::new().api_route("/jit", aide::axum::routing::get(get_jit_elevation_logs))
+    ApiRouter::new()
+        .api_route("/jit", aide::axum::routing::get(get_jit_elevation_logs))
+        .api_route("/jit/{id}", aide::axum::routing::get(get_jit_elevation_log_id))
 }

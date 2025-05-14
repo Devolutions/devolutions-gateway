@@ -2,13 +2,13 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use devolutions_pedm_shared::policy::{AuthenticodeSignatureStatus, ElevationResult, User};
+use devolutions_pedm_shared::policy::{AuthenticodeSignatureStatus, ElevationResult, Hash, Signature, Signer, User};
 use libsql::params::IntoParams;
 use libsql::{params, Row, Transaction, Value};
 
 use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
-use super::err::ParseTimestampError;
+use super::err::{InvalidEnumError, ParseTimestampError};
 use super::{Database, DbError};
 
 pub(crate) struct LibsqlConn(libsql::Connection);
@@ -196,6 +196,110 @@ impl Database for LibsqlConn {
         Ok(())
     }
 
+    async fn get_users(&self) -> Result<Vec<User>, DbError> {
+        let mut stmt = self
+            .prepare("SELECT id, account_name, domain_name, account_sid, domain_sid FROM user")
+            .await?;
+
+        let mut rows = stmt.query(params![]).await?;
+        let mut users = Vec::new();
+
+        while let Some(row) = rows.next().await? {
+            users.push(User {
+                account_name: row.get(1)?,
+                domain_name: row.get(2)?,
+                account_sid: row.get(3)?,
+                domain_sid: row.get(4)?,
+            });
+        }
+
+        Ok(users)
+    }
+
+    async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError> {
+        let mut stmt = self
+            .prepare(
+                "SELECT
+                j.id,
+                j.success,
+                j.timestamp,
+                j.asker_path,
+                j.target_path,
+                j.target_command_line,
+                j.target_working_directory,
+                j.target_sha1,
+                j.target_sha256,
+                u.account_name,
+                u.domain_name,
+                u.account_sid,
+                u.domain_sid,
+                s.id,
+                s.authenticode_sig_status,
+                s.issuer
+             FROM jit_elevation_result j
+             LEFT JOIN user u ON j.target_user_id = u.id
+             LEFT JOIN signature s ON j.target_signature_id = s.id
+             WHERE j.id = ?",
+            )
+            .await?;
+
+        let mut rows = stmt.query(params![id]).await?;
+        if let Some(row) = rows.next().await? {
+            let target_user = match row.get::<Option<String>>(9)? {
+                Some(account_name) => Some(User {
+                    account_name,
+                    domain_name: row.get(10)?,
+                    account_sid: row.get(11)?,
+                    domain_sid: row.get(12)?,
+                }),
+                None => None,
+            };
+
+            let target_signature = match row.get::<Option<i64>>(13)? {
+                Some(_) => Some(Signature {
+                    status: match row.get::<i64>(14)? {
+                        0 => AuthenticodeSignatureStatus::Valid,
+                        1 => AuthenticodeSignatureStatus::Incompatible,
+                        2 => AuthenticodeSignatureStatus::NotSigned,
+                        3 => AuthenticodeSignatureStatus::HashMismatch,
+                        4 => AuthenticodeSignatureStatus::NotSupportedFileFormat,
+                        5 => AuthenticodeSignatureStatus::NotTrusted,
+                        n => {
+                            return Err(DbError::InvalidEnum(InvalidEnumError {
+                                value: n,
+                                enum_name: "AuthenticodeSignatureStatus",
+                            }))
+                        }
+                    },
+                    signer: match row.get::<Option<String>>(15)? {
+                        Some(issuer) => Some(Signer { issuer }),
+                        None => None,
+                    },
+                    certificates: None,
+                }),
+                None => None,
+            };
+
+            Ok(Some(JitElevationLogRow {
+                id: row.get(0)?,
+                success: row.get(1)?,
+                timestamp: row.get(2)?,
+                asker_path: row.get(3)?,
+                target_path: row.get(4)?,
+                target_command_line: row.get(5)?,
+                target_working_directory: row.get(6)?,
+                target_hash: Some(Hash {
+                    sha1: row.get(7)?,
+                    sha256: row.get(8)?,
+                }),
+                user: target_user,
+                target_signature,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn get_jit_elevation_logs(
         &self,
         query_options: JitElevationLogQueryOptions,
@@ -245,7 +349,7 @@ impl Database for LibsqlConn {
         let offset = (query_options.page_number.saturating_sub(1) * query_options.page_size) as i64;
 
         let select_sql = format!(
-            "SELECT jit.id, jit.timestamp, jit.success, jit.asker_path, jit.target_path, u_display.account_name, u_display.domain_name, u_display.account_sid, u_display.domain_sid {} ORDER BY jit.{} {} LIMIT ? OFFSET ?",
+            "SELECT jit.id, jit.timestamp, jit.success, jit.target_path, u_display.account_name, u_display.domain_name, u_display.account_sid, u_display.domain_sid {} ORDER BY jit.{} {} LIMIT ? OFFSET ?",
             base_sql + &joins + &where_sql,
             sort_column,
             sort_order
@@ -264,12 +368,13 @@ impl Database for LibsqlConn {
                 timestamp: row.get(1)?,
                 success: row.get(2)?,
                 target_path: row.get(3)?,
-                user: User {
+                user: Some(User {
                     account_name: row.get(4)?,
                     domain_name: row.get(5)?,
                     account_sid: row.get(6)?,
                     domain_sid: row.get(7)?,
-                },
+                }),
+                ..Default::default()
             });
         }
 

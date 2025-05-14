@@ -102,7 +102,15 @@ impl Database for PgPool {
         Ok(())
     }
 
+    async fn get_users(&self) -> Result<Vec<User>, DbError> {
+        unimplemented!()
+    }
+
     async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
+        unimplemented!()
+    }
+
+    async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError> {
         unimplemented!()
     }
 

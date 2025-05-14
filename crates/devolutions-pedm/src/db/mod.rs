@@ -5,13 +5,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use devolutions_pedm_shared::policy::ElevationResult;
+use devolutions_pedm_shared::policy::{ElevationResult, User};
 use tracing::{info, warn};
 
 mod err;
 
 use crate::config::DbBackend;
-use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions};
+use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 use crate::Config;
 pub(crate) use err::DbError;
 
@@ -202,6 +202,10 @@ pub(crate) trait Database: Send + Sync {
     async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
 
     async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError>;
+
+    async fn get_users(&self) -> Result<Vec<User>, DbError>;
+
+    async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError>;
 
     async fn get_jit_elevation_logs(
         &self,
