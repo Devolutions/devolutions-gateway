@@ -1,10 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use aide::NoApi;
 use axum::extract::State;
 use axum::{Extension, Json};
-use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -20,10 +18,8 @@ use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{environment_block, expand_environment_path, CommandLine, WideString};
 
 use crate::api::state::AppState;
-use crate::db::DbHandle;
 use crate::elevator;
 use crate::error::Error;
-use crate::policy::Policy;
 
 use super::NamedPipeConnectInfo;
 
