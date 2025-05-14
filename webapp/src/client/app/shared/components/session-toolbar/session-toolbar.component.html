@@ -34,11 +34,25 @@
       <div class="separator" *ngIf="!last"></div>
 
     </ng-container>
+
+    <div class="separator" *ngIf="middleToggleButtons.length > 0"></div>
+
+    <ng-container *ngFor="let button of middleToggleButtons; let i = index; let last = last">
+      <p-button (click)="button.action()"
+                [label]="button.label"
+                [icon]="button.icon"
+                iconPos="left"
+                [styleClass]="button.isActive() ? '' : 'p-button-inactive'">
+              </p-button>
+
+      <div class="separator" *ngIf="!last"></div>
+
+    </ng-container>
   </div>
 
   <div class="session-toolbar-middle-group" *ngIf="checkboxes.length > 0">
     <ng-container *ngFor="let checkbox of checkboxes; let i = index; let last = last">
-        <p-checkbox [(ngModel)]="checkbox.checked" (onChange)="checkbox.action(checkbox.checked)"
+        <p-checkbox (onChange)="checkbox.action()"
                   [label]="checkbox.label" [binary]="true"></p-checkbox>
 
         <div class="separator" *ngIf="checkboxes.length > 1 && !last"></div>

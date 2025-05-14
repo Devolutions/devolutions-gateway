@@ -21,6 +21,13 @@ export class SessionToolbarComponent {
     action: () => void;
   }[] = [];
 
+  @Input() middleToggleButtons: {
+    label: string;
+    icon: string;
+    action: () => void;
+    isActive: () => boolean;
+  }[] = [];
+
   @Input() rightButtons: {
     label: string;
     icon: string;
@@ -29,8 +36,8 @@ export class SessionToolbarComponent {
 
   @Input() checkboxes: {
     label: string;
-    checked: boolean;
-    action: (checked: boolean) => void;
+    action: () => void;
+    isChecked: () => boolean;
   }[] = [];
 
   isFullScreenMode = false;
