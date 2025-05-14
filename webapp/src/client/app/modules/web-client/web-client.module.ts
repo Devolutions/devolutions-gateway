@@ -10,6 +10,7 @@ import { RdpFormComponent } from '@gateway/modules/web-client/form/form-componen
 import { SshFormComponent } from '@gateway/modules/web-client/form/form-components/ssh/ssh-form.component';
 import { VncFormComponent } from '@gateway/modules/web-client/form/form-components/vnc/vnc-form.component';
 import { EnableCursorControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-cursor-control/enable-cursor-control.component';
+import { EnableDisplayConfigurationControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-display-configuration-control/enable-display-configuration-control.component';
 import { KdcUrlControlComponent } from '@gateway/modules/web-client/form/form-controls/kdc-url-control/kdc-url-control.component';
 import { PasswordControlComponent } from '@gateway/modules/web-client/form/form-controls/password-control/password-control.component';
 import { PreConnectionBlobControlComponent } from '@gateway/modules/web-client/form/form-controls/preconnection-blob/pre-connection-blob-control.component';
@@ -79,6 +80,7 @@ const routes: Routes = [
     PasswordControlComponent,
     ExtendedClipboardControlComponent,
     ScreenSizeControlComponent,
+    EnableDisplayConfigurationControlComponent,
     KdcUrlControlComponent,
     PreConnectionBlobControlComponent,
     EnabledEncodingsControlComponent,

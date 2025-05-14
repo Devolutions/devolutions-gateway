@@ -20,6 +20,7 @@ export interface IronRDPConnectionParameters {
   token?: string;
   kdcToken?: string;
   screenSize?: DesktopSize;
+  enableDisplayControl: boolean;
   kdcUrl?: string;
   kdcProxyUrl?: string;
   preConnectionBlob?: string;
