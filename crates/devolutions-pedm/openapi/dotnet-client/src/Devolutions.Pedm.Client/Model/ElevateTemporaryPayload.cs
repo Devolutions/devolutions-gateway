@@ -39,15 +39,16 @@ namespace Devolutions.Pedm.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="ElevateTemporaryPayload" /> class.
         /// </summary>
-        /// <param name="seconds">seconds (required).</param>
+        /// <param name="seconds">The number of seconds to elevate the user for.  This must be between 1 and &#x60;i32::MAX&#x60;. (required).</param>
         public ElevateTemporaryPayload(long seconds = default(long))
         {
             this.Seconds = seconds;
         }
 
         /// <summary>
-        /// Gets or Sets Seconds
+        /// The number of seconds to elevate the user for.  This must be between 1 and &#x60;i32::MAX&#x60;.
         /// </summary>
+        /// <value>The number of seconds to elevate the user for.  This must be between 1 and &#x60;i32::MAX&#x60;.</value>
         [DataMember(Name = "Seconds", IsRequired = true, EmitDefaultValue = true)]
         public long Seconds { get; set; }
 

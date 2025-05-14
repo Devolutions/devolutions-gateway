@@ -30,6 +30,22 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <returns>AboutData</returns>
+        AboutData AboutGet();
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <remarks>
+        /// 
+        /// </remarks>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <returns>ApiResponse of AboutData</returns>
+        ApiResponse<AboutData> AboutGetWithHttpInfo();
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <returns></returns>
         void ElevateSessionPost();
 
@@ -82,8 +98,9 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>List&lt;ElevationResult&gt;</returns>
-        List<ElevationResult> LogsGet();
+        /// <param name="jitElevationLogQueryOptions"></param>
+        /// <returns>JitElevationLogPage</returns>
+        JitElevationLogPage LogJitGet(JitElevationLogQueryOptions jitElevationLogQueryOptions);
 
         /// <summary>
         /// 
@@ -92,8 +109,9 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>ApiResponse of List&lt;ElevationResult&gt;</returns>
-        ApiResponse<List<ElevationResult>> LogsGetWithHttpInfo();
+        /// <param name="jitElevationLogQueryOptions"></param>
+        /// <returns>ApiResponse of JitElevationLogPage</returns>
+        ApiResponse<JitElevationLogPage> LogJitGetWithHttpInfo(JitElevationLogQueryOptions jitElevationLogQueryOptions);
         /// <summary>
         /// 
         /// </summary>
@@ -303,6 +321,27 @@ namespace Devolutions.Pedm.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of AboutData</returns>
+        System.Threading.Tasks.Task<AboutData> AboutGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <remarks>
+        /// 
+        /// </remarks>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (AboutData)</returns>
+        System.Threading.Tasks.Task<ApiResponse<AboutData>> AboutGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <remarks>
+        /// 
+        /// </remarks>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of void</returns>
         System.Threading.Tasks.Task ElevateSessionPostAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
@@ -369,9 +408,10 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="jitElevationLogQueryOptions"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of List&lt;ElevationResult&gt;</returns>
-        System.Threading.Tasks.Task<List<ElevationResult>> LogsGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of JitElevationLogPage</returns>
+        System.Threading.Tasks.Task<JitElevationLogPage> LogJitGetAsync(JitElevationLogQueryOptions jitElevationLogQueryOptions, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// 
@@ -380,9 +420,10 @@ namespace Devolutions.Pedm.Client.Api
         /// 
         /// </remarks>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="jitElevationLogQueryOptions"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse (List&lt;ElevationResult&gt;)</returns>
-        System.Threading.Tasks.Task<ApiResponse<List<ElevationResult>>> LogsGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of ApiResponse (JitElevationLogPage)</returns>
+        System.Threading.Tasks.Task<ApiResponse<JitElevationLogPage>> LogJitGetWithHttpInfoAsync(JitElevationLogQueryOptions jitElevationLogQueryOptions, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         /// <summary>
         /// 
         /// </summary>
@@ -847,6 +888,107 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <returns>AboutData</returns>
+        public AboutData AboutGet()
+        {
+            Devolutions.Pedm.Client.Client.ApiResponse<AboutData> localVarResponse = AboutGetWithHttpInfo();
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        ///  
+        /// </summary>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <returns>ApiResponse of AboutData</returns>
+        public Devolutions.Pedm.Client.Client.ApiResponse<AboutData> AboutGetWithHttpInfo()
+        {
+            Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+            var localVarContentType = Devolutions.Pedm.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Pedm.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+
+
+            // make the HTTP request
+            var localVarResponse = this.Client.Get<AboutData>("/about", localVarRequestOptions, this.Configuration);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("AboutGet", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        ///  
+        /// </summary>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of AboutData</returns>
+        public async System.Threading.Tasks.Task<AboutData> AboutGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        {
+            Devolutions.Pedm.Client.Client.ApiResponse<AboutData> localVarResponse = await AboutGetWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        ///  
+        /// </summary>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (AboutData)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<AboutData>> AboutGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        {
+
+            Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+
+            var localVarContentType = Devolutions.Pedm.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Pedm.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+
+
+            // make the HTTP request
+
+            var localVarResponse = await this.AsynchronousClient.GetAsync<AboutData>("/about", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("AboutGet", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        ///  
+        /// </summary>
+        /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <returns></returns>
         public void ElevateSessionPost()
         {
@@ -1178,10 +1320,11 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>List&lt;ElevationResult&gt;</returns>
-        public List<ElevationResult> LogsGet()
+        /// <param name="jitElevationLogQueryOptions"></param>
+        /// <returns>JitElevationLogPage</returns>
+        public JitElevationLogPage LogJitGet(JitElevationLogQueryOptions jitElevationLogQueryOptions)
         {
-            Devolutions.Pedm.Client.Client.ApiResponse<List<ElevationResult>> localVarResponse = LogsGetWithHttpInfo();
+            Devolutions.Pedm.Client.Client.ApiResponse<JitElevationLogPage> localVarResponse = LogJitGetWithHttpInfo(jitElevationLogQueryOptions);
             return localVarResponse.Data;
         }
 
@@ -1189,12 +1332,18 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <returns>ApiResponse of List&lt;ElevationResult&gt;</returns>
-        public Devolutions.Pedm.Client.Client.ApiResponse<List<ElevationResult>> LogsGetWithHttpInfo()
+        /// <param name="jitElevationLogQueryOptions"></param>
+        /// <returns>ApiResponse of JitElevationLogPage</returns>
+        public Devolutions.Pedm.Client.Client.ApiResponse<JitElevationLogPage> LogJitGetWithHttpInfo(JitElevationLogQueryOptions jitElevationLogQueryOptions)
         {
+            // verify the required parameter 'jitElevationLogQueryOptions' is set
+            if (jitElevationLogQueryOptions == null)
+                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'jitElevationLogQueryOptions' when calling DefaultApi->LogJitGet");
+
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
             string[] _contentTypes = new string[] {
+                "application/json"
             };
 
             // to determine the Accept header
@@ -1208,14 +1357,15 @@ namespace Devolutions.Pedm.Client.Api
             var localVarAccept = Devolutions.Pedm.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
             if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
 
+            localVarRequestOptions.Data = jitElevationLogQueryOptions;
 
 
             // make the HTTP request
-            var localVarResponse = this.Client.Get<List<ElevationResult>>("/logs", localVarRequestOptions, this.Configuration);
+            var localVarResponse = this.Client.Get<JitElevationLogPage>("/log/jit", localVarRequestOptions, this.Configuration);
 
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("LogsGet", localVarResponse);
+                Exception _exception = this.ExceptionFactory("LogJitGet", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 
@@ -1226,11 +1376,12 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="jitElevationLogQueryOptions"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of List&lt;ElevationResult&gt;</returns>
-        public async System.Threading.Tasks.Task<List<ElevationResult>> LogsGetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of JitElevationLogPage</returns>
+        public async System.Threading.Tasks.Task<JitElevationLogPage> LogJitGetAsync(JitElevationLogQueryOptions jitElevationLogQueryOptions, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            Devolutions.Pedm.Client.Client.ApiResponse<List<ElevationResult>> localVarResponse = await LogsGetWithHttpInfoAsync(cancellationToken).ConfigureAwait(false);
+            Devolutions.Pedm.Client.Client.ApiResponse<JitElevationLogPage> localVarResponse = await LogJitGetWithHttpInfoAsync(jitElevationLogQueryOptions, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
         }
 
@@ -1238,14 +1389,20 @@ namespace Devolutions.Pedm.Client.Api
         ///  
         /// </summary>
         /// <exception cref="Devolutions.Pedm.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="jitElevationLogQueryOptions"></param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse (List&lt;ElevationResult&gt;)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<List<ElevationResult>>> LogsGetWithHttpInfoAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of ApiResponse (JitElevationLogPage)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Pedm.Client.Client.ApiResponse<JitElevationLogPage>> LogJitGetWithHttpInfoAsync(JitElevationLogQueryOptions jitElevationLogQueryOptions, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
+            // verify the required parameter 'jitElevationLogQueryOptions' is set
+            if (jitElevationLogQueryOptions == null)
+                throw new Devolutions.Pedm.Client.Client.ApiException(400, "Missing required parameter 'jitElevationLogQueryOptions' when calling DefaultApi->LogJitGet");
+
 
             Devolutions.Pedm.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Pedm.Client.Client.RequestOptions();
 
             string[] _contentTypes = new string[] {
+                "application/json"
             };
 
             // to determine the Accept header
@@ -1260,15 +1417,16 @@ namespace Devolutions.Pedm.Client.Api
             var localVarAccept = Devolutions.Pedm.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
             if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
 
+            localVarRequestOptions.Data = jitElevationLogQueryOptions;
 
 
             // make the HTTP request
 
-            var localVarResponse = await this.AsynchronousClient.GetAsync<List<ElevationResult>>("/logs", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+            var localVarResponse = await this.AsynchronousClient.GetAsync<JitElevationLogPage>("/log/jit", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
 
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("LogsGet", localVarResponse);
+                Exception _exception = this.ExceptionFactory("LogJitGet", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 

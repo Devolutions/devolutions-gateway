@@ -5,6 +5,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 
 mod config;
 mod db;
+mod log;
 pub mod model;
 
 pub use config::Config;
@@ -15,7 +16,6 @@ cfg_if::cfg_if! {
         mod elevations;
         mod elevator;
         mod error;
-        mod log;
         mod policy;
         mod utils;
 

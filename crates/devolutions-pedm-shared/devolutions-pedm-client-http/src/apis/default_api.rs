@@ -37,6 +37,7 @@ where
 }
 
 pub trait DefaultApi {
+    fn about_get(&self) -> Pin<Box<dyn Future<Output = Result<models::AboutData, Error>>>>;
     fn elevate_session_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn elevate_temporary_post(
         &self,
@@ -46,7 +47,10 @@ pub trait DefaultApi {
         &self,
         launch_payload: models::LaunchPayload,
     ) -> Pin<Box<dyn Future<Output = Result<models::LaunchResponse, Error>>>>;
-    fn logs_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::ElevationResult>, Error>>>>;
+    fn log_jit_get(
+        &self,
+        jit_elevation_log_query_options: models::JitElevationLogQueryOptions,
+    ) -> Pin<Box<dyn Future<Output = Result<models::JitElevationLogPage, Error>>>>;
     fn policy_assignments_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::Assignment>, Error>>>>;
     fn policy_assignments_id_put(
         &self,
@@ -72,6 +76,13 @@ impl<C: hyper::client::connect::Connect> DefaultApi for DefaultApiClient<C>
 where
     C: Clone + std::marker::Send + Sync,
 {
+    #[allow(unused_mut)]
+    fn about_get(&self) -> Pin<Box<dyn Future<Output = Result<models::AboutData, Error>>>> {
+        let mut req = __internal_request::Request::new(hyper::Method::GET, "/about".to_string());
+
+        req.execute(self.configuration.borrow())
+    }
+
     #[allow(unused_mut)]
     fn elevate_session_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::POST, "/elevate/session".to_string());
@@ -104,8 +115,12 @@ where
     }
 
     #[allow(unused_mut)]
-    fn logs_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::ElevationResult>, Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::GET, "/logs".to_string());
+    fn log_jit_get(
+        &self,
+        jit_elevation_log_query_options: models::JitElevationLogQueryOptions,
+    ) -> Pin<Box<dyn Future<Output = Result<models::JitElevationLogPage, Error>>>> {
+        let mut req = __internal_request::Request::new(hyper::Method::GET, "/log/jit".to_string());
+        req = req.with_body_param(jit_elevation_log_query_options);
 
         req.execute(self.configuration.borrow())
     }

@@ -26,7 +26,7 @@ using OpenAPIDateConverter = Devolutions.Pedm.Client.Client.OpenAPIDateConverter
 namespace Devolutions.Pedm.Client.Model
 {
     /// <summary>
-    /// GetProfilesMeResponse
+    /// Returns some information about the current user and active profiles.  If there is no active profile, the &#x60;active&#x60; UUID will be full of zeroes.
     /// </summary>
     [DataContract(Name = "GetProfilesMeResponse")]
     public partial class GetProfilesMeResponse : IValidatableObject

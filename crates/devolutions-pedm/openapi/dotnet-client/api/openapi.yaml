@@ -5,6 +5,21 @@ info:
 servers:
 - url: /
 paths:
+  /about:
+    get:
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AboutData'
+          description: ""
   /elevate/temporary:
     post:
       requestBody:
@@ -65,23 +80,6 @@ paths:
           description: ""
         "200":
           description: no content
-  /logs:
-    get:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          content:
-            application/json:
-              schema:
-                items:
-                  $ref: '#/components/schemas/ElevationResult'
-                type: array
-          description: ""
   /status:
     get:
       responses:
@@ -97,6 +95,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
           description: ""
+  /log/jit:
+    get:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JitElevationLogQueryOptions'
+        required: true
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: ""
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JitElevationLogPage'
+          description: ""
   /policy/me:
     get:
       responses:
@@ -111,7 +130,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetProfilesMeResponse'
-          description: ""
+          description: |-
+            Returns some information about the current user and active profiles.
+
+            If there is no active profile, the `active` UUID will be full of zeroes.
     put:
       requestBody:
         content:
@@ -277,68 +299,39 @@ paths:
           description: no content
 components:
   schemas:
-    Application:
+    AboutData:
       example:
-        Path: Path
-        WorkingDirectory: WorkingDirectory
-        CommandLine:
-        - CommandLine
-        - CommandLine
-        User:
-          DomainSid: DomainSid
-          DomainName: DomainName
-          AccountSid: AccountSid
-          AccountName: AccountName
-        Signature:
-          Signer:
-            Issuer: Issuer
-          Status: Valid
-          Certificates:
-          - Base64: Base64
-            SerialNumber: SerialNumber
-            Issuer: Issuer
-            Thumbprint:
-              Sha1: Sha1
-              Sha256: Sha256
-            Eku:
-            - Eku
-            - Eku
-            Subject: Subject
-          - Base64: Base64
-            SerialNumber: SerialNumber
-            Issuer: Issuer
-            Thumbprint:
-              Sha1: Sha1
-              Sha256: Sha256
-            Eku:
-            - Eku
-            - Eku
-            Subject: Subject
-        Hash:
-          Sha1: Sha1
-          Sha256: Sha256
+        LastRequestTime: 2000-01-23T04:56:07.000+00:00
+        StartTime: 2000-01-23T04:56:07.000+00:00
+        RunId: 1
+        CurrentRequestCount: 6
+        StartupRequestCount: 5
       properties:
-        CommandLine:
-          items:
-            type: string
-          type: array
-        Hash:
-          $ref: '#/components/schemas/Hash'
-        Path:
+        CurrentRequestCount:
+          format: int32
+          type: integer
+        LastRequestTime:
+          description: |-
+            The time of the most recent request.
+
+            This can be `None` if `/about` is the first request made.
+          format: date-time
           type: string
-        Signature:
-          $ref: '#/components/schemas/Signature'
-        User:
-          $ref: '#/components/schemas/User'
-        WorkingDirectory:
+          nullable: true
+        RunId:
+          format: int32
+          type: integer
+        StartTime:
+          format: date-time
           type: string
+        StartupRequestCount:
+          format: int32
+          type: integer
       required:
-      - CommandLine
-      - Hash
-      - Path
-      - Signature
-      - User
-      - WorkingDirectory
+      - CurrentRequestCount
+      - RunId
+      - StartTime
+      - StartupRequestCount
     Assignment:
       example:
         Users:
@@ -372,54 +365,15 @@ components:
       required:
       - Profile
       - Users
-    AuthenticodeSignatureStatus:
-      enum:
-      - Valid
-      - Incompatible
-      - NotSigned
-      - HashMismatch
-      - NotSupportedFileFormat
-      - NotTrusted
-      type: string
-    Certificate:
-      example:
-        Base64: Base64
-        SerialNumber: SerialNumber
-        Issuer: Issuer
-        Thumbprint:
-          Sha1: Sha1
-          Sha256: Sha256
-        Eku:
-        - Eku
-        - Eku
-        Subject: Subject
-      properties:
-        Base64:
-          type: string
-        Eku:
-          items:
-            type: string
-          type: array
-        Issuer:
-          type: string
-        SerialNumber:
-          type: string
-        Subject:
-          type: string
-        Thumbprint:
-          $ref: '#/components/schemas/Hash'
-      required:
-      - Base64
-      - Eku
-      - Issuer
-      - SerialNumber
-      - Subject
-      - Thumbprint
     ElevateTemporaryPayload:
       example:
         Seconds: 0
       properties:
         Seconds:
+          description: |-
+            The number of seconds to elevate the user for.
+
+            This must be between 1 and `i32::MAX`.
           format: int64
           minimum: 0.0
           type: integer
@@ -452,192 +406,8 @@ components:
       - LocalAdmin
       - VirtualAccount
       type: string
-    ElevationRequest:
-      example:
-        Target:
-          Path: Path
-          WorkingDirectory: WorkingDirectory
-          CommandLine:
-          - CommandLine
-          - CommandLine
-          User:
-            DomainSid: DomainSid
-            DomainName: DomainName
-            AccountSid: AccountSid
-            AccountName: AccountName
-          Signature:
-            Signer:
-              Issuer: Issuer
-            Status: Valid
-            Certificates:
-            - Base64: Base64
-              SerialNumber: SerialNumber
-              Issuer: Issuer
-              Thumbprint:
-                Sha1: Sha1
-                Sha256: Sha256
-              Eku:
-              - Eku
-              - Eku
-              Subject: Subject
-            - Base64: Base64
-              SerialNumber: SerialNumber
-              Issuer: Issuer
-              Thumbprint:
-                Sha1: Sha1
-                Sha256: Sha256
-              Eku:
-              - Eku
-              - Eku
-              Subject: Subject
-          Hash:
-            Sha1: Sha1
-            Sha256: Sha256
-        UnixTimestampSeconds: 0
-        Asker:
-          Path: Path
-          WorkingDirectory: WorkingDirectory
-          CommandLine:
-          - CommandLine
-          - CommandLine
-          User:
-            DomainSid: DomainSid
-            DomainName: DomainName
-            AccountSid: AccountSid
-            AccountName: AccountName
-          Signature:
-            Signer:
-              Issuer: Issuer
-            Status: Valid
-            Certificates:
-            - Base64: Base64
-              SerialNumber: SerialNumber
-              Issuer: Issuer
-              Thumbprint:
-                Sha1: Sha1
-                Sha256: Sha256
-              Eku:
-              - Eku
-              - Eku
-              Subject: Subject
-            - Base64: Base64
-              SerialNumber: SerialNumber
-              Issuer: Issuer
-              Thumbprint:
-                Sha1: Sha1
-                Sha256: Sha256
-              Eku:
-              - Eku
-              - Eku
-              Subject: Subject
-          Hash:
-            Sha1: Sha1
-            Sha256: Sha256
-      properties:
-        Asker:
-          $ref: '#/components/schemas/Application'
-        Target:
-          $ref: '#/components/schemas/Application'
-        UnixTimestampSeconds:
-          format: int64
-          minimum: 0.0
-          type: integer
-      required:
-      - Asker
-      - Target
-      - UnixTimestampSeconds
-    ElevationResult:
-      example:
-        Request:
-          Target:
-            Path: Path
-            WorkingDirectory: WorkingDirectory
-            CommandLine:
-            - CommandLine
-            - CommandLine
-            User:
-              DomainSid: DomainSid
-              DomainName: DomainName
-              AccountSid: AccountSid
-              AccountName: AccountName
-            Signature:
-              Signer:
-                Issuer: Issuer
-              Status: Valid
-              Certificates:
-              - Base64: Base64
-                SerialNumber: SerialNumber
-                Issuer: Issuer
-                Thumbprint:
-                  Sha1: Sha1
-                  Sha256: Sha256
-                Eku:
-                - Eku
-                - Eku
-                Subject: Subject
-              - Base64: Base64
-                SerialNumber: SerialNumber
-                Issuer: Issuer
-                Thumbprint:
-                  Sha1: Sha1
-                  Sha256: Sha256
-                Eku:
-                - Eku
-                - Eku
-                Subject: Subject
-            Hash:
-              Sha1: Sha1
-              Sha256: Sha256
-          UnixTimestampSeconds: 0
-          Asker:
-            Path: Path
-            WorkingDirectory: WorkingDirectory
-            CommandLine:
-            - CommandLine
-            - CommandLine
-            User:
-              DomainSid: DomainSid
-              DomainName: DomainName
-              AccountSid: AccountSid
-              AccountName: AccountName
-            Signature:
-              Signer:
-                Issuer: Issuer
-              Status: Valid
-              Certificates:
-              - Base64: Base64
-                SerialNumber: SerialNumber
-                Issuer: Issuer
-                Thumbprint:
-                  Sha1: Sha1
-                  Sha256: Sha256
-                Eku:
-                - Eku
-                - Eku
-                Subject: Subject
-              - Base64: Base64
-                SerialNumber: SerialNumber
-                Issuer: Issuer
-                Thumbprint:
-                  Sha1: Sha1
-                  Sha256: Sha256
-                Eku:
-                - Eku
-                - Eku
-                Subject: Subject
-            Hash:
-              Sha1: Sha1
-              Sha256: Sha256
-        Successful: true
-      properties:
-        Request:
-          $ref: '#/components/schemas/ElevationRequest'
-        Successful:
-          type: boolean
-      required:
-      - Request
-      - Successful
     Error:
+      description: The original crate-wide error type.
       enum:
       - AccessDenied
       - NotFound
@@ -660,6 +430,10 @@ components:
       - Kind
       - Win32Error
     GetProfilesMeResponse:
+      description: |-
+        Returns some information about the current user and active profiles.
+
+        If there is no active profile, the `active` UUID will be full of zeroes.
       example:
         Active: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
         Available:
@@ -677,18 +451,118 @@ components:
       required:
       - Active
       - Available
-    Hash:
+    JitElevationLogPage:
       example:
-        Sha1: Sha1
-        Sha256: Sha256
+        Results:
+        - User:
+            DomainSid: DomainSid
+            DomainName: DomainName
+            AccountSid: AccountSid
+            AccountName: AccountName
+          TargetPath: TargetPath
+          Id: 0
+          Timestamp: 1
+          Success: 6
+        - User:
+            DomainSid: DomainSid
+            DomainName: DomainName
+            AccountSid: AccountSid
+            AccountName: AccountName
+          TargetPath: TargetPath
+          Id: 0
+          Timestamp: 1
+          Success: 6
+        TotalRecords: 0
+        TotalPages: 0
       properties:
-        Sha1:
-          type: string
-        Sha256:
-          type: string
+        Results:
+          items:
+            $ref: '#/components/schemas/JitElevationLogRow'
+          type: array
+        TotalPages:
+          format: int32
+          minimum: 0.0
+          type: integer
+        TotalRecords:
+          format: int32
+          minimum: 0.0
+          type: integer
       required:
-      - Sha1
-      - Sha256
+      - Results
+      - TotalPages
+      - TotalRecords
+    JitElevationLogQueryOptions:
+      example:
+        User:
+          DomainSid: DomainSid
+          DomainName: DomainName
+          AccountSid: AccountSid
+          AccountName: AccountName
+        EndTime: 0
+        PageSize: 0
+        PageNumber: 0
+        StartTime: 5
+        SortDescending: true
+        SortColumn: SortColumn
+      properties:
+        EndTime:
+          format: int64
+          type: integer
+        PageNumber:
+          format: int32
+          minimum: 0.0
+          type: integer
+        PageSize:
+          format: int32
+          minimum: 0.0
+          type: integer
+        SortColumn:
+          type: string
+        SortDescending:
+          type: boolean
+        StartTime:
+          format: int64
+          type: integer
+        User:
+          $ref: '#/components/schemas/User'
+      required:
+      - EndTime
+      - PageNumber
+      - PageSize
+      - SortColumn
+      - SortDescending
+      - StartTime
+    JitElevationLogRow:
+      example:
+        User:
+          DomainSid: DomainSid
+          DomainName: DomainName
+          AccountSid: AccountSid
+          AccountName: AccountName
+        TargetPath: TargetPath
+        Id: 0
+        Timestamp: 1
+        Success: 6
+      properties:
+        Id:
+          format: int64
+          type: integer
+        Success:
+          format: int64
+          type: integer
+        TargetPath:
+          type: string
+        Timestamp:
+          format: int64
+          type: integer
+        User:
+          $ref: '#/components/schemas/User'
+      required:
+      - Id
+      - Success
+      - TargetPath
+      - Timestamp
+      - User
     LaunchPayload:
       example:
         CreationFlags: 0
@@ -807,52 +681,6 @@ components:
           type: boolean
       required:
       - Enabled
-    Signature:
-      example:
-        Signer:
-          Issuer: Issuer
-        Status: Valid
-        Certificates:
-        - Base64: Base64
-          SerialNumber: SerialNumber
-          Issuer: Issuer
-          Thumbprint:
-            Sha1: Sha1
-            Sha256: Sha256
-          Eku:
-          - Eku
-          - Eku
-          Subject: Subject
-        - Base64: Base64
-          SerialNumber: SerialNumber
-          Issuer: Issuer
-          Thumbprint:
-            Sha1: Sha1
-            Sha256: Sha256
-          Eku:
-          - Eku
-          - Eku
-          Subject: Subject
-      properties:
-        Certificates:
-          items:
-            $ref: '#/components/schemas/Certificate'
-          type: array
-          nullable: true
-        Signer:
-          $ref: '#/components/schemas/Signer'
-        Status:
-          $ref: '#/components/schemas/AuthenticodeSignatureStatus'
-      required:
-      - Status
-    Signer:
-      example:
-        Issuer: Issuer
-      properties:
-        Issuer:
-          type: string
-      required:
-      - Issuer
     StartupInfoDto:
       example:
         Desktop: Desktop
