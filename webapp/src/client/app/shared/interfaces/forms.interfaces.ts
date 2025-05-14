@@ -1,7 +1,7 @@
 import { ScreenSize } from '@shared/enums/screen-size.enum';
-import { ResolutionQuality } from '../enums/resolution-quality.enum';
 import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
 import { Encoding } from '../enums/encoding.enum';
+import { ResolutionQuality } from '../enums/resolution-quality.enum';
 
 export interface HostnameObject {
   hostname: string;

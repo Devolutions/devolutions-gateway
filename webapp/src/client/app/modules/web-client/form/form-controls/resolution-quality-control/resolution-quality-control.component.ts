@@ -3,9 +3,9 @@ import { FormGroup } from '@angular/forms';
 import { SelectItem } from 'primeng/api';
 import { takeUntil } from 'rxjs/operators';
 
+import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
-import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
 
 @Component({
   selector: 'web-client-resolution-quality-control',

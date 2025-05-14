@@ -9,7 +9,6 @@ import {
   SessionType,
 } from './../models/web-session.model';
 
-import { DesktopSize } from '@shared/models/desktop-size';
 import { DVL_WARNING_ICON, ProtocolIconMap } from '@gateway/app.constants';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
@@ -18,6 +17,7 @@ import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { WebSession } from '@shared/models/web-session.model';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 

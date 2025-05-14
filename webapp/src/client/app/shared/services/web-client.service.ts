@@ -3,9 +3,9 @@ import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
-import { DesktopSize } from '@shared/models/desktop-size';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { WebSession } from '@shared/models/web-session.model';
 import { ApiService } from '@shared/services/api.service';
 import { UtilsService } from '@shared/services/utils.service';

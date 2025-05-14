@@ -28,9 +28,9 @@ import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 
+import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { Backend, displayControl, kdcProxyUrl, preConnectionBlob } from '@devolutions/iron-remote-desktop-rdp';
 import { DesktopSize } from '@shared/models/desktop-size';
-import { Backend, preConnectionBlob, kdcProxyUrl, displayControl } from '@devolutions/iron-remote-desktop-rdp';
-import { SessionEvent, UserInteraction, IronError } from '@devolutions/iron-remote-desktop';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';

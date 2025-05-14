@@ -26,15 +26,15 @@ import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 
-import { SessionEvent, UserInteraction, IronError } from '@devolutions/iron-remote-desktop';
+import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
-import { Backend, resolutionQuality, ardQualityMode } from '@devolutions/iron-remote-desktop-vnc';
+import { Backend, ardQualityMode, resolutionQuality } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, DVL_WARNING_ICON, JET_ARD_URL } from '@gateway/app.constants';
+import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
+import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
-import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
-import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
 
 enum UserIronRdpErrorKind {
   General = 0,
