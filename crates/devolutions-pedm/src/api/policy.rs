@@ -11,11 +11,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::state::AppState;
+use super::{Db, NamedPipeConnectInfo};
 use crate::error::Error;
 use crate::policy::Policy;
-
-use super::state::AppState;
-use super::NamedPipeConnectInfo;
 
 async fn post_profiles(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
@@ -86,6 +85,11 @@ struct GetProfilesMeResponse {
 #[derive(Deserialize, JsonSchema)]
 struct PathIdParameter {
     pub(crate) id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathIntIdPath {
+    pub id: i64,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -191,6 +195,20 @@ async fn put_assignments_id(
     Ok(())
 }
 
+async fn get_users(
+    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
+    NoApi(State(_policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
+) -> Result<Json<Vec<User>>, Error> {
+    let mut users = db.get_users().await?;
+
+    if !named_pipe_info.token.is_elevated()? {
+        users = users.into_iter().filter(|u| u == &named_pipe_info.user).collect();
+    }
+
+    Ok(Json(users))
+}
+
 pub(crate) fn policy_router() -> ApiRouter<AppState> {
     ApiRouter::new()
         .api_route("/me", get(get_me).put(set_profile_id))
@@ -201,4 +219,5 @@ pub(crate) fn policy_router() -> ApiRouter<AppState> {
         )
         .api_route("/assignments", get(get_assignments))
         .api_route("/assignments/{id}", put(put_assignments_id))
+        .api_route("/users", get(get_users))
 }

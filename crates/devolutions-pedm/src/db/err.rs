@@ -23,6 +23,8 @@ pub enum DbError {
     /// An error that occurs when parsing microseconds since epoch into `chrono::DateTime<Utc>`.
     #[cfg(feature = "libsql")]
     Timestamp(ParseTimestampError),
+    #[cfg(feature = "libsql")]
+    InvalidEnum(InvalidEnumError),
     #[cfg(feature = "postgres")]
     Bb8(bb8::RunError<tokio_postgres::Error>),
     #[cfg(feature = "postgres")]
@@ -38,6 +40,8 @@ impl Error for DbError {
             Self::TryFromInt(e) => Some(e),
             #[cfg(feature = "libsql")]
             Self::Timestamp(e) => Some(e),
+            #[cfg(feature = "libsql")]
+            Self::InvalidEnum(e) => Some(e),
             #[cfg(feature = "postgres")]
             Self::Bb8(e) => Some(e),
             #[cfg(feature = "postgres")]
@@ -55,6 +59,8 @@ impl fmt::Display for DbError {
             Self::TryFromInt(e) => e.fmt(f),
             #[cfg(feature = "libsql")]
             Self::Timestamp(e) => e.fmt(f),
+            #[cfg(feature = "libsql")]
+            Self::InvalidEnum(e) => e.fmt(f),
             #[cfg(feature = "postgres")]
             Self::Bb8(e) => write!(f, "could not connect to the database: {e}"),
             #[cfg(feature = "postgres")]
@@ -132,3 +138,19 @@ impl fmt::Display for ParseTimestampError {
         }
     }
 }
+
+#[cfg(feature = "libsql")]
+#[derive(Debug)]
+pub struct InvalidEnumError {
+    pub value: i64,
+    pub enum_name: &'static str,
+}
+
+#[cfg(feature = "libsql")]
+impl fmt::Display for InvalidEnumError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid value {} for enum {}", self.value, self.enum_name)
+    }
+}
+
+impl std::error::Error for InvalidEnumError {}

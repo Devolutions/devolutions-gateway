@@ -9,6 +9,7 @@ Method | HTTP request | Description
 [**elevate_temporary_post**](DefaultApi.md#elevate_temporary_post) | **Post** /elevate/temporary | 
 [**launch_post**](DefaultApi.md#launch_post) | **Post** /launch | 
 [**log_jit_get**](DefaultApi.md#log_jit_get) | **Get** /log/jit | 
+[**log_jit_id_get**](DefaultApi.md#log_jit_id_get) | **Get** /log/jit/{id} | 
 [**policy_assignments_get**](DefaultApi.md#policy_assignments_get) | **Get** /policy/assignments | 
 [**policy_assignments_id_put**](DefaultApi.md#policy_assignments_id_put) | **Put** /policy/assignments/{id} | 
 [**policy_me_get**](DefaultApi.md#policy_me_get) | **Get** /policy/me | 
@@ -18,6 +19,7 @@ Method | HTTP request | Description
 [**policy_profiles_id_get**](DefaultApi.md#policy_profiles_id_get) | **Get** /policy/profiles/{id} | 
 [**policy_profiles_id_put**](DefaultApi.md#policy_profiles_id_put) | **Put** /policy/profiles/{id} | 
 [**policy_profiles_post**](DefaultApi.md#policy_profiles_post) | **Post** /policy/profiles | 
+[**policy_users_get**](DefaultApi.md#policy_users_get) | **Get** /policy/users | 
 [**revoke_post**](DefaultApi.md#revoke_post) | **Post** /revoke | 
 [**status_get**](DefaultApi.md#status_get) | **Get** /status | 
 
@@ -152,6 +154,34 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: application/json
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## log_jit_id_get
+
+> models::JitElevationLogRow log_jit_id_get(id)
+
+
+### Parameters
+
+
+Name | Type | Description  | Required | Notes
+------------- | ------------- | ------------- | ------------- | -------------
+**id** | **i64** |  | [required] |
+
+### Return type
+
+[**models::JitElevationLogRow**](JitElevationLogRow.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -397,6 +427,31 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: application/json
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## policy_users_get
+
+> Vec<models::User> policy_users_get()
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**Vec<models::User>**](User.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

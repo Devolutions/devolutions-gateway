@@ -31,6 +31,7 @@ Class | Method | HTTP request | Description
 *DefaultApi* | [**elevate_temporary_post**](docs/DefaultApi.md#elevate_temporary_post) | **Post** /elevate/temporary | 
 *DefaultApi* | [**launch_post**](docs/DefaultApi.md#launch_post) | **Post** /launch | 
 *DefaultApi* | [**log_jit_get**](docs/DefaultApi.md#log_jit_get) | **Get** /log/jit | 
+*DefaultApi* | [**log_jit_id_get**](docs/DefaultApi.md#log_jit_id_get) | **Get** /log/jit/{id} | 
 *DefaultApi* | [**policy_assignments_get**](docs/DefaultApi.md#policy_assignments_get) | **Get** /policy/assignments | 
 *DefaultApi* | [**policy_assignments_id_put**](docs/DefaultApi.md#policy_assignments_id_put) | **Put** /policy/assignments/{id} | 
 *DefaultApi* | [**policy_me_get**](docs/DefaultApi.md#policy_me_get) | **Get** /policy/me | 
@@ -40,6 +41,7 @@ Class | Method | HTTP request | Description
 *DefaultApi* | [**policy_profiles_id_get**](docs/DefaultApi.md#policy_profiles_id_get) | **Get** /policy/profiles/{id} | 
 *DefaultApi* | [**policy_profiles_id_put**](docs/DefaultApi.md#policy_profiles_id_put) | **Put** /policy/profiles/{id} | 
 *DefaultApi* | [**policy_profiles_post**](docs/DefaultApi.md#policy_profiles_post) | **Post** /policy/profiles | 
+*DefaultApi* | [**policy_users_get**](docs/DefaultApi.md#policy_users_get) | **Get** /policy/users | 
 *DefaultApi* | [**revoke_post**](docs/DefaultApi.md#revoke_post) | **Post** /revoke | 
 *DefaultApi* | [**status_get**](docs/DefaultApi.md#status_get) | **Get** /status | 
 
@@ -48,6 +50,8 @@ Class | Method | HTTP request | Description
 
  - [AboutData](docs/AboutData.md)
  - [Assignment](docs/Assignment.md)
+ - [AuthenticodeSignatureStatus](docs/AuthenticodeSignatureStatus.md)
+ - [Certificate](docs/Certificate.md)
  - [ElevateTemporaryPayload](docs/ElevateTemporaryPayload.md)
  - [ElevationConfigurations](docs/ElevationConfigurations.md)
  - [ElevationKind](docs/ElevationKind.md)
@@ -55,6 +59,7 @@ Class | Method | HTTP request | Description
  - [Error](docs/Error.md)
  - [ErrorResponse](docs/ErrorResponse.md)
  - [GetProfilesMeResponse](docs/GetProfilesMeResponse.md)
+ - [Hash](docs/Hash.md)
  - [JitElevationLogPage](docs/JitElevationLogPage.md)
  - [JitElevationLogQueryOptions](docs/JitElevationLogQueryOptions.md)
  - [JitElevationLogRow](docs/JitElevationLogRow.md)
@@ -62,9 +67,12 @@ Class | Method | HTTP request | Description
  - [LaunchResponse](docs/LaunchResponse.md)
  - [OptionalId](docs/OptionalId.md)
  - [PathIdParameter](docs/PathIdParameter.md)
+ - [PathIntIdPath](docs/PathIntIdPath.md)
  - [Profile](docs/Profile.md)
  - [SessionElevationConfiguration](docs/SessionElevationConfiguration.md)
  - [SessionElevationStatus](docs/SessionElevationStatus.md)
+ - [Signature](docs/Signature.md)
+ - [Signer](docs/Signer.md)
  - [StartupInfoDto](docs/StartupInfoDto.md)
  - [StatusResponse](docs/StatusResponse.md)
  - [TemporaryElevationConfiguration](docs/TemporaryElevationConfiguration.md)

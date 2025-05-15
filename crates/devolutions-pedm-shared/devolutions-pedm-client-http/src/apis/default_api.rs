@@ -51,6 +51,7 @@ pub trait DefaultApi {
         &self,
         jit_elevation_log_query_options: models::JitElevationLogQueryOptions,
     ) -> Pin<Box<dyn Future<Output = Result<models::JitElevationLogPage, Error>>>>;
+    fn log_jit_id_get(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<models::JitElevationLogRow, Error>>>>;
     fn policy_assignments_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::Assignment>, Error>>>>;
     fn policy_assignments_id_put(
         &self,
@@ -68,6 +69,7 @@ pub trait DefaultApi {
         profile: models::Profile,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn policy_profiles_post(&self, profile: models::Profile) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
+    fn policy_users_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::User>, Error>>>>;
     fn revoke_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn status_get(&self) -> Pin<Box<dyn Future<Output = Result<models::StatusResponse, Error>>>>;
 }
@@ -121,6 +123,14 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<models::JitElevationLogPage, Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::GET, "/log/jit".to_string());
         req = req.with_body_param(jit_elevation_log_query_options);
+
+        req.execute(self.configuration.borrow())
+    }
+
+    #[allow(unused_mut)]
+    fn log_jit_id_get(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<models::JitElevationLogRow, Error>>>> {
+        let mut req = __internal_request::Request::new(hyper::Method::GET, "/log/jit/{id}".to_string());
+        req = req.with_path_param("id".to_string(), id.to_string());
 
         req.execute(self.configuration.borrow())
     }
@@ -205,6 +215,13 @@ where
         let mut req = __internal_request::Request::new(hyper::Method::POST, "/policy/profiles".to_string());
         req = req.with_body_param(profile);
         req = req.returns_nothing();
+
+        req.execute(self.configuration.borrow())
+    }
+
+    #[allow(unused_mut)]
+    fn policy_users_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::User>, Error>>>> {
+        let mut req = __internal_request::Request::new(hyper::Method::GET, "/policy/users".to_string());
 
         req.execute(self.configuration.borrow())
     }

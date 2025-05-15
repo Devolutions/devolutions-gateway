@@ -39,29 +39,35 @@ namespace Devolutions.Pedm.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="JitElevationLogRow" /> class.
         /// </summary>
+        /// <param name="askerPath">askerPath.</param>
         /// <param name="id">id (required).</param>
         /// <param name="success">success (required).</param>
-        /// <param name="targetPath">targetPath (required).</param>
+        /// <param name="targetCommandLine">targetCommandLine.</param>
+        /// <param name="targetHash">targetHash.</param>
+        /// <param name="targetPath">targetPath.</param>
+        /// <param name="targetSignature">targetSignature.</param>
+        /// <param name="targetWorkingDirectory">targetWorkingDirectory.</param>
         /// <param name="timestamp">timestamp (required).</param>
-        /// <param name="user">user (required).</param>
-        public JitElevationLogRow(long id = default(long), long success = default(long), string targetPath = default(string), long timestamp = default(long), User user = default(User))
+        /// <param name="user">user.</param>
+        public JitElevationLogRow(string askerPath = default(string), long id = default(long), long success = default(long), string targetCommandLine = default(string), Hash targetHash = default(Hash), string targetPath = default(string), Signature targetSignature = default(Signature), string targetWorkingDirectory = default(string), long timestamp = default(long), User user = default(User))
         {
             this.Id = id;
             this.Success = success;
-            // to ensure "targetPath" is required (not null)
-            if (targetPath == null)
-            {
-                throw new ArgumentNullException("targetPath is a required property for JitElevationLogRow and cannot be null");
-            }
-            this.TargetPath = targetPath;
             this.Timestamp = timestamp;
-            // to ensure "user" is required (not null)
-            if (user == null)
-            {
-                throw new ArgumentNullException("user is a required property for JitElevationLogRow and cannot be null");
-            }
+            this.AskerPath = askerPath;
+            this.TargetCommandLine = targetCommandLine;
+            this.TargetHash = targetHash;
+            this.TargetPath = targetPath;
+            this.TargetSignature = targetSignature;
+            this.TargetWorkingDirectory = targetWorkingDirectory;
             this.User = user;
         }
+
+        /// <summary>
+        /// Gets or Sets AskerPath
+        /// </summary>
+        [DataMember(Name = "AskerPath", EmitDefaultValue = false)]
+        public string AskerPath { get; set; }
 
         /// <summary>
         /// Gets or Sets Id
@@ -76,10 +82,34 @@ namespace Devolutions.Pedm.Client.Model
         public long Success { get; set; }
 
         /// <summary>
+        /// Gets or Sets TargetCommandLine
+        /// </summary>
+        [DataMember(Name = "TargetCommandLine", EmitDefaultValue = false)]
+        public string TargetCommandLine { get; set; }
+
+        /// <summary>
+        /// Gets or Sets TargetHash
+        /// </summary>
+        [DataMember(Name = "TargetHash", EmitDefaultValue = false)]
+        public Hash TargetHash { get; set; }
+
+        /// <summary>
         /// Gets or Sets TargetPath
         /// </summary>
-        [DataMember(Name = "TargetPath", IsRequired = true, EmitDefaultValue = true)]
+        [DataMember(Name = "TargetPath", EmitDefaultValue = false)]
         public string TargetPath { get; set; }
+
+        /// <summary>
+        /// Gets or Sets TargetSignature
+        /// </summary>
+        [DataMember(Name = "TargetSignature", EmitDefaultValue = false)]
+        public Signature TargetSignature { get; set; }
+
+        /// <summary>
+        /// Gets or Sets TargetWorkingDirectory
+        /// </summary>
+        [DataMember(Name = "TargetWorkingDirectory", EmitDefaultValue = false)]
+        public string TargetWorkingDirectory { get; set; }
 
         /// <summary>
         /// Gets or Sets Timestamp
@@ -90,7 +120,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <summary>
         /// Gets or Sets User
         /// </summary>
-        [DataMember(Name = "User", IsRequired = true, EmitDefaultValue = true)]
+        [DataMember(Name = "User", EmitDefaultValue = false)]
         public User User { get; set; }
 
         /// <summary>
@@ -101,9 +131,14 @@ namespace Devolutions.Pedm.Client.Model
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("class JitElevationLogRow {\n");
+            sb.Append("  AskerPath: ").Append(AskerPath).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Success: ").Append(Success).Append("\n");
+            sb.Append("  TargetCommandLine: ").Append(TargetCommandLine).Append("\n");
+            sb.Append("  TargetHash: ").Append(TargetHash).Append("\n");
             sb.Append("  TargetPath: ").Append(TargetPath).Append("\n");
+            sb.Append("  TargetSignature: ").Append(TargetSignature).Append("\n");
+            sb.Append("  TargetWorkingDirectory: ").Append(TargetWorkingDirectory).Append("\n");
             sb.Append("  Timestamp: ").Append(Timestamp).Append("\n");
             sb.Append("  User: ").Append(User).Append("\n");
             sb.Append("}\n");
