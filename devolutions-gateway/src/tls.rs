@@ -106,6 +106,7 @@ pub mod windows {
     use std::sync::Arc;
 
     use anyhow::Context as _;
+    use parking_lot::Mutex;
     use rustls_cng::signer::CngSigningKey;
     use rustls_cng::store::{CertStore, CertStoreType};
     use tokio_rustls::rustls::pki_types::CertificateDer;
@@ -114,12 +115,21 @@ pub mod windows {
 
     use crate::config::dto;
 
+    const CACHE_DURATION: time::Duration = time::Duration::seconds(45);
+
     #[derive(Debug)]
     pub struct ServerCertResolver {
         machine_hostname: String,
         subject_name: String,
         store_type: CertStoreType,
         store_name: String,
+        cached_key: Mutex<Option<KeyCache>>,
+    }
+
+    #[derive(Debug)]
+    struct KeyCache {
+        key: Arc<CertifiedKey>,
+        expires_at: time::OffsetDateTime,
     }
 
     impl ServerCertResolver {
@@ -140,6 +150,7 @@ pub mod windows {
                 subject_name: cert_subject_name,
                 store_type,
                 store_name,
+                cached_key: Mutex::new(None),
             })
         }
 
@@ -170,10 +181,20 @@ pub mod windows {
                 )
             }
 
+            let mut cache_guard = self.cached_key.lock();
+
+            let now = time::OffsetDateTime::now_utc();
+
+            if let Some(cache) = cache_guard.as_ref() {
+                if now < cache.expires_at {
+                    trace!("Used certified key from cache");
+                    return Ok(Arc::clone(&cache.key));
+                }
+            }
+
             let store = CertStore::open(self.store_type, &self.store_name).context("open Windows certificate store")?;
 
             // Look up certificate by subject.
-            // TODO(perf): the resolution result could probably be cached.
             let contexts = store.find_by_subject_str(&self.subject_name).with_context(|| {
                 format!(
                     "failed to find server certificate for {} from system store",
@@ -284,12 +305,20 @@ pub mod windows {
                 .context("certification chain is not available for this certificate")?;
             let certs = chain.into_iter().map(CertificateDer::from).collect();
 
-            // Return CertifiedKey instance.
-            return Ok(Arc::new(CertifiedKey {
+            let key = Arc::new(CertifiedKey {
                 cert: certs,
                 key: Arc::new(key),
                 ocsp: None,
-            }));
+            });
+
+            *cache_guard = Some(KeyCache {
+                key: key.clone(),
+                expires_at: now + CACHE_DURATION,
+            });
+            trace!("Cached certified key");
+
+            // Return CertifiedKey instance.
+            return Ok(key);
 
             struct CertHandleCtx {
                 idx: usize,
