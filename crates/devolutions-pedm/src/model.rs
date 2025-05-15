@@ -13,6 +13,7 @@ pub(crate) struct AboutData {
     ///
     /// This can be `None` if `/about` is the first request made.
     pub last_request_time: Option<DateTime<Utc>>,
+    pub version: String,
 }
 
 /// Immutable startup info.

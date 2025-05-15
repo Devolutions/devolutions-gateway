@@ -21,5 +21,6 @@ pub(crate) async fn about(
         startup_request_count: state.startup_info.request_count,
         current_request_count: state.req_counter.load(Ordering::Relaxed),
         last_request_time: db.get_last_request_time().await?,
+        version: win_api_wrappers::utils::get_exe_version()?,
     }))
 }

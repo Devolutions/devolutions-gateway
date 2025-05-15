@@ -317,6 +317,7 @@ pub struct Profile {
     pub elevation_settings: ElevationConfigurations,
     pub default_elevation_kind: ElevationKind,
     pub prompt_secure_desktop: bool,
+    pub target_must_be_signed: bool,
 }
 
 impl Identifiable for Profile {

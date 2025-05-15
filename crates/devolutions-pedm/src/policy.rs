@@ -22,9 +22,9 @@ use serde::Serialize;
 use tracing::info;
 use uuid::Uuid;
 
-use devolutions_pedm_shared::policy;
 use devolutions_pedm_shared::policy::{
-    Application, Certificate, Configuration, ElevationRequest, Identifiable, Profile, Signature, Signer, User,
+    self, Application, AuthenticodeSignatureStatus, Certificate, Configuration, ElevationRequest, Identifiable,
+    Profile, Signature, Signer, User,
 };
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
@@ -332,6 +332,12 @@ impl Policy {
         let profile = self
             .user_current_profile(&request.asker.user)
             .ok_or_else(|| anyhow!(Error::AccessDenied))?;
+
+        if profile.target_must_be_signed {
+            if request.target.signature.status != AuthenticodeSignatureStatus::Valid {
+                bail!(Error::AccessDenied)
+            }
+        }
 
         let elevation_type = profile.default_elevation_kind;
 
