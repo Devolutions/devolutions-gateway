@@ -210,7 +210,7 @@ pub mod windows {
 
             trace!(subject_name = %self.subject_name, count = contexts.len(), "Found certificate contexts");
 
-            let now = picky::x509::date::UtcDate::now();
+            let x509_date_now = picky::x509::date::UtcDate::from(now);
 
             // Initial processing and filtering of the available candidates.
             let mut contexts: Vec<CertHandleCtx> = contexts
@@ -233,7 +233,7 @@ pub mod windows {
 
                             trace!(%idx, %serial_number, %subject, %issuer, %not_before, %not_after, "Parsed store certificate");
 
-                            if now < not_before {
+                            if x509_date_now < not_before {
                                 debug!(
                                     %idx, %serial_number, %not_before, "Filtered out certificate based on not before validity date"
                                 );
