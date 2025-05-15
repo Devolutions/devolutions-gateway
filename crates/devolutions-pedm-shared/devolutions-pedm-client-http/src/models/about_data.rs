@@ -24,16 +24,25 @@ pub struct AboutData {
     pub start_time: String,
     #[serde(rename = "StartupRequestCount")]
     pub startup_request_count: i32,
+    #[serde(rename = "Version")]
+    pub version: String,
 }
 
 impl AboutData {
-    pub fn new(current_request_count: i32, run_id: i32, start_time: String, startup_request_count: i32) -> AboutData {
+    pub fn new(
+        current_request_count: i32,
+        run_id: i32,
+        start_time: String,
+        startup_request_count: i32,
+        version: String,
+    ) -> AboutData {
         AboutData {
             current_request_count,
             last_request_time: None,
             run_id,
             start_time,
             startup_request_count,
+            version,
         }
     }
 }

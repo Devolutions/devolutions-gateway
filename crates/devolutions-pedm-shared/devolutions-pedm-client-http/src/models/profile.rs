@@ -25,6 +25,8 @@ pub struct Profile {
     pub name: String,
     #[serde(rename = "PromptSecureDesktop")]
     pub prompt_secure_desktop: bool,
+    #[serde(rename = "TargetMustBeSigned")]
+    pub target_must_be_signed: bool,
 }
 
 impl Profile {
@@ -35,6 +37,7 @@ impl Profile {
         id: uuid::Uuid,
         name: String,
         prompt_secure_desktop: bool,
+        target_must_be_signed: bool,
     ) -> Profile {
         Profile {
             default_elevation_kind,
@@ -43,6 +46,7 @@ impl Profile {
             id,
             name,
             prompt_secure_desktop,
+            target_must_be_signed,
         }
     }
 }

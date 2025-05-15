@@ -342,6 +342,7 @@ components:
   schemas:
     AboutData:
       example:
+        Version: Version
         LastRequestTime: 2000-01-23T04:56:07.000+00:00
         StartTime: 2000-01-23T04:56:07.000+00:00
         RunId: 1
@@ -368,11 +369,14 @@ components:
         StartupRequestCount:
           format: int32
           type: integer
+        Version:
+          type: string
       required:
       - CurrentRequestCount
       - RunId
       - StartTime
       - StartupRequestCount
+      - Version
     Assignment:
       example:
         Users:
@@ -386,6 +390,7 @@ components:
           AccountName: AccountName
         Profile:
           PromptSecureDesktop: true
+          TargetMustBeSigned: true
           DefaultElevationKind: AutoApprove
           Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
           ElevationSettings:
@@ -842,6 +847,7 @@ components:
     Profile:
       example:
         PromptSecureDesktop: true
+        TargetMustBeSigned: true
         DefaultElevationKind: AutoApprove
         Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
         ElevationSettings:
@@ -866,6 +872,8 @@ components:
           type: string
         PromptSecureDesktop:
           type: boolean
+        TargetMustBeSigned:
+          type: boolean
       required:
       - DefaultElevationKind
       - ElevationMethod
@@ -873,6 +881,7 @@ components:
       - Id
       - Name
       - PromptSecureDesktop
+      - TargetMustBeSigned
     SessionElevationConfiguration:
       example:
         Enabled: true
