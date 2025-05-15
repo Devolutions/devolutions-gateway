@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-pedm-shell-ext"
-version = "2025.1.4"
+version = "2025.1.5"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]

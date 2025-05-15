@@ -2,6 +2,90 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.1.5 (2025-05-15)
+
+### Features
+
+- _dgw_: cross-file seeking for recording player ([#1271](https://github.com/Devolutions/devolutions-gateway/issues/1271)) ([fbac3d29ce](https://github.com/Devolutions/devolutions-gateway/commit/fbac3d29ce0e37af9ccfc8765bb7c00bf7ca4b0d)) ([DGW-216](https://devolutions.atlassian.net/browse/DGW-216)) 
+
+  Introduces support for seemless playback of multi-files recording playback.
+
+- _dgw_: preflight API ([#1279](https://github.com/Devolutions/devolutions-gateway/issues/1279)) ([8d4f7376d5](https://github.com/Devolutions/devolutions-gateway/commit/8d4f7376d516075450886d17c8abef7cd40adcbb)) ([DGW-245](https://devolutions.atlassian.net/browse/DGW-245)) 
+
+  Possible operations:
+  
+  - `get-version`: returns the version of the service.
+  - `get-agent-version`: returns the version of the agent, if available.
+  - `get-running-session-count`: returns the number of active sessions.
+  - `get-recording-storage-health`: returns information about the remaining disk space available for recordings, etc.
+  - `provision-token`: caches the token on the proxy side for later use.
+  - `provision-credentials`: associates a username/password with a token for proxy-side credential injection.
+  - `resolve-host`: DNS resolution of a hostname.
+  
+  Possible results:
+  
+  - `version`: the version of the service.
+  - `agent-version`: the version of the side-by-side installed agent, if applicable.
+  - `running-session-count`: the number of running sessions.
+  - `recording-storage-health`: various information regarding recording storage health.
+  - `resolved-host`: the IP addresses resolved for the hostname.
+  - `ack`: acknowledge a given operation was performed with success. 
+  - `alert`: alert message for errors and other information.
+
+- _dgw_: extend net scanner capabilities ([#1303](https://github.com/Devolutions/devolutions-gateway/issues/1303)) ([7518a4ea20](https://github.com/Devolutions/devolutions-gateway/commit/7518a4ea2050ce62bca7908dea6a4558a8ee4672)) 
+
+- _dgw_: stabilize /jet/net/config ([#1311](https://github.com/Devolutions/devolutions-gateway/issues/1311)) ([36a034ae51](https://github.com/Devolutions/devolutions-gateway/commit/36a034ae51bee7df2d31a563e8c6af646516aca8)) 
+
+- _webapp_: integrate the newer RDP and VNC packages ([#1329](https://github.com/Devolutions/devolutions-gateway/issues/1329)) ([79b09a62f6](https://github.com/Devolutions/devolutions-gateway/commit/79b09a62f66fffe64ec76cb7e278137ef61d789c)) 
+
+  New version of the remote desktop web clients.
+  
+  New settings are exposed for VNC, ARD and RDP.
+  - VNC-specific settings:  Enabled Encodings (it’s possible to specify
+    in a fine-grained manner which codecs are enabled or not),
+    Enable/disable cursor pseudo-encoding, etc.
+  - ARD-specific settings: Resolutions Quality and Quality Mode settings.
+  - RDP-specific: toggle for Unicode mode.
+
+- _webapp_: option for enabling/disabling display control in RDP web client ([#1333](https://github.com/Devolutions/devolutions-gateway/issues/1333)) ([b056ddf5d1](https://github.com/Devolutions/devolutions-gateway/commit/b056ddf5d166d943820fd83e61a84dea0df35325)) 
+
+- _dgw_: improve system store certificate selection ([#1341](https://github.com/Devolutions/devolutions-gateway/issues/1341)) ([d8b2fdf4fd](https://github.com/Devolutions/devolutions-gateway/commit/d8b2fdf4fde7fcd8dc7f44aa453d6d4b1dc66388)) ([DGW-262](https://devolutions.atlassian.net/browse/DGW-262)) 
+
+  The selection is now discriminating based on the extended key usage and
+  the not valid before date.
+  
+  - Discriminate based on the extended key usage: certificate is ignored
+  when the "Server Authentication" (1.3.6.1.5.5.7.3.1) key usage is not
+  specified.
+  - Discriminate based on the "not valid before" date: certificates not
+  yet valid are ignored.
+  - Added generous logging to observe the selection process in details.
+
+### Bug Fixes
+
+- _installer_: resolve potential null reference installing PEDM shell extension ([#1278](https://github.com/Devolutions/devolutions-gateway/issues/1278)) ([d36978e63b](https://github.com/Devolutions/devolutions-gateway/commit/d36978e63b5f3af2f86135b51e4a06fb349c799d)) 
+
+  The top-level file extension keys may not all exist (in the case of QA,
+  `HKEY_CLASSES_ROOT\\.ps1` was not present). Although we check for an
+  empty default _value_, we don't check for the presence of the top-level
+  key which could cause a null-reference exception and force the installer
+  to roll back.
+
+- _dgw_: properly order system certificates ([#1285](https://github.com/Devolutions/devolutions-gateway/issues/1285)) ([1925990f10](https://github.com/Devolutions/devolutions-gateway/commit/1925990f1019615d5a3fd0e21cbd21fd66cbf5a3)) ([DGW-261](https://devolutions.atlassian.net/browse/DGW-261)) 
+
+  We used the wrong key for sorting the certificates. It should have been
+  "valid_not_after" instead of "valid_not_before".
+
+### Performance
+
+- _dgw_: caching of system store certificates ([#1339](https://github.com/Devolutions/devolutions-gateway/issues/1339)) ([4b15a9cf6a](https://github.com/Devolutions/devolutions-gateway/commit/4b15a9cf6a3d5aa9dde5044dba6413157caaa633)) ([DGW-266](https://devolutions.atlassian.net/browse/DGW-266)) 
+
+  Basic caching is implemented for certificates fetched from the system
+  store reducing considerably the number of system calls.
+  
+  The lifetime is 45 seconds, so the certificate is still refreshed on a
+  regular basis.
+
 ## 2025.1.4 (2025-03-18)
 
 ### Features
