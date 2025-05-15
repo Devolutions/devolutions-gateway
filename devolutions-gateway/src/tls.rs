@@ -144,6 +144,8 @@ pub mod windows {
         }
 
         fn resolve(&self, client_hello: ClientHello<'_>) -> anyhow::Result<Arc<CertifiedKey>> {
+            use core::fmt::Write as _;
+
             trace!(server_name = ?client_hello.server_name(), "Received ClientHello");
 
             let request_server_name = client_hello
@@ -172,7 +174,7 @@ pub mod windows {
 
             // Look up certificate by subject.
             // TODO(perf): the resolution result could probably be cached.
-            let mut contexts = store.find_by_subject_str(&self.subject_name).with_context(|| {
+            let contexts = store.find_by_subject_str(&self.subject_name).with_context(|| {
                 format!(
                     "failed to find server certificate for {} from system store",
                     self.subject_name
@@ -187,45 +189,113 @@ pub mod windows {
 
             trace!(subject_name = %self.subject_name, count = contexts.len(), "Found certificate contexts");
 
-            // Sort certificates from the furthest to the earliest expiration
+            let now = picky::x509::date::UtcDate::now();
+
+            // Initial processing and filtering of the available candidates.
+            let mut contexts: Vec<CertHandleCtx> = contexts
+                .into_iter()
+                .enumerate()
+                .filter_map(|(idx, ctx)| {
+                    let not_after = match picky::x509::Cert::from_der(ctx.as_der()) {
+                        Ok(cert) => {
+                            let serial_number = cert.serial_number().0.iter().fold(
+                                String::new(),
+                                |mut acc, byte| {
+                                    let _ = write!(acc, "{byte:X?}");
+                                    acc
+                                },
+                            );
+                            let subject = cert.subject_name();
+                            let issuer = cert.issuer_name();
+                            let not_before = cert.valid_not_before();
+                            let not_after = cert.valid_not_after();
+
+                            trace!(%idx, %serial_number, %subject, %issuer, %not_before, %not_after, "Parsed store certificate");
+
+                            if now < not_before {
+                                debug!(
+                                    %idx, %serial_number, %not_before, "Filtered out certificate based on not before validity date"
+                                );
+                                return None;
+                            }
+
+                            let has_server_auth_key_purpose = cert.extensions().iter().any(|ext| match ext.extn_value() {
+                                picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku) => eku.contains(picky::oids::kp_server_auth()),
+                                _ => false,
+                            });
+
+                            if !has_server_auth_key_purpose {
+                                debug!(
+                                    %idx, %serial_number, "Filtered out certificate because it does not have the server auth extended usage"
+                                );
+                                return None;
+                            }
+
+                            not_after
+                        }
+                        Err(error) => {
+                            debug!(%error, "Failed to parse store certificate number {idx}");
+                            picky::x509::date::UtcDate::ymd(1900, 1, 1).expect("hardcoded")
+                        }
+                    };
+
+                    Some(CertHandleCtx {
+                        idx,
+                        handle: ctx,
+                        not_after,
+                    })
+                })
+                .collect();
+
+            // Sort certificates from the farthest to the earliest expiration
             // time. Note that it appears the certificates are already returned
             // in this order, but it is not a documented behavior. It really
             // depends on the internal order maintained by the store, and there
             // is no guarantee about what this order is, thus we implement the
             // logic here anyway.
-            contexts.sort_by_cached_key(|ctx| match picky::x509::Cert::from_der(ctx.as_der()) {
-                Ok(cert) => cert.valid_not_after(),
-                Err(error) => {
-                    warn!(%error, "Failed to parse store certificate");
-                    picky::x509::date::UtcDate::ymd(1900, 1, 1).expect("hardcoded")
-                }
-            });
+            contexts.sort_by(|a, b| b.not_after.cmp(&a.not_after));
+
+            if enabled!(tracing::Level::TRACE) {
+                contexts.iter().enumerate().for_each(|(sorted_idx, ctx)| trace!(%sorted_idx, idx = %ctx.idx, not_after = %ctx.not_after, "Sorted certificate"));
+            }
 
             // Attempt to acquire a private key and construct CngSigningKey.
             let (context, key) = contexts
                 .into_iter()
-                .rev() // Revert for: closer to farthest -> farthest to closer
                 .find_map(|ctx| {
-                    let key = ctx.acquire_key().ok()?;
-                    CngSigningKey::new(key).ok().map(|key| (ctx, key))
+                    let key = ctx
+                        .handle
+                        .acquire_key()
+                        .inspect_err(|error| debug!(idx = %ctx.idx, %error, "Failed to acquire key for certificate"))
+                        .ok()?;
+                    CngSigningKey::new(key)
+                        .inspect_err(|error| debug!(idx = %ctx.idx, %error, "CngSigningKey::new failed"))
+                        .ok()
+                        .map(|key| (ctx, key))
                 })
-                .context("failed to aquire private key for certificate")?;
+                .context("no usable certificate found in the system store")?;
 
-            trace!(key_algorithm_group = ?key.key().algorithm_group());
-            trace!(key_algorithm = ?key.key().algorithm());
+            trace!(idx = context.idx, not_after = %context.not_after, key_algorithm_group = ?key.key().algorithm_group(), key_algorithm = ?key.key().algorithm(), "Selected certificate");
 
             // Attempt to acquire a full certificate chain.
             let chain = context
+                .handle
                 .as_chain_der()
                 .context("certification chain is not available for this certificate")?;
             let certs = chain.into_iter().map(CertificateDer::from).collect();
 
             // Return CertifiedKey instance.
-            Ok(Arc::new(CertifiedKey {
+            return Ok(Arc::new(CertifiedKey {
                 cert: certs,
                 key: Arc::new(key),
                 ocsp: None,
-            }))
+            }));
+
+            struct CertHandleCtx {
+                idx: usize,
+                handle: rustls_cng::cert::CertContext,
+                not_after: picky::x509::date::UtcDate,
+            }
         }
     }
 
