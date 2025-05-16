@@ -51,6 +51,12 @@ impl From<DbError> for HandlerError {
     }
 }
 
+impl From<anyhow::Error> for HandlerError {
+    fn from(e: anyhow::Error) -> Self {
+        Self(StatusCode::INTERNAL_SERVER_ERROR, Some(e.to_string()))
+    }
+}
+
 #[cfg(feature = "postgres")]
 impl From<tokio_postgres::Error> for HandlerError {
     fn from(e: tokio_postgres::Error) -> Self {

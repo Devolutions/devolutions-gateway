@@ -44,12 +44,19 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="runId">runId (required).</param>
         /// <param name="startTime">startTime (required).</param>
         /// <param name="startupRequestCount">startupRequestCount (required).</param>
-        public AboutData(int currentRequestCount = default(int), DateTime lastRequestTime = default(DateTime), int runId = default(int), DateTime startTime = default(DateTime), int startupRequestCount = default(int))
+        /// <param name="varVersion">varVersion (required).</param>
+        public AboutData(int currentRequestCount = default(int), DateTime lastRequestTime = default(DateTime), int runId = default(int), DateTime startTime = default(DateTime), int startupRequestCount = default(int), string varVersion = default(string))
         {
             this.CurrentRequestCount = currentRequestCount;
             this.RunId = runId;
             this.StartTime = startTime;
             this.StartupRequestCount = startupRequestCount;
+            // to ensure "varVersion" is required (not null)
+            if (varVersion == null)
+            {
+                throw new ArgumentNullException("varVersion is a required property for AboutData and cannot be null");
+            }
+            this.VarVersion = varVersion;
             this.LastRequestTime = lastRequestTime;
         }
 
@@ -85,6 +92,12 @@ namespace Devolutions.Pedm.Client.Model
         public int StartupRequestCount { get; set; }
 
         /// <summary>
+        /// Gets or Sets VarVersion
+        /// </summary>
+        [DataMember(Name = "Version", IsRequired = true, EmitDefaultValue = true)]
+        public string VarVersion { get; set; }
+
+        /// <summary>
         /// Returns the string presentation of the object
         /// </summary>
         /// <returns>String presentation of the object</returns>
@@ -97,6 +110,7 @@ namespace Devolutions.Pedm.Client.Model
             sb.Append("  RunId: ").Append(RunId).Append("\n");
             sb.Append("  StartTime: ").Append(StartTime).Append("\n");
             sb.Append("  StartupRequestCount: ").Append(StartupRequestCount).Append("\n");
+            sb.Append("  VarVersion: ").Append(VarVersion).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }

@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **run_id** | **i32** |  | 
 **start_time** | **String** |  | 
 **startup_request_count** | **i32** |  | 
+**version** | **String** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

@@ -457,6 +457,70 @@ pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>
     ))?)
 }
 
+use windows::Win32::Foundation::{BOOL, HMODULE};
+use windows::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+};
+use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
+
+pub fn get_exe_version() -> Result<String, anyhow::Error> {
+    // Passing None to GetModuleHandleW requests the handle to the current process main executable module
+    // SAFETY: FFI call with no oustanding preconditions.
+    let h_module: HMODULE = unsafe { GetModuleHandleW(None)? };
+
+    let mut path_buf = [0u16; MAX_PATH as usize];
+
+    // SAFETY: We're passing a valid mutable buffer to GetModuleFileNameW of large enough size (MAX_PATH WCHARs)
+    let len = unsafe { GetModuleFileNameW(h_module, &mut path_buf) };
+
+    if len == 0 {
+        anyhow::bail!("GetModuleFileNameW failed: {}", windows::core::Error::from_win32());
+    }
+
+    let exe_path = &path_buf[..len as usize];
+    let exe_path_w = PCWSTR(exe_path.as_ptr());
+
+    // SAFETY: `exe_path_w` is a valid pointer to a null-terminated UTF-16 string from the OS.
+    let size = unsafe { GetFileVersionInfoSizeW(exe_path_w, None) };
+    if size == 0 {
+        anyhow::bail!("GetFileVersionInfoSizeW failed: {}", windows::core::Error::from_win32());
+    }
+
+    let mut buffer = vec![0u8; size as usize];
+
+    // SAFETY: `buffer` is allocated with the correct size.
+    // `exe_path_w` is a valid pointer to a null-terminated UTF-16 string from the OS.
+    unsafe { GetFileVersionInfoW(exe_path_w, 0, size, buffer.as_mut_ptr() as *mut _)? };
+
+    let mut lp_buffer: *mut c_void = ptr::null_mut();
+    let mut len = 0u32;
+    let path = "\\\0".encode_utf16().collect::<Vec<u16>>();
+    let path_ptr = PCWSTR(path.as_ptr());
+
+    // SAFETY: The version info buffer is valid and comes from GetFileVersionInfoW.
+    // The query string is valid null-terminated UTF-16.
+    // `lp_buffer` and `len` are valid out parameters.
+    let ok = unsafe { VerQueryValueW(buffer.as_ptr() as *const _, path_ptr, &mut lp_buffer, &mut len) };
+
+    if !ok.as_bool() {
+        anyhow::bail!("VerQueryValueW failed");
+    }
+
+    // SAFETY: ff VerQueryValueW succeeded, `lp_buffer` points to a valid VS_FIXEDFILEINFO.
+    let info = unsafe { &*(lp_buffer as *const VS_FIXEDFILEINFO) };
+
+    if info.dwSignature != 0xFEEF04BD {
+        bail!("invalid VS_FIXEDFILEINFO signature");
+    }
+
+    let major = (info.dwFileVersionMS >> 16) & 0xffff;
+    let minor = (info.dwFileVersionMS >> 0) & 0xffff;
+    let build = (info.dwFileVersionLS >> 16) & 0xffff;
+    let revision = (info.dwFileVersionLS >> 0) & 0xffff;
+
+    Ok(format!("{}.{}.{}.{}", major, minor, build, revision))
+}
+
 pub struct Snapshot {
     handle: OwnedHandle,
 }

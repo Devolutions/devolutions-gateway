@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **id** | [**uuid::Uuid**](uuid::Uuid.md) |  | 
 **name** | **String** |  | 
 **prompt_secure_desktop** | **bool** |  | 
+**target_must_be_signed** | **bool** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

@@ -340,6 +340,7 @@ components:
       - RunId
       - StartTime
       - StartupRequestCount
+      - Version
       properties:
         CurrentRequestCount:
           type: integer
@@ -361,6 +362,8 @@ components:
         StartupRequestCount:
           type: integer
           format: int32
+        Version:
+          type: string
     Assignment:
       type: object
       required:
@@ -644,6 +647,7 @@ components:
       - Id
       - Name
       - PromptSecureDesktop
+      - TargetMustBeSigned
       properties:
         DefaultElevationKind:
           $ref: '#/components/schemas/ElevationKind'
@@ -657,6 +661,8 @@ components:
         Name:
           type: string
         PromptSecureDesktop:
+          type: boolean
+        TargetMustBeSigned:
           type: boolean
     SessionElevationConfiguration:
       type: object

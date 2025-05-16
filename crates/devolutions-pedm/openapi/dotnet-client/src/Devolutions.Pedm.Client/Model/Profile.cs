@@ -57,7 +57,8 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="id">id (required).</param>
         /// <param name="name">name (required).</param>
         /// <param name="promptSecureDesktop">promptSecureDesktop (required).</param>
-        public Profile(ElevationKind defaultElevationKind = default(ElevationKind), ElevationMethod elevationMethod = default(ElevationMethod), ElevationConfigurations elevationSettings = default(ElevationConfigurations), Guid id = default(Guid), string name = default(string), bool promptSecureDesktop = default(bool))
+        /// <param name="targetMustBeSigned">targetMustBeSigned (required).</param>
+        public Profile(ElevationKind defaultElevationKind = default(ElevationKind), ElevationMethod elevationMethod = default(ElevationMethod), ElevationConfigurations elevationSettings = default(ElevationConfigurations), Guid id = default(Guid), string name = default(string), bool promptSecureDesktop = default(bool), bool targetMustBeSigned = default(bool))
         {
             this.DefaultElevationKind = defaultElevationKind;
             this.ElevationMethod = elevationMethod;
@@ -75,6 +76,7 @@ namespace Devolutions.Pedm.Client.Model
             }
             this.Name = name;
             this.PromptSecureDesktop = promptSecureDesktop;
+            this.TargetMustBeSigned = targetMustBeSigned;
         }
 
         /// <summary>
@@ -102,6 +104,12 @@ namespace Devolutions.Pedm.Client.Model
         public bool PromptSecureDesktop { get; set; }
 
         /// <summary>
+        /// Gets or Sets TargetMustBeSigned
+        /// </summary>
+        [DataMember(Name = "TargetMustBeSigned", IsRequired = true, EmitDefaultValue = true)]
+        public bool TargetMustBeSigned { get; set; }
+
+        /// <summary>
         /// Returns the string presentation of the object
         /// </summary>
         /// <returns>String presentation of the object</returns>
@@ -115,6 +123,7 @@ namespace Devolutions.Pedm.Client.Model
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Name: ").Append(Name).Append("\n");
             sb.Append("  PromptSecureDesktop: ").Append(PromptSecureDesktop).Append("\n");
+            sb.Append("  TargetMustBeSigned: ").Append(TargetMustBeSigned).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }
