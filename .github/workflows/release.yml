@@ -312,6 +312,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    environment: onedrive-upload # for OneDrive secrets
 
     steps:
       - name: Check out Devolutions/actions
@@ -370,6 +371,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    environment: onedrive-upload # for OneDrive secrets
 
     steps:
       - name: Check out Devolutions/actions
