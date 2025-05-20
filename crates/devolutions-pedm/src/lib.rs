@@ -3,6 +3,7 @@ use camino::Utf8PathBuf;
 
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
+mod account;
 mod config;
 mod db;
 mod log;

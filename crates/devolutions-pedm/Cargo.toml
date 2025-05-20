@@ -45,6 +45,13 @@ tokio-postgres = { version = "0.7", optional = true, features = ["with-chrono-0_
 bb8 = { version = "0.9", optional = true }
 bb8-postgres = { version = "0.9", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_Security_Authorization",
+] }
+windows-result = "0.3"
+
 [features]
 default = ["libsql"]
 libsql = ["dep:libsql"]

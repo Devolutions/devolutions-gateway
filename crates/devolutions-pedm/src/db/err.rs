@@ -153,4 +153,4 @@ impl fmt::Display for InvalidEnumError {
     }
 }
 
-impl std::error::Error for InvalidEnumError {}
+impl Error for InvalidEnumError {}

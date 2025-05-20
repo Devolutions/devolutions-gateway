@@ -442,25 +442,23 @@ pub(crate) fn application_from_process(pid: u32) -> anyhow::Result<Application> 
 
 pub(crate) fn authenticode_win_to_policy(
     win_status: win_api_wrappers::security::crypt::AuthenticodeSignatureStatus,
-) -> policy::AuthenticodeSignatureStatus {
+) -> AuthenticodeSignatureStatus {
     match win_status {
-        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid => {
-            policy::AuthenticodeSignatureStatus::Valid
-        }
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid => AuthenticodeSignatureStatus::Valid,
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Incompatible => {
-            policy::AuthenticodeSignatureStatus::Incompatible
+            AuthenticodeSignatureStatus::Incompatible
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotSigned => {
-            policy::AuthenticodeSignatureStatus::NotSigned
+            AuthenticodeSignatureStatus::NotSigned
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::HashMismatch => {
-            policy::AuthenticodeSignatureStatus::HashMismatch
+            AuthenticodeSignatureStatus::HashMismatch
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotSupportedFileFormat => {
-            policy::AuthenticodeSignatureStatus::NotSupportedFileFormat
+            AuthenticodeSignatureStatus::NotSupportedFileFormat
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotTrusted => {
-            policy::AuthenticodeSignatureStatus::NotTrusted
+            AuthenticodeSignatureStatus::NotTrusted
         }
     }
 }
