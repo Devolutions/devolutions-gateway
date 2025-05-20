@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-pedm"
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
