@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 use aide::NoApi;
 use axum::extract::State;
 use axum::Json;
+use chrono::{TimeZone, Utc};
 
 use crate::db::Db;
 use crate::model::AboutData;
@@ -20,7 +21,10 @@ pub(crate) async fn about(
         start_time: state.startup_info.start_time,
         startup_request_count: state.startup_info.request_count,
         current_request_count: state.req_counter.load(Ordering::Relaxed),
-        last_request_time: db.get_last_request_time().await?,
+        last_request_time: db
+            .get_last_request_time()
+            .await?
+            .or_else(|| Some(Utc.timestamp_opt(0, 0).single().unwrap())),
         version: win_api_wrappers::utils::get_exe_version()?,
     }))
 }
