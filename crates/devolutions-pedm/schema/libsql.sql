@@ -30,12 +30,6 @@ CREATE TABLE IF NOT EXISTS http_request
     status_code integer NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS elevate_tmp_request
-(
-    req_id  integer PRIMARY KEY,
-    seconds integer NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS user
 (
     id integer primary key,
@@ -67,6 +61,33 @@ CREATE TABLE IF NOT EXISTS jit_elevation_result
     target_signature_id integer,
     FOREIGN KEY (target_signature_id) REFERENCES signature(id),
     FOREIGN KEY (target_user_id) REFERENCES user(id)
+);
+
+CREATE TABLE IF NOT EXISTS profile
+(
+    id integer PRIMARY KEY,
+    name text NOT NULL,
+    description TEXT,
+    jit_elevation_method integer,
+    jit_elevation_default_kind integer,
+    jit_elevation_target_must_be_signed integer
+);
+
+CREATE TABLE IF NOT EXISTS policy
+(
+    id integer PRIMARY KEY,
+    profile_id integer,
+    user_id integer,
+    FOREIGN KEY (profile_id) REFERENCES profile(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_profile
+(
+    user_id integer PRIMARY KEY,
+    profile_id integer,
+    FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
+    FOREIGN KEY (profile_id) REFERENCES profile(id) ON DELETE CASCADE
 );
 
 INSERT INTO version (version) VALUES (0) ON CONFLICT DO NOTHING;

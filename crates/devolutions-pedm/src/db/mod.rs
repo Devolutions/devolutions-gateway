@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use devolutions_pedm_shared::policy::{ElevationResult, User};
+use devolutions_pedm_shared::policy::{Assignment, ElevationResult, Profile, User};
 use tracing::{info, warn};
 
 mod err;
@@ -199,9 +199,27 @@ pub(crate) trait Database: Send + Sync {
     /// This is used in the `LogLayer` middleware. Note that this query will only be executed after the response is sent.
     async fn log_http_request(&self, req_id: i32, method: &str, path: &str, status_code: i16) -> Result<(), DbError>;
 
-    async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError>;
-
     async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError>;
+
+    async fn get_profiles(&self) -> Result<Vec<Profile>, DbError>;
+
+    async fn get_profiles_for_user(&self, user: &User) -> Result<Vec<Profile>, DbError>;
+
+    async fn get_profile(&self, id: i64) -> Result<Option<Profile>, DbError>;
+
+    async fn insert_profile(&self, profile: &Profile) -> Result<(), DbError>;
+
+    async fn delete_profile(&self, id: i64) -> Result<(), DbError>;
+
+    async fn get_assignments(&self) -> Result<Vec<Assignment>, DbError>;
+
+    async fn get_assignment(&self, profile: &Profile) -> Result<Assignment, DbError>;
+
+    async fn set_assignments(&self, profile_id: i64, users: Vec<User>) -> Result<(), DbError>;
+
+    async fn set_user_profile(&self, user: &User, profile_id: Option<i64>) -> Result<(), DbError>;
+
+    async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError>;
 
     async fn get_users(&self) -> Result<Vec<User>, DbError>;
 

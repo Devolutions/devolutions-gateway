@@ -134,8 +134,8 @@ namespace Devolutions.Agent.Desktop
 
             if (Client.Available)
             {
-                List<(Guid, string)> profiles = new List<(Guid, string)>();
-                profiles.Add((Guid.Empty, Resources.mnuProfileNone));
+                List<(long, string)> profiles = new List<(long, string)>();
+                profiles.Add((0, Resources.mnuProfileNone));
 
                 MenuItem mnuProfiles = new MenuItem(Resources.mnuProfiles);
 
@@ -154,7 +154,7 @@ namespace Devolutions.Agent.Desktop
                 foreach (var profile in profiles)
                 {
                     MenuItem mnuProfile = new MenuItem(profile.Item2);
-                    mnuProfile.Tag = profile.Item1.ToString();
+                    mnuProfile.Tag = profile.Item1;
 
                     if (profile.Item1 == currentProfiles?.Active)
                     {
@@ -165,7 +165,7 @@ namespace Devolutions.Agent.Desktop
                     {
                         try
                         {
-                            Guid profileId = new Guid(((MenuItem) o).Tag.ToString());
+                            long profileId = (long)((MenuItem) o).Tag;
                             Client.SetCurrentProfile(profileId);
                         }
                         catch (Exception exception)

@@ -7,12 +7,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use anyhow::{Context as _, Result};
-use parking_lot::RwLock;
+use anyhow::Result;
 
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
 use win_api_wrappers::process::{ProcessInformation, StartupInfo};
-use win_api_wrappers::raw::Win32::Foundation::{ERROR_INVALID_PARAMETER, LUID};
+use win_api_wrappers::raw::Win32::Foundation::{ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_INVALID_PARAMETER, LUID};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::{Token, TokenElevationType, TokenSecurityAttribute, TokenSecurityAttributeValues};
 use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
@@ -51,13 +50,14 @@ fn elevator(method: ElevationMethod) -> &'static dyn Elevator {
     }
 }
 
-fn elevate_token(policy: &RwLock<Policy>, token: &Token) -> Result<Token> {
+fn elevate_token(policy: &Policy, token: &Token) -> Result<Token> {
     match token.elevation_type()? {
         TokenElevationType::Default => {
-            let policy = policy.read();
+            let policy = policy;
             let elevation_method = policy
-                .user_current_profile(&token.sid_and_attributes()?.sid.lookup_account(None)?.to_user())
-                .context("user not assigned")?
+                .profile
+                .as_ref()
+                .ok_or(Error::from_win32(ERROR_ACCESS_DISABLED_BY_POLICY))?
                 .elevation_method;
             elevator(elevation_method).elevate_token(token)
         }
@@ -68,7 +68,7 @@ fn elevate_token(policy: &RwLock<Policy>, token: &Token) -> Result<Token> {
 
 fn validate_elevation(
     db_handle: &DbHandle,
-    policy: &RwLock<Policy>,
+    policy: &Policy,
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
@@ -104,7 +104,7 @@ fn validate_elevation(
 
     let req = ElevationRequest::new(asker, target);
 
-    let validation = policy.read().validate(client_token.session_id()?, &req);
+    let validation = policy.validate(client_token.session_id()?, &req);
 
     let elevation_result = ElevationResult {
         request: req,
@@ -118,7 +118,7 @@ fn validate_elevation(
 
 pub(crate) fn try_start_elevated(
     db_handle: &DbHandle,
-    policy: &RwLock<Policy>,
+    policy: &Policy,
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,

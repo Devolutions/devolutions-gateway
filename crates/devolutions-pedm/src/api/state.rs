@@ -6,11 +6,10 @@ use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use chrono::Utc;
 use hyper::StatusCode;
-use parking_lot::RwLock;
 
 use crate::db::{Database, Db, DbError, DbHandle};
 use crate::model::StartupInfo;
-use crate::policy::{LoadPolicyError, Policy};
+use crate::policy::LoadPolicyError;
 
 /// Axum application state.
 #[derive(Clone)]
@@ -24,13 +23,10 @@ pub(crate) struct AppState {
     pub(crate) req_counter: Arc<AtomicI32>,
     pub(crate) db: Arc<dyn Database + Send + Sync>,
     pub(crate) db_handle: DbHandle,
-    pub(crate) policy: Arc<RwLock<Policy>>,
 }
 
 impl AppState {
     pub(crate) async fn new(db: Db, db_handle: DbHandle, pipe_name: &str) -> Result<Self, AppStateError> {
-        let policy = Policy::load()?;
-
         let last_req_id = db.get_last_request_id().await?;
         let startup_time = Utc::now();
         let run_id = db.log_server_startup(startup_time, pipe_name).await?;
@@ -46,7 +42,6 @@ impl AppState {
             req_counter: Arc::new(AtomicI32::new(last_req_id)),
             db: db.0,
             db_handle,
-            policy: Arc::new(RwLock::new(policy)),
         })
     }
 }
@@ -65,11 +60,11 @@ where
     }
 }
 
-impl FromRef<AppState> for Arc<RwLock<Policy>> {
-    fn from_ref(state: &AppState) -> Self {
-        Arc::clone(&state.policy)
-    }
-}
+// impl FromRef<AppState> for Policy {
+//     fn from_ref(state: &AppState) -> Self {
+//         &state.policy
+//     }
+// }
 
 #[derive(Debug)]
 pub enum AppStateError {

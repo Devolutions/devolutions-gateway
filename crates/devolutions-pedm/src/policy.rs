@@ -4,7 +4,6 @@
 //! - Profiles: Each profile specifies which type of elevation should be done.
 //! - Assignments: A mapping between users on the machine and the profiles available to them.
 //!
-//! The policy is stored under `%ProgramData%\Devolutions\Agent\pedm\policy\`, and is only accessible by `NT AUTHORITY\SYSTEM`.
 //! It is possible to edit the policy via the named pipe API.
 
 use core::fmt;
@@ -23,8 +22,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use devolutions_pedm_shared::policy::{
-    self, Application, AuthenticodeSignatureStatus, Certificate, Configuration, ElevationRequest, Identifiable,
-    Profile, Signature, Signer, User,
+    self, Application, AuthenticodeSignatureStatus, Certificate, ElevationRequest, Profile, Signature, Signer, User,
 };
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
@@ -33,308 +31,25 @@ use win_api_wrappers::raw::Win32::System::Threading::{PROCESS_QUERY_INFORMATION,
 use win_api_wrappers::security::crypt::{authenticode_status, CryptProviderCertificate, SignerInfo};
 use win_api_wrappers::utils::CommandLine;
 
-use crate::data_dir;
 use crate::error::Error;
-use crate::utils::{ensure_protected_directory, file_hash, AccountExt, MultiHasher};
+use crate::utils::{file_hash, AccountExt, MultiHasher};
 
-pub(crate) struct IdList<T: Identifiable> {
-    root_path: PathBuf,
-    data: HashMap<Uuid, T>,
-}
-
-impl<T: Identifiable + DeserializeOwned + Serialize> IdList<T> {
-    pub(crate) fn new(root_path: PathBuf) -> Self {
-        Self {
-            root_path,
-            data: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn load(&mut self) -> anyhow::Result<()> {
-        self.data.clear();
-
-        for dir_entry in fs::read_dir(self.path())? {
-            let dir_entry = dir_entry?;
-
-            if !dir_entry.file_type()?.is_file() {
-                continue;
-            }
-
-            let entry_path = dir_entry.path();
-
-            if !entry_path.extension().is_some_and(|ext| ext == "json") {
-                continue;
-            }
-
-            let reader = BufReader::new(File::open(&entry_path)?);
-
-            let entry = serde_json::from_reader::<_, T>(reader)?;
-
-            if !entry_path
-                .file_stem()
-                .is_some_and(|name| *entry.id().to_string() == *name)
-            {
-                bail!(Error::InvalidParameter);
-            }
-
-            self.add_internal(entry, false)?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.root_path
-    }
-
-    pub(crate) fn get(&self, id: &Uuid) -> Option<&T> {
-        self.data.get(id)
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.data.values()
-    }
-
-    pub(crate) fn contains(&self, id: &Uuid) -> bool {
-        self.data.contains_key(id)
-    }
-
-    fn add_internal(&mut self, entry: T, write: bool) -> anyhow::Result<()> {
-        if self.contains(entry.id()) {
-            bail!(Error::InvalidParameter);
-        }
-
-        if write {
-            let mut path = self.path().to_owned();
-            path.push(entry.id().to_string());
-            path.set_extension("json");
-
-            let writer = BufWriter::new(OpenOptions::new().create(true).truncate(false).write(true).open(path)?);
-            serde_json::to_writer(writer, &entry)?;
-        }
-
-        self.data.insert(*entry.id(), entry);
-
-        Ok(())
-    }
-
-    pub(crate) fn add(&mut self, entry: T) -> anyhow::Result<()> {
-        self.add_internal(entry, true)
-    }
-
-    pub(crate) fn remove(&mut self, id: &Uuid) -> anyhow::Result<()> {
-        if !self.contains(id) {
-            bail!(Error::NotFound);
-        }
-
-        let mut path = self.path().to_owned();
-        path.push(id.to_string());
-        path.set_extension("json");
-
-        fs::remove_file(path)?;
-
-        self.data.remove(id);
-
-        Ok(())
-    }
-}
-
+#[derive(Clone)]
 pub(crate) struct Policy {
-    /// The path to the policy configuration.
-    ///
-    /// The default is `C:\ProgramData\Devolutions\Agent\pedm\policy\config.json`.
-    /// It is written to when assignments are set.
-    config_path: Utf8PathBuf,
-    /// A hashmap of assignments.
-    ///
-    /// The key is the assignment ID. The value is the list of users assigned to the profile.
-    config: Configuration,
-    profiles: IdList<Profile>,
-    current_profiles: HashMap<User, Uuid>,
+    pub profile: Option<Profile>,
 }
 
 impl Policy {
-    /// Loads the policy from disk configuration.
-    pub(crate) fn load() -> Result<Self, LoadPolicyError> {
-        let data_dir = data_dir();
-        let policy_path = data_dir.join("policy");
-
-        // load assignments
-
-        let config_path = policy_path.join("config.json");
-        let config = match fs::read_to_string(&config_path) {
-            Ok(s) => {
-                info!("Loading assignments from {config_path}");
-                serde_json::from_str(&s)?
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                info!("Assignments not found at {config_path}. Initializing default assignments");
-                let c = Configuration::default();
-                fs::write(&config_path, serde_json::to_string(&c)?)
-                    .map_err(|e| LoadPolicyError::Io(e, config_path.clone()))?;
-                c
-            }
-            Err(e) => return Err(LoadPolicyError::Io(e, config_path)),
-        };
-
-        let mut policy = Self {
-            config_path,
-            config,
-            profiles: IdList::new(policy_path.join("profiles").into_std_path_buf()),
-            current_profiles: HashMap::new(),
-        };
-
-        ensure_protected_directory(
-            data_dir.as_std_path(),
-            vec![Sid::from_well_known(WinBuiltinUsersSid, None)?],
-        )?;
-        ensure_protected_directory(policy_path.as_std_path(), vec![])?;
-        ensure_protected_directory(policy.profiles.path(), vec![])?;
-
-        policy.profiles.load()?;
-        Ok(policy)
-    }
-
-    pub(crate) fn profile(&self, id: &Uuid) -> Option<&Profile> {
-        self.profiles.get(id)
-    }
-
-    pub(crate) fn user_profile(&self, user: &User, id: &Uuid) -> Option<&Profile> {
-        // Check that the user has access to profile.
-        if !self
-            .config
-            .assignments
-            .get(id)
-            .is_some_and(|users| users.contains(user))
-        {
-            return None;
-        }
-
-        self.profiles.get(id)
-    }
-
-    pub(crate) fn user_profiles(&self, user: &User) -> Vec<&Profile> {
-        self.config
-            .assignments
-            .keys()
-            .filter_map(|id| self.user_profile(user, id))
-            .collect()
-    }
-
-    /// Sets the profile ID.
-    pub(crate) fn set_profile_id(&mut self, user: User, profile_id: Option<Uuid>) -> anyhow::Result<()> {
-        if let Some(id) = profile_id {
-            if !self
-                .config
-                .assignments
-                .get(&id)
-                .is_some_and(|users| users.contains(&user))
-            {
-                info!("Unknown profile Id");
-                bail!("Unknown profile Id");
-            }
-            self.current_profiles.insert(user, id);
-        } else {
-            self.current_profiles.remove(&user);
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn user_current_profile(&self, user: &User) -> Option<&Profile> {
-        info!("Getting current profile for user {:?}", user);
-        let profile_id = self.current_profiles.get(user)?;
-        info!("User {:?} is using profile {}", user, profile_id);
-
-        // Make sure the user's assigned profile is actually allowed.
-        if !self
-            .config
-            .assignments
-            .get(profile_id)
-            .is_some_and(|users| users.contains(user))
-        {
-            return None;
-        }
-
-        self.profiles.get(profile_id)
-    }
-
-    pub(crate) fn profiles(&self) -> impl Iterator<Item = &Profile> + '_ {
-        self.profiles.iter()
-    }
-
-    pub(crate) fn add_profile(&mut self, profile: Profile) -> anyhow::Result<()> {
-        let id = profile.id;
-        self.profiles.add(profile)?;
-
-        self.set_assignments(id, vec![])?;
-
-        Ok(())
-    }
-
-    pub(crate) fn replace_profile(&mut self, old_id: &Uuid, profile: Profile) -> anyhow::Result<()> {
-        if !self.profiles.contains(old_id) {
-            bail!(Error::NotFound);
-        } else if old_id != &profile.id && self.profiles.contains(&profile.id) {
-            bail!(Error::InvalidParameter);
-        }
-
-        let old_assignments = self.assignments().get(old_id).cloned().unwrap_or_default();
-
-        self.remove_profile(old_id)?;
-
-        let new_id = profile.id;
-        self.add_profile(profile)?;
-
-        self.set_assignments(new_id, old_assignments)?;
-
-        Ok(())
-    }
-
-    pub(crate) fn remove_profile(&mut self, id: &Uuid) -> anyhow::Result<()> {
-        self.profiles.remove(id)?;
-
-        self.config.assignments.remove(id);
-
-        Ok(())
-    }
-
-    pub(crate) fn assignments(&self) -> &HashMap<Uuid, Vec<User>> {
-        &self.config.assignments
-    }
-
-    pub(crate) fn set_assignments(&mut self, profile_id: Uuid, users: Vec<User>) -> anyhow::Result<()> {
-        if !self.profiles.contains(&profile_id) {
-            bail!(Error::NotFound);
-        }
-
-        if let Some(prof_assignments) = self.config.assignments.get_mut(&profile_id) {
-            prof_assignments.clear();
-            prof_assignments.extend(users);
-        } else {
-            self.config.assignments.insert(profile_id, users);
-        }
-
-        let writer = BufWriter::new(
-            OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&self.config_path)?,
-        );
-
-        serde_json::to_writer(writer, &self.config)?;
-
-        Ok(())
-    }
-
     pub(crate) fn validate(&self, _session_id: u32, request: &ElevationRequest) -> anyhow::Result<()> {
-        let profile = self
-            .user_current_profile(&request.asker.user)
-            .ok_or_else(|| anyhow!(Error::AccessDenied))?;
+        let profile = match &self.profile {
+            Some(val) => val,
+            None => bail!(Error::AccessDenied),
+        };
 
-        if profile.target_must_be_signed && request.target.signature.status != AuthenticodeSignatureStatus::Valid {
-            bail!(Error::AccessDenied)
+        if profile.target_must_be_signed {
+            if request.target.signature.status != AuthenticodeSignatureStatus::Valid {
+                bail!(Error::AccessDenied)
+            }
         }
 
         let elevation_type = profile.default_elevation_kind;

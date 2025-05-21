@@ -91,17 +91,6 @@ impl Database for PgPool {
         Ok(())
     }
 
-    async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError> {
-        self.get()
-            .await?
-            .execute(
-                "INSERT INTO elevate_tmp_request (req_id, seconds) VALUES ($1, $2)",
-                &[&req_id, &seconds],
-            )
-            .await?;
-        Ok(())
-    }
-
     async fn get_users(&self) -> Result<Vec<User>, DbError> {
         unimplemented!()
     }

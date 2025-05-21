@@ -311,23 +311,17 @@ pub trait Identifiable {
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct Profile {
-    pub id: Uuid,
+    pub id: Option<i64>,
     pub name: String,
+    pub description: Option<String>,
     pub elevation_method: ElevationMethod,
-    pub elevation_settings: ElevationConfigurations,
     pub default_elevation_kind: ElevationKind,
-    pub prompt_secure_desktop: bool,
     pub target_must_be_signed: bool,
 }
 
-impl Identifiable for Profile {
-    fn id(&self) -> &Uuid {
-        &self.id
-    }
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug, Default)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-pub struct Configuration {
-    pub assignments: HashMap<Uuid, Vec<User>>,
+pub struct Assignment {
+    pub profile: Profile,
+    pub users: Vec<User>,
 }

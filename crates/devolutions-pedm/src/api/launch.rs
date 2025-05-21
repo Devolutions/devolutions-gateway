@@ -20,6 +20,7 @@ use win_api_wrappers::utils::{environment_block, expand_environment_path, Comman
 use crate::api::state::AppState;
 use crate::elevator;
 use crate::error::Error;
+use crate::policy::Policy;
 
 use super::NamedPipeConnectInfo;
 
@@ -88,6 +89,9 @@ pub(crate) async fn post_launch(
     NoApi(State(state)): NoApi<State<AppState>>,
     Json(mut payload): Json<LaunchPayload>,
 ) -> Result<Json<LaunchResponse>, Error> {
+    let profile = state.db.get_user_profile(&named_pipe_info.user).await?;
+    let policy = Policy { profile };
+
     payload.executable_path = payload
         .executable_path
         .map(|x| win_canonicalize(&x, Some(named_pipe_info.token.as_ref())))
@@ -132,7 +136,7 @@ pub(crate) async fn post_launch(
 
     let proc_info = elevator::try_start_elevated(
         &state.db_handle,
-        &state.policy,
+        &policy,
         &named_pipe_info.token,
         parent_pid,
         payload.executable_path.as_deref(),
