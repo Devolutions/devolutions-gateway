@@ -347,8 +347,10 @@ pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<A
 pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
     // Open the local security policy (LSA Policy)
 
-    let mut object_attrs = Identity::LSA_OBJECT_ATTRIBUTES::default();
-    object_attrs.Length = u32size_of::<Identity::LSA_OBJECT_ATTRIBUTES>();
+    let object_attrs = Identity::LSA_OBJECT_ATTRIBUTES {
+        Length: u32size_of::<Identity::LSA_OBJECT_ATTRIBUTES>(),
+        ..Default::default()
+    };
 
     let mut policy_handle = ScopeGuard::new(Identity::LSA_HANDLE::default(), |handle| {
         // FIXME: maybe we should log the error here.

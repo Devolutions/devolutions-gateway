@@ -457,7 +457,7 @@ pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>
     ))?)
 }
 
-use windows::Win32::Foundation::{BOOL, HMODULE};
+use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
 };
@@ -514,9 +514,9 @@ pub fn get_exe_version() -> Result<String, anyhow::Error> {
     }
 
     let major = (info.dwFileVersionMS >> 16) & 0xffff;
-    let minor = (info.dwFileVersionMS >> 0) & 0xffff;
+    let minor = info.dwFileVersionMS & 0xffff;
     let build = (info.dwFileVersionLS >> 16) & 0xffff;
-    let revision = (info.dwFileVersionLS >> 0) & 0xffff;
+    let revision = info.dwFileVersionLS & 0xffff;
 
     Ok(format!("{}.{}.{}.{}", major, minor, build, revision))
 }
