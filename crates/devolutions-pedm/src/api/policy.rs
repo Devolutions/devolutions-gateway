@@ -88,7 +88,7 @@ struct PathIdParameter {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct PathIntIdPath {
+pub(crate) struct PathIntIdPath {
     pub id: i64,
 }
 
@@ -203,7 +203,7 @@ async fn get_users(
     let mut users = db.get_users().await?;
 
     if !named_pipe_info.token.is_elevated()? {
-        users = users.into_iter().filter(|u| u == &named_pipe_info.user).collect();
+        users.retain(|u| u == &named_pipe_info.user);
     }
 
     Ok(Json(users))

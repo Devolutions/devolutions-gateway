@@ -37,9 +37,9 @@ impl LibsqlConn {
 
         if let Some(row) = rows.next().await? {
             let id: i64 = row.get(0)?;
-            return Ok(Some(id));
+            Ok(Some(id))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -271,10 +271,7 @@ impl Database for LibsqlConn {
                             }))
                         }
                     },
-                    signer: match row.get::<Option<String>>(15)? {
-                        Some(issuer) => Some(Signer { issuer }),
-                        None => None,
-                    },
+                    signer: row.get::<Option<String>>(15)?.map(|issuer| Signer { issuer }),
                     certificates: None,
                 }),
                 None => None,
@@ -329,13 +326,15 @@ impl Database for LibsqlConn {
 
         let where_sql = format!(" WHERE {}", where_clauses.join(" AND "));
 
-        let count_sql = format!("SELECT COUNT(*) {}", &base_sql) + &where_sql;
+        let mut count_sql = format!("SELECT COUNT(*) {}", &base_sql);
+        count_sql.push_str(&where_sql);
         let total_records_row = self
             .query_one(&count_sql, libsql::params_from_iter(params.clone()))
             .await?;
         let total_records: i64 = total_records_row.get(0)?;
-        let total_pages =
-            ((total_records + query_options.page_size as i64 - 1) / query_options.page_size as i64) as u32;
+        let total_pages = u32::try_from(
+            (total_records + i64::from(query_options.page_size) - 1) / i64::from(query_options.page_size),
+        )?;
 
         let sort_columns = ["success", "timestamp", "target_path", "target_user_id"];
         let sort_column = if sort_columns.contains(&query_options.sort_column.as_str()) {
@@ -345,12 +344,14 @@ impl Database for LibsqlConn {
         };
         let sort_order = if query_options.sort_descending { "DESC" } else { "ASC" };
 
-        let limit = query_options.page_size as i64;
-        let offset = (query_options.page_number.saturating_sub(1) * query_options.page_size) as i64;
+        let limit = i64::from(query_options.page_size);
+        let offset = i64::from(query_options.page_number.saturating_sub(1) * query_options.page_size);
 
+        base_sql.push_str(&joins);
+        base_sql.push_str(&where_sql);
         let select_sql = format!(
             "SELECT jit.id, jit.timestamp, jit.success, jit.target_path, u_display.account_name, u_display.domain_name, u_display.account_sid, u_display.domain_sid {} ORDER BY jit.{} {} LIMIT ? OFFSET ?",
-            base_sql + &joins + &where_sql,
+            base_sql,
             sort_column,
             sort_order
         );
@@ -379,8 +380,8 @@ impl Database for LibsqlConn {
         }
 
         Ok(JitElevationLogPage {
-            total_pages: total_pages,
-            total_records: total_records as u32,
+            total_pages,
+            total_records: u32::try_from(total_records)?,
             results,
         })
     }
