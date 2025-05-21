@@ -16,8 +16,8 @@ async fn get_jit_elevation_log_id(
 ) -> Result<Json<JitElevationLogRow>, Error> {
     let row = db.get_jit_elevation_log(id.id).await?.ok_or_else(|| Error::NotFound)?;
 
-    if !named_pipe_info.token.is_elevated()? {
-        if !row.user.as_ref().map_or(true, |u| u != &named_pipe_info.user) {
+    if row.user.as_ref().map_or(true, |u| u != &named_pipe_info.user) {
+        if !named_pipe_info.token.is_elevated()? {
             return Err(Error::AccessDenied);
         }
     }
