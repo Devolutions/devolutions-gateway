@@ -333,10 +333,8 @@ impl Policy {
             .user_current_profile(&request.asker.user)
             .ok_or_else(|| anyhow!(Error::AccessDenied))?;
 
-        if profile.target_must_be_signed {
-            if request.target.signature.status != AuthenticodeSignatureStatus::Valid {
-                bail!(Error::AccessDenied)
-            }
+        if profile.target_must_be_signed && request.target.signature.status != AuthenticodeSignatureStatus::Valid {
+            bail!(Error::AccessDenied)
         }
 
         let elevation_type = profile.default_elevation_kind;
@@ -442,25 +440,23 @@ pub(crate) fn application_from_process(pid: u32) -> anyhow::Result<Application> 
 
 pub(crate) fn authenticode_win_to_policy(
     win_status: win_api_wrappers::security::crypt::AuthenticodeSignatureStatus,
-) -> policy::AuthenticodeSignatureStatus {
+) -> AuthenticodeSignatureStatus {
     match win_status {
-        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid => {
-            policy::AuthenticodeSignatureStatus::Valid
-        }
+        win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Valid => AuthenticodeSignatureStatus::Valid,
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::Incompatible => {
-            policy::AuthenticodeSignatureStatus::Incompatible
+            AuthenticodeSignatureStatus::Incompatible
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotSigned => {
-            policy::AuthenticodeSignatureStatus::NotSigned
+            AuthenticodeSignatureStatus::NotSigned
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::HashMismatch => {
-            policy::AuthenticodeSignatureStatus::HashMismatch
+            AuthenticodeSignatureStatus::HashMismatch
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotSupportedFileFormat => {
-            policy::AuthenticodeSignatureStatus::NotSupportedFileFormat
+            AuthenticodeSignatureStatus::NotSupportedFileFormat
         }
         win_api_wrappers::security::crypt::AuthenticodeSignatureStatus::NotTrusted => {
-            policy::AuthenticodeSignatureStatus::NotTrusted
+            AuthenticodeSignatureStatus::NotTrusted
         }
     }
 }

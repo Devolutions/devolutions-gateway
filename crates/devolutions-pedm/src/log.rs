@@ -18,7 +18,7 @@ pub(crate) struct JitElevationLogQueryOptions {
     pub sort_descending: bool,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize, JsonSchema, Default)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct JitElevationLogRow {
     pub id: i64,
@@ -31,23 +31,6 @@ pub(crate) struct JitElevationLogRow {
     pub target_hash: Option<Hash>,
     pub target_signature: Option<Signature>,
     pub user: Option<User>,
-}
-
-impl Default for JitElevationLogRow {
-    fn default() -> JitElevationLogRow {
-        JitElevationLogRow {
-            id: 0,
-            timestamp: 0,
-            success: 0,
-            asker_path: None,
-            target_path: None,
-            target_command_line: None,
-            target_working_directory: None,
-            target_hash: None,
-            target_signature: None,
-            user: None,
-        }
-    }
 }
 
 #[derive(Serialize, JsonSchema)]

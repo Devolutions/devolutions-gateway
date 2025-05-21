@@ -14,12 +14,10 @@ async fn get_jit_elevation_log_id(
     NoApi(State(_state)): NoApi<State<AppState>>,
     NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<JitElevationLogRow>, Error> {
-    let row = db.get_jit_elevation_log(id.id).await?.ok_or_else(|| Error::NotFound)?;
+    let row = db.get_jit_elevation_log(id.id).await?.ok_or(Error::NotFound)?;
 
-    if row.user.as_ref().map_or(true, |u| u != &named_pipe_info.user) {
-        if !named_pipe_info.token.is_elevated()? {
-            return Err(Error::AccessDenied);
-        }
+    if row.user.as_ref().map_or(true, |u| u != &named_pipe_info.user) && !named_pipe_info.token.is_elevated()? {
+        return Err(Error::AccessDenied);
     }
 
     Ok(Json(row))
@@ -31,10 +29,10 @@ async fn get_jit_elevation_logs(
     NoApi(Db(db)): NoApi<Db>,
     Json(query_options): Json<JitElevationLogQueryOptions>,
 ) -> Result<Json<JitElevationLogPage>, Error> {
-    if query_options.user.as_ref().map_or(true, |u| u != &named_pipe_info.user) {
-        if !named_pipe_info.token.is_elevated()? {
-            return Err(Error::AccessDenied);
-        }
+    if query_options.user.as_ref().map_or(true, |u| u != &named_pipe_info.user)
+        && !named_pipe_info.token.is_elevated()?
+    {
+        return Err(Error::AccessDenied);
     }
 
     let page = db.get_jit_elevation_logs(query_options).await?;
