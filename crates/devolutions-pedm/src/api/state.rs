@@ -60,12 +60,6 @@ where
     }
 }
 
-// impl FromRef<AppState> for Policy {
-//     fn from_ref(state: &AppState) -> Self {
-//         &state.policy
-//     }
-// }
-
 #[derive(Debug)]
 pub enum AppStateError {
     LoadPolicy(LoadPolicyError),

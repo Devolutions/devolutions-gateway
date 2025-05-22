@@ -25,6 +25,8 @@ pub enum DbError {
     Timestamp(ParseTimestampError),
     #[cfg(feature = "libsql")]
     InvalidEnum(InvalidEnumError),
+    #[cfg(feature = "libsql")]
+    DataIntegrity(DataIntegrityError),
     #[cfg(feature = "postgres")]
     Bb8(bb8::RunError<tokio_postgres::Error>),
     #[cfg(feature = "postgres")]
@@ -42,6 +44,8 @@ impl Error for DbError {
             Self::Timestamp(e) => Some(e),
             #[cfg(feature = "libsql")]
             Self::InvalidEnum(e) => Some(e),
+            #[cfg(feature = "libsql")]
+            Self::DataIntegrity(e) => Some(e),
             #[cfg(feature = "postgres")]
             Self::Bb8(e) => Some(e),
             #[cfg(feature = "postgres")]
@@ -61,6 +65,8 @@ impl fmt::Display for DbError {
             Self::Timestamp(e) => e.fmt(f),
             #[cfg(feature = "libsql")]
             Self::InvalidEnum(e) => e.fmt(f),
+            #[cfg(feature = "libsql")]
+            Self::DataIntegrity(e) => e.fmt(f),
             #[cfg(feature = "postgres")]
             Self::Bb8(e) => write!(f, "could not connect to the database: {e}"),
             #[cfg(feature = "postgres")]
@@ -154,3 +160,18 @@ impl fmt::Display for InvalidEnumError {
 }
 
 impl Error for InvalidEnumError {}
+
+#[cfg(feature = "libsql")]
+#[derive(Debug)]
+pub struct DataIntegrityError {
+    pub message: &'static str,
+}
+
+#[cfg(feature = "libsql")]
+impl fmt::Display for DataIntegrityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "inconsistent data: {}", self.message)
+    }
+}
+
+impl Error for DataIntegrityError {}

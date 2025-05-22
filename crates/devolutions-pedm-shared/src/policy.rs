@@ -311,7 +311,7 @@ pub trait Identifiable {
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct Profile {
-    pub id: Option<i64>,
+    pub id: i64,
     pub name: String,
     pub description: Option<String>,
     pub elevation_method: ElevationMethod,

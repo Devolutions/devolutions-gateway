@@ -11,7 +11,7 @@ use libsql::{params, Row, Transaction, Value};
 
 use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
-use super::err::{InvalidEnumError, ParseTimestampError};
+use super::err::{DataIntegrityError, InvalidEnumError, ParseTimestampError};
 use super::{Database, DbError};
 
 pub(crate) struct LibsqlConn(libsql::Connection);
@@ -337,19 +337,17 @@ impl Database for LibsqlConn {
         });
 
         match profile.id {
-            Some(id) => {
+            0 => {
                 self.execute(
                     "
-                    UPDATE profile
-                    SET 
-                        name = ?2, 
-                        description = ?3, 
-                        jit_elevation_method = ?4, 
-                        jit_elevation_default_kind = ?5, 
-                        jit_elevation_target_must_be_signed = ?6
-                    WHERE id = ?1",
+                    INSERT INTO profile (
+                        name, 
+                        description, 
+                        jit_elevation_method, 
+                        jit_elevation_default_kind, 
+                        jit_elevation_target_must_be_signed)
+                    VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
-                        id,
                         profile.name.as_str(),
                         match &profile.description {
                             Some(description) => Value::Text(description.to_string()),
@@ -362,17 +360,19 @@ impl Database for LibsqlConn {
                 )
                 .await?;
             }
-            None => {
+            _ => {
                 self.execute(
                     "
-                    INSERT INTO profile (
-                        name, 
-                        description, 
-                        jit_elevation_method, 
-                        jit_elevation_default_kind, 
-                        jit_elevation_target_must_be_signed)
-                    VALUES (?1, ?2, ?3, ?4, ?5)",
+                    UPDATE profile
+                    SET 
+                        name = ?2, 
+                        description = ?3, 
+                        jit_elevation_method = ?4, 
+                        jit_elevation_default_kind = ?5, 
+                        jit_elevation_target_must_be_signed = ?6
+                    WHERE id = ?1",
                     params![
+                        profile.id,
                         profile.name.as_str(),
                         match &profile.description {
                             Some(description) => Value::Text(description.to_string()),
@@ -436,7 +436,7 @@ impl Database for LibsqlConn {
                 current_profile_id = Some(profile_id);
                 current_assignment = Some(Assignment {
                     profile: Profile {
-                        id: Some(profile_id),
+                        id: profile_id,
                         name: row.get(1)?,
                         description: row.get(2)?,
                         elevation_method: match row.get::<i64>(3)? {
@@ -542,9 +542,13 @@ impl Database for LibsqlConn {
         Ok(())
     }
 
-    async fn set_user_profile(&self, user: &User, profile_id: Option<i64>) -> Result<(), DbError> {
-        // `unwrap` should be sound, the user should not be able to select a profile unless they already exist in the database
-        let user_id = self.get_user_id(user).await?.unwrap();
+    async fn set_user_profile(&self, user: &User, profile_id: i64) -> Result<(), DbError> {
+        let user_id = self
+            .get_user_id(user)
+            .await?
+            .ok_or(DbError::DataIntegrity(DataIntegrityError {
+                message: "set_user_profile for unknown user.id",
+            }))?;
 
         // TODO We're not properly atomic here, because there is a small chance of the user being removed
         self.execute(
@@ -560,8 +564,8 @@ impl Database for LibsqlConn {
             params![
                 user_id,
                 match profile_id {
-                    Some(id) => Value::Integer(id),
-                    None => Value::Null,
+                    0 => Value::Null,
+                    _ => Value::Integer(profile_id),
                 }
             ],
         )
@@ -571,8 +575,12 @@ impl Database for LibsqlConn {
     }
 
     async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError> {
-        // `unwrap` should be sound, the user should not be able to select a profile unless they already exist in the database
-        let user_id = self.get_user_id(user).await?.unwrap();
+        let user_id = self
+            .get_user_id(user)
+            .await?
+            .ok_or(DbError::DataIntegrity(DataIntegrityError {
+                message: "set_user_profile for unknown user.id",
+            }))?;
 
         // TODO We're not properly atomic here, because there is a small chance of the user being removed
         let row = self

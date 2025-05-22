@@ -217,7 +217,7 @@ pub(crate) trait Database: Send + Sync {
 
     async fn set_assignments(&self, profile_id: i64, users: Vec<User>) -> Result<(), DbError>;
 
-    async fn set_user_profile(&self, user: &User, profile_id: Option<i64>) -> Result<(), DbError>;
+    async fn set_user_profile(&self, user: &User, profile_id: i64) -> Result<(), DbError>;
 
     async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError>;
 

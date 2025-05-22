@@ -23,7 +23,7 @@ namespace Devolutions.Agent.Desktop.Service
 
         internal static void SetCurrentProfile(long id)
         {
-            Instance().PolicyMePut(new OptionalId(id));
+            Instance().PolicyMeIdPut(id);
         }
 
         private static DefaultApi Instance()

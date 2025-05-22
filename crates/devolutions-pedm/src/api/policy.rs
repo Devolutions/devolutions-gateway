@@ -68,19 +68,13 @@ async fn delete_profiles_id(
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct GetProfilesMeResponse {
-    pub(crate) active: Option<i64>,
+    pub(crate) active: i64,
     pub(crate) available: Vec<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct PathIdParameter {
     pub id: i64,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "PascalCase")]
-struct OptionalId {
-    pub(crate) id: Option<i64>,
 }
 
 /// Returns the active profile ID if there is one, and a list of available profiles.
@@ -92,8 +86,8 @@ async fn get_me(
     let profiles = db.get_profiles_for_user(&named_pipe_info.user).await?;
 
     Ok(Json(GetProfilesMeResponse {
-        active: Some(selected_profile.and_then(|p| p.id).unwrap_or(0)),
-        available: profiles.into_iter().map(|p| p.id.unwrap()).collect(),
+        active: selected_profile.map_or(0, |p| p.id),
+        available: profiles.into_iter().map(|p| p.id).collect(),
     }))
 }
 
@@ -107,14 +101,14 @@ async fn get_profiles(
     }
 
     let profiles = db.get_profiles().await?;
-    Ok(Json(profiles.into_iter().map(|p| p.id.unwrap()).collect()))
+    Ok(Json(profiles.into_iter().map(|p| p.id).collect()))
 }
 
 /// Sets the profile ID to the specified ID.
 async fn set_profile_id(
+    Path(id): Path<PathIdParameter>,
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     NoApi(Db(db)): NoApi<Db>,
-    Json(id): Json<OptionalId>,
 ) -> Result<(), Error> {
     // The databse should validate that the user can only select an assigned profile
     db.set_user_profile(&named_pipe_info.user, id.id).await?;
@@ -162,7 +156,8 @@ async fn get_users(
 
 pub(crate) fn policy_router() -> ApiRouter<AppState> {
     ApiRouter::new()
-        .api_route("/me", get(get_me).put(set_profile_id))
+        .api_route("/me", get(get_me))
+        .api_route("/me/{id}", put(set_profile_id))
         .api_route("/profiles", get(get_profiles).post(post_profiles))
         .api_route("/profiles/{id}", get(get_profiles_id).delete(delete_profiles_id))
         .api_route("/assignments", get(get_assignments))
