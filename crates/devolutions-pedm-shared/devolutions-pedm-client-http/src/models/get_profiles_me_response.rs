@@ -15,14 +15,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GetProfilesMeResponse {
     #[serde(rename = "Active")]
-    pub active: uuid::Uuid,
+    pub active: i64,
     #[serde(rename = "Available")]
-    pub available: Vec<uuid::Uuid>,
+    pub available: Vec<i64>,
 }
 
 impl GetProfilesMeResponse {
     /// Returns some information about the current user and active profiles.  If there is no active profile, the `active` UUID will be full of zeroes.
-    pub fn new(active: uuid::Uuid, available: Vec<uuid::Uuid>) -> GetProfilesMeResponse {
+    pub fn new(active: i64, available: Vec<i64>) -> GetProfilesMeResponse {
         GetProfilesMeResponse { active, available }
     }
 }

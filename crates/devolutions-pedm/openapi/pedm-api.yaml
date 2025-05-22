@@ -18,34 +18,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AboutData'
-  /elevate/temporary:
-    post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ElevateTemporaryPayload'
-        required: true
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
-  /elevate/session:
-    post:
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
   /launch:
     post:
       requestBody:
@@ -67,32 +39,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LaunchResponse'
-  /revoke:
-    post:
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
-  /status:
-    get:
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StatusResponse'
   /log/jit:
     get:
       requestBody:
@@ -155,13 +101,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetProfilesMeResponse'
+  /policy/me/{id}:
     put:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OptionalId'
+      parameters:
+      - in: path
+        name: id
         required: true
+        schema:
+          type: integer
+          format: int64
+        style: simple
       responses:
         default:
           description: ''
@@ -187,8 +136,8 @@ paths:
               schema:
                 type: array
                 items:
-                  type: string
-                  format: uuid
+                  type: integer
+                  format: int64
     post:
       requestBody:
         content:
@@ -212,8 +161,8 @@ paths:
         name: id
         required: true
         schema:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
         style: simple
       responses:
         default:
@@ -228,38 +177,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Profile'
-    put:
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-          format: uuid
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Profile'
-        required: true
-      responses:
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '200':
-          description: no content
     delete:
       parameters:
       - in: path
         name: id
         required: true
         schema:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
         style: simple
       responses:
         default:
@@ -294,8 +219,8 @@ paths:
         name: id
         required: true
         schema:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
         style: simple
       requestBody:
         content:
@@ -409,29 +334,6 @@ components:
           type: string
         Thumbprint:
           $ref: '#/components/schemas/Hash'
-    ElevateTemporaryPayload:
-      type: object
-      required:
-      - Seconds
-      properties:
-        Seconds:
-          description: |-
-            The number of seconds to elevate the user for.
-
-            This must be between 1 and `i32::MAX`.
-          type: integer
-          format: int64
-          minimum: 0.0
-    ElevationConfigurations:
-      type: object
-      required:
-      - Session
-      - Temporary
-      properties:
-        Session:
-          $ref: '#/components/schemas/SessionElevationConfiguration'
-        Temporary:
-          $ref: '#/components/schemas/TemporaryElevationConfiguration'
     ElevationKind:
       type: string
       enum:
@@ -476,13 +378,13 @@ components:
       - Available
       properties:
         Active:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
         Available:
           type: array
           items:
-            type: string
-            format: uuid
+            type: integer
+            format: int64
     Hash:
       type: object
       required:
@@ -615,22 +517,7 @@ components:
           type: integer
           format: int32
           minimum: 0.0
-    OptionalId:
-      type: object
-      properties:
-        Id:
-          type: string
-          format: uuid
-          nullable: true
     PathIdParameter:
-      type: object
-      required:
-      - id
-      properties:
-        id:
-          type: string
-          format: uuid
-    PathIntIdPath:
       type: object
       required:
       - id
@@ -643,40 +530,23 @@ components:
       required:
       - DefaultElevationKind
       - ElevationMethod
-      - ElevationSettings
       - Id
       - Name
-      - PromptSecureDesktop
       - TargetMustBeSigned
       properties:
         DefaultElevationKind:
           $ref: '#/components/schemas/ElevationKind'
+        Description:
+          type: string
+          nullable: true
         ElevationMethod:
           $ref: '#/components/schemas/ElevationMethod'
-        ElevationSettings:
-          $ref: '#/components/schemas/ElevationConfigurations'
         Id:
-          type: string
-          format: uuid
+          type: integer
+          format: int64
         Name:
           type: string
-        PromptSecureDesktop:
-          type: boolean
         TargetMustBeSigned:
-          type: boolean
-    SessionElevationConfiguration:
-      type: object
-      required:
-      - Enabled
-      properties:
-        Enabled:
-          type: boolean
-    SessionElevationStatus:
-      type: object
-      required:
-      - Enabled
-      properties:
-        Enabled:
           type: boolean
     Signature:
       type: object
@@ -759,48 +629,6 @@ components:
         YSize:
           type: integer
           format: int32
-          minimum: 0.0
-    StatusResponse:
-      type: object
-      required:
-      - Elevated
-      - Session
-      - Temporary
-      properties:
-        Elevated:
-          type: boolean
-        Session:
-          $ref: '#/components/schemas/SessionElevationStatus'
-        Temporary:
-          $ref: '#/components/schemas/TemporaryElevationStatus'
-    TemporaryElevationConfiguration:
-      type: object
-      required:
-      - Enabled
-      - MaximumSeconds
-      properties:
-        Enabled:
-          type: boolean
-        MaximumSeconds:
-          type: integer
-          format: int64
-          minimum: 0.0
-    TemporaryElevationStatus:
-      type: object
-      required:
-      - Enabled
-      - MaximumSeconds
-      - TimeLeft
-      properties:
-        Enabled:
-          type: boolean
-        MaximumSeconds:
-          type: integer
-          format: int64
-          minimum: 0.0
-        TimeLeft:
-          type: integer
-          format: int64
           minimum: 0.0
     User:
       type: object

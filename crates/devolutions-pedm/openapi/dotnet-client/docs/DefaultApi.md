@@ -5,23 +5,18 @@ All URIs are relative to *http://localhost*
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
 | [**AboutGet**](DefaultApi.md#aboutget) | **GET** /about |  |
-| [**ElevateSessionPost**](DefaultApi.md#elevatesessionpost) | **POST** /elevate/session |  |
-| [**ElevateTemporaryPost**](DefaultApi.md#elevatetemporarypost) | **POST** /elevate/temporary |  |
 | [**LaunchPost**](DefaultApi.md#launchpost) | **POST** /launch |  |
 | [**LogJitGet**](DefaultApi.md#logjitget) | **GET** /log/jit |  |
 | [**LogJitIdGet**](DefaultApi.md#logjitidget) | **GET** /log/jit/{id} |  |
 | [**PolicyAssignmentsGet**](DefaultApi.md#policyassignmentsget) | **GET** /policy/assignments |  |
 | [**PolicyAssignmentsIdPut**](DefaultApi.md#policyassignmentsidput) | **PUT** /policy/assignments/{id} |  |
 | [**PolicyMeGet**](DefaultApi.md#policymeget) | **GET** /policy/me |  |
-| [**PolicyMePut**](DefaultApi.md#policymeput) | **PUT** /policy/me |  |
+| [**PolicyMeIdPut**](DefaultApi.md#policymeidput) | **PUT** /policy/me/{id} |  |
 | [**PolicyProfilesGet**](DefaultApi.md#policyprofilesget) | **GET** /policy/profiles |  |
 | [**PolicyProfilesIdDelete**](DefaultApi.md#policyprofilesiddelete) | **DELETE** /policy/profiles/{id} |  |
 | [**PolicyProfilesIdGet**](DefaultApi.md#policyprofilesidget) | **GET** /policy/profiles/{id} |  |
-| [**PolicyProfilesIdPut**](DefaultApi.md#policyprofilesidput) | **PUT** /policy/profiles/{id} |  |
 | [**PolicyProfilesPost**](DefaultApi.md#policyprofilespost) | **POST** /policy/profiles |  |
 | [**PolicyUsersGet**](DefaultApi.md#policyusersget) | **GET** /policy/users |  |
-| [**RevokePost**](DefaultApi.md#revokepost) | **POST** /revoke |  |
-| [**StatusGet**](DefaultApi.md#statusget) | **GET** /status |  |
 
 <a id="aboutget"></a>
 # **AboutGet**
@@ -106,177 +101,6 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 | **200** |  |  -  |
-| **0** |  |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-<a id="elevatesessionpost"></a>
-# **ElevateSessionPost**
-> void ElevateSessionPost ()
-
-
-
-### Example
-```csharp
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net.Http;
-using Devolutions.Pedm.Client.Api;
-using Devolutions.Pedm.Client.Client;
-using Devolutions.Pedm.Client.Model;
-
-namespace Example
-{
-    public class ElevateSessionPostExample
-    {
-        public static void Main()
-        {
-            Configuration config = new Configuration();
-            config.BasePath = "http://localhost";
-            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
-            HttpClient httpClient = new HttpClient();
-            HttpClientHandler httpClientHandler = new HttpClientHandler();
-            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-
-            try
-            {
-                apiInstance.ElevateSessionPost();
-            }
-            catch (ApiException  e)
-            {
-                Debug.Print("Exception when calling DefaultApi.ElevateSessionPost: " + e.Message);
-                Debug.Print("Status Code: " + e.ErrorCode);
-                Debug.Print(e.StackTrace);
-            }
-        }
-    }
-}
-```
-
-#### Using the ElevateSessionPostWithHttpInfo variant
-This returns an ApiResponse object which contains the response data, status code and headers.
-
-```csharp
-try
-{
-    apiInstance.ElevateSessionPostWithHttpInfo();
-}
-catch (ApiException e)
-{
-    Debug.Print("Exception when calling DefaultApi.ElevateSessionPostWithHttpInfo: " + e.Message);
-    Debug.Print("Status Code: " + e.ErrorCode);
-    Debug.Print(e.StackTrace);
-}
-```
-
-### Parameters
-This endpoint does not need any parameter.
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-
-### HTTP response details
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-| **200** | no content |  -  |
-| **0** |  |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-<a id="elevatetemporarypost"></a>
-# **ElevateTemporaryPost**
-> void ElevateTemporaryPost (ElevateTemporaryPayload elevateTemporaryPayload)
-
-
-
-### Example
-```csharp
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net.Http;
-using Devolutions.Pedm.Client.Api;
-using Devolutions.Pedm.Client.Client;
-using Devolutions.Pedm.Client.Model;
-
-namespace Example
-{
-    public class ElevateTemporaryPostExample
-    {
-        public static void Main()
-        {
-            Configuration config = new Configuration();
-            config.BasePath = "http://localhost";
-            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
-            HttpClient httpClient = new HttpClient();
-            HttpClientHandler httpClientHandler = new HttpClientHandler();
-            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var elevateTemporaryPayload = new ElevateTemporaryPayload(); // ElevateTemporaryPayload | 
-
-            try
-            {
-                apiInstance.ElevateTemporaryPost(elevateTemporaryPayload);
-            }
-            catch (ApiException  e)
-            {
-                Debug.Print("Exception when calling DefaultApi.ElevateTemporaryPost: " + e.Message);
-                Debug.Print("Status Code: " + e.ErrorCode);
-                Debug.Print(e.StackTrace);
-            }
-        }
-    }
-}
-```
-
-#### Using the ElevateTemporaryPostWithHttpInfo variant
-This returns an ApiResponse object which contains the response data, status code and headers.
-
-```csharp
-try
-{
-    apiInstance.ElevateTemporaryPostWithHttpInfo(elevateTemporaryPayload);
-}
-catch (ApiException e)
-{
-    Debug.Print("Exception when calling DefaultApi.ElevateTemporaryPostWithHttpInfo: " + e.Message);
-    Debug.Print("Status Code: " + e.ErrorCode);
-    Debug.Print(e.StackTrace);
-}
-```
-
-### Parameters
-
-| Name | Type | Description | Notes |
-|------|------|-------------|-------|
-| **elevateTemporaryPayload** | [**ElevateTemporaryPayload**](ElevateTemporaryPayload.md) |  |  |
-
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
- - **Content-Type**: application/json
- - **Accept**: application/json
-
-
-### HTTP response details
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-| **200** | no content |  -  |
 | **0** |  |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -646,7 +470,7 @@ No authorization required
 
 <a id="policyassignmentsidput"></a>
 # **PolicyAssignmentsIdPut**
-> void PolicyAssignmentsIdPut (Guid id, List<User> user)
+> void PolicyAssignmentsIdPut (long id, List<User> user)
 
 
 
@@ -671,7 +495,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // Guid | 
+            var id = 789L;  // long | 
             var user = new List<User>(); // List<User> | 
 
             try
@@ -709,7 +533,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **Guid** |  |  |
+| **id** | **long** |  |  |
 | **user** | [**List&lt;User&gt;**](User.md) |  |  |
 
 ### Return type
@@ -821,9 +645,9 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a id="policymeput"></a>
-# **PolicyMePut**
-> void PolicyMePut (OptionalId optionalId)
+<a id="policymeidput"></a>
+# **PolicyMeIdPut**
+> void PolicyMeIdPut (long id)
 
 
 
@@ -838,7 +662,7 @@ using Devolutions.Pedm.Client.Model;
 
 namespace Example
 {
-    public class PolicyMePutExample
+    public class PolicyMeIdPutExample
     {
         public static void Main()
         {
@@ -848,15 +672,15 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var optionalId = new OptionalId(); // OptionalId | 
+            var id = 789L;  // long | 
 
             try
             {
-                apiInstance.PolicyMePut(optionalId);
+                apiInstance.PolicyMeIdPut(id);
             }
             catch (ApiException  e)
             {
-                Debug.Print("Exception when calling DefaultApi.PolicyMePut: " + e.Message);
+                Debug.Print("Exception when calling DefaultApi.PolicyMeIdPut: " + e.Message);
                 Debug.Print("Status Code: " + e.ErrorCode);
                 Debug.Print(e.StackTrace);
             }
@@ -865,17 +689,17 @@ namespace Example
 }
 ```
 
-#### Using the PolicyMePutWithHttpInfo variant
+#### Using the PolicyMeIdPutWithHttpInfo variant
 This returns an ApiResponse object which contains the response data, status code and headers.
 
 ```csharp
 try
 {
-    apiInstance.PolicyMePutWithHttpInfo(optionalId);
+    apiInstance.PolicyMeIdPutWithHttpInfo(id);
 }
 catch (ApiException e)
 {
-    Debug.Print("Exception when calling DefaultApi.PolicyMePutWithHttpInfo: " + e.Message);
+    Debug.Print("Exception when calling DefaultApi.PolicyMeIdPutWithHttpInfo: " + e.Message);
     Debug.Print("Status Code: " + e.ErrorCode);
     Debug.Print(e.StackTrace);
 }
@@ -885,7 +709,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **optionalId** | [**OptionalId**](OptionalId.md) |  |  |
+| **id** | **long** |  |  |
 
 ### Return type
 
@@ -897,7 +721,7 @@ No authorization required
 
 ### HTTP request headers
 
- - **Content-Type**: application/json
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 
@@ -911,7 +735,7 @@ No authorization required
 
 <a id="policyprofilesget"></a>
 # **PolicyProfilesGet**
-> List&lt;Guid&gt; PolicyProfilesGet ()
+> List&lt;long&gt; PolicyProfilesGet ()
 
 
 
@@ -939,7 +763,7 @@ namespace Example
 
             try
             {
-                List<Guid> result = apiInstance.PolicyProfilesGet();
+                List<long> result = apiInstance.PolicyProfilesGet();
                 Debug.WriteLine(result);
             }
             catch (ApiException  e)
@@ -959,7 +783,7 @@ This returns an ApiResponse object which contains the response data, status code
 ```csharp
 try
 {
-    ApiResponse<List<Guid>> response = apiInstance.PolicyProfilesGetWithHttpInfo();
+    ApiResponse<List<long>> response = apiInstance.PolicyProfilesGetWithHttpInfo();
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
     Debug.Write("Response Body: " + response.Data);
@@ -976,7 +800,7 @@ catch (ApiException e)
 This endpoint does not need any parameter.
 ### Return type
 
-**List<Guid>**
+**List<long>**
 
 ### Authorization
 
@@ -998,7 +822,7 @@ No authorization required
 
 <a id="policyprofilesiddelete"></a>
 # **PolicyProfilesIdDelete**
-> void PolicyProfilesIdDelete (Guid id)
+> void PolicyProfilesIdDelete (long id)
 
 
 
@@ -1023,7 +847,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // Guid | 
+            var id = 789L;  // long | 
 
             try
             {
@@ -1060,7 +884,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **Guid** |  |  |
+| **id** | **long** |  |  |
 
 ### Return type
 
@@ -1086,7 +910,7 @@ No authorization required
 
 <a id="policyprofilesidget"></a>
 # **PolicyProfilesIdGet**
-> Profile PolicyProfilesIdGet (Guid id)
+> Profile PolicyProfilesIdGet (long id)
 
 
 
@@ -1111,7 +935,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // Guid | 
+            var id = 789L;  // long | 
 
             try
             {
@@ -1152,7 +976,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **id** | **Guid** |  |  |
+| **id** | **long** |  |  |
 
 ### Return type
 
@@ -1172,96 +996,6 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 | **200** |  |  -  |
-| **0** |  |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-<a id="policyprofilesidput"></a>
-# **PolicyProfilesIdPut**
-> void PolicyProfilesIdPut (Guid id, Profile profile)
-
-
-
-### Example
-```csharp
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net.Http;
-using Devolutions.Pedm.Client.Api;
-using Devolutions.Pedm.Client.Client;
-using Devolutions.Pedm.Client.Model;
-
-namespace Example
-{
-    public class PolicyProfilesIdPutExample
-    {
-        public static void Main()
-        {
-            Configuration config = new Configuration();
-            config.BasePath = "http://localhost";
-            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
-            HttpClient httpClient = new HttpClient();
-            HttpClientHandler httpClientHandler = new HttpClientHandler();
-            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-            var id = "id_example";  // Guid | 
-            var profile = new Profile(); // Profile | 
-
-            try
-            {
-                apiInstance.PolicyProfilesIdPut(id, profile);
-            }
-            catch (ApiException  e)
-            {
-                Debug.Print("Exception when calling DefaultApi.PolicyProfilesIdPut: " + e.Message);
-                Debug.Print("Status Code: " + e.ErrorCode);
-                Debug.Print(e.StackTrace);
-            }
-        }
-    }
-}
-```
-
-#### Using the PolicyProfilesIdPutWithHttpInfo variant
-This returns an ApiResponse object which contains the response data, status code and headers.
-
-```csharp
-try
-{
-    apiInstance.PolicyProfilesIdPutWithHttpInfo(id, profile);
-}
-catch (ApiException e)
-{
-    Debug.Print("Exception when calling DefaultApi.PolicyProfilesIdPutWithHttpInfo: " + e.Message);
-    Debug.Print("Status Code: " + e.ErrorCode);
-    Debug.Print(e.StackTrace);
-}
-```
-
-### Parameters
-
-| Name | Type | Description | Notes |
-|------|------|-------------|-------|
-| **id** | **Guid** |  |  |
-| **profile** | [**Profile**](Profile.md) |  |  |
-
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
- - **Content-Type**: application/json
- - **Accept**: application/json
-
-
-### HTTP response details
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-| **200** | no content |  -  |
 | **0** |  |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -1422,176 +1156,6 @@ This endpoint does not need any parameter.
 ### Return type
 
 [**List&lt;User&gt;**](User.md)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-
-### HTTP response details
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-| **200** |  |  -  |
-| **0** |  |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-<a id="revokepost"></a>
-# **RevokePost**
-> void RevokePost ()
-
-
-
-### Example
-```csharp
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net.Http;
-using Devolutions.Pedm.Client.Api;
-using Devolutions.Pedm.Client.Client;
-using Devolutions.Pedm.Client.Model;
-
-namespace Example
-{
-    public class RevokePostExample
-    {
-        public static void Main()
-        {
-            Configuration config = new Configuration();
-            config.BasePath = "http://localhost";
-            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
-            HttpClient httpClient = new HttpClient();
-            HttpClientHandler httpClientHandler = new HttpClientHandler();
-            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-
-            try
-            {
-                apiInstance.RevokePost();
-            }
-            catch (ApiException  e)
-            {
-                Debug.Print("Exception when calling DefaultApi.RevokePost: " + e.Message);
-                Debug.Print("Status Code: " + e.ErrorCode);
-                Debug.Print(e.StackTrace);
-            }
-        }
-    }
-}
-```
-
-#### Using the RevokePostWithHttpInfo variant
-This returns an ApiResponse object which contains the response data, status code and headers.
-
-```csharp
-try
-{
-    apiInstance.RevokePostWithHttpInfo();
-}
-catch (ApiException e)
-{
-    Debug.Print("Exception when calling DefaultApi.RevokePostWithHttpInfo: " + e.Message);
-    Debug.Print("Status Code: " + e.ErrorCode);
-    Debug.Print(e.StackTrace);
-}
-```
-
-### Parameters
-This endpoint does not need any parameter.
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-
-### HTTP response details
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-| **200** | no content |  -  |
-| **0** |  |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-<a id="statusget"></a>
-# **StatusGet**
-> StatusResponse StatusGet ()
-
-
-
-### Example
-```csharp
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net.Http;
-using Devolutions.Pedm.Client.Api;
-using Devolutions.Pedm.Client.Client;
-using Devolutions.Pedm.Client.Model;
-
-namespace Example
-{
-    public class StatusGetExample
-    {
-        public static void Main()
-        {
-            Configuration config = new Configuration();
-            config.BasePath = "http://localhost";
-            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
-            HttpClient httpClient = new HttpClient();
-            HttpClientHandler httpClientHandler = new HttpClientHandler();
-            var apiInstance = new DefaultApi(httpClient, config, httpClientHandler);
-
-            try
-            {
-                StatusResponse result = apiInstance.StatusGet();
-                Debug.WriteLine(result);
-            }
-            catch (ApiException  e)
-            {
-                Debug.Print("Exception when calling DefaultApi.StatusGet: " + e.Message);
-                Debug.Print("Status Code: " + e.ErrorCode);
-                Debug.Print(e.StackTrace);
-            }
-        }
-    }
-}
-```
-
-#### Using the StatusGetWithHttpInfo variant
-This returns an ApiResponse object which contains the response data, status code and headers.
-
-```csharp
-try
-{
-    ApiResponse<StatusResponse> response = apiInstance.StatusGetWithHttpInfo();
-    Debug.Write("Status Code: " + response.StatusCode);
-    Debug.Write("Response Headers: " + response.Headers);
-    Debug.Write("Response Body: " + response.Data);
-}
-catch (ApiException e)
-{
-    Debug.Print("Exception when calling DefaultApi.StatusGetWithHttpInfo: " + e.Message);
-    Debug.Print("Status Code: " + e.ErrorCode);
-    Debug.Print(e.StackTrace);
-}
-```
-
-### Parameters
-This endpoint does not need any parameter.
-### Return type
-
-[**StatusResponse**](StatusResponse.md)
 
 ### Authorization
 

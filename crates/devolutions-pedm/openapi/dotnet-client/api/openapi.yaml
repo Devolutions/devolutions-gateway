@@ -20,34 +20,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/AboutData'
           description: ""
-  /elevate/temporary:
-    post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ElevateTemporaryPayload'
-        required: true
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
-  /elevate/session:
-    post:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
   /launch:
     post:
       requestBody:
@@ -68,32 +40,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LaunchResponse'
-          description: ""
-  /revoke:
-    post:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
-  /status:
-    get:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StatusResponse'
           description: ""
   /log/jit:
     get:
@@ -158,13 +104,17 @@ paths:
             Returns some information about the current user and active profiles.
 
             If there is no active profile, the `active` UUID will be full of zeroes.
+  /policy/me/{id}:
     put:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OptionalId'
+      parameters:
+      - explode: false
+        in: path
+        name: id
         required: true
+        schema:
+          format: int64
+          type: integer
+        style: simple
       responses:
         default:
           content:
@@ -188,8 +138,8 @@ paths:
             application/json:
               schema:
                 items:
-                  format: uuid
-                  type: string
+                  format: int64
+                  type: integer
                 type: array
           description: ""
     post:
@@ -216,8 +166,8 @@ paths:
         name: id
         required: true
         schema:
-          format: uuid
-          type: string
+          format: int64
+          type: integer
         style: simple
       responses:
         default:
@@ -235,8 +185,8 @@ paths:
         name: id
         required: true
         schema:
-          format: uuid
-          type: string
+          format: int64
+          type: integer
         style: simple
       responses:
         default:
@@ -251,31 +201,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Profile'
           description: ""
-    put:
-      parameters:
-      - explode: false
-        in: path
-        name: id
-        required: true
-        schema:
-          format: uuid
-          type: string
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Profile'
-        required: true
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-          description: ""
-        "200":
-          description: no content
   /policy/assignments:
     get:
       responses:
@@ -301,8 +226,8 @@ paths:
         name: id
         required: true
         schema:
-          format: uuid
-          type: string
+          format: int64
+          type: integer
         style: simple
       requestBody:
         content:
@@ -389,16 +314,10 @@ components:
           AccountSid: AccountSid
           AccountName: AccountName
         Profile:
-          PromptSecureDesktop: true
           TargetMustBeSigned: true
+          Description: Description
           DefaultElevationKind: AutoApprove
-          Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
-          ElevationSettings:
-            Temporary:
-              MaximumSeconds: 0
-              Enabled: true
-            Session:
-              Enabled: true
+          Id: 0
           ElevationMethod: LocalAdmin
           Name: Name
       properties:
@@ -454,35 +373,6 @@ components:
       - SerialNumber
       - Subject
       - Thumbprint
-    ElevateTemporaryPayload:
-      example:
-        Seconds: 0
-      properties:
-        Seconds:
-          description: |-
-            The number of seconds to elevate the user for.
-
-            This must be between 1 and `i32::MAX`.
-          format: int64
-          minimum: 0.0
-          type: integer
-      required:
-      - Seconds
-    ElevationConfigurations:
-      example:
-        Temporary:
-          MaximumSeconds: 0
-          Enabled: true
-        Session:
-          Enabled: true
-      properties:
-        Session:
-          $ref: '#/components/schemas/SessionElevationConfiguration'
-        Temporary:
-          $ref: '#/components/schemas/TemporaryElevationConfiguration'
-      required:
-      - Session
-      - Temporary
     ElevationKind:
       enum:
       - AutoApprove
@@ -524,18 +414,18 @@ components:
 
         If there is no active profile, the `active` UUID will be full of zeroes.
       example:
-        Active: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        Active: 0
         Available:
-        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
-        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 6
+        - 6
       properties:
         Active:
-          format: uuid
-          type: string
+          format: int64
+          type: integer
         Available:
           items:
-            format: uuid
-            type: string
+            format: int64
+            type: integer
           type: array
       required:
       - Active
@@ -822,22 +712,7 @@ components:
       required:
       - ProcessId
       - ThreadId
-    OptionalId:
-      example:
-        Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
-      properties:
-        Id:
-          format: uuid
-          type: string
-          nullable: true
     PathIdParameter:
-      properties:
-        id:
-          format: uuid
-          type: string
-      required:
-      - id
-    PathIntIdPath:
       properties:
         id:
           format: int64
@@ -846,58 +721,33 @@ components:
       - id
     Profile:
       example:
-        PromptSecureDesktop: true
         TargetMustBeSigned: true
+        Description: Description
         DefaultElevationKind: AutoApprove
-        Id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
-        ElevationSettings:
-          Temporary:
-            MaximumSeconds: 0
-            Enabled: true
-          Session:
-            Enabled: true
+        Id: 0
         ElevationMethod: LocalAdmin
         Name: Name
       properties:
         DefaultElevationKind:
           $ref: '#/components/schemas/ElevationKind'
+        Description:
+          type: string
+          nullable: true
         ElevationMethod:
           $ref: '#/components/schemas/ElevationMethod'
-        ElevationSettings:
-          $ref: '#/components/schemas/ElevationConfigurations'
         Id:
-          format: uuid
-          type: string
+          format: int64
+          type: integer
         Name:
           type: string
-        PromptSecureDesktop:
-          type: boolean
         TargetMustBeSigned:
           type: boolean
       required:
       - DefaultElevationKind
       - ElevationMethod
-      - ElevationSettings
       - Id
       - Name
-      - PromptSecureDesktop
       - TargetMustBeSigned
-    SessionElevationConfiguration:
-      example:
-        Enabled: true
-      properties:
-        Enabled:
-          type: boolean
-      required:
-      - Enabled
-    SessionElevationStatus:
-      example:
-        Enabled: true
-      properties:
-        Enabled:
-          type: boolean
-      required:
-      - Enabled
     Signature:
       example:
         Signer:
@@ -1016,60 +866,6 @@ components:
       - "Y"
       - YCountChars
       - YSize
-    StatusResponse:
-      example:
-        Elevated: true
-        Temporary:
-          MaximumSeconds: 0
-          TimeLeft: 0
-          Enabled: true
-        Session:
-          Enabled: true
-      properties:
-        Elevated:
-          type: boolean
-        Session:
-          $ref: '#/components/schemas/SessionElevationStatus'
-        Temporary:
-          $ref: '#/components/schemas/TemporaryElevationStatus'
-      required:
-      - Elevated
-      - Session
-      - Temporary
-    TemporaryElevationConfiguration:
-      example:
-        MaximumSeconds: 0
-        Enabled: true
-      properties:
-        Enabled:
-          type: boolean
-        MaximumSeconds:
-          format: int64
-          minimum: 0.0
-          type: integer
-      required:
-      - Enabled
-      - MaximumSeconds
-    TemporaryElevationStatus:
-      example:
-        MaximumSeconds: 0
-        TimeLeft: 0
-        Enabled: true
-      properties:
-        Enabled:
-          type: boolean
-        MaximumSeconds:
-          format: int64
-          minimum: 0.0
-          type: integer
-        TimeLeft:
-          format: int64
-          minimum: 0.0
-          type: integer
-      required:
-      - Enabled
-      - MaximumSeconds
-      - TimeLeft
     User:
       example:
         DomainSid: DomainSid

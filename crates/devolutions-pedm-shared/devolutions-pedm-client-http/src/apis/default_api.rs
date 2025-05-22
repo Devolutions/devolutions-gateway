@@ -38,11 +38,6 @@ where
 
 pub trait DefaultApi {
     fn about_get(&self) -> Pin<Box<dyn Future<Output = Result<models::AboutData, Error>>>>;
-    fn elevate_session_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn elevate_temporary_post(
-        &self,
-        elevate_temporary_payload: models::ElevateTemporaryPayload,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn launch_post(
         &self,
         launch_payload: models::LaunchPayload,
@@ -55,23 +50,16 @@ pub trait DefaultApi {
     fn policy_assignments_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::Assignment>, Error>>>>;
     fn policy_assignments_id_put(
         &self,
-        id: &str,
+        id: i64,
         user: Vec<models::User>,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn policy_me_get(&self) -> Pin<Box<dyn Future<Output = Result<models::GetProfilesMeResponse, Error>>>>;
-    fn policy_me_put(&self, optional_id: models::OptionalId) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<uuid::Uuid>, Error>>>>;
-    fn policy_profiles_id_delete(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn policy_profiles_id_get(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<models::Profile, Error>>>>;
-    fn policy_profiles_id_put(
-        &self,
-        id: &str,
-        profile: models::Profile,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
+    fn policy_me_id_put(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
+    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<i64>, Error>>>>;
+    fn policy_profiles_id_delete(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
+    fn policy_profiles_id_get(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<models::Profile, Error>>>>;
     fn policy_profiles_post(&self, profile: models::Profile) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
     fn policy_users_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::User>, Error>>>>;
-    fn revoke_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
-    fn status_get(&self) -> Pin<Box<dyn Future<Output = Result<models::StatusResponse, Error>>>>;
 }
 
 impl<C: hyper::client::connect::Connect> DefaultApi for DefaultApiClient<C>
@@ -81,26 +69,6 @@ where
     #[allow(unused_mut)]
     fn about_get(&self) -> Pin<Box<dyn Future<Output = Result<models::AboutData, Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::GET, "/about".to_string());
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn elevate_session_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::POST, "/elevate/session".to_string());
-        req = req.returns_nothing();
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn elevate_temporary_post(
-        &self,
-        elevate_temporary_payload: models::ElevateTemporaryPayload,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::POST, "/elevate/temporary".to_string());
-        req = req.with_body_param(elevate_temporary_payload);
-        req = req.returns_nothing();
 
         req.execute(self.configuration.borrow())
     }
@@ -145,7 +113,7 @@ where
     #[allow(unused_mut)]
     fn policy_assignments_id_put(
         &self,
-        id: &str,
+        id: i64,
         user: Vec<models::User>,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::PUT, "/policy/assignments/{id}".to_string());
@@ -164,23 +132,23 @@ where
     }
 
     #[allow(unused_mut)]
-    fn policy_me_put(&self, optional_id: models::OptionalId) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::PUT, "/policy/me".to_string());
-        req = req.with_body_param(optional_id);
+    fn policy_me_id_put(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
+        let mut req = __internal_request::Request::new(hyper::Method::PUT, "/policy/me/{id}".to_string());
+        req = req.with_path_param("id".to_string(), id.to_string());
         req = req.returns_nothing();
 
         req.execute(self.configuration.borrow())
     }
 
     #[allow(unused_mut)]
-    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<uuid::Uuid>, Error>>>> {
+    fn policy_profiles_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<i64>, Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::GET, "/policy/profiles".to_string());
 
         req.execute(self.configuration.borrow())
     }
 
     #[allow(unused_mut)]
-    fn policy_profiles_id_delete(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
+    fn policy_profiles_id_delete(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::DELETE, "/policy/profiles/{id}".to_string());
         req = req.with_path_param("id".to_string(), id.to_string());
         req = req.returns_nothing();
@@ -189,23 +157,9 @@ where
     }
 
     #[allow(unused_mut)]
-    fn policy_profiles_id_get(&self, id: &str) -> Pin<Box<dyn Future<Output = Result<models::Profile, Error>>>> {
+    fn policy_profiles_id_get(&self, id: i64) -> Pin<Box<dyn Future<Output = Result<models::Profile, Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::GET, "/policy/profiles/{id}".to_string());
         req = req.with_path_param("id".to_string(), id.to_string());
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn policy_profiles_id_put(
-        &self,
-        id: &str,
-        profile: models::Profile,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::PUT, "/policy/profiles/{id}".to_string());
-        req = req.with_path_param("id".to_string(), id.to_string());
-        req = req.with_body_param(profile);
-        req = req.returns_nothing();
 
         req.execute(self.configuration.borrow())
     }
@@ -222,21 +176,6 @@ where
     #[allow(unused_mut)]
     fn policy_users_get(&self) -> Pin<Box<dyn Future<Output = Result<Vec<models::User>, Error>>>> {
         let mut req = __internal_request::Request::new(hyper::Method::GET, "/policy/users".to_string());
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn revoke_post(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::POST, "/revoke".to_string());
-        req = req.returns_nothing();
-
-        req.execute(self.configuration.borrow())
-    }
-
-    #[allow(unused_mut)]
-    fn status_get(&self) -> Pin<Box<dyn Future<Output = Result<models::StatusResponse, Error>>>> {
-        let mut req = __internal_request::Request::new(hyper::Method::GET, "/status".to_string());
 
         req.execute(self.configuration.borrow())
     }

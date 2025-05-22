@@ -5,23 +5,18 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**about_get**](DefaultApi.md#about_get) | **Get** /about | 
-[**elevate_session_post**](DefaultApi.md#elevate_session_post) | **Post** /elevate/session | 
-[**elevate_temporary_post**](DefaultApi.md#elevate_temporary_post) | **Post** /elevate/temporary | 
 [**launch_post**](DefaultApi.md#launch_post) | **Post** /launch | 
 [**log_jit_get**](DefaultApi.md#log_jit_get) | **Get** /log/jit | 
 [**log_jit_id_get**](DefaultApi.md#log_jit_id_get) | **Get** /log/jit/{id} | 
 [**policy_assignments_get**](DefaultApi.md#policy_assignments_get) | **Get** /policy/assignments | 
 [**policy_assignments_id_put**](DefaultApi.md#policy_assignments_id_put) | **Put** /policy/assignments/{id} | 
 [**policy_me_get**](DefaultApi.md#policy_me_get) | **Get** /policy/me | 
-[**policy_me_put**](DefaultApi.md#policy_me_put) | **Put** /policy/me | 
+[**policy_me_id_put**](DefaultApi.md#policy_me_id_put) | **Put** /policy/me/{id} | 
 [**policy_profiles_get**](DefaultApi.md#policy_profiles_get) | **Get** /policy/profiles | 
 [**policy_profiles_id_delete**](DefaultApi.md#policy_profiles_id_delete) | **Delete** /policy/profiles/{id} | 
 [**policy_profiles_id_get**](DefaultApi.md#policy_profiles_id_get) | **Get** /policy/profiles/{id} | 
-[**policy_profiles_id_put**](DefaultApi.md#policy_profiles_id_put) | **Put** /policy/profiles/{id} | 
 [**policy_profiles_post**](DefaultApi.md#policy_profiles_post) | **Post** /policy/profiles | 
 [**policy_users_get**](DefaultApi.md#policy_users_get) | **Get** /policy/users | 
-[**revoke_post**](DefaultApi.md#revoke_post) | **Post** /revoke | 
-[**status_get**](DefaultApi.md#status_get) | **Get** /status | 
 
 
 
@@ -45,59 +40,6 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: Not defined
-- **Accept**: application/json
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-
-## elevate_session_post
-
-> elevate_session_post()
-
-
-### Parameters
-
-This endpoint does not need any parameter.
-
-### Return type
-
- (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
-- **Content-Type**: Not defined
-- **Accept**: application/json
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-
-## elevate_temporary_post
-
-> elevate_temporary_post(elevate_temporary_payload)
-
-
-### Parameters
-
-
-Name | Type | Description  | Required | Notes
-------------- | ------------- | ------------- | ------------- | -------------
-**elevate_temporary_payload** | [**ElevateTemporaryPayload**](ElevateTemporaryPayload.md) |  | [required] |
-
-### Return type
-
- (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
-- **Content-Type**: application/json
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -222,7 +164,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **uuid::Uuid** |  | [required] |
+**id** | **i64** |  | [required] |
 **user** | [**Vec<models::User>**](User.md) |  | [required] |
 
 ### Return type
@@ -266,9 +208,9 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 
-## policy_me_put
+## policy_me_id_put
 
-> policy_me_put(optional_id)
+> policy_me_id_put(id)
 
 
 ### Parameters
@@ -276,7 +218,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**optional_id** | [**OptionalId**](OptionalId.md) |  | [required] |
+**id** | **i64** |  | [required] |
 
 ### Return type
 
@@ -288,7 +230,7 @@ No authorization required
 
 ### HTTP request headers
 
-- **Content-Type**: application/json
+- **Content-Type**: Not defined
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -296,7 +238,7 @@ No authorization required
 
 ## policy_profiles_get
 
-> Vec<uuid::Uuid> policy_profiles_get()
+> Vec<i64> policy_profiles_get()
 
 
 ### Parameters
@@ -305,7 +247,7 @@ This endpoint does not need any parameter.
 
 ### Return type
 
-[**Vec<uuid::Uuid>**](uuid::Uuid.md)
+**Vec<i64>**
 
 ### Authorization
 
@@ -329,7 +271,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **uuid::Uuid** |  | [required] |
+**id** | **i64** |  | [required] |
 
 ### Return type
 
@@ -357,7 +299,7 @@ No authorization required
 
 Name | Type | Description  | Required | Notes
 ------------- | ------------- | ------------- | ------------- | -------------
-**id** | **uuid::Uuid** |  | [required] |
+**id** | **i64** |  | [required] |
 
 ### Return type
 
@@ -370,35 +312,6 @@ No authorization required
 ### HTTP request headers
 
 - **Content-Type**: Not defined
-- **Accept**: application/json
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-
-## policy_profiles_id_put
-
-> policy_profiles_id_put(id, profile)
-
-
-### Parameters
-
-
-Name | Type | Description  | Required | Notes
-------------- | ------------- | ------------- | ------------- | -------------
-**id** | **uuid::Uuid** |  | [required] |
-**profile** | [**Profile**](Profile.md) |  | [required] |
-
-### Return type
-
- (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
-- **Content-Type**: application/json
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -444,56 +357,6 @@ This endpoint does not need any parameter.
 ### Return type
 
 [**Vec<models::User>**](User.md)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
-- **Content-Type**: Not defined
-- **Accept**: application/json
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-
-## revoke_post
-
-> revoke_post()
-
-
-### Parameters
-
-This endpoint does not need any parameter.
-
-### Return type
-
- (empty response body)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
-- **Content-Type**: Not defined
-- **Accept**: application/json
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-
-## status_get
-
-> models::StatusResponse status_get()
-
-
-### Parameters
-
-This endpoint does not need any parameter.
-
-### Return type
-
-[**models::StatusResponse**](StatusResponse.md)
 
 ### Authorization
 
