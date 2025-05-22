@@ -162,25 +162,15 @@ namespace DevolutionsAgent.Actions
         {
             string rootPath = Path.Combine(ProgramDataDirectory, "pedm");
 
-            foreach (string directory in new[]
-                     {
-                         "logs",
-                         Path.Combine("policy", "profiles"),
-                         Path.Combine("policy", "rules")
-                     })
+            try
             {
-                string path = Path.Combine(rootPath, directory);
-
-                try
-                {
-                    DirectoryInfo di = Directory.CreateDirectory(path);
-                    session.Log($"created directory at {di.FullName} or already exists");
-                }
-                catch (Exception e)
-                {
-                    session.Log($"failed to evaluate or create path {path}: {e}");
-                    return ActionResult.Failure;
-                }
+                DirectoryInfo di = Directory.CreateDirectory(rootPath);
+                session.Log($"created directory at {di.FullName} or already exists");
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to evaluate or create path {rootPath}: {e}");
+                return ActionResult.Failure;
             }
 
             return ActionResult.Success;
