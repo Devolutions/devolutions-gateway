@@ -258,7 +258,7 @@ internal class Program
                 Dirs = new[]
                 {
                     new Dir(Features.PEDM_FEATURE, "desktop", new Files(Features.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
-                    new Dir(Features.PEDM_FEATURE, "contextmenu", 
+                    new Dir(Features.PEDM_FEATURE, "ShellExt", 
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll), 
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix))
                 }

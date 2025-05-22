@@ -280,7 +280,7 @@ namespace DevolutionsAgent.Actions
             try
             {
                 string installDir = session.Property(AgentProperties.InstallDir);
-                string dllPath = Path.Combine(installDir, "contextmenu", Includes.SHELL_EXT_BINARY_NAME);
+                string dllPath = Path.Combine(installDir, "ShellExt", Includes.SHELL_EXT_BINARY_NAME);
 
                 if (!File.Exists(dllPath))
                 {
