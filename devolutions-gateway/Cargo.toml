@@ -30,7 +30,9 @@ ironrdp-pdu = { version = "0.4", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.1"
 ironrdp-tokio = "0.3"
+ironrdp-connector = "0.4"
 ironrdp-acceptor = "0.4"
+ironrdp-tls = { version = "0.1", features = ["rustls"] }
 ceviche = "0.6.1"
 picky-krb = "0.9"
 network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }

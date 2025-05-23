@@ -1201,9 +1201,11 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-util",
  "ironrdp-acceptor 0.4.0",
+ "ironrdp-connector 0.4.0",
  "ironrdp-core",
  "ironrdp-pdu 0.4.0",
  "ironrdp-rdcleanpath",
+ "ironrdp-tls",
  "ironrdp-tokio 0.3.0",
  "jmux-proxy",
  "job-queue",
@@ -2823,6 +2825,17 @@ dependencies = [
  "bitflags 2.9.0",
  "ironrdp-core",
  "ironrdp-pdu 0.4.0",
+]
+
+[[package]]
+name = "ironrdp-tls"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa164ae78962d1801e7175ba2052396f31b208152702939b475cf8927285833b"
+dependencies = [
+ "tokio 1.45.0",
+ "tokio-rustls",
+ "x509-cert",
 ]
 
 [[package]]

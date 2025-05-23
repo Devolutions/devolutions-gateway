@@ -249,7 +249,7 @@ where
 
             // Establish TLS connection with server
 
-            let server_stream = crate::tls::connect(selected_target.host(), server_stream)
+            let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
                 .await
                 .context("TLS connect")
                 .map_err(ForwardError::BadGateway)?;

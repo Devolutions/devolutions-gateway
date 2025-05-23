@@ -31,7 +31,7 @@ pub struct GenericClient<S> {
 
 impl<S> GenericClient<S>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
 {
     #[instrument(
         "generic_client",
@@ -136,7 +136,8 @@ where
                                 .sessions(sessions)
                                 .subscriber_tx(subscriber_tx)
                                 .credential_entry(entry)
-                                .leftover_bytes(leftover_bytes)
+                                .client_stream_leftover_bytes(leftover_bytes)
+                                .server_dns_name(selected_target.host().to_owned())
                                 .build()
                                 .run()
                                 .await
