@@ -2,6 +2,40 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.1.6 (2025-05-23)
+
+### Bug Fixes
+
+- _agent_: [**breaking**] Major breaking change in the *experimental* **PEDM module**.
+
+  The PEDM module is planned to be released officially in the 2025.2.0 release, but for simplicity we are releasing
+  a 2025.1.6 version that will be compatible with RDM 2025.2 so it’s possible for the users to update or install the
+  agent before updating the rest of the products to 2025.2.
+
+  If you installed the experimental PEDM module prior to 2025.1.5, you must:
+
+  - Uninstall the current version
+  - Run the following PowerShell script as **administrator**.
+  - Install 2025.1.6 or newer.
+
+  ```pwsh
+  $CurrentUser = "$Env:USERDOMAIN\$Env:USERNAME"
+  $Path = "$Env:ProgramData\Devolutions\Agent\pedm"
+
+  if (-Not (Test-Path $Path)) {
+      Write-Error "Path does not exist ($Path)"
+      exit 1
+  }
+
+  Write-Output "Taking ownership of $Path"
+  takeown /F "$Path" /R /D Y | Out-Null
+  Write-Output "Granting full control to $CurrentUser"
+  $Args = "`"$Path`" /grant:r `"$CurrentUser`:F`" /T /C"
+  Start-Process icacls -ArgumentList $Args -NoNewWindow -Wait
+  Write-Output "Deleting $Path"
+  Remove-Item -LiteralPath $Path -Recurse -Force
+  ```
+
 ## 2025.1.5 (2025-05-15)
 
 ### Features
