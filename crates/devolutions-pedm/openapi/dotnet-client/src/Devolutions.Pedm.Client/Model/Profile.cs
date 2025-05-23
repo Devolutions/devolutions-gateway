@@ -52,22 +52,15 @@ namespace Devolutions.Pedm.Client.Model
         /// Initializes a new instance of the <see cref="Profile" /> class.
         /// </summary>
         /// <param name="defaultElevationKind">defaultElevationKind (required).</param>
+        /// <param name="description">description.</param>
         /// <param name="elevationMethod">elevationMethod (required).</param>
-        /// <param name="elevationSettings">elevationSettings (required).</param>
         /// <param name="id">id (required).</param>
         /// <param name="name">name (required).</param>
-        /// <param name="promptSecureDesktop">promptSecureDesktop (required).</param>
         /// <param name="targetMustBeSigned">targetMustBeSigned (required).</param>
-        public Profile(ElevationKind defaultElevationKind = default(ElevationKind), ElevationMethod elevationMethod = default(ElevationMethod), ElevationConfigurations elevationSettings = default(ElevationConfigurations), Guid id = default(Guid), string name = default(string), bool promptSecureDesktop = default(bool), bool targetMustBeSigned = default(bool))
+        public Profile(ElevationKind defaultElevationKind = default(ElevationKind), string description = default(string), ElevationMethod elevationMethod = default(ElevationMethod), long id = default(long), string name = default(string), bool targetMustBeSigned = default(bool))
         {
             this.DefaultElevationKind = defaultElevationKind;
             this.ElevationMethod = elevationMethod;
-            // to ensure "elevationSettings" is required (not null)
-            if (elevationSettings == null)
-            {
-                throw new ArgumentNullException("elevationSettings is a required property for Profile and cannot be null");
-            }
-            this.ElevationSettings = elevationSettings;
             this.Id = id;
             // to ensure "name" is required (not null)
             if (name == null)
@@ -75,33 +68,27 @@ namespace Devolutions.Pedm.Client.Model
                 throw new ArgumentNullException("name is a required property for Profile and cannot be null");
             }
             this.Name = name;
-            this.PromptSecureDesktop = promptSecureDesktop;
             this.TargetMustBeSigned = targetMustBeSigned;
+            this.Description = description;
         }
 
         /// <summary>
-        /// Gets or Sets ElevationSettings
+        /// Gets or Sets Description
         /// </summary>
-        [DataMember(Name = "ElevationSettings", IsRequired = true, EmitDefaultValue = true)]
-        public ElevationConfigurations ElevationSettings { get; set; }
+        [DataMember(Name = "Description", EmitDefaultValue = false)]
+        public string Description { get; set; }
 
         /// <summary>
         /// Gets or Sets Id
         /// </summary>
         [DataMember(Name = "Id", IsRequired = true, EmitDefaultValue = true)]
-        public Guid Id { get; set; }
+        public long Id { get; set; }
 
         /// <summary>
         /// Gets or Sets Name
         /// </summary>
         [DataMember(Name = "Name", IsRequired = true, EmitDefaultValue = true)]
         public string Name { get; set; }
-
-        /// <summary>
-        /// Gets or Sets PromptSecureDesktop
-        /// </summary>
-        [DataMember(Name = "PromptSecureDesktop", IsRequired = true, EmitDefaultValue = true)]
-        public bool PromptSecureDesktop { get; set; }
 
         /// <summary>
         /// Gets or Sets TargetMustBeSigned
@@ -118,11 +105,10 @@ namespace Devolutions.Pedm.Client.Model
             StringBuilder sb = new StringBuilder();
             sb.Append("class Profile {\n");
             sb.Append("  DefaultElevationKind: ").Append(DefaultElevationKind).Append("\n");
+            sb.Append("  Description: ").Append(Description).Append("\n");
             sb.Append("  ElevationMethod: ").Append(ElevationMethod).Append("\n");
-            sb.Append("  ElevationSettings: ").Append(ElevationSettings).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Name: ").Append(Name).Append("\n");
-            sb.Append("  PromptSecureDesktop: ").Append(PromptSecureDesktop).Append("\n");
             sb.Append("  TargetMustBeSigned: ").Append(TargetMustBeSigned).Append("\n");
             sb.Append("}\n");
             return sb.ToString();

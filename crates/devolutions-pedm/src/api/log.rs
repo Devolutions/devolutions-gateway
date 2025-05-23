@@ -6,10 +6,10 @@ use aide::NoApi;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use super::policy::PathIntIdPath;
+use super::policy::PathIdParameter;
 
 async fn get_jit_elevation_log_id(
-    Path(id): Path<PathIntIdPath>,
+    Path(id): Path<PathIdParameter>,
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     NoApi(State(_state)): NoApi<State<AppState>>,
     NoApi(Db(db)): NoApi<Db>,

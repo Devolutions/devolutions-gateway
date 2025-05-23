@@ -5,8 +5,8 @@ Returns some information about the current user and active profiles.  If there i
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**Active** | **Guid** |  | 
-**Available** | **List&lt;Guid&gt;** |  | 
+**Active** | **long** |  | 
+**Available** | **List&lt;long&gt;** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

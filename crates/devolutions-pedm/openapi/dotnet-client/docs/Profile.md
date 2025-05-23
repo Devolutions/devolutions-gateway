@@ -5,11 +5,10 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **DefaultElevationKind** | **ElevationKind** |  | 
+**Description** | **string** |  | [optional] 
 **ElevationMethod** | **ElevationMethod** |  | 
-**ElevationSettings** | [**ElevationConfigurations**](ElevationConfigurations.md) |  | 
-**Id** | **Guid** |  | 
+**Id** | **long** |  | 
 **Name** | **string** |  | 
-**PromptSecureDesktop** | **bool** |  | 
 **TargetMustBeSigned** | **bool** |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

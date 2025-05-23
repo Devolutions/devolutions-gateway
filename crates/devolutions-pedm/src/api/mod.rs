@@ -50,12 +50,8 @@ pub(crate) mod state;
 mod status;
 
 use self::about::about;
-use self::elevate_session::elevate_session;
-use self::elevate_temporary::elevate_temporary;
 use self::launch::post_launch;
-use self::revoke::post_revoke;
 use self::state::{AppState, AppStateError};
-use self::status::get_status;
 
 #[derive(Debug, Clone)]
 struct NamedPipeConnectInfo {
@@ -137,11 +133,7 @@ fn create_pipe(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
 pub(crate) fn api_router() -> ApiRouter<AppState> {
     ApiRouter::new()
         .api_route("/about", aide::axum::routing::get(about))
-        .api_route("/elevate/temporary", aide::axum::routing::post(elevate_temporary))
-        .api_route("/elevate/session", aide::axum::routing::post(elevate_session))
         .api_route("/launch", aide::axum::routing::post(post_launch))
-        .api_route("/revoke", aide::axum::routing::post(post_revoke))
-        .api_route("/status", aide::axum::routing::get(get_status))
         .nest("/log", log::log_router())
         .nest("/policy", policy::policy_router())
         .layer(middleware::from_fn(named_pipe_middleware))

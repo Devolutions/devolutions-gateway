@@ -16,14 +16,14 @@ namespace Devolutions.Agent.Desktop.Service
             return Instance().PolicyMeGet();
         }
 
-        internal static Profile GetProfile(Guid id)
+        internal static Profile GetProfile(long id)
         {
             return Instance().PolicyProfilesIdGet(id);
         }
 
-        internal static void SetCurrentProfile(Guid? id)
+        internal static void SetCurrentProfile(long id)
         {
-            Instance().PolicyMePut(new OptionalId(id.GetValueOrDefault()));
+            Instance().PolicyMeIdPut(id);
         }
 
         private static DefaultApi Instance()

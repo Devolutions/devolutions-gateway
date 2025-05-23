@@ -40,7 +40,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Initializes a new instance of the <see cref="PathIdParameter" /> class.
         /// </summary>
         /// <param name="id">id (required).</param>
-        public PathIdParameter(Guid id = default(Guid))
+        public PathIdParameter(long id = default(long))
         {
             this.Id = id;
         }
@@ -49,7 +49,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets Id
         /// </summary>
         [DataMember(Name = "id", IsRequired = true, EmitDefaultValue = true)]
-        public Guid Id { get; set; }
+        public long Id { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object

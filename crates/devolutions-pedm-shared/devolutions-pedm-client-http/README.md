@@ -27,23 +27,18 @@ All URIs are relative to *http://localhost*
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
 *DefaultApi* | [**about_get**](docs/DefaultApi.md#about_get) | **Get** /about | 
-*DefaultApi* | [**elevate_session_post**](docs/DefaultApi.md#elevate_session_post) | **Post** /elevate/session | 
-*DefaultApi* | [**elevate_temporary_post**](docs/DefaultApi.md#elevate_temporary_post) | **Post** /elevate/temporary | 
 *DefaultApi* | [**launch_post**](docs/DefaultApi.md#launch_post) | **Post** /launch | 
 *DefaultApi* | [**log_jit_get**](docs/DefaultApi.md#log_jit_get) | **Get** /log/jit | 
 *DefaultApi* | [**log_jit_id_get**](docs/DefaultApi.md#log_jit_id_get) | **Get** /log/jit/{id} | 
 *DefaultApi* | [**policy_assignments_get**](docs/DefaultApi.md#policy_assignments_get) | **Get** /policy/assignments | 
 *DefaultApi* | [**policy_assignments_id_put**](docs/DefaultApi.md#policy_assignments_id_put) | **Put** /policy/assignments/{id} | 
 *DefaultApi* | [**policy_me_get**](docs/DefaultApi.md#policy_me_get) | **Get** /policy/me | 
-*DefaultApi* | [**policy_me_put**](docs/DefaultApi.md#policy_me_put) | **Put** /policy/me | 
+*DefaultApi* | [**policy_me_id_put**](docs/DefaultApi.md#policy_me_id_put) | **Put** /policy/me/{id} | 
 *DefaultApi* | [**policy_profiles_get**](docs/DefaultApi.md#policy_profiles_get) | **Get** /policy/profiles | 
 *DefaultApi* | [**policy_profiles_id_delete**](docs/DefaultApi.md#policy_profiles_id_delete) | **Delete** /policy/profiles/{id} | 
 *DefaultApi* | [**policy_profiles_id_get**](docs/DefaultApi.md#policy_profiles_id_get) | **Get** /policy/profiles/{id} | 
-*DefaultApi* | [**policy_profiles_id_put**](docs/DefaultApi.md#policy_profiles_id_put) | **Put** /policy/profiles/{id} | 
 *DefaultApi* | [**policy_profiles_post**](docs/DefaultApi.md#policy_profiles_post) | **Post** /policy/profiles | 
 *DefaultApi* | [**policy_users_get**](docs/DefaultApi.md#policy_users_get) | **Get** /policy/users | 
-*DefaultApi* | [**revoke_post**](docs/DefaultApi.md#revoke_post) | **Post** /revoke | 
-*DefaultApi* | [**status_get**](docs/DefaultApi.md#status_get) | **Get** /status | 
 
 
 ## Documentation For Models
@@ -52,8 +47,6 @@ Class | Method | HTTP request | Description
  - [Assignment](docs/Assignment.md)
  - [AuthenticodeSignatureStatus](docs/AuthenticodeSignatureStatus.md)
  - [Certificate](docs/Certificate.md)
- - [ElevateTemporaryPayload](docs/ElevateTemporaryPayload.md)
- - [ElevationConfigurations](docs/ElevationConfigurations.md)
  - [ElevationKind](docs/ElevationKind.md)
  - [ElevationMethod](docs/ElevationMethod.md)
  - [Error](docs/Error.md)
@@ -65,18 +58,11 @@ Class | Method | HTTP request | Description
  - [JitElevationLogRow](docs/JitElevationLogRow.md)
  - [LaunchPayload](docs/LaunchPayload.md)
  - [LaunchResponse](docs/LaunchResponse.md)
- - [OptionalId](docs/OptionalId.md)
  - [PathIdParameter](docs/PathIdParameter.md)
- - [PathIntIdPath](docs/PathIntIdPath.md)
  - [Profile](docs/Profile.md)
- - [SessionElevationConfiguration](docs/SessionElevationConfiguration.md)
- - [SessionElevationStatus](docs/SessionElevationStatus.md)
  - [Signature](docs/Signature.md)
  - [Signer](docs/Signer.md)
  - [StartupInfoDto](docs/StartupInfoDto.md)
- - [StatusResponse](docs/StatusResponse.md)
- - [TemporaryElevationConfiguration](docs/TemporaryElevationConfiguration.md)
- - [TemporaryElevationStatus](docs/TemporaryElevationStatus.md)
  - [User](docs/User.md)
 
 

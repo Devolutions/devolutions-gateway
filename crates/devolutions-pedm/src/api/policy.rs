@@ -1,74 +1,64 @@
-use std::sync::Arc;
-
 use aide::axum::routing::{get, put};
 use aide::axum::ApiRouter;
 use aide::NoApi;
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::{Extension, Json};
-use devolutions_pedm_shared::policy::{Profile, User};
-use parking_lot::RwLock;
+use devolutions_pedm_shared::policy::{Assignment, Profile, User};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::state::AppState;
 use super::{Db, NamedPipeConnectInfo};
 use crate::error::Error;
-use crate::policy::Policy;
 
 async fn post_profiles(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
     Json(profile): Json<Profile>,
 ) -> Result<(), Error> {
     if !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
-    let mut policy = policy.write();
-    policy.add_profile(profile)?;
+
+    db.insert_profile(&profile).await?;
     Ok(())
 }
 
 async fn get_profiles_id(
     Path(id): Path<PathIdParameter>,
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<Profile>, Error> {
-    let policy = policy.read();
-    let profile = if named_pipe_info.token.is_elevated()? {
-        policy.profile(&id.id).ok_or(Error::NotFound)?
-    } else {
-        policy
-            .user_profile(&named_pipe_info.user, &id.id)
-            .ok_or(Error::AccessDenied)?
-    };
-    Ok(Json(profile.clone()))
-}
+    let profile = match db.get_profile(id.id).await? {
+        Some(p) => {
+            if named_pipe_info.token.is_elevated()? {
+                Ok(p)
+            } else {
+                let assignments = db.get_assignment(&p).await?;
 
-async fn put_profiles_id(
-    Path(id): Path<PathIdParameter>,
-    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
-    Json(profile): Json<Profile>,
-) -> Result<(), Error> {
-    if !named_pipe_info.token.is_elevated()? {
-        return Err(Error::AccessDenied);
-    }
-    let mut policy = policy.write();
-    policy.replace_profile(&id.id, profile)?;
-    Ok(())
+                if assignments.users.contains(&named_pipe_info.user) {
+                    Ok(p)
+                } else {
+                    Err(Error::AccessDenied)
+                }
+            }
+        }
+        None => Err(Error::NotFound),
+    }?;
+
+    Ok(Json(profile))
 }
 
 async fn delete_profiles_id(
     Path(id): Path<PathIdParameter>,
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
 ) -> Result<(), Error> {
     if !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
-    let mut policy = policy.write();
-    policy.remove_profile(&id.id)?;
+
+    db.delete_profile(id.id).await?;
     Ok(())
 }
 
@@ -78,126 +68,81 @@ async fn delete_profiles_id(
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 struct GetProfilesMeResponse {
-    pub(crate) active: Uuid,
-    pub(crate) available: Vec<Uuid>,
+    pub(crate) active: i64,
+    pub(crate) available: Vec<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct PathIdParameter {
-    pub(crate) id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub(crate) struct PathIntIdPath {
+pub struct PathIdParameter {
     pub id: i64,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "PascalCase")]
-struct OptionalId {
-    pub(crate) id: Option<Uuid>,
-}
-
 /// Returns the active profile ID if there is one, and a list of available profiles.
-///
-/// This is similar to `get_profiles`, except it presumably requires less permissions.
 async fn get_me(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<GetProfilesMeResponse>, Error> {
-    let policy = policy.read();
+    let selected_profile = db.get_user_profile(&named_pipe_info.user).await?;
+    let profiles = db.get_profiles_for_user(&named_pipe_info.user).await?;
 
     Ok(Json(GetProfilesMeResponse {
-        active: policy
-            .user_current_profile(&named_pipe_info.user)
-            .map(|p| p.id)
-            .unwrap_or_default(),
-        available: policy
-            .user_profiles(&named_pipe_info.user)
-            .into_iter()
-            .map(|p| p.id)
-            .collect(),
+        active: selected_profile.map_or(0, |p| p.id),
+        available: profiles.into_iter().map(|p| p.id).collect(),
     }))
 }
 
-/// Returns the list of profile IDs for the current user.
+/// Returns the list of profile IDs.
 async fn get_profiles(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
-) -> Result<Json<Vec<Uuid>>, Error> {
+    NoApi(Db(db)): NoApi<Db>,
+) -> Result<Json<Vec<i64>>, Error> {
     if !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
-    let policy = policy.read();
-    Ok(Json(policy.profiles().map(|p| p.id).collect()))
+
+    let profiles = db.get_profiles().await?;
+    Ok(Json(profiles.into_iter().map(|p| p.id).collect()))
 }
 
 /// Sets the profile ID to the specified ID.
 async fn set_profile_id(
+    Path(id): Path<PathIdParameter>,
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
-    Json(id): Json<OptionalId>,
+    NoApi(Db(db)): NoApi<Db>,
 ) -> Result<(), Error> {
-    let mut policy = policy.write();
-
-    policy.set_profile_id(named_pipe_info.user, id.id)?;
-
+    // The databse should validate that the user can only select an assigned profile
+    db.set_user_profile(&named_pipe_info.user, id.id).await?;
     Ok(())
-}
-
-#[derive(Serialize, JsonSchema)]
-#[serde(rename_all = "PascalCase")]
-struct Assignment {
-    pub(crate) profile: Profile,
-    pub(crate) users: Vec<User>,
 }
 
 async fn get_assignments(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<Vec<Assignment>>, Error> {
     if !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
 
-    let policy = policy.read();
-
-    let assignments = policy
-        .assignments()
-        .iter()
-        .filter_map(|(id, users)| {
-            let profile = policy.profile(id)?;
-
-            Some(Assignment {
-                profile: profile.clone(),
-                users: users.clone(),
-            })
-        })
-        .collect();
-
+    let assignments = db.get_assignments().await?;
     Ok(Json(assignments))
 }
 
 async fn put_assignments_id(
     Path(id): Path<PathIdParameter>,
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(policy)): NoApi<State<Arc<RwLock<Policy>>>>,
+    NoApi(Db(db)): NoApi<Db>,
     Json(users): Json<Vec<User>>,
 ) -> Result<(), Error> {
     if !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy.write();
-
-    policy.set_assignments(id.id, users)?;
-
+    db.set_assignments(id.id, users).await?;
     Ok(())
 }
 
 async fn get_users(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-    NoApi(State(_policy)): NoApi<State<Arc<RwLock<Policy>>>>,
     NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<Vec<User>>, Error> {
     let mut users = db.get_users().await?;
@@ -211,12 +156,10 @@ async fn get_users(
 
 pub(crate) fn policy_router() -> ApiRouter<AppState> {
     ApiRouter::new()
-        .api_route("/me", get(get_me).put(set_profile_id))
+        .api_route("/me", get(get_me))
+        .api_route("/me/{id}", put(set_profile_id))
         .api_route("/profiles", get(get_profiles).post(post_profiles))
-        .api_route(
-            "/profiles/{id}",
-            get(get_profiles_id).put(put_profiles_id).delete(delete_profiles_id),
-        )
+        .api_route("/profiles/{id}", get(get_profiles_id).delete(delete_profiles_id))
         .api_route("/assignments", get(get_assignments))
         .api_route("/assignments/{id}", put(put_assignments_id))
         .api_route("/users", get(get_users))

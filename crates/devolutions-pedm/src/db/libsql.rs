@@ -2,13 +2,16 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use devolutions_pedm_shared::policy::{AuthenticodeSignatureStatus, ElevationResult, Hash, Signature, Signer, User};
+use devolutions_pedm_shared::policy::{
+    Assignment, AuthenticodeSignatureStatus, ElevationKind, ElevationMethod, ElevationResult, Hash, Profile, Signature,
+    Signer, User,
+};
 use libsql::params::IntoParams;
 use libsql::{params, Row, Transaction, Value};
 
 use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
-use super::err::{InvalidEnumError, ParseTimestampError};
+use super::err::{DataIntegrityError, InvalidEnumError, ParseTimestampError};
 use super::{Database, DbError};
 
 pub(crate) struct LibsqlConn(libsql::Connection);
@@ -67,6 +70,37 @@ impl LibsqlConn {
         .await?;
 
         Ok(tx.last_insert_rowid())
+    }
+
+    fn profile_from_row(row: &Row) -> Result<Profile, DbError> {
+        Ok(Profile {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            elevation_method: match row.get::<i64>(3)? {
+                0 => ElevationMethod::LocalAdmin,
+                1 => ElevationMethod::VirtualAccount,
+                n => {
+                    return Err(DbError::InvalidEnum(InvalidEnumError {
+                        value: n,
+                        enum_name: "ElevationMethod",
+                    }))
+                }
+            },
+            default_elevation_kind: match row.get::<i64>(4)? {
+                0 => ElevationKind::AutoApprove,
+                1 => ElevationKind::Confirm,
+                2 => ElevationKind::ReasonApproval,
+                3 => ElevationKind::Deny,
+                n => {
+                    return Err(DbError::InvalidEnum(InvalidEnumError {
+                        value: n,
+                        enum_name: "ElevationKind",
+                    }))
+                }
+            },
+            target_must_be_signed: row.get::<bool>(5)?,
+        })
     }
 }
 
@@ -140,15 +174,6 @@ impl Database for LibsqlConn {
         Ok(())
     }
 
-    async fn insert_elevate_tmp_request(&self, req_id: i32, seconds: i32) -> Result<(), DbError> {
-        self.execute(
-            "INSERT INTO elevate_tmp_request (req_id, seconds) VALUES (?1, ?2)",
-            params![req_id, seconds],
-        )
-        .await?;
-        Ok(())
-    }
-
     async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
         let signature_status = Value::Integer(match result.request.target.signature.status {
             AuthenticodeSignatureStatus::Valid => 0,
@@ -178,22 +203,406 @@ impl Database for LibsqlConn {
         let sig_id = self.last_insert_rowid();
         let user_id = self.get_or_insert_user(&mut tx, &result.request.target.user).await?;
 
-        tx.execute("INSERT INTO jit_elevation_result (success, timestamp, asker_path, target_path, target_command_line, target_working_directory, target_sha1, target_sha256, target_user_id, target_signature_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)", 
-        params![
-            result.successful,
-            result.request.unix_timestamp_seconds,
-            result.request.asker.path.to_string_lossy(),
-            result.request.target.path.to_string_lossy(),
-            result.request.target.command_line.join(" "),
-            result.request.target.working_directory.to_string_lossy(),
-            result.request.target.hash.sha1.as_str(),
-            result.request.target.hash.sha256.as_str(),
-            user_id,
-            sig_id
-        ]).await?;
+        tx.execute(
+            "INSERT INTO jit_elevation_result (
+                success, 
+                timestamp, 
+                asker_path, 
+                target_path,
+                target_command_line,
+                target_working_directory, 
+                target_sha1, 
+                target_sha256, 
+                target_user_id, 
+                target_signature_id) 
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                result.successful,
+                result.request.unix_timestamp_seconds,
+                result.request.asker.path.to_string_lossy(),
+                result.request.target.path.to_string_lossy(),
+                result.request.target.command_line.join(" "),
+                result.request.target.working_directory.to_string_lossy(),
+                result.request.target.hash.sha1.as_str(),
+                result.request.target.hash.sha256.as_str(),
+                user_id,
+                sig_id
+            ],
+        )
+        .await?;
 
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn get_profiles(&self) -> Result<Vec<Profile>, DbError> {
+        let mut stmt = self
+            .prepare(
+                "
+            SELECT 
+                id, 
+                name, 
+                description, 
+                jit_elevation_method, 
+                jit_elevation_default_kind, 
+                jit_elevation_target_must_be_signed 
+            FROM profile",
+            )
+            .await?;
+
+        let mut rows = stmt.query(params![]).await?;
+        let mut profiles = Vec::new();
+
+        while let Some(row) = rows.next().await? {
+            profiles.push(LibsqlConn::profile_from_row(&row)?);
+        }
+
+        Ok(profiles)
+    }
+
+    async fn get_profiles_for_user(&self, user: &User) -> Result<Vec<Profile>, DbError> {
+        let mut stmt = self
+            .prepare(
+                "
+                SELECT DISTINCT
+                    p.id,
+                    p.name,
+                    p.description, 
+                    p.jit_elevation_method, 
+                    p.jit_elevation_default_kind,
+                    p.jit_elevation_target_must_be_signed
+                FROM profile p
+                JOIN policy pol ON pol.profile_id = p.id
+                JOIN user u
+                    ON u.account_name = ?1
+                    AND u.domain_name = ?2
+                    AND u.account_sid = ?3
+                    AND u.domain_sid = ?4
+                WHERE pol.user_id = u.id;",
+            )
+            .await?;
+
+        let mut rows = stmt
+            .query(params![
+                user.account_name.as_str(),
+                user.domain_name.as_str(),
+                user.account_sid.as_str(),
+                user.domain_sid.as_str()
+            ])
+            .await?;
+        let mut profiles = Vec::new();
+
+        while let Some(row) = rows.next().await? {
+            profiles.push(LibsqlConn::profile_from_row(&row)?);
+        }
+
+        Ok(profiles)
+    }
+
+    async fn get_profile(&self, id: i64) -> Result<Option<Profile>, DbError> {
+        let mut stmt = self
+            .prepare(
+                "
+                SELECT 
+                    id, 
+                    name, 
+                    description, 
+                    jit_elevation_method, 
+                    jit_elevation_default_kind,
+                    jit_elevation_target_must_be_signed 
+                FROM profile 
+                WHERE id = ?",
+            )
+            .await?;
+
+        let row = stmt.query_row(params![id]).await;
+
+        match row {
+            Ok(r) => Ok(Some(LibsqlConn::profile_from_row(&r)?)),
+            Err(libsql::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    async fn insert_profile(&self, profile: &Profile) -> Result<(), DbError> {
+        let elevation_method = Value::Integer(match profile.elevation_method {
+            ElevationMethod::LocalAdmin => 0,
+            ElevationMethod::VirtualAccount => 1,
+        });
+        let elevation_kind = Value::Integer(match profile.default_elevation_kind {
+            ElevationKind::AutoApprove => 0,
+            ElevationKind::Confirm => 1,
+            ElevationKind::ReasonApproval => 2,
+            ElevationKind::Deny => 3,
+        });
+
+        match profile.id {
+            0 => {
+                self.execute(
+                    "
+                    INSERT INTO profile (
+                        name, 
+                        description, 
+                        jit_elevation_method, 
+                        jit_elevation_default_kind, 
+                        jit_elevation_target_must_be_signed)
+                    VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        profile.name.as_str(),
+                        match &profile.description {
+                            Some(description) => Value::Text(description.to_string()),
+                            None => Value::Null,
+                        },
+                        elevation_method,
+                        elevation_kind,
+                        profile.target_must_be_signed,
+                    ],
+                )
+                .await?;
+            }
+            _ => {
+                self.execute(
+                    "
+                    UPDATE profile
+                    SET 
+                        name = ?2, 
+                        description = ?3, 
+                        jit_elevation_method = ?4, 
+                        jit_elevation_default_kind = ?5, 
+                        jit_elevation_target_must_be_signed = ?6
+                    WHERE id = ?1",
+                    params![
+                        profile.id,
+                        profile.name.as_str(),
+                        match &profile.description {
+                            Some(description) => Value::Text(description.to_string()),
+                            None => Value::Null,
+                        },
+                        elevation_method,
+                        elevation_kind,
+                        profile.target_must_be_signed,
+                    ],
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    // TODO cascade deletes
+    async fn delete_profile(&self, id: i64) -> Result<(), DbError> {
+        self.execute("DELETE FROM profile WHERE id = ?1;", params![id]).await?;
+
+        Ok(())
+    }
+
+    async fn get_assignments(&self) -> Result<Vec<Assignment>, DbError> {
+        let mut assignments = Vec::new();
+        let mut rows = self
+            .query(
+                "
+                SELECT
+                    p.id,
+                    p.name,
+                    p.description,
+                    p.jit_elevation_method,
+                    p.jit_elevation_default_kind,
+                    p.jit_elevation_target_must_be_signed,
+                    u.id,
+                    u.account_name,
+                    u.domain_name,
+                    u.account_sid,
+                    u.domain_sid
+                FROM profile p
+                LEFT JOIN policy pol ON pol.profile_id = p.id
+                LEFT JOIN user u ON u.id = pol.user_id
+                ORDER BY p.id;",
+                params![],
+            )
+            .await?;
+
+        let mut current_profile_id: Option<i64> = None;
+        let mut current_assignment: Option<Assignment> = None;
+
+        while let Some(row) = rows.next().await? {
+            let profile_id = row.get::<i64>(0)?;
+
+            if current_profile_id != Some(profile_id) {
+                if let Some(a) = current_assignment.take() {
+                    assignments.push(a);
+                }
+
+                current_profile_id = Some(profile_id);
+                current_assignment = Some(Assignment {
+                    profile: Profile {
+                        id: profile_id,
+                        name: row.get(1)?,
+                        description: row.get(2)?,
+                        elevation_method: match row.get::<i64>(3)? {
+                            0 => ElevationMethod::LocalAdmin,
+                            1 => ElevationMethod::VirtualAccount,
+                            n => {
+                                return Err(DbError::InvalidEnum(InvalidEnumError {
+                                    value: n,
+                                    enum_name: "ElevationMethod",
+                                }))
+                            }
+                        },
+                        default_elevation_kind: match row.get::<i64>(4)? {
+                            0 => ElevationKind::AutoApprove,
+                            1 => ElevationKind::Confirm,
+                            2 => ElevationKind::ReasonApproval,
+                            3 => ElevationKind::Deny,
+                            n => {
+                                return Err(DbError::InvalidEnum(InvalidEnumError {
+                                    value: n,
+                                    enum_name: "ElevationKind",
+                                }))
+                            }
+                        },
+                        target_must_be_signed: row.get::<bool>(5)?,
+                    },
+                    users: Vec::new(),
+                });
+            }
+
+            if let Some(a) = current_assignment.as_mut() {
+                let user_id: Option<i64> = row.get(6)?;
+
+                if let Some(_) = user_id {
+                    a.users.push(User {
+                        account_name: row.get(7)?,
+                        domain_name: row.get(8)?,
+                        account_sid: row.get(9)?,
+                        domain_sid: row.get(10)?,
+                    });
+                }
+            }
+        }
+
+        if let Some(a) = current_assignment {
+            assignments.push(a);
+        }
+
+        Ok(assignments)
+    }
+
+    async fn get_assignment(&self, profile: &Profile) -> Result<Assignment, DbError> {
+        let mut users = Vec::new();
+
+        let mut rows = self
+            .query(
+                "
+                SELECT
+                    u.account_name,
+                    u.domain_name,
+                    u.account_sid,
+                    u.domain_sid
+                FROM policy pol
+                JOIN user u ON u.id = pol.user_id
+                WHERE pol.profile_id = ?1
+                ",
+                params![profile.id],
+            )
+            .await?;
+
+        while let Some(row) = rows.next().await? {
+            users.push(User {
+                account_name: row.get(0)?,
+                domain_name: row.get(1)?,
+                account_sid: row.get(2)?,
+                domain_sid: row.get(3)?,
+            });
+        }
+
+        Ok(Assignment {
+            profile: profile.clone(),
+            users,
+        })
+    }
+
+    async fn set_assignments(&self, profile_id: i64, users: Vec<User>) -> Result<(), DbError> {
+        let mut tx: Transaction = self.transaction().await?;
+
+        tx.execute("DELETE FROM policy WHERE profile_id = ?1", params![profile_id])
+            .await?;
+
+        for user in users {
+            let user_id = self.get_or_insert_user(&mut tx, &user).await?;
+
+            tx.execute(
+                "INSERT INTO policy (profile_id, user_id) VALUES (?1, ?2)",
+                params![profile_id, user_id],
+            )
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn set_user_profile(&self, user: &User, profile_id: i64) -> Result<(), DbError> {
+        let user_id = self
+            .get_user_id(user)
+            .await?
+            .ok_or(DbError::DataIntegrity(DataIntegrityError {
+                message: "set_user_profile for unknown user.id",
+            }))?;
+
+        // TODO We're not properly atomic here, because there is a small chance of the user being removed
+        self.execute(
+            "
+                INSERT INTO user_profile (user_id, profile_id)
+                SELECT ?1, ?2
+                WHERE ?2 IS NULL
+                OR EXISTS (
+                    SELECT 1 FROM policy WHERE user_id = ?1 AND profile_id = ?2
+                )
+                ON CONFLICT(user_id) DO UPDATE SET profile_id = excluded.profile_id;
+            ",
+            params![
+                user_id,
+                match profile_id {
+                    0 => Value::Null,
+                    _ => Value::Integer(profile_id),
+                }
+            ],
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError> {
+        let user_id = self
+            .get_user_id(user)
+            .await?
+            .ok_or(DbError::DataIntegrity(DataIntegrityError {
+                message: "set_user_profile for unknown user.id",
+            }))?;
+
+        // TODO We're not properly atomic here, because there is a small chance of the user being removed
+        let row = self
+            .query_one(
+                "
+                SELECT p.id, p.name, p.description,
+                    p.jit_elevation_method, p.jit_elevation_default_kind,
+                    p.jit_elevation_target_must_be_signed
+                FROM user u
+                JOIN user_profile up ON up.user_id = u.id
+                JOIN profile p ON p.id = up.profile_id
+                WHERE u.id = ?1
+                ",
+                params![user_id],
+            )
+            .await;
+
+        match row {
+            Ok(r) => Ok(Some(LibsqlConn::profile_from_row(&r)?)),
+            Err(libsql::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => return Err(e.into()),
+        }
     }
 
     async fn get_users(&self) -> Result<Vec<User>, DbError> {
@@ -220,26 +629,26 @@ impl Database for LibsqlConn {
         let mut stmt = self
             .prepare(
                 "SELECT
-                j.id,
-                j.success,
-                j.timestamp,
-                j.asker_path,
-                j.target_path,
-                j.target_command_line,
-                j.target_working_directory,
-                j.target_sha1,
-                j.target_sha256,
-                u.account_name,
-                u.domain_name,
-                u.account_sid,
-                u.domain_sid,
-                s.id,
-                s.authenticode_sig_status,
-                s.issuer
-             FROM jit_elevation_result j
-             LEFT JOIN user u ON j.target_user_id = u.id
-             LEFT JOIN signature s ON j.target_signature_id = s.id
-             WHERE j.id = ?",
+                    j.id,
+                    j.success,
+                    j.timestamp,
+                    j.asker_path,
+                    j.target_path,
+                    j.target_command_line,
+                    j.target_working_directory,
+                    j.target_sha1,
+                    j.target_sha256,
+                    u.account_name,
+                    u.domain_name,
+                    u.account_sid,
+                    u.domain_sid,
+                    s.id,
+                    s.authenticode_sig_status,
+                    s.issuer
+                FROM jit_elevation_result j
+                LEFT JOIN user u ON j.target_user_id = u.id
+                LEFT JOIN signature s ON j.target_signature_id = s.id
+                WHERE j.id = ?",
             )
             .await?;
 
