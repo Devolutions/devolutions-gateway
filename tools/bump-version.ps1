@@ -12,11 +12,7 @@ Set-Location -Path ..
 
 $targetFiles = @(
 	'./VERSION'
-	'./jetsocat/Cargo.toml'
-	'./devolutions-gateway/Cargo.toml'
-	'./devolutions-agent/Cargo.toml'
-	'./devolutions-session/Cargo.toml'
-	'./crates/devolutions-pedm-shell-ext/Cargo.toml'
+	'./Cargo.toml'
 	'./crates/devolutions-pedm-shell-ext/AppxManifest.xml'
 	'./dotnet/DesktopAgent/DesktopAgent.csproj'
 	'./powershell/DevolutionsGateway/DevolutionsGateway.psd1'
