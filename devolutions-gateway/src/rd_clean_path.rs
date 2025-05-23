@@ -321,7 +321,7 @@ pub async fn handle(
         .recording_policy(claims.jet_rec)
         .build();
 
-    info!("RDP-TLS forwarding");
+    info!("RDP-TLS forwarding (RDCleanPath)");
 
     Proxy::builder()
         .conf(conf)

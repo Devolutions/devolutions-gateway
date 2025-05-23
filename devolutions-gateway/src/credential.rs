@@ -1,6 +1,5 @@
 use core::fmt;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -47,10 +46,6 @@ impl CredentialStoreHandle {
     pub fn get(&self, token_id: Uuid) -> Option<ArcCredentialEntry> {
         self.0.lock().get(token_id)
     }
-
-    pub fn remove(&self, token_id: Uuid) -> Option<ArcCredentialEntry> {
-        self.0.lock().remove(token_id)
-    }
 }
 
 #[derive(Debug)]
@@ -80,15 +75,7 @@ impl CredentialStore {
         mapping: Option<AppCredentialMapping>,
         time_to_live: time::Duration,
     ) -> anyhow::Result<Option<ArcCredentialEntry>> {
-        use picky::jose::jws::RawJws;
-
-        let jws = RawJws::decode(&token)
-            .context("failed to parse the provided JWS")?
-            .discard_signature();
-        let payload = serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")?;
-        let jti = payload.get("jti").context("jti is missing from the token")?;
-        let jti = jti.as_str().context("jti value is malformed")?;
-        let jti = Uuid::from_str(jti).context("jti is not a valid UUID string")?;
+        let jti = crate::token::extract_jti(&token).context("failed to extract token ID")?;
 
         let entry = CredentialEntry {
             token,
@@ -103,10 +90,6 @@ impl CredentialStore {
 
     fn get(&self, token_id: Uuid) -> Option<ArcCredentialEntry> {
         self.entries.get(&token_id).map(Arc::clone)
-    }
-
-    fn remove(&mut self, token_id: Uuid) -> Option<ArcCredentialEntry> {
-        self.entries.remove(&token_id)
     }
 }
 

@@ -69,7 +69,7 @@ async fn handle_socket(
         Duration::from_secs(conf.debug.ws_keep_alive_interval),
     );
 
-    let result = crate::rdp_extension::handle(
+    let result = crate::rd_clean_path::handle(
         stream,
         source_addr,
         conf,
