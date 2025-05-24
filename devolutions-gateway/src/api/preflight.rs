@@ -347,7 +347,8 @@ async fn handle_operation(
                     operation_id: operation.id,
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Warn,
-                        message: "no TLS certificate configured, this may cause problems".to_owned(),
+                        message: "no TLS certificate configured, this may cause problems with credentials injection"
+                            .to_owned(),
                     },
                 });
             }
