@@ -347,7 +347,7 @@ async fn handle_operation(
                     operation_id: operation.id,
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Warn,
-                        message: "TLS certificate is not configured on the server, this may cause problems".to_owned(),
+                        message: "no TLS certificate configured, this may cause problems".to_owned(),
                     },
                 });
             }
