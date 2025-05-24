@@ -121,7 +121,7 @@ where
     let (mut client_stream, client_leftover) = client_framed.into_inner();
     let (mut server_stream, server_leftover) = server_framed.into_inner();
 
-    // -- At this point, proceed to the usual forwarding -- //
+    // -- At this point, proceed to the usual two-way forwarding -- //
 
     info!("RDP-TLS forwarding (credential injection)");
 
