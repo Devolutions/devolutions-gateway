@@ -9,7 +9,6 @@ use crate::subscriber::SubscriberSender;
 
 use anyhow::Context as _;
 use ironrdp_pdu::{nego, x224};
-use tap::Pipe;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -201,7 +200,7 @@ where
     Ok(selected_protocol)
 }
 
-// TODO: support for Kerberos and domain-joined.
+// TODO: support for Kerberos domain-joined, and also NetBIOS domains.
 
 async fn perform_credssp_with_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,

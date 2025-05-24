@@ -184,28 +184,27 @@ impl Conf {
                     Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
                 }
             },
-            dto::CertSource::System => {
-                let cert_subject_name = conf_file
-                    .tls_certificate_subject_name
-                    .clone()
-                    .context("TLS usage implied, but TLS certificate subject name is missing")?;
+            dto::CertSource::System => match conf_file.tls_certificate_subject_name.clone() {
+                None if requires_tls => anyhow::bail!("TLS usage implied, but TLS certificate subject name is missing"),
+                None => None,
+                Some(cert_subject_name) => {
+                    let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
 
-                let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
+                    let store_name = conf_file
+                        .tls_certificate_store_name
+                        .clone()
+                        .unwrap_or_else(|| String::from("My"));
 
-                let store_name = conf_file
-                    .tls_certificate_store_name
-                    .clone()
-                    .unwrap_or_else(|| String::from("My"));
+                    let cert_source = crate::tls::CertificateSource::SystemStore {
+                        machine_hostname: hostname.clone(),
+                        cert_subject_name,
+                        store_location,
+                        store_name,
+                    };
 
-                let cert_source = crate::tls::CertificateSource::SystemStore {
-                    machine_hostname: hostname.clone(),
-                    cert_subject_name,
-                    store_location,
-                    store_name,
-                };
-
-                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
-            }
+                    Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+                }
+            },
         };
 
         // Sanity check
