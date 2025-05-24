@@ -2,7 +2,6 @@ use std::io;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context as _;
-use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::{self, pki_types};
 
@@ -32,10 +31,13 @@ static TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
     tokio_rustls::TlsConnector::from(Arc::new(config))
 });
 
-pub async fn connect(dns_name: &str, stream: TcpStream) -> io::Result<TlsStream<TcpStream>> {
+pub async fn connect<IO>(dns_name: String, stream: IO) -> io::Result<TlsStream<IO>>
+where
+    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     use tokio::io::AsyncWriteExt as _;
 
-    let dns_name = pki_types::ServerName::try_from(dns_name.to_owned()).map_err(io::Error::other)?;
+    let dns_name = pki_types::ServerName::try_from(dns_name).map_err(io::Error::other)?;
 
     let mut tls_stream = TLS_CONNECTOR.connect(dns_name, stream).await?;
 

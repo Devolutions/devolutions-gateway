@@ -1085,6 +1085,20 @@ fn validate_token_impl(
     Ok(claims)
 }
 
+pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
+    use anyhow::Context as _;
+
+    let jws = RawJws::decode(token)
+        .context("failed to parse the provided JWS")?
+        .discard_signature();
+    let payload = serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")?;
+    let jti = payload.get("jti").context("jti is missing from the token")?;
+    let jti = jti.as_str().context("jti value is malformed")?;
+    let jti = Uuid::from_str(jti).context("jti is not a valid UUID string")?;
+
+    Ok(jti)
+}
+
 #[deprecated = "make sure this is never used without a deliberate action"]
 pub mod unsafe_debug {
     // Any function in this module should only be used at development stage when deliberately
