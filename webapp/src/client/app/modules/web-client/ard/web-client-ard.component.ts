@@ -331,7 +331,8 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       .withPassword(connectionParameters.password)
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
-      .withAuthToken(connectionParameters.token);
+      .withAuthToken(connectionParameters.token)
+      .withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     if (connectionParameters.resolutionQuality != null) {
       configBuilder.withExtension(resolutionQuality(connectionParameters.resolutionQuality));
@@ -340,8 +341,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     if (connectionParameters.ardQualityMode != null) {
       configBuilder.withExtension(ardQualityMode(connectionParameters.ardQualityMode));
     }
-
-    configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     const config = configBuilder.build();
 
