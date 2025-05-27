@@ -39,6 +39,7 @@ export interface IronVNCConnectionParameters {
   disableCursor: boolean;
   disableExtendedClipboard: boolean;
   ultraVirtualDisplay: boolean;
+  wheelSpeedFactor: number;
   sessionId?: string;
 }
 
@@ -51,6 +52,7 @@ export interface IronARDConnectionParameters {
   token?: string;
   resolutionQuality?: string;
   ardQualityMode?: string;
+  wheelSpeedFactor: number;
   sessionId?: string;
 }
 

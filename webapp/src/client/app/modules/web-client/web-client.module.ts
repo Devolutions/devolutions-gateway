@@ -39,6 +39,7 @@ import { ExtendedClipboardControlComponent } from './form/form-controls/extended
 import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
 import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
+import { WheelSpeedFactorControlComponent } from './form/form-controls/wheel-speed-factor-control/wheel-speed-factor-control.component';
 import { NetScanComponent } from './net-scan/net-scan.component';
 import { WebClientRdpComponent } from './rdp/web-client-rdp.component';
 import { WebClientComponent } from './web-client.component';
@@ -94,6 +95,7 @@ const routes: Routes = [
     UltraVirtualDisplayControlComponent,
     ResolutionQualityControlComponent,
     ArdQualityModeControlComponent,
+    WheelSpeedFactorControlComponent,
     TabViewComponent,
     DynamicTabComponent,
     SessionToolbarComponent,

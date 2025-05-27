@@ -36,6 +36,7 @@ import {
   disableExtendedClipboard,
   enabledEncodings,
   ultraVirtualDisplay,
+  wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
@@ -341,6 +342,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       enableExtendedClipboard,
       enabledEncodings,
       ultraVirtualDisplay,
+      wheelSpeedFactor = 1,
     } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultVncPort);
 
@@ -363,6 +365,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       disableCursor: !enableCursor,
       disableExtendedClipboard: !enableExtendedClipboard,
       ultraVirtualDisplay,
+      wheelSpeedFactor,
     };
     return of(connectionParameters);
   }
@@ -411,6 +414,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     } else {
       configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
     }
+
+    configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     const config = configBuilder.build();
 
