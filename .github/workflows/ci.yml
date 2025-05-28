@@ -337,7 +337,6 @@ jobs:
     name: devolutions-gateway-web-ui
     runs-on: ubuntu-latest
     needs: preflight
-    environment: artifactory-ci # for NPM token secret
 
     # DEVOLUTIONSBOT_TOKEN is a repository secret, and it can’t be used by PRs originating from forks.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -373,7 +372,7 @@ jobs:
       - name: Setup .npmrc config file
         uses: ./.github/workflows/npmrc-setup
         with:
-          npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
+          npm_token: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
 
       - name: Install NPM dependencies
         working-directory: webapp
@@ -404,7 +403,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    environment: artifactory-ci # for NPM token secret
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -423,7 +421,7 @@ jobs:
       - name: Setup .npmrc config file
         uses: ./.github/workflows/npmrc-setup
         with:
-          npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
+          npm_token: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
 
       - name: Install Biome
         run: npm install -g @biomejs/biome
