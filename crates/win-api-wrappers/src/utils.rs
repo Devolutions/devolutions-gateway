@@ -415,37 +415,33 @@ pub fn environment_block(token: Option<&Token>, inherit: bool) -> anyhow::Result
 }
 
 pub fn expand_environment(src: &str, environment: &HashMap<String, String>) -> String {
-    let mut expanded = String::with_capacity(src.len());
+    let mut result = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
 
-    // For strings such as "%MyVar%MyVar%", only the first occurrence should be replaced.
-    let mut last_replaced = false;
-
-    let mut it = src.split('%').peekable();
-
-    if let Some(first) = it.next() {
-        expanded.push_str(first);
-    }
-
-    while let Some(segment) = it.next() {
-        let var_value = environment.get(segment);
-
-        match (last_replaced, it.peek(), var_value) {
-            (true, Some(_), Some(var_value)) => {
-                expanded.push_str(var_value);
-                last_replaced = true;
-            }
-            (_, _, _) => {
-                if !last_replaced {
-                    expanded.push('%');
+    while let Some(ch) = chars.next() {
+        if ch == '%' {
+            let mut var_name = String::new();
+            while let Some(&next_ch) = chars.peek() {
+                chars.next();
+                if next_ch == '%' {
+                    break;
                 }
-
-                expanded.push_str(segment);
-                last_replaced = false;
+                var_name.push(next_ch);
             }
+
+            if let Some(value) = environment.get(&var_name) {
+                result.push_str(value);
+            } else {
+                result.push('%');
+                result.push_str(&var_name);
+                result.push('%');
+            }
+        } else {
+            result.push(ch);
         }
     }
 
-    expanded
+    result
 }
 
 pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
