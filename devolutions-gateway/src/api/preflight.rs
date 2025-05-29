@@ -124,6 +124,8 @@ pub(crate) enum PreflightAlertStatus {
     GeneralFailure,
     #[serde(rename = "info")]
     Info,
+    #[serde(rename = "warn")]
+    Warn,
     #[serde(rename = "unsupported-operation")]
     UnsupportedOperation,
     #[serde(rename = "invalid-parameters")]
@@ -336,6 +338,17 @@ async fn handle_operation(
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Info,
                         message: "an existing credential entry was replaced".to_owned(),
+                    },
+                });
+            }
+
+            if conf.tls.is_none() && operation.kind.as_str() == OP_PROVISION_CREDENTIALS {
+                outputs.push(PreflightOutput {
+                    operation_id: operation.id,
+                    kind: PreflightOutputKind::Alert {
+                        status: PreflightAlertStatus::Warn,
+                        message: "no TLS certificate configured, this may cause problems with credentials injection"
+                            .to_owned(),
                     },
                 });
             }
