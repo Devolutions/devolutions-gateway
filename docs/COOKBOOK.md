@@ -6,6 +6,7 @@ Developer-oriented cookbook for testing purposes.
 - [WebSocket-to-TCP tunnel using jetsocat](#websocket-to-tcp-tunnel-using-jetsocat)
 - [Standalone web application custom authentication](#standalone-web-application-custom-authentication)
 - [Preflight API](#preflight-api)
+- [Proxy-based credentials injection for RDP](#proxy-based-credentials-injection-for-rdp)
 
 ## RDP routing
 
@@ -268,3 +269,50 @@ And here is how the response may look like:
   {"operation_id":"55821d24-d1df-481c-8b88-66c06f879835","kind":"resolved-host","resolved_host":"devolutions.net","resolved_addresses":["20.239.34.78"]}
 ]
 ```
+
+## Proxy-based credentials injection for RDP
+
+### How it works
+
+- Perform two-way forwarding between the client and the target until the TLS security upgrade.
+- Separately perform the TLS upgrade for both the client and the server, effectively acting as a man-in-the-middle.
+  -  The client must trust the TLS certificate configured in the Devolutions Gateway.
+- Separately perform CredSSP authentication as server with the client, and as client with the target.
+  - The fake, proxy credentials are used with the client.
+  - The real, target credentials are used with the target.
+- Proceed with the usual two-way forwarding (except we can actually see and inspect all the traffic)
+
+### Prerequisites
+
+- Generate some tokens. You can use `tokengen` or the PowerShell cmdlet.
+  - Generate a session token for the RDP session.
+  - Generate a scope token for the preflight API.
+- Configure the TLS certificate and private key.
+- Run the Devolutions Gateway.
+  - We’ll assume it runs on localhost, and it listens for HTTP on 7171 and TCP on 8181.
+  - Adjust to your needs.
+
+### Push the credentials
+
+```shell
+curl "127.0.0.1:7171/jet/preflight?token=<SCOPE_TOKEN>" \
+  -X POST -H "Content-Type: application/json" \
+  --data '[
+    {"id": "ef1a3ae9-e55d-48b8-92b0-ae67c29b2e4e", "kind": "provision-credentials", "token": "<SESSION_TOKEN>",
+      "proxy_credential": { "kind": "username-password", "username": "FakeUser", "password": "FakePassword" },
+      "target_credential": { "kind": "username-password", "username": "RealUser", "password": "RealPassword" } }
+  ]'
+```
+
+### Connect using the fake (proxy) credentials
+
+```shell
+xfreerdp3 /v:127.0.0.1:8181 /u:'FakeUser' /p:'FakePassword' /pcb:<SESSION_TOKEN>
+```
+
+You may also add the option `/cert:ignore` if the certificate you configured is not trusted.
+
+### Demo
+
+[proxy-based-credentials-injection-prototype.webm](https://github.com/user-attachments/assets/d5380053-810d-4529-b3f9-1ed84c2d77c4)
+
