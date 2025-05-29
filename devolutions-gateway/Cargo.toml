@@ -26,9 +26,12 @@ devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
 job-queue = { path = "../crates/job-queue" }
 job-queue-libsql = { path = "../crates/job-queue-libsql" }
-ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf", features = ["std"] }
-ironrdp-core = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf", features = ["std"] }
-ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "7c268d863048d0a9182b3f7bf778668de8db4ccf" }
+ironrdp-pdu = { version = "0.5", features = ["std"] }
+ironrdp-core = { version = "0.1", features = ["std"] }
+ironrdp-rdcleanpath = "0.1"
+ironrdp-tokio = { version = "0.4", default-features = false }
+ironrdp-connector = { version = "0.5" }
+ironrdp-acceptor = { version = "0.5" }
 ceviche = "0.6.1"
 picky-krb = "0.9"
 network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
@@ -65,6 +68,7 @@ picky = { version = "7.0.0-rc.10", default-features = false, features = ["jose",
 zeroize = { version = "1.8", features = ["derive"] }
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 # Logging
 tracing = "0.1"
