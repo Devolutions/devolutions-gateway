@@ -372,7 +372,7 @@ jobs:
       - name: Setup .npmrc config file
         uses: ./.github/workflows/npmrc-setup
         with:
-          npm_token: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+          npm_token: ${{ secrets.ARTIFACTORY_NPM_READ_TOKEN }}
 
       - name: Install NPM dependencies
         working-directory: webapp
@@ -421,7 +421,7 @@ jobs:
       - name: Setup .npmrc config file
         uses: ./.github/workflows/npmrc-setup
         with:
-          npm_token: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+          npm_token: ${{ secrets.ARTIFACTORY_NPM_READ_TOKEN }}
 
       - name: Install Biome
         run: npm install -g @biomejs/biome
