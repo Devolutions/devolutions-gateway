@@ -152,63 +152,59 @@ impl Conf {
             .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
 
         let tls = match conf_file.tls_certificate_source.unwrap_or_default() {
-            _ if !requires_tls => {
-                trace!("Not configured to use HTTPS, ignoring TLS configuration");
-                None
-            }
-            dto::CertSource::External => {
-                let certificate_path = conf_file
-                    .tls_certificate_file
-                    .as_ref()
-                    .context("TLS usage implied, but TLS certificate file is missing")?;
+            dto::CertSource::External => match conf_file.tls_certificate_file.as_ref() {
+                None if requires_tls => anyhow::bail!("TLS usage implied, but TLS certificate file is missing"),
+                None => None,
+                Some(certificate_path) => {
+                    let (certificates, private_key) = match certificate_path.extension() {
+                        Some("pfx" | "p12") => {
+                            read_pfx_file(certificate_path, conf_file.tls_private_key_password.as_ref())
+                                .context("read PFX/PKCS12 file")?
+                        }
+                        None | Some(_) => {
+                            let certificates =
+                                read_rustls_certificate_file(certificate_path).context("read TLS certificate")?;
 
-                let (certificates, private_key) = match certificate_path.extension() {
-                    Some("pfx" | "p12") => read_pfx_file(certificate_path, conf_file.tls_private_key_password.as_ref())
-                        .context("read PFX/PKCS12 file")?,
-                    None | Some(_) => {
-                        let certificates =
-                            read_rustls_certificate_file(certificate_path).context("read TLS certificate")?;
+                            let private_key = conf_file
+                                .tls_private_key_file
+                                .as_ref()
+                                .context("TLS private key file is missing")?
+                                .pipe_deref(read_rustls_priv_key_file)
+                                .context("read TLS private key")?;
 
-                        let private_key = conf_file
-                            .tls_private_key_file
-                            .as_ref()
-                            .context("TLS private key file is missing")?
-                            .pipe_deref(read_rustls_priv_key_file)
-                            .context("read TLS private key")?;
+                            (certificates, private_key)
+                        }
+                    };
 
-                        (certificates, private_key)
-                    }
-                };
+                    let cert_source = crate::tls::CertificateSource::External {
+                        certificates,
+                        private_key,
+                    };
 
-                let cert_source = crate::tls::CertificateSource::External {
-                    certificates,
-                    private_key,
-                };
+                    Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+                }
+            },
+            dto::CertSource::System => match conf_file.tls_certificate_subject_name.clone() {
+                None if requires_tls => anyhow::bail!("TLS usage implied, but TLS certificate subject name is missing"),
+                None => None,
+                Some(cert_subject_name) => {
+                    let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
 
-                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
-            }
-            dto::CertSource::System => {
-                let cert_subject_name = conf_file
-                    .tls_certificate_subject_name
-                    .clone()
-                    .context("TLS usage implied, but TLS certificate subject name is missing")?;
+                    let store_name = conf_file
+                        .tls_certificate_store_name
+                        .clone()
+                        .unwrap_or_else(|| String::from("My"));
 
-                let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
+                    let cert_source = crate::tls::CertificateSource::SystemStore {
+                        machine_hostname: hostname.clone(),
+                        cert_subject_name,
+                        store_location,
+                        store_name,
+                    };
 
-                let store_name = conf_file
-                    .tls_certificate_store_name
-                    .clone()
-                    .unwrap_or_else(|| String::from("My"));
-
-                let cert_source = crate::tls::CertificateSource::SystemStore {
-                    machine_hostname: hostname.clone(),
-                    cert_subject_name,
-                    store_location,
-                    store_name,
-                };
-
-                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
-            }
+                    Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+                }
+            },
         };
 
         // Sanity check
@@ -1089,7 +1085,7 @@ pub mod dto {
             match self {
                 VerbosityProfile::Default => "info",
                 VerbosityProfile::Debug => {
-                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace,job_queue=trace,job_queue_libsql=trace"
+                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace,job_queue=trace,job_queue_libsql=trace,devolutions_gateway::rdp_proxy=trace"
                 }
                 VerbosityProfile::Tls => {
                     "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"

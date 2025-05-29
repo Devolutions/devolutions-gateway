@@ -7,12 +7,13 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
+use crate::credential::CredentialStoreHandle;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
+use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::utils;
 
 #[derive(TypedBuilder)]
@@ -25,11 +26,12 @@ pub struct GenericClient<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
+    credential_store: CredentialStoreHandle,
 }
 
 impl<S> GenericClient<S>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
 {
     #[instrument(
         "generic_client",
@@ -46,6 +48,7 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
+            credential_store,
         } = self;
 
         let span = tracing::Span::current();
@@ -53,7 +56,7 @@ where
         let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(10));
         let read_pcb_fut = read_pcb(&mut client_stream);
 
-        let (pdu, mut leftover_bytes) = tokio::select! {
+        let (pcb, mut leftover_bytes) = tokio::select! {
             () = timeout => {
                 info!("Timed out at preconnection blob reception");
                 return Ok(())
@@ -69,8 +72,14 @@ where
             }
         };
 
+        let token = pcb.v2_payload.as_deref().context("V2 payload missing from RDP PCB")?;
+
+        if conf.debug.dump_tokens {
+            debug!(token, "**DEBUG OPTION**");
+        }
+
         let source_ip = client_addr.ip();
-        let claims = extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl, &active_recordings)?;
+        let claims = extract_association_claims(token, source_ip, &conf, &token_cache, &jrl, &active_recordings)?;
 
         span.record("session_id", claims.jet_aid.to_string())
             .record("protocol", claims.jet_ap.to_string());
@@ -93,12 +102,7 @@ where
                 trace!(%selected_target, "Connected");
                 span.record("target", selected_target.to_string());
 
-                info!("TCP forwarding");
-
-                server_stream
-                    .write_buf(&mut leftover_bytes)
-                    .await
-                    .context("failed to write leftover bytes")?;
+                let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
 
                 let info = SessionInfo::builder()
                     .association_id(claims.jet_aid)
@@ -110,6 +114,44 @@ where
                     .recording_policy(claims.jet_rec)
                     .filtering_policy(claims.jet_flt)
                     .build();
+
+                // We support proxy-based credential injection for RDP.
+                // If a credential mapping has been pushed, we automatically switch to this mode.
+                // Otherwise, we continue the generic procedure.
+                if is_rdp {
+                    let token_id = token::extract_jti(token).context("failed to extract jti claim from token")?;
+
+                    if let Some(entry) = credential_store.get(token_id) {
+                        anyhow::ensure!(token == entry.token, "token mismatch");
+
+                        // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
+                        if entry.mapping.is_some() {
+                            return crate::rdp_proxy::RdpProxy::builder()
+                                .conf(conf)
+                                .session_info(info)
+                                .client_addr(client_addr)
+                                .client_stream(client_stream)
+                                .server_addr(server_addr)
+                                .server_stream(server_stream)
+                                .sessions(sessions)
+                                .subscriber_tx(subscriber_tx)
+                                .credential_entry(entry)
+                                .client_stream_leftover_bytes(leftover_bytes)
+                                .server_dns_name(selected_target.host().to_owned())
+                                .build()
+                                .run()
+                                .await
+                                .context("encountered a failure during RDP proxying (credential injection)");
+                        }
+                    }
+                }
+
+                info!("TCP forwarding");
+
+                server_stream
+                    .write_buf(&mut leftover_bytes)
+                    .await
+                    .context("failed to write leftover bytes")?;
 
                 Proxy::builder()
                     .conf(conf)
