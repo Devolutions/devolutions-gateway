@@ -237,7 +237,7 @@ async fn process_cleanpath(
 
     // Establish TLS connection with server
 
-    let server_stream = crate::tls::connect(selected_target.host(), server_stream)
+    let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
             source,
@@ -321,7 +321,7 @@ pub async fn handle(
         .recording_policy(claims.jet_rec)
         .build();
 
-    info!("RDP-TLS forwarding");
+    info!("RDP-TLS forwarding (RDCleanPath)");
 
     Proxy::builder()
         .conf(conf)
