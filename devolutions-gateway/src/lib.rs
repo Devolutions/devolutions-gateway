@@ -28,7 +28,7 @@ pub mod middleware;
 pub mod ngrok;
 pub mod plugin_manager;
 pub mod proxy;
-pub mod rdp_extension;
+pub mod rd_clean_path;
 pub mod rdp_pcb;
 pub mod recording;
 pub mod session;
