@@ -42,6 +42,7 @@ export interface VncFormDataInput {
   enableExtendedClipboard: boolean;
   ultraVirtualDisplay: boolean;
   enabledEncodings: Encoding[];
+  wheelSpeedFactor: number;
   screenSize: ScreenSize;
   customWidth?: number;
   customHeight?: number;
@@ -53,6 +54,7 @@ export interface ArdFormDataInput {
   username: string;
   password: string;
   protocol: number;
+  wheelSpeedFactor: number;
   resolutionQuality: ResolutionQuality;
   ardQualityMode: ArdQualityMode;
 }
