@@ -77,7 +77,6 @@ where
         if conf.debug.dump_tokens {
             debug!(token, "**DEBUG OPTION**");
         }
-        info!(pdu = ?pdu, "Received preconnection blob");
 
         let source_ip = client_addr.ip();
 
