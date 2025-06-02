@@ -258,6 +258,7 @@ async fn process_cleanpath(
     // - Without PCB: Gateway handles (1) X224 connection request, (2) X224 connection response,
     //   then leaves TLS handshake and CredSSP to IronRDP client
     let (server_stream, x224_rsp) = if let Some(pcb_string) = cleanpath_pdu.preconnection_blob {
+        debug!("Sending preconnection blob to server");
         let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
             version: ironrdp_pdu::pcb::PcbVersion::V2,
             id: 0,
@@ -270,7 +271,7 @@ async fn process_cleanpath(
 
         server_stream.write_all(&encoded).await?;
 
-        let server_stream = crate::tls::connect(selected_target.host(), server_stream)
+        let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
             .await
             .map_err(|source| CleanPathError::TlsHandshake {
                 source,
@@ -279,8 +280,6 @@ async fn process_cleanpath(
 
         (server_stream, None)
     } else {
-        debug!("Preconnection blob sent");
-
         // Send X224 connection request
         let x224_req = cleanpath_pdu
             .x224_connection_pdu
@@ -288,6 +287,12 @@ async fn process_cleanpath(
             .map_err(CleanPathError::BadRequest)?;
 
         server_stream.write_all(x224_req.as_bytes()).await?;
+
+        let x224_rsp = read_x224_response(&mut server_stream)
+            .await
+            .with_context(|| format!("read X224 response from {selected_target}"))
+            .map_err(CleanPathError::BadRequest)?;
+        trace!("Receiving X224 response");
 
         let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
             .await
@@ -299,23 +304,7 @@ async fn process_cleanpath(
 
         // Receive server X224 connection response
 
-        trace!("Receiving X224 response");
-
-        let x224_rsp = read_x224_response(&mut server_stream)
-            .await
-            .with_context(|| format!("read X224 response from {selected_target}"))
-            .map_err(CleanPathError::BadRequest)?;
-
         trace!("Establishing TLS connection with server");
-
-        // Establish TLS connection with server
-
-        let server_stream = crate::tls::connect(selected_target.host(), server_stream)
-            .await
-            .map_err(|source| CleanPathError::TlsHandshake {
-                source,
-                target_server: selected_target.to_owned(),
-            })?;
 
         (server_stream, Some(x224_rsp))
     };
