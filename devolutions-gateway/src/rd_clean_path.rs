@@ -164,7 +164,7 @@ struct CleanPathResult {
     destination: TargetAddr,
     server_addr: SocketAddr,
     server_stream: tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
-    x224_rsp: Vec<u8>,
+    x224_rsp: Option<Vec<u8>>,
 }
 
 async fn process_cleanpath(
@@ -234,45 +234,99 @@ async fn process_cleanpath(
     debug!(%selected_target, "Connected to destination server");
     span.record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable
-    if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-        server_stream.write_all(pcb.as_bytes()).await?;
-    }
+    // Preconnection Blob (PCB) is currently only used for Hyper-V VMs.
+    //
+    // Connection sequence with Hyper-V VMs (PCB enabled):
+    // ┌─────────────────────┐    ┌─────────────────────────────────────────────────────────────┐
+    // │   handled by        │    │              handled by IronRDP client                      │
+    // │     Gateway         │    │                                                             │
+    // └─────────────────────┘    └─────────────────────────────────────────────────────────────┘
+    // │PCB → TLS handshake  │ →  │CredSSP → X224 connection request → X224 connection response │
+    // └─────────────────────┘    └─────────────────────────────────────────────────────────────┘
+    //
+    // Connection sequence without Hyper-V VMs (PCB disabled):
+    // ┌─────────────────────────────────────────────────────────────┐    ┌──────────────────────┐
+    // │                  handled by Gateway                         │    │ handled by IronRDP   │
+    // │                                                             │    │       client         │
+    // └─────────────────────────────────────────────────────────────┘    └──────────────────────┘
+    // │X224 connection request → X224 connection response → TLS hs  │ →  │CredSSP → ...         │
+    // └─────────────────────────────────────────────────────────────┘    └──────────────────────┘
+    //
+    // Summary:
+    // - With PCB: Gateway handles (1) sending PCB, (2) TLS handshake, then leaves CredSSP
+    //   and X224 connection request/response to IronRDP client
+    // - Without PCB: Gateway handles (1) X224 connection request, (2) X224 connection response,
+    //   then leaves TLS handshake and CredSSP to IronRDP client
+    let (server_stream, x224_rsp) = if let Some(pcb_string) = cleanpath_pdu.preconnection_blob {
+        let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+            version: ironrdp_pdu::pcb::PcbVersion::V2,
+            id: 0,
+            v2_payload: Some(pcb_string),
+        };
 
-    // Send X224 connection request
-    let x224_req = cleanpath_pdu
-        .x224_connection_pdu
-        .context("request is missing X224 connection PDU")
-        .map_err(CleanPathError::BadRequest)?;
-    server_stream.write_all(x224_req.as_bytes()).await?;
+        let encoded = ironrdp_core::encode_vec(&pcb)
+            .context("failed to encode preconnection blob")
+            .map_err(CleanPathError::BadRequest)?;
 
-    // Receive server X224 connection response
+        server_stream.write_all(&encoded).await?;
 
-    trace!("Receiving X224 response");
+        let server_stream = crate::tls::connect(selected_target.host(), server_stream)
+            .await
+            .map_err(|source| CleanPathError::TlsHandshake {
+                source,
+                target_server: selected_target.to_owned(),
+            })?;
 
-    let x224_rsp = read_x224_response(&mut server_stream)
-        .await
-        .with_context(|| format!("read X224 response from {selected_target}"))
-        .map_err(CleanPathError::BadRequest)?;
+        (server_stream, None)
+    } else {
+        debug!("Preconnection blob sent");
 
-    trace!("Establishing TLS connection with server");
+        // Send X224 connection request
+        let x224_req = cleanpath_pdu
+            .x224_connection_pdu
+            .context("request is missing X224 connection PDU")
+            .map_err(CleanPathError::BadRequest)?;
 
-    // Establish TLS connection with server
+        server_stream.write_all(x224_req.as_bytes()).await?;
 
-    let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
-        .await
-        .map_err(|source| CleanPathError::TlsHandshake {
-            source,
-            target_server: selected_target.to_owned(),
-        })?;
+        let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
+            .await
+            .map_err(|source| CleanPathError::TlsHandshake {
+                source,
+                target_server: selected_target.to_owned(),
+            })?;
+        debug!("X224 connection request sent");
 
-    Ok(CleanPathResult {
+        // Receive server X224 connection response
+
+        trace!("Receiving X224 response");
+
+        let x224_rsp = read_x224_response(&mut server_stream)
+            .await
+            .with_context(|| format!("read X224 response from {selected_target}"))
+            .map_err(CleanPathError::BadRequest)?;
+
+        trace!("Establishing TLS connection with server");
+
+        // Establish TLS connection with server
+
+        let server_stream = crate::tls::connect(selected_target.host(), server_stream)
+            .await
+            .map_err(|source| CleanPathError::TlsHandshake {
+                source,
+                target_server: selected_target.to_owned(),
+            })?;
+
+        (server_stream, Some(x224_rsp))
+    };
+
+    return Ok(CleanPathResult {
         destination: selected_target.to_owned(),
         claims,
         server_addr,
         server_stream,
         x224_rsp,
-    })
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -295,7 +349,7 @@ pub async fn handle(
         .await
         .context("couldn’t read clean cleanpath PDU")?;
 
-    trace!("Processing RDCleanPath");
+    trace!(RDCleanPath = ?cleanpath_pdu,"Processing RDCleanPath");
 
     let CleanPathResult {
         claims,

@@ -54,6 +54,10 @@ fn decode_pcb(buf: &[u8]) -> Result<Option<(PreconnectionBlob, usize)>, io::Erro
         Ok(pcb) => {
             let pdu_size = ironrdp_core::size(&pcb);
             let read_len = cursor.pos();
+            info!(
+                pdu_size,
+                read_len, "read preconnection blob (size: {}, read: {})", pdu_size, read_len
+            );
 
             // NOTE: sanity check (reporting the wrong number will corrupt the communication)
             if read_len != pdu_size {
