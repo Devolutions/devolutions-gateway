@@ -54,6 +54,7 @@ import { TreeModule } from 'primeng/tree';
 import { TreeTableModule } from 'primeng/treetable';
 import { TriStateCheckboxModule } from 'primeng/tristatecheckbox';
 import { VirtualScrollerModule } from 'primeng/virtualscroller';
+import { SliderModule } from 'primeng/slider';
 
 const PRIMENG_MODULES = [
   DividerModule,
@@ -110,6 +111,7 @@ const PRIMENG_MODULES = [
   ListboxModule,
   BadgeModule,
   ConfirmPopupModule,
+  SliderModule,
 ];
 
 @NgModule({

@@ -118,6 +118,17 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
+  sliders = [
+    {
+      label: 'Wheel Speed',
+      value: 1,
+      onChange: (value: number) => this.setWheelSpeedFactor(value),
+      min: 0.1,
+      max: 5,
+      step: 0.1,
+    },
+  ];
+
   protected removeElement: Subject<unknown> = new Subject();
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
@@ -199,6 +210,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     }
 
     this.cursorOverrideActive = !this.cursorOverrideActive;
+  }
+
+  setWheelSpeedFactor(factor: number): void {
+    this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
   }
 
   removeWebClientGuiElement(): void {
@@ -414,8 +429,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     } else {
       configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
     }
-
-    configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     const config = configBuilder.build();
 

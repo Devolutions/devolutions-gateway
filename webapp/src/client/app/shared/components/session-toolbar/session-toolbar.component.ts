@@ -36,8 +36,17 @@ export class SessionToolbarComponent {
 
   @Input() checkboxes: {
     label: string;
-    action: () => void;
-    isChecked: () => boolean;
+    default: boolean;
+    onChange: (value: boolean) => void;
+  }[] = [];
+
+  @Input() sliders: {
+    label: string;
+    value: number;
+    onChange: (value: number) => void;
+    min: number;
+    max: number;
+    step: number;
   }[] = [];
 
   isFullScreenMode = false;
