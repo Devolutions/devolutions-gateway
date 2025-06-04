@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use async_trait::async_trait;
 use core::fmt;
 use devolutions_gateway_task::{ShutdownSignal, Task};
@@ -8,22 +9,29 @@ use picky::key::{PrivateKey, PublicKey};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::recording::ActiveRecordings;
+use crate::session::DisconnectedInfo;
 use crate::target_addr::TargetAddr;
 
 pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
-const MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
+const RDP_MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
 const BRIDGE_TOKEN_MAX_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 12; // 12 hours
 
-pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
+/// This is the maximum number of reconnections allowed during the reconnection window. If the
+/// reconnection window (e.g.: 30 seconds) is over while the connection is still alive, the counter
+/// is reset, and it’s possible to reconnect up to N times again. This prevents brute force attacks
+/// in the situation where the token is stolen, although that is tricky to exploit in the first place.
+const MAX_RECONNECTIONS_DURING_RECONNECTION_WINDOW: u32 = 10;
+
+pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>;
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
 
 pub fn new_token_cache() -> TokenCache {
@@ -357,6 +365,28 @@ impl From<u64> for SessionTtl {
     }
 }
 
+/// Maximum duration in seconds since last disconnection during which a token for session reconnection
+#[derive(Default, Debug, Clone, Copy)]
+pub enum ReconnectionPolicy {
+    #[default]
+    Disallowed,
+    Allowed {
+        window_in_seconds: NonZeroU32,
+    },
+}
+
+impl From<u32> for ReconnectionPolicy {
+    fn from(seconds: u32) -> Self {
+        if let Some(seconds) = NonZeroU32::new(seconds) {
+            Self::Allowed {
+                window_in_seconds: seconds,
+            }
+        } else {
+            Self::Disallowed
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AssociationTokenClaims {
     /// Association ID (= Session ID)
@@ -377,7 +407,12 @@ pub struct AssociationTokenClaims {
     /// Max session duration
     pub jet_ttl: SessionTtl,
 
-    /// JWT expiration time claim.
+    /// Window during which a token can be reused since last disconnection
+    ///
+    /// Once this window is over, the token is removed from the cache and can’t be reused anymore.
+    pub jet_reuse: ReconnectionPolicy,
+
+    /// JWT expiration time claim
     ///
     /// We need this to build our token invalidation cache.
     /// This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
@@ -736,6 +771,7 @@ pub struct TokenValidator<'a> {
     delegation_key: Option<&'a PrivateKey>,
     subkey: Option<&'a Subkey>,
     gw_id: Option<Uuid>,
+    disconnected_info: Option<DisconnectedInfo>,
 }
 
 impl TokenValidator<'_> {
@@ -750,6 +786,7 @@ impl TokenValidator<'_> {
             self.delegation_key,
             self.subkey,
             self.gw_id,
+            self.disconnected_info,
         )
     }
 }
@@ -765,6 +802,7 @@ fn validate_token_impl(
     delegation_key: Option<&PrivateKey>,
     subkey: Option<&Subkey>,
     gw_id: Option<Uuid>,
+    disconnected_info: Option<DisconnectedInfo>,
 ) -> Result<AccessTokenClaims, TokenError> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
@@ -942,12 +980,14 @@ fn validate_token_impl(
     }
 
     match claims {
-        // Mitigate replay attacks for RDP associations by rejecting token reuse from a different
-        // source address IP (RDP requires multiple connections, so we can't just reject everything)
+        // Mitigate replay attacks by rejecting token reuse from a different
+        // source address IP (RDP requires multiple connections, so we can't
+        // just always reject everything)
         AccessTokenClaims::Association(AssociationTokenClaims {
             jti: id,
             exp,
-            jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
+            ref jet_ap,
+            jet_reuse,
             ..
         }) => {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -961,10 +1001,47 @@ fn validate_token_impl(
                         });
                     }
 
-                    if now > bucket.get().last_use_timestamp + MAX_REUSE_INTERVAL_SECS {
-                        return Err(TokenError::UnexpectedReplay {
-                            reason: "maximum reuse interval is exceeded",
-                        });
+                    match (disconnected_info, jet_reuse) {
+                        (Some(info), ReconnectionPolicy::Allowed { window_in_seconds }) => {
+                            // When a reconnection policy is set, the token can be reused under three conditions:
+                            // - The associated session was not killed.
+                            // - The reconnection window since last disconnection is not exceeded.
+                            // - The number of connections during the reconnection window does not
+                            //   exceed 10 (hardcoded value).
+
+                            if info.was_killed {
+                                return Err(TokenError::UnexpectedReplay {
+                                    reason: "session was killed",
+                                });
+                            }
+
+                            if now > info.date.unix_timestamp() + i64::from(window_in_seconds.get()) {
+                                return Err(TokenError::UnexpectedReplay {
+                                    reason: "reconnection window is exceeded",
+                                });
+                            }
+
+                            if MAX_RECONNECTIONS_DURING_RECONNECTION_WINDOW < u32::from(info.count) {
+                                return Err(TokenError::UnexpectedReplay {
+                                    reason: "exceeded maximum number of reconnections during the reconnection window",
+                                });
+                            }
+                        }
+                        _ => {
+                            if matches!(jet_ap, ApplicationProtocol::Known(Protocol::Rdp)) {
+                                // We allow reconnections for RDP in a limited way.
+                                // ~10 seconds since the last _connection_, or usage of the token (not disconnection).
+                                if now > bucket.get().last_use_timestamp + RDP_MAX_REUSE_INTERVAL_SECS {
+                                    return Err(TokenError::UnexpectedReplay {
+                                        reason: "maximum reuse interval is exceeded",
+                                    });
+                                }
+                            } else {
+                                return Err(TokenError::UnexpectedReplay {
+                                    reason: "reconnection window exceeded or not set",
+                                });
+                            }
+                        }
                     }
                 }
                 Entry::Vacant(bucket) => {
@@ -977,9 +1054,8 @@ fn validate_token_impl(
             }
         }
 
-        // All other tokens can't be reused even if source IP is identical
-        AccessTokenClaims::Association(AssociationTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
+        // SCOPE, NETSCAN, and JMUX tokens can never be reused.
+        AccessTokenClaims::Scope(ScopeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
@@ -1061,18 +1137,24 @@ fn validate_token_impl(
     Ok(claims)
 }
 
-pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
-    use anyhow::Context as _;
-
+fn extract_uuid(token: &str, field: &str) -> anyhow::Result<Uuid> {
     let jws = RawJws::decode(token)
         .context("failed to parse the provided JWS")?
         .discard_signature();
     let payload = serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")?;
-    let jti = payload.get("jti").context("jti is missing from the token")?;
-    let jti = jti.as_str().context("jti value is malformed")?;
-    let jti = Uuid::from_str(jti).context("jti is not a valid UUID string")?;
+    let uuid = payload.get(field).context("claim is missing from the token")?;
+    let uuid = uuid.as_str().context("value is malformed")?;
+    let uuid = Uuid::from_str(uuid).context("value is not a valid UUID string")?;
 
-    Ok(jti)
+    Ok(uuid)
+}
+
+pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
+    extract_uuid(token, "jti").context("extract jti")
+}
+
+pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {
+    extract_uuid(token, "jet_aid").context("extract jet_aid")
 }
 
 #[deprecated = "make sure this is never used without a deliberate action"]
@@ -1194,6 +1276,8 @@ mod serde_impl {
         jet_flt: bool,
         #[serde(default)]
         jet_ttl: SessionTtl,
+        #[serde(default)]
+        jet_reuse: ReconnectionPolicy,
         exp: i64,
         jti: Uuid,
     }
@@ -1257,6 +1341,27 @@ mod serde_impl {
         }
     }
 
+    impl ser::Serialize for ReconnectionPolicy {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            match self {
+                ReconnectionPolicy::Disallowed => serializer.serialize_u32(0),
+                ReconnectionPolicy::Allowed { window_in_seconds } => serializer.serialize_u32(window_in_seconds.get()),
+            }
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for ReconnectionPolicy {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            u32::deserialize(deserializer).map(ReconnectionPolicy::from)
+        }
+    }
+
     impl ser::Serialize for AssociationTokenClaims {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -1279,6 +1384,7 @@ mod serde_impl {
                 jet_rec: self.jet_rec,
                 jet_flt: self.jet_flt,
                 jet_ttl: self.jet_ttl,
+                jet_reuse: self.jet_reuse,
                 exp: self.exp,
                 jti: self.jti,
             }
@@ -1321,6 +1427,7 @@ mod serde_impl {
                 jet_rec: claims.jet_rec,
                 jet_flt: claims.jet_flt,
                 jet_ttl: claims.jet_ttl,
+                jet_reuse: claims.jet_reuse,
                 exp: claims.exp,
                 jti: claims.jti,
             })

@@ -11,7 +11,7 @@ use crate::credential::CredentialStoreHandle;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
+use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::utils;
@@ -79,7 +79,22 @@ where
         }
 
         let source_ip = client_addr.ip();
-        let claims = extract_association_claims(token, source_ip, &conf, &token_cache, &jrl, &active_recordings)?;
+
+        let disconnected_info = if let Ok(session_id) = token::extract_session_id(token) {
+            sessions.get_disconnected_info(session_id).await.ok().flatten()
+        } else {
+            None
+        };
+
+        let claims = extract_association_claims(
+            token,
+            source_ip,
+            &conf,
+            &token_cache,
+            &jrl,
+            &active_recordings,
+            disconnected_info,
+        )?;
 
         span.record("session_id", claims.jet_aid.to_string())
             .record("protocol", claims.jet_ap.to_string());
@@ -115,6 +130,8 @@ where
                     .filtering_policy(claims.jet_flt)
                     .build();
 
+                let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
+
                 // We support proxy-based credential injection for RDP.
                 // If a credential mapping has been pushed, we automatically switch to this mode.
                 // Otherwise, we continue the generic procedure.
@@ -138,6 +155,7 @@ where
                                 .credential_entry(entry)
                                 .client_stream_leftover_bytes(leftover_bytes)
                                 .server_dns_name(selected_target.host().to_owned())
+                                .disconnect_interest(disconnect_interest)
                                 .build()
                                 .run()
                                 .await
@@ -162,6 +180,7 @@ where
                     .transport_b(server_stream)
                     .sessions(sessions)
                     .subscriber_tx(subscriber_tx)
+                    .disconnect_interest(disconnect_interest)
                     .build()
                     .select_dissector_and_forward()
                     .await

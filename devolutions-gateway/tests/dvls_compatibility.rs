@@ -74,6 +74,7 @@ where
         .gw_id(gw_id)
         .subkey(None)
         .active_recordings(active_recordings)
+        .disconnected_info(None)
         .build()
         .validate(&token)?;
 

@@ -1,7 +1,7 @@
 use crate::config::Conf;
 use crate::interceptor::pcap::PcapInspector;
 use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
-use crate::session::{SessionInfo, SessionMessageSender};
+use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
 
@@ -24,6 +24,7 @@ pub struct Proxy<A, B> {
     address_b: SocketAddr,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
+    disconnect_interest: Option<DisconnectInterest>,
     #[builder(default = None)]
     buffer_size: Option<usize>,
 }
@@ -76,6 +77,7 @@ where
                 sessions: self.sessions,
                 subscriber_tx: self.subscriber_tx,
                 buffer_size: self.buffer_size,
+                disconnect_interest: self.disconnect_interest,
             }
             .forward()
             .await
@@ -96,6 +98,7 @@ where
             &self.subscriber_tx,
             self.session_info,
             Arc::clone(&notify_kill),
+            self.disconnect_interest,
         )
         .await?;
 

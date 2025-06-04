@@ -1,7 +1,7 @@
 use crate::recording::RecordingMessageSender;
 use crate::subscriber;
 use crate::target_addr::TargetAddr;
-use crate::token::{ApplicationProtocol, RecordingPolicy, SessionTtl};
+use crate::token::{ApplicationProtocol, ReconnectionPolicy, RecordingPolicy, SessionTtl};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use core::fmt;
@@ -49,12 +49,13 @@ pub async fn add_session_in_progress(
     subscriber_tx: &subscriber::SubscriberSender,
     info: SessionInfo,
     notify_kill: Arc<Notify>,
+    disconnect_interest: Option<DisconnectInterest>,
 ) -> anyhow::Result<()> {
     let association_id = info.id;
     let start_timestamp = info.start_timestamp;
 
     sessions
-        .new_session(info, notify_kill)
+        .new_session(info, notify_kill, disconnect_interest)
         .await
         .context("couldn't register new session")?;
 
@@ -103,10 +104,36 @@ pub enum KillResult {
     NotFound,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DisconnectInterest {
+    pub window: Duration,
+}
+
+impl DisconnectInterest {
+    pub fn from_reconnection_policy(policy: ReconnectionPolicy) -> Option<DisconnectInterest> {
+        match policy {
+            ReconnectionPolicy::Disallowed => None,
+            ReconnectionPolicy::Allowed { window_in_seconds } => Some(DisconnectInterest {
+                window: Duration::from_secs(u64::from(window_in_seconds.get())),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DisconnectedInfo {
+    pub id: Uuid,
+    pub was_killed: bool,
+    pub date: OffsetDateTime,
+    pub interest: DisconnectInterest,
+    pub count: u8,
+}
+
 enum SessionManagerMessage {
     New {
         info: SessionInfo,
         notify_kill: Arc<Notify>,
+        disconnect_interest: Option<DisconnectInterest>,
     },
     GetInfo {
         id: Uuid,
@@ -120,6 +147,10 @@ enum SessionManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<KillResult>,
     },
+    GetDisconnectedInfo {
+        id: Uuid,
+        channel: oneshot::Sender<Option<DisconnectedInfo>>,
+    },
     GetRunning {
         channel: oneshot::Sender<RunningSessions>,
     },
@@ -131,9 +162,15 @@ enum SessionManagerMessage {
 impl fmt::Debug for SessionManagerMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SessionManagerMessage::New { info, notify_kill: _ } => {
-                f.debug_struct("New").field("info", info).finish_non_exhaustive()
-            }
+            SessionManagerMessage::New {
+                info,
+                notify_kill: _,
+                disconnect_interest,
+            } => f
+                .debug_struct("New")
+                .field("info", info)
+                .field("disconnect_interest", disconnect_interest)
+                .finish_non_exhaustive(),
             SessionManagerMessage::GetInfo { id, channel: _ } => {
                 f.debug_struct("GetInfo").field("id", id).finish_non_exhaustive()
             }
@@ -143,6 +180,10 @@ impl fmt::Debug for SessionManagerMessage {
             SessionManagerMessage::Kill { id, channel: _ } => {
                 f.debug_struct("Kill").field("id", id).finish_non_exhaustive()
             }
+            SessionManagerMessage::GetDisconnectedInfo { id, channel: _ } => f
+                .debug_struct("GetDisconnectedInfo")
+                .field("id", id)
+                .finish_non_exhaustive(),
             SessionManagerMessage::GetRunning { channel: _ } => f.debug_struct("GetRunning").finish_non_exhaustive(),
             SessionManagerMessage::GetCount { channel: _ } => f.debug_struct("GetCount").finish_non_exhaustive(),
         }
@@ -153,9 +194,18 @@ impl fmt::Debug for SessionManagerMessage {
 pub struct SessionMessageSender(mpsc::Sender<SessionManagerMessage>);
 
 impl SessionMessageSender {
-    pub async fn new_session(&self, info: SessionInfo, notify_kill: Arc<Notify>) -> anyhow::Result<()> {
+    pub async fn new_session(
+        &self,
+        info: SessionInfo,
+        notify_kill: Arc<Notify>,
+        disconnect_interest: Option<DisconnectInterest>,
+    ) -> anyhow::Result<()> {
         self.0
-            .send(SessionManagerMessage::New { info, notify_kill })
+            .send(SessionManagerMessage::New {
+                info,
+                notify_kill,
+                disconnect_interest,
+            })
             .await
             .ok()
             .context("couldn't send New message")
@@ -167,7 +217,7 @@ impl SessionMessageSender {
             .send(SessionManagerMessage::GetInfo { id, channel: tx })
             .await
             .ok()
-            .context("couldn't send Remove message")?;
+            .context("couldn't send GetInfo message")?;
         rx.await.context("couldn't receive info for session")
     }
 
@@ -189,6 +239,16 @@ impl SessionMessageSender {
             .ok()
             .context("couldn't send Kill message")?;
         rx.await.context("couldn't receive kill result")
+    }
+
+    pub async fn get_disconnected_info(&self, id: Uuid) -> anyhow::Result<Option<DisconnectedInfo>> {
+        let (tx, rx) = oneshot::channel();
+        self.0
+            .send(SessionManagerMessage::GetDisconnectedInfo { id, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send GetDisconnectedInfo message")?;
+        rx.await.context("couldn't receive disconnected info for session")
     }
 
     pub async fn get_running_sessions(&self) -> anyhow::Result<RunningSessions> {
@@ -253,6 +313,8 @@ pub struct SessionManagerTask {
     all_running: RunningSessions,
     all_notify_kill: HashMap<Uuid, Arc<Notify>>,
     recording_manager_handle: RecordingMessageSender,
+    disconnect_interest: HashMap<Uuid, DisconnectInterest>,
+    disconnected_info: HashMap<Uuid, DisconnectedInfo>,
 }
 
 impl SessionManagerTask {
@@ -273,6 +335,8 @@ impl SessionManagerTask {
             all_running: HashMap::new(),
             all_notify_kill: HashMap::new(),
             recording_manager_handle,
+            disconnect_interest: HashMap::new(),
+            disconnected_info: HashMap::new(),
         }
     }
 
@@ -280,10 +344,20 @@ impl SessionManagerTask {
         self.tx.clone()
     }
 
-    fn handle_new(&mut self, info: SessionInfo, notify_kill: Arc<Notify>) {
+    fn handle_new(
+        &mut self,
+        info: SessionInfo,
+        notify_kill: Arc<Notify>,
+        disconnect_interest: Option<DisconnectInterest>,
+    ) {
         let id = info.id;
+
         self.all_running.insert(id, info);
         self.all_notify_kill.insert(id, notify_kill);
+
+        if let Some(interest) = disconnect_interest {
+            self.disconnect_interest.insert(id, interest);
+        }
     }
 
     fn handle_get_info(&mut self, id: Uuid) -> Option<SessionInfo> {
@@ -292,11 +366,21 @@ impl SessionManagerTask {
 
     fn handle_remove(&mut self, id: Uuid) -> Option<SessionInfo> {
         let removed_session = self.all_running.remove(&id);
+
         let _ = self.all_notify_kill.remove(&id);
+
+        if let Some(interest) = self.disconnect_interest.remove(&id) {
+            self.update_disconnected_info(id, interest, false);
+        }
+
         removed_session
     }
 
-    fn handle_kill(&self, id: Uuid) -> KillResult {
+    fn handle_kill(&mut self, id: Uuid) -> KillResult {
+        if let Some(interest) = self.disconnect_interest.get(&id).copied() {
+            self.update_disconnected_info(id, interest, true);
+        }
+
         match self.all_notify_kill.get(&id) {
             Some(notify_kill) => {
                 notify_kill.notify_waiters();
@@ -304,6 +388,33 @@ impl SessionManagerTask {
             }
             None => KillResult::NotFound,
         }
+    }
+
+    fn handle_get_disconnected_info(&mut self, id: Uuid) -> Option<DisconnectedInfo> {
+        self.disconnected_info.get(&id).copied()
+    }
+
+    /// Try to insert disconnected info. Nothing will happen in the info are already inserted.
+    fn update_disconnected_info(&mut self, id: Uuid, interest: DisconnectInterest, was_killed: bool) {
+        self.disconnected_info
+            .entry(id)
+            .and_modify(|info| {
+                // Never unset the was_killed flag.
+                info.was_killed |= was_killed;
+
+                if !was_killed {
+                    info.date = OffsetDateTime::now_utc();
+                    info.interest = interest;
+                    info.count += 1;
+                }
+            })
+            .or_insert_with(|| DisconnectedInfo {
+                id,
+                was_killed,
+                date: OffsetDateTime::now_utc(),
+                interest,
+                count: if was_killed { 0 } else { 1 },
+            });
     }
 }
 
@@ -323,12 +434,16 @@ async fn session_manager_task(
     mut manager: SessionManagerTask,
     mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
+    const DISCONNECTED_INFO_CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 5); // 5 minutes
+
     debug!("Task started");
 
     let mut with_ttl = BinaryHeap::<WithTtlInfo>::new();
     let auto_kill_sleep = tokio::time::sleep_until(tokio::time::Instant::now());
     tokio::pin!(auto_kill_sleep);
     (&mut auto_kill_sleep).await; // Consume initial sleep.
+
+    let mut cleanup_interval = tokio::time::interval(DISCONNECTED_INFO_CLEANUP_INTERVAL);
 
     loop {
         tokio::select! {
@@ -358,7 +473,7 @@ async fn session_manager_task(
                 debug!(?msg, "Received message");
 
                 match msg {
-                    SessionManagerMessage::New { info, notify_kill } => {
+                    SessionManagerMessage::New { info, notify_kill, disconnect_interest } => {
                         if let SessionTtl::Limited { minutes } = info.time_to_live {
                             let now = tokio::time::Instant::now();
                             let duration = Duration::from_secs(minutes.get() * 60);
@@ -389,7 +504,7 @@ async fn session_manager_task(
                             debug!(session.id = %info.id, "Session with recording policy registered");
                         }
 
-                        manager.handle_new(info, notify_kill);
+                        manager.handle_new(info, notify_kill, disconnect_interest);
                     }
                     SessionManagerMessage::GetInfo { id, channel } => {
                         let session_info = manager.handle_get_info(id);
@@ -403,6 +518,10 @@ async fn session_manager_task(
                         let kill_result = manager.handle_kill(id);
                         let _ = channel.send(kill_result);
                     }
+                    SessionManagerMessage::GetDisconnectedInfo { id, channel } => {
+                        let disconnected_info = manager.handle_get_disconnected_info(id);
+                        let _ = channel.send(disconnected_info);
+                    }
                     SessionManagerMessage::GetRunning { channel } => {
                         let _ = channel.send(manager.all_running.clone());
                     }
@@ -411,7 +530,13 @@ async fn session_manager_task(
                     }
                 }
             }
-            _ = shutdown_signal.wait() => {
+            _ = cleanup_interval.tick() => {
+                trace!(table_size = manager.disconnected_info.len(), "Cleanup disconnected info table");
+                let now = OffsetDateTime::now_utc();
+                manager.disconnected_info.retain(|_, info| now < info.date + info.interest.window);
+                trace!(table_size = manager.disconnected_info.len(), "Disconnected info table cleanup complete");
+            }
+            () = shutdown_signal.wait() => {
                 break;
             }
         }

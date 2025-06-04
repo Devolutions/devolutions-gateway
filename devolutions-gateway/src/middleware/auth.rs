@@ -13,6 +13,7 @@ use axum_extra::TypedHeader;
 use crate::config::Conf;
 use crate::http::HttpError;
 use crate::recording::ActiveRecordings;
+use crate::session::DisconnectedInfo;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 use crate::DgwState;
 
@@ -91,6 +92,7 @@ pub async fn auth_middleware(
         token_cache,
         jrl,
         recordings,
+        sessions,
         ..
     }): State<DgwState>,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
@@ -140,6 +142,12 @@ pub async fn auth_middleware(
             }
         };
 
+        let disconnected_info = if let Ok(session_id) = crate::token::extract_session_id(token) {
+            sessions.get_disconnected_info(session_id).await.ok().flatten()
+        } else {
+            None
+        };
+
         let conf = conf_handle.get_conf();
 
         let access_token_claims = authenticate(
@@ -149,6 +157,7 @@ pub async fn auth_middleware(
             &token_cache,
             &jrl,
             &recordings.active_recordings,
+            disconnected_info,
         )
         .map_err(HttpError::unauthorized().err())?;
 
@@ -167,6 +176,7 @@ pub fn authenticate(
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
     active_recordings: &ActiveRecordings,
+    disconnected_info: Option<DisconnectedInfo>,
 ) -> Result<AccessTokenClaims, crate::token::TokenError> {
     if conf.debug.dump_tokens {
         debug!(token, "**DEBUG OPTION**");
@@ -187,6 +197,7 @@ pub fn authenticate(
             .active_recordings(active_recordings)
             .gw_id(conf.id)
             .subkey(conf.sub_provisioner_public_key.as_ref())
+            .disconnected_info(disconnected_info)
             .build()
             .validate(token)
     }

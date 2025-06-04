@@ -230,6 +230,7 @@ fn revocation_list(
                 .gw_id(None)
                 .subkey(None)
                 .active_recordings(&active_recordings)
+                .disconnected_info(None)
                 .build()
                 .validate(&item.token)
                 .with_context(|| format!("Item n°{idx} validation failed"))?;
@@ -287,6 +288,7 @@ fn revocation_list(
                 .gw_id(None)
                 .subkey(None)
                 .active_recordings(&active_recordings)
+                .disconnected_info(None)
                 .build()
                 .validate(&item.token);
 
@@ -344,6 +346,7 @@ fn token_cache(
             .gw_id(None)
             .subkey(None)
             .active_recordings(&active_recordings)
+            .disconnected_info(None)
             .build()
             .validate(&token)?;
 
@@ -358,6 +361,7 @@ fn token_cache(
             .gw_id(None)
             .subkey(None)
             .active_recordings(&active_recordings)
+            .disconnected_info(None)
             .build()
             .validate(&token);
 
@@ -484,6 +488,7 @@ fn with_scopes(
             .gw_id(Some(this_gw_id))
             .subkey(Some(&subkey_metadata))
             .active_recordings(&active_recordings)
+            .disconnected_info(None)
             .build()
             .validate(&token);
 
@@ -577,6 +582,7 @@ fn with_subkey(
             .gw_id(Some(this_gw_id))
             .subkey(Some(&subkey_metadata))
             .active_recordings(&active_recordings)
+            .disconnected_info(None)
             .build()
             .validate(&token);
 
