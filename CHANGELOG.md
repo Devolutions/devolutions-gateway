@@ -2,6 +2,30 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.2.0 (2025-06-04)
+
+### Features
+
+- _webapp_: add `wheel_speed_factor` setting to a VNC and ARD connection forms ([#1362](https://github.com/Devolutions/devolutions-gateway/issues/1362)) ([e6be3d02eb](https://github.com/Devolutions/devolutions-gateway/commit/e6be3d02eb0c470e766e6600d2822ece63b77ec1)) 
+
+- _dgw_: emit a warning alert when TLS is not configured and credentials are pushed ([5a6ecd944b](https://github.com/Devolutions/devolutions-gateway/commit/5a6ecd944baa2c0c2921f9978dfc22c3e7598812)) 
+
+  For instance, proxy-based credentials injection for RDP requires a TLS
+  certificate and private key to be configured.
+
+- _dgw_: proxy-based credential injection for RDP ([033206eb90](https://github.com/Devolutions/devolutions-gateway/commit/033206eb9097bbe98033f622b40a127296b20699)) ([ARC-277](https://devolutions.atlassian.net/browse/ARC-277)) 
+
+### Bug Fixes
+
+- _pedm_: fix flawed expand_environment function ([#1366](https://github.com/Devolutions/devolutions-gateway/issues/1366)) ([476b885199](https://github.com/Devolutions/devolutions-gateway/commit/476b885199772c845433f1a717fdf483db948183)) 
+
+- _webapp_: typo in resolution quality control ([#1364](https://github.com/Devolutions/devolutions-gateway/issues/1364)) ([5b7bbbeff3](https://github.com/Devolutions/devolutions-gateway/commit/5b7bbbeff39c7e5a2c1ae3bf379a3901568700a1)) ([DGW-272](https://devolutions.atlassian.net/browse/DGW-272)) 
+
+- _dgw_: [**breaking**] drop the prx_usr, prx_pwd, dst_usr and dst_pwd claims ([#1370](https://github.com/Devolutions/devolutions-gateway/issues/1370)) ([ba1feedc9f](https://github.com/Devolutions/devolutions-gateway/commit/ba1feedc9f5deecd30d4c112e0ce814fba133d65)) 
+
+  The favored approach when pushing credentials is now to use the
+  preflight route.
+
 ## 2025.1.6 (2025-05-23)
 
 ### Bug Fixes
