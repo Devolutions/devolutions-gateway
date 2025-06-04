@@ -22,6 +22,7 @@ pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
 const BRIDGE_TOKEN_MAX_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 12; // 12 hours
+const NUMBER_OF_ALLOWED_RECONNECTIONS: u32 = 32;
 
 pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
@@ -357,6 +358,26 @@ impl From<u64> for SessionTtl {
     }
 }
 
+/// Maximum duration in seconds since last disconnection during which a token for session reconnection
+#[derive(Default, Debug, Clone, Copy)]
+pub enum ReconnectionWindow {
+    #[default]
+    Disallowed,
+    Allowed {
+        seconds: NonZeroU64,
+    },
+}
+
+impl From<u64> for ReconnectionWindow {
+    fn from(seconds: u64) -> Self {
+        if let Some(seconds) = NonZeroU64::new(seconds) {
+            Self::Allowed { seconds }
+        } else {
+            Self::Disallowed
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AssociationTokenClaims {
     /// Association ID (= Session ID)
@@ -377,7 +398,12 @@ pub struct AssociationTokenClaims {
     /// Max session duration
     pub jet_ttl: SessionTtl,
 
-    /// JWT expiration time claim.
+    /// Window during which a token can be reused since last disconnection
+    ///
+    /// Once this window is over, the token is removed from the cache and can’t be reused anymore.
+    pub jet_reuse: ReconnectionWindow,
+
+    /// JWT expiration time claim
     ///
     /// We need this to build our token invalidation cache.
     /// This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
@@ -1194,6 +1220,8 @@ mod serde_impl {
         jet_flt: bool,
         #[serde(default)]
         jet_ttl: SessionTtl,
+        #[serde(default)]
+        jet_reuse: ReconnectionWindow,
         exp: i64,
         jti: Uuid,
     }
@@ -1257,6 +1285,27 @@ mod serde_impl {
         }
     }
 
+    impl ser::Serialize for ReconnectionWindow {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            match self {
+                ReconnectionWindow::Disallowed => serializer.serialize_u64(0),
+                ReconnectionWindow::Allowed { seconds } => serializer.serialize_u64(seconds.get()),
+            }
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for ReconnectionWindow {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            u64::deserialize(deserializer).map(ReconnectionWindow::from)
+        }
+    }
+
     impl ser::Serialize for AssociationTokenClaims {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -1279,6 +1328,7 @@ mod serde_impl {
                 jet_rec: self.jet_rec,
                 jet_flt: self.jet_flt,
                 jet_ttl: self.jet_ttl,
+                jet_reuse: self.jet_reuse,
                 exp: self.exp,
                 jti: self.jti,
             }
@@ -1321,6 +1371,7 @@ mod serde_impl {
                 jet_rec: claims.jet_rec,
                 jet_flt: claims.jet_flt,
                 jet_ttl: claims.jet_ttl,
+                jet_reuse: claims.jet_reuse,
                 exp: claims.exp,
                 jti: claims.jti,
             })
