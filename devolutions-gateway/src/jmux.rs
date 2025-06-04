@@ -61,7 +61,7 @@ pub async fn handle(
 
     let notify_kill = Arc::new(Notify::new());
 
-    crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, Arc::clone(&notify_kill)).await?;
+    crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, Arc::clone(&notify_kill), None).await?;
 
     let proxy_fut = JmuxProxy::new(reader, writer).with_config(config).run();
     let proxy_handle = ChildTask::spawn(proxy_fut);

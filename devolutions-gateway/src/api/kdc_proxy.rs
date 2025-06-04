@@ -38,6 +38,7 @@ async fn kdc_proxy(
         &token_cache,
         &jrl,
         &recordings.active_recordings,
+        None,
     )
     .map_err(HttpError::unauthorized().err())?;
 

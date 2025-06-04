@@ -18,7 +18,7 @@ use crate::config::{WebAppAuth, WebAppConf, WebAppUser};
 use crate::extract::WebAppToken;
 use crate::http::HttpError;
 use crate::target_addr::TargetAddr;
-use crate::token::{ApplicationProtocol, RecordingPolicy};
+use crate::token::{ApplicationProtocol, ReconnectionPolicy, RecordingPolicy};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -336,6 +336,7 @@ pub(crate) async fn sign_session_token(
                 jet_rec: RecordingPolicy::None,
                 jet_flt: false,
                 jet_ttl: crate::token::SessionTtl::Unlimited,
+                jet_reuse: ReconnectionPolicy::Disallowed,
                 exp,
                 jti,
             }

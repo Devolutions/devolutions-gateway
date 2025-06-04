@@ -8,6 +8,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::config::Conf;
 use crate::recording::ActiveRecordings;
+use crate::session::DisconnectedInfo;
 use crate::token::{AccessTokenClaims, AssociationTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 
 pub fn extract_association_claims(
@@ -17,6 +18,7 @@ pub fn extract_association_claims(
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
     active_recordings: &ActiveRecordings,
+    disconnected_info: Option<DisconnectedInfo>,
 ) -> anyhow::Result<AssociationTokenClaims> {
     let delegation_key = conf.delegation_private_key.as_ref();
 
@@ -33,6 +35,7 @@ pub fn extract_association_claims(
             .gw_id(conf.id)
             .subkey(conf.sub_provisioner_public_key.as_ref())
             .active_recordings(active_recordings)
+            .disconnected_info(disconnected_info)
             .build()
             .validate(token)
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::config::Conf;
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
-use crate::session::{SessionInfo, SessionMessageSender};
+use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 
 use anyhow::Context as _;
@@ -25,6 +25,7 @@ pub struct RdpProxy<C, S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     server_dns_name: String,
+    disconnect_interest: Option<DisconnectInterest>,
 }
 
 impl<A, B> RdpProxy<A, B>
@@ -55,6 +56,7 @@ where
         sessions,
         subscriber_tx,
         server_dns_name,
+        disconnect_interest,
     } = proxy;
 
     let tls_conf = conf
@@ -156,6 +158,7 @@ where
         .transport_b(server_stream)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
+        .disconnect_interest(disconnect_interest)
         .build()
         .select_dissector_and_forward()
         .await

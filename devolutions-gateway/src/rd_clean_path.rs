@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::config::Conf;
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
+use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
@@ -34,12 +34,19 @@ fn authorize(
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
     active_recordings: &ActiveRecordings,
+    disconnected_info: Option<DisconnectedInfo>,
 ) -> Result<AssociationTokenClaims, AuthorizationError> {
     use crate::token::AccessTokenClaims;
 
-    if let AccessTokenClaims::Association(claims) =
-        crate::middleware::auth::authenticate(source_addr, token, conf, token_cache, jrl, active_recordings)?
-    {
+    if let AccessTokenClaims::Association(claims) = crate::middleware::auth::authenticate(
+        source_addr,
+        token,
+        conf,
+        token_cache,
+        jrl,
+        active_recordings,
+        disconnected_info,
+    )? {
         Ok(claims)
     } else {
         Err(AuthorizationError::Forbidden)
@@ -167,6 +174,7 @@ async fn process_cleanpath(
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
     active_recordings: &ActiveRecordings,
+    sessions: &SessionMessageSender,
 ) -> Result<CleanPathResult, CleanPathError> {
     use crate::utils;
 
@@ -175,9 +183,23 @@ async fn process_cleanpath(
         .as_deref()
         .ok_or(CleanPathError::Authorization(AuthorizationError::Unauthorized))?;
 
+    let disconnected_info = if let Ok(session_id) = crate::token::extract_session_id(token) {
+        sessions.get_disconnected_info(session_id).await.ok().flatten()
+    } else {
+        None
+    };
+
     trace!("Authorizing session");
 
-    let claims = authorize(client_addr, token, conf, token_cache, jrl, active_recordings)?;
+    let claims = authorize(
+        client_addr,
+        token,
+        conf,
+        token_cache,
+        jrl,
+        active_recordings,
+        disconnected_info,
+    )?;
 
     let crate::token::ConnectionMode::Fwd { ref targets, .. } = claims.jet_cm else {
         return anyhow::Error::msg("unexpected connection mode")
@@ -281,7 +303,17 @@ pub async fn handle(
         server_addr,
         server_stream,
         x224_rsp,
-    } = match process_cleanpath(cleanpath_pdu, client_addr, &conf, token_cache, jrl, active_recordings).await {
+    } = match process_cleanpath(
+        cleanpath_pdu,
+        client_addr,
+        &conf,
+        token_cache,
+        jrl,
+        active_recordings,
+        &sessions,
+    )
+    .await
+    {
         Ok(result) => result,
         Err(error) => {
             let response = RDCleanPathPdu::from(&error);
@@ -332,6 +364,7 @@ pub async fn handle(
         .transport_b(server_stream)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
+        .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
         .build()
         .select_dissector_and_forward()
         .await
