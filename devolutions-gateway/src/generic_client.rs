@@ -88,7 +88,7 @@ where
             ConnectionMode::Rdv => {
                 anyhow::bail!("TCP rendezvous not supported");
             }
-            ConnectionMode::Fwd { targets, creds: None } => {
+            ConnectionMode::Fwd { targets } => {
                 match claims.jet_rec {
                     RecordingPolicy::None | RecordingPolicy::Stream => (),
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
@@ -166,10 +166,6 @@ where
                     .select_dissector_and_forward()
                     .await
                     .context("encountered a failure during plain tcp traffic proxying")
-            }
-            ConnectionMode::Fwd { creds: Some(_), .. } => {
-                // Credentials handling should be special cased (e.g.: RDP-TLS)
-                anyhow::bail!("unexpected credentials");
             }
         }
     }

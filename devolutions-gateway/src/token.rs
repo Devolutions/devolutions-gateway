@@ -14,7 +14,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::credential::Password;
 use crate::recording::ActiveRecordings;
 use crate::target_addr::TargetAddr;
 
@@ -116,7 +115,7 @@ pub enum AccessTokenClaims {
 impl AccessTokenClaims {
     fn contains_secret(&self) -> bool {
         match self {
-            AccessTokenClaims::Association(claims) => claims.contains_secret(),
+            AccessTokenClaims::Association(_) => false,
             AccessTokenClaims::Scope(_) => false,
             AccessTokenClaims::Bridge(_) => false,
             AccessTokenClaims::Jmux(_) => false,
@@ -335,24 +334,7 @@ pub enum ConnectionMode {
     Fwd {
         /// Forward targets. Should be tried in order.
         targets: NonEmpty<TargetAddr>,
-
-        /// Credentials to use if protocol is wrapped by the Gateway (e.g. RDP TLS)
-        creds: Option<CredsClaims>,
     },
-}
-
-// TODO: It’s probably safe to drop these claims at this point.
-// The favored approach is going to be credentials pushing via the preflight route.
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct CredsClaims {
-    // Proxy credentials (client ↔ jet)
-    pub prx_usr: String,
-    pub prx_pwd: Password,
-
-    // Target credentials (jet ↔ server)
-    pub dst_usr: String,
-    pub dst_pwd: Password,
 }
 
 /// Maximum duration in minutes for a session (aka time to live)
@@ -403,12 +385,6 @@ pub struct AssociationTokenClaims {
 
     /// Unique ID for this token
     pub jti: Uuid,
-}
-
-impl AssociationTokenClaims {
-    fn contains_secret(&self) -> bool {
-        matches!(&self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
-    }
 }
 
 // ----- scope claims ----- //
@@ -1202,8 +1178,6 @@ mod serde_impl {
             /// Alternate Destination Hosts
             #[serde(default)]
             dst_alt: Vec<SmolStr>,
-            #[serde(flatten)]
-            creds: Option<CredsClaims>,
         },
     }
 
@@ -1293,14 +1267,13 @@ mod serde_impl {
                 jet_ap: self.jet_ap.clone(),
                 jet_cm: match &self.jet_cm {
                     ConnectionMode::Rdv => ConnectionModeHelper::Rdv,
-                    ConnectionMode::Fwd { targets, creds } => ConnectionModeHelper::Fwd {
+                    ConnectionMode::Fwd { targets } => ConnectionModeHelper::Fwd {
                         dst_hst: SmolStr::new(targets.first().as_str()),
                         dst_alt: targets
                             .tail()
                             .iter()
                             .map(|target| SmolStr::new(target.as_str()))
                             .collect(),
-                        creds: creds.clone(),
                     },
                 },
                 jet_rec: self.jet_rec,
@@ -1322,11 +1295,7 @@ mod serde_impl {
 
             let jet_cm = match claims.jet_cm {
                 ConnectionModeHelper::Rdv => ConnectionMode::Rdv,
-                ConnectionModeHelper::Fwd {
-                    dst_hst,
-                    dst_alt,
-                    creds,
-                } => {
+                ConnectionModeHelper::Fwd { dst_hst, dst_alt } => {
                     let primary_target =
                         TargetAddr::parse(&dst_hst, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
 
@@ -1341,7 +1310,7 @@ mod serde_impl {
                         targets.push(alt);
                     }
 
-                    ConnectionMode::Fwd { targets, creds }
+                    ConnectionMode::Fwd { targets }
                 }
             };
 
