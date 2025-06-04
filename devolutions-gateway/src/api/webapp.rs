@@ -332,7 +332,6 @@ pub(crate) async fn sign_session_token(
                 jet_ap: protocol,
                 jet_cm: ConnectionMode::Fwd {
                     targets: nonempty::NonEmpty::new(destination.clone()),
-                    creds: None,
                 },
                 jet_rec: RecordingPolicy::None,
                 jet_flt: false,
