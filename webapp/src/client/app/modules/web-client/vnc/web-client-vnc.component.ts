@@ -124,7 +124,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       value: 1,
       onChange: (value: number) => this.setWheelSpeedFactor(value),
       min: 0.1,
-      max: 5,
+      max: 3,
       step: 0.1,
     },
   ];
