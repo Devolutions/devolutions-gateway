@@ -32,8 +32,8 @@ import { DesktopSize } from '@shared/models/desktop-size';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
-  disableCursor,
-  disableExtendedClipboard,
+  enableCursor,
+  enableExtendedClipboard,
   enabledEncodings,
   ultraVirtualDisplay,
   wheelSpeedFactor,
@@ -377,8 +377,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       screenSize: desktopScreenSize,
       sessionId,
       enabledEncodings: enabledEncodings.join(','),
-      disableCursor: !enableCursor,
-      disableExtendedClipboard: !enableExtendedClipboard,
+      enableCursor,
+      enableExtendedClipboard,
       ultraVirtualDisplay,
       wheelSpeedFactor,
     };
@@ -412,12 +412,12 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       configBuilder.withDesktopSize(connectionParameters.screenSize);
     }
 
-    if (connectionParameters.disableCursor) {
-      configBuilder.withExtension(disableCursor(true));
+    if (connectionParameters.enableCursor) {
+      configBuilder.withExtension(enableCursor(true));
     }
 
-    if (connectionParameters.disableExtendedClipboard) {
-      configBuilder.withExtension(disableExtendedClipboard(true));
+    if (connectionParameters.enableExtendedClipboard) {
+      configBuilder.withExtension(enableExtendedClipboard(true));
     }
 
     if (connectionParameters.ultraVirtualDisplay) {
