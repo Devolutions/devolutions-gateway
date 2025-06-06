@@ -40,6 +40,7 @@ import { RadioButtonModule } from 'primeng/radiobutton';
 import { ScrollPanelModule } from 'primeng/scrollpanel';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SidebarModule } from 'primeng/sidebar';
+import { SliderModule } from 'primeng/slider';
 import { SplitButtonModule } from 'primeng/splitbutton';
 import { StepsModule } from 'primeng/steps';
 import { TableModule } from 'primeng/table';
@@ -54,7 +55,6 @@ import { TreeModule } from 'primeng/tree';
 import { TreeTableModule } from 'primeng/treetable';
 import { TriStateCheckboxModule } from 'primeng/tristatecheckbox';
 import { VirtualScrollerModule } from 'primeng/virtualscroller';
-import { SliderModule } from 'primeng/slider';
 
 const PRIMENG_MODULES = [
   DividerModule,
