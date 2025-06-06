@@ -402,7 +402,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       .withPassword(connectionParameters.password)
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
-      .withAuthToken(connectionParameters.token);
+      .withAuthToken(connectionParameters.token)
+      .withExtension(enableExtendedClipboard(connectionParameters.enableExtendedClipboard));
 
     if (connectionParameters.username != null) {
       configBuilder.withUsername(connectionParameters.username);
@@ -414,10 +415,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     if (connectionParameters.enableCursor) {
       configBuilder.withExtension(enableCursor(true));
-    }
-
-    if (connectionParameters.enableExtendedClipboard) {
-      configBuilder.withExtension(enableExtendedClipboard(true));
     }
 
     if (connectionParameters.ultraVirtualDisplay) {
