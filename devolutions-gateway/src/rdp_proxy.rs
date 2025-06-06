@@ -37,7 +37,7 @@ where
     }
 }
 
-#[instrument("rdp_proxy", skip_all, fields(session_id = proxy.session_info.association_id.to_string(), target = proxy.server_addr.to_string()))]
+#[instrument("rdp_proxy", skip_all, fields(session_id = proxy.session_info.id.to_string(), target = proxy.server_addr.to_string()))]
 async fn handle<C, S>(proxy: RdpProxy<C, S>) -> anyhow::Result<()>
 where
     C: AsyncRead + AsyncWrite + Unpin + Send + Sync,

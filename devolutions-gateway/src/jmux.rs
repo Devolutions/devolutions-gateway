@@ -50,7 +50,7 @@ pub async fn handle(
     let session_id = claims.jet_aid;
 
     let info = SessionInfo::builder()
-        .association_id(session_id)
+        .id(session_id)
         .application_protocol(claims.jet_ap)
         .details(ConnectionModeDetails::Fwd {
             destination_host: main_destination_host,

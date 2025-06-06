@@ -28,7 +28,8 @@ pub enum ConnectionModeDetails {
 
 #[derive(Debug, Serialize, Clone, TypedBuilder)]
 pub struct SessionInfo {
-    pub association_id: Uuid,
+    #[serde(rename = "association_id")]
+    pub id: Uuid,
     pub application_protocol: ApplicationProtocol,
     #[builder(setter(transform = |value: RecordingPolicy| value != RecordingPolicy::None))]
     pub recording_policy: bool,
@@ -42,12 +43,6 @@ pub struct SessionInfo {
     pub details: ConnectionModeDetails,
 }
 
-impl SessionInfo {
-    pub fn id(&self) -> Uuid {
-        self.association_id
-    }
-}
-
 #[instrument]
 pub async fn add_session_in_progress(
     sessions: &SessionMessageSender,
@@ -55,7 +50,7 @@ pub async fn add_session_in_progress(
     info: SessionInfo,
     notify_kill: Arc<Notify>,
 ) -> anyhow::Result<()> {
-    let association_id = info.association_id;
+    let association_id = info.id;
     let start_timestamp = info.start_timestamp;
 
     sessions
@@ -286,7 +281,7 @@ impl SessionManagerTask {
     }
 
     fn handle_new(&mut self, info: SessionInfo, notify_kill: Arc<Notify>) {
-        let id = info.association_id;
+        let id = info.id;
         self.all_running.insert(id, info);
         self.all_notify_kill.insert(id, notify_kill);
     }
@@ -371,7 +366,7 @@ async fn session_manager_task(
 
                             with_ttl.push(WithTtlInfo {
                                 deadline,
-                                session_id: info.id(),
+                                session_id: info.id,
                             });
 
                             // Reset the Sleep instance if the new deadline is sooner or it is already elapsed.
@@ -379,19 +374,19 @@ async fn session_manager_task(
                                 auto_kill_sleep.as_mut().reset(deadline);
                             }
 
-                            debug!(session.id = %info.id(), minutes = minutes.get(), "Limited TTL session registered");
+                            debug!(session.id = %info.id, minutes = minutes.get(), "Limited TTL session registered");
                         }
 
                         if info.recording_policy {
                             let task = EnsureRecordingPolicyTask {
-                                session_id: info.id(),
+                                session_id: info.id,
                                 session_manager_handle: manager.tx.clone(),
                                 recording_manager_handle: manager.recording_manager_handle.clone(),
                             };
 
                             devolutions_gateway_task::spawn_task(task, shutdown_signal.clone()).detach();
 
-                            debug!(session.id = %info.id(), "Session with recording policy registered");
+                            debug!(session.id = %info.id, "Session with recording policy registered");
                         }
 
                         manager.handle_new(info, notify_kill);

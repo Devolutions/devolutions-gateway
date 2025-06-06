@@ -257,7 +257,7 @@ where
             info!("WebSocket-TLS forwarding");
 
             let info = SessionInfo::builder()
-                .association_id(claims.jet_aid)
+                .id(claims.jet_aid)
                 .application_protocol(claims.jet_ap)
                 .details(ConnectionModeDetails::Fwd {
                     destination_host: selected_target.clone(),
@@ -286,7 +286,7 @@ where
             info!("WebSocket-TCP forwarding");
 
             let info = SessionInfo::builder()
-                .association_id(claims.jet_aid)
+                .id(claims.jet_aid)
                 .application_protocol(claims.jet_ap)
                 .details(ConnectionModeDetails::Fwd {
                     destination_host: selected_target.clone(),
@@ -470,7 +470,7 @@ async fn fwd_http(
                 info!(target = %request_uri, "WebSocket-WebSocket forwarding");
 
                 let info = SessionInfo::builder()
-                    .association_id(claims.jet_aid)
+                    .id(claims.jet_aid)
                     .application_protocol(claims.jet_ap)
                     .details(ConnectionModeDetails::Fwd {
                         destination_host: claims.target_host,
