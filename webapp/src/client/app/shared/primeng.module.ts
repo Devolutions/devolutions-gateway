@@ -40,6 +40,7 @@ import { RadioButtonModule } from 'primeng/radiobutton';
 import { ScrollPanelModule } from 'primeng/scrollpanel';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SidebarModule } from 'primeng/sidebar';
+import { SliderModule } from 'primeng/slider';
 import { SplitButtonModule } from 'primeng/splitbutton';
 import { StepsModule } from 'primeng/steps';
 import { TableModule } from 'primeng/table';
@@ -110,6 +111,7 @@ const PRIMENG_MODULES = [
   ListboxModule,
   BadgeModule,
   ConfirmPopupModule,
+  SliderModule,
 ];
 
 @NgModule({

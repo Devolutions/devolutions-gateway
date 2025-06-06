@@ -113,11 +113,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   checkboxes = [
     {
       label: 'Unicode Keyboard Mode',
-      action: () => {
+      default: this.useUnicodeKeyboard,
+      onChange: () => {
         this.useUnicodeKeyboard = !this.useUnicodeKeyboard;
         this.setKeyboardUnicodeMode(this.useUnicodeKeyboard);
       },
-      isChecked: () => this.useUnicodeKeyboard,
     },
   ];
 
