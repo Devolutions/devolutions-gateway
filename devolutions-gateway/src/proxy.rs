@@ -88,7 +88,7 @@ where
         let mut transport_a = self.transport_a;
         let mut transport_b = self.transport_b;
 
-        let session_id = self.session_info.id();
+        let session_id = self.session_info.id;
         let notify_kill = Arc::new(Notify::new());
 
         crate::session::add_session_in_progress(

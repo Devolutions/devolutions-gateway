@@ -170,7 +170,7 @@ async fn subscriber_polling_task(
                 let session_list = sessions
                     .into_values()
                     .map(|session| SubscriberSessionInfo {
-                        association_id: session.association_id,
+                        association_id: session.id,
                         start_timestamp: session.start_timestamp,
                     })
                     .collect();

@@ -312,7 +312,7 @@ pub async fn handle(
     // Start actual RDP session
 
     let info = SessionInfo::builder()
-        .association_id(claims.jet_aid)
+        .id(claims.jet_aid)
         .application_protocol(claims.jet_ap)
         .details(ConnectionModeDetails::Fwd {
             destination_host: destination.clone(),
