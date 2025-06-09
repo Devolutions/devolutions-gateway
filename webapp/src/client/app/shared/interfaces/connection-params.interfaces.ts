@@ -36,8 +36,8 @@ export interface IronVNCConnectionParameters {
   token?: string;
   screenSize?: DesktopSize;
   enabledEncodings?: string;
-  disableCursor: boolean;
-  disableExtendedClipboard: boolean;
+  enableCursor: boolean;
+  enableExtendedClipboard: boolean;
   ultraVirtualDisplay: boolean;
   wheelSpeedFactor: number;
   sessionId?: string;

@@ -32,8 +32,8 @@ import { DesktopSize } from '@shared/models/desktop-size';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
-  disableCursor,
-  disableExtendedClipboard,
+  enableCursor,
+  enableExtendedClipboard,
   enabledEncodings,
   ultraVirtualDisplay,
   wheelSpeedFactor,
@@ -118,6 +118,17 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
+  sliders = [
+    {
+      label: 'Wheel Speed',
+      value: 1,
+      onChange: (value: number) => this.setWheelSpeedFactor(value),
+      min: 0.1,
+      max: 3,
+      step: 0.1,
+    },
+  ];
+
   protected removeElement: Subject<unknown> = new Subject();
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
@@ -199,6 +210,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     }
 
     this.cursorOverrideActive = !this.cursorOverrideActive;
+  }
+
+  setWheelSpeedFactor(factor: number): void {
+    this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
   }
 
   removeWebClientGuiElement(): void {
@@ -362,8 +377,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       screenSize: desktopScreenSize,
       sessionId,
       enabledEncodings: enabledEncodings.join(','),
-      disableCursor: !enableCursor,
-      disableExtendedClipboard: !enableExtendedClipboard,
+      enableCursor,
+      enableExtendedClipboard,
       ultraVirtualDisplay,
       wheelSpeedFactor,
     };
@@ -387,7 +402,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       .withPassword(connectionParameters.password)
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
-      .withAuthToken(connectionParameters.token);
+      .withAuthToken(connectionParameters.token)
+      .withExtension(enableCursor(connectionParameters.enableCursor))
+      .withExtension(ultraVirtualDisplay(connectionParameters.ultraVirtualDisplay))
+      .withExtension(enableExtendedClipboard(connectionParameters.enableExtendedClipboard));
 
     if (connectionParameters.username != null) {
       configBuilder.withUsername(connectionParameters.username);
@@ -397,25 +415,11 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       configBuilder.withDesktopSize(connectionParameters.screenSize);
     }
 
-    if (connectionParameters.disableCursor) {
-      configBuilder.withExtension(disableCursor(true));
-    }
-
-    if (connectionParameters.disableExtendedClipboard) {
-      configBuilder.withExtension(disableExtendedClipboard(true));
-    }
-
-    if (connectionParameters.ultraVirtualDisplay) {
-      configBuilder.withExtension(ultraVirtualDisplay(true));
-    }
-
     if (connectionParameters.enabledEncodings !== '') {
       configBuilder.withExtension(enabledEncodings(connectionParameters.enabledEncodings));
     } else {
       configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
     }
-
-    configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     const config = configBuilder.build();
 

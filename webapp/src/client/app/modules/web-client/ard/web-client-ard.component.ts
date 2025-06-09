@@ -97,6 +97,17 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
+  sliders = [
+    {
+      label: 'Wheel Speed',
+      value: 1,
+      onChange: (value: number) => this.setWheelSpeedFactor(value),
+      min: 0.1,
+      max: 3,
+      step: 0.1,
+    },
+  ];
+
   protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;
   private remoteClient: UserInteraction;
@@ -166,6 +177,10 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     }
 
     this.cursorOverrideActive = !this.cursorOverrideActive;
+  }
+
+  setWheelSpeedFactor(factor: number): void {
+    this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
   }
 
   removeWebClientGuiElement(): void {
@@ -331,8 +346,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       .withPassword(connectionParameters.password)
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
-      .withAuthToken(connectionParameters.token)
-      .withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
+      .withAuthToken(connectionParameters.token);
 
     if (connectionParameters.resolutionQuality != null) {
       configBuilder.withExtension(resolutionQuality(connectionParameters.resolutionQuality));

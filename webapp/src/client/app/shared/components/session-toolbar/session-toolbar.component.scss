@@ -77,6 +77,11 @@
   height: 100%;
 }
 
+.session-toolbar ::ng-deep .p-slider {
+  width: 5vw;
+  margin: 10px;
+}
+
 ::ng-deep .p-button-inactive .p-button-icon {
   color: gray !important;
 }

@@ -51,12 +51,27 @@
   </div>
 
   <div class="session-toolbar-middle-group" *ngIf="checkboxes.length > 0">
-    <ng-container *ngFor="let checkbox of checkboxes; let i = index; let last = last">
-        <p-checkbox (onChange)="checkbox.action()"
-                  [label]="checkbox.label" [binary]="true"></p-checkbox>
+    <ng-container *ngFor="let checkbox of checkboxes; let last = last;">
+      <p-checkbox (onChange)="checkbox.onChange($event.checked)"
+                  [value]="checkbox.default"
+                  [label]="checkbox.label"
+                  [binary]="true"></p-checkbox>
 
-        <div class="separator" *ngIf="checkboxes.length > 1 && !last"></div>
+      <div class="separator" *ngIf="!last"></div>
+    </ng-container>
+  </div>
 
+  <div class="session-toolbar-middle-group" *ngIf="sliders.length > 0">
+    <ng-container *ngFor="let slider of sliders; let last = last;">
+        <label>{{ slider.label }}</label>
+        <p-slider [(ngModel)]="slider.value"
+                  (onSlideEnd)="slider.onChange($event.value)"
+                  [min]="slider.min"
+                  [max]="slider.max"
+                  [step]="slider.step"></p-slider>
+        <span>{{ slider.value }}</span>
+
+      <div class="separator" *ngIf="!last"></div>
     </ng-container>
   </div>
 
