@@ -404,12 +404,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       .withProxyAddress(connectionParameters.gatewayAddress)
       .withAuthToken(connectionParameters.token)
       .withExtension(enableCursor(connectionParameters.enableCursor))
-      .withExtension(
-        ultraVirtualDisplay(connectionParameters.ultraVirtualDisplay),
-      )
-      .withExtension(
-        enableExtendedClipboard(connectionParameters.enableExtendedClipboard),
-      );
+      .withExtension(ultraVirtualDisplay(connectionParameters.ultraVirtualDisplay))
+      .withExtension(enableExtendedClipboard(connectionParameters.enableExtendedClipboard));
 
     if (connectionParameters.username != null) {
       configBuilder.withUsername(connectionParameters.username);
