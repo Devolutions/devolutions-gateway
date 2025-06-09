@@ -403,7 +403,13 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
       .withAuthToken(connectionParameters.token)
-      .withExtension(enableExtendedClipboard(connectionParameters.enableExtendedClipboard));
+      .withExtension(enableCursor(connectionParameters.enableCursor))
+      .withExtension(
+        ultraVirtualDisplay(connectionParameters.ultraVirtualDisplay),
+      )
+      .withExtension(
+        enableExtendedClipboard(connectionParameters.enableExtendedClipboard),
+      );
 
     if (connectionParameters.username != null) {
       configBuilder.withUsername(connectionParameters.username);
@@ -411,14 +417,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     if (connectionParameters.screenSize != null) {
       configBuilder.withDesktopSize(connectionParameters.screenSize);
-    }
-
-    if (connectionParameters.enableCursor) {
-      configBuilder.withExtension(enableCursor(true));
-    }
-
-    if (connectionParameters.ultraVirtualDisplay) {
-      configBuilder.withExtension(ultraVirtualDisplay(true));
     }
 
     if (connectionParameters.enabledEncodings !== '') {
