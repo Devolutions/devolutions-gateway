@@ -101,6 +101,7 @@ pub(crate) async fn forward_handler(
             jet_ttl: request.jet_ttl,
             jet_aid: request.jet_aid,
             jet_rec: request.jet_rec,
+            jet_reuse: request.jet_reuse,
         },
     )
     .await
@@ -279,6 +280,7 @@ pub(crate) struct ForwardRequest {
     jet_ttl: Option<u64>,
     jet_aid: Option<Uuid>,
     jet_rec: bool,
+    jet_reuse: Option<u32>,
 }
 
 #[derive(Deserialize)]
