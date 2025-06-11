@@ -23,6 +23,9 @@ public class AssociationClaims : IGatewayClaims
     [JsonPropertyName("jet_rec")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RecordingPolicy? RecordingPolicy { get; set; }
+    [JsonPropertyName("jet_reuse")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReusePolicy? ReusePolicy { get; set; }
 
     public AssociationClaims(
         Guid scopeGatewayId,
@@ -30,7 +33,8 @@ public class AssociationClaims : IGatewayClaims
         ApplicationProtocol applicationProtocol,
         Guid sessionId,
         SessionTtl? TimeToLive = null,
-        RecordingPolicy? RecordingPolicy = null)
+        RecordingPolicy? RecordingPolicy = null,
+        ReusePolicy? ReusePolicy = null)
     {
         this.DestinationHost = destinationHost;
         this.ApplicationProtocol = applicationProtocol;
@@ -39,6 +43,7 @@ public class AssociationClaims : IGatewayClaims
         this.ScopeGatewayId = scopeGatewayId;
         this.TimeToLive = TimeToLive;
         this.RecordingPolicy = RecordingPolicy;
+        this.ReusePolicy = ReusePolicy;
     }
 
     public string GetContentType()
