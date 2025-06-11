@@ -420,20 +420,19 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private initSessionEventHandler(): void {
-    this.remoteClient.onSessionEvent({
-      next: (event: SessionEvent): void => {
-        switch (event.type) {
-          case SessionEventType.STARTED:
-            this.handleSessionStarted(event);
-            break;
-          case SessionEventType.TERMINATED:
-          case SessionEventType.ERROR:
-            this.handleSessionEndedOrError(event);
-            break;
-        }
-      },
-      error: (err) => this.handleSubscriptionError(err),
-    });
+    const handler = (event: SessionEvent): void => {
+      switch (event.type) {
+        case SessionEventType.STARTED:
+          this.handleSessionStarted(event);
+          break;
+        case SessionEventType.TERMINATED:
+        case SessionEventType.ERROR:
+          this.handleSessionEndedOrError(event);
+          break;
+      }
+    };
+
+    this.remoteClient.onSessionEvent(handler);
   }
 
   private handleSessionStarted(event: SessionEvent): void {
@@ -469,10 +468,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ? DVL_WARNING_ICON : DVL_RDP_ICON;
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
-  }
-
-  private handleSubscriptionError(error): void {
-    console.error('Error in session event subscription', error);
   }
 
   private handleIronRDPError(error: IronError | string): void {
