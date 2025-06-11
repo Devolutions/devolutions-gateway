@@ -95,9 +95,9 @@ public class JsonSerializationTests
     [Fact]
     public void AssociationClaimsWithOptionalParameters()
     {
-        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":120,"jet_rec":"proxy"}""";
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":120,"jet_rec":"proxy","jet_reuse":0}""";
 
-        var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(120), RecordingPolicy.Proxy);
+        var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(120), RecordingPolicy.Proxy, ReusePolicy.Disallow);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
