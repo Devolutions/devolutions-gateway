@@ -2,6 +2,45 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.2.1 (2025-06-11)
+
+### Features
+
+- _webapp_: allow dynamically adjust wheel_speed_factor for VNC and ARD sessions ([#1369](https://github.com/Devolutions/devolutions-gateway/issues/1369)) ([58536dba69](https://github.com/Devolutions/devolutions-gateway/commit/58536dba69d4b181dd270112754c77fa64d347cd))
+
+  The wheel speed factor setting is moved to the toolbar.
+
+- _dgw_: allow session tokens to be reused in a limited way ([b3415c2bcc](https://github.com/Devolutions/devolutions-gateway/commit/b3415c2bcc425cb3ce98ce17b93e4ebe9c72069f)) ([DGW-238](https://devolutions.atlassian.net/browse/DGW-238))
+
+  Add support a configurable reconnection window, allowing token reuse for
+  reconnections after disconnection within a defined period. This feature
+  will enable more robust handling of temporary disconnections, minimizing
+  session disruptions.
+  
+  The token can be reused under three conditions:
+  
+  - The associated session was not killed.
+  - The reconnection window since last disconnection is not exceeded.
+  - The number of connections during the reconnection window does not
+    exceed 10 (hardcoded value).
+  
+  For the last point, this is the maximum number of reconnections allowed
+  during the reconnection window. If the reconnection window (e.g.:
+  30 seconds) is over while the connection is still alive, the counter
+  is reset, and it’s possible to reconnect up to 10 times again. This
+  prevents brute force attacks in the situation where the token is stolen,
+  although that is tricky to exploit in the first place.
+
+- _dgw_: support port wildcards for JMUX sessions ([#1377](https://github.com/Devolutions/devolutions-gateway/issues/1377)) ([922792ea07](https://github.com/Devolutions/devolutions-gateway/commit/922792ea07893617b849a5de0b080e7db9eb818b)) ([DGW-243](https://devolutions.atlassian.net/browse/DGW-243))
+
+  When the port is set to 0, we do not add a `FilteringRule::Port`, and
+  when the the host is also set to * (i.e.: `*:0`), insert
+  `FilteringRule::Allow` to allow anything.
+
+### Bug Fixes
+
+- _dgw_: fix terminal recording player CSS issue ([#1374](https://github.com/Devolutions/devolutions-gateway/issues/1374)) ([917bb48d44](https://github.com/Devolutions/devolutions-gateway/commit/917bb48d444e80d77b03396f205913910fe2de15)) ([DGW-280](https://devolutions.atlassian.net/browse/DGW-280))
+
 ## 2025.2.0 (2025-06-04)
 
 ### Features

@@ -21,7 +21,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "2025.2.0"
+version = "2025.2.1"
 
 [profile.profiling]
 inherits = "release"
