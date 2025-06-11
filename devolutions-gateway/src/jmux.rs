@@ -36,16 +36,17 @@ pub async fn handle(
             claims
                 .hosts
                 .into_iter()
-                .map(|addr| {
-                    if addr.host() == "*" {
-                        FilteringRule::port(addr.port())
-                    } else {
-                        FilteringRule::wildcard_host(addr.host().to_owned()).and(FilteringRule::port(addr.port()))
-                    }
+                .map(|addr| match (addr.host(), addr.port()) {
+                    ("*", 0) => FilteringRule::allow(),
+                    ("*", port) => FilteringRule::port(port),
+                    (host, 0) => FilteringRule::wildcard_host(host.to_owned()),
+                    (host, port) => FilteringRule::wildcard_host(host.to_owned()).and(FilteringRule::port(port)),
                 })
                 .collect(),
         ),
     };
+
+    debug!(?config, "JMUX config");
 
     let session_id = claims.jet_aid;
 
