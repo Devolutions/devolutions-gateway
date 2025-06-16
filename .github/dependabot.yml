@@ -8,11 +8,9 @@ updates:
       - "CBenoit"
     open-pull-requests-limit: 3
     groups:
-      ironrdp:
+      iron:
         patterns:
           - "ironrdp*"
-      ironvnc:
-        patterns:
           - "ironvnc*"
       serde:
         patterns:
