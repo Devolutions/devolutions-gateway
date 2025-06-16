@@ -50,13 +50,11 @@ export class WebClientService extends BaseComponent {
     const screenSizeStr: string = ScreenSize.getEnumKey(submittedFormData.screenSize);
     if (submittedFormData.screenSize >= 2 && submittedFormData.screenSize <= 20) {
       const rawSize: string[] = screenSizeStr?.split('x');
-      return rawSize.length > 1
-        ? { width: Number.parseInt(rawSize[0]), height: Number.parseInt(rawSize[1]) - WebSession.TOOLBAR_SIZE }
-        : null;
+      return rawSize.length > 1 ? { width: Number.parseInt(rawSize[0]), height: Number.parseInt(rawSize[1]) } : null;
     }
     if (submittedFormData.screenSize === ScreenSize.Custom) {
       return submittedFormData.customWidth && submittedFormData.customHeight
-        ? { width: submittedFormData.customWidth, height: submittedFormData.customHeight - WebSession.TOOLBAR_SIZE }
+        ? { width: submittedFormData.customWidth, height: submittedFormData.customHeight }
         : null;
     }
   }
