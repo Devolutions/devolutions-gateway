@@ -1,4 +1,4 @@
-import { Component, ElementRef, HostListener, Input, Renderer2 } from '@angular/core';
+import { Component, ElementRef, HostListener, Input } from '@angular/core';
 import { WebSession } from '@shared/models/web-session.model';
 import { UtilsService } from '@shared/services/utils.service';
 
@@ -37,8 +37,9 @@ export class SessionToolbarComponent {
 
   @Input() checkboxes: {
     label: string;
-    default: boolean;
+    value: boolean;
     onChange: (value: boolean) => void;
+    enabled: () => boolean;
   }[] = [];
 
   @Input() sliders: {
@@ -54,10 +55,7 @@ export class SessionToolbarComponent {
   showToolbarDiv = true;
   loading = true;
 
-  constructor(
-    private renderer: Renderer2,
-    protected utils: UtilsService,
-  ) {}
+  constructor(protected utils: UtilsService) {}
 
   @HostListener('document:mousemove', ['$event'])
   onMouseMove(event: MouseEvent): void {
@@ -66,13 +64,7 @@ export class SessionToolbarComponent {
 
   @HostListener('document:fullscreenchange')
   onFullScreenChange(): void {
-    this.handleOnFullScreenEvent();
-  }
-
-  private handleOnFullScreenEvent(): void {
-    if (!document.fullscreenElement) {
-      this.handleExitFullScreenEvent();
-    }
+    this.isFullScreenMode = !!document.fullscreenElement;
   }
 
   private handleSessionToolbarDisplay(event: MouseEvent): void {
@@ -86,45 +78,6 @@ export class SessionToolbarComponent {
       this.showToolbarDiv = true;
     } else if (event.clientY > WebSession.TOOLBAR_SIZE) {
       this.showToolbarDiv = false;
-    }
-  }
-
-  toggleFullscreen(): void {
-    this.isFullScreenMode = !this.isFullScreenMode;
-    !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
-  }
-
-  private async enterFullScreen(): Promise<void> {
-    if (document.fullscreenElement) {
-      return;
-    }
-
-    try {
-      const sessionContainerElement = this.sessionContainerParent.nativeElement;
-      await sessionContainerElement.requestFullscreen();
-    } catch (err) {
-      this.isFullScreenMode = false;
-      console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
-    }
-  }
-
-  private exitFullScreen(): void {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch((err) => {
-        console.error(`Error attempting to exit fullscreen: ${err}`);
-      });
-    }
-  }
-
-  private handleExitFullScreenEvent(): void {
-    this.isFullScreenMode = false;
-    this.showToolbarDiv = true;
-
-    const sessionContainerElement = this.sessionContainerParent.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
     }
   }
 }

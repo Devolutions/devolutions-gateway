@@ -17,14 +17,6 @@
   </div>
 
   <div class="session-toolbar-middle-group">
-    <p-button
-      (onClick)="toggleFullscreen()"
-      label="Full Screen"
-      icon="dvl-icon dvl-icon-fullscreen"
-      iconPos="left"></p-button>
-
-    <div class="separator" *ngIf="middleButtons.length > 0"></div>
-
     <ng-container *ngFor="let button of middleButtons; let i = index; let last = last">
       <p-button (click)="button.action()"
                 [label]="button.label"
@@ -53,8 +45,9 @@
   <div class="session-toolbar-middle-group" *ngIf="checkboxes.length > 0">
     <ng-container *ngFor="let checkbox of checkboxes; let last = last;">
       <p-checkbox (onChange)="checkbox.onChange($event.checked)"
-                  [value]="checkbox.default"
+                  [(ngModel)]="checkbox.value"
                   [label]="checkbox.label"
+                  [disabled]="!checkbox.enabled()"
                   [binary]="true"></p-checkbox>
 
       <div class="separator" *ngIf="!last"></div>
