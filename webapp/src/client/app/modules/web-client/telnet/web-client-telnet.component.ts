@@ -9,11 +9,6 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { MessageService } from 'primeng/api';
-import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
-import { v4 as uuidv4 } from 'uuid';
-
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
@@ -22,6 +17,10 @@ import { ComponentStatus } from '@shared/models/component-status.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultTelnetPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { MessageService } from 'primeng/api';
+import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
+import { v4 as uuidv4 } from 'uuid';
 import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
 import {
   LoggingLevel,

@@ -1,11 +1,10 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { AbstractControl, FormGroup } from '@angular/forms';
-import { SelectItem } from 'primeng/api';
-import { takeUntil } from 'rxjs/operators';
-
 import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebFormService } from '@shared/services/web-form.service';
+import { SelectItem } from 'primeng/api';
+import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'web-client-screen-size-control',

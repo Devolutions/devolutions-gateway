@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Observable, Subject, merge, timer } from 'rxjs';
+import { merge, Observable, Subject, timer } from 'rxjs';
 import { distinctUntilChanged, finalize, map, shareReplay, startWith, takeUntil } from 'rxjs/operators';
 import { LoadingMode } from '../enums/loading-mode.enum';
 import { LoadingEvent } from '../models/loading-event.model';

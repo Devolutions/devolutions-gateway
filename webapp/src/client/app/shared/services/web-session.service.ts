@@ -1,14 +1,5 @@
 import { Injectable, Type } from '@angular/core';
 import { FormGroup } from '@angular/forms';
-import { BehaviorSubject, Observable, of } from 'rxjs';
-import { map } from 'rxjs/operators';
-import {
-  CanSendTerminateSessionCmd,
-  ComponentForSession,
-  ConnectionSessionType,
-  SessionType,
-} from './../models/web-session.model';
-
 import { DVL_WARNING_ICON, ProtocolIconMap } from '@gateway/app.constants';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
@@ -20,6 +11,14 @@ import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
 import { DesktopSize } from '@shared/models/desktop-size';
 import { WebSession } from '@shared/models/web-session.model';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
+import { BehaviorSubject, Observable, of } from 'rxjs';
+import { map } from 'rxjs/operators';
+import {
+  CanSendTerminateSessionCmd,
+  ComponentForSession,
+  ConnectionSessionType,
+  SessionType,
+} from './../models/web-session.model';
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024

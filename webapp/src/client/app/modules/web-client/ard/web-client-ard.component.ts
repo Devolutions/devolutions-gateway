@@ -11,10 +11,7 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { MessageService } from 'primeng/api';
-import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
-
+import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -25,10 +22,11 @@ import { ComponentStatus } from '@shared/models/component-status.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-
-import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { MessageService } from 'primeng/api';
+import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
-import { Backend, ardQualityMode, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
+import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, DVL_WARNING_ICON, JET_ARD_URL } from '@gateway/app.constants';
 import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
 import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';

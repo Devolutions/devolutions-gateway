@@ -11,10 +11,7 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { MessageService } from 'primeng/api';
-import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
-
+import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -23,18 +20,19 @@ import { SessionEventType } from '@shared/enums/session-event-type.enum';
 import { IronVNCConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { VncFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-
-import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
-import { DesktopSize } from '@shared/models/desktop-size';
+import { MessageService } from 'primeng/api';
+import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
   enableCursor,
-  enableExtendedClipboard,
   enabledEncodings,
+  enableExtendedClipboard,
   ultraVirtualDisplay,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';

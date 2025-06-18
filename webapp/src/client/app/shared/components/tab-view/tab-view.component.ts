@@ -9,13 +9,11 @@ import {
   Type,
   ViewChild,
 } from '@angular/core';
-import { TabView } from 'primeng/tabview';
-import { takeUntil } from 'rxjs/operators';
-
+import { BaseComponent } from '@shared/bases/base.component';
 import { SessionDataTypeMap, SessionType, WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
-
-import { BaseComponent } from '@shared/bases/base.component';
+import { TabView } from 'primeng/tabview';
+import { takeUntil } from 'rxjs/operators';
 import { MainPanelComponent } from '../main-panel/main-panel.component';
 
 @Component({

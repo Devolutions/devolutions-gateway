@@ -1,12 +1,11 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, Subscription, interval, of, throwError } from 'rxjs';
-import { catchError, map, takeUntil, tap } from 'rxjs/operators';
-
 import { BaseComponent } from '@shared/bases/base.component';
 import { Session } from '@shared/models/session';
 import { ApiService } from '@shared/services/api.service';
 import { NavigationService } from '@shared/services/navigation.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { BehaviorSubject, interval, Observable, of, Subscription, throwError } from 'rxjs';
+import { catchError, map, takeUntil, tap } from 'rxjs/operators';
 import { SessionType } from '../models/web-session.model';
 
 @Injectable({

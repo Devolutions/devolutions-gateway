@@ -9,10 +9,6 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { AbstractControl, FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { Message } from 'primeng/api';
-import { EMPTY, Observable, forkJoin, of } from 'rxjs';
-import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
-
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
@@ -21,10 +17,13 @@ import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.inte
 import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { BaseSessionComponent, ConnectionSessionType, SessionType, WebSession } from '@shared/models/web-session.model';
-import { UtilsService } from '@shared/services/utils.service';
 import { StorageService } from '@shared/services/utils/storage.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { Message } from 'primeng/api';
+import { EMPTY, forkJoin, Observable, of } from 'rxjs';
+import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'web-client-form',

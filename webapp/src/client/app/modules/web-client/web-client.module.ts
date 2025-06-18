@@ -1,9 +1,7 @@
-import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from '@angular/core';
-import { RouterModule, Routes } from '@angular/router';
-import { KeyFilterModule } from 'primeng/keyfilter';
-
 import { NgOptimizedImage } from '@angular/common';
+import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterModule, Routes } from '@angular/router';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { ArdFormComponent } from '@gateway/modules/web-client/form/form-components/ard/ard-form.component';
 import { RdpFormComponent } from '@gateway/modules/web-client/form/form-components/rdp/rdp-form.component';
@@ -27,6 +25,7 @@ import { SessionToolbarComponent } from '@shared/components/session-toolbar/sess
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
 import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
+import { KeyFilterModule } from 'primeng/keyfilter';
 import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 // TODO: uncomment when adding support for iDRAC and VMWare
 // import { VmIdControlComponent } from './form/form-controls/vm-id-control/vm-id-control.component';

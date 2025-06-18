@@ -9,29 +9,27 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { MessageService } from 'primeng/api';
-import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
-import { v4 as uuidv4 } from 'uuid';
-
+import {
+  LoggingLevel,
+  SSHTerminal,
+  loggingService as sshLoggingService,
+  TerminalConnectionStatus,
+} from '@devolutions/web-ssh-gui';
+import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
+import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebClientBaseComponent, WebComponentReady } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
+import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultSshPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-
-import {
-  LoggingLevel,
-  SSHTerminal,
-  TerminalConnectionStatus,
-  loggingService as sshLoggingService,
-} from '@devolutions/web-ssh-gui';
-import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
-import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import { MessageService } from 'primeng/api';
+import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
+import { v4 as uuidv4 } from 'uuid';
 
 @Component({
   selector: 'gateway-web-client-ssh',

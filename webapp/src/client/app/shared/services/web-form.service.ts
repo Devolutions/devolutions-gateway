@@ -1,12 +1,11 @@
 import { ChangeDetectorRef, Injectable } from '@angular/core';
-import { BaseComponent } from '@shared/bases/base.component';
-import { WebClientAuthMode } from '@shared/enums/web-client-auth-mode.enum';
-import { Observable, of } from 'rxjs';
-
 import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms';
+import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { WebClientAuthMode } from '@shared/enums/web-client-auth-mode.enum';
 import { WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { SelectItem } from 'primeng/api';
+import { Observable, of } from 'rxjs';
 import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
 import { Encoding } from '../enums/encoding.enum';
 import { ResolutionQuality } from '../enums/resolution-quality.enum';
