@@ -12,7 +12,7 @@ import { map } from 'rxjs/operators';
 export class WasmInitResolver implements Resolve<void> {
   constructor() {}
 
-  resolve(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): Observable<void> {
+  resolve(_route: ActivatedRouteSnapshot, _state: RouterStateSnapshot): Observable<void> {
     return forkJoin([from(rdp_init('INFO')), from(vnc_init('INFO'))]).pipe(map(() => void 0));
   }
 }

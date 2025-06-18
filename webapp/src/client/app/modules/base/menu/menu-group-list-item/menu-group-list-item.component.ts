@@ -25,7 +25,7 @@ export class MenuGroupListItemComponent extends BaseComponent implements OnInit,
     this.onMenuGroupMouseLeave(); // Call this function to reset the icon at init
   }
 
-  onToggleMenuGroupList($event: MouseEvent): void {
+  onToggleMenuGroupList(_$event: MouseEvent): void {
     if (this.accordion) {
       this.isClosed = !this.isClosed;
       if (this.isClosed) {

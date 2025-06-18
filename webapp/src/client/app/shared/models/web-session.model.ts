@@ -1,4 +1,4 @@
-import { Component, ComponentRef, Type } from '@angular/core';
+import { ComponentRef, Type } from '@angular/core';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';

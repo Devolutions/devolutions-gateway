@@ -28,8 +28,6 @@ import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, DVL_WARNING_ICON, JET_ARD_URL } from '@gateway/app.constants';
-import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
-import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -385,7 +383,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     this.remoteClient.onSessionEvent(handler);
   }
 
-  private handleSessionStarted(event: SessionEvent): void {
+  private handleSessionStarted(_event: SessionEvent): void {
     this.handleIronRDPConnectStarted();
     this.initializeStatus();
   }

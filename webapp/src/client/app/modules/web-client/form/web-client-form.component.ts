@@ -8,15 +8,13 @@ import {
   Output,
   SimpleChanges,
 } from '@angular/core';
-import { AbstractControl, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
-import { BaseComponent } from '@shared/bases/base.component';
-import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.interfaces';
 import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { BaseSessionComponent, ConnectionSessionType, SessionType, WebSession } from '@shared/models/web-session.model';
+import { BaseSessionComponent, SessionType, WebSession } from '@shared/models/web-session.model';
 import { StorageService } from '@shared/services/utils/storage.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { WebFormService } from '@shared/services/web-form.service';

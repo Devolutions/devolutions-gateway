@@ -423,13 +423,14 @@ jobs:
         with:
           npm_token: ${{ secrets.ARTIFACTORY_NPM_READ_TOKEN }}
 
-      - name: Install Biome
-        run: npm install -g @biomejs/biome
+      - name: Install NPM dependencies for webapp
+        working-directory: webapp/
+        run: npm install
 
       - name: Check
-        working-directory: webapp/player-project
-        run: biome check ./src
-      
+        working-directory: webapp/
+        run: npm run player:check
+
       - name: Install NPM dependencies for video player
         working-directory: webapp/video-player
         run: npm install

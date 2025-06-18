@@ -6,11 +6,10 @@ import {
   HostListener,
   OnDestroy,
   OnInit,
-  Type,
   ViewChild,
 } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import { SessionDataTypeMap, SessionType, WebSession, WebSessionComponentType } from '@shared/models/web-session.model';
+import { SessionDataTypeMap, SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { TabView } from 'primeng/tabview';
 import { takeUntil } from 'rxjs/operators';

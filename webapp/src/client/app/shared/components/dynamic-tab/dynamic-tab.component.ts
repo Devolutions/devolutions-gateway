@@ -2,7 +2,6 @@ import {
   AfterViewInit,
   ChangeDetectorRef,
   Component,
-  ComponentRef,
   EventEmitter,
   Input,
   OnDestroy,
@@ -20,7 +19,7 @@ import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { ComponentListenerService } from '@shared/services/component-listener.service';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { distinctUntilChanged, take, takeUntil, tap } from 'rxjs/operators';
+import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'web-client-dynamic-tab',

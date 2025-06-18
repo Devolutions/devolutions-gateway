@@ -1,9 +1,9 @@
-import { HttpErrorResponse, HttpEvent, HttpHandler, HttpInterceptor, HttpRequest } from '@angular/common/http';
+import { HttpErrorResponse, HttpHandler, HttpInterceptor, HttpRequest } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
-import { Observable, throwError } from 'rxjs';
+import { throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
 @Injectable()
@@ -26,7 +26,7 @@ export class AuthInterceptor implements HttpInterceptor {
       const currentUrl = new URL(window.location.href);
       const targetUrl = new URL(req.url);
       goToNext.push(currentUrl.hostname !== targetUrl.hostname);
-    } catch (e) {
+    } catch (_e) {
       // do nothing, the url is not valid, the req is for the same host
     }
 

@@ -45,7 +45,7 @@ export class AnalyticService {
       return;
     }
     this.openedConnections.delete(connectionId.id);
-    const duration = new Date().getTime() - connection.startTime.getTime();
+    const duration = Date.now() - connection.startTime.getTime();
     const durationInSeconds = duration / 1000;
 
     this.sendEvent({
@@ -57,7 +57,7 @@ export class AnalyticService {
   sendCloseAllEvents(): void {
     this.openedConnections.forEach((connection, id) => {
       this.openedConnections.delete(id);
-      const duration = new Date().getTime() - connection.startTime.getTime();
+      const duration = Date.now() - connection.startTime.getTime();
       const durationInSeconds = duration / 1000;
 
       this.sendEvent({
