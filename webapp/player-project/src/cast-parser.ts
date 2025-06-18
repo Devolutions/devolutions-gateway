@@ -13,8 +13,8 @@ export function ensureNoSameTimeCues(content: string) {
         lines[i] = JSON.stringify(parsed);
         prevLine = parsed; // Update prevLine to the current parsed line
       }
-    } catch (e) {
-      // If parsing fails (e.g., it's a non-JSON line), skip or handle error
+    } catch (_e) {
+      // If parsing fails (e.g., it's a non-JSON line), skip
     }
   }
   return lines.join('\n');

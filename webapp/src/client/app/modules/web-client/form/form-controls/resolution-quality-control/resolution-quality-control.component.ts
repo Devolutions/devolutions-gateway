@@ -1,11 +1,10 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
-import { SelectItem } from 'primeng/api';
-import { takeUntil } from 'rxjs/operators';
-
 import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
+import { SelectItem } from 'primeng/api';
+import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'web-client-resolution-quality-control',

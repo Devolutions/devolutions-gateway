@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { ProtocolIconMap, ProtocolNameToProtocolMap } from '@gateway/app.constants';
-import { Observable, Subject, from, merge } from 'rxjs';
+import { from, merge, Observable, Subject } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Protocol } from '../enums/web-client-protocol.enum';
 import { WebClientService } from './web-client.service';

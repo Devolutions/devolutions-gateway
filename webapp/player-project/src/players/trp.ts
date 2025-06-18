@@ -1,7 +1,7 @@
-import { loadFile, overrideFetch, restoreFetch } from '.';
 import { GatewayAccessApi } from '../gateway';
 import { createTerminal } from '../terminal';
 import { convertTRPtoCast } from '../trp-decoder';
+import { loadFile, overrideFetch, restoreFetch } from '.';
 
 export async function handleTrp(gatewayApi: GatewayAccessApi) {
   const trpSrc = gatewayApi.staticRecordingUrl(gatewayApi.recordingInfo.files[0].fileName);

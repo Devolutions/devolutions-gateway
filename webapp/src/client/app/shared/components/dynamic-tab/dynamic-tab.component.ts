@@ -13,8 +13,8 @@ import {
 
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
-import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { BaseComponent } from '@shared/bases/base.component';
+import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { ComponentListenerService } from '@shared/services/component-listener.service';

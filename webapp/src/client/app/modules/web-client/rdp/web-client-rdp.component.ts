@@ -11,10 +11,8 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { MessageService } from 'primeng/api';
-import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
-
+import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { Backend, displayControl, kdcProxyUrl, preConnectionBlob } from '@devolutions/iron-remote-desktop-rdp';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -23,14 +21,14 @@ import { SessionEventType } from '@shared/enums/session-event-type.enum';
 import { IronRDPConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { RdpFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { UtilsService } from '@shared/services/utils.service';
+import { DesktopSize } from '@shared/models/desktop-size';
 import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-
-import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
-import { Backend, displayControl, kdcProxyUrl, preConnectionBlob } from '@devolutions/iron-remote-desktop-rdp';
-import { DesktopSize } from '@shared/models/desktop-size';
+import { MessageService } from 'primeng/api';
+import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';

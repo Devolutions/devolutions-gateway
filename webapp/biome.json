@@ -1,26 +1,42 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.8.2/schema.json",
-  "organizeImports": {
-    "enabled": true
+  "root": true,
+  "$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
   },
   "files": {
-    "ignore": [
-      "*.json",
-      "*.js.map",
-      "*.min.js",
-      "*.min.css",
-      "player/",
-      "player-project/dist/",
-      "player-project/node_modules/",
-      "video-player/dist/",
-      "video-player/node_modules/"
+    "includes": [
+      "**",
+      "!**/*.json",
+      "!**/*.js.map",
+      "!**/*.min.js",
+      "!**/*.min.css",
+      "!**/player/",
+      "!**/player-project/dist/",
+      "!**/player-project/node_modules/",
+      "!**/video-player/dist/",
+      "!**/video-player/node_modules/"
     ]
   },
   "linter": {
     "rules": {
       "style": {
         "useTemplate": "off",
-        "useImportType": "off"
+        "useImportType": "off",
+        "noParameterAssign": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error",
+        "useEnumInitializers": "error",
+        "useSelfClosingElements": "error",
+        "useSingleVarDeclarator": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useNumberNamespace": "error",
+        "noInferrableTypes": "error",
+        "noUselessElse": "error"
       },
       "complexity": {
         "noUselessConstructor": "off"
