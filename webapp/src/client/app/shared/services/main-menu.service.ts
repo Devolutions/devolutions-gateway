@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { SessionType, WebSession } from '@shared/models/web-session.model';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject } from 'rxjs';
 
 @Injectable()
 export class MainMenuService {

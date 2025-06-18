@@ -450,7 +450,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     this.remoteClient.onSessionEvent(handler);
   }
 
-  private handleSessionStarted(event: SessionEvent): void {
+  private handleSessionStarted(_event: SessionEvent): void {
     this.handleIronVNCConnectStarted();
     this.initializeStatus();
   }

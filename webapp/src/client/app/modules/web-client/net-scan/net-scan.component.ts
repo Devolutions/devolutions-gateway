@@ -28,7 +28,7 @@ export class NetScanComponent implements AfterViewInit {
       next: (entry: NetScanEntry) => {
         this.services.push(entry);
       },
-      error: (e) => {
+      error: (_e) => {
         this.ended = true;
       },
       complete: () => {

@@ -1,5 +1,5 @@
-import { ComponentRef, Injectable, Type, ViewContainerRef } from '@angular/core';
-import { DataForSession, SessionType, WebSession } from '@shared/models/web-session.model';
+import { ComponentRef, Injectable, ViewContainerRef } from '@angular/core';
+import { SessionType, WebSession } from '@shared/models/web-session.model';
 
 @Injectable({
   providedIn: 'root',

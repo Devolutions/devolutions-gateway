@@ -12,7 +12,6 @@ import {
   TelnetConnectionParameters,
 } from '@shared/interfaces/connection-params.interfaces';
 import { DesktopSize } from '@shared/models/desktop-size';
-import { WebSession } from '@shared/models/web-session.model';
 import { ApiService } from '@shared/services/api.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { Observable, of, throwError } from 'rxjs';
@@ -126,7 +125,7 @@ export class WebClientService extends BaseComponent {
       map((token) => {
         return { ...connectionParameters, token } as typeof connectionParameters;
       }),
-      catchError((err) => {
+      catchError((_err) => {
         return throwError(() => new Error('Failed to fetch protocol token'));
       }),
     );

@@ -1,7 +1,6 @@
 import { AfterViewInit, ChangeDetectorRef, Component, Injectable, Input, OnDestroy, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
-import { SSHFormDataInput } from '@gateway/shared/interfaces/forms.interfaces';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { BaseComponent } from '@shared/bases/base.component';

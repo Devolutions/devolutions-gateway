@@ -6,7 +6,6 @@ import { NavigationService } from '@shared/services/navigation.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { BehaviorSubject, interval, Observable, of, Subscription, throwError } from 'rxjs';
 import { catchError, map, takeUntil, tap } from 'rxjs/operators';
-import { SessionType } from '../models/web-session.model';
 
 @Injectable({
   providedIn: 'root',
@@ -135,7 +134,7 @@ export class AuthService extends BaseComponent {
   }
 
   private storeToken(username: string, token: string): void {
-    const expirationTime: number = new Date().getTime() + AuthService.TOKEN_LIFESPAN;
+    const expirationTime: number = Date.now() + AuthService.TOKEN_LIFESPAN;
     const session: Session = new Session(username, token, new Date(expirationTime).toISOString());
     sessionStorage.setItem(AuthService.SESSION_STORAGE_KEY, JSON.stringify(session));
     this.sessionSubject.next(session);
@@ -174,7 +173,7 @@ export class AuthService extends BaseComponent {
       return false;
     }
 
-    const now: number = new Date().getTime();
+    const now: number = Date.now();
     const expiresTime: number = new Date(session.expires).getTime();
 
     return now <= expiresTime;

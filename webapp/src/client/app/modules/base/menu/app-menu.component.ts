@@ -78,7 +78,7 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
       (): void => {
         this.navigationService.navigateToRoot().then(noop);
       },
-      (url: string) => false,
+      (_url: string) => false,
       true,
     );
 
@@ -109,7 +109,7 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
    * This function always returns zero, indicating "no change" in order.
    * KAH Dec 16 2023
    */
-  asIsOrder(a: KeyValue<string, RouterMenuItem>, b: KeyValue<string, RouterMenuItem>): number {
+  asIsOrder(_a: KeyValue<string, RouterMenuItem>, _b: KeyValue<string, RouterMenuItem>): number {
     return 1;
   }
 

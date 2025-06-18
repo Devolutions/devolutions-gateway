@@ -1,4 +1,4 @@
-import { Component, ElementRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { Component, Input, OnDestroy, OnInit } from '@angular/core';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { ValidateFileResult } from '../../../../../shared/services/ssh-key.service';

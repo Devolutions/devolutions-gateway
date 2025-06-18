@@ -1,6 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import { ConnectionSessionType, SessionType, WebSession } from '@shared/models/web-session.model';
+import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { takeUntil } from 'rxjs/operators';
 
