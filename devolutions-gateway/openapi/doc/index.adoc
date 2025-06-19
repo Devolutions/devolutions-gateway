@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2025.1.4
+2025.2.1
 :toc: left
 :numbered:
 :toclevels: 4
@@ -1102,6 +1102,92 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Net]
+=== Net
+
+
+[.getNetConfig]
+==== getNetConfig
+
+`GET /jet/net/config`
+
+Lists network interfaces
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/net/config/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `netscan_token`
+| http
+| bearer
+|===
+
+
+===== Return Type
+
+
+<<List>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Network interfaces
+| List[<<InterfaceInfo>>] 
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/net/config/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Preflight]
 === Preflight
 
@@ -1743,6 +1829,25 @@ endif::internal-generation[]
 |===
 
 
+[#AddressFamily]
+=== _AddressFamily_ 
+
+
+
+
+
+
+[.fields-AddressFamily]
+[cols="1"]
+|===
+| Enum Values
+
+| IPv4
+| IPv6
+
+|===
+
+
 [#AppCredential]
 === _AppCredential_ 
 
@@ -2136,6 +2241,56 @@ Service configuration diagnostic
 
 
 
+[#InterfaceInfo]
+=== _InterfaceInfo_ 
+
+
+
+
+[.fields-InterfaceInfo]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| address
+| X
+| 
+|   String  
+| 
+|     
+
+| broadcast
+| 
+| X
+|   String  
+| 
+|     
+
+| family
+| X
+| 
+|  <<AddressFamily>>  
+| 
+|    IPv4, IPv6,  
+
+| mac
+| 
+| X
+|   String  
+| 
+|     
+
+| netmask
+| 
+| X
+|   String  
+| 
+|     
+
+|===
+
+
+
 [#JrlInfo]
 === _JrlInfo_ 
 
@@ -2209,6 +2364,7 @@ Service configuration diagnostic
 
 | general-failure
 | info
+| warn
 | unsupported-operation
 | invalid-parameters
 | internal-server-error
@@ -2275,7 +2431,7 @@ Service configuration diagnostic
 | 
 | X
 |   String  
-| The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kind.
+| The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kinds.
 |     
 
 |===
@@ -2336,7 +2492,7 @@ Service configuration diagnostic
 | X
 |  <<PreflightAlertStatus>>  
 | 
-|    general-failure, info, unsupported-operation, invalid-parameters, internal-server-error, host-resolution-failure, agent-version-lookup-failure,  
+|    general-failure, info, warn, unsupported-operation, invalid-parameters, internal-server-error, host-resolution-failure, agent-version-lookup-failure,  
 
 | kind
 | X

@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2025.1.5
+  version: 2025.2.1
 paths:
   /jet/config:
     patch:
@@ -337,6 +337,35 @@ paths:
       security:
       - scope_token:
         - gateway.jrl.read
+  /jet/net/config:
+    get:
+      tags:
+      - Net
+      summary: Lists network interfaces
+      operationId: GetNetConfig
+      responses:
+        '200':
+          description: Network interfaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InterfaceInfo'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
+      security:
+      - netscan_token: []
   /jet/preflight:
     post:
       tags:
@@ -540,6 +569,11 @@ components:
       - gateway.recordings.read
       - gateway.update
       - gateway.preflight
+    AddressFamily:
+      type: string
+      enum:
+      - IPv4
+      - IPv6
     AppCredential:
       type: object
       required:
@@ -739,6 +773,25 @@ components:
           type: string
           description: Gateway service version
           nullable: true
+    InterfaceInfo:
+      type: object
+      required:
+      - family
+      - address
+      properties:
+        address:
+          type: string
+        broadcast:
+          type: string
+          nullable: true
+        family:
+          $ref: '#/components/schemas/AddressFamily'
+        mac:
+          type: string
+          nullable: true
+        netmask:
+          type: string
+          nullable: true
     JrlInfo:
       type: object
       required:
@@ -770,6 +823,7 @@ components:
       enum:
       - general-failure
       - info
+      - warn
       - unsupported-operation
       - invalid-parameters
       - internal-server-error
