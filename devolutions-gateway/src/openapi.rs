@@ -26,7 +26,7 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::api::webapp::sign_session_token,
         crate::api::update::trigger_update_check,
         crate::api::preflight::post_preflight,
-        // crate::api::net::get_net_config,
+        crate::api::net::get_net_config,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -54,9 +54,10 @@ use crate::api::preflight::PreflightAlertStatus;
         PreflightOutput,
         PreflightOutputKind,
         PreflightAlertStatus,
-        // crate::api::net::NetworkInterface,
         SessionTokenContentType,
         SessionTokenSignRequest,
+        InterfaceInfo,
+        AddressFamily,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -347,8 +348,7 @@ enum PreflightOperationKind {
 }
 
 #[allow(unused)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 struct AppCredential {
     /// The kind of credentials.
     kind: AppCredentialKind,
@@ -362,15 +362,13 @@ struct AppCredential {
     password: Option<String>,
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 enum AppCredentialKind {
     #[serde(rename = "username-password")]
     UsernamePassword,
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct PreflightOutput {
     /// The ID of the preflight operation associated to this result.
     operation_id: Uuid,
@@ -419,8 +417,7 @@ pub(crate) struct PreflightOutput {
 }
 
 #[allow(unused)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) enum PreflightOutputKind {
     #[serde(rename = "version")]
     Version,
@@ -434,4 +431,22 @@ pub(crate) enum PreflightOutputKind {
     ResolvedHost,
     #[serde(rename = "alert")]
     Alert,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+struct InterfaceInfo {
+    family: AddressFamily,
+    address: String,
+    broadcast: Option<String>,
+    netmask: Option<String>,
+    mac: Option<String>,
+}
+
+#[allow(unused)]
+#[derive(Serialize, utoipa::ToSchema)]
+enum AddressFamily {
+    #[serde(rename = "IPv4")]
+    V4,
+    #[serde(rename = "IPv6")]
+    V6,
 }
