@@ -1,7 +1,7 @@
-use crate::extract::RepeatQuery;
-use crate::http::HttpError;
-use crate::token::Protocol;
-use crate::DgwState;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
+
 use axum::extract::ws::{Message, Utf8Bytes};
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
@@ -16,9 +16,11 @@ use network_scanner::ping::PingEvent;
 use network_scanner::port_discovery::TcpKnockEvent;
 use network_scanner::scanner::{self, DnsEvent, NetworkScannerParams, ScannerConfig, TcpKnockWithHost};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::time::Duration;
+
+use crate::extract::RepeatQuery;
+use crate::http::HttpError;
+use crate::token::Protocol;
+use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new()
@@ -469,7 +471,7 @@ impl EventFilter {
     tag = "Net",
     path = "/jet/net/config",
     responses(
-        (status = 200, description = "Network interfaces", body = [Vec<NetworkInterface>]),
+        (status = 200, description = "Network interfaces", body = [HashMap<String, Vec<InterfaceInfo>>]),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -477,101 +479,69 @@ impl EventFilter {
     ),
     security(("netscan_token" = [])),
 ))]
-pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
-    let interfaces = interfaces::get_network_interfaces()
-        .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
-        .into_iter()
-        .map(NetworkInterface::from)
-        .collect();
+pub(crate) async fn get_net_config(
+    _token: crate::extract::NetScanToken,
+) -> Result<Json<HashMap<String, Vec<InterfaceInfo>>>, HttpError> {
+    let net_ifaces = interfaces::get_network_interfaces()
+        .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?;
 
-    Ok(Json(interfaces))
-}
+    let mut interface_map = HashMap::new();
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Serialize)]
-pub struct NetworkInterface {
-    pub name: String,
-    #[serde(rename = "addresses")]
-    pub addrs: Vec<Addr>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mac_addr: Option<String>,
-    pub index: u32,
-}
-
-/// Network interface address
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub enum Addr {
-    V4(V4IfAddr),
-    V6(V6IfAddr),
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Netmask<T>(pub T);
-
-impl<T: fmt::Display> fmt::Display for Netmask<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<T> Serialize for Netmask<T>
-where
-    T: Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct V4IfAddr {
-    pub ip: Ipv4Addr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub broadcast: Option<Ipv4Addr>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub netmask: Option<Netmask<Ipv4Addr>>,
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct V6IfAddr {
-    pub ip: Ipv6Addr,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub broadcast: Option<Ipv6Addr>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub netmask: Option<Netmask<Ipv6Addr>>,
-}
-
-impl From<interfaces::NetworkInterface> for NetworkInterface {
-    fn from(iface: interfaces::NetworkInterface) -> Self {
-        let addr = iface
+    for iface in net_ifaces {
+        let addresses: Vec<InterfaceInfo> = iface
             .addr
             .into_iter()
             .map(|addr| match addr {
-                interfaces::Addr::V4(v4) => Addr::V4(V4IfAddr {
-                    ip: v4.ip,
-                    broadcast: v4.broadcast,
-                    netmask: v4.netmask.map(Netmask),
-                }),
-                interfaces::Addr::V6(v6) => Addr::V6(V6IfAddr {
-                    ip: v6.ip,
-                    broadcast: v6.broadcast,
-                    netmask: v6.netmask.map(Netmask),
-                }),
+                interfaces::Addr::V4(addr) => InterfaceInfo {
+                    address: IfAddress::V4 {
+                        address: addr.ip,
+                        broadcast: addr.broadcast,
+                        netmask: addr.netmask,
+                    },
+                    mac: iface.mac_addr.clone(),
+                },
+                interfaces::Addr::V6(addr) => InterfaceInfo {
+                    address: IfAddress::V6 {
+                        address: addr.ip,
+                        broadcast: addr.broadcast,
+                        netmask: addr.netmask,
+                    },
+                    mac: iface.mac_addr.clone(),
+                },
             })
             .collect();
 
-        NetworkInterface {
-            name: iface.name,
-            mac_addr: iface.mac_addr,
-            addrs: addr,
-            index: iface.index,
-        }
+        interface_map.insert(iface.name, addresses);
     }
+
+    Ok(Json(interface_map))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct InterfaceInfo {
+    #[serde(flatten)]
+    address: IfAddress,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mac: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(tag = "family")]
+enum IfAddress {
+    #[serde(rename = "IPv4")]
+    V4 {
+        address: Ipv4Addr,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        broadcast: Option<Ipv4Addr>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        netmask: Option<Ipv4Addr>,
+    },
+    #[serde(rename = "IPv6")]
+    V6 {
+        address: Ipv6Addr,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        broadcast: Option<Ipv6Addr>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        netmask: Option<Ipv6Addr>,
+    },
 }
