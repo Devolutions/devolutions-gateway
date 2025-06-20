@@ -27,11 +27,13 @@ import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { WebSession } from '@shared/models/web-session.model';
+import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -49,6 +51,7 @@ enum UserIronRdpErrorKind {
 })
 export class WebClientRdpComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;
+  @Input() sessionsContainerElement: ElementRef;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
@@ -61,9 +64,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   formData: RdpFormDataInput;
   rdpError: { kind: string; backtrace: string };
   isFullScreenMode = false;
-  showToolbarDiv = true;
   useUnicodeKeyboard = false;
   cursorOverrideActive = false;
+
+  dynamicResizeSupported = false;
+  dynamicResizeEnabled = false;
 
   leftToolbarButtons = [
     {
@@ -79,6 +84,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   ];
 
   middleToolbarButtons = [
+    {
+      label: 'Full Screen',
+      icon: 'dvl-icon dvl-icon-fullscreen',
+      action: () => this.toggleFullscreen(),
+    },
     {
       label: 'Fit to Screen',
       icon: 'dvl-icon dvl-icon-minimize',
@@ -111,11 +121,18 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   checkboxes = [
     {
       label: 'Unicode Keyboard Mode',
-      default: this.useUnicodeKeyboard,
+      value: this.useUnicodeKeyboard,
       onChange: () => {
         this.useUnicodeKeyboard = !this.useUnicodeKeyboard;
         this.setKeyboardUnicodeMode(this.useUnicodeKeyboard);
       },
+      enabled: () => true,
+    },
+    {
+      label: 'Dynamic Resize',
+      value: this.dynamicResizeEnabled,
+      onChange: () => this.toggleDynamicResize(),
+      enabled: () => this.dynamicResizeSupported,
     },
   ];
 
@@ -123,20 +140,19 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   private remoteClientEventListener: (event: Event) => void;
   private remoteClient: UserInteraction;
 
+  private componentResizeObserverDisconnect?: () => void;
+  private dynamicComponentResizeSubscription?: Subscription;
+
   constructor(
     private renderer: Renderer2,
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
     private webClientService: WebClientService,
+    private componentResizeService: ComponentResizeObserverService,
     protected analyticService: AnalyticService,
   ) {
     super(gatewayAlertMessageService, analyticService);
-  }
-
-  @HostListener('document:mousemove', ['$event'])
-  onMouseMove(event: MouseEvent): void {
-    this.handleSessionToolbarDisplay(event);
   }
 
   @HostListener('document:fullscreenchange')
@@ -155,6 +171,10 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   ngOnDestroy(): void {
     this.removeRemoteClientListener();
     this.removeWebClientGuiElement();
+
+    this.dynamicComponentResizeSubscription?.unsubscribe();
+    this.componentResizeObserverDisconnect?.();
+
     super.ngOnDestroy();
   }
 
@@ -182,11 +202,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   scaleTo(scale: ScreenScale): void {
-    if (scale === ScreenScale.Full) {
-      this.toggleFullscreen();
-    } else {
-      this.remoteClient.setScale(scale.valueOf());
-    }
+    this.remoteClient.setScale(scale.valueOf());
   }
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {
@@ -201,6 +217,30 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     }
 
     this.cursorOverrideActive = !this.cursorOverrideActive;
+  }
+
+  toggleDynamicResize(): void {
+    const RESIZE_DEBOUNCE_TIME = 100;
+
+    this.dynamicResizeEnabled = !this.dynamicResizeEnabled;
+
+    if (this.dynamicResizeEnabled) {
+      this.componentResizeObserverDisconnect = this.componentResizeService.observe(
+        this.sessionsContainerElement.nativeElement,
+      );
+
+      this.dynamicComponentResizeSubscription = this.componentResizeService.resize$
+        .pipe(debounceTime(RESIZE_DEBOUNCE_TIME))
+        .subscribe(({ width, height }) => {
+          if (!this.isFullScreenMode) {
+            height -= WebSession.TOOLBAR_SIZE;
+          }
+          this.remoteClient.resize(width, height);
+        });
+    } else {
+      this.dynamicComponentResizeSubscription?.unsubscribe();
+      this.componentResizeObserverDisconnect?.();
+    }
   }
 
   removeWebClientGuiElement(): void {
@@ -236,21 +276,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     }
   }
 
-  private handleSessionToolbarDisplay(event: MouseEvent): void {
-    if (!document.fullscreenElement) {
-      return;
-    }
-
-    if (event.clientY === 0) {
-      this.showToolbarDiv = true;
-    } else if (event.clientY > 44) {
-      this.showToolbarDiv = false;
-    }
-  }
-
   private toggleFullscreen(): void {
     this.isFullScreenMode = !this.isFullScreenMode;
     !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
+
+    this.scaleTo(ScreenScale.Full);
   }
 
   private async enterFullScreen(): Promise<void> {
@@ -259,8 +289,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     }
 
     try {
-      const sessionContainerElement = this.sessionContainerElement.nativeElement;
-      await sessionContainerElement.requestFullscreen();
+      await this.sessionsContainerElement.nativeElement.requestFullscreen();
     } catch (err) {
       this.isFullScreenMode = false;
       console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
@@ -277,7 +306,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   private handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
-    this.showToolbarDiv = true;
 
     const sessionContainerElement = this.sessionContainerElement.nativeElement;
     const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
@@ -394,6 +422,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
     if (connectionParameters.enableDisplayControl) {
       configBuilder.withExtension(displayControl(true));
+      this.dynamicResizeSupported = true;
     }
 
     if (connectionParameters.preConnectionBlob != null) {

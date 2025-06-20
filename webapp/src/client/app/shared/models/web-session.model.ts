@@ -1,4 +1,4 @@
-import { ComponentRef, Type } from '@angular/core';
+import { ComponentRef, ElementRef, Type } from '@angular/core';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
@@ -57,6 +57,7 @@ export interface HasTabIndex {
 export abstract class BaseSessionComponent extends BaseComponent implements HasTabIndex {
   tabIndex?: number;
   webSessionId: string;
+  sessionsContainerElement: ElementRef;
 }
 
 export interface CanSendTerminateSessionCmd {
