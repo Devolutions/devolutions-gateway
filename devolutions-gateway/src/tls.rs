@@ -73,9 +73,28 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
         CertificateSource::External {
             certificates,
             private_key,
-        } => builder
-            .with_single_cert(certificates, private_key)
-            .context("failed to set server config cert"),
+        } => {
+            let first_certificate = certificates.first().context("empty certificate list")?;
+
+            if let Ok(report) = check_certificate_now(&first_certificate) {
+                if report.issues.intersects(
+                    CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
+                ) {
+                    let serial_number = report.serial_number;
+                    let subject = report.subject;
+                    let issuer = report.issuer;
+                    let not_before = report.not_before;
+                    let not_after = report.not_after;
+                    let issues = report.issues;
+
+                    anyhow::bail!("found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues}");
+                }
+            }
+
+            builder
+                .with_single_cert(certificates, private_key)
+                .context("failed to set server config cert")
+        }
 
         #[cfg(windows)]
         CertificateSource::SystemStore {
@@ -157,8 +176,6 @@ pub mod windows {
         }
 
         fn resolve(&self, client_hello: ClientHello<'_>) -> anyhow::Result<Arc<CertifiedKey>> {
-            use core::fmt::Write as _;
-
             trace!(server_name = ?client_hello.server_name(), "Received ClientHello");
 
             let request_server_name = client_hello
@@ -212,52 +229,54 @@ pub mod windows {
 
             trace!(subject_name = %self.subject_name, count = contexts.len(), "Found certificate contexts");
 
-            let x509_date_now = picky::x509::date::UtcDate::from(now);
+            // We will accumulate all the certificate issues we observe next.
+            let mut cert_issues = CertIssues::empty();
 
             // Initial processing and filtering of the available candidates.
             let mut contexts: Vec<CertHandleCtx> = contexts
                 .into_iter()
                 .enumerate()
                 .filter_map(|(idx, ctx)| {
-                    let not_after = match picky::x509::Cert::from_der(ctx.as_der()) {
-                        Ok(cert) => {
-                            let serial_number = cert.serial_number().0.iter().fold(
-                                String::new(),
-                                |mut acc, byte| {
-                                    let _ = write!(acc, "{byte:X?}");
-                                    acc
-                                },
+                    let not_after = match check_certificate(ctx.as_der(), now) {
+                        Ok(report) => {
+                            trace!(
+                                %idx,
+                                serial_number = %report.serial_number,
+                                subject = %report.subject,
+                                issuer = %report.issuer,
+                                not_before = %report.not_before,
+                                not_after = %report.not_after,
+                                issues = %report.issues,
+                                "Parsed store certificate"
                             );
-                            let subject = cert.subject_name();
-                            let issuer = cert.issuer_name();
-                            let not_before = cert.valid_not_before();
-                            let not_after = cert.valid_not_after();
 
-                            trace!(%idx, %serial_number, %subject, %issuer, %not_before, %not_after, "Parsed store certificate");
+                            // Accumulate the issues found.
+                            cert_issues |= report.issues;
 
-                            if x509_date_now < not_before {
+                            // Skip the certificate if any of the following is true:
+                            // - The certificate is not yet valid.
+                            // - The certificate is missing the server auth extended key usage.
+                            // - The certificate is missing a subject alternative name (SAN) extension.
+                            let skip = report.issues.intersects(
+                                CertIssues::NOT_YET_VALID
+                                    | CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE
+                                    | CertIssues::MISSING_SUBJECT_ALT_NAME,
+                            );
+
+                            if skip {
                                 debug!(
-                                    %idx, %serial_number, %not_before, "Filtered out certificate based on not before validity date"
+                                    %idx,
+                                    serial_number = %report.serial_number,
+                                    issues = %report.issues,
+                                    "Filtered out certificate because it has issues"
                                 );
                                 return None;
                             }
 
-                            let has_server_auth_key_purpose = cert.extensions().iter().any(|ext| match ext.extn_value() {
-                                picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku) => eku.contains(picky::oids::kp_server_auth()),
-                                _ => false,
-                            });
-
-                            if !has_server_auth_key_purpose {
-                                debug!(
-                                    %idx, %serial_number, "Filtered out certificate because it does not have the server auth extended usage"
-                                );
-                                return None;
-                            }
-
-                            not_after
+                            report.not_after
                         }
                         Err(error) => {
-                            debug!(%error, "Failed to parse store certificate number {idx}");
+                            debug!(%idx, %error, "Failed to parse store certificate");
                             picky::x509::date::UtcDate::ymd(1900, 1, 1).expect("hardcoded")
                         }
                     };
@@ -296,7 +315,9 @@ pub mod windows {
                         .ok()
                         .map(|key| (ctx, key))
                 })
-                .context("no usable certificate found in the system store")?;
+                .with_context(|| {
+                    format!("no usable certificate found in the system store; all observed issues: {cert_issues}")
+                })?;
 
             trace!(idx = context.idx, not_after = %context.not_after, key_algorithm_group = ?key.key().algorithm_group(), key_algorithm = ?key.key().algorithm(), "Selected certificate");
 
@@ -341,6 +362,94 @@ pub mod windows {
             }
         }
     }
+}
+
+pub struct CertReport {
+    pub serial_number: String,
+    pub subject: picky::x509::name::DirectoryName,
+    pub issuer: picky::x509::name::DirectoryName,
+    pub not_before: picky::x509::date::UtcDate,
+    pub not_after: picky::x509::date::UtcDate,
+    pub issues: CertIssues,
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct CertIssues: u8 {
+        const NOT_YET_VALID = 0b00000001;
+        const EXPIRED = 0b00000010;
+        const MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE = 0b00000100;
+        const MISSING_SUBJECT_ALT_NAME = 0b00001000;
+    }
+}
+
+impl core::fmt::Display for CertIssues {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        bitflags::parser::to_writer(self, f)
+    }
+}
+
+pub fn check_certificate_now(cert: &[u8]) -> anyhow::Result<CertReport> {
+    check_certificate(cert, time::OffsetDateTime::now_utc())
+}
+
+pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Result<CertReport> {
+    use anyhow::Context as _;
+    use core::fmt::Write as _;
+
+    let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
+    let at = picky::x509::date::UtcDate::from(at);
+
+    let mut issues = CertIssues::empty();
+
+    let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
+        let _ = write!(acc, "{byte:X?}");
+        acc
+    });
+    let subject = cert.subject_name();
+    let issuer = cert.issuer_name();
+    let not_before = cert.valid_not_before();
+    let not_after = cert.valid_not_after();
+
+    if at < not_before {
+        issues.insert(CertIssues::NOT_YET_VALID);
+    }
+
+    if not_after < at {
+        issues.insert(CertIssues::EXPIRED);
+    }
+
+    let mut has_server_auth_key_purpose = false;
+    let mut has_san = false;
+
+    for ext in cert.extensions() {
+        match ext.extn_value() {
+            picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku)
+                if eku.contains(picky::oids::kp_server_auth()) =>
+            {
+                has_server_auth_key_purpose = true;
+            }
+            picky::x509::extension::ExtensionView::SubjectAltName(_) => has_san = true,
+            _ => {}
+        }
+    }
+
+    if !has_server_auth_key_purpose {
+        issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
+    }
+
+    if !has_san {
+        issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
+    }
+
+    Ok(CertReport {
+        serial_number,
+        subject,
+        issuer,
+        not_before,
+        not_after,
+        issues,
+    })
 }
 
 pub mod sanity {
