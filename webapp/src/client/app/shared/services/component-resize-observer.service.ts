@@ -16,7 +16,7 @@ export class ComponentResizeObserverService {
 
     this.ngZone.runOutsideAngular(() => {
       this.observer = new ResizeObserver((entries) => {
-        for (let _entry of entries) {
+        for (const _entry of entries) {
           const width: number = element.offsetWidth;
           const height: number = element.offsetHeight;
 
