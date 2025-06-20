@@ -1,5 +1,6 @@
 import { Component, ElementRef, HostListener, Input, Renderer2 } from '@angular/core';
 import { UtilsService } from '@shared/services/utils.service';
+import { WebSession } from "@shared/models/web-session.model";
 
 @Component({
   selector: 'session-toolbar',
@@ -79,9 +80,11 @@ export class SessionToolbarComponent {
       return;
     }
 
-    if (event.clientY === 0) {
+    const TOOLBAR_ACTIVATION_HEIGHT = 10;
+
+    if (event.clientY <= TOOLBAR_ACTIVATION_HEIGHT) {
       this.showToolbarDiv = true;
-    } else if (event.clientY > 44) {
+    } else if (event.clientY > WebSession.TOOLBAR_SIZE) {
       this.showToolbarDiv = false;
     }
   }
