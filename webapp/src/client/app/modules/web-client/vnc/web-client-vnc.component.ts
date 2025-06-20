@@ -25,25 +25,25 @@ import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError, Subscription, debounceTime } from 'rxjs';
+import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
+  dynamicResizingSupportedCallback,
   enableCursor,
   enabledEncodings,
   enableExtendedClipboard,
   ultraVirtualDisplay,
   wheelSpeedFactor,
-  dynamicResizingSupportedCallback,
 } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { Encoding } from '@shared/enums/encoding.enum';
+import { WebSession } from '@shared/models/web-session.model';
+import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
-import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
-import { WebSession } from '@shared/models/web-session.model';
 
 enum UserIronRdpErrorKind {
   General = 0,

@@ -27,13 +27,13 @@ import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError, Subscription, debounceTime } from 'rxjs';
+import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { WebSession } from '@shared/models/web-session.model';
+import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 
 enum UserIronRdpErrorKind {
   General = 0,
