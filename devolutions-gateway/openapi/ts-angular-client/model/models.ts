@@ -1,4 +1,5 @@
 export * from './accessScope';
+export * from './addressFamily';
 export * from './appCredential';
 export * from './appCredentialKind';
 export * from './appTokenContentType';
@@ -11,6 +12,7 @@ export * from './dataEncoding';
 export * from './deleteManyResult';
 export * from './heartbeat';
 export * from './identity';
+export * from './interfaceInfo';
 export * from './jrlInfo';
 export * from './listenerUrls';
 export * from './preflightAlertStatus';

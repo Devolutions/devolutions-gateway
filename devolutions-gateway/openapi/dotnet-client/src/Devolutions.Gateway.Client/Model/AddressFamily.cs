@@ -28,29 +28,37 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Defines AppTokenContentType
+    /// Defines AddressFamily
     /// </summary>
     [JsonConverter(typeof(StringEnumConverter))]
-    public enum AppTokenContentType
+    public enum AddressFamily
     {
         /// <summary>
-        /// Enum WEBAPP for value: WEBAPP
+        /// Enum IPv4 for value: IPv4
         /// </summary>
-        [EnumMember(Value = "WEBAPP")]
-        WEBAPP = 1
+        [EnumMember(Value = "IPv4")]
+        IPv4 = 1,
+
+        /// <summary>
+        /// Enum IPv6 for value: IPv6
+        /// </summary>
+        [EnumMember(Value = "IPv6")]
+        IPv6 = 2
     }
 
-    public static class AppTokenContentTypeExtensions
+    public static class AddressFamilyExtensions
     {
         /// <summary>
         /// Returns the value as string for a given variant
         /// </summary>
-        public static string ToValue(this AppTokenContentType variant)
+        public static string ToValue(this AddressFamily variant)
         {
             switch (variant)
             {
-                case AppTokenContentType.WEBAPP:
-                    return "WEBAPP";
+                case AddressFamily.IPv4:
+                    return "IPv4";
+                case AddressFamily.IPv6:
+                    return "IPv6";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }

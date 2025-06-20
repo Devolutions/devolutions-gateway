@@ -28,7 +28,7 @@ export interface PreflightOperation {
      */
     time_to_live?: number | null;
     /**
-     * The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kind.
+     * The token to be stored on the proxy-side.  Required for \"provision-token\" and \"provision-credentials\" kinds.
      */
     token?: string | null;
 }

@@ -2,6 +2,7 @@
 Devolutions.Gateway.Client.sln
 README.md
 docs/AccessScope.md
+docs/AddressFamily.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -18,10 +19,12 @@ docs/HealthApi.md
 docs/Heartbeat.md
 docs/HeartbeatApi.md
 docs/Identity.md
+docs/InterfaceInfo.md
 docs/JrecApi.md
 docs/JrlApi.md
 docs/JrlInfo.md
 docs/ListenerUrls.md
+docs/NetApi.md
 docs/PreflightAlertStatus.md
 docs/PreflightApi.md
 docs/PreflightOperation.md
@@ -43,6 +46,7 @@ src/Devolutions.Gateway.Client/Api/HealthApi.cs
 src/Devolutions.Gateway.Client/Api/HeartbeatApi.cs
 src/Devolutions.Gateway.Client/Api/JrecApi.cs
 src/Devolutions.Gateway.Client/Api/JrlApi.cs
+src/Devolutions.Gateway.Client/Api/NetApi.cs
 src/Devolutions.Gateway.Client/Api/PreflightApi.cs
 src/Devolutions.Gateway.Client/Api/SessionsApi.cs
 src/Devolutions.Gateway.Client/Api/UpdateApi.cs
@@ -67,6 +71,7 @@ src/Devolutions.Gateway.Client/Client/WebRequestPathBuilder.cs
 src/Devolutions.Gateway.Client/Devolutions.Gateway.Client.csproj
 src/Devolutions.Gateway.Client/Model/AbstractOpenAPISchema.cs
 src/Devolutions.Gateway.Client/Model/AccessScope.cs
+src/Devolutions.Gateway.Client/Model/AddressFamily.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
@@ -79,6 +84,7 @@ src/Devolutions.Gateway.Client/Model/DataEncoding.cs
 src/Devolutions.Gateway.Client/Model/DeleteManyResult.cs
 src/Devolutions.Gateway.Client/Model/Heartbeat.cs
 src/Devolutions.Gateway.Client/Model/Identity.cs
+src/Devolutions.Gateway.Client/Model/InterfaceInfo.cs
 src/Devolutions.Gateway.Client/Model/JrlInfo.cs
 src/Devolutions.Gateway.Client/Model/ListenerUrls.cs
 src/Devolutions.Gateway.Client/Model/PreflightAlertStatus.cs

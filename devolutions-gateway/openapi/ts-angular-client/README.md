@@ -1,8 +1,8 @@
-## @devolutions/gateway-client@0.14.0
+## @devolutions/gateway-client@0.15.0
 
 Protocol-aware fine-grained relay server
 
-The version of the OpenAPI document: 2025.1.4
+The version of the OpenAPI document: 2025.2.1
 
 ### Building
 
@@ -23,7 +23,7 @@ Navigate to the folder of your consuming project and run one of next commands.
 _published:_
 
 ```
-npm install @devolutions/gateway-client@0.14.0 --save
+npm install @devolutions/gateway-client@0.15.0 --save
 ```
 
 _without publishing (not recommended):_
