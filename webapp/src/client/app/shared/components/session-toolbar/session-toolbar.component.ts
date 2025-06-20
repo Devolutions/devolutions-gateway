@@ -1,6 +1,6 @@
 import { Component, ElementRef, HostListener, Input, Renderer2 } from '@angular/core';
 import { UtilsService } from '@shared/services/utils.service';
-import { WebSession } from "@shared/models/web-session.model";
+import { WebSession } from '@shared/models/web-session.model';
 
 @Component({
   selector: 'session-toolbar',
