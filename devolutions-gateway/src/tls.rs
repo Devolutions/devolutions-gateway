@@ -277,7 +277,7 @@ pub mod windows {
                             report.not_after
                         }
                         Err(error) => {
-                            debug!(%idx, %error, "Failed to parse store certificate");
+                            debug!(%idx, %error, "Failed to check store certificate");
                             picky::x509::date::UtcDate::ymd(1900, 1, 1).expect("hardcoded")
                         }
                     };
