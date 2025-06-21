@@ -135,6 +135,7 @@ pub mod windows {
     use tokio_rustls::rustls::sign::CertifiedKey;
 
     use crate::config::dto;
+    use crate::tls::{check_certificate, CertIssues};
 
     const CACHE_DURATION: time::Duration = time::Duration::seconds(45);
 
@@ -316,7 +317,7 @@ pub mod windows {
                         .map(|key| (ctx, key))
                 })
                 .with_context(|| {
-                    format!("no usable certificate found in the system store; all observed issues: {cert_issues}")
+                    format!("no usable certificate found in the system store; observed issues: {cert_issues}")
                 })?;
 
             trace!(idx = context.idx, not_after = %context.not_after, key_algorithm_group = ?key.key().algorithm_group(), key_algorithm = ?key.key().algorithm(), "Selected certificate");
