@@ -269,7 +269,7 @@ pub mod windows {
                                     %idx,
                                     serial_number = %report.serial_number,
                                     issues = %report.issues,
-                                    "Filtered out certificate because it has issues"
+                                    "Filtered out certificate because it has significant issues"
                                 );
                                 return None;
                             }
