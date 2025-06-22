@@ -414,9 +414,7 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
 
     if at < not_before {
         issues.insert(CertIssues::NOT_YET_VALID);
-    }
-
-    if not_after < at {
+    } else if not_after < at {
         issues.insert(CertIssues::EXPIRED);
     }
 
