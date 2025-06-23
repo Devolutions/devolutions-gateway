@@ -1206,7 +1206,7 @@ dependencies = [
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "ironrdp-rdcleanpath",
- "ironrdp-tokio 0.4.0",
+ "ironrdp-tokio 0.5.0",
  "jmux-proxy",
  "job-queue",
  "job-queue-libsql",
@@ -2840,9 +2840,9 @@ dependencies = [
 
 [[package]]
 name = "ironrdp-tokio"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55e49a72da0632d87a456a21f70e0ae276122ff43484929f1028fb70c355c7b4"
+checksum = "2a44ec3da4e2a5ca5fef2866f5995e684ab87fecd55f4247a0a8090392a2c21a"
 dependencies = [
  "bytes 1.10.1",
  "ironrdp-async 0.5.0",
