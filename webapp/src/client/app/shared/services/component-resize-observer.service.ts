@@ -1,5 +1,4 @@
 import { Injectable, NgZone } from '@angular/core';
-import { WebSession } from '@shared/models/web-session.model';
 import { BehaviorSubject } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
