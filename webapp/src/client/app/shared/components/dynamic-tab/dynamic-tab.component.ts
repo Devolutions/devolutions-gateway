@@ -2,6 +2,7 @@ import {
   AfterViewInit,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   EventEmitter,
   Input,
   OnDestroy,
@@ -28,6 +29,8 @@ import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 })
 export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
   @Input() webSessionTab: WebSession<T>;
+  @Input() sessionsContainerElement: ElementRef;
+
   @ViewChild('dynamicComponentContainer', { read: ViewContainerRef }) container: ViewContainerRef;
   @Output() componentRefSizeChange: EventEmitter<void> = new EventEmitter<void>();
 
@@ -57,7 +60,11 @@ export class DynamicTabComponent<T extends SessionType> extends BaseComponent im
       return;
     }
 
-    const componentRef = this.dynamicComponentService.createComponent(this.container, this.webSessionTab);
+    const componentRef = this.dynamicComponentService.createComponent(
+      this.container,
+      this.sessionsContainerElement,
+      this.webSessionTab,
+    );
 
     if ('webComponentReady' in componentRef.instance) {
       if (componentRef.instance instanceof WebClientTelnetComponent) {

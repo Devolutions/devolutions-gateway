@@ -22,7 +22,7 @@ import { MainPanelComponent } from '../main-panel/main-panel.component';
 })
 export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
   @ViewChild('tabView') tabView: TabView;
-  @ViewChild('sessionsContainer') sessionsContainer: ElementRef;
+  @ViewChild('sessionsContainer') sessionsContainerRef: ElementRef;
 
   webSessionTabs: WebSession<SessionType>[] = [];
   currentTabIndex = 0;
@@ -63,8 +63,8 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   }
 
   measureSize(): void {
-    const width: number = this.sessionsContainer.nativeElement.offsetWidth;
-    const height: number = this.sessionsContainer.nativeElement.offsetHeight - WebSession.TOOLBAR_SIZE;
+    const width: number = this.sessionsContainerRef.nativeElement.offsetWidth;
+    const height: number = this.sessionsContainerRef.nativeElement.offsetHeight - WebSession.TOOLBAR_SIZE;
     this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 

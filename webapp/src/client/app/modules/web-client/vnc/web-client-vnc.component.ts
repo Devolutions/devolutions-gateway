@@ -25,11 +25,12 @@ import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
+  dynamicResizingSupportedCallback,
   enableCursor,
   enabledEncodings,
   enableExtendedClipboard,
@@ -39,6 +40,8 @@ import {
 import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { Encoding } from '@shared/enums/encoding.enum';
+import { WebSession } from '@shared/models/web-session.model';
+import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -58,6 +61,7 @@ enum UserIronRdpErrorKind {
 })
 export class WebClientVncComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;
+  @Input() sessionsContainerElement: ElementRef;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
@@ -70,8 +74,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   formData: VncFormDataInput;
   clientError: { kind: string; backtrace: string };
   isFullScreenMode = false;
-  showToolbarDiv = true;
   cursorOverrideActive = false;
+
+  dynamicResizeSupported = false;
+  dynamicResizeEnabled = false;
 
   leftToolbarButtons = [
     {
@@ -87,6 +93,11 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   ];
 
   middleToolbarButtons = [
+    {
+      label: 'Full Screen',
+      icon: 'dvl-icon dvl-icon-fullscreen',
+      action: () => this.toggleFullscreen(),
+    },
     {
       label: 'Fit to Screen',
       icon: 'dvl-icon dvl-icon-minimize',
@@ -105,6 +116,15 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       icon: 'dvl-icon dvl-icon-cursor',
       action: () => this.toggleCursorKind(),
       isActive: () => !this.cursorOverrideActive,
+    },
+  ];
+
+  checkboxes = [
+    {
+      label: 'Dynamic Resize',
+      value: this.dynamicResizeEnabled,
+      onChange: () => this.toggleDynamicResize(),
+      enabled: () => this.dynamicResizeSupported,
     },
   ];
 
@@ -131,19 +151,19 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
 
+  private componentResizeObserverDisconnect?: () => void;
+  private dynamicComponentResizeSubscription?: Subscription;
+
   constructor(
     private renderer: Renderer2,
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
     private webClientService: WebClientService,
+    private componentResizeService: ComponentResizeObserverService,
     protected analyticService: AnalyticService,
   ) {
     super(gatewayAlertMessageService, analyticService);
-  }
-  @HostListener('document:mousemove', ['$event'])
-  onMouseMove(event: MouseEvent): void {
-    this.handleSessionToolbarDisplay(event);
   }
 
   @HostListener('document:fullscreenchange')
@@ -162,6 +182,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   ngOnDestroy(): void {
     this.removeRemoteClientListener();
     this.removeWebClientGuiElement();
+
+    this.dynamicComponentResizeSubscription?.unsubscribe();
+    this.componentResizeObserverDisconnect?.();
+
     super.ngOnDestroy();
   }
 
@@ -189,11 +213,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }
 
   scaleTo(scale: ScreenScale): void {
-    if (scale === ScreenScale.Full) {
-      this.toggleFullscreen();
-    } else {
-      this.remoteClient.setScale(scale.valueOf());
-    }
+    this.remoteClient.setScale(scale.valueOf());
   }
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {
@@ -212,6 +232,30 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   setWheelSpeedFactor(factor: number): void {
     this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+  }
+
+  toggleDynamicResize(): void {
+    const RESIZE_DEBOUNCE_TIME = 100;
+
+    this.dynamicResizeEnabled = !this.dynamicResizeEnabled;
+
+    if (this.dynamicResizeEnabled) {
+      this.componentResizeObserverDisconnect = this.componentResizeService.observe(
+        this.sessionsContainerElement.nativeElement,
+      );
+
+      this.dynamicComponentResizeSubscription = this.componentResizeService.resize$
+        .pipe(debounceTime(RESIZE_DEBOUNCE_TIME))
+        .subscribe(({ width, height }) => {
+          if (!this.isFullScreenMode) {
+            height -= WebSession.TOOLBAR_SIZE;
+          }
+          this.remoteClient.resize(width, height);
+        });
+    } else {
+      this.dynamicComponentResizeSubscription?.unsubscribe();
+      this.componentResizeObserverDisconnect?.();
+    }
   }
 
   removeWebClientGuiElement(): void {
@@ -247,21 +291,11 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     }
   }
 
-  private handleSessionToolbarDisplay(event: MouseEvent): void {
-    if (!document.fullscreenElement) {
-      return;
-    }
-
-    if (event.clientY === 0) {
-      this.showToolbarDiv = true;
-    } else if (event.clientY > 44) {
-      this.showToolbarDiv = false;
-    }
-  }
-
   private toggleFullscreen(): void {
     this.isFullScreenMode = !this.isFullScreenMode;
     !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
+
+    this.scaleTo(ScreenScale.Full);
   }
 
   private async enterFullScreen(): Promise<void> {
@@ -288,7 +322,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   private handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
-    this.showToolbarDiv = true;
 
     const sessionContainerElement = this.sessionContainerElement.nativeElement;
     const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
@@ -401,6 +434,16 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
       .withAuthToken(connectionParameters.token)
+      .withExtension(
+        dynamicResizingSupportedCallback(() => {
+          this.dynamicResizeSupported = true;
+          // After connecting to the server, the VNC WASM module uses the server's initial desktop size.
+          // If the server supports resizing, we can request a different desktop size.
+          // The canvas will change its logical size, but visually it will remain unchanged.
+          // To prevent the image from appearing flattened or stretched, we need to rescale the canvas.
+          this.scaleTo(this.screenScale.Fit);
+        }),
+      )
       .withExtension(enableCursor(connectionParameters.enableCursor))
       .withExtension(ultraVirtualDisplay(connectionParameters.ultraVirtualDisplay))
       .withExtension(enableExtendedClipboard(connectionParameters.enableExtendedClipboard));

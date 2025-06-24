@@ -1,4 +1,4 @@
-import { ComponentRef, Injectable, ViewContainerRef } from '@angular/core';
+import { ComponentRef, ElementRef, Injectable, ViewContainerRef } from '@angular/core';
 import { SessionType, WebSession } from '@shared/models/web-session.model';
 
 @Injectable({
@@ -7,7 +7,11 @@ import { SessionType, WebSession } from '@shared/models/web-session.model';
 export class DynamicComponentService {
   constructor() {}
 
-  createComponent<T extends SessionType>(container: ViewContainerRef, webSession?: WebSession<T>) {
+  createComponent<T extends SessionType>(
+    container: ViewContainerRef,
+    sessionsContainerRef: ElementRef,
+    webSession?: WebSession<T>,
+  ) {
     container.clear();
     const componentRef = container.createComponent(webSession.component);
 
@@ -16,6 +20,7 @@ export class DynamicComponentService {
     }
 
     componentRef.instance.webSessionId = webSession.id;
+    componentRef.instance.sessionsContainerElement = sessionsContainerRef;
 
     return componentRef;
   }
