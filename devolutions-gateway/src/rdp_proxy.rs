@@ -11,7 +11,7 @@ use crate::subscriber::SubscriberSender;
 
 use anyhow::Context as _;
 use ironrdp_acceptor::credssp::CredsspProcessGenerator as CredsspServerProcessGenerator;
-use ironrdp_connector::credssp::{CredsspProcessGenerator as CredsspClientProcessGenerator, KerberosConfig};
+use ironrdp_connector::credssp::CredsspProcessGenerator as CredsspClientProcessGenerator;
 use ironrdp_connector::sspi::credssp::{ClientState, ServerError, ServerState};
 use ironrdp_connector::sspi::generator::GeneratorState;
 use ironrdp_connector::sspi::kerberos::ServerProperties;
@@ -103,12 +103,8 @@ where
 
     let (client_stream, server_stream) = tokio::join!(client_tls_upgrade_fut, server_tls_upgrade_fut);
 
-    let client_stream = client_stream
-        .inspect_err(|err| warn!(?err, "client stream error"))
-        .context("TLS upgrade with client failed")?;
-    let server_stream = server_stream
-        .inspect_err(|err| warn!(?err, "server stream error"))
-        .context("TLS upgrade with server failed")?;
+    let client_stream = client_stream.context("TLS upgrade with client failed")?;
+    let server_stream = server_stream.context("TLS upgrade with server failed")?;
 
     let server_public_key =
         extract_tls_server_public_key(&server_stream).context("extract target server TLS public key")?;
@@ -176,11 +172,9 @@ where
         Some(&mut network_client),
     );
 
-    // let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    // client_credssp_res.context("CredSSP with client")?;
-    // server_credssp_res.context("CredSSP with server")?;
-    client_credssp_fut.await.context("CredSSP with client")?;
-    server_credssp_fut.await.context("CredSSP with server")?;
+    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
+    client_credssp_res.context("CredSSP with client")?;
+    server_credssp_res.context("CredSSP with server")?;
 
     // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
 
@@ -409,10 +403,8 @@ where
         security_protocol,
         ironrdp_connector::ServerName::new(server_name),
         server_public_key,
-        Some(KerberosConfig {
-            kdc_proxy_url: Some(url::Url::parse("tcp://192.168.1.103:88").unwrap()),
-            hostname: Some("myroniuk-p-laptop".into()),
-        }),
+        // We do not need to specify the Kerberos config here: the sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
+        None,
     )?;
 
     let mut buf = ironrdp_pdu::WriteBuf::new();
@@ -529,6 +521,8 @@ where
     .await;
 
     if security_protocol.intersects(nego::SecurityProtocol::HYBRID_EX) {
+        trace!(?result, "HYBRID_EX");
+
         let result = if result.is_ok() {
             EarlyUserAuthResult::Success
         } else {
