@@ -118,7 +118,6 @@ where
                 span.record("target", selected_target.to_string());
 
                 let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
-                trace!(is_rdp, "IS_RDP????");
 
                 let info = SessionInfo::builder()
                     .id(claims.jet_aid)
