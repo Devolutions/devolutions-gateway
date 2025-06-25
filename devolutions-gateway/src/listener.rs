@@ -2,7 +2,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use futures::TryFutureExt as _;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs as _};
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
