@@ -2,7 +2,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use futures::TryFutureExt as _;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
@@ -10,7 +10,7 @@ use tracing::Instrument as _;
 use url::Url;
 
 use crate::generic_client::GenericClient;
-use crate::utils::url_to_socket_addr;
+use crate::target_addr::TargetAddr;
 use crate::DgwState;
 
 const HTTP_CONNECTION_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(10 * 60);
@@ -36,7 +36,7 @@ pub enum ListenerKind {
 
 pub struct GatewayListener {
     addr: SocketAddr,
-    listener_url: Url,
+    binding_url: TargetAddr,
     kind: ListenerKind,
     listener: TcpListener,
     state: DgwState,
@@ -48,7 +48,12 @@ impl GatewayListener {
 
         info!(%url, "Initiating listener...");
 
-        let socket_addr = url_to_socket_addr(&url).context("invalid url")?;
+        let url = TargetAddr::try_from(url).context("invalid internal url")?;
+        let socket_addr = url
+            .to_socket_addrs()
+            .context("resolve internal URL to socket addr")?
+            .next()
+            .context("internal URL resolved to nothing")?;
 
         let socket = if socket_addr.is_ipv4() {
             TcpSocket::new_v4().context("failed to create IPv4 TCP socket")?
@@ -72,7 +77,7 @@ impl GatewayListener {
 
         Ok(Self {
             addr: socket_addr,
-            listener_url: url,
+            binding_url: url,
             kind,
             listener,
             state,
@@ -87,7 +92,7 @@ impl GatewayListener {
         self.kind
     }
 
-    #[instrument("listener", skip(self), fields(port = self.listener_url.port().expect("port")))]
+    #[instrument("listener", skip(self), fields(port = self.binding_url.port()))]
     pub async fn run(self) -> anyhow::Result<()> {
         match self.kind() {
             ListenerKind::Tcp => run_tcp_listener(self.listener, self.state).await,

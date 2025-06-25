@@ -254,7 +254,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     conf.listeners
         .iter()
         .map(|listener| {
-            GatewayListener::init_and_bind(listener.internal_url.clone(), state.clone())
+            GatewayListener::init_and_bind(listener, state.clone())
                 .with_context(|| format!("failed to initialize {}", listener.internal_url))
         })
         .collect::<anyhow::Result<Vec<GatewayListener>>>()
