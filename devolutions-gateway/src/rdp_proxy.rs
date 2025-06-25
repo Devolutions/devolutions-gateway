@@ -55,8 +55,6 @@ where
     C: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
-    info!("started RDP proxy!");
-
     let RdpProxy {
         conf,
         session_info,
@@ -87,23 +85,16 @@ where
         tls_conf.acceptor.clone(),
     ));
 
-    info!("gateway public key is here");
-
     // -- Dual handshake with the client and the server until the TLS security upgrade -- //
 
     let mut client_framed = ironrdp_tokio::TokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
-    info!("framed streams are here");
-
     let handshake_result =
         dual_handshake_until_tls_upgrade(&mut client_framed, &mut server_framed, credential_mapping).await?;
-    info!("the handshakes are done!");
 
     let client_stream = client_framed.into_inner_no_leftover();
     let server_stream = server_framed.into_inner_no_leftover();
-
-    info!("Handshake is done!");
 
     // -- Perform the TLS upgrading for both the client and the server, effectively acting as a man-in-the-middle -- //
 
@@ -112,16 +103,12 @@ where
 
     let (client_stream, server_stream) = tokio::join!(client_tls_upgrade_fut, server_tls_upgrade_fut);
 
-    info!("TLS upgrade futures finished!");
-
     let client_stream = client_stream
         .inspect_err(|err| warn!(?err, "client stream error"))
         .context("TLS upgrade with client failed")?;
     let server_stream = server_stream
         .inspect_err(|err| warn!(?err, "server stream error"))
         .context("TLS upgrade with server failed")?;
-
-    info!("TLS upgrade is done!");
 
     let server_public_key =
         extract_tls_server_public_key(&server_stream).context("extract target server TLS public key")?;
@@ -131,8 +118,6 @@ where
 
     let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
-
-    warn!("START CREDSSPS STAGES");
 
     let krb_server_config = if conf.debug.enable_unstable {
         if let Some(KerberosServer {
@@ -195,7 +180,6 @@ where
     // client_credssp_res.context("CredSSP with client")?;
     // server_credssp_res.context("CredSSP with server")?;
     client_credssp_fut.await.context("CredSSP with client")?;
-    warn!("CREDSASPWITHCLIENTFINISHED");
     server_credssp_fut.await.context("CredSSP with server")?;
 
     // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
@@ -344,16 +328,10 @@ where
         .await
         .context("send connection request to server")?;
 
-    info!("sent");
-
     let (_, received_frame) = server_framed.read_pdu().await.context("read PDU from server")?;
-    info!("pdu has been read");
-
     let received_connection_confirm: x224::X224<nego::ConnectionConfirm> =
         ironrdp_core::decode(&received_frame).context("decode PDU from server")?;
     trace!(message = ?received_connection_confirm, "Received Connection Confirm PDU from server");
-
-    debug!("before match");
 
     let (connection_confirm_to_send, handshake_result) = match &received_connection_confirm.0 {
         nego::ConnectionConfirm::Response {
@@ -411,8 +389,6 @@ where
 {
     use ironrdp_tokio::FramedWrite as _;
 
-    info!(?credentials, "CREDSFORTHESERVER targetccredscheck");
-
     let (credentials, domain) = match credentials {
         crate::credential::AppCredential::UsernamePassword {
             username,
@@ -426,8 +402,6 @@ where
             domain.as_deref(),
         ),
     };
-
-    info!(?credentials, "CREDSFORTHESERVER");
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,
@@ -448,10 +422,9 @@ where
             let mut generator = sequence.process_ts_request(ts_request);
 
             if let Some(network_client_ref) = network_client.as_deref_mut() {
-                trace!("resolving network");
                 resolve_client_generator(&mut generator, network_client_ref).await?
             } else {
-                panic!("network client is missing")
+                generator.resolve_to_result().context("sspi generator resolve")?
             }
         }; // drop generator
 
@@ -556,8 +529,6 @@ where
     .await;
 
     if security_protocol.intersects(nego::SecurityProtocol::HYBRID_EX) {
-        trace!(?result, "HYBRID_EX");
-
         let result = if result.is_ok() {
             EarlyUserAuthResult::Success
         } else {
@@ -598,8 +569,6 @@ where
             password: password.expose_secret().to_owned().into(),
         };
 
-        info!(?identity, ?client_computer_name, "CREDSFORTHECLIENT");
-
         let mut sequence = ironrdp_acceptor::credssp::CredsspSequence::init(
             &identity,
             client_computer_name,
@@ -627,7 +596,7 @@ where
                 if let Some(network_client_ref) = network_client.as_deref_mut() {
                     resolve_server_generator(&mut generator, network_client_ref).await
                 } else {
-                    panic!("network client is missing");
+                    generator.resolve_to_result()
                 }
             }; // drop generator
 
