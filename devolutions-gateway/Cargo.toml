@@ -37,9 +37,9 @@ sysevent-codes.path = "../crates/sysevent-codes"
 ironrdp-pdu = { version = "0.5", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.1"
-ironrdp-tokio = "0.5"
-ironrdp-connector = { version = "0.5" }
-ironrdp-acceptor = { version = "0.5" }
+ironrdp-tokio = { version = "0.6", features = ["reqwest"] }
+ironrdp-connector = { version = "0.6" }
+ironrdp-acceptor = { version = "0.6" }
 ceviche = "0.7"
 picky-krb = "0.11"
 

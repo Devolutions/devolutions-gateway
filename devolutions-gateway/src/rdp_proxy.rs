@@ -1,6 +1,8 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 
+use crate::config::dto::{DomainUser, KerberosServer};
 use crate::config::Conf;
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
@@ -8,7 +10,16 @@ use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 
 use anyhow::Context as _;
+use ironrdp_acceptor::credssp::CredsspProcessGenerator as CredsspServerProcessGenerator;
+use ironrdp_connector::credssp::{CredsspProcessGenerator as CredsspClientProcessGenerator, KerberosConfig};
+use ironrdp_connector::sspi::credssp::{ClientState, ServerError, ServerState};
+use ironrdp_connector::sspi::generator::GeneratorState;
+use ironrdp_connector::sspi::kerberos::ServerProperties;
+use ironrdp_connector::sspi::{
+    AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
+};
 use ironrdp_pdu::{mcs, nego, x224};
+use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -44,6 +55,8 @@ where
     C: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
+    info!("started RDP proxy!");
+
     let RdpProxy {
         conf,
         session_info,
@@ -63,26 +76,34 @@ where
         .tls
         .as_ref()
         .context("TLS configuration required for credential injection feature")?;
+    let gateway_hostname = conf.hostname.clone();
 
     let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
 
     // -- Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on -- //
 
     let gateway_public_key_handle = tokio::spawn(get_cached_gateway_public_key(
-        conf.hostname.clone(),
+        gateway_hostname.clone(),
         tls_conf.acceptor.clone(),
     ));
+
+    info!("gateway public key is here");
 
     // -- Dual handshake with the client and the server until the TLS security upgrade -- //
 
     let mut client_framed = ironrdp_tokio::TokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
+    info!("framed streams are here");
+
     let handshake_result =
         dual_handshake_until_tls_upgrade(&mut client_framed, &mut server_framed, credential_mapping).await?;
+    info!("the handshakes are done!");
 
     let client_stream = client_framed.into_inner_no_leftover();
     let server_stream = server_framed.into_inner_no_leftover();
+
+    info!("Handshake is done!");
 
     // -- Perform the TLS upgrading for both the client and the server, effectively acting as a man-in-the-middle -- //
 
@@ -91,8 +112,16 @@ where
 
     let (client_stream, server_stream) = tokio::join!(client_tls_upgrade_fut, server_tls_upgrade_fut);
 
-    let client_stream = client_stream.context("TLS upgrade with client failed")?;
-    let server_stream = server_stream.context("TLS upgrade with server failed")?;
+    info!("TLS upgrade futures finished!");
+
+    let client_stream = client_stream
+        .inspect_err(|err| warn!(?err, "client stream error"))
+        .context("TLS upgrade with client failed")?;
+    let server_stream = server_stream
+        .inspect_err(|err| warn!(?err, "server stream error"))
+        .context("TLS upgrade with server failed")?;
+
+    info!("TLS upgrade is done!");
 
     let server_public_key =
         extract_tls_server_public_key(&server_stream).context("extract target server TLS public key")?;
@@ -103,25 +132,71 @@ where
     let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
+    warn!("START CREDSSPS STAGES");
+
+    let krb_server_config = if conf.debug.enable_unstable {
+        if let Some(KerberosServer {
+            max_time_skew,
+            ticket_decryption_key,
+            service_user,
+        }) = conf.debug.kerberos_server.as_ref()
+        {
+            let user = service_user.as_ref().map(|user| {
+                let DomainUser {
+                    username,
+                    domain,
+                    password,
+                } = user;
+                CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(username, domain, password))
+            });
+
+            Some(KerberosServerConfig {
+                kerberos_config: SspiKerberosConfig {
+                    // The sspi will automatically try to resolve the KDC host via DNS and/or environment variable.
+                    kdc_url: None,
+                    client_computer_name: Some(client_addr.to_string()),
+                },
+                server_properties: ServerProperties::new(
+                    &["TERMSRV", &gateway_hostname],
+                    user,
+                    Duration::from_secs(*max_time_skew),
+                    ticket_decryption_key.clone(),
+                )?,
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut network_client = ReqwestNetworkClient::new();
     let client_credssp_fut = perform_credssp_with_client(
         &mut client_framed,
         client_addr.ip(),
         gateway_public_key,
         handshake_result.client_security_protocol,
         &credential_mapping.proxy,
+        Some(&mut network_client),
+        krb_server_config,
     );
 
+    let mut network_client = ReqwestNetworkClient::new();
     let server_credssp_fut = perform_credssp_with_server(
         &mut server_framed,
         server_dns_name,
         server_public_key,
         handshake_result.server_security_protocol,
         &credential_mapping.target,
+        Some(&mut network_client),
     );
 
-    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_credssp_res.context("CredSSP with client")?;
-    server_credssp_res.context("CredSSP with server")?;
+    // let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
+    // client_credssp_res.context("CredSSP with client")?;
+    // server_credssp_res.context("CredSSP with server")?;
+    client_credssp_fut.await.context("CredSSP with client")?;
+    warn!("CREDSASPWITHCLIENTFINISHED");
+    server_credssp_fut.await.context("CredSSP with server")?;
 
     // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
 
@@ -269,10 +344,16 @@ where
         .await
         .context("send connection request to server")?;
 
+    info!("sent");
+
     let (_, received_frame) = server_framed.read_pdu().await.context("read PDU from server")?;
+    info!("pdu has been read");
+
     let received_connection_confirm: x224::X224<nego::ConnectionConfirm> =
         ironrdp_core::decode(&received_frame).context("decode PDU from server")?;
     trace!(message = ?received_connection_confirm, "Received Connection Confirm PDU from server");
+
+    debug!("before match");
 
     let (connection_confirm_to_send, handshake_result) = match &received_connection_confirm.0 {
         nego::ConnectionConfirm::Response {
@@ -323,36 +404,56 @@ async fn perform_credssp_with_server<S>(
     server_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
     credentials: &crate::credential::AppCredential,
+    mut network_client: Option<&mut ReqwestNetworkClient>,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
 {
     use ironrdp_tokio::FramedWrite as _;
 
-    let credentials = match credentials {
-        crate::credential::AppCredential::UsernamePassword { username, password } => {
+    info!(?credentials, "CREDSFORTHESERVER targetccredscheck");
+
+    let (credentials, domain) = match credentials {
+        crate::credential::AppCredential::UsernamePassword {
+            username,
+            domain,
+            password,
+        } => (
             ironrdp_connector::Credentials::UsernamePassword {
                 username: username.clone(),
                 password: password.expose_secret().to_owned(),
-            }
-        }
+            },
+            domain.as_deref(),
+        ),
     };
+
+    info!(?credentials, "CREDSFORTHESERVER");
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,
-        None,
+        domain,
         security_protocol,
         ironrdp_connector::ServerName::new(server_name),
         server_public_key,
-        None,
+        Some(KerberosConfig {
+            kdc_proxy_url: Some(url::Url::parse("tcp://192.168.1.103:88").unwrap()),
+            hostname: Some("myroniuk-p-laptop".into()),
+        }),
     )?;
 
     let mut buf = ironrdp_pdu::WriteBuf::new();
 
     loop {
-        let mut generator = sequence.process_ts_request(ts_request);
-        let client_state = generator.resolve_to_result().context("sspi generator resolve")?;
-        drop(generator);
+        let client_state = {
+            let mut generator = sequence.process_ts_request(ts_request);
+
+            if let Some(network_client_ref) = network_client.as_deref_mut() {
+                trace!("resolving network");
+                resolve_client_generator(&mut generator, network_client_ref).await?
+            } else {
+                panic!("network client is missing")
+            }
+        }; // drop generator
 
         buf.clear();
         let written = sequence.handle_process_result(client_state, &mut buf)?;
@@ -381,6 +482,46 @@ where
     Ok(())
 }
 
+async fn resolve_server_generator(
+    generator: &mut CredsspServerProcessGenerator<'_>,
+    network_client: &mut ReqwestNetworkClient,
+) -> Result<ServerState, ServerError> {
+    let mut state = generator.start();
+
+    loop {
+        match state {
+            GeneratorState::Suspended(request) => {
+                let response = network_client.send(&request).await.expect("todo");
+                state = generator.resume(Ok(response));
+            }
+            GeneratorState::Completed(client_state) => {
+                break client_state;
+            }
+        }
+    }
+}
+
+async fn resolve_client_generator(
+    generator: &mut CredsspClientProcessGenerator<'_>,
+    network_client: &mut ReqwestNetworkClient,
+) -> ironrdp_connector::ConnectorResult<ClientState> {
+    let mut state = generator.start();
+
+    loop {
+        match state {
+            GeneratorState::Suspended(request) => {
+                let response = network_client.send(&request).await?;
+                state = generator.resume(Ok(response));
+            }
+            GeneratorState::Completed(client_state) => {
+                break client_state.map_err(|e| {
+                    ironrdp_connector::ConnectorError::new("CredSSP", ironrdp_connector::ConnectorErrorKind::Credssp(e))
+                })
+            }
+        }
+    }
+}
+
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
 async fn perform_credssp_with_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
@@ -388,6 +529,8 @@ async fn perform_credssp_with_client<S>(
     gateway_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
     credentials: &crate::credential::AppCredential,
+    network_client: Option<&mut ReqwestNetworkClient>,
+    kerberos_server_config: Option<KerberosServerConfig>,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -401,7 +544,16 @@ where
     // But this does not seem to matter so far, so we stringify the IP address of the client instead.
     let client_computer_name = ironrdp_connector::ServerName::new(client_addr.to_string());
 
-    let result = credssp_loop(framed, &mut buf, client_computer_name, gateway_public_key, credentials).await;
+    let result = credssp_loop(
+        framed,
+        &mut buf,
+        client_computer_name,
+        gateway_public_key,
+        credentials,
+        network_client,
+        kerberos_server_config,
+    )
+    .await;
 
     if security_protocol.intersects(nego::SecurityProtocol::HYBRID_EX) {
         trace!(?result, "HYBRID_EX");
@@ -426,21 +578,34 @@ where
         client_computer_name: ironrdp_connector::ServerName,
         public_key: Vec<u8>,
         credentials: &crate::credential::AppCredential,
+        mut network_client: Option<&mut ReqwestNetworkClient>,
+        kerberos_server_config: Option<KerberosServerConfig>,
     ) -> anyhow::Result<()>
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
     {
-        let crate::credential::AppCredential::UsernamePassword { username, password } = credentials;
+        let crate::credential::AppCredential::UsernamePassword {
+            username,
+            domain,
+            password,
+        } = credentials;
 
-        let username = ironrdp_connector::sspi::Username::parse(username).context("invalid username")?;
+        let username =
+            ironrdp_connector::sspi::Username::new(username, domain.as_deref()).context("invalid username")?;
 
         let identity = ironrdp_connector::sspi::AuthIdentity {
             username,
             password: password.expose_secret().to_owned().into(),
         };
 
-        let mut sequence =
-            ironrdp_acceptor::credssp::CredsspSequence::init(&identity, client_computer_name, public_key, None)?;
+        info!(?identity, ?client_computer_name, "CREDSFORTHECLIENT");
+
+        let mut sequence = ironrdp_acceptor::credssp::CredsspSequence::init(
+            &identity,
+            client_computer_name,
+            public_key,
+            kerberos_server_config,
+        )?;
 
         loop {
             let Some(next_pdu_hint) = sequence.next_pdu_hint()? else {
@@ -456,7 +621,16 @@ where
                 break;
             };
 
-            let result = sequence.process_ts_request(ts_request);
+            let result = {
+                let mut generator = sequence.process_ts_request(ts_request);
+
+                if let Some(network_client_ref) = network_client.as_deref_mut() {
+                    resolve_server_generator(&mut generator, network_client_ref).await
+                } else {
+                    panic!("network client is missing");
+                }
+            }; // drop generator
+
             buf.clear();
             let written = sequence.handle_process_result(result, buf)?;
 
