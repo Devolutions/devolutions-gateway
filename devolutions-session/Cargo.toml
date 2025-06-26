@@ -39,7 +39,7 @@ tokio = { version = "1", features = ["macros", "sync", "time"] }
 
 async-trait = { version = "0.1", optional = true }
 tempfile = { version = "3", optional = true }
-thiserror = { version = "1", optional = true }
+thiserror = { version = "2", optional = true }
 win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
 [dependencies.now-proto-pdu]

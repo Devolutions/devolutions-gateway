@@ -59,7 +59,7 @@ notify-debouncer-mini = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 aws-lc-rs = "1.13"
 sha2 = "0.10"
-thiserror = "1"
+thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 win-api-wrappers = { path = "../crates/win-api-wrappers" }

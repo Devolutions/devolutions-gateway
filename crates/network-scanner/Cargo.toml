@@ -18,7 +18,7 @@ network-scanner-net = { path = "../network-scanner-net" }
 network-scanner-proto = { path = "../network-scanner-proto" }
 parking_lot = "0.12"
 socket2 = "0.5"
-thiserror = "1"
+thiserror = "2"
 tokio = { version = "1.45", features = ["rt", "sync", "time", "fs"] }
 tracing = "0.1"
 typed-builder = "0.19"
