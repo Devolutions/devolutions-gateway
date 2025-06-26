@@ -257,36 +257,38 @@ async fn process_cleanpath(
     //   and X224 connection request/response to IronRDP client
     // - Without PCB: Gateway handles (1) X224 connection request, (2) X224 connection response,
     //   then leaves TLS handshake and CredSSP to IronRDP client
-    let (server_stream, x224_rsp) = if let Some(pcb_string) = cleanpath_pdu.preconnection_blob {
-        debug!("Sending preconnection blob to server");
-        let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
-            version: ironrdp_pdu::pcb::PcbVersion::V2,
-            id: 0,
-            v2_payload: Some(pcb_string),
-        };
+    // Send preconnection blob and/or X224 connection request
+    match (&cleanpath_pdu.preconnection_blob, &cleanpath_pdu.x224_connection_pdu) {
+        (None, None) => {
+            return Err(CleanPathError::BadRequest(anyhow::anyhow!(
+                "RDCleanPath PDU is missing both preconnection blob and X224 connection PDU"
+            )));
+        }
+        (Some(general_pcb), Some(_)) => {
+            server_stream.write_all(general_pcb.as_bytes()).await?;
+        }
+        (None, Some(_)) => {} // no preconnection blob to send
+        // This is considered to be the case where the preconnection blob is used for Hyper-V VMs connection
+        (Some(pcb), None) => {
+            debug!("Sending preconnection blob to server");
+            let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+                version: ironrdp_pdu::pcb::PcbVersion::V2,
+                id: 0,
+                v2_payload: Some(pcb.clone()),
+            };
 
-        let encoded = ironrdp_core::encode_vec(&pcb)
-            .context("failed to encode preconnection blob")
-            .map_err(CleanPathError::BadRequest)?;
+            let encoded = ironrdp_core::encode_vec(&pcb)
+                .context("failed to encode preconnection blob")
+                .map_err(CleanPathError::BadRequest)?;
 
-        server_stream.write_all(&encoded).await?;
+            server_stream.write_all(&encoded).await?;
+        }
+    }
 
-        let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
-            .await
-            .map_err(|source| CleanPathError::TlsHandshake {
-                source,
-                target_server: selected_target.to_owned(),
-            })?;
-
-        (server_stream, None)
-    } else {
-        // Send X224 connection request
-        let x224_req = cleanpath_pdu
-            .x224_connection_pdu
-            .context("request is missing X224 connection PDU")
-            .map_err(CleanPathError::BadRequest)?;
-
-        server_stream.write_all(x224_req.as_bytes()).await?;
+    // Send X224 connection request if present
+    let x224_rsp = if let Some(x224_connection_pdu) = &cleanpath_pdu.x224_connection_pdu {
+        server_stream.write_all(x224_connection_pdu.as_bytes()).await?;
+        debug!("X224 connection request sent");
 
         let x224_rsp = read_x224_response(&mut server_stream)
             .await
@@ -294,20 +296,19 @@ async fn process_cleanpath(
             .map_err(CleanPathError::BadRequest)?;
         trace!("Receiving X224 response");
 
-        let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
-            .await
-            .map_err(|source| CleanPathError::TlsHandshake {
-                source,
-                target_server: selected_target.to_owned(),
-            })?;
-        debug!("X224 connection request sent");
-
-        // Receive server X224 connection response
-
-        trace!("Establishing TLS connection with server");
-
-        (server_stream, Some(x224_rsp))
+        Some(x224_rsp)
+    } else {
+        None
     };
+
+    // Establish TLS connection
+    trace!("Establishing TLS connection with server");
+    let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
+        .await
+        .map_err(|source| CleanPathError::TlsHandshake {
+            source,
+            target_server: selected_target.to_owned(),
+        })?;
 
     return Ok(CleanPathResult {
         destination: selected_target.to_owned(),
@@ -379,8 +380,12 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+    let rdcleanpath_rsp = RDCleanPathPdu::new_response(
+        server_addr.to_string(),
+        x224_rsp,
+        x509_chain,
+    )
+    .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
