@@ -16,7 +16,7 @@ use ironrdp_connector::sspi::credssp::{ClientState, ServerError, ServerState};
 use ironrdp_connector::sspi::generator::GeneratorState;
 use ironrdp_connector::sspi::kerberos::ServerProperties;
 use ironrdp_connector::sspi::{
-    AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
+    self, AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
 };
 use ironrdp_pdu::{mcs, nego, x224};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
@@ -456,7 +456,14 @@ async fn resolve_server_generator(
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = network_client.send(&request).await.expect("todo");
+                let response = network_client
+                    .send(&request)
+                    .await
+                    .inspect_err(|err| error!(?err, "Failed to send a Kerberos message"))
+                    .map_err(|err| ServerError {
+                        ts_request: None,
+                        error: sspi::Error::new(sspi::ErrorKind::InternalError, err),
+                    })?;
                 state = generator.resume(Ok(response));
             }
             GeneratorState::Completed(client_state) => {
@@ -555,10 +562,9 @@ where
             password,
         } = credentials;
 
-        let username =
-            ironrdp_connector::sspi::Username::new(username, domain.as_deref()).context("invalid username")?;
+        let username = sspi::Username::new(username, domain.as_deref()).context("invalid username")?;
 
-        let identity = ironrdp_connector::sspi::AuthIdentity {
+        let identity = sspi::AuthIdentity {
             username,
             password: password.expose_secret().to_owned().into(),
         };
