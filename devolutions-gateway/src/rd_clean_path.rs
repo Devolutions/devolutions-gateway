@@ -164,7 +164,7 @@ struct CleanPathResult {
     destination: TargetAddr,
     server_addr: SocketAddr,
     server_stream: tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
-    x224_rsp: Vec<u8>,
+    x224_rsp: Option<Vec<u8>>,
 }
 
 async fn process_cleanpath(
@@ -234,31 +234,75 @@ async fn process_cleanpath(
     debug!(%selected_target, "Connected to destination server");
     span.record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable
-    if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-        server_stream.write_all(pcb.as_bytes()).await?;
+    // Preconnection Blob (PCB) is currently only used for Hyper-V VMs.
+    //
+    // Connection sequence with Hyper-V VMs (PCB enabled):
+    // ┌─────────────────────┐    ┌─────────────────────────────────────────────────────────────┐
+    // │   handled by        │    │              handled by IronRDP client                      │
+    // │     Gateway         │    │                                                             │
+    // └─────────────────────┘    └─────────────────────────────────────────────────────────────┘
+    // │PCB → TLS handshake  │ →  │CredSSP → X224 connection request → X224 connection response │
+    // └─────────────────────┘    └─────────────────────────────────────────────────────────────┘
+    //
+    // Connection sequence without Hyper-V VMs (PCB disabled):
+    // ┌─────────────────────────────────────────────────────────────┐    ┌──────────────────────┐
+    // │                  handled by Gateway                         │    │ handled by IronRDP   │
+    // │                                                             │    │       client         │
+    // └─────────────────────────────────────────────────────────────┘    └──────────────────────┘
+    // │X224 connection request → X224 connection response → TLS hs  │ →  │CredSSP → ...         │
+    // └─────────────────────────────────────────────────────────────┘    └──────────────────────┘
+    //
+    // Summary:
+    // - With PCB: Gateway handles (1) sending PCB, (2) TLS handshake, then leaves CredSSP
+    //   and X224 connection request/response to IronRDP client
+    // - Without PCB: Gateway handles (1) X224 connection request, (2) X224 connection response,
+    //   then leaves TLS handshake and CredSSP to IronRDP client
+    // Send preconnection blob and/or X224 connection request
+    match (&cleanpath_pdu.preconnection_blob, &cleanpath_pdu.x224_connection_pdu) {
+        (None, None) => {
+            return Err(CleanPathError::BadRequest(anyhow::anyhow!(
+                "RDCleanPath PDU is missing both preconnection blob and X224 connection PDU"
+            )));
+        }
+        (Some(general_pcb), Some(_)) => {
+            server_stream.write_all(general_pcb.as_bytes()).await?;
+        }
+        (None, Some(_)) => {} // no preconnection blob to send
+        // This is considered to be the case where the preconnection blob is used for Hyper-V VMs connection
+        (Some(pcb), None) => {
+            debug!("Sending preconnection blob to server");
+            let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+                version: ironrdp_pdu::pcb::PcbVersion::V2,
+                id: 0,
+                v2_payload: Some(pcb.clone()),
+            };
+
+            let encoded = ironrdp_core::encode_vec(&pcb)
+                .context("failed to encode preconnection blob")
+                .map_err(CleanPathError::BadRequest)?;
+
+            server_stream.write_all(&encoded).await?;
+        }
     }
 
-    // Send X224 connection request
-    let x224_req = cleanpath_pdu
-        .x224_connection_pdu
-        .context("request is missing X224 connection PDU")
-        .map_err(CleanPathError::BadRequest)?;
-    server_stream.write_all(x224_req.as_bytes()).await?;
+    // Send X224 connection request if present
+    let x224_rsp = if let Some(x224_connection_pdu) = &cleanpath_pdu.x224_connection_pdu {
+        server_stream.write_all(x224_connection_pdu.as_bytes()).await?;
+        debug!("X224 connection request sent");
 
-    // Receive server X224 connection response
+        let x224_rsp = read_x224_response(&mut server_stream)
+            .await
+            .with_context(|| format!("read X224 response from {selected_target}"))
+            .map_err(CleanPathError::BadRequest)?;
+        trace!("Receiving X224 response");
 
-    trace!("Receiving X224 response");
+        Some(x224_rsp)
+    } else {
+        None
+    };
 
-    let x224_rsp = read_x224_response(&mut server_stream)
-        .await
-        .with_context(|| format!("read X224 response from {selected_target}"))
-        .map_err(CleanPathError::BadRequest)?;
-
+    // Establish TLS connection
     trace!("Establishing TLS connection with server");
-
-    // Establish TLS connection with server
-
     let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
@@ -266,13 +310,13 @@ async fn process_cleanpath(
             target_server: selected_target.to_owned(),
         })?;
 
-    Ok(CleanPathResult {
+    return Ok(CleanPathResult {
         destination: selected_target.to_owned(),
         claims,
         server_addr,
         server_stream,
         x224_rsp,
-    })
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -295,7 +339,7 @@ pub async fn handle(
         .await
         .context("couldn’t read clean cleanpath PDU")?;
 
-    trace!("Processing RDCleanPath");
+    trace!(RDCleanPath = ?cleanpath_pdu,"Processing RDCleanPath");
 
     let CleanPathResult {
         claims,
@@ -336,8 +380,12 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+    let rdcleanpath_rsp = RDCleanPathPdu::new_response(
+        server_addr.to_string(),
+        x224_rsp,
+        x509_chain,
+    )
+    .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
