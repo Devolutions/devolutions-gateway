@@ -81,7 +81,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 futures = "0.3"
 async-trait = "0.1"
 tower = { version = "0.5", features = ["timeout"] }
-ngrok = "0.13"
+ngrok = { version = "0.15", default-features = false, features = ["ring"] }
 
 # HTTP
 hyper = "1.4"
