@@ -76,7 +76,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _webapp_: change toolbar activation height ([#1390](https://github.com/Devolutions/devolutions-gateway/issues/1390)) ([882e7571c0](https://github.com/Devolutions/devolutions-gateway/commit/882e7571c03c4036c79cbaec89f37db1562868cd)) 
 
-  When the in fullscreen mode, the session toolbar was not appearing
+  When in fullscreen mode, the session toolbar was not appearing
   when the cursor was moved to the top of the screen.
 
 - _dgw_: [**breaking**] fail-fast on improper certificate for TLS ([#1391](https://github.com/Devolutions/devolutions-gateway/issues/1391)) ([aca08f0aba](https://github.com/Devolutions/devolutions-gateway/commit/aca08f0aba1e637ac6c2b791941a95d2cbfb0402)) ([DGW-286](https://devolutions.atlassian.net/browse/DGW-286)) 
