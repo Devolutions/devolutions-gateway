@@ -11,9 +11,9 @@ workspace = true
 [dependencies]
 log = "0.4"
 byteorder = "1.5"
-uuid = { version = "1.10", features = ["v4"] }
-httparse = "1.9"
-http = "1.1"
+uuid = { version = "1.17", features = ["v4"] }
+httparse = "1.10"
+http = "1.3"
 
 [dev-dependencies]
 hex-literal = "0.4"

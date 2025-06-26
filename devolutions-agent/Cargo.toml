@@ -40,7 +40,7 @@ features = [
 ]
 
 [dependencies.tokio]
-version = "1.44"
+version = "1.45"
 features = [
     "signal",
     "net",
@@ -57,10 +57,10 @@ features = [
 hex = "0.4"
 notify-debouncer-mini = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
-aws-lc-rs = "^1.11.1"
+aws-lc-rs = "1.13"
 sha2 = "0.10"
 thiserror = "1"
-uuid = { version = "1.10", features = ["v4"] }
+uuid = { version = "1.17", features = ["v4"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 win-api-wrappers = { path = "../crates/win-api-wrappers" }
 
@@ -78,4 +78,4 @@ features = [
 ]
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.4"
+embed-resource = "2.5"

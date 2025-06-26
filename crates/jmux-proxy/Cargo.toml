@@ -15,7 +15,7 @@ workspace = true
 jmux-proto = { path = "../jmux-proto" }
 
 # async
-tokio = { version = "1.44", features = ["net", "rt", "io-util", "macros"] }
+tokio = { version = "1.45", features = ["net", "rt", "io-util", "macros"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
 
@@ -26,5 +26,5 @@ anyhow = "1.0"
 tracing = "0.1"
 
 # codec implementation
-bytes = "1.6"
+bytes = "1.10"
 bitvec = "1.0"

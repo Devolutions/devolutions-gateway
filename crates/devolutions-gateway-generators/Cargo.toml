@@ -7,6 +7,6 @@ publish = false
 
 [dependencies]
 devolutions-gateway = { path = "../../devolutions-gateway" }
-proptest = "1.5"
-uuid = "1.10"
+proptest = "1.7"
+uuid = "1.17"
 serde = { version = "1", features = ["derive"] }

@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 anyhow = "1.0"
 futures-util = { version = "0.3", features = ["sink"] }
-tokio = { version = "1.44", features = [
+tokio = { version = "1.45", features = [
     "io-util",
     "rt",
     "rt-multi-thread",
@@ -19,13 +19,13 @@ tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
 cadeau = { version = "0.5", features = ["dlopen"] }
 thiserror = "2"
-num_cpus = "1.16"
+num_cpus = "1.17"
 ebml-iterable = "0.6"
 webm-iterable = "0.6"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
-tokio = { version = "1.44", features = [
+tokio = { version = "1.45", features = [
     "io-util",
     "rt",
     "rt-multi-thread",
