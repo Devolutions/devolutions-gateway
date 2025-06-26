@@ -1,15 +1,13 @@
-use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
-use tokio::time::{sleep, Duration};
+use std::process::ExitStatus;
+use sysinfo::{Pid, ProcessesToUpdate, System};
+use tokio::task;
 
-pub(crate) async fn watch_process(pid: Pid) {
-    let mut system = System::new_with_specifics(RefreshKind::new());
-    let process_refresh_kind = ProcessRefreshKind::new();
-
-    loop {
-        if !system.refresh_process_specifics(pid, process_refresh_kind) {
-            return;
-        }
-
-        sleep(Duration::from_secs(60)).await;
-    }
+pub(crate) async fn watch_process(pid: Pid) -> Option<ExitStatus> {
+    task::spawn_blocking(move || {
+        let mut sys = System::new();
+        sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), false);
+        sys.process(pid).and_then(|p| p.wait())
+    })
+    .await
+    .expect("blocking task panicked")
 }
