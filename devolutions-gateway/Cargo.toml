@@ -125,7 +125,7 @@ embed-resource = "2.5"
 [dev-dependencies]
 tokio-test = "0.4"
 proptest = "1.7"
-rstest = "0.24"
+rstest = "0.25"
 devolutions-gateway-generators = { path = "../crates/devolutions-gateway-generators" }
 http-body-util = "0.1"
 tracing-cov-mark = { path = "../crates/tracing-cov-mark" }
