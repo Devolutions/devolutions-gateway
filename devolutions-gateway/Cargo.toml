@@ -60,7 +60,7 @@ anyhow = "1.0"
 thiserror = "2"
 typed-builder = "0.21"
 backoff = "0.4"
-sysinfo = "0.30"
+sysinfo = { version = "0.35", default-features = false, features = ["disk"] }
 dunce = "1.0"
 bitflags = "2.9"
 

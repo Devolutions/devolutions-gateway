@@ -53,7 +53,7 @@ anyhow = "1.0"
 dirs-next = "2.0"
 
 # find parent process / watch process 
-sysinfo = { version = "0.30", default-features = false }
+sysinfo = { version = "0.35", default-features = false, features = ["system"] }
 
 # doctor
 tinyjson = "2.5" # Small JSON library; used to avoid including a bigger like serde-json
