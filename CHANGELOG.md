@@ -2,6 +2,96 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.2.2 (2025-06-27)
+
+### Features
+
+- _webapp_: support dynamic resizing for RDP and VNC sessions ([#1389](https://github.com/Devolutions/devolutions-gateway/issues/1389)) ([aa03b65645](https://github.com/Devolutions/devolutions-gateway/commit/aa03b656459cc31d642f2cf9b42a8a20df227070)) 
+
+- _webapp_: update RDP and VNC web clients ([#1393](https://github.com/Devolutions/devolutions-gateway/issues/1393)) ([79870495da](https://github.com/Devolutions/devolutions-gateway/commit/79870495da8a399b8c673c027ad26d5b9af26ddf)) 
+
+  - Prevent undesirable scrolling when the canvas is focused.
+  - Fix a typo.
+  - Fix keyboard input for Firefox.
+  - Hide slider in fullscreen mode.
+  - Fix a bug in VNC client where ZLIB encoding was not disabled even when
+    unchecked from the list.
+
+### Bug Fixes
+
+- _webapp_: incorrect desktop size when a predefined resolution is selected ([#1383](https://github.com/Devolutions/devolutions-gateway/issues/1383)) ([4225fda033](https://github.com/Devolutions/devolutions-gateway/commit/4225fda03307e178cd0a77911975b7bb50f6835c)) 
+
+- _dgw_: [**breaking**] clean up /jet/net/config route ([#1387](https://github.com/Devolutions/devolutions-gateway/issues/1387)) ([d596e90558](https://github.com/Devolutions/devolutions-gateway/commit/d596e90558358fc6b4ec7278e01f1de8c820aa4e)) ([DGW-287](https://devolutions.atlassian.net/browse/DGW-287)) 
+
+  The JSON output of the `/jet/net/config` route is changed to be more
+  convenient in the consumer code.
+  
+  Previous output example:
+  ```
+  [
+    {
+      "name": "vboxnet0",
+      "addresses": [
+        {
+          "V4": {
+            "ip": "192.168.56.1",
+            "broadcast": "192.168.56.255",
+            "netmask": "255.255.255.0"
+          }
+        },
+        {
+          "V6": {
+            "ip": "fe80::800:27ff:fe00:0",
+            "netmask": "ffff:ffff:ffff:ffff::"
+          }
+        }
+      ],
+      "mac_addr": "0a:00:27:00:00:00",
+      "index": 4
+    }
+  ]
+  ```
+  
+  New output example:
+  
+  ```
+  {
+    "vboxnet0": [
+      {
+        "family": "IPv4",
+        "address": "192.168.56.1",
+        "broadcast": "192.168.56.255",
+        "netmask": "255.255.255.0",
+        "mac": "0a:00:27:00:00:00"
+      },
+      {
+        "family": "IPv6",
+        "address": "fe80::800:27ff:fe00:0",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "mac": "0a:00:27:00:00:00"
+      }
+    ]
+  }
+  ```
+
+- _webapp_: change toolbar activation height ([#1390](https://github.com/Devolutions/devolutions-gateway/issues/1390)) ([882e7571c0](https://github.com/Devolutions/devolutions-gateway/commit/882e7571c03c4036c79cbaec89f37db1562868cd)) 
+
+  When the in fullscreen mode, the session toolbar was not appearing
+  when the cursor was moved to the top of the screen.
+
+- _dgw_: [**breaking**] fail-fast on improper certificate for TLS ([#1391](https://github.com/Devolutions/devolutions-gateway/issues/1391)) ([aca08f0aba](https://github.com/Devolutions/devolutions-gateway/commit/aca08f0aba1e637ac6c2b791941a95d2cbfb0402)) ([DGW-286](https://devolutions.atlassian.net/browse/DGW-286)) 
+
+  Certificates missing the auth extended key usage, or missing a subject
+  alternative name are now rejected:
+  
+  - immediately fail on startup for certificates from filesystem, and
+  - fail on certificate resolution for system certificate store.
+
+- _dgw_: crash when using default port HTTP internal URL ([#1392](https://github.com/Devolutions/devolutions-gateway/issues/1392)) ([71080c0547](https://github.com/Devolutions/devolutions-gateway/commit/71080c054706ce07daab5ee363db93dadac64541)) ([DGW-288](https://devolutions.atlassian.net/browse/DGW-288)) 
+
+  The listener task was crashing when the default port for HTTP (80) or HTTPS (443)
+  was used in the internal URL of the HTTP listener.
+
 ## 2025.2.1 (2025-06-11)
 
 ### Features
