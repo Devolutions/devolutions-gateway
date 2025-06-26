@@ -16,4 +16,4 @@ httparse = "1.10"
 http = "1.3"
 
 [dev-dependencies]
-hex-literal = "0.4"
+hex-literal = "1.0"
