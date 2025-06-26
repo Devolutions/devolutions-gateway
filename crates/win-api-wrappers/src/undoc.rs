@@ -14,8 +14,8 @@
 use std::ffi::c_void;
 use std::mem;
 
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{BOOL, HANDLE, LUID, NTSTATUS, UNICODE_STRING};
+use windows::core::{BOOL, PCWSTR};
+use windows::Win32::Foundation::{HANDLE, LUID, NTSTATUS, UNICODE_STRING};
 use windows::Win32::Security::{
     LOGON32_LOGON, LOGON32_PROVIDER, PSID, QUOTA_LIMITS, TOKEN_ACCESS_MASK, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
     TOKEN_OWNER, TOKEN_PRIMARY_GROUP, TOKEN_PRIVILEGES, TOKEN_SOURCE, TOKEN_TYPE, TOKEN_USER,
@@ -307,7 +307,7 @@ pub const PIPE_ACCESS_FULL_CONTROL: u32 = 0x1F019F;
 
 /// https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/pebteb/curdir.htm
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CURDIR {
     pub DosPath: UNICODE_STRING,
     pub Handle: HANDLE,
@@ -315,7 +315,7 @@ pub struct CURDIR {
 
 /// https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/pebteb/rtl_user_process_parameters.htm
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RTL_USER_PROCESS_PARAMETERS {
     pub MaximumLength: u32,
     pub Length: u32,
@@ -379,7 +379,7 @@ pub const TOKEN_SECURITY_ATTRIBUTE_COMPARE_IGNORE: TOKEN_SECURITY_ATTRIBUTE_FLAG
 
 /// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L197.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE {
     pub Version: u64,
     pub Name: UNICODE_STRING,

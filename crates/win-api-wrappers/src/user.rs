@@ -15,7 +15,7 @@ pub fn load_string(hinstance: HINSTANCE, resource_id: u32) -> anyhow::Result<Opt
     // We pass a null-initialized mutable reference to `resource_ptr`. This is safe because:
     // - `resource_ptr` is a properly aligned, initialized `PWSTR` variable that is of sufficient length to hold a pointer.
     // - if `cchBufferMax` is equal to 0, `LoadStringW` guarantees to write a valid pointer to the start of a resource string or leave it as null if no resource is found.
-    let length = unsafe { LoadStringW(hinstance, resource_id, resource_ptr_addr, 0) };
+    let length = unsafe { LoadStringW(Some(hinstance), resource_id, resource_ptr_addr, 0) };
 
     match length {
         0 => Ok(None),

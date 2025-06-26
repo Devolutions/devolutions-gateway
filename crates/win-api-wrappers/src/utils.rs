@@ -232,7 +232,7 @@ impl CommandLine {
             .collect::<Vec<_>>();
 
         // SAFETY: No preconditions. `raw_args` is valid and must be freed.
-        let _ = unsafe { LocalFree(HLOCAL(raw_args.cast())) };
+        let _ = unsafe { LocalFree(Some(HLOCAL(raw_args.cast()))) };
 
         Self(args)
     }
@@ -368,7 +368,7 @@ pub fn environment_block(token: Option<&Token>, inherit: bool) -> anyhow::Result
     unsafe {
         CreateEnvironmentBlock(
             &mut raw_blocks as *mut _ as *mut *mut c_void,
-            token.map(|x| x.handle().raw()).unwrap_or_default(),
+            token.map(|x| x.handle().raw()),
             inherit,
         )?;
     }
@@ -467,7 +467,7 @@ pub fn get_exe_version() -> Result<String, anyhow::Error> {
     let mut path_buf = [0u16; MAX_PATH as usize];
 
     // SAFETY: We're passing a valid mutable buffer to GetModuleFileNameW of large enough size (MAX_PATH WCHARs)
-    let len = unsafe { GetModuleFileNameW(h_module, &mut path_buf) };
+    let len = unsafe { GetModuleFileNameW(Some(h_module), &mut path_buf) };
 
     if len == 0 {
         anyhow::bail!("GetModuleFileNameW failed: {}", windows::core::Error::from_win32());
@@ -486,7 +486,7 @@ pub fn get_exe_version() -> Result<String, anyhow::Error> {
 
     // SAFETY: `buffer` is allocated with the correct size.
     // `exe_path_w` is a valid pointer to a null-terminated UTF-16 string from the OS.
-    unsafe { GetFileVersionInfoW(exe_path_w, 0, size, buffer.as_mut_ptr() as *mut _)? };
+    unsafe { GetFileVersionInfoW(exe_path_w, None, size, buffer.as_mut_ptr() as *mut _)? };
 
     let mut lp_buffer: *mut c_void = ptr::null_mut();
     let mut len = 0u32;
@@ -625,7 +625,7 @@ impl Link {
         unsafe { persist_file.Load(raw_path.as_pcwstr(), STGM_READ) }?;
 
         // SAFETY: Must be called within COM context.
-        unsafe { inst.Resolve(None, SLR_NO_UI.0 as u32) }?;
+        unsafe { inst.Resolve(windows::Win32::Foundation::HWND::default(), SLR_NO_UI.0 as u32) }?;
 
         f(&inst)
     }
@@ -763,7 +763,7 @@ impl Pipe {
                 // Note that we are not setting FILE_FLAG_OVERLAPPED here, as we are not expecting async
                 // writes from target process stdout/stderr.
                 FILE_FLAGS_AND_ATTRIBUTES(0),
-                HANDLE::default(),
+                None,
             )
         }?;
 

@@ -598,7 +598,7 @@ mod wrapper {
             // SAFETY: FFI call with no outstanding preconditions.
             unsafe {
                 Cryptography::CertAddEncodedCertificateToStore(
-                    self.ptr,
+                    Some(self.ptr),
                     Cryptography::X509_ASN_ENCODING,
                     cert,
                     Cryptography::CERT_STORE_ADD_ALWAYS,
@@ -650,7 +650,7 @@ mod wrapper {
     impl Drop for CertStore {
         fn drop(&mut self) {
             // SAFETY: The store handle is owned by us.
-            let res = unsafe { Cryptography::CertCloseStore(self.ptr, 0) };
+            let res = unsafe { Cryptography::CertCloseStore(Some(self.ptr), 0) };
 
             if let Err(error) = res {
                 warn!(%error, "failed to close certificate store");
@@ -778,7 +778,7 @@ mod wrapper {
                     None,
                     self.ptr,
                     None,
-                    store,
+                    Some(store),
                     &chain_para,
                     0,
                     None,

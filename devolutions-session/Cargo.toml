@@ -51,7 +51,7 @@ features = ["std"]
 embed-resource = "2.5"
 
 [target.'cfg(windows)'.dependencies.windows]
-version = "0.58"
+version = "0.61"
 optional = true
 features = [
     "Win32_Foundation",

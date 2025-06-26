@@ -14,10 +14,10 @@ use windows::Win32::Security::{
     self, AdjustTokenGroups, AdjustTokenPrivileges, DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser,
     RevertToSelf, SecurityIdentification, SecurityImpersonation, SetTokenInformation, TokenElevationTypeDefault,
     TokenElevationTypeFull, TokenElevationTypeLimited, LOGON32_LOGON, LOGON32_PROVIDER, LUID_AND_ATTRIBUTES,
-    SECURITY_ATTRIBUTES, SECURITY_DYNAMIC_TRACKING, SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE,
-    TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_IMPERSONATE,
-    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_PRIVILEGES,
-    TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY, TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE,
+    SECURITY_ATTRIBUTES, SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE, TOKEN_ACCESS_MASK,
+    TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_IMPERSONATE, TOKEN_INFORMATION_CLASS,
+    TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY,
+    TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE,
 };
 use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
 use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
@@ -95,8 +95,8 @@ impl Token {
         let sqos = SECURITY_QUALITY_OF_SERVICE {
             Length: u32size_of::<SECURITY_QUALITY_OF_SERVICE>(),
             ImpersonationLevel: SecurityImpersonation,
-            ContextTrackingMode: SECURITY_DYNAMIC_TRACKING.0,
-            EffectiveOnly: false.into(),
+            ContextTrackingMode: Security::SECURITY_DYNAMIC_TRACKING as u8,
+            EffectiveOnly: false,
         };
 
         let object_attributes = undoc::OBJECT_ATTRIBUTES {
