@@ -55,7 +55,7 @@ features = [
 ]
 
 [dev-dependencies]
-rstest = "0.24"
+rstest = "0.25"
 
 [lints]
 workspace = true
