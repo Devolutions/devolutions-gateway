@@ -1,4 +1,6 @@
 #[macro_use]
+extern crate serde;
+#[macro_use]
 extern crate tracing;
 
 use ::{ctrlc as _, devolutions_gateway_task as _, futures as _, tokio as _};

@@ -1,5 +1,4 @@
 use crate::DateVersion;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Example JSON structure:
