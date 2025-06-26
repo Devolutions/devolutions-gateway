@@ -17,5 +17,5 @@ serde = "1"
 time = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
 typed-builder = "0.19"
-ulid = { version = "1.1", features = ["uuid"] }
-uuid = "1.11"
+ulid = { version = "1.2", features = ["uuid"] }
+uuid = "1.17"

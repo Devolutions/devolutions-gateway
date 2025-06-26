@@ -12,7 +12,7 @@ workspace = true
 anyhow = "1"
 crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
 parking_lot = "0.12"
-polling = "3.7"
+polling = "3.8"
 socket2 = { version = "0.5", features = ["all"] }
 thiserror = "1"
 tracing = "0.1"
@@ -20,7 +20,7 @@ tracing = "0.1"
 [dev-dependencies]
 tracing-cov-mark = { path = "../tracing-cov-mark" }
 tracing-subscriber = "0.3"
-tokio = { version = "1.44", features = [
+tokio = { version = "1.45", features = [
     "rt",
     "sync",
     "macros",
