@@ -1140,7 +1140,7 @@ pub mod dto {
 
     /// Kerberos server config
     ///
-    /// This config is used to configure the kerberos server during RDP proxying.
+    /// This config is used to configure the Kerberos server during RDP proxying.
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     pub struct KerberosServer {
         /// The maximum allowed time difference between client and proxy clocks
