@@ -1,7 +1,11 @@
-mod date_version;
-mod update_json;
+#[macro_use]
+extern crate serde;
+
 #[cfg(windows)]
 pub mod windows;
+
+mod date_version;
+mod update_json;
 
 #[cfg(not(windows))]
 use std::convert::Infallible;

@@ -1,7 +1,6 @@
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
-use serde::{Deserialize, Serialize};
 use tap::prelude::*;
 
 use std::fs::File;

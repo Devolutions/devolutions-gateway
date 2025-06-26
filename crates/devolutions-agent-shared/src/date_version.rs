@@ -1,7 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::de::Deserialize;
+use serde::ser::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
