@@ -16,6 +16,6 @@ libsql = { version = "0.9", default-features = false, features = ["core", "serde
 serde = "1"
 time = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
-typed-builder = "0.19"
+typed-builder = "0.21"
 ulid = { version = "1.2", features = ["uuid"] }
 uuid = "1.17"
