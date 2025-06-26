@@ -13,8 +13,12 @@ mod win {
         let version_rc_data = generate_version_rc();
         fs::write(&version_rc_file, version_rc_data).expect("BUG: failed to write version.rc");
 
-        embed_resource::compile(&version_rc_file, embed_resource::NONE);
-        embed_resource::compile("resources.rc", embed_resource::NONE);
+        embed_resource::compile(&version_rc_file, embed_resource::NONE)
+            .manifest_required()
+            .unwrap();
+        embed_resource::compile("resources.rc", embed_resource::NONE)
+            .manifest_required()
+            .unwrap();
     }
 
     fn generate_version_rc() -> String {

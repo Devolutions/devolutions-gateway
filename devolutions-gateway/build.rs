@@ -13,7 +13,9 @@ mod win {
         let version_rc_data = generate_version_rc();
         fs::write(&version_rc_file, version_rc_data).unwrap();
 
-        embed_resource::compile(&version_rc_file, embed_resource::NONE);
+        embed_resource::compile(&version_rc_file, embed_resource::NONE)
+            .manifest_required()
+            .unwrap();
     }
 
     fn generate_version_rc() -> String {

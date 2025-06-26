@@ -78,4 +78,4 @@ features = [
 ]
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.5"
+embed-resource = "3.0"

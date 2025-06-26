@@ -14,9 +14,8 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::fs::get_system32_path;
 use win_api_wrappers::process::{Module, Process};
-use win_api_wrappers::raw::core::BOOL;
 use win_api_wrappers::raw::core::{
-    implement, interface, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
+    implement, interface, Error, IUnknown, IUnknown_Vtbl, Interface, Result, BOOL, GUID, HRESULT, PWSTR,
 };
 use win_api_wrappers::raw::Win32::Foundation::{
     CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL, E_POINTER,
