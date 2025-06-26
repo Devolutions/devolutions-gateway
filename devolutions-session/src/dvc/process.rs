@@ -1,8 +1,7 @@
 use tokio::sync::mpsc::Sender;
-use windows::core::PCWSTR;
+use windows::core::{BOOL, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, BOOL, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0,
-    WPARAM,
+    CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::Threading::{
@@ -508,7 +507,7 @@ impl WinApiProcessBuilder {
         unsafe {
             CreateProcessW(
                 PCWSTR::null(),
-                command_line_wide.as_pwstr(),
+                Some(command_line_wide.as_pwstr()),
                 Some(security_attributes.as_ptr()),
                 None,
                 true,

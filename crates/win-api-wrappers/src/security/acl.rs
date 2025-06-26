@@ -100,7 +100,7 @@ impl Drop for Acl {
     fn drop(&mut self) {
         // SAFETY: Per invariants: the pointer can be freed using LocalFree.
         unsafe {
-            LocalFree(self.ptr);
+            LocalFree(Some(self.ptr));
         }
     }
 }
@@ -249,8 +249,8 @@ pub fn set_named_security_info(
             object_name.as_pcwstr(),
             object_type,
             security_info,
-            owner.map(|x| x.as_psid_const()).unwrap_or_default(),
-            group.map(|x| x.as_psid_const()).unwrap_or_default(),
+            owner.map(|x| x.as_psid_const()),
+            group.map(|x| x.as_psid_const()),
             dacl.as_ref().map(|x| x.acl.as_ptr().cast()),
             sacl.as_ref().map(|x| x.acl.as_ptr().cast()),
         )

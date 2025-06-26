@@ -14,12 +14,13 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::fs::get_system32_path;
 use win_api_wrappers::process::{Module, Process};
+use win_api_wrappers::raw::core::BOOL;
 use win_api_wrappers::raw::core::{
     implement, interface, Error, IUnknown, IUnknown_Vtbl, Interface, Result, GUID, HRESULT, PWSTR,
 };
 use win_api_wrappers::raw::Win32::Foundation::{
-    BOOL, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL,
-    E_POINTER, E_UNEXPECTED, HINSTANCE,
+    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL, E_POINTER,
+    E_UNEXPECTED, HINSTANCE,
 };
 use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
 use win_api_wrappers::raw::Win32::System::Com::{CoTaskMemFree, IBindCtx, IClassFactory, IClassFactory_Impl};
@@ -74,7 +75,7 @@ impl ElevationContextMenuCommand {
 impl IElevationContextMenuCommand_Impl for ElevationContextMenuCommand_Impl {}
 
 impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
-    fn GetTitle(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
+    fn GetTitle(&self, _item_array: windows_core::Ref<'_, IShellItemArray>) -> Result<PWSTR> {
         // SAFETY:
         // `DLL_MODULE` is fully initialized and valid for the lifetime of the DLL in the process,
         // and is not mutated after inital initialization
@@ -89,7 +90,7 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
         unsafe { SHStrDupW(title.as_pwstr()) }
     }
 
-    fn GetIcon(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
+    fn GetIcon(&self, _item_array: windows_core::Ref<'_, IShellItemArray>) -> Result<PWSTR> {
         let Ok(module) = Module::current() else {
             return Err(E_FAIL.into());
         };
@@ -109,7 +110,7 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
         unsafe { SHStrDupW(icon_path.as_pwstr()) }
     }
 
-    fn GetToolTip(&self, _item_array: Option<&IShellItemArray>) -> Result<PWSTR> {
+    fn GetToolTip(&self, _item_array: windows_core::Ref<'_, IShellItemArray>) -> Result<PWSTR> {
         Err(E_NOTIMPL.into())
     }
 
@@ -117,11 +118,15 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
         Ok(self.guid)
     }
 
-    fn GetState(&self, _item_array: Option<&IShellItemArray>, _ok_to_be_slow: BOOL) -> Result<u32> {
+    fn GetState(&self, _item_array: windows_core::Ref<'_, IShellItemArray>, _ok_to_be_slow: BOOL) -> Result<u32> {
         Ok(ECS_ENABLED.0 as _)
     }
 
-    fn Invoke(&self, item_array: Option<&IShellItemArray>, _bind_ctx: Option<&IBindCtx>) -> Result<()> {
+    fn Invoke(
+        &self,
+        item_array: windows_core::Ref<'_, IShellItemArray>,
+        _bind_ctx: windows_core::Ref<'_, IBindCtx>,
+    ) -> Result<()> {
         // SAFETY: `item_array` is valid and `GetCount` has no preconditions.
         if item_array.is_none() || unsafe { item_array.unwrap().GetCount() }? < 1 {
             return Ok(());
@@ -167,9 +172,9 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
 }
 
 impl IObjectWithSite_Impl for ElevationContextMenuCommand_Impl {
-    fn SetSite(&self, site: Option<&IUnknown>) -> Result<()> {
-        if let Some(site) = site {
-            self.site.write().replace(site.clone());
+    fn SetSite(&self, site: windows_core::Ref<'_, windows_core::IUnknown>) -> Result<()> {
+        if let Some(site) = site.cloned() {
+            self.site.write().replace(site);
             Ok(())
         } else {
             Err(E_FAIL.into())
@@ -365,7 +370,12 @@ extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: u32, _: *mut ()) 
 struct ElevationContextMenuCommandFactory;
 
 impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
-    fn CreateInstance(&self, outer: Option<&IUnknown>, iid: *const GUID, object: *mut *mut c_void) -> Result<()> {
+    fn CreateInstance(
+        &self,
+        outer: windows_core::Ref<'_, windows_core::IUnknown>,
+        iid: *const GUID,
+        object: *mut *mut c_void,
+    ) -> Result<()> {
         if object.is_null() {
             return Err(E_INVALIDARG.into());
         }

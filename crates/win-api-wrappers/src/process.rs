@@ -517,7 +517,7 @@ impl Module {
         let mut buf = vec![0; MAX_PATH as usize];
 
         // SAFETY: No preconditions. `buf` is large enough and handle is valid.
-        let size = unsafe { GetModuleFileNameW(self.handle, &mut buf) } as usize;
+        let size = unsafe { GetModuleFileNameW(Some(self.handle), &mut buf) } as usize;
         if size == 0 {
             bail!(Error::last_error());
         }
@@ -700,7 +700,7 @@ pub fn create_process_as_user(
             // - `DestroyEnvironmentBlock` is called in the `ProcessEnvironment` destructor.
             //
             // Therefore, all preconditions are met to safely call `CreateEnvironmentBlock`.
-            unsafe { CreateEnvironmentBlock(&mut environment, token.handle().raw(), false) }?;
+            unsafe { CreateEnvironmentBlock(&mut environment, Some(token.handle().raw()), false) }?;
         }
 
         ProcessEnvironment::OsDefined(environment.cast_const())
@@ -721,9 +721,9 @@ pub fn create_process_as_user(
     // SAFETY: FFI call with no outstanding precondition.
     unsafe {
         CreateProcessAsUserW(
-            token.map(|x| x.handle().raw()).unwrap_or_default(),
+            token.map(|x| x.handle().raw()),
             application_name.as_pcwstr(),
-            command_line.as_pwstr(),
+            Some(command_line.as_pwstr()),
             process_attributes.map(|x| x.as_ptr()),
             thread_attributes.map(|x| x.as_ptr()),
             inherit_handles,

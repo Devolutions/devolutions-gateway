@@ -104,9 +104,7 @@ impl<'a> ThreadAttributeList {
         let mut required_size = 0;
 
         // SAFETY: No preconditions.
-        let res = unsafe {
-            InitializeProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST::default(), count, 0, &mut required_size)
-        };
+        let res = unsafe { InitializeProcThreadAttributeList(None, count, None, &mut required_size) };
 
         let Err(err) = res else {
             anyhow::bail!("first call to InitializeProcThreadAttributeList did not fail")
@@ -127,9 +125,9 @@ impl<'a> ThreadAttributeList {
         // SAFETY: `lpAttributeList` points to a buffer of the `out_size`.
         unsafe {
             InitializeProcThreadAttributeList(
-                LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr().cast()),
+                Some(LPPROC_THREAD_ATTRIBUTE_LIST(buf.as_mut_ptr().cast())),
                 count,
-                0,
+                None,
                 &mut allocated_length,
             )?;
         };

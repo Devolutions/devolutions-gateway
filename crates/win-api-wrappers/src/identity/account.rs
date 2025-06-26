@@ -163,9 +163,9 @@ pub fn get_username(format: Identity::EXTENDED_NAME_FORMAT) -> windows::core::Re
     let mut required_size = 0u32;
 
     // SAFETY: lpNameBuffer being null is fine because nSize is set to 0.
-    let ret = unsafe { Identity::GetUserNameExW(format, PWSTR::null(), &mut required_size) };
+    let ret = unsafe { Identity::GetUserNameExW(format, None, &mut required_size) };
 
-    assert!(!ret.as_bool());
+    assert!(!ret);
 
     // SAFETY: FFI call with no outstanding precondition.
     if unsafe { GetLastError() } != ERROR_MORE_DATA {
@@ -175,9 +175,9 @@ pub fn get_username(format: Identity::EXTENDED_NAME_FORMAT) -> windows::core::Re
     let mut buf = vec![0u16; required_size as usize];
 
     // SAFETY: lpNameBuffer is correctly sized and matches the size announced in nSize AKA required_size.
-    let ret = unsafe { Identity::GetUserNameExW(format, PWSTR::from_raw(buf.as_mut_ptr()), &mut required_size) };
+    let ret = unsafe { Identity::GetUserNameExW(format, Some(PWSTR::from_raw(buf.as_mut_ptr())), &mut required_size) };
 
-    if !ret.as_bool() {
+    if !ret {
         return Err(windows::core::Error::from_win32());
     }
 
@@ -297,13 +297,13 @@ pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<A
     // SAFETY: Variable-sized parameters are provided as null pointers for the first call.
     unsafe {
         let _ = Security::LookupAccountNameW(
-            None,                            // local system
-            account_name.as_pcwstr(),        // account name to look up
-            Security::PSID(ptr::null_mut()), // no SID buffer yet
-            &mut sid_size,                   // receives required SID buffer size
-            PWSTR::null(),                   // no domain name buffer yet
-            &mut domain_name_size,           // receives required domain name length (characters)
-            &mut sid_use,                    // receives the SID type (user/group)
+            None,                     // local system
+            account_name.as_pcwstr(), // account name to look up
+            None,                     // no SID buffer yet
+            &mut sid_size,            // receives required SID buffer size
+            None,                     // no domain name buffer yet
+            &mut domain_name_size,    // receives required domain name length (characters)
+            &mut sid_use,             // receives the SID type (user/group)
         );
     }
 
@@ -320,9 +320,9 @@ pub fn lookup_account_by_name(account_name: &U16CStr) -> windows::core::Result<A
         Security::LookupAccountNameW(
             None,
             account_name.as_pcwstr(),
-            Security::PSID(sid.as_mut_ptr().cast()),
+            Some(Security::PSID(sid.as_mut_ptr().cast())),
             &mut sid_size,
-            PWSTR(domain_name.as_mut_ptr()),
+            Some(PWSTR(domain_name.as_mut_ptr())),
             &mut domain_name_size,
             &mut sid_use,
         )?;

@@ -158,7 +158,7 @@ pub fn get_sessions() -> anyhow::Result<Vec<WTSSessionInfo>> {
 
     // SAFETY: FFI call with no outstanding precondition.
     unsafe {
-        WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &mut sessions, &mut count)?;
+        WTSEnumerateSessionsW(Some(WTS_CURRENT_SERVER_HANDLE), 0, 1, &mut sessions, &mut count)?;
     };
 
     // SAFETY: The pointer placed into `sessions` by `WTSEnumerateSessionsW` must be freed by `WTSFreeMemory`.
@@ -184,7 +184,7 @@ pub fn get_sessions() -> anyhow::Result<Vec<WTSSessionInfo>> {
 
 pub fn log_off_session(session_id: u32, wait: bool) -> anyhow::Result<()> {
     // SAFETY: FFI call with no outstanding precondition.
-    unsafe { WTSLogoffSession(WTS_CURRENT_SERVER_HANDLE, session_id, wait).map_err(|e| e.into()) }
+    unsafe { WTSLogoffSession(Some(WTS_CURRENT_SERVER_HANDLE), session_id, wait).map_err(|e| e.into()) }
 }
 
 pub fn get_session_user_name(session_id: u32) -> anyhow::Result<String> {
@@ -213,7 +213,7 @@ pub fn send_message_to_session(
     // - `title` and `message` are holding a null-terminated UTF-16 string, and as_pcwstr() returns a valid pointer to it.
     unsafe {
         WTSSendMessageW(
-            WTS_CURRENT_SERVER_HANDLE,
+            Some(WTS_CURRENT_SERVER_HANDLE),
             session_id,
             title.as_pcwstr(),
             (title.0.unwrap().len() * size_of_val(&0u16)).try_into()?,
@@ -243,7 +243,13 @@ fn query_session_information_string(session_id: u32, info_class: WTS_INFO_CLASS)
 
     // SAFETY: Passing a `PWSTR` is correct in the case where `info_class` represents a string result.
     unsafe {
-        WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, session_id, info_class, &mut string, &mut len)?;
+        WTSQuerySessionInformationW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            session_id,
+            info_class,
+            &mut string,
+            &mut len,
+        )?;
     }
 
     // SAFETY: On success, WTSQuerySessionInformationW places a valid pointer which must be freed by `WTSFreeMemory`.

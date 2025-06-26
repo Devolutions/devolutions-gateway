@@ -156,7 +156,7 @@ impl CatalogAdminContext {
                 None,
                 BCRYPT_SHA256_ALGORITHM,
                 None,
-                0,
+                None,
             )
         }?;
 
@@ -178,7 +178,7 @@ impl CatalogAdminContext {
                 HANDLE(file.as_raw_handle().cast()),
                 &mut required_size,
                 None,
-                0,
+                None,
             )
         }?;
 
@@ -193,7 +193,7 @@ impl CatalogAdminContext {
                 HANDLE(file.as_raw_handle().cast()),
                 &mut allocated_length,
                 Some(hash.as_mut_ptr()),
-                0,
+                None,
             )
         }?;
 
@@ -241,7 +241,7 @@ impl Iterator for CatalogIterator<'_> {
             CryptCATAdminEnumCatalogFromHash(
                 self.admin_ctx.handle.0 as isize,
                 self.hash,
-                0,
+                None,
                 self.cur.map(|mut x| &mut x.0 as *mut _ as *mut isize),
             )
         };

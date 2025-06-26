@@ -868,7 +868,7 @@ fn set_kbd_layout(layout: SetKbdLayoutOption<'_>) -> anyhow::Result<()> {
     // SAFETY: hwnd is valid window handle.
     unsafe {
         PostMessageW(
-            focused_window,
+            Some(focused_window),
             WM_INPUTLANGCHANGEREQUEST,
             WPARAM(0),      // wParam is not used.
             LPARAM(locale), // lParam is locale (low word of layout identifier).

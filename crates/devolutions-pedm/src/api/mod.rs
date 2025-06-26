@@ -119,8 +119,8 @@ fn create_pipe(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
             HANDLE(pipe.as_raw_handle().cast()),
             SE_KERNEL_OBJECT,
             DACL_SECURITY_INFORMATION,
-            PSID::default(),
-            PSID::default(),
+            None,
+            None,
             Some(dacl.as_ptr().cast()),
             None,
         )

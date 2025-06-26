@@ -146,7 +146,7 @@ impl fmt::Display for Sid {
         // SAFETY:
         // - self a valid SID, well constructed.
         // - The mutability of the pointer is changed, but ConvertSidToStringSidW is not modifying the underlying data.
-        unsafe { ConvertSidToStringSidW(self, &mut repr_ptr).map_err(|_| fmt::Error)? };
+        unsafe { ConvertSidToStringSidW(self.as_psid_const(), &mut repr_ptr).map_err(|_| fmt::Error)? };
 
         // SAFETY: ConvertSidToStringSidW returns a null-terminated SID string.
         let repr = unsafe { U16CStr::from_pwstr(repr_ptr) };
@@ -154,7 +154,7 @@ impl fmt::Display for Sid {
         let res = f.write_str(&repr.to_string_lossy());
 
         // SAFETY: The pointer allocated by ConvertSidToStringSidW must be freed using `LocalFree`.
-        unsafe { LocalFree(HLOCAL(repr_ptr.0.cast())) };
+        unsafe { LocalFree(Some(HLOCAL(repr_ptr.0.cast()))) };
 
         res
     }
@@ -163,18 +163,6 @@ impl fmt::Display for Sid {
 impl fmt::Debug for Sid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
-    }
-}
-
-impl windows::core::Param<Security::PSID> for &mut Sid {
-    unsafe fn param(self) -> windows::core::ParamValue<Security::PSID> {
-        windows::core::ParamValue::Borrowed(self.as_psid())
-    }
-}
-
-impl windows::core::Param<Security::PSID> for &Sid {
-    unsafe fn param(self) -> windows::core::ParamValue<Security::PSID> {
-        windows::core::ParamValue::Borrowed(self.as_psid_const())
     }
 }
 
@@ -269,12 +257,10 @@ impl Sid {
 
         let mut return_length = 0u32;
 
-        let domain_sid = domain_sid.map(Sid::as_psid_const).unwrap_or_default();
+        let domain_sid = domain_sid.map(Sid::as_psid_const);
 
         // SAFETY: The domain SID is only used as an in parameter, and is actually never modified by CreateWellKnownSid.
-        let res = unsafe {
-            Security::CreateWellKnownSid(sid_type, domain_sid, Security::PSID::default(), &mut return_length)
-        };
+        let res = unsafe { Security::CreateWellKnownSid(sid_type, domain_sid, None, &mut return_length) };
 
         let Err(err) = res else {
             anyhow::bail!("first call to CreateWellKnownSid did not fail")
@@ -300,7 +286,7 @@ impl Sid {
             Security::CreateWellKnownSid(
                 sid_type,
                 domain_sid,
-                Security::PSID(sid.as_mut_ptr().cast()),
+                Some(Security::PSID(sid.as_mut_ptr().cast())),
                 &mut return_length,
             )?
         };
@@ -367,7 +353,7 @@ impl Sid {
         let res = unsafe { Self::from_psid(psid) };
 
         // SAFETY: On success, psid is a valid pointer initialized by ConvertStringSidToSidW that must be freed using LocalFree.
-        unsafe { LocalFree(HLOCAL(psid.0)) };
+        unsafe { LocalFree(Some(HLOCAL(psid.0))) };
 
         Ok(res?)
     }
@@ -379,13 +365,13 @@ impl Sid {
         // SAFETY:
         // - self a valid SID, well constructed.
         // - The mutability of the pointer is changed, but ConvertSidToStringSidW is not modifying the underlying data.
-        unsafe { ConvertSidToStringSidW(self, &mut repr_ptr)? };
+        unsafe { ConvertSidToStringSidW(self.as_psid_const(), &mut repr_ptr)? };
 
         // SAFETY: ConvertSidToStringSidW returns a null-terminated SID string.
         let repr = unsafe { U16CString::from_pwstr(repr_ptr) };
 
         // SAFETY: The pointer allocated by ConvertSidToStringSidW must be freed using `LocalFree`.
-        unsafe { LocalFree(HLOCAL(repr_ptr.0.cast())) };
+        unsafe { LocalFree(Some(HLOCAL(repr_ptr.0.cast()))) };
 
         Ok(StringSid { inner: repr })
     }
@@ -395,7 +381,7 @@ impl Sid {
     /// than the maximum.
     pub fn is_valid(&self) -> bool {
         // SAFETY: FFI call with no outstanding precondition.
-        unsafe { Security::IsValidSid(self).as_bool() }
+        unsafe { Security::IsValidSid(self.as_psid_const()).as_bool() }
     }
 
     /// Retrieves the name of the account for this SID and the name of the first domain on which this SID is found.
@@ -424,10 +410,10 @@ impl Sid {
         let res = unsafe {
             Security::LookupAccountSidW(
                 system_name.map_or_else(PCWSTR::null, U16CStrExt::as_pcwstr),
-                self,
-                PWSTR::null(),
+                self.as_psid_const(),
+                None,
                 &mut account_name_size,
-                PWSTR::null(),
+                None,
                 &mut domain_name_size,
                 &mut sid_name_use,
             )
@@ -454,10 +440,10 @@ impl Sid {
         unsafe {
             Security::LookupAccountSidW(
                 system_name.map_or_else(PCWSTR::null, U16CStrExt::as_pcwstr),
-                self,
-                PWSTR::from_raw(account_name_buf.as_mut_ptr()),
+                self.as_psid_const(),
+                Some(PWSTR::from_raw(account_name_buf.as_mut_ptr())),
                 &mut account_name_size,
-                PWSTR::from_raw(domain_name_buf.as_mut_ptr()),
+                Some(PWSTR::from_raw(domain_name_buf.as_mut_ptr())),
                 &mut domain_name_size,
                 &mut sid_name_use,
             )?

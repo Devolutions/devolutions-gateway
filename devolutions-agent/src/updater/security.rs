@@ -21,9 +21,7 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
     use windows::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
-    use windows::Win32::Security::{
-        GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    };
+    use windows::Win32::Security::{GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
 
     struct OwnedPSecurityDescriptor(PSECURITY_DESCRIPTOR);
 
@@ -34,7 +32,7 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
             }
             // SAFETY: `self.0` is a valid pointer to a security descriptor, therefore the function
             // is safe to call.
-            unsafe { LocalFree(HLOCAL(self.0 .0)) };
+            unsafe { LocalFree(Some(HLOCAL(self.0 .0))) };
         }
     }
 
@@ -67,9 +65,9 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
     unsafe {
         GetSecurityDescriptorDacl(
             psecurity_descriptor.0,
-            &mut sec_present as *mut windows::Win32::Foundation::BOOL,
+            &mut sec_present as *mut windows::core::BOOL,
             &mut dacl as *mut *mut ACL,
-            &mut sec_defaulted as *mut windows::Win32::Foundation::BOOL,
+            &mut sec_defaulted as *mut windows::core::BOOL,
         )
     }
     .map_err(|_| UpdaterError::AclString { acl: acl.to_owned() })?;
@@ -87,8 +85,8 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
             wide_file_path.as_pcwstr(),
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
-            PSID::default(),
-            PSID::default(),
+            None,
+            None,
             Some(dacl),
             None,
         )
