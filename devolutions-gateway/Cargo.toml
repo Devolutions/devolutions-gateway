@@ -33,7 +33,7 @@ ironrdp-tokio = "0.5"
 ironrdp-connector = { version = "0.5" }
 ironrdp-acceptor = { version = "0.5" }
 ceviche = "0.6.1"
-picky-krb = "0.9"
+picky-krb = "0.11"
 network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
 video-streamer = { path = "../crates/video-streamer" }
 terminal-streamer = { path = "../crates/terminal-streamer" }

@@ -1226,7 +1226,7 @@ dependencies = [
  "parking_lot",
  "pcap-file",
  "picky",
- "picky-krb 0.9.6",
+ "picky-krb 0.11.0",
  "pin-project-lite 0.2.16",
  "portpicker",
  "proptest",
@@ -4287,9 +4287,9 @@ dependencies = [
 
 [[package]]
 name = "picky-krb"
-version = "0.9.6"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dd326177336b27707c6f969e14f57a54d6b521ce95cce55785ce02525052783"
+checksum = "dd24e82ec97008ec01a89a40ba4eeacf09c573da78915674e7127bf33bced64d"
 dependencies = [
  "aes",
  "byteorder",
@@ -4312,9 +4312,9 @@ dependencies = [
 
 [[package]]
 name = "picky-krb"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd24e82ec97008ec01a89a40ba4eeacf09c573da78915674e7127bf33bced64d"
+checksum = "b45ffe5f2122cdda5e9059ab837a65ba1b77729db43fc1500f2fce6b27070eab"
 dependencies = [
  "aes",
  "byteorder",
