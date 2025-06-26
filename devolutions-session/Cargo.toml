@@ -48,7 +48,7 @@ version = "0.2"
 features = ["std"]
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.5"
+embed-resource = "3.0"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.61"

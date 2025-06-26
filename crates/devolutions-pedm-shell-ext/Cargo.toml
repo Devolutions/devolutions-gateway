@@ -22,4 +22,4 @@ devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["bu
 fs_extra = "1.3"
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.5"
+embed-resource = "3.0"
