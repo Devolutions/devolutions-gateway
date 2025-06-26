@@ -9,8 +9,8 @@ publish = false
 
 [dependencies]
 base16ct = { version = "0.2", features = ["alloc"] }
-anyhow = "1.0"
-thiserror = "1.0"
+anyhow = "1"
+thiserror = "2"
 tracing = "0.1"
 uuid = { version = "1.17", features = ["v4"] }
 widestring = "1.2.0"

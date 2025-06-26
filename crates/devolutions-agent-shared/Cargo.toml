@@ -13,7 +13,7 @@ workspace = true
 camino = "1.1"
 cfg-if = "1"
 serde = { version = "1", features = ["derive"] }
-thiserror = "1"
+thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.3"

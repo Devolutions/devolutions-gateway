@@ -57,7 +57,7 @@ uuid = { version = "1.17", features = ["v4", "serde"] }
 time = { version = "0.3", default-features = false, features = ["std", "serde", "formatting"] }
 parking_lot = "0.12"
 anyhow = "1.0"
-thiserror = "1"
+thiserror = "2"
 typed-builder = "0.19"
 backoff = "0.4"
 sysinfo = "0.30"
