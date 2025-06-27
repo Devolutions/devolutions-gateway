@@ -221,6 +221,8 @@ pub(crate) trait Database: Send + Sync {
 
     async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError>;
 
+    async fn get_user_id(&self, user: &User) -> Result<Option<i64>, DbError>;
+
     async fn get_users(&self) -> Result<Vec<User>, DbError>;
 
     async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError>;
