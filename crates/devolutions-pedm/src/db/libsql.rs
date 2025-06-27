@@ -32,20 +32,6 @@ impl LibsqlConn {
             .ok_or(libsql::Error::QueryReturnedNoRows)
     }
 
-    async fn get_user_id(&self, user: &User) -> Result<Option<i64>, DbError> {
-        let mut rows = self.query(
-            "SELECT id FROM user WHERE account_name = ?1 AND domain_name = ?2 AND account_sid = ?3 AND domain_sid = ?4",
-            params![user.account_name.as_str(), user.domain_name.as_str(), user.account_sid.as_str(), user.domain_sid.as_str()],
-        ).await?;
-
-        if let Some(row) = rows.next().await? {
-            let id: i64 = row.get(0)?;
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
-    }
-
     async fn get_or_insert_user(&self, tx: &mut Transaction, user: &User) -> Result<i64, DbError> {
         let mut rows = tx.query(
             "SELECT id FROM user WHERE account_name = ?1 AND domain_name = ?2 AND account_sid = ?3 AND domain_sid = ?4",
@@ -623,6 +609,20 @@ impl Database for LibsqlConn {
         }
 
         Ok(users)
+    }
+
+    async fn get_user_id(&self, user: &User) -> Result<Option<i64>, DbError> {
+        let mut rows = self.query(
+            "SELECT id FROM user WHERE account_name = ?1 AND domain_name = ?2 AND account_sid = ?3 AND domain_sid = ?4",
+            params![user.account_name.as_str(), user.domain_name.as_str(), user.account_sid.as_str(), user.domain_sid.as_str()],
+        ).await?;
+
+        if let Some(row) = rows.next().await? {
+            let id: i64 = row.get(0)?;
+            Ok(Some(id))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError> {

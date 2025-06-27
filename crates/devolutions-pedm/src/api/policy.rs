@@ -82,13 +82,21 @@ async fn get_me(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     NoApi(Db(db)): NoApi<Db>,
 ) -> Result<Json<GetProfilesMeResponse>, Error> {
-    let selected_profile = db.get_user_profile(&named_pipe_info.user).await?;
-    let profiles = db.get_profiles_for_user(&named_pipe_info.user).await?;
+    match db.get_user_id(&named_pipe_info.user).await? {
+        Some(_) => {
+            let selected_profile = db.get_user_profile(&named_pipe_info.user).await?;
+            let profiles = db.get_profiles_for_user(&named_pipe_info.user).await?;
 
-    Ok(Json(GetProfilesMeResponse {
-        active: selected_profile.map_or(0, |p| p.id),
-        available: profiles.into_iter().map(|p| p.id).collect(),
-    }))
+            Ok(Json(GetProfilesMeResponse {
+                active: selected_profile.map_or(0, |p| p.id),
+                available: profiles.into_iter().map(|p| p.id).collect(),
+            }))
+        }
+        None => Ok(Json(GetProfilesMeResponse {
+            active: 0,
+            available: vec![],
+        })),
+    }
 }
 
 /// Returns the list of profile IDs.

@@ -95,6 +95,10 @@ impl Database for PgPool {
         unimplemented!()
     }
 
+    async fn get_user_id(&self, user: &User) -> Result<Option<i64>, DbError> {
+        unimplemented!()
+    }
+
     async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
         unimplemented!()
     }
