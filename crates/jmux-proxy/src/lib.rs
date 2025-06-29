@@ -393,6 +393,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
             Some(internal_msg) = internal_msg_rx.recv() => {
                 match internal_msg {
                     InternalMessage::Eof { id } => {
+                        // Remove associated data sender.
+                        data_senders.remove(&id);
+
                         let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
                         let channel_span = channel.span.clone();
                         let local_id = channel.local_id;
@@ -666,9 +669,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         channel.span.in_scope(|| {
                             debug!("Distant peer EOFed");
                         });
-
-                        // Remove associated data sender
-                        data_senders.remove(&id);
 
                         match channel.local_state {
                             JmuxChannelState::Streaming => {},
