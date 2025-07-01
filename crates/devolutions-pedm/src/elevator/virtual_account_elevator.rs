@@ -26,7 +26,7 @@ use win_api_wrappers::Error;
 
 use super::Elevator;
 
-use anyhow::Context;
+use anyhow::Context as _;
 
 struct VirtualAccountElevation {
     _base_token: Token,
