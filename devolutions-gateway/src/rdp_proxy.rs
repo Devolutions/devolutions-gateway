@@ -432,7 +432,7 @@ where
     {
         let crate::credential::AppCredential::UsernamePassword { username, password } = credentials;
 
-        let username = ironrdp_connector::sspi::Username::new(username, None).context("invalid username")?;
+        let username = ironrdp_connector::sspi::Username::parse(username).context("invalid username")?;
 
         let identity = ironrdp_connector::sspi::AuthIdentity {
             username,
