@@ -437,11 +437,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       .withExtension(
         dynamicResizingSupportedCallback(() => {
           this.dynamicResizeSupported = true;
-          // After connecting to the server, the VNC WASM module uses the server's initial desktop size.
-          // If the server supports resizing, we can request a different desktop size.
-          // The canvas will change its logical size, but visually it will remain unchanged.
-          // To prevent the image from appearing flattened or stretched, we need to rescale the canvas.
-          this.scaleTo(this.screenScale.Fit);
         }),
       )
       .withExtension(enableCursor(connectionParameters.enableCursor))
