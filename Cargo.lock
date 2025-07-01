@@ -373,7 +373,7 @@ dependencies = [
  "sha1",
  "sync_wrapper 1.0.2",
  "tokio 1.45.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -1246,14 +1246,14 @@ dependencies = [
  "tokio 1.45.1",
  "tokio-rustls",
  "tokio-test",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "tower 0.5.2",
  "tower-http 0.5.2",
  "tracing",
  "tracing-cov-mark",
  "tracing-subscriber",
  "transport",
- "tungstenite",
+ "tungstenite 0.26.2",
  "typed-builder",
  "url",
  "utoipa",
@@ -2921,7 +2921,7 @@ dependencies = [
  "test-utils",
  "tinyjson",
  "tokio 1.45.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -5964,7 +5964,7 @@ dependencies = [
  "portpicker",
  "proptest",
  "tokio 1.45.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "transport",
 ]
 
@@ -6252,6 +6252,18 @@ checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
 dependencies = [
  "futures-util",
  "log",
+ "tokio 1.45.1",
+ "tungstenite 0.26.2",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "489a59b6730eda1b0171fcfda8b121f4bee2b35cba8645ca35c5f7ba3eb736c1"
+dependencies = [
+ "futures-util",
+ "log",
  "native-tls",
  "rustls 0.23.28",
  "rustls-native-certs",
@@ -6259,7 +6271,7 @@ dependencies = [
  "tokio 1.45.1",
  "tokio-native-tls",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.27.0",
 ]
 
 [[package]]
@@ -6711,6 +6723,23 @@ dependencies = [
  "http 1.3.1",
  "httparse",
  "log",
+ "rand 0.9.1",
+ "sha1",
+ "thiserror 2.0.12",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eadc29d668c91fcc564941132e17b28a7ceb2f3ebf0b9dae3e03fd7a6748eb0d"
+dependencies = [
+ "bytes 1.10.1",
+ "data-encoding",
+ "http 1.3.1",
+ "httparse",
+ "log",
  "native-tls",
  "rand 0.9.1",
  "rustls 0.23.28",
@@ -6932,7 +6961,7 @@ dependencies = [
  "num_cpus",
  "thiserror 2.0.12",
  "tokio 1.45.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
