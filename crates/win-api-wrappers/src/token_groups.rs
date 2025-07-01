@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt, mem};
 
 use windows::Win32::Security;
 
@@ -83,6 +83,12 @@ impl TokenGroups {
                 sid,
                 attributes: raw.Attributes,
             })
+    }
+}
+
+impl fmt::Debug for TokenGroups {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TokenGroups").field("sids", &self.sids).finish()
     }
 }
 

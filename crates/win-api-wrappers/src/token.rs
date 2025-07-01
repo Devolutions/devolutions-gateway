@@ -350,7 +350,8 @@ impl Token {
                 info_class,
                 value as *const _ as *const _,
                 u32size_of::<T>(),
-            )?;
+            )
+            .context("SetTokenInformation")?;
         }
 
         Ok(())
@@ -441,7 +442,10 @@ impl Token {
                 None,
                 None,
             )
-        }?;
+            .with_context(|| {
+                format!("LogonUserExExW failed (username: {username:?}, domain: {domain:?}, logon_type: {logon_type:?}, logon_provider: {logon_provider:?}, groups: {groups:?})")
+            })?
+        }
 
         // SAFETY: We own the handle.
         let handle = unsafe { Handle::new_owned(raw_token)? };
