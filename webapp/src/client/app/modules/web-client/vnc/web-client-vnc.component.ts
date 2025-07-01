@@ -303,8 +303,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     }
 
     try {
-      const sessionContainerElement = this.sessionContainerElement.nativeElement;
-      await sessionContainerElement.requestFullscreen();
+      const sessionsContainerElement = this.sessionsContainerElement.nativeElement;
+      await sessionsContainerElement.requestFullscreen();
     } catch (err) {
       this.isFullScreenMode = false;
       console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
