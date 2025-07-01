@@ -59,7 +59,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   formData: ArdFormDataInput;
   ardError: { kind: string; backtrace: string };
   isFullScreenMode = false;
-  showToolbarDiv = true;
   cursorOverrideActive = false;
 
   middleToolbarButtons = [
@@ -121,10 +120,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     protected analyticService: AnalyticService,
   ) {
     super(gatewayAlertMessageService, analyticService);
-  }
-  @HostListener('document:mousemove', ['$event'])
-  onMouseMove(event: MouseEvent): void {
-    this.handleSessionToolbarDisplay(event);
   }
 
   @HostListener('document:fullscreenchange')
@@ -216,18 +211,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     }
   }
 
-  private handleSessionToolbarDisplay(event: MouseEvent): void {
-    if (!document.fullscreenElement) {
-      return;
-    }
-
-    if (event.clientY === 0) {
-      this.showToolbarDiv = true;
-    } else if (event.clientY > 44) {
-      this.showToolbarDiv = false;
-    }
-  }
-
   private toggleFullscreen(): void {
     this.isFullScreenMode = !this.isFullScreenMode;
     !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
@@ -259,7 +242,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   private handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
-    this.showToolbarDiv = true;
 
     const sessionContainerElement = this.sessionContainerElement.nativeElement;
     const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
