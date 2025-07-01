@@ -56,7 +56,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   backendRef = Backend;
 
-  screenScale = ScreenScale;
   formData: ArdFormDataInput;
   ardError: { kind: string; backtrace: string };
   isFullScreenMode = false;
@@ -67,12 +66,12 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     {
       label: 'Fit to Screen',
       icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(this.screenScale.Fit),
+      action: () => this.scaleTo(ScreenScale.Fit),
     },
     {
       label: 'Actual Size',
       icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(this.screenScale.Real),
+      action: () => this.scaleTo(ScreenScale.Real),
     },
   ];
 
@@ -262,7 +261,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
     }
 
-    this.remoteClient.setScale(ScreenScale.Fit.valueOf());
+    this.scaleTo(ScreenScale.Fit);
   }
 
   private initiateRemoteClientListener(): void {
