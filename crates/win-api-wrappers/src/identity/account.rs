@@ -242,7 +242,10 @@ pub fn create_profile(account_sid: &Sid, account_name: &U16CStr) -> anyhow::Resu
             account_string_sid.as_u16cstr().as_pcwstr(),
             account_name.as_pcwstr(),
             profile_path.as_mut_slice(),
-        )?
+        )
+        .with_context(|| {
+            format!("CreateProfile failed (account_string_sid: {account_string_sid:?}, account_name: {account_name:?}, profile_path: {profile_path:?}")
+        })?
     };
 
     Ok(U16CString::from_vec_truncate(profile_path))
@@ -269,7 +272,10 @@ impl ProfileInfo {
         profile_info.raw.lpUserName = profile_info.username.as_pwstr();
 
         // SAFETY: Only prerequisite is for `profile_info`'s `dwSize` member to be set correctly, which it is.
-        unsafe { LoadUserProfileW(profile_info.token.handle().raw(), &mut profile_info.raw) }?;
+        unsafe {
+            LoadUserProfileW(profile_info.token.handle().raw(), &mut profile_info.raw)
+                .with_context(|| format!("LoadUserProfileW failed (username: {:?})", profile_info.username))?;
+        };
 
         Ok(profile_info)
     }

@@ -26,6 +26,8 @@ use win_api_wrappers::Error;
 
 use super::Elevator;
 
+use anyhow::Context as _;
+
 struct VirtualAccountElevation {
     _base_token: Token,
     elevated_token: Token,
@@ -56,7 +58,7 @@ impl VirtualAccountElevator {
     fn create_token(&self, token: &Token) -> anyhow::Result<()> {
         let domain = U16CString::from_str(&self.domain)?;
 
-        let virtual_account = create_virtual_account(self.rid, &domain, token)?;
+        let virtual_account = create_virtual_account(self.rid, &domain, token).context("create virtual account")?;
 
         let mut groups = TokenGroups::new(
             // Needed for the virtual account to access the user's desktop and window station.
@@ -93,9 +95,12 @@ impl VirtualAccountElevator {
             LOGON32_LOGON_INTERACTIVE,
             LOGON32_PROVIDER_VIRTUAL,
             Some(&groups),
-        )?;
+        )
+        .context("logon virtual account")?;
 
-        let profile = base_token.load_profile(virtual_account.name)?;
+        let profile = base_token
+            .load_profile(virtual_account.name)
+            .context("load virtual account profile")?;
 
         let elevated_token = base_token.linked_token()?;
 
@@ -120,7 +125,7 @@ impl Elevator for VirtualAccountElevator {
         let sid = token.sid_and_attributes()?.sid;
 
         if !self.tokens.read().contains_key(&sid) {
-            self.create_token(token)?;
+            self.create_token(token).context("create virtual account token")?;
         }
 
         self.tokens
@@ -128,9 +133,14 @@ impl Elevator for VirtualAccountElevator {
             .get(&sid)
             .ok_or_else(|| anyhow::anyhow!(Error::from_win32(ERROR_ACCOUNT_EXPIRED)))
             .and_then(|vtoken| {
-                let mut vtoken = vtoken.elevated_token.duplicate_impersonation()?;
+                let mut vtoken = vtoken
+                    .elevated_token
+                    .duplicate_impersonation()
+                    .context("duplicate virtual elevated token")?;
 
-                vtoken.set_session_id(token.session_id()?)?;
+                vtoken
+                    .set_session_id(token.session_id()?)
+                    .context("set virtual token session id")?;
 
                 Ok(vtoken)
             })
