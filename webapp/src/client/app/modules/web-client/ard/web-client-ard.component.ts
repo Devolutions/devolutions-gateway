@@ -64,6 +64,11 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
   middleToolbarButtons = [
     {
+      label: 'Full Screen',
+      icon: 'dvl-icon dvl-icon-fullscreen',
+      action: () => this.toggleFullscreen(),
+    },
+    {
       label: 'Fit to Screen',
       icon: 'dvl-icon dvl-icon-minimize',
       action: () => this.scaleTo(ScreenScale.Fit),
@@ -157,7 +162,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   }
 
   scaleTo(scale: ScreenScale): void {
-    scale === ScreenScale.Full ? this.toggleFullscreen() : this.remoteClient.setScale(scale.valueOf());
+    this.remoteClient.setScale(scale.valueOf());
   }
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {
@@ -226,6 +231,8 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   private toggleFullscreen(): void {
     this.isFullScreenMode = !this.isFullScreenMode;
     !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
+
+    this.scaleTo(ScreenScale.Full);
   }
 
   private async enterFullScreen(): Promise<void> {
