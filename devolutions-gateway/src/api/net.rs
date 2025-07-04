@@ -370,19 +370,22 @@ impl TryFrom<ScannerEvent> for NetworkScanResponse {
                 protocol,
                 port,
             }) => {
-                let protocol = protocol.map(|protocol| match protocol {
-                    scanner::ServiceType::Rdp => Protocol::Rdp,
-                    scanner::ServiceType::Ard => Protocol::Ard,
-                    scanner::ServiceType::Vnc => Protocol::Vnc,
-                    scanner::ServiceType::Ssh => Protocol::Ssh,
-                    scanner::ServiceType::Sftp => Protocol::Sftp,
-                    scanner::ServiceType::Scp => Protocol::Scp,
-                    scanner::ServiceType::Telnet => Protocol::Telnet,
-                    scanner::ServiceType::Http => Protocol::Http,
-                    scanner::ServiceType::Https => Protocol::Https,
-                    scanner::ServiceType::Ldap => Protocol::Ldap,
-                    scanner::ServiceType::Ldaps => Protocol::Ldaps,
-                });
+                let protocol = match protocol {
+                    None => None,
+                    Some(protocol) => Some(match protocol {
+                        scanner::ServiceType::Rdp => Protocol::Rdp,
+                        scanner::ServiceType::Ard => Protocol::Ard,
+                        scanner::ServiceType::Vnc => Protocol::Vnc,
+                        scanner::ServiceType::Ssh => Protocol::Ssh,
+                        scanner::ServiceType::Sftp => Protocol::Sftp,
+                        scanner::ServiceType::Scp => Protocol::Scp,
+                        scanner::ServiceType::Telnet => Protocol::Telnet,
+                        scanner::ServiceType::Http => Protocol::Http,
+                        scanner::ServiceType::Https => Protocol::Https,
+                        scanner::ServiceType::Ldap => Protocol::Ldap,
+                        scanner::ServiceType::Ldaps => Protocol::Ldaps,
+                    }),
+                };
 
                 let protocol = match protocol {
                     Some(protocol) => TcpKnockProbe::NamedApplication(protocol),
