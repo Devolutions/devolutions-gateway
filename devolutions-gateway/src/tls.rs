@@ -76,7 +76,7 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
         } => {
             let first_certificate = certificates.first().context("empty certificate list")?;
 
-            if let Ok(report) = check_certificate_now(&first_certificate) {
+            if let Ok(report) = check_certificate_now(first_certificate) {
                 if report.issues.intersects(
                     CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
                 ) {

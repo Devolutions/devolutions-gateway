@@ -77,10 +77,7 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => break,
                 std::cmp::Ordering::Greater => {
-                    return Err(io::Error::new(
-                        ErrorKind::Other,
-                        "no leftover is expected when reading cleanpath PDU",
-                    ));
+                    return Err(io::Error::other("no leftover is expected when reading cleanpath PDU"));
                 }
             }
         }
@@ -234,30 +231,31 @@ async fn process_cleanpath(
     debug!(%selected_target, "Connected to destination server");
     span.record("target", selected_target.to_string());
 
-    // Preconnection Blob (PCB) is currently only used for Hyper-V VMs.
+    // Preconnection Blob (PCB) is currently used for Hyper-V VMs almost exclusively in practice.
+    // However, we still leave space for future extensions of usages of PCB.
     //
-    // Connection sequence with Hyper-V VMs (PCB enabled):
-    // ┌─────────────────────┐    ┌─────────────────────────────────────────────────────────────┐
-    // │   handled by        │    │              handled by IronRDP client                      │
-    // │     Gateway         │    │                                                             │
-    // └─────────────────────┘    └─────────────────────────────────────────────────────────────┘
-    // │PCB → TLS handshake  │ →  │CredSSP → X224 connection request → X224 connection response │
-    // └─────────────────────┘    └─────────────────────────────────────────────────────────────┘
+    // Connection sequence with Hyper-V VMs (PCB included and X224 connection request is not present):
+    // ┌───────────────────────┐    ┌───────────────────────────────────────────────────────────────┐
+    // │       handled by      │    │                  handled by IronRDP client                    │
+    // │        Gateway        │    │                                                               │
+    // └───────────────────────┘    └───────────────────────────────────────────────────────────────┘
+    // │ PCB → TLS handshake   │ →  │ CredSSP → X224 connection request → X224 connection response  │
+    // └───────────────────────┘    └───────────────────────────────────────────────────────────────┘
     //
-    // Connection sequence without Hyper-V VMs (PCB disabled):
-    // ┌─────────────────────────────────────────────────────────────┐    ┌──────────────────────┐
-    // │                  handled by Gateway                         │    │ handled by IronRDP   │
-    // │                                                             │    │       client         │
-    // └─────────────────────────────────────────────────────────────┘    └──────────────────────┘
-    // │X224 connection request → X224 connection response → TLS hs  │ →  │CredSSP → ...         │
-    // └─────────────────────────────────────────────────────────────┘    └──────────────────────┘
+    // Connection sequence without Hyper-V VMs (PCB optional):
+    // ┌───────────────────────────────────────────────────────────────┐          ┌───────────────────────┐
+    // │                     handled by Gateway                        │          │   handled by IronRDP  │
+    // │                                                               │          │         client        │
+    // └───────────────────────────────────────────────────────────────┘          └───────────────────────┘
+    // │ PCB → X224 connection request → X224 connection response → TLS|          │ → CredSSP → ...       │
+    // └───────────────────────────────────────────────────────────────┘          └───────────────────────┘
     //
     // Summary:
-    // - With PCB: Gateway handles (1) sending PCB, (2) TLS handshake, then leaves CredSSP
-    //   and X224 connection request/response to IronRDP client
-    // - Without PCB: Gateway handles (1) X224 connection request, (2) X224 connection response,
-    //   then leaves TLS handshake and CredSSP to IronRDP client
-    // Send preconnection blob and/or X224 connection request
+    // - With PCB but not X224 connection request: Gateway handles (1) sending PCB/VmConnectID, (2) TLS handshake, then leaves CredSSP
+    //   and X224 connection request/response to IronRDP client.
+    // - With PCB and X224 connection request: Gateway handles (1) sending PCB/VmConnectID, (2) X224 connection request, (3) X224 connection response, (4) TLS handshake,
+    //   then leaves CredSSP to IronRDP client.
+    // - Without PCB: In this case, X224 MUST be present! Gateway handles (1) X224 connection request, (2) X224 connection response, (3) TLS handshake, then leaves CredSSP to IronRDP client.
     match (&cleanpath_pdu.preconnection_blob, &cleanpath_pdu.x224_connection_pdu) {
         (None, None) => {
             return Err(CleanPathError::BadRequest(anyhow::anyhow!(
@@ -310,13 +308,13 @@ async fn process_cleanpath(
             target_server: selected_target.to_owned(),
         })?;
 
-    return Ok(CleanPathResult {
+    Ok(CleanPathResult {
         destination: selected_target.to_owned(),
         claims,
         server_addr,
         server_stream,
         x224_rsp,
-    });
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -380,12 +378,8 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rdcleanpath_rsp = RDCleanPathPdu::new_response(
-        server_addr.to_string(),
-        x224_rsp,
-        x509_chain,
-    )
-    .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
+        .context("couldn’t build RDCleanPath response")?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
@@ -504,7 +498,7 @@ enum WsaError {
     WSAESTALE = 10070,
     WSAEREMOTE = 10071,
     WSASYSNOTREADY = 10091,
-    WSAVERNOTSUPPORTED = 10092,
+    WSAVERNOT_SUPPORTED = 10092,
     WSANOTINITIALISED = 10093,
     WSAEDISCON = 10101,
     WSAENOMORE = 10102,
