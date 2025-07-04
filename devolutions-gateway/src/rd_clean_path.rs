@@ -256,31 +256,29 @@ async fn process_cleanpath(
     // - With PCB and X224 connection request: Gateway handles (1) sending PCB/VmConnectID, (2) X224 connection request, (3) X224 connection response, (4) TLS handshake,
     //   then leaves CredSSP to IronRDP client.
     // - Without PCB: In this case, X224 MUST be present! Gateway handles (1) X224 connection request, (2) X224 connection response, (3) TLS handshake, then leaves CredSSP to IronRDP client.
-    match (&cleanpath_pdu.preconnection_blob, &cleanpath_pdu.x224_connection_pdu) {
+    let pcb_bytes = match (&cleanpath_pdu.preconnection_blob, &cleanpath_pdu.x224_connection_pdu) {
         (None, None) => {
             return Err(CleanPathError::BadRequest(anyhow::anyhow!(
                 "RDCleanPath PDU is missing both preconnection blob and X224 connection PDU"
             )));
         }
-        (Some(general_pcb), Some(_)) => {
-            server_stream.write_all(general_pcb.as_bytes()).await?;
-        }
-        (None, Some(_)) => {} // no preconnection blob to send
-        // This is considered to be the case where the preconnection blob is used for Hyper-V VMs connection
-        (Some(pcb), None) => {
-            debug!("Sending preconnection blob to server");
-            let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
-                version: ironrdp_pdu::pcb::PcbVersion::V2,
-                id: 0,
-                v2_payload: Some(pcb.clone()),
-            };
+        (None, Some(_)) => None, // no preconnection blob to send
+        (Some(general_pcb), Some(_)) => Some(general_pcb),
+        (Some(vmconnect), None) => Some(vmconnect),
+    };
 
-            let encoded = ironrdp_core::encode_vec(&pcb)
-                .context("failed to encode preconnection blob")
-                .map_err(CleanPathError::BadRequest)?;
+    if let Some(pcb_bytes) = pcb_bytes {
+        let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+            version: ironrdp_pdu::pcb::PcbVersion::V2,
+            id: 0,
+            v2_payload: Some(pcb_bytes.to_owned()),
+        };
 
-            server_stream.write_all(&encoded).await?;
-        }
+        let encoded = ironrdp_core::encode_vec(&pcb)
+            .context("failed to encode preconnection blob")
+            .map_err(CleanPathError::BadRequest)?;
+
+        server_stream.write_all(&encoded).await?;
     }
 
     // Send X224 connection request if present
