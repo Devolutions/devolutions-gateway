@@ -29,12 +29,6 @@ pub struct AppCredentialMapping {
 #[derive(Debug, Clone)]
 pub struct CredentialStoreHandle(Arc<Mutex<CredentialStore>>);
 
-impl Default for CredentialStoreHandle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CredentialStoreHandle {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(CredentialStore::new())))
