@@ -77,10 +77,7 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => break,
                 std::cmp::Ordering::Greater => {
-                    return Err(io::Error::new(
-                        ErrorKind::Other,
-                        "no leftover is expected when reading cleanpath PDU",
-                    ));
+                    return Err(io::Error::other("no leftover is expected when reading cleanpath PDU"));
                 }
             }
         }
@@ -164,7 +161,7 @@ struct CleanPathResult {
     destination: TargetAddr,
     server_addr: SocketAddr,
     server_stream: tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
-    x224_rsp: Vec<u8>,
+    x224_rsp: Option<Vec<u8>>,
 }
 
 async fn process_cleanpath(
@@ -234,31 +231,74 @@ async fn process_cleanpath(
     debug!(%selected_target, "Connected to destination server");
     span.record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable
-    if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-        server_stream.write_all(pcb.as_bytes()).await?;
+    // Preconnection Blob (PCB) is currently used for Hyper-V VMs almost exclusively in practice.
+    // However, we still leave space for future extensions of usages of PCB.
+    //
+    // Connection sequence with Hyper-V VMs (PCB included and X224 connection request is not present):
+    // ┌───────────────────────┐    ┌───────────────────────────────────────────────────────────────┐
+    // │       handled by      │    │                  handled by IronRDP client                    │
+    // │        Gateway        │    │                                                               │
+    // └───────────────────────┘    └───────────────────────────────────────────────────────────────┘
+    // │ PCB → TLS handshake   │ →  │ CredSSP → X224 connection request → X224 connection response  │
+    // └───────────────────────┘    └───────────────────────────────────────────────────────────────┘
+    //
+    // Connection sequence without Hyper-V VMs (PCB optional):
+    // ┌───────────────────────────────────────────────────────────────┐          ┌───────────────────────┐
+    // │                     handled by Gateway                        │          │   handled by IronRDP  │
+    // │                                                               │          │         client        │
+    // └───────────────────────────────────────────────────────────────┘          └───────────────────────┘
+    // │ PCB → X224 connection request → X224 connection response → TLS|          │ → CredSSP → ...       │
+    // └───────────────────────────────────────────────────────────────┘          └───────────────────────┘
+    //
+    // Summary:
+    // - With PCB but not X224 connection request: Gateway handles (1) sending PCB/VmConnectID, (2) TLS handshake, then leaves CredSSP
+    //   and X224 connection request/response to IronRDP client.
+    // - With PCB and X224 connection request: Gateway handles (1) sending PCB/VmConnectID, (2) X224 connection request, (3) X224 connection response, (4) TLS handshake,
+    //   then leaves CredSSP to IronRDP client.
+    // - Without PCB: In this case, X224 MUST be present! Gateway handles (1) X224 connection request, (2) X224 connection response, (3) TLS handshake, then leaves CredSSP to IronRDP client.
+    let pcb_bytes = match (&cleanpath_pdu.preconnection_blob, &cleanpath_pdu.x224_connection_pdu) {
+        (None, None) => {
+            return Err(CleanPathError::BadRequest(anyhow::anyhow!(
+                "RDCleanPath PDU is missing both preconnection blob and X224 connection PDU"
+            )));
+        }
+        (None, Some(_)) => None, // no preconnection blob to send
+        (Some(general_pcb), Some(_)) => Some(general_pcb),
+        (Some(vmconnect), None) => Some(vmconnect),
+    };
+
+    if let Some(pcb_bytes) = pcb_bytes {
+        let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+            version: ironrdp_pdu::pcb::PcbVersion::V2,
+            id: 0,
+            v2_payload: Some(pcb_bytes.to_owned()),
+        };
+
+        let encoded = ironrdp_core::encode_vec(&pcb)
+            .context("failed to encode preconnection blob")
+            .map_err(CleanPathError::BadRequest)?;
+
+        server_stream.write_all(&encoded).await?;
     }
 
-    // Send X224 connection request
-    let x224_req = cleanpath_pdu
-        .x224_connection_pdu
-        .context("request is missing X224 connection PDU")
-        .map_err(CleanPathError::BadRequest)?;
-    server_stream.write_all(x224_req.as_bytes()).await?;
+    // Send X224 connection request if present
+    let x224_rsp = if let Some(x224_connection_pdu) = &cleanpath_pdu.x224_connection_pdu {
+        server_stream.write_all(x224_connection_pdu.as_bytes()).await?;
+        debug!("X224 connection request sent");
 
-    // Receive server X224 connection response
+        let x224_rsp = read_x224_response(&mut server_stream)
+            .await
+            .with_context(|| format!("read X224 response from {selected_target}"))
+            .map_err(CleanPathError::BadRequest)?;
+        trace!("Receiving X224 response");
 
-    trace!("Receiving X224 response");
+        Some(x224_rsp)
+    } else {
+        None
+    };
 
-    let x224_rsp = read_x224_response(&mut server_stream)
-        .await
-        .with_context(|| format!("read X224 response from {selected_target}"))
-        .map_err(CleanPathError::BadRequest)?;
-
+    // Establish TLS connection
     trace!("Establishing TLS connection with server");
-
-    // Establish TLS connection with server
-
     let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
@@ -295,7 +335,7 @@ pub async fn handle(
         .await
         .context("couldn’t read clean cleanpath PDU")?;
 
-    trace!("Processing RDCleanPath");
+    trace!(RDCleanPath = ?cleanpath_pdu,"Processing RDCleanPath");
 
     let CleanPathResult {
         claims,
@@ -337,7 +377,7 @@ pub async fn handle(
     trace!("Sending RDCleanPath response");
 
     let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+        .context("couldn’t build RDCleanPath response")?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
@@ -456,7 +496,7 @@ enum WsaError {
     WSAESTALE = 10070,
     WSAEREMOTE = 10071,
     WSASYSNOTREADY = 10091,
-    WSAVERNOTSUPPORTED = 10092,
+    WSAVERNOT_SUPPORTED = 10092,
     WSANOTINITIALISED = 10093,
     WSAEDISCON = 10101,
     WSAENOMORE = 10102,

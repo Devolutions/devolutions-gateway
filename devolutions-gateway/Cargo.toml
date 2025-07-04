@@ -28,8 +28,8 @@ job-queue = { path = "../crates/job-queue" }
 job-queue-libsql = { path = "../crates/job-queue-libsql" }
 ironrdp-pdu = { version = "0.5", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
-ironrdp-rdcleanpath = "0.1"
 ironrdp-tokio = "0.5"
+ironrdp-rdcleanpath = { path = "C:\\dev\\IronRDP\\crates\\ironrdp-rdcleanpath" }
 ironrdp-connector = { version = "0.5" }
 ironrdp-acceptor = { version = "0.5" }
 ceviche = "0.6.1"
