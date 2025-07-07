@@ -107,7 +107,7 @@ catch (ApiException e)
 | **400** | Bad request |  -  |
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
-| **406** | A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted) |  -  |
+| **409** | A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted) |  -  |
 | **413** | Request payload is too large |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -205,7 +205,7 @@ void (empty response body)
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **404** | The specified recording was not found |  -  |
-| **406** | The recording is still ongoing and can&#39;t be deleted yet |  -  |
+| **409** | The recording is still ongoing and can&#39;t be deleted yet |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

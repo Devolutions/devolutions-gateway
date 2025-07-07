@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2025.2.1
+2025.2.2
 :toc: left
 :numbered:
 :toclevels: 4
@@ -608,7 +608,7 @@ If you try to delete more than 50,000 recordings at once, you should split the l
 |  <<>>
 
 
-| 406
+| 409
 | A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted)
 |  <<>>
 
@@ -717,7 +717,7 @@ Deletes a recording stored on this instance
 |  <<>>
 
 
-| 406
+| 409
 | The recording is still ongoing and can&#39;t be deleted yet
 |  <<>>
 
