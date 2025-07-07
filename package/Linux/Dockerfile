@@ -1,5 +1,15 @@
-FROM mcr.microsoft.com/powershell:debian-bullseye-slim
-LABEL maintainer "Devolutions Inc."
+FROM debian:bookworm-slim
+LABEL maintainer="Devolutions Inc."
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget ca-certificates \
+    && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && rm packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        powershell \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/devolutions/gateway
 
