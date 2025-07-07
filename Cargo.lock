@@ -1211,7 +1211,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-util",
  "ironrdp-acceptor 0.5.0",
- "ironrdp-connector 0.5.0",
+ "ironrdp-connector 0.5.1",
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "ironrdp-rdcleanpath",
@@ -2589,7 +2589,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad348cb50d990c23b7c6f4f8f4c42b6678d5d0c6d7acd57f14685b41d77d9ff7"
 dependencies = [
  "ironrdp-async 0.5.0",
- "ironrdp-connector 0.5.0",
+ "ironrdp-connector 0.5.1",
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "ironrdp-svc 0.4.0",
@@ -2626,7 +2626,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb8b3d345988b6791fd780befc08df35c81a030603e4588c6fb9bf4b14dd3ab"
 dependencies = [
  "bytes 1.10.1",
- "ironrdp-connector 0.5.0",
+ "ironrdp-connector 0.5.1",
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "tracing",
@@ -2661,9 +2661,9 @@ dependencies = [
 
 [[package]]
 name = "ironrdp-connector"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17af84fc181aa27c142459606ba4ada6f99cf1f4efed7ba622d7e7d20840b30f"
+checksum = "131d5060ff071a244f69e43d3efa19704b2930a41700e0288685d2f3c91d2e28"
 dependencies = [
  "ironrdp-core",
  "ironrdp-error 0.1.2",
