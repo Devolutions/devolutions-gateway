@@ -133,7 +133,7 @@ async fn handle_jrec_push(
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "The specified recording was not found"),
-        (status = 406, description = "The recording is still ongoing and can't be deleted yet"),
+        (status = 409, description = "The recording is still ongoing and can't be deleted yet"),
     ),
     security(("scope_token" = ["gateway.recording.delete"])),
 ))]
@@ -202,7 +202,7 @@ pub(crate) struct DeleteManyResult {
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
-        (status = 406, description = "A recording is still ongoing and can't be deleted yet (nothing is deleted)"),
+        (status = 409, description = "A recording is still ongoing and can't be deleted yet (nothing is deleted)"),
         (status = 413, description = "Request payload is too large"),
     ),
     security(("scope_token" = ["gateway.recording.delete"])),

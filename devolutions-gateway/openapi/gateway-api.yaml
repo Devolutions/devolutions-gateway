@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2025.2.1
+  version: 2025.2.2
 paths:
   /jet/config:
     patch:
@@ -186,7 +186,7 @@ paths:
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
-        '406':
+        '409':
           description: A recording is still ongoing and can't be deleted yet (nothing is deleted)
         '413':
           description: Request payload is too large
@@ -218,7 +218,7 @@ paths:
           description: Insufficient permissions
         '404':
           description: The specified recording was not found
-        '406':
+        '409':
           description: The recording is still ongoing and can't be deleted yet
       security:
       - scope_token:
