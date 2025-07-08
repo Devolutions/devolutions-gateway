@@ -19,7 +19,7 @@ use ironrdp_connector::sspi::{
     self, AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
 };
 use ironrdp_pdu::{mcs, nego, x224};
-use ironrdp_tokio::AsyncSendableNetworkClient;
+use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -151,7 +151,7 @@ where
         None
     };
 
-    let mut network_client = ironrdp_tokio::reqwest::ReqwestNetworkClient::new();
+    let mut network_client = ReqwestNetworkClient::new();
     let client_credssp_fut = perform_credssp_with_client(
         &mut client_framed,
         client_addr.ip(),
@@ -162,7 +162,7 @@ where
         krb_server_config,
     );
 
-    let mut network_client = ironrdp_tokio::reqwest::ReqwestNetworkClient::new();
+    let mut network_client = ReqwestNetworkClient::new();
     let server_credssp_fut = perform_credssp_with_server(
         &mut server_framed,
         server_dns_name,
@@ -376,7 +376,7 @@ async fn perform_credssp_with_server<S>(
     server_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
     credentials: &crate::credential::AppCredential,
-    mut network_client: Option<&mut dyn AsyncSendableNetworkClient>,
+    mut network_client: Option<&mut ReqwestNetworkClient>,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -449,21 +449,17 @@ where
 
 async fn resolve_server_generator(
     generator: &mut CredsspServerProcessGenerator<'_>,
-    network_client: &mut dyn AsyncSendableNetworkClient,
+    network_client: &mut ReqwestNetworkClient,
 ) -> Result<ServerState, ServerError> {
     let mut state = generator.start();
 
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = network_client
-                    .send(&request)
-                    .await
-                    .inspect_err(|err| error!(?err, "Failed to send a Kerberos message"))
-                    .map_err(|err| ServerError {
-                        ts_request: None,
-                        error: sspi::Error::new(sspi::ErrorKind::InternalError, err),
-                    })?;
+                let response = network_client.send(&request).await.map_err(|err| ServerError {
+                    ts_request: None,
+                    error: sspi::Error::new(sspi::ErrorKind::InternalError, err),
+                })?;
                 state = generator.resume(Ok(response));
             }
             GeneratorState::Completed(client_state) => {
@@ -475,7 +471,7 @@ async fn resolve_server_generator(
 
 async fn resolve_client_generator(
     generator: &mut CredsspClientProcessGenerator<'_>,
-    network_client: &mut dyn AsyncSendableNetworkClient,
+    network_client: &mut ReqwestNetworkClient,
 ) -> ironrdp_connector::ConnectorResult<ClientState> {
     let mut state = generator.start();
 
@@ -501,7 +497,7 @@ async fn perform_credssp_with_client<S>(
     gateway_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
     credentials: &crate::credential::AppCredential,
-    network_client: Option<&mut dyn AsyncSendableNetworkClient>,
+    network_client: Option<&mut ReqwestNetworkClient>,
     kerberos_server_config: Option<KerberosServerConfig>,
 ) -> anyhow::Result<()>
 where
@@ -550,7 +546,7 @@ where
         client_computer_name: ironrdp_connector::ServerName,
         public_key: Vec<u8>,
         credentials: &crate::credential::AppCredential,
-        mut network_client: Option<&mut dyn AsyncSendableNetworkClient>,
+        mut network_client: Option<&mut ReqwestNetworkClient>,
         kerberos_server_config: Option<KerberosServerConfig>,
     ) -> anyhow::Result<()>
     where
