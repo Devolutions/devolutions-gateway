@@ -19,6 +19,7 @@ fn hub_sample() -> Sample {
         	"Hostname": "hostname.example.io",
         	"TlsPrivateKeyFile": "/path/to/tls-private.key",
         	"TlsCertificateFile": "/path/to/tls-certificate.pem",
+        	"TlsVerifyStrict": true,
         	"ProvisionerPublicKeyFile": "/path/to/provisioner.pub.key",
             "SubProvisionerPublicKey": {
                 "Id": "subkey-id",
@@ -69,6 +70,7 @@ fn hub_sample() -> Sample {
             tls_certificate_subject_name: None,
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
+            tls_verify_strict: Some(true),
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),
@@ -121,6 +123,7 @@ fn legacy_sample() -> Sample {
             tls_certificate_subject_name: None,
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
+            tls_verify_strict: None,
             listeners: vec![],
             subscriber: None,
             log_file: Some("/path/to/log/file.log".into()),
@@ -163,6 +166,7 @@ fn system_store_sample() -> Sample {
             tls_certificate_subject_name: Some("localhost".to_owned()),
             tls_certificate_store_location: Some(CertStoreLocation::LocalMachine),
             tls_certificate_store_name: Some("My".to_owned()),
+            tls_verify_strict: None,
             listeners: vec![],
             subscriber: None,
             log_file: None,
@@ -221,6 +225,7 @@ fn standalone_custom_auth_sample() -> Sample {
             tls_certificate_subject_name: None,
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
+            tls_verify_strict: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),
@@ -295,6 +300,7 @@ fn standalone_no_auth_sample() -> Sample {
             tls_certificate_subject_name: None,
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
+            tls_verify_strict: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),
