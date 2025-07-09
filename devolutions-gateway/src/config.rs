@@ -59,7 +59,7 @@ impl fmt::Debug for Tls {
 
 impl Tls {
     fn init(cert_source: crate::tls::CertificateSource) -> anyhow::Result<Self> {
-        let tls_server_config = crate::tls::build_server_config(cert_source).context("failed build TLS config")?;
+        let tls_server_config = crate::tls::build_server_config(cert_source).context("failed to build TLS config")?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_server_config));
 
