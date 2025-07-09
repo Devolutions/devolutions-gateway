@@ -122,6 +122,18 @@ Stable options are:
     additional measures like securing access to the files or using the system certificate store (see
     **TlsCertificateSource** option).
 
+- **TlsVerifyStrict** (_Boolean_): Enables strict TLS certificate verification (default is `true`).
+
+    When enabled (`true`), the client performs additional checks on the server certificate,
+    including:
+
+    - Ensuring the presence of the **Subject Alternative Name (SAN)** extension.
+    - Verifying that the **Extended Key Usage (EKU)** extension includes `serverAuth`.
+
+    Certificates that do not meet these requirements are increasingly rejected by modern clients
+    (e.g., Chrome, macOS). Therefore, we strongly recommend using certificates that comply with
+    these standards.
+
 - **Listeners** (_Array_): Array of listener URLs.
 
     Each element has the following schema: 

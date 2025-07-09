@@ -58,8 +58,9 @@ impl fmt::Debug for Tls {
 }
 
 impl Tls {
-    fn init(cert_source: crate::tls::CertificateSource) -> anyhow::Result<Self> {
-        let tls_server_config = crate::tls::build_server_config(cert_source).context("failed to build TLS config")?;
+    fn init(cert_source: crate::tls::CertificateSource, strict_checks: bool) -> anyhow::Result<Self> {
+        let tls_server_config =
+            crate::tls::build_server_config(cert_source, strict_checks).context("failed to build TLS config")?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_server_config));
 
@@ -151,6 +152,8 @@ impl Conf {
             .iter()
             .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
 
+        let strict_checks = conf_file.tls_verify_strict.unwrap_or(true);
+
         let tls = match conf_file.tls_certificate_source.unwrap_or_default() {
             dto::CertSource::External => match conf_file.tls_certificate_file.as_ref() {
                 None if requires_tls => anyhow::bail!("TLS usage implied, but TLS certificate file is missing"),
@@ -181,7 +184,9 @@ impl Conf {
                         private_key,
                     };
 
-                    Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+                    Tls::init(cert_source, strict_checks)
+                        .context("failed to init TLS config")?
+                        .pipe(Some)
                 }
             },
             dto::CertSource::System => match conf_file.tls_certificate_subject_name.clone() {
@@ -202,7 +207,9 @@ impl Conf {
                         store_name,
                     };
 
-                    Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+                    Tls::init(cert_source, strict_checks)
+                        .context("failed to init TLS config")?
+                        .pipe(Some)
                 }
             },
         };
@@ -963,6 +970,20 @@ pub mod dto {
         /// Location of the Windows Certificate Store to use
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tls_certificate_store_location: Option<CertStoreLocation>,
+        /// Enables strict TLS certificate verification.
+        ///
+        /// When enabled (`true`), the client performs additional checks on the server certificate,
+        /// including:
+        /// - Ensuring the presence of the **Subject Alternative Name (SAN)** extension.
+        /// - Verifying that the **Extended Key Usage (EKU)** extension includes `serverAuth`.
+        ///
+        /// Certificates that do not meet these requirements are increasingly rejected by modern clients
+        /// (e.g., Chrome, macOS). Therefore, we strongly recommend using certificates that comply with
+        /// these standards.
+        ///
+        /// If unset, the default is `true`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_verify_strict: Option<bool>,
 
         /// Listeners to launch at startup
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1038,6 +1059,7 @@ pub mod dto {
                 tls_certificate_subject_name: None,
                 tls_certificate_store_name: None,
                 tls_certificate_store_location: None,
+                tls_verify_strict: Some(true),
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8181".to_owned(),

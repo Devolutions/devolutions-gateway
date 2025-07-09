@@ -66,7 +66,10 @@ pub enum CertificateSource {
     },
 }
 
-pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rustls::ServerConfig> {
+pub fn build_server_config(
+    cert_source: CertificateSource,
+    strict_checks: bool,
+) -> anyhow::Result<rustls::ServerConfig> {
     let builder = rustls::ServerConfig::builder().with_no_client_auth();
 
     match cert_source {
@@ -76,18 +79,20 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
         } => {
             let first_certificate = certificates.first().context("empty certificate list")?;
 
-            if let Ok(report) = check_certificate_now(&first_certificate) {
-                if report.issues.intersects(
-                    CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
-                ) {
-                    let serial_number = report.serial_number;
-                    let subject = report.subject;
-                    let issuer = report.issuer;
-                    let not_before = report.not_before;
-                    let not_after = report.not_after;
-                    let issues = report.issues;
+            if strict_checks {
+                if let Ok(report) = check_certificate_now(&first_certificate) {
+                    if report.issues.intersects(
+                        CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
+                    ) {
+                        let serial_number = report.serial_number;
+                        let subject = report.subject;
+                        let issuer = report.issuer;
+                        let not_before = report.not_before;
+                        let not_after = report.not_after;
+                        let issues = report.issues;
 
-                    anyhow::bail!("found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues}");
+                        anyhow::bail!("found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues}");
+                    }
                 }
             }
 
@@ -103,9 +108,14 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
             store_location,
             store_name,
         } => {
-            let resolver =
-                windows::ServerCertResolver::new(machine_hostname, cert_subject_name, store_location, store_name)
-                    .context("create ServerCertResolver")?;
+            let resolver = windows::ServerCertResolver::new(
+                machine_hostname,
+                cert_subject_name,
+                store_location,
+                store_name,
+                strict_checks,
+            )
+            .context("create ServerCertResolver")?;
             Ok(builder.with_cert_resolver(Arc::new(resolver)))
         }
         #[cfg(not(windows))]
@@ -146,6 +156,7 @@ pub mod windows {
         store_type: CertStoreType,
         store_name: String,
         cached_key: Mutex<Option<KeyCache>>,
+        strict_checks: bool,
     }
 
     #[derive(Debug)]
@@ -160,6 +171,7 @@ pub mod windows {
             cert_subject_name: String,
             store_type: dto::CertStoreLocation,
             store_name: String,
+            strict_checks: bool,
         ) -> anyhow::Result<Self> {
             let store_type = match store_type {
                 dto::CertStoreLocation::LocalMachine => CertStoreType::LocalMachine,
@@ -173,6 +185,7 @@ pub mod windows {
                 store_type,
                 store_name,
                 cached_key: Mutex::new(None),
+                strict_checks,
             })
         }
 
@@ -255,14 +268,18 @@ pub mod windows {
                             cert_issues |= report.issues;
 
                             // Skip the certificate if any of the following is true:
-                            // - The certificate is not yet valid.
-                            // - The certificate is missing the server auth extended key usage.
-                            // - The certificate is missing a subject alternative name (SAN) extension.
-                            let skip = report.issues.intersects(
+                            // - the certificate is not yet valid,
+                            // - (if strict) the certificate is missing the server auth extended key usage,
+                            // - (if strict) the certificate is missing a subject alternative name (SAN) extension.
+                            let issues_to_check = if self.strict_checks {
                                 CertIssues::NOT_YET_VALID
                                     | CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE
-                                    | CertIssues::MISSING_SUBJECT_ALT_NAME,
-                            );
+                                    | CertIssues::MISSING_SUBJECT_ALT_NAME
+                            } else {
+                                CertIssues::NOT_YET_VALID
+                            };
+
+                            let skip = report.issues.intersects(issues_to_check);
 
                             if skip {
                                 debug!(
