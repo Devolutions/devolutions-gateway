@@ -6,20 +6,20 @@ use axum::extract::{self, ConnectInfo, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
-use axum::{http, Json, Router};
-use axum_extra::headers::{self, HeaderMapExt as _};
+use axum::{Json, Router, http};
 use axum_extra::TypedHeader;
+use axum_extra::headers::{self, HeaderMapExt as _};
 use picky::key::PrivateKey;
 use tap::prelude::*;
 use tower_http::services::ServeFile;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::config::{WebAppAuth, WebAppConf, WebAppUser};
 use crate::extract::WebAppToken;
 use crate::http::HttpError;
 use crate::target_addr::TargetAddr;
 use crate::token::{ApplicationProtocol, ReconnectionPolicy, RecordingPolicy};
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     if state.conf_handle.get_conf().web_app.enabled {
@@ -537,11 +537,7 @@ mod login_rate_limit {
             let num_attempts = attempts.entry((username, address)).or_insert(0);
             *num_attempts = num_attempts.checked_add(1).ok_or(())?;
 
-            if *num_attempts > rate_limit {
-                Err(())
-            } else {
-                Ok(())
-            }
+            if *num_attempts > rate_limit { Err(()) } else { Ok(()) }
         }
     }
 }

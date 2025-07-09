@@ -71,7 +71,7 @@ impl JetMessage {
         let jet_header = JetMessage::read_header(stream)?;
         let payload = JetMessage::read_payload(stream, &jet_header)?;
 
-        trace!("Message received: {}", payload);
+        trace!("Message received: {payload}");
 
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut req = httparse::Request::new(&mut headers);
@@ -103,7 +103,7 @@ impl JetMessage {
         let jet_header = JetMessage::read_header(stream)?;
         let payload = JetMessage::read_payload(stream, &jet_header)?;
 
-        trace!("Message received: {}", payload);
+        trace!("Message received: {payload}");
 
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut rsp = httparse::Response::new(&mut headers);
@@ -119,7 +119,7 @@ impl JetMessage {
         let jet_header = JetMessage::read_header(stream)?;
         let payload = JetMessage::read_payload(stream, &jet_header)?;
 
-        trace!("Message received: {}", payload);
+        trace!("Message received: {payload}");
 
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut rsp = httparse::Response::new(&mut headers);
@@ -243,7 +243,7 @@ impl From<io::Error> for Error {
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, error)
+        io::Error::other(error)
     }
 }
 

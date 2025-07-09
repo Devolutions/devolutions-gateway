@@ -10,21 +10,21 @@ use std::sync::LazyLock;
 use anyhow::Result;
 
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
+use win_api_wrappers::Error;
 use win_api_wrappers::process::{ProcessInformation, StartupInfo};
 use win_api_wrappers::raw::Win32::Foundation::{ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_INVALID_PARAMETER, LUID};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::{Token, TokenElevationType, TokenSecurityAttribute, TokenSecurityAttributeValues};
 use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
-use win_api_wrappers::utils::{environment_block, CommandLine};
-use win_api_wrappers::Error;
+use win_api_wrappers::utils::{CommandLine, environment_block};
 
 use local_admin_elevator::LocalAdminElevator;
 use virtual_account_elevator::VirtualAccountElevator;
 
 use crate::db::DbHandle;
 use crate::log;
-use crate::policy::{self, application_from_path, Policy};
-use crate::utils::{start_process, AccountExt};
+use crate::policy::{self, Policy, application_from_path};
+use crate::utils::{AccountExt, start_process};
 
 static LOCAL_ADMIN_ELEVATOR: LazyLock<LocalAdminElevator> = LazyLock::new(|| {
     LocalAdminElevator::new(
@@ -92,10 +92,12 @@ fn validate_elevation(
         )),
         (Some(executable_path), None) => Ok((
             executable_path.to_owned(),
-            CommandLine::new(vec![executable_path
-                .to_str()
-                .ok_or_else(|| Error::from_win32(ERROR_INVALID_PARAMETER))?
-                .to_owned()]),
+            CommandLine::new(vec![
+                executable_path
+                    .to_str()
+                    .ok_or_else(|| Error::from_win32(ERROR_INVALID_PARAMETER))?
+                    .to_owned(),
+            ]),
         )),
         (Some(executable_path), Some(command_line)) => Ok((executable_path.to_owned(), command_line.clone())),
     }?;

@@ -4,8 +4,8 @@ use webm_iterable::errors::TagWriterError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 use webm_iterable::{WebmWriter, WriteOptions};
 
-use crate::debug::mastroka_spec_name;
 use crate::StreamingConfig;
+use crate::debug::mastroka_spec_name;
 
 use super::block_tag::VideoBlock;
 
@@ -144,7 +144,7 @@ where
     T: std::io::Write,
 {
     #[instrument(skip(self, tag))]
-    pub fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
+    pub(crate) fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
         match tag {
             MatroskaSpec::Timestamp(timestamp) => {
                 self.cluster_timestamp = Some(timestamp);
@@ -201,8 +201,8 @@ where
                     cut_block_absolute_time: current_video_block.absolute_timestamp()?,
                     last_cluster_relative_time: 0,
                 };
-                let block = SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true);
-                block
+
+                SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true)
             }
             CutBlockState::Met {
                 cut_block_absolute_time,
@@ -235,8 +235,7 @@ where
                 );
                 let timestamp = i16::try_from(relative_timestamp)?;
 
-                let block = SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true);
-                block
+                SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true)
             }
         };
 
@@ -276,7 +275,7 @@ where
 
     fn update_cluster_time(&mut self, time: u64) {
         if let CutBlockState::Met {
-            ref mut last_cluster_relative_time,
+            last_cluster_relative_time,
             ..
         } = &mut self.cut_block_state
         {

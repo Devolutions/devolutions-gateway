@@ -1,17 +1,17 @@
 use std::io;
 use std::net::SocketAddr;
 
+use axum::Router;
 use axum::extract::{self, ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::routing::post;
-use axum::Router;
 use picky_krb::messages::KdcProxyMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
+use crate::DgwState;
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::token::AccessTokenClaims;
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new().route("/{token}", post(kdc_proxy)).with_state(state)
@@ -101,7 +101,7 @@ async fn kdc_proxy(
         trace!("Connected! Forwarding KDC message...");
 
         connection
-            .write_all(&kdc_proxy_message.kerb_message.0 .0)
+            .write_all(&kdc_proxy_message.kerb_message.0.0)
             .await
             .map_err(
                 HttpError::bad_gateway()
@@ -133,7 +133,7 @@ async fn kdc_proxy(
         // First 4 bytes contains message length. We don't need it for UDP.
         #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
         udp_socket
-            .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_addr.as_addr())
+            .send_to(&kdc_proxy_message.kerb_message.0.0[4..], kdc_addr.as_addr())
             .await
             .map_err(|e| unable_to_reach_kdc_server_err(e))?;
 

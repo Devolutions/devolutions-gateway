@@ -39,7 +39,7 @@ impl AsyncRead for AsyncReadChannel {
                 buf.put_slice(data.as_bytes());
                 Poll::Ready(Ok(()))
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(std::io::Error::other(e))),
             Poll::Ready(None) => {
                 // Channel is closed - only then we signal EOF
                 Poll::Ready(Ok(()))

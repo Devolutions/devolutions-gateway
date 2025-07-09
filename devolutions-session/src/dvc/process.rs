@@ -1,15 +1,15 @@
 use tokio::sync::mpsc::Sender;
-use windows::core::{BOOL, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, GetLastError, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, TerminateProcess, WaitForMultipleObjects, CREATE_NEW_CONSOLE,
-    CREATE_NEW_PROCESS_GROUP, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
-};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
+use windows::Win32::System::Threading::{
+    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CreateProcessW, GetExitCodeProcess, INFINITE, NORMAL_PRIORITY_CLASS,
+    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW, TerminateProcess, WaitForMultipleObjects,
+};
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, WM_QUIT};
+use windows::core::{BOOL, PCWSTR};
 
 use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
 use win_api_wrappers::event::Event;
@@ -18,9 +18,9 @@ use win_api_wrappers::process::Process;
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::utils::{Pipe, WideString};
 
-use crate::dvc::channel::{winapi_signaled_mpsc_channel, WinapiSignaledReceiver, WinapiSignaledSender};
+use crate::dvc::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_signaled_mpsc_channel};
 use crate::dvc::fs::TmpFileGuard;
-use crate::dvc::io::{ensure_overlapped_io_result, IoRedirectionPipes};
+use crate::dvc::io::{IoRedirectionPipes, ensure_overlapped_io_result};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {

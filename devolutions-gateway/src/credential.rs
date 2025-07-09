@@ -29,6 +29,12 @@ pub struct AppCredentialMapping {
 #[derive(Debug, Clone)]
 pub struct CredentialStoreHandle(Arc<Mutex<CredentialStore>>);
 
+impl Default for CredentialStoreHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CredentialStoreHandle {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(CredentialStore::new())))
@@ -183,7 +189,7 @@ impl Task for CleanupTask {
 
 #[instrument(skip_all)]
 async fn cleanup_task(handle: CredentialStoreHandle, mut shutdown_signal: ShutdownSignal) {
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 15); // 15 minutes
 

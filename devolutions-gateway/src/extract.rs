@@ -1,6 +1,6 @@
+use axum::Extension;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use axum::Extension;
 
 use crate::http::HttpError;
 use crate::token::{

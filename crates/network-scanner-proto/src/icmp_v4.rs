@@ -373,10 +373,10 @@ impl std::fmt::Display for PacketParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PacketParseError::PacketTooSmall(size) => {
-                write!(f, "packet too small to parse: {}", size)
+                write!(f, "packet too small to parse: {size}")
             }
             PacketParseError::UnrecognizedICMPType(t) => {
-                write!(f, "unrecognized ICMP type: {}", t)
+                write!(f, "unrecognized ICMP type: {t}")
             }
         }
     }

@@ -9,13 +9,13 @@ use tracing::info;
 
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::{Process, StartupInfo};
-use win_api_wrappers::raw::Win32::Security::{WinLocalSystemSid, TOKEN_QUERY};
+use win_api_wrappers::raw::Win32::Security::{TOKEN_QUERY, WinLocalSystemSid};
 use win_api_wrappers::raw::Win32::System::Threading::{
     PROCESS_CREATE_PROCESS, PROCESS_CREATION_FLAGS, PROCESS_QUERY_INFORMATION, STARTUPINFOW_FLAGS,
 };
 use win_api_wrappers::thread::{ThreadAttributeList, ThreadAttributeType};
 use win_api_wrappers::token::Token;
-use win_api_wrappers::utils::{environment_block, expand_environment_path, CommandLine, WideString};
+use win_api_wrappers::utils::{CommandLine, WideString, environment_block, expand_environment_path};
 
 use crate::api::state::AppState;
 use crate::elevator;

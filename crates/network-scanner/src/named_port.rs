@@ -20,9 +20,9 @@ pub enum NamedPort {
     Ldaps,
 }
 
-impl Into<u16> for &NamedPort {
-    fn into(self) -> u16 {
-        match self {
+impl From<&NamedPort> for u16 {
+    fn from(val: &NamedPort) -> Self {
+        match val {
             NamedPort::Rdp => 3389,
             NamedPort::Ard => 5900,
             NamedPort::Vnc => 5900,
@@ -151,7 +151,7 @@ pub struct NamedAddress {
 
 impl AsRef<NamedAddress> for NamedAddress {
     fn as_ref(&self) -> &NamedAddress {
-        return self;
+        self
     }
 }
 

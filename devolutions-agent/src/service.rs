@@ -2,6 +2,7 @@ use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc;
 
 use anyhow::Context;
+use devolutions_agent::AgentServiceEvent;
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::log::AgentLog;
 use devolutions_agent::remote_desktop::RemoteDesktopTask;
@@ -9,7 +10,6 @@ use devolutions_agent::remote_desktop::RemoteDesktopTask;
 use devolutions_agent::session_manager::SessionManager;
 #[cfg(windows)]
 use devolutions_agent::updater::UpdaterTask;
-use devolutions_agent::AgentServiceEvent;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 #[cfg(windows)]

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use devolutions_gateway::DgwState;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::credential::CredentialStoreHandle;
 use devolutions_gateway::listener::GatewayListener;
@@ -10,7 +11,6 @@ use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
-use devolutions_gateway::DgwState;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;

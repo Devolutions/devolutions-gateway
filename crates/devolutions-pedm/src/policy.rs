@@ -13,11 +13,11 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail};
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use camino::Utf8PathBuf;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tracing::info;
 use uuid::Uuid;
 
@@ -26,13 +26,13 @@ use devolutions_pedm_shared::policy::{
 };
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, TOKEN_QUERY};
+use win_api_wrappers::raw::Win32::Security::{TOKEN_QUERY, WinBuiltinUsersSid};
 use win_api_wrappers::raw::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
-use win_api_wrappers::security::crypt::{authenticode_status, CryptProviderCertificate, SignerInfo};
+use win_api_wrappers::security::crypt::{CryptProviderCertificate, SignerInfo, authenticode_status};
 use win_api_wrappers::utils::CommandLine;
 
 use crate::error::Error;
-use crate::utils::{file_hash, AccountExt, MultiHasher};
+use crate::utils::{AccountExt, MultiHasher, file_hash};
 
 #[derive(Clone)]
 pub(crate) struct Policy {

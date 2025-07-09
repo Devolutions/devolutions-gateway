@@ -4,14 +4,14 @@ use std::sync::OnceLock;
 
 use parking_lot::Mutex;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use retour::GenericDetour;
 use win_api_wrappers::process::Module;
-use win_api_wrappers::raw::core::{GUID, PCWSTR};
 use win_api_wrappers::raw::Win32::Foundation::{HANDLE, HWND};
 use win_api_wrappers::raw::Win32::System::Rpc::{
     RPC_ASYNC_STATE, RPC_IF_CALLBACK_FN, RPC_SERVER_INTERFACE, RPC_STATUS,
 };
+use win_api_wrappers::raw::core::{GUID, PCWSTR};
 use win_api_wrappers::rpc::RpcServerInterfacePointer;
 
 /// https://github.com/hfiref0x/UACME/blob/master/Source/Akagi/appinfo/appinfo.idl

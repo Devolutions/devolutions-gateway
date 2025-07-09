@@ -1,12 +1,12 @@
+use axum::Router;
 use axum::extract::State;
 use axum::routing::post;
-use axum::Router;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::extract::SessionTerminateScope;
 use crate::http::HttpError;
 use crate::session::KillResult;
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()

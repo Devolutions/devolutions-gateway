@@ -9,7 +9,7 @@ use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
 use job_queue_libsql::libsql;
 use time::OffsetDateTime;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{Notify, mpsc};
 
 pub struct JobQueueCtx {
     notify_runner: Arc<Notify>,

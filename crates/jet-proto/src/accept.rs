@@ -1,7 +1,7 @@
 use crate::utils::{RequestHelper, ResponseHelper};
 use crate::{
-    get_uuid_in_path, Error, JET_HEADER_ASSOCIATION, JET_HEADER_HOST, JET_HEADER_INSTANCE, JET_HEADER_METHOD,
-    JET_HEADER_TIMEOUT, JET_HEADER_VERSION,
+    Error, JET_HEADER_ASSOCIATION, JET_HEADER_HOST, JET_HEADER_INSTANCE, JET_HEADER_METHOD, JET_HEADER_TIMEOUT,
+    JET_HEADER_VERSION, get_uuid_in_path,
 };
 use http::StatusCode;
 use std::io;

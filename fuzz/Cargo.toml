@@ -3,7 +3,7 @@ name = "fuzz"
 version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true

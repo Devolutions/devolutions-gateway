@@ -1,23 +1,23 @@
 use std::collections::HashMap;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Shutdown::{
-    ExitWindowsEx, InitiateSystemShutdownW, LockWorkStation, EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT,
+    EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, ExitWindowsEx, InitiateSystemShutdownW, LockWorkStation,
     SHUTDOWN_REASON,
 };
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, MessageBoxW, PostMessageW, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT,
-    MESSAGEBOX_STYLE, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST,
+    GetForegroundWindow, GetWindowThreadProcessId, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE,
+    MessageBoxW, PostMessageW, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST,
 };
+use windows::core::PCWSTR;
 
 use devolutions_gateway_task::Task;
 use now_proto_pdu::ironrdp_core::IntoOwned;
@@ -33,7 +33,7 @@ use win_api_wrappers::event::Event;
 use win_api_wrappers::security::privilege::ScopedPrivileges;
 use win_api_wrappers::utils::WideString;
 
-use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel, WinapiSignaledSender};
+use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};

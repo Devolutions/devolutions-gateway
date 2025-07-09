@@ -25,10 +25,10 @@ use {proptest as _, test_utils as _};
 extern crate tracing;
 
 use anyhow::Context as _;
+use jetsocat::DoctorOutputFormat;
 use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
-use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
-use jetsocat::DoctorOutputFormat;
+use jetsocat::proxy::{ProxyConfig, ProxyType, detect_proxy};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use std::env;
@@ -463,7 +463,7 @@ impl CommonArgs {
             let pid = u32::try_from(process_id).context("invalid value for process ID")?;
             Some(sysinfo::Pid::from_u32(pid))
         } else if c.bool_flag("watch-parent") {
-            use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+            use sysinfo::System;
 
             // Find current process' parent process ID
             let current_pid =
@@ -760,7 +760,7 @@ fn setup_logger(logging: &Logging) -> LoggerGuard {
     use std::panic;
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     let (layer, guard) = match &logging {
         Logging::Term => {
@@ -850,7 +850,7 @@ fn clean_old_log_files(logging: &Logging) -> anyhow::Result<()> {
         match entry
             .metadata()
             .and_then(|metadata| metadata.modified())
-            .and_then(|time| time.elapsed().map_err(|e| io::Error::new(io::ErrorKind::Other, e)))
+            .and_then(|time| time.elapsed().map_err(io::Error::other))
         {
             Ok(modified) if modified > MAX_AGE => {
                 info!("Delete log file");

@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 pub struct KeepAliveShutdownSignal(pub ShutdownSignal);
 
 impl transport::KeepAliveShutdown for KeepAliveShutdownSignal {
-    fn wait(&mut self) -> impl future::Future<Output = ()> + Send + '_ {
+    fn wait(&mut self) -> impl Future<Output = ()> + Send + '_ {
         self.0.wait()
     }
 }

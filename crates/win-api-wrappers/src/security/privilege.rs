@@ -1,15 +1,15 @@
 use std::mem;
 use std::sync::LazyLock;
 
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Security;
 use windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;
 use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
+use windows::core::PCWSTR;
 
 use crate::dst::{Win32Dst, Win32DstDef};
 use crate::process::Process;
-use crate::str::{u16cstr, U16CStr, U16CStrExt};
+use crate::str::{U16CStr, U16CStrExt, u16cstr};
 use crate::token::{Token, TokenPrivilegesAdjustment};
 use crate::utils::Snapshot;
 

@@ -11,5 +11,5 @@ pub mod dvc;
 mod config;
 mod log;
 
-pub use config::{get_data_dir, Conf, ConfHandle};
+pub use config::{Conf, ConfHandle, get_data_dir};
 pub use log::init_log;

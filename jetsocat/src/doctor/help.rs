@@ -74,8 +74,8 @@ where
     C: Iterator,
     C::Item: InspectCert,
 {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let mut chain_href = "https://x509.io/?cert=".to_owned();
 

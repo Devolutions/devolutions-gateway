@@ -1,10 +1,10 @@
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::extract::HeartbeatReadScope;
 use crate::http::HttpError;
-use crate::DgwState;
 use devolutions_agent_shared::get_installed_agent_version;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

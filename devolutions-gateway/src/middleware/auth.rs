@@ -1,21 +1,21 @@
 use std::net::SocketAddr;
 
+use axum::RequestPartsExt as _;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{Method, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::RequestPartsExt as _;
-use axum_extra::headers::authorization::Bearer;
-use axum_extra::headers::Authorization;
 use axum_extra::TypedHeader;
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::Bearer;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::http::HttpError;
 use crate::recording::ActiveRecordings;
 use crate::session::DisconnectedInfo;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache, TokenValidator};
-use crate::DgwState;
 
 struct AuthException {
     method: Method,

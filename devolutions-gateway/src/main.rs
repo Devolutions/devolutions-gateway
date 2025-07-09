@@ -30,14 +30,14 @@ extern crate tracing;
 mod service;
 
 use anyhow::Context;
-use ceviche::controller::{dispatch, Controller, ControllerInterface};
+use ceviche::controller::{Controller, ControllerInterface, dispatch};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
 use devolutions_gateway::config::ConfHandle;
 use std::sync::mpsc;
 use tap::prelude::*;
 
-use crate::service::{GatewayService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
+use crate::service::{DESCRIPTION, DISPLAY_NAME, GatewayService, SERVICE_NAME};
 
 enum CliAction {
     ShowHelp,
@@ -79,7 +79,8 @@ fn run() -> anyhow::Result<()> {
 
     // Set the DGATEWAY_CONFIG_PATH if --config-path was provided
     if let Some(path) = config_path {
-        std::env::set_var("DGATEWAY_CONFIG_PATH", &path);
+        // SAFETY: At this point the program is single-threaded.
+        unsafe { std::env::set_var("DGATEWAY_CONFIG_PATH", &path) };
     }
 
     // Parse remaining arguments for CLI actions
@@ -239,7 +240,7 @@ Service!("gateway", gateway_service_main);
 
 #[cfg(unix)]
 async fn build_signals_fut() -> anyhow::Result<()> {
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
 
     let mut terminate_signal = signal(SignalKind::terminate()).context("failed to create terminate signal stream")?;
     let mut quit_signal = signal(SignalKind::quit()).context("failed to create quit signal stream failed")?;

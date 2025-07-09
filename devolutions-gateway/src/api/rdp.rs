@@ -8,13 +8,13 @@ use axum::response::Response;
 use devolutions_gateway_task::ShutdownSignal;
 use tracing::Instrument as _;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::http::HttpError;
 use crate::recording::ActiveRecordings;
 use crate::session::SessionMessageSender;
 use crate::subscriber::SubscriberSender;
 use crate::token::{CurrentJrl, TokenCache};
-use crate::DgwState;
 
 pub async fn handler(
     State(DgwState {

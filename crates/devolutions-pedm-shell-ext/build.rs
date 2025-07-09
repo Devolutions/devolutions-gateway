@@ -1,11 +1,7 @@
-use devolutions_pedm_shared::build::target_dir;
-use fs_extra::dir::CopyOptions;
-use std::error::Error;
-use std::path::PathBuf;
-use std::{env, fs};
-
 #[cfg(target_os = "windows")]
 fn generate_version_rc() -> String {
+    use std::env;
+
     let output_name = "DevolutionsPedmShellExt";
     let filename = format!("{}.dll", output_name);
     let company_name = "Devolutions Inc.";
@@ -72,7 +68,12 @@ END"#,
 }
 
 #[cfg(target_os = "windows")]
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn core::error::Error>> {
+    use devolutions_pedm_shared::build::target_dir;
+    use fs_extra::dir::CopyOptions;
+    use std::path::PathBuf;
+    use std::{env, fs};
+
     let target = target_dir()?;
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 

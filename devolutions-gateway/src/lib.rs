@@ -105,8 +105,8 @@ impl DgwState {
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {
     use axum::error_handling::HandleErrorLayer;
     use std::time::Duration;
-    use tower::timeout::TimeoutLayer;
     use tower::ServiceBuilder;
+    use tower::timeout::TimeoutLayer;
 
     trace!("Make http service");
 

@@ -576,7 +576,7 @@ fn encode_request(buf: &mut BytesMut, dest: &DestAddr) {
         }
     };
 
-    buf.reserve(FIXED_PART_SIZE + host.as_bytes().len() * 2);
+    buf.reserve(FIXED_PART_SIZE + host.len() * 2);
 
     put(buf, b"CONNECT ");
     put(buf, host.as_bytes());

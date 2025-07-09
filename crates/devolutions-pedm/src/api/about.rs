@@ -1,8 +1,8 @@
 use std::sync::atomic::Ordering;
 
 use aide::NoApi;
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use chrono::{TimeZone, Utc};
 
 use crate::db::Db;

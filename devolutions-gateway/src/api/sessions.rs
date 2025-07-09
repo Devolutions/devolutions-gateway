@@ -2,10 +2,10 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 
+use crate::DgwState;
 use crate::extract::SessionsReadScope;
 use crate::http::HttpError;
 use crate::session::SessionInfo;
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new().route("/", get(get_sessions)).with_state(state)

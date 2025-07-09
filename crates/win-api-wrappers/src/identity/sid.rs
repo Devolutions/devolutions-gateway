@@ -1,10 +1,10 @@
 use std::{fmt, mem};
 
 use thiserror::Error;
-use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{LocalFree, HLOCAL};
+use windows::Win32::Foundation::{HLOCAL, LocalFree};
 use windows::Win32::Security;
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
+use windows::core::{PCWSTR, PWSTR};
 
 use crate::dst::{Win32Dst, Win32DstDef};
 use crate::identity::account::{Account, AccountWithType};

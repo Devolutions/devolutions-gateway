@@ -5,9 +5,9 @@ use tap::Pipe as _;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::extract::{JrlReadScope, JrlToken};
 use crate::http::HttpError;
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()

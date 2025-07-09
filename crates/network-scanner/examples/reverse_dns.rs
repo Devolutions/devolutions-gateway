@@ -19,7 +19,7 @@ fn main() {
     };
 
     match lookup_addr(&ip) {
-        Ok(hostname) => println!("{}", hostname),
-        Err(e) => eprintln!("Lookup failed: {}", e),
+        Ok(hostname) => println!("{hostname}"),
+        Err(e) => eprintln!("Lookup failed: {e}"),
     }
 }

@@ -17,7 +17,7 @@ use std::rc::Rc;
 use futures::Future;
 use hyper;
 
-use super::{configuration, request as __internal_request, Error};
+use super::{Error, configuration, request as __internal_request};
 use crate::models;
 
 pub struct DefaultApiClient<C: hyper::client::connect::Connect>

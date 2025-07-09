@@ -2,8 +2,8 @@
 
 // Re-export relevant items from the widestring crate.
 pub use widestring::{
-    decode_utf16, decode_utf16_lossy, encode_utf16, include_utf16str, u16cstr, u16str, utf16str, U16CStr, U16CString,
-    U16Str, U16String, Utf16Str, Utf16String,
+    U16CStr, U16CString, U16Str, U16String, Utf16Str, Utf16String, decode_utf16, decode_utf16_lossy, encode_utf16,
+    include_utf16str, u16cstr, u16str, utf16str,
 };
 
 #[cfg(target_os = "windows")]
@@ -13,8 +13,8 @@ pub use self::win_ext::*;
 mod win_ext {
     use super::{U16CStr, U16CString};
 
-    use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::Foundation::UNICODE_STRING;
+    use windows::core::{PCWSTR, PWSTR};
 
     pub trait U16CStrExt {
         /// # Safety

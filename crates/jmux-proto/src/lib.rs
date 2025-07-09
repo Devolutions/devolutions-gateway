@@ -595,7 +595,7 @@ impl ChannelOpenFailure {
     }
 
     pub fn size(&self) -> usize {
-        Self::FIXED_PART_SIZE + self.description.as_bytes().len()
+        Self::FIXED_PART_SIZE + self.description.len()
     }
 
     pub fn encode(&self, buf: &mut BytesMut) {

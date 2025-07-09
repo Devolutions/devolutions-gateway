@@ -17,22 +17,22 @@ pub(crate) const UPDATE_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;NS)(A
 
 /// Set DACL (Discretionary Access Control List) on a specified file.
 pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError> {
-    use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, FALSE, HLOCAL};
+    use windows::Win32::Foundation::{ERROR_SUCCESS, FALSE, HLOCAL, LocalFree};
     use windows::Win32::Security::Authorization::{
-        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
     };
-    use windows::Win32::Security::{GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR};
 
     struct OwnedPSecurityDescriptor(PSECURITY_DESCRIPTOR);
 
     impl Drop for OwnedPSecurityDescriptor {
         fn drop(&mut self) {
-            if self.0 .0.is_null() {
+            if self.0.0.is_null() {
                 return;
             }
             // SAFETY: `self.0` is a valid pointer to a security descriptor, therefore the function
             // is safe to call.
-            unsafe { LocalFree(Some(HLOCAL(self.0 .0))) };
+            unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
         }
     }
 

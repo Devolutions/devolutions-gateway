@@ -2,7 +2,7 @@
 name = "jetsocat"
 version.workspace = true
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
-edition = "2021"
+edition = "2024"
 description = "(Web)Socket toolkit for jet protocol related operations"
 publish = false
 

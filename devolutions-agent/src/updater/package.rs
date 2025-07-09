@@ -112,10 +112,10 @@ async fn uninstall_msi(ctx: &UpdaterCtx, product_code: Uuid, log_path: &Utf8Path
 }
 
 fn ensure_enough_rights() -> Result<(), UpdaterError> {
-    use windows::core::Owned;
     use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::Owned;
 
     // SAFETY: `GetCurrentProcess` returns a "pseudo handle" that does not need to be closed.
     let process_handle = unsafe { GetCurrentProcess() };
@@ -165,10 +165,10 @@ pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), 
 
 fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
     use windows::Win32::Security::Cryptography::{
-        CertFreeCertificateContext, CryptHashCertificate, CALG_SHA1, CERT_CONTEXT,
+        CALG_SHA1, CERT_CONTEXT, CertFreeCertificateContext, CryptHashCertificate,
     };
     use windows::Win32::System::ApplicationInstallationAndServicing::{
-        MsiGetFileSignatureInformationW, MSI_INVALID_HASH_IS_FATAL,
+        MSI_INVALID_HASH_IS_FATAL, MsiGetFileSignatureInformationW,
     };
 
     // Wrapper type to free CERT_CONTEXT retrieved via `MsiGetFileSignatureInformationW``

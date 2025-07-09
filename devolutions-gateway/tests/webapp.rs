@@ -48,7 +48,10 @@ fn initialize_conf() {
     CREATE.call_once(|| {
         let users_txt_file = format!("{}/users.txt", std::env!("CARGO_TARGET_TMPDIR"));
         std::fs::write(users_txt_file, CONTENTS.as_bytes()).unwrap();
-        std::env::set_var("DGATEWAY_CONFIG_PATH", std::env!("CARGO_TARGET_TMPDIR"));
+        // SAFETY:
+        // - The `Once` ensures we are not trying to set the environment variable in a concurrent way.
+        // - Even threads that do not run the code are blocking until the end.
+        unsafe { std::env::set_var("DGATEWAY_CONFIG_PATH", std::env!("CARGO_TARGET_TMPDIR")) };
     });
 }
 

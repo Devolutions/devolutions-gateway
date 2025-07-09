@@ -1,6 +1,6 @@
 use core::{error, fmt};
-use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI32;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;

@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 
-use futures::future::*;
 use futures::Future;
-use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
+use futures::future::*;
+use hyper::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HeaderValue, USER_AGENT};
 use {futures, hyper, serde, serde_json};
 
-use super::{configuration, Error};
+use super::{Error, configuration};
 
 pub(crate) struct ApiKey {
     pub in_header: bool,
@@ -18,7 +18,7 @@ impl ApiKey {
     fn key(&self, prefix: &Option<String>, key: &str) -> String {
         match prefix {
             None => key.to_owned(),
-            Some(ref prefix) => format!("{} {}", prefix, key),
+            Some(prefix) => format!("{prefix} {key}"),
         }
     }
 }
@@ -115,7 +115,7 @@ impl Request {
         let mut path = self.path;
         for (k, v) in self.path_params {
             // replace {id} with the value of the id path param
-            path = path.replace(&format!("{{{}}}", k), &v);
+            path = path.replace(&format!("{{{k}}}"), &v);
         }
 
         for (key, val) in self.query_params {
@@ -195,7 +195,7 @@ impl Request {
         }
 
         let req_headers = req_builder.headers_mut().unwrap();
-        let request_result = if self.form_params.len() > 0 {
+        let request_result = if !self.form_params.is_empty() {
             req_headers.insert(
                 CONTENT_TYPE,
                 HeaderValue::from_static("application/x-www-form-urlencoded"),
@@ -221,7 +221,7 @@ impl Request {
         Box::pin(
             conf.client
                 .request(request)
-                .map_err(|e| Error::from(e))
+                .map_err(Error::from)
                 .and_then(move |response| {
                     let status = response.status();
                     if !status.is_success() {
@@ -237,7 +237,7 @@ impl Request {
                     } else {
                         hyper::body::to_bytes(response.into_body())
                             .map(|bytes| serde_json::from_slice(&bytes.unwrap()))
-                            .map_err(|e| Error::from(e))
+                            .map_err(Error::from)
                             .boxed()
                     }
                 }),

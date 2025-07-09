@@ -1,5 +1,5 @@
 use crate::interceptor::{Inspector, PeerSide};
-use crate::plugin_manager::{PacketsParser, Recorder, PLUGIN_MANAGER};
+use crate::plugin_manager::{PLUGIN_MANAGER, PacketsParser, Recorder};
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
 use parking_lot::{Condvar, Mutex};

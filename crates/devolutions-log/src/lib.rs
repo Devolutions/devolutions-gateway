@@ -9,11 +9,11 @@ use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::fs;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 pub trait StaticLogConfig {
     const MAX_BYTES_PER_LOG_FILE: u64;
@@ -176,7 +176,7 @@ async fn log_deleter_task<C: StaticLogConfig>(
                                 .metadata()
                                 .await
                                 .and_then(|metadata| metadata.modified())
-                                .and_then(|time| time.elapsed().map_err(|e| io::Error::new(io::ErrorKind::Other, e)))
+                                .and_then(|time| time.elapsed().map_err(io::Error::other))
                             {
                                 Ok(modified) if modified > MAX_AGE => {
                                     info!(file_name, "Delete log file");

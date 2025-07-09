@@ -89,7 +89,7 @@ fn parse_arg<'a>(mut value: &[&'a str]) -> anyhow::Result<Args<'a>> {
                 value = rest;
             }
             ["--help" | "-h", ..] => {
-                println!("{}", HELP);
+                println!("{HELP}");
                 exit(0);
             }
             [] => break,
@@ -100,7 +100,7 @@ fn parse_arg<'a>(mut value: &[&'a str]) -> anyhow::Result<Args<'a>> {
     }
 
     if arg.input_path.is_empty() {
-        println!("{}", HELP);
+        println!("{HELP}");
         anyhow::bail!("Input path is required");
     }
 

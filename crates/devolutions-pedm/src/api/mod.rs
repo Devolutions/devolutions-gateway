@@ -1,7 +1,7 @@
 use core::{fmt, task};
 use std::os::windows::io::AsRawHandle;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -26,8 +26,8 @@ use devolutions_pedm_shared::policy::User;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
-use win_api_wrappers::raw::Win32::Security::Authorization::{SetSecurityInfo, GRANT_ACCESS, SE_KERNEL_OBJECT};
-use win_api_wrappers::raw::Win32::Security::{WinBuiltinUsersSid, DACL_SECURITY_INFORMATION, NO_INHERITANCE, PSID};
+use win_api_wrappers::raw::Win32::Security::Authorization::{GRANT_ACCESS, SE_KERNEL_OBJECT, SetSecurityInfo};
+use win_api_wrappers::raw::Win32::Security::{DACL_SECURITY_INFORMATION, NO_INHERITANCE, PSID, WinBuiltinUsersSid};
 use win_api_wrappers::security::acl::{Acl, ExplicitAccess, Trustee};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;

@@ -4,10 +4,10 @@
 use std::net::SocketAddr;
 use std::str::FromStr as _;
 
+use axum::Router;
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{self, Request, StatusCode};
-use axum::Router;
 use devolutions_gateway::credential::AppCredential;
 use devolutions_gateway::{DgwState, MockHandles};
 use http_body_util::BodyExt as _;

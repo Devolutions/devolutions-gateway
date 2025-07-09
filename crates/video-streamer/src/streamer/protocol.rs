@@ -16,7 +16,7 @@ impl TryFrom<&str> for Codec {
             "vp9" => Ok(Codec::Vp9),
             "V_VP8" => Ok(Codec::Vp8),
             "V_VP9" => Ok(Codec::Vp9),
-            _ => Err(format!("unknown codec: {}", value)),
+            _ => Err(format!("unknown codec: {value}")),
         }
     }
 }
@@ -65,7 +65,7 @@ impl codec::Decoder for ProtocolCodeC {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "invalid message type",
-                ))
+                ));
             }
         };
 
@@ -106,7 +106,7 @@ impl codec::Encoder<ServerMessage<'_>> for ProtocolCodeC {
                 dst.put(chunk);
             }
             ServerMessage::MetaData { codec } => {
-                let json = format!("{{\"codec\":\"{}\"}}", codec);
+                let json = format!("{{\"codec\":\"{codec}\"}}");
                 dst.put(json.as_bytes());
             }
             ServerMessage::Error(err) => {

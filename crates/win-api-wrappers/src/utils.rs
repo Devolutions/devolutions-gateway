@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::{c_void, OsStr, OsString};
+use std::ffi::{OsStr, OsString, c_void};
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::mem::MaybeUninit;
@@ -11,43 +11,43 @@ use std::{ptr, slice};
 
 use anyhow::bail;
 use uuid::Uuid;
-use windows::core::{Interface, PCSTR, PCWSTR, PSTR, PWSTR};
 use windows::Win32::Foundation::{
-    LocalFree, SetHandleInformation, E_INVALIDARG, E_POINTER, GENERIC_WRITE, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT,
-    HLOCAL, MAX_PATH, UNICODE_STRING,
+    E_INVALIDARG, E_POINTER, GENERIC_WRITE, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HLOCAL, LocalFree, MAX_PATH,
+    SetHandleInformation, UNICODE_STRING,
 };
 use windows::Win32::Security::{
-    RevertToSelf, SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS,
+    RevertToSelf, SecurityIdentification, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS, TokenPrimary,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED,
-    FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
+    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, FlushFileBuffers, OPEN_EXISTING,
+    PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT, COINIT_MULTITHREADED,
+    CLSCTX_INPROC_SERVER, COINIT, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile,
     STGM_READ,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32First, Process32Next, CREATE_TOOLHELP_SNAPSHOT_FLAGS, PROCESSENTRY32,
+    CREATE_TOOLHELP_SNAPSHOT_FLAGS, CreateToolhelp32Snapshot, PROCESSENTRY32, Process32First, Process32Next,
 };
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::Memory::{
-    VirtualAllocEx, VirtualFreeEx, VirtualProtect, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_PROTECTION_FLAGS,
-    PAGE_READWRITE,
+    MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx,
+    VirtualProtect,
 };
 use windows::Win32::System::Pipes::{
-    CreateNamedPipeW, CreatePipe, GetNamedPipeClientProcessId, ImpersonateNamedPipeClient, PeekNamedPipe,
-    PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
+    CreateNamedPipeW, CreatePipe, GetNamedPipeClientProcessId, ImpersonateNamedPipeClient, PIPE_READMODE_BYTE,
+    PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe,
 };
 use windows::Win32::UI::Controls::INFOTIPSIZE;
-use windows::Win32::UI::Shell::{CommandLineToArgvW, IShellLinkW, ShellLink, SLGP_SHORTPATH, SLR_NO_UI};
+use windows::Win32::UI::Shell::{CommandLineToArgvW, IShellLinkW, SLGP_SHORTPATH, SLR_NO_UI, ShellLink};
+use windows::core::{Interface, PCSTR, PCWSTR, PSTR, PWSTR};
 
+use crate::Error;
 use crate::handle::{Handle, HandleWrapper};
 use crate::process::Process;
 use crate::security::attributes::{SecurityAttributes, SecurityAttributesInit};
 use crate::thread::Thread;
 use crate::token::Token;
-use crate::Error;
 
 pub trait SafeWindowsString {
     fn to_string_safe(&self) -> anyhow::Result<String>;
@@ -455,7 +455,7 @@ pub fn expand_environment_path(src: &Path, environment: &HashMap<String, String>
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Storage::FileSystem::{
-    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
 };
 use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
 

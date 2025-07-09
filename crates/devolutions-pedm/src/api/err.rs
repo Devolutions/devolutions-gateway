@@ -1,6 +1,6 @@
 use aide::OperationOutput;
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::response::{IntoResponse, Response};
 use hyper::StatusCode;
 
 use crate::db::DbError;

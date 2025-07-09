@@ -12,7 +12,7 @@ use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_
 
 #[macro_use]
 extern crate tracing;
-use devolutions_session::{get_data_dir, init_log, ConfHandle};
+use devolutions_session::{ConfHandle, get_data_dir, init_log};
 
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 

@@ -399,7 +399,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
 #[instrument(skip_all)]
 pub async fn pipe(mut a: Pipe, mut b: Pipe) -> Result<()> {
-    use tokio::io::{copy_bidirectional_with_sizes, AsyncWriteExt as _};
+    use tokio::io::{AsyncWriteExt as _, copy_bidirectional_with_sizes};
 
     const BUF_SIZE: usize = 16 * 1024;
 

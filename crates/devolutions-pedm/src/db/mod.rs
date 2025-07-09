@@ -10,9 +10,9 @@ use tracing::{info, warn};
 
 mod err;
 
+use crate::Config;
 use crate::config::DbBackend;
 use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
-use crate::Config;
 pub(crate) use err::DbError;
 
 #[cfg(feature = "libsql")]
@@ -30,9 +30,9 @@ use bb8::Pool;
 #[cfg(feature = "postgres")]
 use bb8_postgres::PostgresConnectionManager;
 #[cfg(feature = "postgres")]
-use tokio_postgres::config::SslMode;
-#[cfg(feature = "postgres")]
 use tokio_postgres::NoTls;
+#[cfg(feature = "postgres")]
+use tokio_postgres::config::SslMode;
 
 pub(crate) const CURRENT_SCHEMA_VERSION: i16 = 0;
 
@@ -127,7 +127,7 @@ impl Db {
 }
 
 #[derive(Debug)]
-pub enum InitSchemaError {
+pub(crate) enum InitSchemaError {
     VersionMismatch { expected: i16, actual: i16 },
     Db(DbError),
 }

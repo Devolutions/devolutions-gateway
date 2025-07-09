@@ -18,7 +18,7 @@ impl Display for NetBiosPacket<'_> {
         for byte in self.data.iter() {
             values.push_str(&format!("0x{:01$X}, ", byte, 2));
         }
-        write!(f, "[{}]", values)
+        write!(f, "[{values}]")
     }
 }
 

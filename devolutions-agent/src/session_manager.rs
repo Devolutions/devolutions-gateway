@@ -1,6 +1,6 @@
 //! Module for starting and managing the Devolutions Session process in user sessions.
 
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use crate::AgentServiceEvent;
 use async_trait::async_trait;
@@ -11,7 +11,7 @@ use std::fmt::Debug;
 
 use camino::Utf8PathBuf;
 use win_api_wrappers::process::{
-    create_process_in_session, is_process_running_in_session, terminate_process_by_name_in_session, StartupInfo,
+    StartupInfo, create_process_in_session, is_process_running_in_session, terminate_process_by_name_in_session,
 };
 use win_api_wrappers::utils::{CommandLine, WideString};
 use win_api_wrappers::wts::session_has_logged_in_user;

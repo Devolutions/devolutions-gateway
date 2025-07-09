@@ -8,9 +8,9 @@ use ngrok::config::{HttpTunnelBuilder, TcpTunnelBuilder, TunnelBuilder as _};
 use ngrok::tunnel::UrlTunnel as _;
 use tracing::Instrument as _;
 
+use crate::DgwState;
 use crate::config::dto::{NgrokConf, NgrokTunnelConf};
 use crate::generic_client::GenericClient;
-use crate::DgwState;
 
 #[derive(Clone)]
 pub struct NgrokSession {

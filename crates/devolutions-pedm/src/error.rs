@@ -1,14 +1,14 @@
 use std::fmt::Debug;
 
 use aide::OperationOutput;
-use axum::response::{IntoResponse, Response};
 use axum::Json;
+use axum::response::{IntoResponse, Response};
 use hyper::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use win_api_wrappers::raw::Win32::Foundation::{
-    ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_INVALID_PARAMETER, E_UNEXPECTED,
+    E_UNEXPECTED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_INVALID_PARAMETER,
 };
 
 /// The original crate-wide error type.

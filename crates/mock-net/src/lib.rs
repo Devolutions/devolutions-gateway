@@ -6,11 +6,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::sync::LazyLock;
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{Mutex, Notify, mpsc};
 
 static LISTENERS: LazyLock<Mutex<HashMap<SocketAddr, mpsc::Sender<DuplexStream>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static NEW_LISTENER: LazyLock<Notify> = LazyLock::new(|| Notify::new());
+static NEW_LISTENER: LazyLock<Notify> = LazyLock::new(Notify::new);
 
 #[derive(Debug)]
 pub struct TcpListener(
@@ -24,7 +24,7 @@ impl TcpListener {
         let addr = addr
             .to_socket_addrs()?
             .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "invalid address"))?;
+            .ok_or_else(|| std::io::Error::other("invalid address"))?;
 
         let (sender, receiver) = mpsc::channel(3);
         LISTENERS.lock().await.insert(addr, sender);
@@ -40,7 +40,7 @@ impl TcpListener {
             .await
             .recv()
             .await
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no more duplex sender"))?;
+            .ok_or_else(|| std::io::Error::other("no more duplex sender"))?;
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         Ok((TcpStream(stream), addr))
     }
@@ -55,7 +55,7 @@ impl TcpStream {
         let addr = addr
             .to_socket_addrs()?
             .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "invalid address"))?;
+            .ok_or_else(|| std::io::Error::other("invalid address"))?;
 
         let sender = loop {
             if let Some(sender) = LISTENERS.lock().await.get(&addr) {
@@ -66,12 +66,10 @@ impl TcpStream {
         };
 
         let (one, two) = tokio::io::duplex(1024);
-        sender.send(two).await.map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "couldn't connect to host (listener has been dropped)",
-            )
-        })?;
+        sender
+            .send(two)
+            .await
+            .map_err(|_| std::io::Error::other("couldn't connect to host (listener has been dropped)"))?;
 
         Ok(Self(one))
     }

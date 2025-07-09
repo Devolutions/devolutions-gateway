@@ -86,9 +86,9 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
                 input = rest;
             }
             ["--user" | "-u", value, rest @ ..] => {
-                let idx = value.find(',').ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {value}"))
-                })?;
+                let idx = value
+                    .find(',')
+                    .ok_or_else(|| io::Error::other(format!("malformed username,password: {value}")))?;
                 let (user, pass) = value.split_at(idx);
                 args.user = Some((user, &pass[1..]));
                 input = rest;
@@ -98,10 +98,7 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
                 input = rest;
             }
             [unexpected_arg, ..] => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("unexpected argument: {unexpected_arg}"),
-                ))
+                return Err(io::Error::other(format!("unexpected argument: {unexpected_arg}")));
             }
             [] => break,
         }

@@ -2,22 +2,22 @@ use std::ffi::c_void;
 use std::ptr::{self, NonNull};
 use std::slice;
 
-use windows::core::GUID;
-use windows::Win32::Foundation::{ERROR_MORE_DATA, E_INVALIDARG};
-use windows::Win32::Security::{SecurityIdentification, TokenPrimary, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS};
+use windows::Win32::Foundation::{E_INVALIDARG, ERROR_MORE_DATA};
+use windows::Win32::Security::{SecurityIdentification, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS, TokenPrimary};
 use windows::Win32::System::Memory::PAGE_READWRITE;
 use windows::Win32::System::Rpc::{
-    RpcBindingVectorFree, RpcImpersonateClient, RpcRevertToSelfEx, RpcServerInqBindings, RpcServerInqCallAttributesW,
     MIDL_SERVER_INFO, RPC_BINDING_VECTOR, RPC_CALL_ATTRIBUTES_V2_W, RPC_CALL_ATTRIBUTES_VERSION, RPC_QUERY_CLIENT_PID,
-    RPC_QUERY_CLIENT_PRINCIPAL_NAME, RPC_QUERY_SERVER_PRINCIPAL_NAME, RPC_SERVER_INTERFACE, SERVER_ROUTINE,
+    RPC_QUERY_CLIENT_PRINCIPAL_NAME, RPC_QUERY_SERVER_PRINCIPAL_NAME, RPC_SERVER_INTERFACE, RpcBindingVectorFree,
+    RpcImpersonateClient, RpcRevertToSelfEx, RpcServerInqBindings, RpcServerInqCallAttributesW, SERVER_ROUTINE,
 };
+use windows::core::GUID;
 
+use crate::Error;
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::utils::set_memory_protection;
-use crate::Error;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[expect(non_camel_case_types)] // Unless a better name is found…
 pub type RPC_BINDING_HANDLE = *mut c_void;

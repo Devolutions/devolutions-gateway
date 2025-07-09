@@ -2,13 +2,13 @@ use anyhow::bail;
 use windows::Win32::Foundation::WIN32_ERROR;
 use windows::Win32::NetworkManagement::NetManagement;
 use windows::Win32::NetworkManagement::NetManagement::{
-    NetLocalGroupGetMembers, LOCALGROUP_MEMBERS_INFO_0, MAX_PREFERRED_LENGTH,
+    LOCALGROUP_MEMBERS_INFO_0, MAX_PREFERRED_LENGTH, NetLocalGroupGetMembers,
 };
 use windows::Win32::Security::WinBuiltinAdministratorsSid;
 
+use crate::Error;
 use crate::identity::sid::Sid;
 use crate::str::{U16CStr, U16CStrExt as _};
-use crate::Error;
 
 pub fn add_local_group_member(group_name: &U16CStr, security_identifier: &Sid) -> windows::core::Result<()> {
     let group_info = LOCALGROUP_MEMBERS_INFO_0 {

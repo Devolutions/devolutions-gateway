@@ -1,14 +1,14 @@
 use std::alloc::Layout;
 
 use thiserror::Error;
-use windows::core::Owned;
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GENERIC_READ};
 use windows::Win32::System::Services::{
-    OpenSCManagerW, OpenServiceW, QueryServiceConfigW, QueryServiceStatus, StartServiceW, QUERY_SERVICE_CONFIGW,
-    SC_HANDLE, SC_MANAGER_ALL_ACCESS, SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_BOOT_START, SERVICE_DEMAND_START,
+    OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfigW, QueryServiceStatus, SC_HANDLE,
+    SC_MANAGER_ALL_ACCESS, SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_BOOT_START, SERVICE_DEMAND_START,
     SERVICE_DISABLED, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_STATUS,
-    SERVICE_SYSTEM_START,
+    SERVICE_SYSTEM_START, StartServiceW,
 };
+use windows::core::Owned;
 
 use crate::raw_buffer::RawBuffer;
 use crate::utils::WideString;

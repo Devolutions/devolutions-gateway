@@ -1,11 +1,11 @@
 use anyhow::Context as _;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
+use rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
 use std::borrow::Cow;
 use std::path::Path;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx, InspectCert};
+use crate::doctor::{Args, Diagnostic, DiagnosticCtx, InspectCert, cert_to_pem, help};
 
 pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     let mut root_store = rustls::RootCertStore::empty();

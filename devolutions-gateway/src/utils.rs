@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use std::fmt;
 use std::net::SocketAddr;
-use tokio::net::{lookup_host, TcpStream};
+use tokio::net::{TcpStream, lookup_host};
 use url::Url;
 
 use crate::target_addr::TargetAddr;
@@ -41,7 +41,7 @@ pub async fn successive_try<'a, F, Fut, In, Out>(
 where
     In: fmt::Display + 'a,
     F: Fn(&'a In) -> Fut + 'a,
-    Fut: core::future::Future<Output = anyhow::Result<Out>>,
+    Fut: Future<Output = anyhow::Result<Out>>,
 {
     let mut error: Option<anyhow::Error> = None;
 

@@ -7,8 +7,6 @@ pub mod windows;
 mod date_version;
 mod update_json;
 
-#[cfg(not(windows))]
-use std::convert::Infallible;
 use std::env;
 
 use camino::Utf8PathBuf;
