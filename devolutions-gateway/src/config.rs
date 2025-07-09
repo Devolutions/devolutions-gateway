@@ -59,8 +59,7 @@ impl fmt::Debug for Tls {
 
 impl Tls {
     fn init(cert_source: crate::tls::CertificateSource, strict_checks: bool) -> anyhow::Result<Self> {
-        let tls_server_config =
-            crate::tls::build_server_config(cert_source, strict_checks).context("failed to build TLS config")?;
+        let tls_server_config = crate::tls::build_server_config(cert_source, strict_checks)?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_server_config));
 
@@ -152,7 +151,7 @@ impl Conf {
             .iter()
             .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
 
-        let strict_checks = conf_file.tls_verify_strict.unwrap_or(true);
+        let strict_checks = conf_file.tls_verify_strict.unwrap_or(false);
 
         let tls = match conf_file.tls_certificate_source.unwrap_or_default() {
             dto::CertSource::External => match conf_file.tls_certificate_file.as_ref() {
@@ -185,7 +184,7 @@ impl Conf {
                     };
 
                     Tls::init(cert_source, strict_checks)
-                        .context("failed to init TLS config")?
+                        .context("failed to initialize TLS configuration")?
                         .pipe(Some)
                 }
             },
@@ -208,7 +207,7 @@ impl Conf {
                     };
 
                     Tls::init(cert_source, strict_checks)
-                        .context("failed to init TLS config")?
+                        .context("failed to initialize TLS configuration")?
                         .pipe(Some)
                 }
             },
