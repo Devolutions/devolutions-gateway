@@ -124,7 +124,7 @@ pub(crate) fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> 
         Some(conf_file) => conf_file,
         None => {
             let defaults = dto::ConfFile::generate_new();
-            println!("Write default configuration to disk…");
+            println!("Write default configuration to {conf_file_path}…");
             save_config(&defaults).context("failed to save configuration")?;
             defaults
         }
