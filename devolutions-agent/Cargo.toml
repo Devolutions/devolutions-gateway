@@ -22,7 +22,7 @@ devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
 futures = "0.3"
 parking_lot = "0.12"
-rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
+rand = "0.9" # FIXME(@CBenoit): maybe we don’t need this crate
 rustls-pemfile = "2.2" # FIXME(@CBenoit): maybe we don’t need this crate
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
