@@ -762,7 +762,7 @@ dependencies = [
  "ctrlc",
  "libc",
  "log",
- "system-configuration-sys",
+ "system-configuration-sys 0.5.0",
  "timer",
  "widestring 0.4.3",
  "windows-sys 0.52.0",
@@ -2315,9 +2315,11 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite 0.2.16",
  "socket2",
+ "system-configuration",
  "tokio 1.46.1",
  "tower-service",
  "tracing",
+ "windows-registry",
 ]
 
 [[package]]
@@ -4691,7 +4693,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4873cd217803ccb250f2563adf3f7a128a6a2039a0aeb2417a58130a079748b4"
 dependencies = [
  "core-foundation 0.9.4",
- "system-configuration-sys",
+ "system-configuration-sys 0.5.0",
  "url",
  "winapi",
  "winreg 0.9.0",
@@ -4957,6 +4959,7 @@ dependencies = [
  "bytes 1.10.1",
  "futures-core",
  "futures-util",
+ "h2 0.4.11",
  "http 1.3.1",
  "http-body 1.0.1",
  "http-body-util",
@@ -5890,10 +5893,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "system-configuration"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
+dependencies = [
+ "bitflags 2.9.1",
+ "core-foundation 0.9.4",
+ "system-configuration-sys 0.6.0",
+]
+
+[[package]]
 name = "system-configuration-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
+name = "system-configuration-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
