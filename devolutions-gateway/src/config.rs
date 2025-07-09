@@ -59,7 +59,7 @@ impl fmt::Debug for Tls {
 
 impl Tls {
     fn init(cert_source: crate::tls::CertificateSource) -> anyhow::Result<Self> {
-        let tls_server_config = crate::tls::build_server_config(cert_source).context("failed build TLS config")?;
+        let tls_server_config = crate::tls::build_server_config(cert_source).context("failed to build TLS config")?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_server_config));
 
@@ -501,7 +501,7 @@ fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_data_dir() -> Utf8PathBuf {
+pub fn get_data_dir() -> Utf8PathBuf {
     if let Ok(config_path_env) = env::var("DGATEWAY_CONFIG_PATH") {
         Utf8PathBuf::from(config_path_env)
     } else {
