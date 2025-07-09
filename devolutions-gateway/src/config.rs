@@ -501,7 +501,7 @@ fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_data_dir() -> Utf8PathBuf {
+pub fn get_data_dir() -> Utf8PathBuf {
     if let Ok(config_path_env) = env::var("DGATEWAY_CONFIG_PATH") {
         Utf8PathBuf::from(config_path_env)
     } else {

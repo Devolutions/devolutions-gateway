@@ -48,6 +48,16 @@ enum CliAction {
 }
 
 fn main() -> anyhow::Result<()> {
+    run().inspect_err(|error| {
+        let bootstacktrace_path = devolutions_gateway::config::get_data_dir().join("bootstacktrace.log");
+
+        if let Err(write_error) = std::fs::write(bootstacktrace_path, format!("{error:?}")) {
+            eprintln!("Failed to the boot stacktrace to {bootstacktrace_path}: {write_error}");
+        }
+    })
+}
+
+fn run() -> anyhow::Result<()> {
     let mut args = std::env::args();
     let executable = args.next().context("executable name is missing from the environment")?;
 
