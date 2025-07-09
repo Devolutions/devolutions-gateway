@@ -5,8 +5,8 @@
 use anyhow::Context as _;
 use devolutions_gateway::recording::ActiveRecordings;
 use devolutions_gateway::token::{
-    new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, TokenError,
-    MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+    ApplicationProtocol, JrlTokenClaims, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS, Protocol, Subkey, TokenError,
+    new_token_cache,
 };
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
@@ -399,11 +399,7 @@ fn token_cache(
 fn jet_gw_id(this_gw_id: Uuid) -> impl Strategy<Value = Option<Uuid>> {
     (option::of(uuid_typed()), any::<bool>()).prop_map(
         move |(other_id, is_this_gw_id)| {
-            if is_this_gw_id {
-                Some(this_gw_id)
-            } else {
-                other_id
-            }
+            if is_this_gw_id { Some(this_gw_id) } else { other_id }
         },
     )
 }
@@ -523,11 +519,7 @@ fn subkey_compatible_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
 fn kid(this_kid: &str) -> impl Strategy<Value = String> + '_ {
     ("[a-zA-Z]{5,15}".no_shrink(), any::<bool>()).prop_map(
         |(other_kid, use_this_kid)| {
-            if use_this_kid {
-                this_kid.to_owned()
-            } else {
-                other_kid
-            }
+            if use_this_kid { this_kid.to_owned() } else { other_kid }
         },
     )
 }

@@ -196,8 +196,8 @@ impl DiagnosticCtx {
 }
 
 fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
-    use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
     use std::fmt::Write as _;
 
     let body = STANDARD.encode(cert_der);
@@ -279,7 +279,7 @@ impl std::io::Write for &DiagnosticTrace {
 }
 
 fn build_tracing_dispatcher(trace: std::sync::Arc<DiagnosticTrace>) -> tracing::Dispatch {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     let filter = EnvFilter::try_from_env("JETSOCAT_LOG").unwrap_or_else(|_| EnvFilter::new("debug"));
 

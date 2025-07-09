@@ -7,7 +7,6 @@ use network_scanner::event_bus::{ScannerEvent, TypedReceiver};
 use network_scanner::named_port::{MaybeNamedPort, NamedPort};
 use network_scanner::port_discovery::TcpKnockEvent;
 use network_scanner::scanner::{DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles};
-use tokio::time::timeout;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
@@ -48,7 +47,7 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let scanner = NetworkScanner::new(params).unwrap();
-        let mut stream = scanner.start()?;
+        let stream = scanner.start()?;
         let now = std::time::Instant::now();
         tokio::task::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {

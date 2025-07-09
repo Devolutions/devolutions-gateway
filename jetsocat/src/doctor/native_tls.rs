@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{cert_to_pem, help, Args, Diagnostic, DiagnosticCtx};
+use crate::doctor::{Args, Diagnostic, DiagnosticCtx, cert_to_pem, help};
 
 pub(crate) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     #[cfg(not(windows))]
@@ -128,7 +128,7 @@ mod openssl {
     use std::path::Path;
 
     use crate::doctor::macros::diagnostic;
-    use crate::doctor::{help, Args, Diagnostic, DiagnosticCtx, InspectCert};
+    use crate::doctor::{Args, Diagnostic, DiagnosticCtx, InspectCert, help};
 
     pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
         let mut server_certificates = Vec::new();

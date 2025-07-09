@@ -205,13 +205,10 @@ async fn connect_impl(
             // as per RFC server should send 0xFF as method if none of the methods
             // listed by client are acceptable.
             // However some implementation ignores this (ie: CCProxy 8.0).
-            return Err(io::Error::new(io::ErrorKind::Other, "no acceptable auth method"));
+            return Err(io::Error::other("no acceptable auth method"));
         }
         _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "unknown / unsupported auth method",
-            ))
+            return Err(io::Error::other("unknown / unsupported auth method"));
         }
     }
 
@@ -440,7 +437,7 @@ struct NegotiationRequest {
 
 impl NegotiationRequest {
     async fn write(&self, stream: &mut dyn ReadWriteStream) -> io::Result<()> {
-        let nauth = u8::try_from(self.methods.len()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let nauth = u8::try_from(self.methods.len()).map_err(io::Error::other)?;
         let mut packet = vec![SOCKS_VERSION, nauth];
         packet.extend_from_slice(&self.methods);
         stream.write_all(&packet).await?;
@@ -543,7 +540,7 @@ impl SocksRequest {
             0x01 => Command::Connect,
             0x02 => Command::Bind,
             0x03 => Command::UdpAssociate,
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "unknown command")),
+            _ => return Err(io::Error::other("unknown command")),
         };
 
         if stream.read_u8().await? != 0 {
@@ -612,44 +609,29 @@ impl SocksResponse {
         match rep {
             0 => {} // succeeded
             1 => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    Socks5FailureCode::GeneralSocksServerFailure,
-                ))
+                return Err(io::Error::other(Socks5FailureCode::GeneralSocksServerFailure));
             }
             2 => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    Socks5FailureCode::ConnectionNotAllowedByRuleset,
-                ))
+                return Err(io::Error::other(Socks5FailureCode::ConnectionNotAllowedByRuleset));
             }
             3 => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    Socks5FailureCode::NetworkUnreachable,
-                ))
+                return Err(io::Error::other(Socks5FailureCode::NetworkUnreachable));
             }
-            4 => return Err(io::Error::new(io::ErrorKind::Other, Socks5FailureCode::HostUnreachable)),
+            4 => return Err(io::Error::other(Socks5FailureCode::HostUnreachable)),
             5 => {
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionRefused,
                     Socks5FailureCode::ConnectionRefused,
-                ))
+                ));
             }
             6 => return Err(io::Error::new(io::ErrorKind::TimedOut, Socks5FailureCode::TtlExpired)),
             7 => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    Socks5FailureCode::CommandNotSupported,
-                ))
+                return Err(io::Error::other(Socks5FailureCode::CommandNotSupported));
             }
             8 => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    Socks5FailureCode::AddressTypeNotSupported,
-                ))
+                return Err(io::Error::other(Socks5FailureCode::AddressTypeNotSupported));
             }
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "unknown SOCKS error")),
+            _ => return Err(io::Error::other("unknown SOCKS error")),
         }
 
         if stream.read_u8().await? != 0 {
@@ -694,7 +676,7 @@ async fn read_addr(stream: &mut dyn ReadWriteStream) -> io::Result<DestAddr> {
             let port = stream.read_u16().await?;
             Ok(DestAddr::Ip(SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))))
         }
-        _ => Err(io::Error::new(io::ErrorKind::Other, "unsupported address type")),
+        _ => Err(io::Error::other("unsupported address type")),
     }
 }
 

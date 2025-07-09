@@ -11,10 +11,11 @@
 use std::collections::HashMap;
 
 use parking_lot::RwLock;
-use win_api_wrappers::identity::account::{create_virtual_account, ProfileInfo};
+use win_api_wrappers::Error;
+use win_api_wrappers::identity::account::{ProfileInfo, create_virtual_account};
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
 use win_api_wrappers::raw::Win32::Foundation::ERROR_ACCOUNT_EXPIRED;
-use win_api_wrappers::raw::Win32::Security::{WinBuiltinAdministratorsSid, WinLocalSid, LOGON32_LOGON_INTERACTIVE};
+use win_api_wrappers::raw::Win32::Security::{LOGON32_LOGON_INTERACTIVE, WinBuiltinAdministratorsSid, WinLocalSid};
 use win_api_wrappers::raw::Win32::System::SystemServices::{
     SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_LOGON_ID, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
 };
@@ -22,7 +23,6 @@ use win_api_wrappers::str::U16CString;
 use win_api_wrappers::token::Token;
 use win_api_wrappers::token_groups::TokenGroups;
 use win_api_wrappers::undoc::LOGON32_PROVIDER_VIRTUAL;
-use win_api_wrappers::Error;
 
 use super::Elevator;
 

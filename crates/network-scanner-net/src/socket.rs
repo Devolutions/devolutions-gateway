@@ -226,10 +226,7 @@ impl Future for ConnectFuture<'_> {
                 .is_err() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
                 .expect("your platform does not support connect failed")
             {
-                return std::task::Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "connection failed",
-                )));
+                return std::task::Poll::Ready(Err(std::io::Error::other("connection failed")));
             }
 
             // This is a special case, this happens when using epoll to wait for a unconnected TCP socket.
@@ -270,10 +267,9 @@ impl Future for ConnectFuture<'_> {
                 .register_events(&self.socket, &events_interested, cx.waker().clone())
             {
                 warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
-                return std::task::Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("failed to register socket to poller: {}", e),
-                )));
+                return std::task::Poll::Ready(Err(std::io::Error::other(format!(
+                    "failed to register socket to poller: {e}"
+                ))));
             }
         }
         std::task::Poll::Pending
@@ -356,10 +352,9 @@ fn resolve<T>(
                 ?event,
                 "Failed to register socket to poller"
             );
-            return std::task::Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed to register socket to poller: {}", e),
-            )));
+            return std::task::Poll::Ready(Err(std::io::Error::other(format!(
+                "failed to register socket to poller: {e}"
+            ))));
         }
 
         return std::task::Poll::Pending;

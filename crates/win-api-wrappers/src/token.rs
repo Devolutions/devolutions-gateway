@@ -4,34 +4,34 @@ use std::fmt::Debug;
 use std::mem::MaybeUninit;
 use std::ptr;
 
-use anyhow::{bail, Context as _};
-use windows::core::PCWSTR;
+use anyhow::{Context as _, bail};
 use windows::Win32::Foundation::{
     ERROR_ALREADY_EXISTS, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_VARIANT, HANDLE, LUID,
 };
 use windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT;
 use windows::Win32::Security::{
     self, AdjustTokenGroups, AdjustTokenPrivileges, DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser,
-    RevertToSelf, SecurityIdentification, SecurityImpersonation, SetTokenInformation, TokenElevationTypeDefault,
-    TokenElevationTypeFull, TokenElevationTypeLimited, LOGON32_LOGON, LOGON32_PROVIDER, LUID_AND_ATTRIBUTES,
-    SECURITY_ATTRIBUTES, SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE, TOKEN_ACCESS_MASK,
-    TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_IMPERSONATE, TOKEN_INFORMATION_CLASS,
-    TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_PRIVILEGES, TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY,
-    TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE,
+    LOGON32_LOGON, LOGON32_PROVIDER, LUID_AND_ATTRIBUTES, RevertToSelf, SECURITY_ATTRIBUTES,
+    SECURITY_IMPERSONATION_LEVEL, SECURITY_QUALITY_OF_SERVICE, SecurityIdentification, SecurityImpersonation,
+    SetTokenInformation, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_ELEVATION_TYPE, TOKEN_IMPERSONATE,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_POLICY, TOKEN_MANDATORY_POLICY_ID, TOKEN_PRIVILEGES,
+    TOKEN_PRIVILEGES_ATTRIBUTES, TOKEN_QUERY, TOKEN_SOURCE, TOKEN_STATISTICS, TOKEN_TYPE, TokenElevationTypeDefault,
+    TokenElevationTypeFull, TokenElevationTypeLimited,
 };
 use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
 use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
+use windows::core::PCWSTR;
 
 use crate::handle::{Handle, HandleWrapper};
-use crate::identity::account::{create_profile, get_username, ProfileInfo};
+use crate::identity::account::{ProfileInfo, create_profile, get_username};
 use crate::identity::sid::{Sid, SidAndAttributes};
 use crate::raw_buffer::{InitedBuffer, RawBuffer};
 use crate::security::acl::{Acl, AclRef};
-use crate::security::privilege::{self, find_token_with_privilege, lookup_privilege_value, TokenPrivileges};
+use crate::security::privilege::{self, TokenPrivileges, find_token_with_privilege, lookup_privilege_value};
 use crate::str::{U16CStr, U16CStrExt as _, U16CString, UnicodeStr};
 use crate::token_groups::TokenGroups;
 use crate::utils::u32size_of;
-use crate::{create_impersonation_context, undoc, Error};
+use crate::{Error, create_impersonation_context, undoc};
 
 #[derive(Debug)]
 pub struct Token {

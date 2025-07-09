@@ -1,7 +1,7 @@
 use crate::utils::{RequestHelper, ResponseHelper};
 use crate::{
-    get_uuid_in_path, Error, JET_HEADER_ASSOCIATION, JET_HEADER_CONNECTION, JET_HEADER_HOST, JET_HEADER_METHOD,
-    JET_HEADER_VERSION,
+    Error, JET_HEADER_ASSOCIATION, JET_HEADER_CONNECTION, JET_HEADER_HOST, JET_HEADER_METHOD, JET_HEADER_VERSION,
+    get_uuid_in_path,
 };
 use http::StatusCode;
 use std::io;
@@ -61,11 +61,7 @@ impl JetConnectReq {
         if request.is_get_method() {
             // Version has to be specified
             let version_opt = if let Some(version_str) = request.get_header_value("jet-version") {
-                if let Ok(version) = version_str.parse::<u32>() {
-                    Some(version)
-                } else {
-                    None
-                }
+                version_str.parse::<u32>().ok()
             } else {
                 None
             };

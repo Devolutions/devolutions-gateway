@@ -5,12 +5,12 @@ use axum::{Json, Router};
 use tokio::fs::File;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::extract::DiagnosticsReadScope;
 use crate::http::HttpError;
 use crate::listener::ListenerUrls;
 use crate::log::GatewayLog;
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()

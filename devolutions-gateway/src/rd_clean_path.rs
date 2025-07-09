@@ -77,10 +77,7 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => break,
                 std::cmp::Ordering::Greater => {
-                    return Err(io::Error::new(
-                        ErrorKind::Other,
-                        "no leftover is expected when reading cleanpath PDU",
-                    ));
+                    return Err(io::Error::other("no leftover is expected when reading cleanpath PDU"));
                 }
             }
         }

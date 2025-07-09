@@ -145,20 +145,18 @@ async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<Socket
 
     match stream.read_u8().await? {
         90 => {}
-        91 => return Err(io::Error::new(io::ErrorKind::Other, "request rejected or failed")),
+        91 => return Err(io::Error::other("request rejected or failed")),
         92 => {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "request rejected because SOCKS server cannot connect to identd on the client",
-            ))
+            ));
         }
         93 => {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "request rejected because the client program and identd report different user-ids",
-            ))
+            ));
         }
-        _ => return Err(io::Error::new(io::ErrorKind::Other, "invalid result code")),
+        _ => return Err(io::Error::other("invalid result code")),
     }
 
     let port = stream.read_u16().await?;

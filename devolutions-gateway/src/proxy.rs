@@ -41,7 +41,9 @@ where
                 self.forward_using_dissector(WaykDissector).await
             }
             _ => {
-                trace!("No dissector available for this protocol. Data received will not be split to get application message");
+                trace!(
+                    "No dissector available for this protocol. Data received will not be split to get application message"
+                );
                 self.forward_using_dissector(DummyDissector).await
             }
         }
@@ -170,7 +172,7 @@ fn is_really_an_error(original_error: &io::Error) -> bool {
             match tungstenite_error {
                 tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed => return false,
                 tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => {
-                    return false
+                    return false;
                 }
                 tungstenite::Error::Io(io_error) => dyn_error = Some(io_error),
                 _ => return true,

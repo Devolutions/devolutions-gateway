@@ -36,14 +36,14 @@ impl AsciinemaEvent {
         match self {
             AsciinemaEvent::TerminalOutput { payload, time } => {
                 let escaped_payload = Self::sanitize_payload(payload);
-                format!(r#"[{},"o","{}"]"#, time, escaped_payload)
+                format!(r#"[{time},"o","{escaped_payload}"]"#)
             }
             AsciinemaEvent::UserInput { payload, time } => {
                 let escaped_payload = Self::sanitize_payload(payload);
-                format!(r#"[{},"i","{}"]"#, time, escaped_payload)
+                format!(r#"[{time},"i","{escaped_payload}"]"#)
             }
             AsciinemaEvent::Resize { width, height, time } => {
-                format!(r#"[{},"r","{}x{}"]"#, time, width, height)
+                format!(r#"[{time},"r","{width}x{height}"]"#)
             }
         }
     }

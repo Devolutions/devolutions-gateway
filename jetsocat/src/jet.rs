@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jet_proto::JET_VERSION_V2;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
@@ -8,8 +8,8 @@ pub(crate) async fn write_jet_accept_request(
     association_id: Uuid,
     candidate_id: Uuid,
 ) -> Result<()> {
-    use jet_proto::accept::JetAcceptReq;
     use jet_proto::JetMessage;
+    use jet_proto::accept::JetAcceptReq;
     use tokio::io::AsyncWriteExt;
 
     let jet_accept_request = JetMessage::JetAcceptReq(JetAcceptReq {
@@ -58,8 +58,8 @@ pub(crate) async fn write_jet_connect_request(
     association_id: Uuid,
     candidate_id: Uuid,
 ) -> Result<()> {
-    use jet_proto::connect::JetConnectReq;
     use jet_proto::JetMessage;
+    use jet_proto::connect::JetConnectReq;
     use tokio::io::AsyncWriteExt;
 
     let jet_connect_request = JetMessage::JetConnectReq(JetConnectReq {

@@ -2,7 +2,7 @@ mod reversed_hex_uuid;
 
 pub mod registry;
 
-use uuid::{uuid, Uuid};
+use uuid::{Uuid, uuid};
 
 pub use reversed_hex_uuid::InvalidReversedHexUuid;
 

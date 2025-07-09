@@ -111,7 +111,7 @@ impl LibSqlJobQueue {
                     self.conn
                         .execute_batch(sql_query)
                         .await
-                        .with_context(|| format!("failed to execute migration {}", migration_id))?;
+                        .with_context(|| format!("failed to execute migration {migration_id}"))?;
 
                     trace!(migration_id, "Applied migration");
 

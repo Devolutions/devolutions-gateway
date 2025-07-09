@@ -1,15 +1,15 @@
 use anyhow::anyhow;
-use windows::core::Owned;
-use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, ERROR_NO_TOKEN, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_NO_TOKEN, HANDLE};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::RemoteDesktop::{
-    self, WTSEnumerateSessionsW, WTSFreeMemory, WTSLogoffSession, WTSQuerySessionInformationW, WTSQueryUserToken,
-    WTSSendMessageW, WTSVirtualChannelClose, WTSVirtualChannelOpenEx, WTSVirtualChannelQuery, WTSVirtualFileHandle,
-    WTS_CHANNEL_OPTION_DYNAMIC, WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTS_INFO_CLASS,
-    WTS_SESSION_INFOW,
+    self, WTS_CHANNEL_OPTION_DYNAMIC, WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+    WTS_INFO_CLASS, WTS_SESSION_INFOW, WTSEnumerateSessionsW, WTSFreeMemory, WTSLogoffSession,
+    WTSQuerySessionInformationW, WTSQueryUserToken, WTSSendMessageW, WTSVirtualChannelClose, WTSVirtualChannelOpenEx,
+    WTSVirtualChannelQuery, WTSVirtualFileHandle,
 };
 use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_RESULT;
+use windows::core::Owned;
 
 use crate::process::Process;
 use crate::security::privilege::{self, ScopedPrivileges};

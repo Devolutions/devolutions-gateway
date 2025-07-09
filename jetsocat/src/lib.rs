@@ -81,7 +81,7 @@ pub struct JmuxProxyCfg {
 
 #[instrument("jmux", skip_all)]
 pub async fn jmux_proxy(cfg: JmuxProxyCfg) -> anyhow::Result<()> {
-    use self::listener::{http_listener_task, socks5_listener_task, tcp_listener_task, ListenerMode};
+    use self::listener::{ListenerMode, http_listener_task, socks5_listener_task, tcp_listener_task};
     use jmux_proxy::JmuxProxy;
     use pipe::open_pipe;
     use tokio::sync::mpsc;

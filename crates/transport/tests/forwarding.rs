@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use futures_util::FutureExt;
 use proptest::prelude::*;
-use test_utils::{find_unused_ports, payload, read_assert_payload, transport_kind, write_payload, TransportKind};
+use test_utils::{TransportKind, find_unused_ports, payload, read_assert_payload, transport_kind, write_payload};
 use tokio::io::AsyncWriteExt;
 
 async fn client(payload: &[u8], kind: TransportKind, port: u16) -> anyhow::Result<()> {

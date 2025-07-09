@@ -46,10 +46,12 @@ impl RdpServerDisplayUpdates for DisplayUpdates {
         let left: u16 = rng.gen_range(0..WIDTH);
         let width = NonZeroU16::new(rng.gen_range(1..=WIDTH - left)).expect("never zero");
 
-        let data: Vec<u8> = std::iter::repeat([rng.r#gen(), rng.r#gen(), rng.r#gen(), 255])
-            .take(usize::from(width.get()) * usize::from(height.get()))
-            .flatten()
-            .collect();
+        let data: Vec<u8> = std::iter::repeat_n(
+            [rng.r#gen(), rng.r#gen(), rng.r#gen(), 255],
+            usize::from(width.get()) * usize::from(height.get()),
+        )
+        .flatten()
+        .collect();
 
         trace!(left, top, width, height, "BitmapUpdate");
 

@@ -11,7 +11,7 @@ use tracing::info;
 use win_api_wrappers::fs::create_directory;
 use win_api_wrappers::identity::account::Account;
 use win_api_wrappers::identity::sid::Sid;
-use win_api_wrappers::process::{create_process_as_user, ProcessInformation, StartupInfo};
+use win_api_wrappers::process::{ProcessInformation, StartupInfo, create_process_as_user};
 use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::CommandLine;

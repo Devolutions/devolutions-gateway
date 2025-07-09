@@ -665,7 +665,7 @@ impl Task for CleanupTask {
 
 #[instrument(skip_all)]
 async fn cleanup_task(token_cache: Arc<TokenCache>, mut shutdown_signal: ShutdownSignal) {
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 30); // 30 minutes
 
@@ -943,7 +943,9 @@ fn validate_token_impl(
             // Gateway ID scope rule is not respected
             Some(_) => return Err(TokenError::GatewayIdScopeMismatch),
             None => {
-                warn!("This token is restricted to a specific gateway, but no ID has been assigned. This may become a hard error in the future.")
+                warn!(
+                    "This token is restricted to a specific gateway, but no ID has been assigned. This may become a hard error in the future."
+                )
             }
         }
     }
@@ -1177,7 +1179,9 @@ pub mod unsafe_debug {
         use picky::jose::jwt::JwtSig;
         use serde_json::Value;
 
-        warn!("**DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!");
+        warn!(
+            "**DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!"
+        );
 
         // === Decoding JWT === //
 

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
-use axum::extract::ws::{Message, Utf8Bytes};
 use axum::extract::WebSocketUpgrade;
+use axum::extract::ws::{Message, Utf8Bytes};
 use axum::response::Response;
 use axum::{Json, Router};
 use network_scanner::event_bus::ScannerEvent;
@@ -17,10 +17,10 @@ use network_scanner::port_discovery::TcpKnockEvent;
 use network_scanner::scanner::{self, DnsEvent, NetworkScannerParams, ScannerConfig, TcpKnockWithHost};
 use serde::{Deserialize, Serialize};
 
+use crate::DgwState;
 use crate::extract::RepeatQuery;
 use crate::http::HttpError;
 use crate::token::Protocol;
-use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new()
@@ -370,22 +370,19 @@ impl TryFrom<ScannerEvent> for NetworkScanResponse {
                 protocol,
                 port,
             }) => {
-                let protocol = match protocol {
-                    None => None,
-                    Some(protocol) => Some(match protocol {
-                        scanner::ServiceType::Rdp => Protocol::Rdp,
-                        scanner::ServiceType::Ard => Protocol::Ard,
-                        scanner::ServiceType::Vnc => Protocol::Vnc,
-                        scanner::ServiceType::Ssh => Protocol::Ssh,
-                        scanner::ServiceType::Sftp => Protocol::Sftp,
-                        scanner::ServiceType::Scp => Protocol::Scp,
-                        scanner::ServiceType::Telnet => Protocol::Telnet,
-                        scanner::ServiceType::Http => Protocol::Http,
-                        scanner::ServiceType::Https => Protocol::Https,
-                        scanner::ServiceType::Ldap => Protocol::Ldap,
-                        scanner::ServiceType::Ldaps => Protocol::Ldaps,
-                    }),
-                };
+                let protocol = protocol.map(|protocol| match protocol {
+                    scanner::ServiceType::Rdp => Protocol::Rdp,
+                    scanner::ServiceType::Ard => Protocol::Ard,
+                    scanner::ServiceType::Vnc => Protocol::Vnc,
+                    scanner::ServiceType::Ssh => Protocol::Ssh,
+                    scanner::ServiceType::Sftp => Protocol::Sftp,
+                    scanner::ServiceType::Scp => Protocol::Scp,
+                    scanner::ServiceType::Telnet => Protocol::Telnet,
+                    scanner::ServiceType::Http => Protocol::Http,
+                    scanner::ServiceType::Https => Protocol::Https,
+                    scanner::ServiceType::Ldap => Protocol::Ldap,
+                    scanner::ServiceType::Ldaps => Protocol::Ldaps,
+                });
 
                 let protocol = match protocol {
                     Some(protocol) => TcpKnockProbe::NamedApplication(protocol),

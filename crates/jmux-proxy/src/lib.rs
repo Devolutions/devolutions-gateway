@@ -20,12 +20,12 @@ use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message,
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
@@ -801,7 +801,7 @@ impl DataReaderTask {
             let mut bytes = match bytes {
                 Ok(bytes) => bytes,
                 Err(error) if is_really_an_error(&error) => {
-                    return Err(anyhow::Error::new(error).context("couldn’t read next bytes from stream"))
+                    return Err(anyhow::Error::new(error).context("couldn’t read next bytes from stream"));
                 }
                 Err(error) => {
                     debug!(%error, "Couldn’t read next bytes from stream (not really an error)");

@@ -1,5 +1,5 @@
-use crate::config::dto::Subscriber;
 use crate::config::ConfHandle;
+use crate::config::dto::Subscriber;
 use crate::session::SessionMessageSender;
 use anyhow::Context as _;
 use async_trait::async_trait;

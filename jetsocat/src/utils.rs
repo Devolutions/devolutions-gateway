@@ -1,7 +1,7 @@
 use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::Context as _;
 use core::time::Duration;
-use futures_util::{future, Future, Sink, Stream};
+use futures_util::{Future, Sink, Stream, future};
 use proxy_types::{DestAddr, ToDestAddr};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};

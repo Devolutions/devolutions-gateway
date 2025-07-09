@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures_core::{ready, Stream};
+use futures_core::{Stream, ready};
 use futures_sink::Sink;
 use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -55,7 +55,7 @@ where
                     WsReadMsg::Payload(data) => data,
                     WsReadMsg::Close => return Poll::Ready(Ok(())),
                 },
-                Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+                Some(Err(e)) => return Poll::Ready(Err(io::Error::other(e))),
                 None => return Poll::Ready(Ok(())),
             }
         };
@@ -120,7 +120,7 @@ where
 fn to_io_result<E: std::error::Error + Send + Sync + 'static>(res: Result<(), E>) -> io::Result<()> {
     match res {
         Ok(()) => Ok(()),
-        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+        Err(e) => Err(io::Error::other(e)),
     }
 }
 
@@ -135,11 +135,11 @@ pub enum WsWriteMsg {
 }
 
 pub trait KeepAliveShutdown: Send + 'static {
-    fn wait(&mut self) -> impl core::future::Future<Output = ()> + Send + '_;
+    fn wait(&mut self) -> impl Future<Output = ()> + Send + '_;
 }
 
 impl KeepAliveShutdown for std::sync::Arc<tokio::sync::Notify> {
-    fn wait(&mut self) -> impl core::future::Future<Output = ()> + Send + '_ {
+    fn wait(&mut self) -> impl Future<Output = ()> + Send + '_ {
         self.notified()
     }
 }

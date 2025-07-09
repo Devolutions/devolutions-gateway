@@ -2,16 +2,16 @@ use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 
-use anyhow::{bail, Context as _};
-use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{GetLastError, ERROR_INVALID_SID, ERROR_MORE_DATA, MAX_PATH, WIN32_ERROR};
+use anyhow::{Context as _, bail};
+use windows::Win32::Foundation::{ERROR_INVALID_SID, ERROR_MORE_DATA, GetLastError, MAX_PATH, WIN32_ERROR};
 use windows::Win32::NetworkManagement::NetManagement::{
     NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
 };
 use windows::Win32::Security;
 use windows::Win32::Security::Authentication::Identity;
 use windows::Win32::System::GroupPolicy::PI_NOUI;
-use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, UnloadUserProfile, PROFILEINFOW};
+use windows::Win32::UI::Shell::{CreateProfile, LoadUserProfileW, PROFILEINFOW, UnloadUserProfile};
+use windows::core::{PCWSTR, PWSTR};
 
 use crate::handle::HandleWrapper;
 use crate::identity::sid::Sid;
@@ -20,8 +20,8 @@ use crate::scope_guard::ScopeGuard;
 use crate::str::{U16CStr, U16CStrExt, U16CString, UnicodeStr};
 use crate::token::Token;
 use crate::undoc::{
-    LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT,
-    LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT,
+    LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT, LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT, LsaManageSidNameMapping,
+    LsaSidNameMappingOperation_Add,
 };
 use crate::utils::u32size_of;
 

@@ -3,15 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use axum::Router;
 use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
-use axum::Router;
 use bytes::Bytes;
 use devolutions_gateway_task::ShutdownSignal;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{field, Instrument as _};
+use tracing::{Instrument as _, field};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
@@ -22,10 +22,10 @@ use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol, RecordingPolicy};
-use crate::{utils, DgwState};
+use crate::{DgwState, utils};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    use axum::routing::{self, get, MethodFilter};
+    use axum::routing::{self, MethodFilter, get};
 
     let router = Router::new()
         .route("/tcp/{id}", get(fwd_tcp))
@@ -193,7 +193,7 @@ impl std::fmt::Display for ForwardError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BadGateway(error) => write!(f, "bad gateway: {error}"),
-            Self::Internal(error) => write!(f, "{}", error),
+            Self::Internal(error) => write!(f, "{error}"),
         }
     }
 }
@@ -325,7 +325,7 @@ async fn fwd_http(
     mut request: axum::http::Request<axum::body::Body>,
 ) -> Result<Response, HttpError> {
     use axum::extract::FromRequestParts as _; // from_request_parts
-    use axum::http::{header, Response};
+    use axum::http::{Response, header};
     use core::str::FromStr;
     use http_body_util::BodyExt as _; // into_data_stream
     use std::sync::LazyLock;

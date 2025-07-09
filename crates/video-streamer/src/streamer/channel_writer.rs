@@ -28,7 +28,7 @@ impl io::Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.writer
             .blocking_send(buf.to_vec())
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, ChannelWriterError::ChannelClosed))?;
+            .map_err(|_| io::Error::other(ChannelWriterError::ChannelClosed))?;
 
         Ok(buf.len())
     }

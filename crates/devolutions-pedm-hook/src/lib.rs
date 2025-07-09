@@ -10,17 +10,17 @@ mod lib_win {
     use std::sync::OnceLock;
     use std::{mem, thread};
 
-    use anyhow::{bail, Result};
+    use anyhow::{Result, bail};
 
     use parking_lot::Mutex;
 
     use appinfo::dump_interfaces;
     use hook::rai_launch_admin_process;
     use win_api_wrappers::process::Module;
-    use win_api_wrappers::raw::core::GUID;
     use win_api_wrappers::raw::Win32::Foundation::*;
     use win_api_wrappers::raw::Win32::System::Rpc::SERVER_ROUTINE;
     use win_api_wrappers::raw::Win32::System::SystemServices::*;
+    use win_api_wrappers::raw::core::GUID;
 
     fn original_handlers() -> &'static Mutex<HashMap<GUID, Box<[SERVER_ROUTINE]>>> {
         static ORIGINAL_HANDLERS: OnceLock<Mutex<HashMap<GUID, Box<[SERVER_ROUTINE]>>>> = OnceLock::new();
@@ -79,7 +79,7 @@ mod lib_win {
         Ok(())
     }
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     extern "system" fn DllMain(_dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
         let status = match call_reason {
             DLL_PROCESS_ATTACH => {

@@ -3,7 +3,7 @@ use std::io::BufReader;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_agent_shared::get_data_dir;
 use serde::{Deserialize, Serialize};
@@ -249,6 +249,7 @@ pub mod dto {
         pub enabled: bool,
     }
 
+    #[allow(clippy::derivable_impls)]
     impl Default for PedmConf {
         fn default() -> Self {
             Self { enabled: false }

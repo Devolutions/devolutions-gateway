@@ -11,7 +11,7 @@ use tokio::fs::OpenOptions;
 use tokio::sync::Notify;
 use uuid::Uuid;
 use video_streamer::config::CpuCount;
-use video_streamer::{webm_stream, ReOpenableFile};
+use video_streamer::{ReOpenableFile, webm_stream};
 
 use crate::token::RecordingFileType;
 

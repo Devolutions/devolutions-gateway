@@ -2,9 +2,9 @@ use anyhow::Context;
 use mdns_sd::ServiceEvent;
 use tokio::sync::mpsc;
 
+use crate::ScannerError;
 use crate::scanner::ServiceType;
 use crate::task_utils::TaskManager;
-use crate::ScannerError;
 
 #[derive(Clone)]
 pub struct MdnsDaemon {
@@ -97,11 +97,11 @@ pub fn mdns_query_scan(
 
     for service in SERVICE_TYPES_INTERESTED {
         let service_name: &str = service.into();
-        let service_name = format!("{}.local.", service_name);
+        let service_name = format!("{service_name}.local.");
         let (result_sender, daemon_clone, service_name_clone) =
             (result_sender.clone(), daemon.clone(), service_name.clone());
         let receiver = daemon.browse(service_name.as_ref()).with_context(|| {
-            let err_msg = format!("failed to browse for service: {}", service_name);
+            let err_msg = format!("failed to browse for service: {service_name}");
             error!(error = err_msg);
             err_msg
         })?;

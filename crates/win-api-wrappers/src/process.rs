@@ -1,45 +1,45 @@
 use std::collections::HashMap;
-use std::ffi::{c_void, OsString};
+use std::ffi::{OsString, c_void};
 use std::fmt::Debug;
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::{ptr, slice};
 
-use anyhow::{bail, Context, Result};
-use windows::core::PCWSTR;
+use anyhow::{Context, Result, bail};
 use windows::Win32::Foundation::{
-    FreeLibrary, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, E_INVALIDARG, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT,
+    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT,
     WAIT_FAILED,
 };
 use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::LibraryLoader::{
-    GetModuleFileNameW, GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GetModuleFileNameW, GetModuleHandleExW, GetProcAddress,
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
-    CreateProcessAsUserW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
-    QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, PEB,
-    PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
-    PROCESS_TERMINATE, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
+    GetCurrentProcess, GetExitCodeProcess, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess,
+    OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS,
+    PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW,
+    STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
 };
-use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
+use windows::core::PCWSTR;
 
+use crate::Error;
 use crate::handle::{Handle, HandleWrapper};
 use crate::security::attributes::SecurityAttributes;
 use crate::security::privilege::{self, ScopedPrivileges};
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::undoc::{NtQueryInformationProcess, ProcessBasicInformation, RTL_USER_PROCESS_PARAMETERS};
-use crate::utils::{u32size_of, Allocation, AnsiString, ComContext, CommandLine, WideString};
-use crate::Error;
+use crate::utils::{Allocation, AnsiString, ComContext, CommandLine, WideString, u32size_of};
 
 #[derive(Debug)]
 pub struct Process {

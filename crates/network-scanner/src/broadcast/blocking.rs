@@ -75,7 +75,7 @@ pub fn block_broadcast(ip: Ipv4Addr, read_time_out: Option<Duration>) -> anyhow:
     trace!(?packet, "Sending packet");
     socket
         .send_to(&packet.to_bytes(true), &addr.into())
-        .with_context(|| format!("Failed to send packet to {}", ip))?;
+        .with_context(|| format!("Failed to send packet to {ip}"))?;
 
     Ok(BorcastBlockStream {
         socket,

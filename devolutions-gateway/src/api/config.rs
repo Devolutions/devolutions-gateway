@@ -1,7 +1,7 @@
+use crate::DgwState;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
 use crate::extract::ConfigWriteScope;
 use crate::http::HttpError;
-use crate::DgwState;
 use axum::extract::State;
 use axum::routing::patch;
 use axum::{Json, Router};

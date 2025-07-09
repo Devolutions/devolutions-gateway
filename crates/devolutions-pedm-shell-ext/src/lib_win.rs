@@ -1,6 +1,6 @@
 #![allow(non_snake_case)] // WinAPI naming.
 
-use std::ffi::{c_void, OsString};
+use std::ffi::{OsString, c_void};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -14,12 +14,9 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::fs::get_system32_path;
 use win_api_wrappers::process::{Module, Process};
-use win_api_wrappers::raw::core::{
-    implement, interface, Error, IUnknown, IUnknown_Vtbl, Interface, Result, BOOL, GUID, HRESULT, PWSTR,
-};
 use win_api_wrappers::raw::Win32::Foundation::{
-    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_INVALIDARG, E_NOTIMPL, E_POINTER,
-    E_UNEXPECTED, HINSTANCE,
+    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_NOTIMPL, E_POINTER, E_UNEXPECTED,
+    ERROR_CANCELLED, HINSTANCE,
 };
 use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
 use win_api_wrappers::raw::Win32::System::Com::{CoTaskMemFree, IBindCtx, IClassFactory, IClassFactory_Impl};
@@ -28,13 +25,16 @@ use win_api_wrappers::raw::Win32::System::Ole::{IObjectWithSite, IObjectWithSite
 use win_api_wrappers::raw::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
 use win_api_wrappers::raw::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 use win_api_wrappers::raw::Win32::UI::Shell::{
-    IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray, SHStrDupW, ECF_DEFAULT,
-    ECS_ENABLED, SIGDN_FILESYSPATH,
+    ECF_DEFAULT, ECS_ENABLED, IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray,
+    SHStrDupW, SIGDN_FILESYSPATH,
+};
+use win_api_wrappers::raw::core::{
+    BOOL, Error, GUID, HRESULT, IUnknown, IUnknown_Vtbl, Interface, PWSTR, Result, implement, interface,
 };
 use win_api_wrappers::token::Token;
 use win_api_wrappers::user;
 use win_api_wrappers::utils::{
-    environment_block, expand_environment, expand_environment_path, Link, Snapshot, WideString,
+    Link, Snapshot, WideString, environment_block, expand_environment, expand_environment_path,
 };
 
 const IDS_RUN_ELEVATED: u32 = 150;
@@ -336,7 +336,7 @@ enum ChannelCommand {
 
 static mut DLL_MODULE: HINSTANCE = HINSTANCE(std::ptr::null_mut());
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
     match call_reason {
         DLL_PROCESS_ATTACH => {
@@ -399,7 +399,7 @@ impl IClassFactory_Impl for ElevationContextMenuCommandFactory_Impl {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "system" fn DllGetClassObject(class_id: *const GUID, iid: *const GUID, out: *mut *mut c_void) -> HRESULT {
     // SAFETY: We assume the argument is the correct type according to the doc.
     let class_id = unsafe { class_id.as_ref() };

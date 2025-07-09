@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use std::future::Future;
 
 use crate::event_bus::EventBus;
-use crate::ip_utils::{get_subnets, IpAddrRange, Subnet};
+use crate::ip_utils::{IpAddrRange, Subnet, get_subnets};
 use crate::mdns::MdnsDaemon;
 use crate::named_port::MaybeNamedPort;
 use crate::scanner::{NetworkScanner, ScannerConfig, ScannerToggles};
@@ -94,7 +94,7 @@ impl TaskExecutionContext {
 
         let broadcast_subnet = get_subnets()?;
         let context = Self {
-            event_bus: event_bus.clone(),
+            event_bus,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
             mdns_daemon,

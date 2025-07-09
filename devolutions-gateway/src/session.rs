@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tap::prelude::*;
 use time::OffsetDateTime;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{Notify, mpsc, oneshot};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 

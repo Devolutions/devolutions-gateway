@@ -10,7 +10,7 @@ use windows::Win32::Security::{Credentials, Cryptography};
 use wrapper::ScopeGuard;
 
 use crate::doctor::macros::diagnostic;
-use crate::doctor::{help, Args, CertInspectProxy, Diagnostic, DiagnosticCtx};
+use crate::doctor::{Args, CertInspectProxy, Diagnostic, DiagnosticCtx, help};
 
 struct ChainCtx {
     store: wrapper::CertStore,

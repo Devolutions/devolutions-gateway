@@ -1,34 +1,34 @@
-use std::ffi::{c_void, OsString};
+use std::ffi::{OsString, c_void};
 use std::fmt::Debug;
 use std::fs::File;
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Result};
-use windows::core::HRESULT;
+use anyhow::{Result, anyhow, bail};
 use windows::Win32::Foundation::{
     CRYPT_E_BAD_MSG, ERROR_INCORRECT_SIZE, ERROR_INVALID_VARIANT, HANDLE, HWND, INVALID_HANDLE_VALUE, NTE_BAD_ALGID,
     S_OK, TRUST_E_BAD_DIGEST, TRUST_E_EXPLICIT_DISTRUST, TRUST_E_NOSIGNATURE, TRUST_E_PROVIDER_UNKNOWN,
 };
 use windows::Win32::Security::Cryptography::Catalog::{
-    CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminEnumCatalogFromHash,
-    CryptCATAdminReleaseCatalogContext, CryptCATAdminReleaseContext, CryptCATCatalogInfoFromContext, CATALOG_INFO,
+    CATALOG_INFO, CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminEnumCatalogFromHash,
+    CryptCATAdminReleaseCatalogContext, CryptCATAdminReleaseContext, CryptCATCatalogInfoFromContext,
 };
 use windows::Win32::Security::Cryptography::{
-    CertGetEnhancedKeyUsage, CertNameToStrW, BCRYPT_SHA256_ALGORITHM, CERT_CONTEXT, CERT_EXTENSION, CERT_INFO,
-    CERT_QUERY_ENCODING_TYPE, CERT_SIMPLE_NAME_STR, CERT_STRING_TYPE, CERT_V1, CERT_V2, CERT_V3, CMSG_SIGNER_INFO,
-    CRYPT_ATTRIBUTE, CRYPT_INTEGER_BLOB, CTL_USAGE, PKCS_7_ASN_ENCODING, X509_ASN_ENCODING,
+    BCRYPT_SHA256_ALGORITHM, CERT_CONTEXT, CERT_EXTENSION, CERT_INFO, CERT_QUERY_ENCODING_TYPE, CERT_SIMPLE_NAME_STR,
+    CERT_STRING_TYPE, CERT_V1, CERT_V2, CERT_V3, CMSG_SIGNER_INFO, CRYPT_ATTRIBUTE, CRYPT_INTEGER_BLOB, CTL_USAGE,
+    CertGetEnhancedKeyUsage, CertNameToStrW, PKCS_7_ASN_ENCODING, X509_ASN_ENCODING,
 };
 use windows::Win32::Security::WinTrust::{
-    WTHelperProvDataFromStateData, WinVerifyTrustEx, CRYPT_PROVIDER_CERT, CRYPT_PROVIDER_DATA, CRYPT_PROVIDER_SGNR,
-    WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
-    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4, WTD_REVOKE_WHOLECHAIN,
-    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_USE_DEFAULT_OSVER_CHECK,
+    CRYPT_PROVIDER_CERT, CRYPT_PROVIDER_DATA, CRYPT_PROVIDER_SGNR, WINTRUST_ACTION_GENERIC_VERIFY_V2,
+    WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
+    WTD_CHOICE_CATALOG, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
+    WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_USE_DEFAULT_OSVER_CHECK, WTHelperProvDataFromStateData, WinVerifyTrustEx,
 };
+use windows::core::HRESULT;
 
-use crate::utils::{nul_slice_wide_str, slice_from_ptr, u32size_of, SafeWindowsString, WideString};
 use crate::Error;
+use crate::utils::{SafeWindowsString, WideString, nul_slice_wide_str, slice_from_ptr, u32size_of};
 
 pub struct CatalogInfo {
     pub path: PathBuf,

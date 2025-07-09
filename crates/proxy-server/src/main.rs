@@ -98,15 +98,17 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
     loop {
         match input {
             ["--https-port", value, rest @ ..] => {
-                args.https_port = value.parse::<u16>().map(Some).map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("HTTPS proxy port value malformed: {e}"))
-                })?;
+                args.https_port = value
+                    .parse::<u16>()
+                    .map(Some)
+                    .map_err(|e| io::Error::other(format!("HTTPS proxy port value malformed: {e}")))?;
                 input = rest;
             }
             ["--socks-port", value, rest @ ..] => {
-                args.socks_port = value.parse::<u16>().map(Some).map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("SOCKS5 proxy port value malformed: {e}"))
-                })?;
+                args.socks_port = value
+                    .parse::<u16>()
+                    .map(Some)
+                    .map_err(|e| io::Error::other(format!("SOCKS5 proxy port value malformed: {e}")))?;
                 input = rest;
             }
             ["--no-auth-required", rest @ ..] => {
@@ -114,9 +116,9 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
                 input = rest;
             }
             ["--user" | "-u", value, rest @ ..] => {
-                let idx = value.find(',').ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {value}"))
-                })?;
+                let idx = value
+                    .find(',')
+                    .ok_or_else(|| io::Error::other(format!("malformed username,password: {value}")))?;
                 let (user, pass) = value.split_at(idx);
                 args.user = Some((user, &pass[1..]));
                 input = rest;
@@ -126,10 +128,7 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
                 input = rest;
             }
             [unexpected_arg, ..] => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("unexpected argument: {unexpected_arg}"),
-                ))
+                return Err(io::Error::other(format!("unexpected argument: {unexpected_arg}")));
             }
             [] => break,
         }

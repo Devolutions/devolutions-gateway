@@ -1,8 +1,8 @@
 //!  Module which provides logic to detect installed products and their versions.
 use uuid::Uuid;
 
-use devolutions_agent_shared::windows::{registry, GATEWAY_UPDATE_CODE};
 use devolutions_agent_shared::DateVersion;
+use devolutions_agent_shared::windows::{GATEWAY_UPDATE_CODE, registry};
 
 use crate::updater::{Product, UpdaterError};
 

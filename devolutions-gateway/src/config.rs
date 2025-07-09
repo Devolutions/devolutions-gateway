@@ -699,7 +699,7 @@ fn read_rustls_certificate(
     path: Option<&Utf8Path>,
     data: Option<&dto::ConfData<dto::CertFormat>>,
 ) -> anyhow::Result<Option<Vec<pki_types::CertificateDer<'static>>>> {
-    use picky::pem::{read_pem, PemError};
+    use picky::pem::{PemError, read_pem};
 
     match (path, data) {
         (Some(path), _) => {
@@ -735,7 +735,7 @@ fn read_rustls_certificate(
                     Err(e) => {
                         return anyhow::Error::new(e)
                             .context(format!("couldn't parse pem document at position {}", x509_chain.len()))
-                            .pipe(Err)
+                            .pipe(Err);
                     }
                 }
             }

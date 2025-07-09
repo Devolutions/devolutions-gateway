@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use camino::Utf8Path;
 use rustls::ServerConfig;
-use tokio_rustls::{rustls, TlsAcceptor};
+use tokio_rustls::{TlsAcceptor, rustls};
 
 pub(crate) fn acceptor(cert_path: &Utf8Path, key_path: &Utf8Path) -> anyhow::Result<TlsAcceptor> {
     let cert_file = File::open(cert_path).with_context(|| format!("failed to open {cert_path}"))?;

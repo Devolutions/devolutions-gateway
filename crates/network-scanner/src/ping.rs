@@ -144,12 +144,12 @@ pub fn blocking_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     socket
         .send_to(&packet.to_bytes(true), &addr.into())
-        .with_context(|| format!("failed to send packet to {}", ip))?;
+        .with_context(|| format!("failed to send packet to {ip}"))?;
 
     let mut buffer = [MaybeUninit::uninit(); icmp_v4::ICMPV4_MTU];
     let _ = socket
         .recv_from(&mut buffer)
-        .with_context(|| format!("failed to receive packet from {}", ip))?;
+        .with_context(|| format!("failed to receive packet from {ip}"))?;
 
     Ok(())
 }

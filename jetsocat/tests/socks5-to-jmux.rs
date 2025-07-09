@@ -6,7 +6,7 @@ use anyhow::Context as _;
 use futures_util::FutureExt;
 use proptest::prelude::*;
 use test_utils::{
-    find_unused_ports, read_assert_payload, small_payload, transport_kind, write_payload, Payload, TransportKind,
+    Payload, TransportKind, find_unused_ports, read_assert_payload, small_payload, transport_kind, write_payload,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::*;
@@ -41,7 +41,7 @@ fn client_cfg() -> impl Strategy<Value = ClientConfig> {
 
 async fn retry<Fut, T, E>(fut: impl Fn() -> Fut) -> Result<T, E>
 where
-    Fut: std::future::Future<Output = Result<T, E>>,
+    Fut: Future<Output = Result<T, E>>,
 {
     for _ in 0..10 {
         match fut().await {

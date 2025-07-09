@@ -56,7 +56,7 @@ pub(crate) fn remove_file_on_reboot(file_path: &Utf8Path) -> Result<(), UpdaterE
 #[cfg(windows)]
 pub(crate) fn remove_file_on_reboot_impl(file_path: &Utf8Path) -> Result<(), UpdaterError> {
     use win_api_wrappers::utils::WideString;
-    use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
+    use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
 
     let wide_file_path = WideString::from(file_path.as_str());
 

@@ -1,15 +1,15 @@
+use axum::Router;
 use axum::extract::ws::{self, WebSocket, WebSocketUpgrade};
 use axum::routing::get;
-use axum::Router;
-use futures::stream::StreamExt;
 use futures::SinkExt;
-use std::io::{Error as IoError, ErrorKind};
+use futures::stream::StreamExt;
+use std::io::Error as IoError;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::tungstenite::protocol::Message as TungsteniteMessage;
 use tokio_tungstenite::tungstenite::Bytes;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::protocol::Message as TungsteniteMessage;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::info;
 
 pub(crate) struct WebSocketClient {
@@ -23,7 +23,7 @@ impl WebSocketClient {
             .await
             .next()
             .await
-            .map(|result| result.map_err(|e| IoError::new(ErrorKind::Other, e)))
+            .map(|result| result.map_err(IoError::other))
     }
 
     pub(crate) async fn send(&self, message: Vec<u8>) -> Result<(), IoError> {
@@ -32,7 +32,7 @@ impl WebSocketClient {
             .await
             .send(TungsteniteMessage::Binary(Bytes::from(message)))
             .await
-            .map_err(|e| IoError::new(ErrorKind::Other, e))
+            .map_err(IoError::other)
     }
 }
 
@@ -95,7 +95,7 @@ fn websocket_compat(ws: WebSocket) -> impl AsyncRead + AsyncWrite + Unpin + Send
             let mapped = item
                 .map(|msg| match msg {
                     ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(s.into())),
-                    ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data.into())),
+                    ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
                     ws::Message::Ping(_) | ws::Message::Pong(_) => None,
                     ws::Message::Close(_) => Some(transport::WsReadMsg::Close),
                 })

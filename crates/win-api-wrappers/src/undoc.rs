@@ -14,12 +14,12 @@
 use std::ffi::c_void;
 use std::mem;
 
-use windows::core::{BOOL, PCWSTR};
 use windows::Win32::Foundation::{HANDLE, LUID, NTSTATUS, UNICODE_STRING};
 use windows::Win32::Security::{
     LOGON32_LOGON, LOGON32_PROVIDER, PSID, QUOTA_LIMITS, TOKEN_ACCESS_MASK, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
     TOKEN_OWNER, TOKEN_PRIMARY_GROUP, TOKEN_PRIVILEGES, TOKEN_SOURCE, TOKEN_TYPE, TOKEN_USER,
 };
+use windows::core::{BOOL, PCWSTR};
 
 use crate::process::Module;
 

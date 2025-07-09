@@ -1,6 +1,6 @@
 use core::fmt;
 use core::ptr::NonNull;
-use std::alloc::{alloc_zeroed, dealloc, realloc, Layout};
+use std::alloc::{Layout, alloc_zeroed, dealloc, realloc};
 
 /// The `AllocError` error indicates an allocation failure
 /// that may be due to resource exhaustion or to

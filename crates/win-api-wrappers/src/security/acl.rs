@@ -10,7 +10,7 @@
 
 use core::ptr;
 
-use windows::Win32::Foundation::{LocalFree, HLOCAL};
+use windows::Win32::Foundation::{HLOCAL, LocalFree};
 use windows::Win32::Security;
 use windows::Win32::System::Memory;
 

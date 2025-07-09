@@ -7,7 +7,7 @@ use devolutions_pedm_shared::policy::{
     Signer, User,
 };
 use libsql::params::IntoParams;
-use libsql::{params, Row, Transaction, Value};
+use libsql::{Row, Transaction, Value, params};
 
 use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
@@ -70,7 +70,7 @@ impl LibsqlConn {
                     return Err(DbError::InvalidEnum(InvalidEnumError {
                         value: n,
                         enum_name: "ElevationMethod",
-                    }))
+                    }));
                 }
             },
             default_elevation_kind: match row.get::<i64>(4)? {
@@ -82,7 +82,7 @@ impl LibsqlConn {
                     return Err(DbError::InvalidEnum(InvalidEnumError {
                         value: n,
                         enum_name: "ElevationKind",
-                    }))
+                    }));
                 }
             },
             target_must_be_signed: row.get::<bool>(5)?,
@@ -432,7 +432,7 @@ impl Database for LibsqlConn {
                                 return Err(DbError::InvalidEnum(InvalidEnumError {
                                     value: n,
                                     enum_name: "ElevationMethod",
-                                }))
+                                }));
                             }
                         },
                         default_elevation_kind: match row.get::<i64>(4)? {
@@ -444,7 +444,7 @@ impl Database for LibsqlConn {
                                 return Err(DbError::InvalidEnum(InvalidEnumError {
                                     value: n,
                                     enum_name: "ElevationKind",
-                                }))
+                                }));
                             }
                         },
                         target_must_be_signed: row.get::<bool>(5)?,
@@ -456,7 +456,7 @@ impl Database for LibsqlConn {
             if let Some(a) = current_assignment.as_mut() {
                 let user_id: Option<i64> = row.get(6)?;
 
-                if let Some(_) = user_id {
+                if user_id.is_some() {
                     a.users.push(User {
                         account_name: row.get(7)?,
                         domain_name: row.get(8)?,
@@ -677,7 +677,7 @@ impl Database for LibsqlConn {
                             return Err(DbError::InvalidEnum(InvalidEnumError {
                                 value: n,
                                 enum_name: "AuthenticodeSignatureStatus",
-                            }))
+                            }));
                         }
                     },
                     signer: row.get::<Option<String>>(15)?.map(|issuer| Signer { issuer }),
@@ -759,10 +759,7 @@ impl Database for LibsqlConn {
         base_sql.push_str(&joins);
         base_sql.push_str(&where_sql);
         let select_sql = format!(
-            "SELECT jit.id, jit.timestamp, jit.success, jit.target_path, u_display.account_name, u_display.domain_name, u_display.account_sid, u_display.domain_sid {} ORDER BY jit.{} {} LIMIT ? OFFSET ?",
-            base_sql,
-            sort_column,
-            sort_order
+            "SELECT jit.id, jit.timestamp, jit.success, jit.target_path, u_display.account_name, u_display.domain_name, u_display.account_sid, u_display.domain_sid {base_sql} ORDER BY jit.{sort_column} {sort_order} LIMIT ? OFFSET ?"
         );
 
         params.push(limit.into());
@@ -798,8 +795,8 @@ impl Database for LibsqlConn {
 
 /// Converts a timestamp in microseconds to a `DateTime<Utc>`.
 fn parse_micros(micros: i64) -> Result<DateTime<Utc>, ParseTimestampError> {
-    use chrono::offset::LocalResult;
     use chrono::TimeZone;
+    use chrono::offset::LocalResult;
 
     match Utc.timestamp_micros(micros) {
         LocalResult::Single(dt) => Ok(dt),

@@ -1,14 +1,14 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::future::Future;
-use std::pin::{pin, Pin};
+use std::pin::{Pin, pin};
 use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
 use devolutions_pedm_client_http::apis::client::APIClient;
+use hyper::Uri;
 use hyper::body::HttpBody;
 use hyper::client::connect::{Connected, Connection};
-use hyper::Uri;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};

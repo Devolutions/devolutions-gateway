@@ -1,8 +1,8 @@
 use std::io::ErrorKind;
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use socket2::SockAddr;
@@ -23,7 +23,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
 
     fn send_to(mut socket: AsyncRawSocket, number: u8, addr: SocketAddr) -> JoinHandle<Result<(), anyhow::Error>> {
         tokio::task::spawn(async move {
-            let msg = format!("hello from socket {}", number);
+            let msg = format!("hello from socket {number}");
             socket.send_to(msg.as_bytes(), &SockAddr::from(addr)).await?;
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
@@ -31,7 +31,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
 
             info!(%size, ?addr);
             let back = unsafe { crate::assume_init(&buf[..size]) };
-            assert_eq!(back, format!("hello from socket {}", number).as_bytes());
+            assert_eq!(back, format!("hello from socket {number}").as_bytes());
             Ok::<(), anyhow::Error>(())
         })
     }
@@ -84,13 +84,13 @@ async fn multiple_tcp() -> anyhow::Result<()> {
     fn connect(mut socket: AsyncRawSocket, number: u8, addr: SocketAddr) -> JoinHandle<Result<(), anyhow::Error>> {
         tokio::task::spawn(async move {
             socket.connect(&SockAddr::from(addr)).await?;
-            let msg = format!("hello from socket {}", number);
+            let msg = format!("hello from socket {number}");
             socket.send(msg.as_bytes()).await?;
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let size = socket.recv(&mut buf).await?;
             tracing::info!("size: {}", size);
             let back = unsafe { crate::assume_init(&buf[..size]) };
-            assert_eq!(back, format!("hello from socket {}", number).as_bytes());
+            assert_eq!(back, format!("hello from socket {number}").as_bytes());
             Ok::<(), anyhow::Error>(())
         })
     }
@@ -125,7 +125,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
 
     let handle = tokio::task::spawn(async move {
         socket.connect(&SockAddr::from(addr)).await?;
-        let msg = "hello from socket".to_string();
+        let msg = "hello from socket".to_owned();
         for _ in 0..10 {
             socket.send(msg.as_bytes()).await?;
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
@@ -140,7 +140,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
 
     let handle2 = tokio::task::spawn(async move {
         let mut stream = tokio::net::TcpStream::connect(addr).await?;
-        let msg = "hello from tokio socket".to_string();
+        let msg = "hello from tokio socket".to_owned();
         for _ in 0..10 {
             let _ = stream.write(msg.as_bytes()).await?;
             let mut buf = [0u8; 1024];

@@ -1,7 +1,7 @@
 use uuid::Uuid;
 
-use crate::windows::reversed_hex_uuid::{reversed_hex_to_uuid, uuid_to_reversed_hex, InvalidReversedHexUuid};
 use crate::DateVersion;
+use crate::windows::reversed_hex_uuid::{InvalidReversedHexUuid, reversed_hex_to_uuid, uuid_to_reversed_hex};
 
 const REG_CURRENT_VERSION: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion";
 

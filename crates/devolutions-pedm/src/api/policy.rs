@@ -1,6 +1,6 @@
-use aide::axum::routing::{get, put};
-use aide::axum::ApiRouter;
 use aide::NoApi;
+use aide::axum::ApiRouter;
+use aide::axum::routing::{get, put};
 use axum::extract::Path;
 use axum::{Extension, Json};
 use devolutions_pedm_shared::policy::{Assignment, Profile, User};

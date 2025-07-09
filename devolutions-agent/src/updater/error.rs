@@ -8,7 +8,9 @@ use crate::updater::Product;
 pub(crate) enum UpdaterError {
     #[error("queried `{product}` artifact hash has invalid format: `{hash}`")]
     HashEncoding { product: Product, hash: String },
-    #[error("integrity check for downloaded `{product}` artifact has failed, expected hash: `{expected_hash}`, actual hash: `{actual_hash}`")]
+    #[error(
+        "integrity check for downloaded `{product}` artifact has failed, expected hash: `{expected_hash}`, actual hash: `{actual_hash}`"
+    )]
     IntegrityCheck {
         product: Product,
         expected_hash: String,
@@ -18,7 +20,9 @@ pub(crate) enum UpdaterError {
     MsiSignature { product: Product, msi_path: Utf8PathBuf },
     #[error("failed to calculate MSI certificate hash for `{product}`. MSI path: `{msi_path}`")]
     MsiCertHash { product: Product, msi_path: Utf8PathBuf },
-    #[error("MSI for `{product}` is signed with invalid non-Devolutions certificate. Certificate thumbprint: `{thumbprint}`")]
+    #[error(
+        "MSI for `{product}` is signed with invalid non-Devolutions certificate. Certificate thumbprint: `{thumbprint}`"
+    )]
     MsiCertificateThumbprint { product: Product, thumbprint: String },
     #[error("failed to install `{product}` MSI. Path: `{msi_path}`")]
     MsiInstall { product: Product, msi_path: Utf8PathBuf },

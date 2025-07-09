@@ -1,7 +1,7 @@
 use devolutions_gateway::session::{ConnectionModeDetails, SessionInfo};
 use devolutions_gateway::target_addr::TargetAddr;
 use devolutions_gateway::token::{
-    self, AccessScope, ApplicationProtocol, Protocol, RecordingPolicy, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+    self, AccessScope, ApplicationProtocol, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS, Protocol, RecordingPolicy,
 };
 use proptest::collection::vec;
 use proptest::option;

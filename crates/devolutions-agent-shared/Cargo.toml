@@ -3,7 +3,7 @@ name = "devolutions-agent-shared"
 version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 description = "Shared code between the Devolutions Agent and the Devolutions Gateway"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [lints]

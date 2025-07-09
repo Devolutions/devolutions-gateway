@@ -1,7 +1,7 @@
 [package]
 name = "devolutions-gateway"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]

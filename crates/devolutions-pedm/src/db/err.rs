@@ -12,7 +12,7 @@ use tokio_postgres::error::SqlState;
 
 /// Error type for DB operations.
 #[derive(Debug)]
-pub enum DbError {
+pub(crate) enum DbError {
     #[cfg(feature = "libsql")]
     Libsql(libsql::Error),
     /// This is to handle some type conversions.
@@ -108,7 +108,7 @@ impl From<tokio_postgres::Error> for DbError {
 }
 
 impl DbError {
-    pub fn is_table_does_not_exist(&self) -> bool {
+    pub(crate) fn is_table_does_not_exist(&self) -> bool {
         match self {
             #[cfg(feature = "libsql")]
             Self::Libsql(libsql::Error::SqliteFailure(1, msg)) => msg.starts_with("no such table"),
@@ -122,7 +122,7 @@ impl DbError {
 /// A custom error type equivalent for `chrono::LocalResult`.
 #[cfg(feature = "libsql")]
 #[derive(Debug)]
-pub enum ParseTimestampError {
+pub(crate) enum ParseTimestampError {
     None,
     /// This should be unreachable when using UTC.
     Ambiguous(DateTime<Utc>, DateTime<Utc>),
@@ -147,7 +147,7 @@ impl fmt::Display for ParseTimestampError {
 
 #[cfg(feature = "libsql")]
 #[derive(Debug)]
-pub struct InvalidEnumError {
+pub(crate) struct InvalidEnumError {
     pub value: i64,
     pub enum_name: &'static str,
 }
@@ -163,7 +163,7 @@ impl Error for InvalidEnumError {}
 
 #[cfg(feature = "libsql")]
 #[derive(Debug)]
-pub struct DataIntegrityError {
+pub(crate) struct DataIntegrityError {
     pub message: &'static str,
 }
 

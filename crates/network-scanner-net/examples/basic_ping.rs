@@ -26,7 +26,7 @@ pub async fn main() -> anyhow::Result<()> {
         socket.send_to(&echo_request, &SockAddr::from(addr)).await?;
         let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
         let (size, addr) = socket.recv_from(&mut buf).await?;
-        println!("counter = {i} size: {}, addr: {:?}", size, addr);
+        println!("counter = {i} size: {size}, addr: {addr:?}");
         println!()
     }
 

@@ -79,21 +79,22 @@ pub fn build_server_config(
         } => {
             let first_certificate = certificates.first().context("empty certificate list")?;
 
-            if strict_checks {
-                if let Ok(report) = check_certificate_now(&first_certificate) {
-                    if report.issues.intersects(
-                        CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
-                    ) {
-                        let serial_number = report.serial_number;
-                        let subject = report.subject;
-                        let issuer = report.issuer;
-                        let not_before = report.not_before;
-                        let not_after = report.not_after;
-                        let issues = report.issues;
+            if strict_checks
+                && let Ok(report) = check_certificate_now(first_certificate)
+                && report.issues.intersects(
+                    CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
+                )
+            {
+                let serial_number = report.serial_number;
+                let subject = report.subject;
+                let issuer = report.issuer;
+                let not_before = report.not_before;
+                let not_after = report.not_after;
+                let issues = report.issues;
 
-                        anyhow::bail!("found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues}");
-                    }
-                }
+                anyhow::bail!(
+                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues}"
+                );
             }
 
             builder
@@ -145,7 +146,7 @@ pub mod windows {
     use tokio_rustls::rustls::sign::CertifiedKey;
 
     use crate::config::dto;
-    use crate::tls::{check_certificate, CertIssues};
+    use crate::tls::{CertIssues, check_certificate};
 
     const CACHE_DURATION: time::Duration = time::Duration::seconds(45);
 
@@ -519,7 +520,7 @@ pub mod sanity {
 
 pub mod danger {
     use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-    use tokio_rustls::rustls::{pki_types, DigitallySignedStruct, Error, SignatureScheme};
+    use tokio_rustls::rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
 
     #[derive(Debug)]
     pub struct NoCertificateVerification;

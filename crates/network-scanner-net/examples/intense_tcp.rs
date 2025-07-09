@@ -25,7 +25,7 @@ pub async fn main() -> anyhow::Result<()> {
     }
 
     let port = args[args.len() - 1].parse::<u16>()?;
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("127.0.0.1:{port}");
     match args[1].as_str() {
         "server" => {
             tcp_server(&addr).await?;
@@ -56,7 +56,7 @@ async fn tcp_client() -> anyhow::Result<()> {
             socket.connect(&addr).await?;
             let mut buffer = [MaybeUninit::uninit(); 1024];
             for i in 0..1000 {
-                let data = format!("hello world {} times", i);
+                let data = format!("hello world {i} times");
                 tracing::info!("Sending: {} from socket {:?}", &data, &socket);
                 let write_future = socket.send(data.as_bytes());
 
@@ -96,7 +96,7 @@ async fn tcp_client() -> anyhow::Result<()> {
 
 async fn tcp_server(addr: &str) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("Listening on: {}", addr);
+    println!("Listening on: {addr}");
     let count = std::sync::Arc::new(AtomicU32::new(0));
     loop {
         let (mut socket, _) = listener.accept().await?;
@@ -115,14 +115,14 @@ async fn tcp_server(addr: &str) -> anyhow::Result<()> {
                         n
                     }
                     Err(e) => {
-                        eprintln!("Failed to read from socket; err = {:?}", e);
+                        eprintln!("Failed to read from socket; err = {e:?}");
                         return;
                     }
                 };
-                println!("Received {} bytes", n);
+                println!("Received {n} bytes");
                 // Write the data back
                 if let Err(e) = socket.write_all(&buf[0..n]).await {
-                    eprintln!("Failed to write to socket; err = {:?}", e);
+                    eprintln!("Failed to write to socket; err = {e:?}");
                     return;
                 }
                 count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

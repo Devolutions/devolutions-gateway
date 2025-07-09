@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::time::Duration;
 
@@ -13,8 +13,8 @@ use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
 
-use crate::socket::AsyncRawSocket;
 use crate::ScannnerNetError;
+use crate::socket::AsyncRawSocket;
 
 #[derive(Debug)]
 pub struct Socket2Runtime {

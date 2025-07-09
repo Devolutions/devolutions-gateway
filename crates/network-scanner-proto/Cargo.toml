@@ -6,7 +6,7 @@ authors = [
     "Jeremy Wall <jeremy@marzhillstudios.com>",
     "Jon Grimes <jonkgrimes@gmail.com>"
 ]
-edition = "2021"
+edition = "2024"
 publish = false
 license = "MIT/Apache-2.0"
 

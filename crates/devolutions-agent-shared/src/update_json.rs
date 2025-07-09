@@ -30,7 +30,7 @@ impl fmt::Display for VersionSpecification {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VersionSpecification::Latest => write!(f, "latest"),
-            VersionSpecification::Specific(version) => write!(f, "{}", version),
+            VersionSpecification::Specific(version) => write!(f, "{version}"),
         }
     }
 }
@@ -57,11 +57,11 @@ mod tests {
         ];
 
         for (serialized, deserialized) in cases {
-            let parsed = serde_json::from_str::<VersionSpecification>(&format!("\"{}\"", serialized)).unwrap();
+            let parsed = serde_json::from_str::<VersionSpecification>(&format!("\"{serialized}\"")).unwrap();
             assert_eq!(parsed, *deserialized);
 
             let reserialized = serde_json::to_string(&parsed).unwrap();
-            assert_eq!(reserialized, format!("\"{}\"", serialized));
+            assert_eq!(reserialized, format!("\"{serialized}\""));
         }
     }
 }

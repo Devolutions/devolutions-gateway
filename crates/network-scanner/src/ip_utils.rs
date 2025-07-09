@@ -137,11 +137,11 @@ impl Iterator for IpV6RangeIterator {
 // Helper to create the appropriate enum variant
 impl IpAddrRange {
     pub fn new_ipv4(lower: Ipv4Addr, upper: Ipv4Addr) -> Self {
-        IpAddrRange::V4(IpV4AddrRange::new(Ipv4Addr::from(upper), Ipv4Addr::from(lower)))
+        IpAddrRange::V4(IpV4AddrRange::new(upper, lower))
     }
 
     pub fn new_ipv6(lower: Ipv6Addr, upper: Ipv6Addr) -> Self {
-        IpAddrRange::V6(IpV6AddrRange::new(Ipv6Addr::from(upper), Ipv6Addr::from(lower)))
+        IpAddrRange::V6(IpV6AddrRange::new(upper, lower))
     }
 
     pub fn has_overlap(&self, other: &Self) -> bool {
@@ -230,7 +230,7 @@ impl From<Subnet> for IpAddrRange {
 impl From<&Subnet> for IpAddrRange {
     fn from(value: &Subnet) -> Self {
         let (lower, upper) = calculate_subnet_bounds(value.ip, value.netmask);
-        IpAddrRange::new_ipv4(lower.into(), upper.into())
+        IpAddrRange::new_ipv4(lower, upper)
     }
 }
 
@@ -301,7 +301,7 @@ mod tests {
     fn test_iter_ipv4() {
         let lower = "10.10.0.0".parse::<Ipv4Addr>().unwrap();
         let upper = "10.10.0.30".parse::<Ipv4Addr>().unwrap();
-        let range = IpAddrRange::new_ipv4(lower.into(), upper.into());
+        let range = IpAddrRange::new_ipv4(lower, upper);
 
         let mut iter = range.into_iter();
         for i in 0..31 {

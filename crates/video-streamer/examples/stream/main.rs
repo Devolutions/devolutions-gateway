@@ -10,11 +10,10 @@ use anyhow::Context;
 use cadeau::xmf;
 use local_websocket::create_local_websocket;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::watch::Sender;
 use tokio::sync::Notify;
 use tracing::{error, info};
 use video_streamer::config::CpuCount;
-use video_streamer::{webm_stream, ReOpenableFile, StreamingConfig};
+use video_streamer::{ReOpenableFile, StreamingConfig, webm_stream};
 
 pub struct TokioSignal {
     signal: tokio::sync::watch::Receiver<()>,
@@ -108,7 +107,7 @@ async fn get_slowly_written_file(
     let temp_file_path = input_path
         .parent()
         .context("no parent")?
-        .join(format!("temp_{}", input_file_name));
+        .join(format!("temp_{input_file_name}"));
 
     // remove the temp file if it exists
     tokio::fs::remove_file(&temp_file_path).await.ok();
@@ -184,7 +183,7 @@ fn parse_arg<'a>(mut value: &[&'a str]) -> anyhow::Result<Args<'a>> {
                 value = rest;
             }
             ["--help" | "-h", ..] => {
-                println!("{}", HELP);
+                println!("{HELP}");
                 exit(0);
             }
             [] => break,

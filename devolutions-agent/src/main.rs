@@ -22,10 +22,10 @@ mod service;
 use std::env;
 use std::sync::mpsc;
 
-use ceviche::controller::*;
 use ceviche::Service;
-use devolutions_agent::config::ConfHandle;
+use ceviche::controller::*;
 use devolutions_agent::AgentServiceEvent;
+use devolutions_agent::config::ConfHandle;
 
 use self::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
@@ -107,22 +107,22 @@ fn main() {
         match cmd.as_str() {
             "create" => {
                 if let Err(e) = controller.create() {
-                    println!("{}", e);
+                    println!("{e}");
                 }
             }
             "delete" => {
                 if let Err(e) = controller.delete() {
-                    println!("{}", e);
+                    println!("{e}");
                 }
             }
             "start" => {
                 if let Err(e) = controller.start() {
-                    println!("{}", e);
+                    println!("{e}");
                 }
             }
             "stop" => {
                 if let Err(e) = controller.stop() {
-                    println!("{}", e);
+                    println!("{e}");
                 }
             }
             "run" => {
@@ -139,7 +139,7 @@ fn main() {
             "config" => {
                 let subcommand = env::args().nth(2).expect("missing config subcommand");
                 if let Err(e) = devolutions_agent::config::handle_cli(subcommand.as_str()) {
-                    eprintln!("[ERROR] Agent configuration failed: {}", e);
+                    eprintln!("[ERROR] Agent configuration failed: {e}");
                 }
             }
             _ => {

@@ -1,5 +1,5 @@
-use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf};
 use now_proto_pdu::NowMessage;
+use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf};
 
 /// Reconstructs Now messages from a stream of bytes.
 #[derive(Default)]

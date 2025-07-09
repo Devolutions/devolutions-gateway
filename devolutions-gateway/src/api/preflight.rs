@@ -1,20 +1,20 @@
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use devolutions_agent_shared::get_installed_agent_version;
 use serde::de;
 use time::Duration;
 use tracing::{Instrument as _, Span};
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::credential::{AppCredentialMapping, CredentialStoreHandle};
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
-use crate::DgwState;
 
 const OP_GET_VERSION: &str = "get-version";
 const OP_GET_AGENT_VERSION: &str = "get-agent-version";
@@ -385,7 +385,7 @@ async fn handle_operation(
             return Err(PreflightError::new(
                 PreflightAlertStatus::UnsupportedOperation,
                 format!("unsupported operation: {unsupported_op}"),
-            ))
+            ));
         }
     }
 

@@ -9,9 +9,9 @@ use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tracing::Instrument as _;
 use url::Url;
 
+use crate::DgwState;
 use crate::generic_client::GenericClient;
 use crate::target_addr::TargetAddr;
-use crate::DgwState;
 
 const HTTP_CONNECTION_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(10 * 60);
 

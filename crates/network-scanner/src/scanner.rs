@@ -5,7 +5,7 @@ use crate::mdns::{self, MdnsDaemon, MdnsEvent};
 use crate::named_port::MaybeNamedPort;
 use crate::netbios::netbios_query_scan;
 use crate::ping::ping_range;
-use crate::port_discovery::{scan_ports, TcpKnockEvent};
+use crate::port_discovery::{TcpKnockEvent, scan_ports};
 use crate::task_utils::{TaskExecutionContext, TaskExecutionRunner, TaskManager};
 use anyhow::Context;
 use std::fmt::Display;
@@ -138,7 +138,7 @@ impl NetworkScanner {
                                 .await
                                 .context("Failed to spawn blocking task")?;
 
-                                ip_cache.write().insert(ip, resolve_dns.clone());
+                                ip_cache.write().insert(ip, resolve_dns);
                             }
 
                             anyhow::Ok(())
@@ -363,7 +363,7 @@ impl NetworkScannerStream {
         self.event_bus.subscribe::<T>()
     }
 
-    pub fn stop(self: &Self) {
+    pub fn stop(&self) {
         self.task_manager.stop();
         if let Some(daemon) = &self.mdns_daemon {
             daemon.stop();
@@ -418,7 +418,7 @@ impl Display for ScanMethod {
             ScanMethod::Broadcast => "broadcast",
             ScanMethod::Zeroconf => "zeroconf",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
