@@ -1,0 +1,15 @@
+[package]
+name = "sysevent-logger"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+publish = false
+
+[target.'cfg(windows)'.dependencies]
+tracelogging = "1.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true
