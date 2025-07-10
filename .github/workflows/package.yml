@@ -249,12 +249,9 @@ jobs:
           }
 
           Remove-Item $PSModuleZipFilePath -ErrorAction SilentlyContinue | Out-Null
+          Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath -CompressionLevel Optimal
 
           $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
-
-          Push-Location $PSModuleParentPath
-          Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath -CompressionLevel Optimal
-          Pop-Location
 
           New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
 
