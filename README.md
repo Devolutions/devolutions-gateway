@@ -122,7 +122,7 @@ Stable options are:
     additional measures like securing access to the files or using the system certificate store (see
     **TlsCertificateSource** option).
 
-- **TlsVerifyStrict** (_Boolean_): Enables strict TLS certificate verification (default is `true`).
+- **TlsVerifyStrict** (_Boolean_): Enables strict TLS certificate verification (default is `false`).
 
     When enabled (`true`), the client performs additional checks on the server certificate,
     including:

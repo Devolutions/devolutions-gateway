@@ -93,7 +93,7 @@ pub fn build_server_config(
                 let issues = report.issues;
 
                 anyhow::bail!(
-                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues}"
+                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues} (you can set `TlsVerifyStrict` to `false` in the gateway.json configuration file if that's intended)"
                 );
             }
 
@@ -121,7 +121,7 @@ pub fn build_server_config(
         }
         #[cfg(not(windows))]
         CertificateSource::SystemStore { .. } => {
-            anyhow::bail!("System Certificate Store not supported for this platform")
+            anyhow::bail!("system certificate store not supported for this platform")
         }
     }
 }

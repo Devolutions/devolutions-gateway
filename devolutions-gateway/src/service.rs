@@ -68,6 +68,10 @@ impl GatewayService {
             );
         }
 
+        if matches!(conf_file.tls_verify_strict, None | Some(false)) {
+            warn!("TlsVerifyStrict option is absent or set to false. This may hide latent issues.");
+        }
+
         if let Some((cert_subject_name, hostname)) = conf_file
             .tls_certificate_subject_name
             .as_deref()
