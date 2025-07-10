@@ -170,8 +170,8 @@ jobs:
           New-Item -ItemType Directory -Path $TargetPath
           tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
 
-          $PowerShellArchive = Get-ChildItem -Recurse -Filter "DevolutionsGateway-ps-*.zip" | Select-Object -First 1
-          Expand-Archive -Path $PowerShellArchive -DestinationPath "$PkgDir"
+          $PowerShellArchive = Get-ChildItem -Recurse -Filter "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
+          tar -xvf "$PowerShellArchive" -C "$PkgDir"
 
       - name: Build container
         id: build-container
@@ -277,27 +277,32 @@ jobs:
         shell: pwsh
         run: Remove-Item -Path (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
+      - name: Install PSResourceGet
+        shell: pwsh
+        run: |
+          Install-PSResource Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -TrustRepository
+
       - name: Publish PowerShell module
         shell: pwsh
         run: |
-          Set-PSDebug -Trace 1
+          $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.tar" -File
+          Write-Host "Archive = $Archive"
 
-          $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File
-          Expand-Archive -Path $Archive -DestinationPath 'PowerShell'
+          tar -xvf "$Archive" -C './PowerShell'
+          Get-ChildItem -Path "./PowerShell" -Recurse
 
-          $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path PowerShell DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
+          $PublishCmd = @('Publish-PSResource', '-Repository', 'PSGallery', '-Path', (Join-Path PowerShell DevolutionsGateway), '-ApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
 
           $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
           if ($DryRun) {
             $PublishCmd += '-WhatIf'
           }
           $PublishCmd = $PublishCmd -Join ' '
-          Write-Host $PublishCmd
+          Write-Host "PublishCmd = $PublishCmd"
 
           try {
             Invoke-Expression $PublishCmd
-          }
-          catch {
+          } catch {
             if ($_.Exception.Message -ilike "*cannot be published as the current version*is already available in the repository*") {
               echo "::warning::PowerShell module not published; this version is already listed on PSGallery"
             } else {

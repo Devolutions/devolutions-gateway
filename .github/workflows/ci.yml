@@ -467,14 +467,22 @@ jobs:
       - name: Build module
         shell: pwsh
         run: |
-          ./powershell/build.ps1
-          $PSModuleName = "DevolutionsGateway"
           $PSModuleVersion = "${{ needs.preflight.outputs.version }}"
-          $PSModuleOutputPath = Join-Path "powershell" "package" $PSModuleName
+
+          ./powershell/build.ps1
+
+          $PSModuleName = "DevolutionsGateway"
+          $PSModuleParentPath = Join-Path "powershell" "package"
+          Write-Host "PSModuleOutputPath = $PSModuleParentPath"
+
           $PSStagingPath = Join-Path "powershell-staging" "PowerShell"
+          Write-Host "PSStagingPath = $PSStagingPath"
           New-Item -Path $PSStagingPath -ItemType Directory | Out-Null
-          $PSModuleZipFilePath = Join-Path $PSStagingPath "$PSModuleName-ps-$PSModuleVersion.zip"
-          Compress-Archive -Path $PSModuleOutputPath -Destination $PSModuleZipFilePath
+
+          $PSModuleTarFilePath = Join-Path $PSStagingPath "$PSModuleName-ps-$PSModuleVersion.tar"
+          Write-Host "PSModuleTarFilePath = $PSModuleTarFilePath"
+
+          tar -cvf "$PSModuleTarFilePath" -C "$PSModuleParentPath" "$PSModuleName"
 
       - name: Pester tests
         shell: pwsh
@@ -630,14 +638,19 @@ jobs:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
         run: |
+          Set-PSDebug -Trace 1
+
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
             $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
 
             $PSStagingPath = Join-Path (Get-Location) "powershell-staging"
+            Write-Host "PSStagingPath = $PSStagingPath"
             $PSModuleOutputPath = Join-Path $PSStagingPath "DevolutionsGateway"
-            $PSModuleZipFilePath = Get-ChildItem -Path "$PSStagingPath/PowerShell" "*-ps-*.zip" | Select-Object -First 1
-            Expand-Archive -Path $PSModuleZipFilePath -Destination $PSStagingPath
+            $PSModuleTarFilePath = Get-ChildItem -Path "$PSStagingPath/PowerShell" "*-ps-*.tar" | Select-Object -First 1
+            tar -xvf "$PSModuleTarFilePath" -C "$PSStagingPath"
+            Get-ChildItem -Path "$PSStagingPath" -Recurse
+
             $Env:DGATEWAY_PSMODULE_PATH = $PSModuleOutputPath
           } else {
             $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "libxmf.so" | Resolve-Path
