@@ -101,8 +101,8 @@ jobs:
           }
           echo "skip-publishing=$SkipPublishing" >> $Env:GITHUB_OUTPUT
 
-  containers:
-    name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
+  container:
+    name: Container [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: publish-prod
     needs: preflight
@@ -111,21 +111,12 @@ jobs:
       fail-fast: false
       matrix:
         arch: [ x86_64 ]
-        os: [ windows, linux ]
-        base-image: [debian-bullseye-slim, windowsservercore-ltsc2022, lts-nanoserver-ltsc2022 ]
+        os: [ linux ]
+        base-image: [ bookworm-slim ]
 
         include:
-          - os: windows
-            runner: windows-2022
           - os: linux
             runner: ubuntu-latest
-        exclude:
-          - os: windows
-            base-image: debian-bullseye-slim
-          - os: linux
-            base-image: windowsservercore-ltsc2022
-          - os: linux
-            base-image: lts-nanoserver-ltsc2022
 
     steps:
       - name: Download artifacts
@@ -151,13 +142,7 @@ jobs:
           Get-ChildItem -Path "$PkgDir"
 
           $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}"
-
-          if ($Env:RUNNER_OS -eq "Windows") {
-            $SourceFileName = "$($SourceFileName).exe"
-            $TargetFileName = "DevolutionsGateway.exe"
-          } else {
-            $TargetFileName = "devolutions-gateway"
-          }
+          $TargetFileName = "devolutions-gateway"
           Write-Host "SourceFileName = $SourceFileName"
           Write-Host "TargetFileName = $TargetFileName"
 
@@ -172,11 +157,6 @@ jobs:
           }
 
           $XmfFileName = "libxmf.so"
-
-          if ($Env:RUNNER_OS -eq "Windows") {
-            $XmfFileName = "xmf.dll"
-          }
-
           $XmfSourcePath = Get-ChildItem -Recurse -Filter $XmfFileName -File -Path native-libs
           $XmfTargetPath = Join-Path $PkgDir $XmfFileName
           Write-Host "XmfSourcePath = $XmfSourcePath"
@@ -201,11 +181,7 @@ jobs:
           Set-PSDebug -Trace 1
 
           $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
-          if ("${{ matrix.base-image }}" -Eq "lts-nanoserver-ltsc2022") {
-            docker build --build-arg FROM_IMAGE=mcr.microsoft.com/powershell:lts-nanoserver-ltsc2022 -t "$ImageName" .
-          } else {
-            docker build -t "$ImageName" .
-          }
+          docker build -t "$ImageName" .
           echo "image-name=$ImageName" >> $Env:GITHUB_OUTPUT
           Get-ChildItem -Recurse
 
@@ -457,7 +433,7 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
     needs:
-      - containers
+      - container
       - github-release
       - psgallery-release
       - onedrive-gateway
@@ -472,3 +448,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./ci/remove-labels.ps1 -Label 'release-required'
+
