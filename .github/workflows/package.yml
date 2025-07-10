@@ -74,6 +74,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_RUN: ${{ steps.get-run.outputs.run }}
         run: |
+          Set-PSDebug -Trace 1
+
           $Ref = '${{ inputs.ref }}'
           if (-Not $Ref) {
             $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
@@ -225,6 +227,8 @@ jobs:
         if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           . .\ci\PSModuleHelpers.ps1
           $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
           $PSModuleZipFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.zip" | Select-Object -First 1
@@ -637,6 +641,8 @@ jobs:
         shell: pwsh
         working-directory: jetsocat/nuget
         run: |
+          Set-PSDebug -Trace 1
+
           $Version = '${{ github.event.inputs.jetsocat-nuget-version }}'
           if ([string]::IsNullOrWhitespace($Version)) {
             $Version = Get-Date -Format "yyyy.M.d"
@@ -652,6 +658,8 @@ jobs:
         shell: pwsh
         working-directory: jetsocat/nuget
         run: |
+          Set-PSDebug -Trace 1
+
           Install-Module -Name ZipIt -Force
           & 'nuget' 'pack' 'Devolutions.Jetsocat.nuspec'
           $NugetPackage = (Get-Item ".\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
