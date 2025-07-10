@@ -84,6 +84,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          Set-PSDebug -Trace 1
+
           $Output = (gh release list --repo $Env:GITHUB_REPOSITORY) | Out-String
           $Releases = ( $Output -split '\r?\n' ).Trim()
           $Versions = ForEach($Release in $Releases) {
@@ -106,6 +108,7 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
     strategy:
+      fail-fast: false
       matrix:
         arch: [ x86_64 ]
         os: [ windows, linux ]
@@ -134,14 +137,18 @@ jobs:
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
         shell: pwsh
-        run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+        run: Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Prepare artifacts
         id: prepare-artifacts
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $PkgDir = Join-Path docker $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "package-path=$PkgDir" >> $Env:GITHUB_OUTPUT
+          Write-Host "PkgDir = $PkgDir"
+          Get-ChildItem -Path "$PkgDir"
 
           $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}"
 
@@ -151,10 +158,14 @@ jobs:
           } else {
             $TargetFileName = "devolutions-gateway"
           }
+          Write-Host "SourceFileName = $SourceFileName"
+          Write-Host "TargetFileName = $TargetFileName"
 
           $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path devolutions-gateway
           $TargetPath = Join-Path $PkgDir $TargetFileName
-          Copy-Item $SourcePath $TargetPath
+          Write-Host "SourcePath = $SourcePath"
+          Write-Host "TargetPath = $TargetPath"
+          Copy-Item -Path $SourcePath -Destination $TargetPath
 
           if ($Env:RUNNER_OS -eq "Linux") {
             Invoke-Expression "chmod +x $TargetPath"
@@ -168,21 +179,27 @@ jobs:
 
           $XmfSourcePath = Get-ChildItem -Recurse -Filter $XmfFileName -File -Path native-libs
           $XmfTargetPath = Join-Path $PkgDir $XmfFileName
-          Copy-Item $XmfSourcePath $XmfTargetPath
+          Write-Host "XmfSourcePath = $XmfSourcePath"
+          Write-Host "XmfTargetPath = $XmfTargetPath"
+          Copy-Item -Path $XmfSourcePath -Destination $XmfTargetPath
 
           $WebAppArchive = Get-ChildItem -Recurse -Filter "devolutions_gateway_webapp_*.tar.gz" | Select-Object -First 1
           $TargetPath = Join-Path $PkgDir "webapp" "client"
+          Write-Host "WebAppArchive = $WebAppArchive"
+          Write-Host "TargetPath = $TargetPath"
           New-Item -ItemType Directory -Path $TargetPath
           tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
 
           $PowerShellArchive = Get-ChildItem -Recurse -Filter "DevolutionsGateway-ps-*.zip" | Select-Object -First 1
-          Expand-Archive $PowerShellArchive -DestinationPath "$PkgDir"
+          Expand-Archive -Path $PowerShellArchive -DestinationPath "$PkgDir"
 
       - name: Build container
         id: build-container
         shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
+          Set-PSDebug -Trace 1
+
           $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
           if ("${{ matrix.base-image }}" -Eq "lts-nanoserver-ltsc2022") {
             docker build --build-arg FROM_IMAGE=mcr.microsoft.com/powershell:lts-nanoserver-ltsc2022 -t "$ImageName" .
@@ -196,6 +213,8 @@ jobs:
         shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
+          Set-PSDebug -Trace 1
+
           echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
           Write-Host $DockerPushCmd
@@ -227,16 +246,18 @@ jobs:
         run: |
           # workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
           # FIXME: I suspect this line is no longer required.
-          Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
           # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
-          Remove-Item (Join-Path devolutions-agent linux) -Recurse -ErrorAction Ignore
+          Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse -ErrorAction Ignore
 
       - name: Create GitHub release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          Set-PSDebug -Trace 1
+
           $Version = "${{ needs.preflight.outputs.version }}"
           $HashPath = 'checksums'
           $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md', '*.dll' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
@@ -278,11 +299,13 @@ jobs:
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
         shell: pwsh
-        run: Remove-Item (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+        run: Remove-Item -Path (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Publish PowerShell module
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File
           Expand-Archive -Path $Archive -DestinationPath 'PowerShell'
 
@@ -340,6 +363,8 @@ jobs:
         id: prepare
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $destinationFolder = "${{ runner.temp }}/artifacts"
           $version="${{ needs.preflight.outputs.version }}"
           # Note that ".0" is appended here (required by release tooling downstream)
@@ -399,6 +424,8 @@ jobs:
         id: prepare
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $destinationFolder = "${{ runner.temp }}/artifacts"
           $version="${{ needs.preflight.outputs.version }}"
           # Note that ".0" is appended here (required by release tooling downstream)
@@ -445,4 +472,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./ci/remove-labels.ps1 -Label 'release-required'
-
