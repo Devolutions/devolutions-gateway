@@ -227,6 +227,9 @@ jobs:
           # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
           Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse -ErrorAction Ignore
 
+          # For the PowerShell module, only upload the nupkg.
+          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar) -Recurse -ErrorAction Ignore
+
       - name: Create GitHub release
         shell: pwsh
         env:
