@@ -61,10 +61,8 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _pedm_: add additional context to virtual account code paths ([#1409](https://github.com/Devolutions/devolutions-gateway/issues/1409)) ([63a0d8c8c9](https://github.com/Devolutions/devolutions-gateway/commit/63a0d8c8c9cb26478ef4fa010022034e69accc58)) 
 
-  Some users are experiencing an error with the virtual account elevator
-  that I cannot reproduce, and we do not have the necessary contextual
-  information. This PR adds additional context to the virtual account
-  elevator code paths.
+  Some users are experiencing an error with the virtual account elevator.
+  This adds additional context to the virtual account elevator code paths.
 
 - _dgw_: set default value of TlsVerifyStrict to false ([#1419](https://github.com/Devolutions/devolutions-gateway/issues/1419)) ([528cada242](https://github.com/Devolutions/devolutions-gateway/commit/528cada242f611657633a73a7cbc1e1a7a219b1e)) 
 
