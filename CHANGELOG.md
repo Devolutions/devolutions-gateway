@@ -2,6 +2,104 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.2.3 (2025-07-11)
+
+### Features
+
+- _dgw_: write startup failures into boot.stacktrace file ([#1416](https://github.com/Devolutions/devolutions-gateway/issues/1416)) ([78028a6e60](https://github.com/Devolutions/devolutions-gateway/commit/78028a6e602c94f5b563f97f78b0d9cd13be677b)) ([DGW-292](https://devolutions.atlassian.net/browse/DGW-292)) 
+
+  This will make troubleshooting configuration errors much more easier.
+
+- _dgw_: new TlsVerifyStrict option ([#1415](https://github.com/Devolutions/devolutions-gateway/issues/1415)) ([257d941dd1](https://github.com/Devolutions/devolutions-gateway/commit/257d941dd16fd291b4ccdf8a2e5468042ac4b9f7)) ([DGW-293](https://devolutions.atlassian.net/browse/DGW-293)) 
+
+  This adds a `TlsVerifyStrict` option for controlling the new stricter
+  checks on TLS certificates.
+  
+  When enabled (`true`), the client performs additional checks on the
+  server certificate, including:
+  
+  - Ensuring the presence of the **Subject Alternative Name (SAN)**
+    extension.
+  - Verifying that the **Extended Key Usage (EKU)** extension includes
+    `serverAuth`.
+  
+  Certificates that do not meet these requirements are increasingly
+  rejected by modern clients (e.g., Chrome, macOS). Therefore, we strongly
+  recommend using certificates that comply with these standards.
+  
+  The default configuration for fresh installs will include the
+  `TlsVerifyStrict` key set to `true`.
+
+- _dgw,agent_: display config file path during initialization ([#1421](https://github.com/Devolutions/devolutions-gateway/issues/1421)) ([a185df7844](https://github.com/Devolutions/devolutions-gateway/commit/a185df7844c527e54610ec1e549cf051dad770a9)) 
+
+  Output the full path to the configuration file when initializing the
+  configuration for both Devolutions Gateway and Devolutions Agent. This
+  simplifies debugging and setup verification.
+
+- _dgw_: auto-detect proxy setup when performing HTTP requests ([#1422](https://github.com/Devolutions/devolutions-gateway/issues/1422)) ([b380feffe6](https://github.com/Devolutions/devolutions-gateway/commit/b380feffe6a1b25d37fa7d1db9da54a7439023a6)) 
+
+  Look in environment variables to set HTTP, HTTPS or SOCKS proxies.
+
+- _agent_: auto-detect proxy setup when fetching productinfo.htm ([#1420](https://github.com/Devolutions/devolutions-gateway/issues/1420)) ([9f89c4c15c](https://github.com/Devolutions/devolutions-gateway/commit/9f89c4c15c09f7e8701ecc579bfcc9b0e1624fdb)) ([DGW-291](https://devolutions.atlassian.net/browse/DGW-291)) 
+
+  Look in environment variables to set HTTP, HTTPS or SOCKS proxies.
+
+### Bug Fixes
+
+- _pedm_: don't error on profile selection if no assignments ([#1398](https://github.com/Devolutions/devolutions-gateway/issues/1398)) ([abe9f7c693](https://github.com/Devolutions/devolutions-gateway/commit/abe9f7c6934baea008cfbc7b6579efcedd57e179)) 
+
+  If a user has never had a profile assigned, there will be no record of
+  them in the `user` table.
+  
+  However, if they try to select a profile, an error is returned. It's
+  better to catch this scenario upfront and just return an empty profile
+  selection and list.
+
+- _webapp_: fullscreen handling for ARD web client ([#1406](https://github.com/Devolutions/devolutions-gateway/issues/1406)) ([30b6941406](https://github.com/Devolutions/devolutions-gateway/commit/30b6941406773c4a381641511e1f0fcaea663866)) 
+
+- _webapp_: fix enter fullscreen button during a running session ([#1408](https://github.com/Devolutions/devolutions-gateway/issues/1408)) ([4295a41919](https://github.com/Devolutions/devolutions-gateway/commit/4295a419190fcb6f002ed27af6509ee0c61cdc47)) 
+
+- _pedm_: add additional context to virtual account code paths ([#1409](https://github.com/Devolutions/devolutions-gateway/issues/1409)) ([63a0d8c8c9](https://github.com/Devolutions/devolutions-gateway/commit/63a0d8c8c9cb26478ef4fa010022034e69accc58)) 
+
+  Some users are experiencing an error with the virtual account elevator
+  that I cannot reproduce, and we do not have the necessary contextual
+  information. This PR adds additional context to the virtual account
+  elevator code paths.
+
+- _dgw_: set default value of TlsVerifyStrict to false ([#1419](https://github.com/Devolutions/devolutions-gateway/issues/1419)) ([528cada242](https://github.com/Devolutions/devolutions-gateway/commit/528cada242f611657633a73a7cbc1e1a7a219b1e)) 
+
+  Previously, strict TLS verification was performed even when the
+  TlsVerifyStrict key was absent from the configuration file.
+  
+  From now on, if this key is missing, it will default to
+  "TlsVerifyStrict": false.
+  
+  This change ensures that existing users who are currently using improper
+  certificates will not be affected. At the same time, newly generated
+  configuration files will continue to include "TlsVerifyStrict": true by
+  default, encouraging using proper certificates from the start.
+  
+  New users can still opt out of strict verification by explicitly setting
+  the value to false or removing the key entirely if they are willing to
+  accept potential compatibility issues with some clients, such as Chrome
+  or macOS.
+  
+  A warning will be logged if the option is disabled as it may hide latent
+  issues.
+  Hopefully, this lead the user to enable the option, and fix the
+  underlying certificate issue if necessary.
+
+- _webapp_: fix an issue in the VNC client where display scaling was not correctly
+  updated after a server-initiated resize.
+
+- _webapp_: fix excessive scroll speed in VNC client.
+
+- _webapp_: fix clipboard monitoring treats clipboard updates from the server as
+  local clipboard updates.
+
+- _webapp_: fix the error when `navigator.clipboard.write` was called when the
+  browser window was not focused.
+
 ## 2025.2.2 (2025-06-27)
 
 ### Features
