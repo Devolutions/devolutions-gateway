@@ -8,8 +8,15 @@ RUN apt-get update \
     && rm packages-microsoft-prod.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        powershell \
+        powershell openssl \
     && rm -rf /var/lib/apt/lists/*
+
+ENV XDG_CACHE_HOME="/tmp/.cache"
+ENV XDG_DATA_HOME="/tmp/.local/share"
+ENV POWERSHELL_TELEMETRY_OPTOUT="1"
+
+ENV DGATEWAY_CONFIG_PATH="/tmp/devolutions-gateway"
+RUN mkdir -p "$DGATEWAY_CONFIG_PATH"
 
 WORKDIR /opt/devolutions/gateway
 
@@ -26,7 +33,9 @@ RUN apt-get update
 RUN apt-get install -y --no-install-recommends ca-certificates curl
 RUN rm -rf /var/lib/apt/lists/*
 
-EXPOSE 8080
-EXPOSE 10256
+EXPOSE 7171
+EXPOSE 8181
 
-ENTRYPOINT [ "./devolutions-gateway" ]
+COPY entrypoint.ps1 /usr/local/bin/entrypoint.ps1
+RUN chmod +x /usr/local/bin/entrypoint.ps1
+ENTRYPOINT ["pwsh", "-File", "/usr/local/bin/entrypoint.ps1"]
