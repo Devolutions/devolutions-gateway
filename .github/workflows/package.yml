@@ -27,674 +27,674 @@ on:
         type: string
 
 jobs:
-  preflight:
-    name: Preflight
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.get-run.outputs.run }}
-      commit: ${{ steps.get-commit.outputs.commit }}
-      version: ${{ steps.get-version.outputs.version }}
-      package-env: ${{ steps.info.outputs.package-env }}
+  # preflight:
+  #   name: Preflight
+  #   runs-on: ubuntu-latest
+  #   outputs:
+  #     run: ${{ steps.get-run.outputs.run }}
+  #     commit: ${{ steps.get-commit.outputs.commit }}
+  #     version: ${{ steps.get-version.outputs.version }}
+  #     package-env: ${{ steps.info.outputs.package-env }}
 
-    steps:
-      - name: Package information
-        id: info
-        shell: pwsh
-        run: |
-          $ref = '${{ github.ref_name }}'
-          $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
-          $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
-          $PackageEnv = if ($IsMasterBranch -And -Not $IsScheduledJob) {
-            "publish-prod"
-          } else {
-            "publish-prod" # "publish-test"
-          }
-          echo "package-env=$PackageEnv" >> $Env:GITHUB_OUTPUT
+  #   steps:
+  #     - name: Package information
+  #       id: info
+  #       shell: pwsh
+  #       run: |
+  #         $ref = '${{ github.ref_name }}'
+  #         $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
+  #         $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
+  #         $PackageEnv = if ($IsMasterBranch -And -Not $IsScheduledJob) {
+  #           "publish-prod"
+  #         } else {
+  #           "publish-prod" # "publish-test"
+  #         }
+  #         echo "package-env=$PackageEnv" >> $Env:GITHUB_OUTPUT
 
-      ## workflow_dispatch: The run_id is read from the inputs
-      ## workflow_call:     The run_id is the current run_id
-      - name: Get run
-        id: get-run
-        shell: pwsh
-        run: |
-          if ('${{ github.event.inputs.run }}') {
-            echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
-          } else {
-            echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
-          }
+  #     ## workflow_dispatch: The run_id is read from the inputs
+  #     ## workflow_call:     The run_id is the current run_id
+  #     - name: Get run
+  #       id: get-run
+  #       shell: pwsh
+  #       run: |
+  #         if ('${{ github.event.inputs.run }}') {
+  #           echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
+  #         } else {
+  #           echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
+  #         }
 
-      ## To consistently repackage the CI artifacts, we must use the same commit that produced the artifacts
-      ##
-      ## workflow_dispatch: Lookup the SHA from the given run_id
-      ## workflow_call:     Use the input SHA; otherwise lookup the SHA from the current run_id
-      - name: Get commit
-        id: get-commit
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_RUN: ${{ steps.get-run.outputs.run }}
-        run: |
-          Set-PSDebug -Trace 1
+  #     ## To consistently repackage the CI artifacts, we must use the same commit that produced the artifacts
+  #     ##
+  #     ## workflow_dispatch: Lookup the SHA from the given run_id
+  #     ## workflow_call:     Use the input SHA; otherwise lookup the SHA from the current run_id
+  #     - name: Get commit
+  #       id: get-commit
+  #       shell: pwsh
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #         CI_RUN: ${{ steps.get-run.outputs.run }}
+  #       run: |
+  #         Set-PSDebug -Trace 1
 
-          $Ref = '${{ inputs.ref }}'
-          if (-Not $Ref) {
-            $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
-            if ($($Run.head_branch) -Ne "master") {
-              echo "::notice::specified run is not on master"
-            }
+  #         $Ref = '${{ inputs.ref }}'
+  #         if (-Not $Ref) {
+  #           $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
+  #           if ($($Run.head_branch) -Ne "master") {
+  #             echo "::notice::specified run is not on master"
+  #           }
 
-            $ValidateDependency = $false
-            if ('${{ github.event.inputs.validate-dependency }}') {
-              $ValidateDependency = [System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')
-            }
+  #           $ValidateDependency = $false
+  #           if ('${{ github.event.inputs.validate-dependency }}') {
+  #             $ValidateDependency = [System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')
+  #           }
 
-            if ($ValidateDependency) {
-              if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-                echo "::error::specified run is either not complete or not successful"
-                exit 1
-              }
-            }
+  #           if ($ValidateDependency) {
+  #             if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+  #               echo "::error::specified run is either not complete or not successful"
+  #               exit 1
+  #             }
+  #           }
 
-            $Ref = $($Run.head_sha)
-          }
+  #           $Ref = $($Run.head_sha)
+  #         }
 
-          echo "commit=$Ref" >> $Env:GITHUB_OUTPUT
-          echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
+  #         echo "commit=$Ref" >> $Env:GITHUB_OUTPUT
+  #         echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
 
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.get-commit.outputs.commit }}
+  #     - name: Checkout ${{ github.repository }}
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ steps.get-commit.outputs.commit }}
 
-      - name: Upload version artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: version
-          path: VERSION
-          overwrite: true
+  #     - name: Upload version artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: version
+  #         path: VERSION
+  #         overwrite: true
 
-      - name: Upload docker file artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker
-          path: package/**/Dockerfile
+  #     - name: Upload docker file artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: docker
+  #         path: package/**/Dockerfile
 
-      - name: Upload changelog artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: changelog
-          path: CHANGELOG.md
+  #     - name: Upload changelog artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: changelog
+  #         path: CHANGELOG.md
 
-      - name: Get version
-        id: get-version
-        shell: pwsh
-        run: |
-          $Version = Get-Content VERSION -TotalCount 1
-          echo "version=$Version" >> $Env:GITHUB_OUTPUT
+  #     - name: Get version
+  #       id: get-version
+  #       shell: pwsh
+  #       run: |
+  #         $Version = Get-Content VERSION -TotalCount 1
+  #         echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
-      - name: Download Cadeau
-        shell: pwsh
-        run: |
-          ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
-          ./ci/download-cadeau.ps1 -Platform 'linux' -Architecture 'x64'
+  #     - name: Download Cadeau
+  #       shell: pwsh
+  #       run: |
+  #         ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
+  #         ./ci/download-cadeau.ps1 -Platform 'linux' -Architecture 'x64'
 
-      - name: Upload native libs
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-libs
-          path: native-libs/
+  #     - name: Upload native libs
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: native-libs
+  #         path: native-libs/
 
-  codesign:
-    name: Codesign
-    runs-on: ${{ matrix.runner }}
-    needs: preflight
-    environment: ${{ needs.preflight.outputs.package-env }}
-    strategy:
-      matrix:
-        project: [ jetsocat, devolutions-gateway, devolutions-agent ]
-        os: [ windows, macos, linux ]
-        include:
-          - os: windows
-            runner: windows-2022
-          - os: macos
-            runner: macos-latest
-          - os: linux
-            runner: ubuntu-latest
-        exclude:
-          - project: devolutions-gateway
-            os: macos
-          - project: devolutions-agent
-            os: macos
+  # codesign:
+  #   name: Codesign
+  #   runs-on: ${{ matrix.runner }}
+  #   needs: preflight
+  #   environment: ${{ needs.preflight.outputs.package-env }}
+  #   strategy:
+  #     matrix:
+  #       project: [ jetsocat, devolutions-gateway, devolutions-agent ]
+  #       os: [ windows, macos, linux ]
+  #       include:
+  #         - os: windows
+  #           runner: windows-2022
+  #         - os: macos
+  #           runner: macos-latest
+  #         - os: linux
+  #           runner: ubuntu-latest
+  #       exclude:
+  #         - project: devolutions-gateway
+  #           os: macos
+  #         - project: devolutions-agent
+  #           os: macos
 
-    steps:
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.commit }}
+  #   steps:
+  #     - name: Checkout ${{ github.repository }}
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ needs.preflight.outputs.commit }}
 
-      - name: Download artifacts
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
-          gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
+  #     - name: Download artifacts
+  #       shell: pwsh
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
+  #         gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
 
-      ## Delete the files that we won't operate on to prevent them being re-uploaded
-      ## This ensures consistency of the artifact since we are operating in a matrix
-      - name: Manage artifacts
-        shell: pwsh
-        run: |
-          $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
-          $Exclusions = @('${{ matrix.os }}', 'Powershell')
-          Get-ChildItem "$Destination" -Exclude $Exclusions | Remove-Item -Recurse
+  #     ## Delete the files that we won't operate on to prevent them being re-uploaded
+  #     ## This ensures consistency of the artifact since we are operating in a matrix
+  #     - name: Manage artifacts
+  #       shell: pwsh
+  #       run: |
+  #         $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
+  #         $Exclusions = @('${{ matrix.os }}', 'Powershell')
+  #         Get-ChildItem "$Destination" -Exclude $Exclusions | Remove-Item -Recurse
 
-      - name: Install AzureSignTool
-        if: matrix.os == 'windows'
-        run: |
-          dotnet tool install --global AzureSignTool
+  #     - name: Install AzureSignTool
+  #       if: matrix.os == 'windows'
+  #       run: |
+  #         dotnet tool install --global AzureSignTool
 
-      - name: Configure certificates (macOS)
-        if: matrix.os == 'macos'
-        env:
-          DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
-          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=Price2011
+  #     - name: Configure certificates (macOS)
+  #       if: matrix.os == 'macos'
+  #       env:
+  #         DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
+  #         DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
+  #       run: |
+  #         KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+  #         KEYCHAIN_PASSWORD=Price2011
 
-          DEVELOPER_ID_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_cert.p12
-          echo -n "$DEVELOPER_ID_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_CERTIFICATE_PATH
+  #         DEVELOPER_ID_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_cert.p12
+  #         echo -n "$DEVELOPER_ID_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_CERTIFICATE_PATH
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+  #         security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+  #         security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+  #         security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
-          security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
+  #         security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+  #         security list-keychain -d user -s $KEYCHAIN_PATH
 
-      - name: Configure runner (Windows)
-        if: matrix.os == 'windows'
-        run: |
-          echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+  #     - name: Configure runner (Windows)
+  #       if: matrix.os == 'windows'
+  #       run: |
+  #         echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          # https://github.com/actions/runner-images/issues/9667
-          choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
-          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+  #         # https://github.com/actions/runner-images/issues/9667
+  #         choco uninstall wixtoolset
+  #         choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
+  #         echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Sign PowerShell module contents
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
-        shell: pwsh
-        run: |
-          Set-PSDebug -Trace 1
+  #     - name: Sign PowerShell module contents
+  #       if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+  #       shell: pwsh
+  #       run: |
+  #         Set-PSDebug -Trace 1
 
-          . .\ci\PSModuleHelpers.ps1
-          $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
-          $PSModuleTarFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
-          tar -xvf "$PSModuleTarFilePath" -C "$PSModuleOutputPath"
-          $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
+  #         . .\ci\PSModuleHelpers.ps1
+  #         $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
+  #         $PSModuleTarFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
+  #         tar -xvf "$PSModuleTarFilePath" -C "$PSModuleOutputPath"
+  #         $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
 
-          $IncludePattern = @('*.ps1', '*.psd1', '*.psm1', 'DevolutionsGateway.dll')
-          Get-ChildItem -Path $PSModuleOutputPath -Recurse -Include $IncludePattern | % {
-            $Params = @('sign',
-              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-              '-v')
-            AzureSignTool @Params $_.FullName
-          }
+  #         $IncludePattern = @('*.ps1', '*.psd1', '*.psm1', 'DevolutionsGateway.dll')
+  #         Get-ChildItem -Path $PSModuleOutputPath -Recurse -Include $IncludePattern | % {
+  #           $Params = @('sign',
+  #             '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+  #             '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+  #             '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+  #             '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+  #             '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+  #             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+  #             '-v')
+  #           AzureSignTool @Params $_.FullName
+  #         }
 
-          Remove-Item $PSModuleTarFilePath -ErrorAction SilentlyContinue | Out-Null
+  #         Remove-Item $PSModuleTarFilePath -ErrorAction SilentlyContinue | Out-Null
 
-          $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
+  #         $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
 
-          # For some reason, when using Compress-Archive we end up with a corrupted archive once in the release.yml workflow.
-          # Maybe because of the double compression via the upload-artifact action?
-          # With a tarball archive, there is no problem.
-          Write-Host "Recreate archive at $PSModuleTarFilePath"
-          tar -cvf "$PSModuleTarFilePath" -C "$PSModuleParentPath" DevolutionsGateway
+  #         # For some reason, when using Compress-Archive we end up with a corrupted archive once in the release.yml workflow.
+  #         # Maybe because of the double compression via the upload-artifact action?
+  #         # With a tarball archive, there is no problem.
+  #         Write-Host "Recreate archive at $PSModuleTarFilePath"
+  #         tar -cvf "$PSModuleTarFilePath" -C "$PSModuleParentPath" DevolutionsGateway
 
-          # Verify the archive.
-          Write-Host "Verify archive at $PSModuleTarFilePath"
-          tar -t "$PSModuleTarFilePath"
+  #         # Verify the archive.
+  #         Write-Host "Verify archive at $PSModuleTarFilePath"
+  #         tar -t "$PSModuleTarFilePath"
 
-          Set-PSDebug -Off # Too many traces are logged when running New-ModulePackage.
-          New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
+  #         Set-PSDebug -Off # Too many traces are logged when running New-ModulePackage.
+  #         New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
 
-      - name: Sign executables
-        if: matrix.os == 'windows' || matrix.os == 'macos'
-        shell: pwsh
-        run: |
-          $IncludePattern = @(switch ('${{ matrix.project }}') {
-            'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
-            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
-            'jetsocat' { @('jetsocat_*') }
-          })
-          $ExcludePattern = "*.pdb"
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
-            if ('${{ matrix.os }}' -Eq 'windows') {
-              if ($_.Name -Eq 'DevolutionsPedmShellExt.msix') {
-                $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
-                $UnpackedMsix = Join-Path ${{ runner.temp }} "unpacked-context-menu-msix"
-                $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
-                $PackedMsix = $_.FullName
+  #     - name: Sign executables
+  #       if: matrix.os == 'windows' || matrix.os == 'macos'
+  #       shell: pwsh
+  #       run: |
+  #         $IncludePattern = @(switch ('${{ matrix.project }}') {
+  #           'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
+  #           'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+  #           'jetsocat' { @('jetsocat_*') }
+  #         })
+  #         $ExcludePattern = "*.pdb"
+  #         Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
+  #           if ('${{ matrix.os }}' -Eq 'windows') {
+  #             if ($_.Name -Eq 'DevolutionsPedmShellExt.msix') {
+  #               $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
+  #               $UnpackedMsix = Join-Path ${{ runner.temp }} "unpacked-context-menu-msix"
+  #               $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
+  #               $PackedMsix = $_.FullName
 
-                & 'MakeAppx.exe' unpack /p $PackedMsix /d $UnpackedMsix /nv
-                Remove-Item $PackedMsix -Force | Out-Null
-                $appx = [xml](Get-Content -Path $AppxManifest)
-                $appx.Package.Identity.Publisher = $PackagePublisher
-                $xmlWriterSettings = New-Object System.Xml.XmlWriterSettings
-                $xmlWriterSettings.Indent = $true
-                $xmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
-                $xmlTextWriter = [System.Xml.XmlTextWriter]::Create($AppxManifest, $xmlWriterSettings)
-                $appx.Save($xmlTextWriter)
-                $xmlTextWriter.Close()
-                & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix /nv
+  #               & 'MakeAppx.exe' unpack /p $PackedMsix /d $UnpackedMsix /nv
+  #               Remove-Item $PackedMsix -Force | Out-Null
+  #               $appx = [xml](Get-Content -Path $AppxManifest)
+  #               $appx.Package.Identity.Publisher = $PackagePublisher
+  #               $xmlWriterSettings = New-Object System.Xml.XmlWriterSettings
+  #               $xmlWriterSettings.Indent = $true
+  #               $xmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
+  #               $xmlTextWriter = [System.Xml.XmlTextWriter]::Create($AppxManifest, $xmlWriterSettings)
+  #               $appx.Save($xmlTextWriter)
+  #               $xmlTextWriter.Close()
+  #               & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix /nv
 
-                Remove-Item $UnpackedMsix -Recurse -Force | Out-Null
-              }
+  #               Remove-Item $UnpackedMsix -Recurse -Force | Out-Null
+  #             }
 
-              $Params = @('sign',
-                '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-                '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-                '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-                '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-                '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-                '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-                '-v')
-              AzureSignTool @Params $_.FullName
-            } elseif ('${{ matrix.os }}' -Eq 'macos') {
-              $SignCmd = $(@(
-                'codesign',
-                '--timestamp',
-                '--options=runtime',
-                '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
-                '-v',
-                $_.FullName
-              )) -Join ' '
-              Write-Host $SignCmd
-              Invoke-Expression $SignCmd
-            } else {
-              echo "::debug::nothing to do for ${{ matrix.os }}"
-            }
-          }
+  #             $Params = @('sign',
+  #               '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+  #               '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+  #               '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+  #               '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+  #               '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+  #               '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+  #               '-v')
+  #             AzureSignTool @Params $_.FullName
+  #           } elseif ('${{ matrix.os }}' -Eq 'macos') {
+  #             $SignCmd = $(@(
+  #               'codesign',
+  #               '--timestamp',
+  #               '--options=runtime',
+  #               '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
+  #               '-v',
+  #               $_.FullName
+  #             )) -Join ' '
+  #             Write-Host $SignCmd
+  #             Invoke-Expression $SignCmd
+  #           } else {
+  #             echo "::debug::nothing to do for ${{ matrix.os }}"
+  #           }
+  #         }
 
-      - name: Download web client artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $Destination = Join-Path "webapp" "client"
-          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
+  #     - name: Download web client artifacts
+  #       if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+  #       shell: pwsh
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         $Destination = Join-Path "webapp" "client"
+  #         gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
 
-      - name: Download web player artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $Destination = Join-Path "webapp" "player"
-          gh run download ${{ needs.preflight.outputs.run }} -n webapp-player -D "$Destination"
+  #     - name: Download web player artifacts
+  #       if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+  #       shell: pwsh
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         $Destination = Join-Path "webapp" "player"
+  #         gh run download ${{ needs.preflight.outputs.run }} -n webapp-player -D "$Destination"
 
-      - name: Add msbuild to PATH
-        if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
-        uses: microsoft/setup-msbuild@v2
+  #     - name: Add msbuild to PATH
+  #       if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
+  #       uses: microsoft/setup-msbuild@v2
 
-      - name: Download native-libs
-        uses: actions/download-artifact@v4
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        with:
-          name: native-libs
-          path: native-libs
+  #     - name: Download native-libs
+  #       uses: actions/download-artifact@v4
+  #       if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
+  #       with:
+  #         name: native-libs
+  #         path: native-libs
 
-      - name: Zip debug symbol files
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+  #     - name: Zip debug symbol files
+  #       if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       run: |
+  #         $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
-          Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Compress-Archive -DestinationPath "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
-          Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Remove-Item | Out-Null
+  #         Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Compress-Archive -DestinationPath "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
+  #         Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Remove-Item | Out-Null
 
-      - name: Regenerate Gateway MSI
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
-          $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
-          $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
-          $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
-          $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
+  #     - name: Regenerate Gateway MSI
+  #       if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       run: |
+  #         $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+  #         $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
+  #         $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
+  #         $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
+  #         $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
+  #         $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
 
-          ./ci/tlk.ps1 package -Product gateway -PackageOption generate
+  #         ./ci/tlk.ps1 package -Product gateway -PackageOption generate
 
-      - name: Download pedm desktop artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $Destination = "devolutions-pedm-desktop"
-          gh run download ${{ needs.preflight.outputs.run }} -n devolutions-pedm-desktop -D "$Destination"
-          Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") -Recurse | Where-Object { $_.Extension -notin '.exe', '.dll' } | Remove-Item -Recurse -Force
+  #     - name: Download pedm desktop artifacts
+  #       if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
+  #       shell: pwsh
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         $Destination = "devolutions-pedm-desktop"
+  #         gh run download ${{ needs.preflight.outputs.run }} -n devolutions-pedm-desktop -D "$Destination"
+  #         Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") -Recurse | Where-Object { $_.Extension -notin '.exe', '.dll' } | Remove-Item -Recurse -Force
           
-      - name: Sign pedm desktop executables
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
-        shell: pwsh
-        run: |
-          $IncludePattern = '*Devolutions*'
-          Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") | Where-Object { (Get-AuthenticodeSignature $_).Status -ne 'Valid'} | % {
-              $Params = @('sign',
-                '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-                '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-                '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-                '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-                '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-                '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-                '-v')
+  #     - name: Sign pedm desktop executables
+  #       if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
+  #       shell: pwsh
+  #       run: |
+  #         $IncludePattern = '*Devolutions*'
+  #         Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") | Where-Object { (Get-AuthenticodeSignature $_).Status -ne 'Valid'} | % {
+  #             $Params = @('sign',
+  #               '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+  #               '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+  #               '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+  #               '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+  #               '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+  #               '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+  #               '-v')
 
-              echo "::debug::signing $_.FullName"
-              AzureSignTool @Params $_.FullName
-          }
+  #             echo "::debug::signing $_.FullName"
+  #             AzureSignTool @Params $_.FullName
+  #         }
 
-      - name: Regenerate Agent MSI
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-          $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
-          $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
-          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
-          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
-          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
+  #     - name: Regenerate Agent MSI
+  #       if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       run: |
+  #         $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+  #         $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
+  #         $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
+  #         $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
+  #         $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
+  #         $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
 
-          ./ci/tlk.ps1 package -Product agent -PackageOption generate
+  #         ./ci/tlk.ps1 package -Product agent -PackageOption generate
 
-      - name: Sign Gateway MSI runtime
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        shell: pwsh
-        working-directory: package/WindowsManaged/Release
-        run: |
-          Get-ChildItem -Path .\* -Include "*.exe" | % {
-            $Params = @('sign',
-              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-              '-v')
-            AzureSignTool @Params $_.FullName
-          }
+  #     - name: Sign Gateway MSI runtime
+  #       if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       working-directory: package/WindowsManaged/Release
+  #       run: |
+  #         Get-ChildItem -Path .\* -Include "*.exe" | % {
+  #           $Params = @('sign',
+  #             '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+  #             '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+  #             '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+  #             '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+  #             '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+  #             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+  #             '-v')
+  #           AzureSignTool @Params $_.FullName
+  #         }
 
-      - name: Sign Agent MSI runtime
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
-        working-directory: package/AgentWindowsManaged/Release
-        run: |
-          Get-ChildItem -Path .\* -Include "*.exe" | % {
-            $Params = @('sign',
-              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-              '-v')
-            AzureSignTool @Params $_.FullName
-          }
+  #     - name: Sign Agent MSI runtime
+  #       if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       working-directory: package/AgentWindowsManaged/Release
+  #       run: |
+  #         Get-ChildItem -Path .\* -Include "*.exe" | % {
+  #           $Params = @('sign',
+  #             '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+  #             '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+  #             '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+  #             '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+  #             '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+  #             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+  #             '-v')
+  #           AzureSignTool @Params $_.FullName
+  #         }
 
-      - name: Repackage Gateway
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
-          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
+  #     - name: Repackage Gateway
+  #       if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       run: |
+  #         $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
+  #         $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
 
-          ./ci/tlk.ps1 package -Product gateway -PackageOption assemble
+  #         ./ci/tlk.ps1 package -Product gateway -PackageOption assemble
 
-          $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
-          Remove-Item $Env:DGATEWAY_PSMODULE_PATH -Recurse -ErrorAction SilentlyContinue | Out-Null
+  #         $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
+  #         Remove-Item $Env:DGATEWAY_PSMODULE_PATH -Recurse -ErrorAction SilentlyContinue | Out-Null
 
-      - name: Repackage Agent
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent
-          $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Select -First 1
+  #     - name: Repackage Agent
+  #       if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
+  #       shell: pwsh
+  #       run: |
+  #         $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent
+  #         $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Select -First 1
 
-          ./ci/tlk.ps1 package -Product agent -PackageOption assemble
+  #         ./ci/tlk.ps1 package -Product agent -PackageOption assemble
 
-          $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
-          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
-          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
-          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
+  #         $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
+  #         $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
+  #         $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
+  #         $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
 
-          @($Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH,
-            $Env:DAGENT_PEDM_SHELL_EXT_DLL, $Env:DAGENT_PEDM_SHELL_EXT_MSIX,
-            $Env:DAGENT_SESSION_EXECUTABLE) | ForEach-Object {
-            Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
-          }
+  #         @($Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH,
+  #           $Env:DAGENT_PEDM_SHELL_EXT_DLL, $Env:DAGENT_PEDM_SHELL_EXT_MSIX,
+  #           $Env:DAGENT_SESSION_EXECUTABLE) | ForEach-Object {
+  #           Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
+  #         }
 
-      - name: Sign packages
-        if: (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') && matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $ContentDescription = switch ('${{ matrix.project }}') {
-            'devolutions-gateway' { 'Devolutions Gateway' }
-            'devolutions-agent' { 'Devolutions Agent' }
-          }
+  #     - name: Sign packages
+  #       if: (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') && matrix.os == 'windows'
+  #       shell: pwsh
+  #       run: |
+  #         $ContentDescription = switch ('${{ matrix.project }}') {
+  #           'devolutions-gateway' { 'Devolutions Gateway' }
+  #           'devolutions-agent' { 'Devolutions Agent' }
+  #         }
 
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % {
-            $Params = @('sign',
-              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-              '-d', $ContentDescription,
-              '-v')
-            AzureSignTool @Params $_.FullName
-          }
+  #         Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % {
+  #           $Params = @('sign',
+  #             '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+  #             '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+  #             '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+  #             '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+  #             '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+  #             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+  #             '-d', $ContentDescription,
+  #             '-v')
+  #           AzureSignTool @Params $_.FullName
+  #         }
 
-      - name: Verification
-        if: (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod'
-        shell: pwsh
-        run: |
-          $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
-          if ('${{ matrix.os }}' -Eq 'windows') {
-            Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % {
-              signtool verify /pa "$($_.FullName)"
-              if ($LastExitCode -Ne 0) {
-                echo "::error::failed to verify the signature of $($_.FullName)"
-                exit 1
-              }
-            }
-          } elseif ('${{ matrix.os }}' -Eq 'macos') {
-            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % {
-              codesign -dvvv "$($_.FullName)"
-              if ($LastExitCode -Ne 0) {
-                echo "::error::failed to verify the signature of $($_.FullName)"
-                exit 1
-              }
-            }
-          }
+  #     - name: Verification
+  #       if: (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod'
+  #       shell: pwsh
+  #       run: |
+  #         $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
+  #         if ('${{ matrix.os }}' -Eq 'windows') {
+  #           Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % {
+  #             signtool verify /pa "$($_.FullName)"
+  #             if ($LastExitCode -Ne 0) {
+  #               echo "::error::failed to verify the signature of $($_.FullName)"
+  #               exit 1
+  #             }
+  #           }
+  #         } elseif ('${{ matrix.os }}' -Eq 'macos') {
+  #           Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % {
+  #             codesign -dvvv "$($_.FullName)"
+  #             if ($LastExitCode -Ne 0) {
+  #               echo "::error::failed to verify the signature of $($_.FullName)"
+  #               exit 1
+  #             }
+  #           }
+  #         }
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.project }}-${{ matrix.os }}
-          path: ${{ runner.temp }}/${{ matrix.project }}
-          if-no-files-found: error
-          retention-days: 1
+  #     - name: Upload artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ${{ matrix.project }}-${{ matrix.os }}
+  #         path: ${{ runner.temp }}/${{ matrix.project }}
+  #         if-no-files-found: error
+  #         retention-days: 1
 
-  devolutions-gateway-merge:
-    name: Merge gateway artifacts
-    runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+  # devolutions-gateway-merge:
+  #   name: Merge gateway artifacts
+  #   runs-on: ubuntu-latest
+  #   needs: [preflight, codesign]
 
-    steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: devolutions-gateway-*
-          merge-multiple: true
+  #   steps:
+  #     - name: Download Artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: devolutions-gateway-*
+  #         merge-multiple: true
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ github.workspace }}/**/*
-          name: devolutions-gateway
-          overwrite: true
+  #     - name: Upload Artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ${{ github.workspace }}/**/*
+  #         name: devolutions-gateway
+  #         overwrite: true
 
-  devolutions-agent-merge:
-    name: Merge agent artifacts
-    runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+  # devolutions-agent-merge:
+  #   name: Merge agent artifacts
+  #   runs-on: ubuntu-latest
+  #   needs: [preflight, codesign]
 
-    steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: devolutions-agent-*
-          merge-multiple: true
+  #   steps:
+  #     - name: Download Artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: devolutions-agent-*
+  #         merge-multiple: true
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ github.workspace }}/**/*
-          name: devolutions-agent
-          overwrite: true
+  #     - name: Upload Artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ${{ github.workspace }}/**/*
+  #         name: devolutions-agent
+  #         overwrite: true
 
-  jetsocat-merge:
-    name: Merge jetsocat artifacts
-    runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+  # jetsocat-merge:
+  #   name: Merge jetsocat artifacts
+  #   runs-on: ubuntu-latest
+  #   needs: [preflight, codesign]
 
-    steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: jetsocat-*
-          merge-multiple: true
+  #   steps:
+  #     - name: Download Artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: jetsocat-*
+  #         merge-multiple: true
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ github.workspace }}/**/*
-          name: jetsocat
-          overwrite: true
+  #     - name: Upload Artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ${{ github.workspace }}/**/*
+  #         name: jetsocat
+  #         overwrite: true
 
-  web-app:
-    name: Web App
-    runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+  # web-app:
+  #   name: Web App
+  #   runs-on: ubuntu-latest
+  #   needs: [preflight, codesign]
 
-    steps:
-      - name: Download artifacts
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -R $Env:GITHUB_REPOSITORY -D webapp-client
+  #   steps:
+  #     - name: Download artifacts
+  #       shell: pwsh
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -R $Env:GITHUB_REPOSITORY -D webapp-client
 
-      - name: Create tarball
-        run: tar -czvf devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz webapp-client
+  #     - name: Create tarball
+  #       run: tar -czvf devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz webapp-client
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: webapp-client
-          path: devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz
-          if-no-files-found: error
-          overwrite: true
+  #     - name: Upload artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: webapp-client
+  #         path: devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz
+  #         if-no-files-found: error
+  #         overwrite: true
 
-  nuget:
-    name: Nuget
-    runs-on: ubuntu-22.04 # nuget.exe not available on 24.04 and `nuget pack` doesn't work without a csproj
-    needs: [preflight, codesign, jetsocat-merge]
+  # nuget:
+  #   name: Nuget
+  #   runs-on: ubuntu-22.04 # nuget.exe not available on 24.04 and `nuget pack` doesn't work without a csproj
+  #   needs: [preflight, codesign, jetsocat-merge]
 
-    steps:
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.commit }}
+  #   steps:
+  #     - name: Checkout ${{ github.repository }}
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ needs.preflight.outputs.commit }}
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: jetsocat
-          path: jetsocat/nuget/bin
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: jetsocat
+  #         path: jetsocat/nuget/bin
 
-      - name: Rename artifacts
-        shell: pwsh
-        working-directory: jetsocat/nuget/bin
-        run: |
-          # Backward compatibility with prior nuspec versions
-          Get-ChildItem -Directory -Recurse "x86_64" | Rename-Item -NewName "x64"
+  #     - name: Rename artifacts
+  #       shell: pwsh
+  #       working-directory: jetsocat/nuget/bin
+  #       run: |
+  #         # Backward compatibility with prior nuspec versions
+  #         Get-ChildItem -Directory -Recurse "x86_64" | Rename-Item -NewName "x64"
 
-          # Remove version number and architecture from binary name
-          Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat"
-          cd windows
-          Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat.exe"
+  #         # Remove version number and architecture from binary name
+  #         Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat"
+  #         cd windows
+  #         Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat.exe"
 
-      - name: Set package metadata
-        shell: pwsh
-        working-directory: jetsocat/nuget
-        run: |
-          Set-PSDebug -Trace 1
+  #     - name: Set package metadata
+  #       shell: pwsh
+  #       working-directory: jetsocat/nuget
+  #       run: |
+  #         Set-PSDebug -Trace 1
 
-          $Version = '${{ github.event.inputs.jetsocat-nuget-version }}'
-          if ([string]::IsNullOrWhitespace($Version)) {
-            $Version = Get-Date -Format "yyyy.M.d"
-          }
+  #         $Version = '${{ github.event.inputs.jetsocat-nuget-version }}'
+  #         if ([string]::IsNullOrWhitespace($Version)) {
+  #           $Version = Get-Date -Format "yyyy.M.d"
+  #         }
 
-          $Nuspec = (Resolve-Path "Devolutions.Jetsocat.nuspec")
-          $Xml = [xml] (Get-Content $Nuspec)
-          Select-Xml -xml $Xml -XPath //package/metadata/version | % { $_.Node.'#text' = "$Version" }
-          Select-Xml -xml $Xml -XPath //package/metadata/description | % { $_.Node.'#text' = "Websocket toolkit for jet protocol related operations" }
-          $Xml.Save($Nuspec)
+  #         $Nuspec = (Resolve-Path "Devolutions.Jetsocat.nuspec")
+  #         $Xml = [xml] (Get-Content $Nuspec)
+  #         Select-Xml -xml $Xml -XPath //package/metadata/version | % { $_.Node.'#text' = "$Version" }
+  #         Select-Xml -xml $Xml -XPath //package/metadata/description | % { $_.Node.'#text' = "Websocket toolkit for jet protocol related operations" }
+  #         $Xml.Save($Nuspec)
 
-      - name: Build package
-        shell: pwsh
-        working-directory: jetsocat/nuget
-        run: |
-          Set-PSDebug -Trace 1
+  #     - name: Build package
+  #       shell: pwsh
+  #       working-directory: jetsocat/nuget
+  #       run: |
+  #         Set-PSDebug -Trace 1
 
-          Install-Module -Name ZipIt -Force
-          & 'nuget' 'pack' 'Devolutions.Jetsocat.nuspec'
-          $NugetPackage = (Get-Item ".\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
-          Set-ZipItUnixFilePermissions $NugetPackage -FilePattern "native/jetsocat$" -FilePermissions "r-xr-xr-x"
+  #         Install-Module -Name ZipIt -Force
+  #         & 'nuget' 'pack' 'Devolutions.Jetsocat.nuspec'
+  #         $NugetPackage = (Get-Item ".\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
+  #         Set-ZipItUnixFilePermissions $NugetPackage -FilePattern "native/jetsocat$" -FilePermissions "r-xr-xr-x"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: jetsocat-nuget
-          path: jetsocat/nuget/*.nupkg
-          if-no-files-found: error
+  #     - name: Upload artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: jetsocat-nuget
+  #         path: jetsocat/nuget/*.nupkg
+  #         if-no-files-found: error
 
   generate-sbom:
     name: Upload SBOM
     runs-on: ubuntu-latest
-    needs: preflight
+    # needs: preflight
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.commit }}
+        # with:
+        #   ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Check out Devolutions/actions
         uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
-          ref: v1
+          ref: DEVOPS-3700
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
@@ -712,12 +712,12 @@ jobs:
           name: bom.xml
           path: bom.xml
 
-      - name: Upload SBOM to Dependency-Track
-        uses: ./.github/workflows/dtrack-upload-sbom
-        with:
-          api_key: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
-          autocreate: 'true'
-          bom_filename: bom.xml
-          project_name: devolutions-gateway
-          project_version: ${{ needs.preflight.outputs.version }}
-          server_hostname: 'dtrack-api.devolutions.com'
+      # - name: Upload SBOM to Dependency-Track
+      #   uses: ./.github/workflows/dtrack-upload-sbom
+      #   with:
+      #     api_key: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
+      #     autocreate: 'true'
+      #     bom_filename: bom.xml
+      #     project_name: devolutions-gateway
+      #     project_version: ${{ needs.preflight.outputs.version }}
+      #     server_hostname: 'dtrack-api.devolutions.com'
