@@ -17,7 +17,7 @@ export class StringService {
     this.utils = parent;
   }
 
-  //DOMAIN\username or username@DOMAIN
+  //DOMAIN\username
   extractDomain(fullUsername: string): ExtractedUsernameDomain {
     const extractionData: ExtractedUsernameDomain = {
       username: fullUsername,
@@ -27,9 +27,6 @@ export class StringService {
     if (fullUsername.includes('\\')) {
       extractionData.domain = fullUsername.split('\\')[0];
       extractionData.username = fullUsername.split('\\')[1];
-    } else if (fullUsername.includes('@')) {
-      extractionData.domain = fullUsername.split('@')[1];
-      extractionData.username = fullUsername.split('@')[0];
     }
     return extractionData;
   }
