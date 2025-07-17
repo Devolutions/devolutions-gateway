@@ -690,6 +690,9 @@ jobs:
         # with:
         #   ref: ${{ needs.preflight.outputs.commit }}
 
+      - name: Install cdxgen
+        run: npm install -g @cyclonedx/cdxgen@11.4.4
+
       - name: Check out Devolutions/actions
         uses: actions/checkout@v4
         with:
