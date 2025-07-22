@@ -54,7 +54,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
   protected removeElement = new Subject();
   private remoteTerminal: TelnetTerminal;
-  private remoteTerminalEventListener: () => void;
+  private unsubscribeTerminalEvent: () => void;
 
   constructor(
     private renderer: Renderer2,
@@ -121,9 +121,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   }
 
   private removeRemoteTerminalListener(): void {
-    if (this.remoteTerminalEventListener) {
-      this.remoteTerminalEventListener();
-    }
+      this.unsubscribeTerminalEvent();
   }
 
   private initializeStatus(): void {
@@ -214,7 +212,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     }
 
     // Store the listener function for cleanup
-    this.remoteTerminalEventListener = this.remoteTerminal.onStatusChange((status) => {
+    this.unsubscribeTerminalEvent = this.remoteTerminal.onStatusChange((status) => {
       switch (status) {
         case TerminalConnectionStatus.connected:
           this.handleSessionStarted();
