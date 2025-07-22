@@ -12,7 +12,13 @@ import {
   ViewChild,
 } from '@angular/core';
 import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
-import { Backend, displayControl, kdcProxyUrl, preConnectionBlob } from '@devolutions/iron-remote-desktop-rdp';
+import {
+  Backend,
+  displayControl,
+  kdcProxyUrl,
+  preConnectionBlob,
+  RdpConfigParser,
+} from '@devolutions/iron-remote-desktop-rdp';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -27,13 +33,15 @@ import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
+import { debounceTime, EMPTY, from, noop, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
+import { ActivatedRoute } from '@angular/router';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
+import { NavigationService } from '@shared/services/navigation.service';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -68,6 +76,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
+
+  rdpConfig: string | null;
 
   leftToolbarButtons = [
     {
@@ -145,6 +155,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   constructor(
     private renderer: Renderer2,
     protected utils: UtilsService,
+    private activatedRoute: ActivatedRoute,
+    private navigation: NavigationService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
     private webClientService: WebClientService,
@@ -160,7 +172,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   ngOnInit(): void {
+    console.log('RDP init');
     this.removeWebClientGuiElement();
+    this.setRdpConfig();
+    // Navigate to /session route to clear query params.
+    this.navigation.navigateToNewSession().then(noop);
   }
 
   ngAfterViewInit(): void {
@@ -175,6 +191,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     this.componentResizeObserverDisconnect?.();
 
     super.ngOnDestroy();
+  }
+
+  private setRdpConfig(): void {
+    const queryParams = this.activatedRoute.snapshot.queryParams;
+    this.rdpConfig = queryParams.config ?? null;
   }
 
   sendWindowsKey(): void {
@@ -336,11 +357,16 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private startConnectionProcess(): void {
-    this.getFormData()
+    const parameters = this.rdpConfig
+      ? this.parseRdpConfig(this.rdpConfig)
+      : this.getFormData().pipe(
+          switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
+          switchMap(() => this.fetchParameters(this.formData)),
+        );
+
+    parameters
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
-        switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.fetchTokens(params)),
         switchMap((params) => this.webClientService.generateKdcProxyUrl(params)),
         catchError((error) => {
@@ -381,6 +407,36 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       preConnectionBlob,
       kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88'),
     };
+    return of(connectionParameters);
+  }
+
+  private parseRdpConfig(config: string): Observable<IronRDPConnectionParameters> {
+    const configParser = new RdpConfigParser(atob(config));
+
+    const host = configParser.getStr('full address');
+    const port = configParser.getInt('server port');
+    const username = configParser.getStr('username');
+    const password = configParser.getStr('ClearTextPassword');
+    const kdcProxyUrl = configParser.getStr('kdcproxyurl');
+
+    const extractedUsernameDomain: ExtractedUsernameDomain = this.utils.string.extractDomain(username);
+
+    // TODO: Parse `DesktopSize` from config.
+    const screenSize: DesktopSize = this.webSessionService.getWebSessionScreenSizeSnapshot();
+
+    const connectionParameters: IronRDPConnectionParameters = {
+      username: extractedUsernameDomain.username,
+      password,
+      host,
+      port,
+      domain: extractedUsernameDomain.domain,
+      gatewayAddress: this.getWebSocketUrl(),
+      screenSize,
+      kdcProxyUrl,
+      // TODO: Parse from config.
+      enableDisplayControl: true,
+    };
+
     return of(connectionParameters);
   }
 

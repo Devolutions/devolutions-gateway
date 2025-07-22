@@ -71,7 +71,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
 
   private handleLoginResult(success: boolean): void {
     if (success) {
-      void this.navigationService.navigateToNewSession();
+      void this.navigationService.navigateToReturnUrl();
     } else {
       this.autoLoginAttempted = true;
     }

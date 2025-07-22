@@ -32,6 +32,15 @@ export class NavigationService {
     return this.router.navigateByUrl(NavigationService.SESSION_KEY);
   }
 
+  navigateToReturnUrl(): Promise<boolean> {
+    const returnUrl = this.activatedRoute.snapshot.queryParams.returnUrl;
+    if (returnUrl) {
+      return this.router.navigateByUrl(returnUrl);
+    }
+    // Navigate to a new session as a fallback.
+    return this.navigateToNewSession();
+  }
+
   navigateToRDPSession(connectionTypeRoute: WebClientSection, queryParams?: string) {
     const webClientUrl = `session/${connectionTypeRoute}` + (queryParams ?? '');
     return this.router.navigateByUrl(webClientUrl);
