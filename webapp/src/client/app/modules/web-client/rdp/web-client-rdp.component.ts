@@ -12,13 +12,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
-import {
-  Backend,
-  displayControl,
-  kdcProxyUrl,
-  preConnectionBlob,
-  RdpConfigParser,
-} from '@devolutions/iron-remote-desktop-rdp';
+import { Backend, displayControl, kdcProxyUrl, preConnectionBlob, RdpFile } from '@devolutions/iron-remote-desktop-rdp';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -411,13 +405,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private parseRdpConfig(config: string): Observable<IronRDPConnectionParameters> {
-    const configParser = new RdpConfigParser(atob(config));
+    const rdpFile = new RdpFile();
+    rdpFile.parse(atob(config));
 
-    const host = configParser.getStr('full address');
-    const port = configParser.getInt('server port');
-    const username = configParser.getStr('username');
-    const password = configParser.getStr('ClearTextPassword');
-    const kdcProxyUrl = configParser.getStr('kdcproxyurl');
+    const host = rdpFile.getStr('full address');
+    const port = rdpFile.getInt('server port');
+    const username = rdpFile.getStr('username');
+    const password = rdpFile.getStr('ClearTextPassword');
+    const kdcProxyUrl = rdpFile.getStr('kdcproxyurl');
 
     const extractedUsernameDomain: ExtractedUsernameDomain = this.utils.string.extractDomain(username);
 
