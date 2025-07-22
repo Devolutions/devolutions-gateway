@@ -180,9 +180,13 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
-          docker build -t "$ImageName" .
+          $Version = "${{ needs.preflight.outputs.version }}"          
+          $ImageName = "devolutions/devolutions-gateway:$Version"
+          $LatestImageName = "devolutions/devolutions-gateway:latest"
+          
+          docker build -t "$ImageName" -t "$LatestImageName" .
           echo "image-name=$ImageName" >> $Env:GITHUB_OUTPUT
+          echo "latest-image-name=$LatestImageName" >> $Env:GITHUB_OUTPUT
           Get-ChildItem -Recurse
 
       - name: Push container
@@ -193,11 +197,14 @@ jobs:
 
           echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
+          $DockerPushLatestCmd = 'docker push ${{ steps.build-container.outputs.latest-image-name }}'
           Write-Host $DockerPushCmd
+          Write-Host $DockerPushLatestCmd
 
           $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
           if (-Not $DryRun) {
             Invoke-Expression $DockerPushCmd
+            Invoke-Expression $DockerPushLatestCmd
           }
 
   github-release:
