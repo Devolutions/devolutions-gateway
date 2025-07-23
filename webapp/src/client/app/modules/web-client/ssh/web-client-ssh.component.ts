@@ -9,12 +9,8 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import {
-  LoggingLevel,
-  SSHTerminal,
-  loggingService as sshLoggingService,
-  TerminalConnectionStatus,
-} from '@devolutions/web-ssh-gui';
+import { LoggingLevel } from '@devolutions/terminal-shared';
+import { SSHTerminal, loggingService as sshLoggingService, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
 import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebClientBaseComponent, WebComponentReady } from '@shared/bases/base-web-client.component';
