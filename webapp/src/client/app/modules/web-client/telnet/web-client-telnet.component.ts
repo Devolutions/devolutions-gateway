@@ -121,7 +121,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   }
 
   private removeRemoteTerminalListener(): void {
-      this.unsubscribeTerminalEvent();
+    this.unsubscribeTerminalEvent();
   }
 
   private initializeStatus(): void {
