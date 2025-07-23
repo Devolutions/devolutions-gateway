@@ -1,5 +1,5 @@
 use std::mem::MaybeUninit;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -109,14 +109,36 @@ pub fn ping_range(
     Ok(receiver)
 }
 
-pub async fn ping(runtime: Arc<Socket2Runtime>, ip: impl Into<IpAddr>, duration: Duration) -> anyhow::Result<()> {
+pub async fn ping_addr(runtime: Arc<Socket2Runtime>, addr: impl ToSocketAddrs, duration: Duration) -> anyhow::Result<()> {
+    let socket_addr = addr.to_socket_addrs()?.next().context("Hostname not found")?; //TODO return proper error
+    let socket2_sockaddr: socket2::SockAddr = socket_addr.into();
+
     let socket = runtime.new_socket(
-        socket2::Domain::IPV4,
+        socket2_sockaddr.domain(),
         socket2::Type::RAW,
-        Some(socket2::Protocol::ICMPV4),
+        match socket_addr {
+            SocketAddr::V4(_) => Some(socket2::Protocol::ICMPV4),
+            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6)
+        },
     )?;
-    let addr = SocketAddr::new(ip.into(), 0);
-    timeout(duration, try_ping(addr.into(), socket)).await?
+
+    timeout(duration, try_ping(socket2_sockaddr, socket)).await?
+}
+
+pub async fn ping(runtime: Arc<Socket2Runtime>, ip: impl Into<IpAddr>, duration: Duration) -> anyhow::Result<()> {
+    let socket_addr = SocketAddr::new(ip.into(), 0);
+    let socket2_sockaddr: socket2::SockAddr = socket_addr.into();
+
+    let socket = runtime.new_socket(
+        socket2_sockaddr.domain(),
+        socket2::Type::RAW,
+        match socket_addr {
+            SocketAddr::V4(_) => Some(socket2::Protocol::ICMPV4),
+            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6)
+        },
+    )?;
+
+    timeout(duration, try_ping(socket2_sockaddr, socket)).await?
 }
 
 async fn try_ping(addr: socket2::SockAddr, mut socket: AsyncRawSocket) -> anyhow::Result<()> {
