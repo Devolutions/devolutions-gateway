@@ -349,8 +349,8 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "021e862c184ae977658b36c4500f7feac3221ca5da43e3f25bd04ab6c79a29b5"
 dependencies = [
- "axum-macros",
  "axum-core 0.5.2",
+ "axum-macros",
  "base64 0.22.1",
  "bytes 1.10.1",
  "form_urlencoded",
@@ -448,13 +448,13 @@ dependencies = [
 
 [[package]]
 name = "axum-macros"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
+checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
 dependencies = [
- "proc-macro2 1.0.94",
+ "proc-macro2 1.0.95",
  "quote 1.0.40",
- "syn 2.0.100",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -3658,13 +3658,19 @@ dependencies = [
 name = "network-monitor"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "camino",
+ "chrono",
  "devolutions-agent-shared",
+ "network-scanner",
+ "network-scanner-net",
  "serde",
  "serde_json",
  "tempdir",
  "thiserror 1.0.69",
+ "tokio 1.45.1",
  "tokio-test",
+ "tokio-util",
 ]
 
 [[package]]
@@ -6375,8 +6381,11 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.15.4",
  "pin-project-lite 0.2.16",
- "tokio 1.46.1",
+ "slab",
+ "tokio 1.45.1",
 ]
 
 [[package]]
