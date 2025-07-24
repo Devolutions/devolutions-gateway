@@ -78,6 +78,35 @@ public class JmuxClaims : IGatewayClaims
         }
     }
 
+    /// <summary>Modify all destinations to set the port to 0 (wildcard port).</summary>
+    public void HttpAllowAnyPort()
+    {
+        // Set the main destination port to 0
+        this.Destination = new TargetAddr(this.Destination.Scheme, this.Destination.Host, 0);
+
+        // Set all additional destinations ports to 0
+        if (this.AdditionalDestinations != null)
+        {
+            for (int i = 0; i < this.AdditionalDestinations.Count; i++)
+            {
+                var dest = this.AdditionalDestinations[i];
+                this.AdditionalDestinations[i] = new TargetAddr(dest.Scheme, dest.Host, 0);
+            }
+        }
+    }
+
+    /// <summary>Insert *:0 to allow any port for any destination.</summary>
+    public void HttpAllowAnything()
+    {
+        if (this.AdditionalDestinations is null)
+        {
+            this.AdditionalDestinations = new List<TargetAddr>();
+        }
+
+        this.AdditionalDestinations.Add(new TargetAddr("http", "*", 0));
+        this.AdditionalDestinations.Add(new TargetAddr("https", "*", 0));
+    }
+
     public string GetContentType()
     {
         return "JMUX";

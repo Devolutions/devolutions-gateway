@@ -83,6 +83,29 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void JmuxClaimsHttpAllowAnyPort()
+    {
+        const string EXPECTED = """{"dst_hst":"http://hello.world:0","dst_addl":["https://example.com:0","tcp://test.com:0"],"jet_ap":"http","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new JmuxClaims(gatewayId, "http://hello.world:80", ApplicationProtocol.Http, sessionId);
+        claims.AdditionalDestinations = new List<TargetAddr> { "https://example.com:443", "tcp://test.com:8080" };
+        claims.HttpAllowAnyPort();
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
+    public void JmuxClaimsHttpAllowAnything()
+    {
+        const string EXPECTED = """{"dst_hst":"http://hello.world:80","dst_addl":["http://*:0","https://*:0"],"jet_ap":"http","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new JmuxClaims(gatewayId, "http://hello.world", ApplicationProtocol.Http, sessionId);
+        claims.HttpAllowAnything();
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void AssociationClaims()
     {
         const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
