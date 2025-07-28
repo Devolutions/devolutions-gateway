@@ -6,7 +6,7 @@ use crate::token::{JmuxTokenClaims, RecordingPolicy};
 
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
-use jmux_proxy::JmuxProxy;
+use jmux_proxy::{FilteringRule, JmuxConfig, JmuxProxy};
 use tap::prelude::*;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
@@ -18,8 +18,6 @@ pub async fn handle(
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()> {
-    use jmux_proxy::{FilteringRule, JmuxConfig};
-
     match claims.jet_rec {
         RecordingPolicy::None | RecordingPolicy::Stream => (),
         RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
@@ -31,21 +29,7 @@ pub async fn handle(
 
     let main_destination_host = claims.hosts.first().clone();
 
-    let config = JmuxConfig {
-        filtering: FilteringRule::Any(
-            claims
-                .hosts
-                .into_iter()
-                .map(|addr| match (addr.host(), addr.port()) {
-                    ("*", 0) => FilteringRule::allow(),
-                    ("*", port) => FilteringRule::port(port),
-                    (host, 0) => FilteringRule::wildcard_host(host.to_owned()),
-                    (host, port) => FilteringRule::wildcard_host(host.to_owned()).and(FilteringRule::port(port)),
-                })
-                .collect(),
-        ),
-    };
-
+    let config = claims_to_jmux_config(&claims);
     debug!(?config, "JMUX config");
 
     let session_id = claims.jet_aid;
@@ -83,4 +67,22 @@ pub async fn handle(
     crate::session::remove_session_in_progress(&sessions, &subscriber_tx, session_id).await?;
 
     res
+}
+
+#[doc(hidden)] // Used in tests.
+pub fn claims_to_jmux_config(claims: &JmuxTokenClaims) -> JmuxConfig {
+    JmuxConfig {
+        filtering: FilteringRule::Any(
+            claims
+                .hosts
+                .iter()
+                .map(|addr| match (addr.host(), addr.port()) {
+                    ("*", 0) => FilteringRule::allow(),
+                    ("*", port) => FilteringRule::port(port),
+                    (host, 0) => FilteringRule::wildcard_host(host.to_owned()),
+                    (host, port) => FilteringRule::wildcard_host(host.to_owned()).and(FilteringRule::port(port)),
+                })
+                .collect(),
+        ),
+    }
 }
