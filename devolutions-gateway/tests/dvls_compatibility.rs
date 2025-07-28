@@ -112,6 +112,19 @@ fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
+mod as_of_v2025_2_6_0 {
+    use super::*;
+
+    #[rstest]
+    #[case::jmux(
+        "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpNVVgifQ.eyJkc3RfYWRkbCI6WyJodHRwczovL2xvY2FsaG9zdDo0NDMiLCJodHRwOi8vd3d3LmxvY2FsaG9zdDo4ODAwIiwiaHR0cHM6Ly93d3cubG9jYWxob3N0OjQ0MyJdLCJkc3RfaHN0IjoiaHR0cDovL2xvY2FsaG9zdDo4ODAwIiwiZXhwIjoxNzUzNjU4NDgxLCJpYXQiOjE3NTM2NTgxODEsImpldF9haWQiOiIyYzNjOGI4ZC0wZThlLTQwMGItYWVmMy1mM2U4ZjFhN2EzOTQiLCJqZXRfYXAiOiJodHRwIiwiamV0X2d3X2lkIjoiZGU0ZDMyODUtMjUzOS00NjhkLThlMmEtMTc1OWVjMDQyYTM3IiwianRpIjoiYTk3NWI4OGMtOGU5My00N2JkLThkNDQtY2QwZGI2YzViNGNmIiwibmJmIjoxNzUzNjU4MTgxfQ.g9yKXuH-A_oRlPaS6xcKddnzQZZ4XTnSFd_pzN-pPzbLAuxOpNyzkhOfSUEkday0Uh3Z2TQ2KxAnkG7zjvO6dKecv4xUamiU8gItuzhgHTzQQBqNsiu-t4rHvG1Ad83cXDzcuGMXiYHAxq4zqPrUN2atzkzXlF6eoG3mNQw8kNGrTCWWyAZgU1_Sjwuyd-MRATNdZt0cy3Awj6dMPCdGR3_oBTnLhPyqIAzfh_56bpUVlayy8u3HBFZo5Wj8uX8dbgN0izna-idvR85rWKqyBLpZUgeEctrk4UnM6Cz9kwCIxtQI5jTmi-U7UIGfggcbmyRWkoWvxr2tnBIPxSZDkA"
+    )]
+    fn samples(#[case] sample: &str) {
+        #[allow(deprecated)]
+        devolutions_gateway::token::unsafe_debug::dangerous_validate_token(sample, None).unwrap();
+    }
+}
+
 mod as_of_v2022_3_0_0 {
     use super::*;
     use proptest::collection::vec;
