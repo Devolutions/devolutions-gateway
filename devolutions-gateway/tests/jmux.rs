@@ -1,8 +1,7 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
-use expect_test::Expect;
-use expect_test::expect;
+use expect_test::{Expect, expect};
 
 fn check(sample: &str, expected: Expect) {
     #[allow(deprecated)]
