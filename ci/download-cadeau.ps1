@@ -7,7 +7,9 @@ param(
 
 	[Parameter(Mandatory=$true)]
 	[ValidateSet('x64', 'arm64')]
-	[string] $Architecture
+	[string] $Architecture,
+
+	[string] $VersionTag = "v2025.7.16.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +20,7 @@ $tmpFolder = [System.IO.Path]::GetTempPath() + [System.Guid]::NewGuid()
 Write-Host "Temporary directory: $tmpFolder"
 New-Item -ItemType Directory -Path "$tmpFolder" | Out-Null
 
-$downloadUrl = "https://github.com/Devolutions/cadeau/releases/download/v2025.2.21.0/cadeau-$Platform-$Architecture.zip"
+$downloadUrl = "https://github.com/Devolutions/cadeau/releases/download/$VersionTag/cadeau-$Platform-$Architecture.zip"
 Write-Host "Download URL: $downloadUrl"
 
 try
