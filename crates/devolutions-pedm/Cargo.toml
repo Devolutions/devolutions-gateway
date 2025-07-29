@@ -33,7 +33,7 @@ camino = { version = "1", features = ["serde1"] }
 async-trait = "0.1"
 tracing = "0.1"
 aide = { version = "0.14", features = ["axum", "axum-extra", "axum-json", "axum-tokio"] }
-tower-http = { version = "0.5", features = ["timeout"] }
+tower-http = { version = "0.6", features = ["timeout"] }
 parking_lot = "0.12"
 cfg-if = "1.0"
 uuid = "1"
