@@ -1254,6 +1254,7 @@ dependencies = [
  "smol_str",
  "sysinfo",
  "tap",
+ "tempdir",
  "terminal-streamer",
  "thiserror 2.0.12",
  "time",
@@ -3668,7 +3669,7 @@ dependencies = [
  "serde_json",
  "tempdir",
  "thiserror 1.0.69",
- "tokio 1.45.1",
+ "tokio 1.46.1",
  "tokio-test",
  "tokio-util",
 ]
@@ -6385,7 +6386,7 @@ dependencies = [
  "hashbrown 0.15.4",
  "pin-project-lite 0.2.16",
  "slab",
- "tokio 1.45.1",
+ "tokio 1.46.1",
 ]
 
 [[package]]

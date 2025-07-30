@@ -10,11 +10,10 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use camino::Utf8PathBuf;
+use camino::*;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
-use devolutions_agent_shared::get_data_dir;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
@@ -25,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 mod log_queue;
 mod state;
 
-use crate::state::State;
+pub use crate::state::State;
 
 
 #[derive(Error, Debug)]
@@ -40,7 +39,7 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
         .create(true)
         .write(true)
         .truncate(true)
-        .open(get_monitor_config_path())?;
+        .open(get_monitor_config_path(&state.cache_path))?;
 
     let mut config_write = state.config.write().await;
 
@@ -66,7 +65,11 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
             loop {
                 let start_time = Utc::now();
 
-                let monitor_result = do_ping_monitor(&definition_clone).await;
+                let monitor_result = match definition_clone.probe {
+                    ProbeType::Ping => do_ping_monitor(&definition_clone).await,
+                    ProbeType::TcpOpen => do_tcpopen_monitor(&definition_clone).await,
+                    ProbeType::Unknown(_) => return // TODO: shouldn't happen, they should be filtered out. Create a separate ProbeType enum without Unknown?
+                };
 
                 state.log.write(monitor_result);
 
@@ -108,7 +111,7 @@ async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
         ping::ping_addr(
             runtime,
-            definition.address.clone(),
+            format!("{hostname}:0", hostname = definition.address),
             Duration::from_secs(definition.timeout)
         ).await?;
         // TODO: send more than 1 ping packet
@@ -121,23 +124,35 @@ async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
             monitor_id: definition.id.clone(),
             request_start_time: start_time,
             response_success: true,
+            response_messages: None,
             response_time: time.as_seconds_f64()
         },
         Err(error) => MonitorResult { // TODO: store error in the result
             monitor_id: definition.id.clone(),
             request_start_time: start_time,
             response_success: false,
+            response_messages: Some(format!("{error:#}").into()),
             response_time: f64::INFINITY
         }
     };
 }
 
-pub fn flush_log(state: Arc<State>) -> VecDeque<MonitorResult> {
+async fn do_tcpopen_monitor(definition: &MonitorDefinition) -> MonitorResult {
+    MonitorResult {
+        monitor_id: definition.id.clone(),
+        request_start_time: Utc::now(),
+        response_success: false,
+        response_messages: Some("not implemented".into()),
+        response_time: f64::INFINITY
+    }
+}
+
+pub fn drain_log(state: Arc<State>) -> VecDeque<MonitorResult> {
     return state.log.drain();
 }
 
-fn get_monitor_config_path() -> Utf8PathBuf {
-    get_data_dir().join("monitors.json")
+fn get_monitor_config_path(cache_path: &Utf8PathBuf) -> Utf8PathBuf {
+    cache_path.join("monitors_cache.json")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -146,6 +161,12 @@ pub struct MonitorsConfig {
 }
 
 impl MonitorsConfig {
+    fn empty() -> MonitorsConfig {
+        MonitorsConfig {
+            monitors: Vec::new()
+        }
+    }
+
     fn mock() -> MonitorsConfig {
         MonitorsConfig { 
             monitors : vec![
@@ -186,6 +207,7 @@ pub struct MonitorResult {
     monitor_id: String,
     request_start_time: DateTime<Utc>,
     response_success: bool,
+    response_messages: Option<String>,
     response_time: f64
 }
 
@@ -201,11 +223,13 @@ mod tests {
     fn set_config_writes_to_disk() {
         let temp_dir = TempDir::new("dgw-network-monitor-test").expect("could not create temp dir");
 
-        std::env::set_var("DGATEWAY_CONFIG_PATH", temp_dir.path());
-
         let config = MonitorsConfig::mock();
 
-        let state = State::mock();
+        let temp_path: Utf8PathBuf = Utf8Path::from_path(temp_dir.path())
+            .expect("TempDir gave us a garbage path")
+            .to_path_buf();
+
+        let state = State::mock(temp_path);
 
         assert_ok!(tokio_test::block_on(set_config(config, state.into())));
 
