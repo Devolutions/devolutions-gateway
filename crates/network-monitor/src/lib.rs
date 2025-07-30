@@ -1,37 +1,33 @@
-extern crate serde_json;
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::fs;
 use std::future::Future;
 use std::io;
-use std::fs;
 use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+
 use camino::*;
-use chrono::DateTime;
-use chrono::TimeDelta;
-use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
+use chrono::{DateTime, TimeDelta, Utc};
+use serde::*;
 use thiserror::Error;
-use network_scanner::ping;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+
+use network_scanner::ping;
 
 mod log_queue;
 mod state;
 
 pub use crate::state::State;
 
-
 #[derive(Error, Debug)]
 #[error(transparent)]
 pub enum SetConfigError {
     Io(#[from] io::Error),
-    Serde(#[from] serde_json::Error)
+    Serde(#[from] serde_json::Error),
 }
 
 pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(), SetConfigError> {
@@ -48,43 +44,51 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
     let old_config = mem::replace(&mut *config_write, config);
 
     let new_config_set: HashSet<&MonitorDefinition> = config_write.monitors.iter().collect();
-    let old_config_set: HashSet<&MonitorDefinition>  = old_config.monitors.iter().collect();
+    let old_config_set: HashSet<&MonitorDefinition> = old_config.monitors.iter().collect();
 
     let added = new_config_set.difference(&old_config_set);
     let deleted = old_config_set.difference(&new_config_set);
 
-    let (new_cancellation_tokens, new_monitors): (Vec<(String, CancellationToken)>, Vec<Pin<Box<dyn Future<Output = ()> + Send>>>) = added.map(|definition| {
-        let cancellation_token = CancellationToken::new();
-        let cancellation_monitor = cancellation_token.clone();
+    let (new_cancellation_tokens, new_monitors): (
+        Vec<(String, CancellationToken)>,
+        Vec<Pin<Box<dyn Future<Output = ()> + Send>>>,
+    ) = added
+        .map(|definition| {
+            let cancellation_token = CancellationToken::new();
+            let cancellation_monitor = cancellation_token.clone();
 
-        let definition_clone = (*definition).clone(); // TODO: is there a nicer way to do this?
+            let definition_clone = (*definition).clone(); // TODO: is there a nicer way to do this?
 
-        let state = state.clone();
-    
-        let monitor  =  async move {
-            loop {
-                let start_time = Utc::now();
+            let state = state.clone();
 
-                let monitor_result = match definition_clone.probe {
-                    ProbeType::Ping => do_ping_monitor(&definition_clone).await,
-                    ProbeType::TcpOpen => do_tcpopen_monitor(&definition_clone).await,
-                    ProbeType::Unknown(_) => return // TODO: shouldn't happen, they should be filtered out. Create a separate ProbeType enum without Unknown?
-                };
+            let monitor = async move {
+                loop {
+                    let start_time = Utc::now();
 
-                state.log.write(monitor_result);
+                    let monitor_result = match definition_clone.probe {
+                        ProbeType::Ping => do_ping_monitor(&definition_clone).await,
+                        ProbeType::TcpOpen => do_tcpopen_monitor(&definition_clone).await,
+                        ProbeType::Unknown(_) => return, // TODO: shouldn't happen, they should be filtered out. Create a separate ProbeType enum without Unknown?
+                    };
 
-                let elapsed = Utc::now() - start_time;
-                let next_run_in = (definition_clone.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
-                select! {
-                    _ = cancellation_monitor.cancelled() => { () }
-                    _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { () }
+                    state.log.write(monitor_result);
+
+                    let elapsed = Utc::now() - start_time;
+                    let next_run_in =
+                        (definition_clone.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
+                    select! {
+                        _ = cancellation_monitor.cancelled() => { () }
+                        _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { () }
+                    }
                 }
-            }
-        };
+            };
 
-        return ((definition.id.clone(), cancellation_token), Box::pin(monitor) as Pin<Box<dyn Future<Output = ()> + Send>>);
-    })
-    .unzip();
+            return (
+                (definition.id.clone(), cancellation_token),
+                Box::pin(monitor) as Pin<Box<dyn Future<Output = ()> + Send>>,
+            );
+        })
+        .unzip();
 
     let mut cancellation_tokens_write = state.cancellation_tokens.lock().await;
 
@@ -106,18 +110,20 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
 
 async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
     let start_time = Utc::now();
-                
+
     let ping_result = async || -> anyhow::Result<TimeDelta> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
         ping::ping_addr(
             runtime,
             format!("{hostname}:0", hostname = definition.address),
-            Duration::from_secs(definition.timeout)
-        ).await?;
+            Duration::from_secs(definition.timeout),
+        )
+        .await?;
         // TODO: send more than 1 ping packet
 
         Ok(Utc::now() - start_time)
-    }().await;
+    }()
+    .await;
 
     return match ping_result {
         Ok(time) => MonitorResult {
@@ -125,15 +131,16 @@ async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
             request_start_time: start_time,
             response_success: true,
             response_messages: None,
-            response_time: time.as_seconds_f64()
+            response_time: time.as_seconds_f64(),
         },
-        Err(error) => MonitorResult { // TODO: store error in the result
+        Err(error) => MonitorResult {
+            // TODO: store error in the result
             monitor_id: definition.id.clone(),
             request_start_time: start_time,
             response_success: false,
             response_messages: Some(format!("{error:#}").into()),
-            response_time: f64::INFINITY
-        }
+            response_time: f64::INFINITY,
+        },
     };
 }
 
@@ -143,7 +150,7 @@ async fn do_tcpopen_monitor(definition: &MonitorDefinition) -> MonitorResult {
         request_start_time: Utc::now(),
         response_success: false,
         response_messages: Some("not implemented".into()),
-        response_time: f64::INFINITY
+        response_time: f64::INFINITY,
     }
 }
 
@@ -157,28 +164,24 @@ fn get_monitor_config_path(cache_path: &Utf8PathBuf) -> Utf8PathBuf {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MonitorsConfig {
-    monitors: Vec<MonitorDefinition>
+    monitors: Vec<MonitorDefinition>,
 }
 
 impl MonitorsConfig {
     fn empty() -> MonitorsConfig {
-        MonitorsConfig {
-            monitors: Vec::new()
-        }
+        MonitorsConfig { monitors: Vec::new() }
     }
 
     fn mock() -> MonitorsConfig {
-        MonitorsConfig { 
-            monitors : vec![
-                MonitorDefinition {
-                    id: "a".to_string(),
-                    probe: ProbeType::Ping,
-                    address: "c".to_string(),
-                    interval: 1,
-                    timeout: 2,
-                    port: Some(3)
-                }
-            ]
+        MonitorsConfig {
+            monitors: vec![MonitorDefinition {
+                id: "a".to_string(),
+                probe: ProbeType::Ping,
+                address: "c".to_string(),
+                interval: 1,
+                timeout: 2,
+                port: Some(3),
+            }],
         }
     }
 }
@@ -189,7 +192,7 @@ pub enum ProbeType {
     Ping,
     TcpOpen,
     #[serde(untagged)]
-    Unknown(String)
+    Unknown(String),
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, Serialize, Deserialize, Debug)]
@@ -199,7 +202,7 @@ pub struct MonitorDefinition {
     address: String,
     interval: u64,
     timeout: u64,
-    port: Option<i16>
+    port: Option<i16>,
 }
 
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
@@ -208,7 +211,7 @@ pub struct MonitorResult {
     request_start_time: DateTime<Utc>,
     response_success: bool,
     response_messages: Option<String>,
-    response_time: f64
+    response_time: f64,
 }
 
 #[cfg(test)]
