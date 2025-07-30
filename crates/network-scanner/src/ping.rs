@@ -111,7 +111,11 @@ pub fn ping_range(
     Ok(receiver)
 }
 
-pub async fn ping_addr(runtime: Arc<Socket2Runtime>, addr: impl ToSocketAddrs, duration: Duration) -> anyhow::Result<()> {
+pub async fn ping_addr(
+    runtime: Arc<Socket2Runtime>,
+    addr: impl ToSocketAddrs,
+    duration: Duration,
+) -> anyhow::Result<()> {
     let socket_addr = addr.to_socket_addrs()?.next().context("Hostname not found")?; //TODO return proper error
     let socket2_sockaddr: socket2::SockAddr = socket_addr.into();
 
@@ -120,7 +124,7 @@ pub async fn ping_addr(runtime: Arc<Socket2Runtime>, addr: impl ToSocketAddrs, d
         socket2::Type::RAW,
         match socket_addr {
             SocketAddr::V4(_) => Some(socket2::Protocol::ICMPV4),
-            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6)
+            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6),
         },
     )?;
 
@@ -136,7 +140,7 @@ pub async fn ping(runtime: Arc<Socket2Runtime>, ip: impl Into<IpAddr>, duration:
         socket2::Type::RAW,
         match socket_addr {
             SocketAddr::V4(_) => Some(socket2::Protocol::ICMPV4),
-            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6)
+            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6),
         },
     )?;
 
@@ -149,12 +153,13 @@ async fn try_ping(addr: socket2::SockAddr, mut socket: AsyncRawSocket) -> anyhow
 
     let packet_bytes = match addr.domain() {
         socket2::Domain::IPV4 => create_v4_echo_request()?.0.to_bytes(true),
-        socket2::Domain::IPV6 => Icmpv6Message::EchoRequest { 
+        socket2::Domain::IPV6 => Icmpv6Message::EchoRequest {
             identifier: 42,
-            sequence_number: 0, 
-            payload: vec![42,32] 
-        }.into(),
-        _ => return Err(anyhow::anyhow!("Can't ping a unix socket"))
+            sequence_number: 0,
+            payload: vec![42; 32],
+        }
+        .into(),
+        _ => return Err(anyhow::anyhow!("Can't ping a unix socket")),
     };
 
     socket.send_to(&packet_bytes, &addr).await?;

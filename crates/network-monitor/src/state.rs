@@ -7,7 +7,7 @@ pub struct State {
     pub(crate) cache_path: Utf8PathBuf,
     pub(crate) log: LogQueue<MonitorResult>,
     pub(crate) config: RwLock<MonitorsConfig>,
-    pub(crate) cancellation_tokens: Mutex<HashMap<String, CancellationToken>>
+    pub(crate) cancellation_tokens: Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl State {
@@ -16,7 +16,7 @@ impl State {
             cache_path: cache_path,
             log: LogQueue::new(),
             config: RwLock::new(MonitorsConfig::empty()),
-            cancellation_tokens: Mutex::new(HashMap::new())
+            cancellation_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -25,7 +25,7 @@ impl State {
             cache_path: cache_path,
             log: LogQueue::new(),
             config: RwLock::new(MonitorsConfig::mock()),
-            cancellation_tokens: Mutex::new(HashMap::new())
+            cancellation_tokens: Mutex::new(HashMap::new()),
         }
     }
 }

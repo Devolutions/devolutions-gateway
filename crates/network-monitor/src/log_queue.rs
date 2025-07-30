@@ -1,22 +1,22 @@
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::mem;
+use std::sync::Mutex;
 
 /// Thread-safe VecDeque which can be drained (consumed until empty) without blocking writers.
 pub(crate) struct LogQueue<T> {
-    entries: Mutex<VecDeque<T>>
+    entries: Mutex<VecDeque<T>>,
 }
 
 impl<T> LogQueue<T> {
     pub(crate) fn new() -> Self {
         LogQueue {
-            entries: Mutex::new(VecDeque::new())
+            entries: Mutex::new(VecDeque::new()),
         }
     }
 
     pub(crate) fn write(&self, data: T) {
         let mut entries = self.entries.lock().expect("Couldn't get LogQueue lock");
-        
+
         entries.push_back(data);
     }
 
