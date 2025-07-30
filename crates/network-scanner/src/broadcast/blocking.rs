@@ -6,7 +6,7 @@ use anyhow::Context;
 
 use network_scanner_proto::icmp_v4;
 
-use crate::create_echo_request;
+use crate::create_v4_echo_request;
 
 use super::BroadcastResponseEntry;
 
@@ -70,7 +70,7 @@ pub fn block_broadcast(ip: Ipv4Addr, read_time_out: Option<Duration>) -> anyhow:
 
     let addr = SocketAddr::new(ip.into(), 0);
 
-    let (packet, verifier) = create_echo_request()?;
+    let (packet, verifier) = create_v4_echo_request()?;
 
     trace!(?packet, "Sending packet");
     socket

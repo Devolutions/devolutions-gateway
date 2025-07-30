@@ -8,7 +8,7 @@ use network_scanner_net::runtime;
 use network_scanner_proto::icmp_v4;
 use socket2::SockAddr;
 
-use crate::create_echo_request;
+use crate::create_v4_echo_request;
 
 use super::BroadcastEvent;
 
@@ -30,7 +30,7 @@ pub async fn broadcast(
     socket.set_broadcast(true)?;
 
     // skip verification, we are not interested in the response
-    let (packet, _) = create_echo_request()?;
+    let (packet, _) = create_v4_echo_request()?;
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
 
     task_manager.spawn_no_sub_task(async move {
