@@ -1,6 +1,6 @@
 @use 'mixins';
-@use "variables";
-@use "theme-mode-variables";
+@use 'theme-mode-variables';
+@use 'variables';
 
 :host ::ng-deep .p-dropdown {
   width: 100%;
@@ -50,7 +50,7 @@
   font-style: normal;
   font-weight: 400;
   font-family: variables.$fontFamily;
-  color: mixins.$default-text-color !important;
+  color: theme-mode-variables.$default-text-color !important;
   line-height: 11px;
 }
 

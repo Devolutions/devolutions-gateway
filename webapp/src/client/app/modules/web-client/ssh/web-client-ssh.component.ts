@@ -1,5 +1,6 @@
 import {
   Component,
+  CUSTOM_ELEMENTS_SCHEMA,
   ElementRef,
   EventEmitter,
   Input,
@@ -10,28 +11,34 @@ import {
   ViewChild,
 } from '@angular/core';
 import { LoggingLevel } from '@devolutions/terminal-shared';
-import { SSHTerminal, loggingService as sshLoggingService, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
+import { loggingService as sshLoggingService, SSHTerminal, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
 import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
+import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebClientBaseComponent, WebComponentReady } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
+import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { DefaultSshPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
+import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
+import { WebClientFormComponent } from '../form/web-client-form.component';
 
 @Component({
   selector: 'gateway-web-client-ssh',
   templateUrl: 'web-client-ssh.component.html',
   styleUrls: ['web-client-ssh.component.scss'],
   providers: [MessageService],
+  standalone: true,
+  imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class WebClientSshComponent extends WebClientBaseComponent implements WebComponentReady, OnInit, OnDestroy {
   @Input() webSessionId: string;

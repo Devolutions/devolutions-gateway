@@ -5,15 +5,22 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { ButtonModule } from 'primeng/button';
+import { TooltipModule } from 'primeng/tooltip';
 import { noop } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { MainAppComponent } from '../main-app/main-app.component';
+import { MenuGroupListItemComponent } from './menu-group-list-item/menu-group-list-item.component';
+import { MenuListActiveSessionsComponent } from './menu-list-active-sessions/menu-list-active-sessions.component';
+import { MenuListItemComponent } from './menu-list-item/menu-list-item.component';
 import { RouterMenuItem } from './model/router-menu-item.model';
 
 @Component({
   selector: 'app-menu',
   templateUrl: './app-menu.component.html',
   styleUrls: ['app-menu.component.scss'],
+  standalone: true,
+  imports: [MenuGroupListItemComponent, MenuListItemComponent, MenuListActiveSessionsComponent, ButtonModule, TooltipModule]
 })
 export class AppMenuComponent extends BaseComponent implements OnInit {
   isAutoLoginOn = false;

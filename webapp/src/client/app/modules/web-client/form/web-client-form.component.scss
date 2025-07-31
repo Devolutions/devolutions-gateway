@@ -1,6 +1,6 @@
 @use 'mixins';
-@use "variables";
-@use "theme-mode-variables";
+@use 'theme-mode-variables';
+@use 'variables';
 
 :host {
   --box-background-color: white;
@@ -134,7 +134,7 @@ rdp-form, ssh-form, vnc-form, ard-form {
   font-style: normal;
   font-weight: 400;
   font-family: variables.$fontFamily;
-  color: mixins.$default-text-color !important;
+  color: theme-mode-variables.$default-text-color !important;
   line-height: 11px;
 }
 

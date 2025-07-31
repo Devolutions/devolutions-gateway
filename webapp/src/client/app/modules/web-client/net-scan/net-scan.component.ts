@@ -1,10 +1,15 @@
+import { CommonModule } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component } from '@angular/core';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
+import { ButtonModule } from 'primeng/button';
+import { TooltipModule } from 'primeng/tooltip';
 
 @Component({
   selector: 'app-net-scan',
   templateUrl: './net-scan.component.html',
   styleUrls: ['./net-scan.component.scss'],
+  standalone: true,
+  imports: [CommonModule, ButtonModule, TooltipModule]
 })
 export class NetScanComponent implements AfterViewInit {
   services: NetScanEntry[] = [];
@@ -14,7 +19,7 @@ export class NetScanComponent implements AfterViewInit {
   constructor(
     private netscanService: NetScanService,
     private cd: ChangeDetectorRef,
-  ) {}
+  ) { }
 
   ngAfterViewInit(): void {
     this.startScan();

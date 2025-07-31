@@ -8,25 +8,36 @@ import {
   Output,
   SimpleChanges,
 } from '@angular/core';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.interfaces';
 import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { BaseSessionComponent, SessionType, WebSession } from '@shared/models/web-session.model';
-import { StorageService } from '@shared/services/utils/storage.service';
 import { UtilsService } from '@shared/services/utils.service';
+import { StorageService } from '@shared/services/utils/storage.service';
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Message } from 'primeng/api';
+import { ToastMessageOptions } from 'primeng/api';
+import { AutoCompleteModule } from 'primeng/autocomplete';
+import { ButtonModule } from 'primeng/button';
+import { MessageModule } from 'primeng/message';
+import { SelectModule } from 'primeng/select';
+import { TooltipModule } from 'primeng/tooltip';
 import { EMPTY, forkJoin, Observable, of } from 'rxjs';
 import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
+import { ArdFormComponent } from './form-components/ard/ard-form.component';
+import { RdpFormComponent } from './form-components/rdp/rdp-form.component';
+import { SshFormComponent } from './form-components/ssh/ssh-form.component';
+import { VncFormComponent } from './form-components/vnc/vnc-form.component';
 
 @Component({
   selector: 'web-client-form',
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
+  standalone: true,
+  imports: [ReactiveFormsModule, RdpFormComponent, SshFormComponent, VncFormComponent, ArdFormComponent, AutoCompleteModule, ButtonModule, MessageModule, SelectModule, TooltipModule]
 })
 export class WebClientFormComponent extends BaseSessionComponent implements OnInit, OnChanges {
   @Input() isFormExists = false;
@@ -42,7 +53,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   protocolOptions: SelectItemWithTooltip[];
   protocolSelectedTooltip = '';
 
-  messages: Message[] = [];
+  messages: ToastMessageOptions[] = [];
 
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
@@ -68,7 +79,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes.error && this.error) {
-      this.displayErrorMessages(this.error);
+      this.displayErrorToastMessageOptionss(this.error);
     }
   }
 
@@ -239,16 +250,16 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
-  private addMessages(newMessages: Message[]): void {
-    const areThereNewMessages: boolean = newMessages.some(
+  private addToastMessageOptionss(newToastMessageOptionss: ToastMessageOptions[]): void {
+    const areThereNewToastMessageOptionss: boolean = newToastMessageOptionss.some(
       (newMsg) =>
         !this.messages.some(
           (existingMsg) => existingMsg.summary === newMsg.summary && existingMsg.detail === newMsg.detail,
         ),
     );
 
-    if (areThereNewMessages) {
-      this.messages = [...this.messages, ...newMessages];
+    if (areThereNewToastMessageOptionss) {
+      this.messages = [...this.messages, ...newToastMessageOptionss];
     }
   }
 
@@ -256,12 +267,12 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return this.connectSessionForm.get('protocol').value;
   }
 
-  private displayErrorMessages(error): void {
+  private displayErrorToastMessageOptionss(error): void {
     const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error.kind ?? error);
     const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error.backtrace ?? '');
 
     setTimeout(() => {
-      this.addMessages([
+      this.addToastMessageOptionss([
         {
           severity: 'error',
           summary: formattedSummary,

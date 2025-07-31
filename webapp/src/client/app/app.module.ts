@@ -18,8 +18,8 @@ import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { SharedModule } from '@shared/shared.module';
 import { AutoCompleteModule } from 'primeng/autocomplete';
-import { SidebarModule } from 'primeng/sidebar';
-import { TabView, TabViewModule } from 'primeng/tabview';
+import { DrawerModule } from 'primeng/drawer';
+import { TabsModule } from 'primeng/tabs';
 import { ToastModule } from 'primeng/toast';
 // Components
 import { AppComponent } from './app.component';
@@ -36,7 +36,20 @@ const routerOptions: ExtraOptions = {
 };
 
 @NgModule({
-  declarations: [
+  declarations: [],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  exports: [],
+  bootstrap: [],
+  imports: [
+    FormsModule,
+    BrowserModule,
+    BrowserAnimationsModule,
+    RouterModule.forRoot(routes, routerOptions),
+    SharedModule,
+    DrawerModule,
+    ToastModule,
+    TabsModule,
+    AutoCompleteModule,
     AppComponent,
     LoginComponent,
     MainAppComponent,
@@ -47,20 +60,6 @@ const routerOptions: ExtraOptions = {
     MenuGroupListItemComponent,
     GatewayAlertMessageComponent,
   ],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  exports: [],
-  bootstrap: [AppComponent],
-  imports: [
-    FormsModule,
-    BrowserModule,
-    BrowserAnimationsModule,
-    RouterModule.forRoot(routes, routerOptions),
-    SharedModule,
-    SidebarModule,
-    ToastModule,
-    TabViewModule,
-    AutoCompleteModule,
-  ],
   providers: [
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
     { provide: APP_BASE_HREF, useValue: '/jet/webapp/client/' },
@@ -70,8 +69,7 @@ const routerOptions: ExtraOptions = {
     WebSessionService,
     WebClientService,
     SshKeyService,
-    TabView,
     provideHttpClient(withInterceptorsFromDi()),
   ],
 })
-export class AppModule {}
+export class AppModule { }

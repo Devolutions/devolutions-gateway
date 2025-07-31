@@ -1,5 +1,6 @@
 import {
   Component,
+  CUSTOM_ELEMENTS_SCHEMA,
   ElementRef,
   EventEmitter,
   Input,
@@ -9,33 +10,39 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
+import {
+  LoggingLevel,
+  loggingService as telnetLoggingService,
+  TelnetTerminal,
+  TerminalConnectionStatus,
+} from '@devolutions/web-telnet-gui';
+import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
+import { DVL_TELNET_ICON, DVL_WARNING_ICON, JET_TELNET_URL } from '@gateway/app.constants';
+import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
+import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { TelnetFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { UtilsService } from '@shared/services/utils.service';
+import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { DefaultTelnetPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
+import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
-import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
-import {
-  LoggingLevel,
-  TelnetTerminal,
-  TerminalConnectionStatus,
-  loggingService as telnetLoggingService,
-} from '@devolutions/web-telnet-gui';
-import { DVL_TELNET_ICON, DVL_WARNING_ICON, JET_TELNET_URL } from '@gateway/app.constants';
-import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import { WebClientFormComponent } from '../form/web-client-form.component';
 
 @Component({
   templateUrl: 'web-client-telnet.component.html',
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],
+  standalone: true,
+  imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA]
 })
 export class WebClientTelnetComponent extends WebClientBaseComponent implements OnInit, OnDestroy {
   @Input() webSessionId: string;
