@@ -1,3 +1,5 @@
+@use 'mixins';
+
 .p-datascroller-content {
-  @include custom-scrollbar()
+  @include mixins.custom-scrollbar()
 }

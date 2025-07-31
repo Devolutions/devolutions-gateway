@@ -1,3 +1,7 @@
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
+
 .p-autocomplete {
   width: 100%;
 
@@ -8,13 +12,13 @@
   &.p-autocomplete-dd {
     .p-autocomplete-input {
       padding-right: 2em;
-      border-top-right-radius: $borderRadius;
-      border-bottom-right-radius: $borderRadius;
+      border-top-right-radius: variables.$borderRadius;
+      border-bottom-right-radius: variables.$borderRadius;
     }
 
     .p-inputtext:enabled:focus + .p-autocomplete-dropdown {
       .pi {
-        color: $input-txt-border-focus-color;
+        color: theme-mode-variables.$input-txt-border-focus-color;
       }
     }
 
@@ -28,24 +32,24 @@
   .p-autocomplete-dropdown {
     width: 2em;
     background: transparent !important;
-    background: $input-txt-bg-color;
-    color: $dropdown-trigger-color;
+    background: theme-mode-variables.$input-txt-bg-color;
+    color: theme-mode-variables.$dropdown-trigger-color;
     border: 0 none;
     position: absolute;
     right: 0;
     top: 4px;
 
-    @include transition(color $transitionDuration);
+    @include mixins.transition(color variables.$transitionDuration);
 
     &:enabled:hover:not(.p-disabled):not([disabled]) {
-      color: $input-txt-border-focus-color;
+      color: theme-mode-variables.$input-txt-border-focus-color;
     }
   }
 
   &.p-autocomplete-multiple {
     .p-autocomplete-multiple-container:not(.p-disabled).p-focus + .p-autocomplete-dropdown {
       .pi {
-        color: $input-txt-border-focus-color;
+        color: theme-mode-variables.$input-txt-border-focus-color;
       }
     }
 
@@ -53,11 +57,11 @@
       padding: .429em;
 
       &:not(.p-disabled):hover {
-        border-color: $input-txt-border-focus-color;
+        border-color: theme-mode-variables.$input-txt-border-focus-color;
       }
 
       &:not(.p-disabled).p-focus {
-        border-color: $input-txt-border-focus-color;
+        border-color: theme-mode-variables.$input-txt-border-focus-color;
       }
 
       .p-autocomplete-input-token {
@@ -66,16 +70,16 @@
 
         input {
           border: none;
-          color: $default-text-color;
-          font-family: $fontFamily;
-          font-size: $fontSize;
+          color: theme-mode-variables.$default-text-color;
+          font-family: variables.$fontFamily;
+          font-size: variables.$fontSize;
           padding: 0;
           margin: 0;
         }
       }
 
       .p-autocomplete-token {
-        font-size: $fontSize;
+        font-size: variables.$fontSize;
         padding-right: 8px;
         line-height: 24px;
         background: var(--input-chips-bg-color);
@@ -95,13 +99,13 @@
 }
 
 .p-autocomplete-panel {
-  background-color: $dropdown-bg-color;
-  border: 1px solid $dropdown-overlay-border-color;
-  box-shadow: $defaultBoxShadow;
+  background-color: theme-mode-variables.$dropdown-bg-color;
+  border: 1px solid theme-mode-variables.$dropdown-overlay-border-color;
+  box-shadow: variables.$defaultBoxShadow;
   margin-top: -1px; /* hack to simulate a thin line */
-  border-radius: 0 0 $borderRadius $borderRadius;
+  border-radius: 0 0 variables.$borderRadius variables.$borderRadius;
 
-  @include custom-scrollbar();
+  @include mixins.custom-scrollbar();
 
   .p-autocomplete-items {
     padding: 0;
@@ -118,9 +122,9 @@
       align-items: center;
       display: flex;
       margin: 0;
-      padding: $listItemPadding;
-      color: $default-text-color;
-      @include border-radius(0);
+      padding: variables.$listItemPadding;
+      color: theme-mode-variables.$default-text-color;
+      @include mixins.border-radius(0);
 
       .user-or-group-container {
         display: flex;
@@ -128,18 +132,18 @@
         padding: 5px 0;
 
         label {
-          @include text-ellipsis();
+          @include mixins.text-ellipsis();
           width: 100%;
           margin-left: 10px;
           line-height: 1.6;
-          color: $grid-txt-color;
+          color: theme-mode-variables.$grid-txt-color;
         }
       }
     }
 
     .p-autocomplete-item:hover, .p-autocomplete-item.p-highlight {
-      background-color: $dropdown-user-group-selected-bg-hover-color;
-      color: $default-text-color;
+      background-color: theme-mode-variables.$dropdown-user-group-selected-bg-hover-color;
+      color: theme-mode-variables.$default-text-color;
     }
   }
 }
@@ -178,7 +182,7 @@
   .p-autocomplete-token {
     margin: 2px;
 
-    @include transition(ease-in-out background-color .15s, ease-in-out color .15s);
+    @include mixins.transition(ease-in-out background-color .15s, ease-in-out color .15s);
 
     > div {
       margin-right: 5px;
@@ -190,7 +194,7 @@
       vertical-align: middle;
       color: var(--input-chips-icon-color);
 
-      @include transition(ease-in-out color .15s);
+      @include mixins.transition(ease-in-out color .15s);
     }
 
     &:hover:not(:disabled) {
@@ -217,7 +221,7 @@
     width: 100%;
     max-height: 160px;
 
-    @include custom-scrollbar();
+    @include mixins.custom-scrollbar();
   }
 }
 
@@ -233,6 +237,6 @@
   }
 
   .p-autocomplete-dropdown {
-    border-color: $default-btn-bg-pressed-color;
+    border-color: theme-mode-variables.$default-btn-bg-pressed-color;
   }
 }

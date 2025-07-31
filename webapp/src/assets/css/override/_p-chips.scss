@@ -1,4 +1,6 @@
-@import 'mixins';
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
 
 .p-chips {
   width: 100%;
@@ -8,18 +10,18 @@
     padding: 5px 8px;
 
     &:hover {
-      border: 1px solid $input-txt-border-hover-color;
+      border: 1px solid theme-mode-variables.$input-txt-border-hover-color;
       transition: border-color 0.3s ease 0s;
     }
 
     &:focus {
-      box-shadow: 0 3px 6px 0 $input-txt-shadow-color;
-      border: 1px solid $input-txt-border-focus-color;
+      box-shadow: 0 3px 6px 0 theme-mode-variables.$input-txt-shadow-color;
+      border: 1px solid theme-mode-variables.$input-txt-border-focus-color;
     }
 
     .p-chips-input-token {
       input {
-        font-size: $fontSize;
+        font-size: variables.$fontSize;
         padding: 0;
         margin: 0;
         border: none;
@@ -39,7 +41,7 @@
 
     .p-chips-token {
       background-color: var(--input-chips-bg-color);
-      border-radius: $borderRadius;
+      border-radius: variables.$borderRadius;
       color: var(--input-chips-txt-color);
       display: inline-flex;
       font-size: 14px;
@@ -53,14 +55,14 @@
       &-label {
         width: 100%;
 
-        @include text-ellipsis();
+        @include mixins.text-ellipsis();
 
         & + .p-chips-token-icon {
           margin-left: .4em;
         }
       }
 
-      @include transition(ease-in-out background-color .15s, ease-in-out color .15s);
+      @include mixins.transition(ease-in-out background-color .15s, ease-in-out color .15s);
 
       i.dvl-icon {
         font-size: 16px;
@@ -76,8 +78,8 @@
         vertical-align: middle;
         color: var(--input-chips-icon-color);
 
-        @include transition(ease-in-out color .15s);
-        @include override-font("\e93f");
+        @include mixins.transition(ease-in-out color .15s);
+        @include mixins.override-font("\e93f");
       }
 
       &:hover:not(:disabled) {

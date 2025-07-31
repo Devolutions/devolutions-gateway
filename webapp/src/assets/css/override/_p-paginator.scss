@@ -1,3 +1,5 @@
+@use 'variables';
+
 .p-paginator .p-paginator-first,
 .p-paginator .p-paginator-prev,
 .p-paginator .p-paginator-next,
@@ -18,13 +20,13 @@
 }
 
 .p-paginator .p-paginator-first {
-  border-top-left-radius: $borderRadius;
-  border-bottom-left-radius: $borderRadius;
+  border-top-left-radius: variables.$borderRadius;
+  border-bottom-left-radius: variables.$borderRadius;
 }
 
 .p-paginator .p-paginator-last {
-  border-top-right-radius: $borderRadius;
-  border-bottom-right-radius: $borderRadius;
+  border-top-right-radius: variables.$borderRadius;
+  border-bottom-right-radius: variables.$borderRadius;
 }
 
 .p-paginator .p-dropdown {
@@ -86,4 +88,3 @@ p-dropdown[styleclass="p-paginator-rpp-options"] {
     }
   }
 }
-

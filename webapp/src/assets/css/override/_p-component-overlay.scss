@@ -1,5 +1,8 @@
+@use 'theme-mode-variables';
+@use 'variables';
+
 .p-component-overlay {
-  background-color: $overlay-bg-color;
+  background-color: theme-mode-variables.$overlay-bg-color;
   transition-duration: 0.2s;
   z-index: 1;
 }
@@ -17,13 +20,13 @@
     background-color: transparent;
   }
   to {
-    background-color: $overlay-bg-color;
+    background-color: theme-mode-variables.$overlay-bg-color;
   }
 }
 
 @keyframes p-component-overlay-leave-animation {
   from {
-    background-color: $overlay-bg-color;
+    background-color: theme-mode-variables.$overlay-bg-color;
   }
   to {
     background-color: transparent;

@@ -1,5 +1,5 @@
-@import '../../../../assets/css/style/mixins';
-@import '../../../../assets/css/style/variables';
+@use 'mixins';
+@use 'variables';
 
 :host {
   --box-background-color: white;
@@ -146,7 +146,7 @@
 :host ::ng-deep .btn-login {
     width: 100%;
     padding: 10px;
-    background-color: $default-btn-bg-color;
+    background-color: mixins.$default-btn-bg-color;
     color: white;
     border: none;
     border-radius: 4px;
@@ -154,7 +154,7 @@
 }
 
 :host ::ng-deep .btn-login:hover {
-  background-color: $default-btn-bg-hover-color;
+  background-color: mixins.$default-btn-bg-hover-color;
 }
 
 .form-helper-text {

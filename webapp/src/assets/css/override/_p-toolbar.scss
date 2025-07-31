@@ -1,8 +1,11 @@
+@use 'theme-mode-variables';
+@use 'variables';
+
 body {
   .p-toolbar {
     background-color: transparent;
-    border-color: $layout-container-admin-border-color;
-    padding: $headerPadding;
+    border-color: theme-mode-variables.$layout-container-admin-border-color;
+    padding: variables.$headerPadding;
 
     .p-toolbar-seperator {
       vertical-align: middle;
@@ -12,12 +15,12 @@ body {
 
   .dashboard-toolbar {
     height: 50px;
-    background-color: $dashboard-card-bg-color;
+    background-color: theme-mode-variables.$dashboard-card-bg-color;
   }
 
   .card-toolbar {
     height: auto;
-    background-color: $dashboard-card-bg-color !important;
+    background-color: theme-mode-variables.$dashboard-card-bg-color !important;
     padding: 0 0 0 1px;
     border: none;
   }
