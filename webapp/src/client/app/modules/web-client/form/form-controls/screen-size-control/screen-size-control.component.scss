@@ -1,6 +1,6 @@
 @use 'mixins';
-@use "variables";
-@use "theme-mode-variables";
+@use 'variables';
+@use 'theme-mode-variables';
 
 :host ::ng-deep .p-dropdown {
   width: 100%;

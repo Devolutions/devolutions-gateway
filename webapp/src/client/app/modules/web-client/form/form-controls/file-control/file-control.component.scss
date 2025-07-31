@@ -1,6 +1,6 @@
 @use 'mixins';
-@use "variables";
-@use "theme-mode-variables";
+@use 'variables';
+@use 'theme-mode-variables';
 
 ::ng-deep p-fileUpload .p-fileupload-content .p-progressbar {
   display: none !important;
