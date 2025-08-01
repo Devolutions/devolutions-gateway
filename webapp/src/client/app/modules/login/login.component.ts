@@ -21,7 +21,7 @@ import { catchError, takeUntil } from 'rxjs/operators';
 })
 export class LoginComponent extends BaseComponent implements OnInit {
   loginForm: FormGroup;
-  messages: ToastMessageOptions[] = [];
+  message: ToastMessageOptions = {};
   showPassword = false;
   autoLoginAttempted = false;
 
@@ -52,7 +52,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   }
 
   onSubmit(): void {
-    this.messages = [];
+    this.message = {};
     const submittedData = this.loginForm.value;
 
     this.authService.login(submittedData.username, submittedData.password).subscribe({
@@ -84,12 +84,12 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private handleAutoLoginError(error: HttpErrorResponse): Observable<boolean> {
     if (error?.status !== 401) {
       console.error('Auto login:', error);
-      this.addToastMessageOptionss([
+      this.addMessage(
         {
           severity: 'error',
           detail: error.message,
         },
-      ]);
+      );
     }
     return of(false);
   }
@@ -101,22 +101,20 @@ export class LoginComponent extends BaseComponent implements OnInit {
       //For translation 'InvalidUserNameOrPasswordPleaseVerifyYourCredentials'
       message = 'Invalid username or password, please verify your credentials';
     }
-    this.addToastMessageOptionss([
+    this.addMessage(
       {
         severity: 'error',
         summary: 'Error', //For translation lblError
         detail: message,
       },
-    ]);
+    );
     console.error('Login Error', error);
   }
 
-  private addToastMessageOptionss(messages: ToastMessageOptions[]) {
-    this.messages = [];
-    if (messages?.length > 0) {
-      for (const message of messages) {
-        this.messages.push(message);
-      }
+  private addMessage(message: ToastMessageOptions) {
+    this.message = {};
+    if (message.text?.length > 0) {
+      this.message = message;
     }
   }
 }
