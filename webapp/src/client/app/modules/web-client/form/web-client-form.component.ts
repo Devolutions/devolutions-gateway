@@ -79,7 +79,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes.error && this.error) {
-      this.displayErrorToastMessageOptionss(this.error);
+      this.displayErrorMessages(this.error);
     }
   }
 
@@ -250,16 +250,16 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
-  private addToastMessageOptionss(newToastMessageOptionss: ToastMessageOptions[]): void {
-    const areThereNewToastMessageOptionss: boolean = newToastMessageOptionss.some(
+  private addMessages(newMessages: ToastMessageOptions[]): void {
+    const areThereNewToastMessageOptions: boolean = newMessages.some(
       (newMsg) =>
         !this.messages.some(
           (existingMsg) => existingMsg.summary === newMsg.summary && existingMsg.detail === newMsg.detail,
         ),
     );
 
-    if (areThereNewToastMessageOptionss) {
-      this.messages = [...this.messages, ...newToastMessageOptionss];
+    if (areThereNewToastMessageOptions) {
+      this.messages = [...this.messages, ...newMessages];
     }
   }
 
@@ -267,12 +267,12 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return this.connectSessionForm.get('protocol').value;
   }
 
-  private displayErrorToastMessageOptionss(error): void {
+  private displayErrorMessages(error): void {
     const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error.kind ?? error);
     const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error.backtrace ?? '');
 
     setTimeout(() => {
-      this.addToastMessageOptionss([
+      this.addMessages([
         {
           severity: 'error',
           summary: formattedSummary,

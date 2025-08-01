@@ -6,8 +6,9 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          @if (messages.length > 0) {
-          <p-message [escape]="false" [closable]="false">{{ messages }}</p-message>
+          <!-- TODO: check styling of multiple messages after migration to PrimeNG 20-->
+          @for(message of messages; track message.text) {
+          <p-message [escape]="false" [closable]="false">{{ message.text }}</p-message>
           }
         </div>
         <div class="box-content grid nomargin nopad">
