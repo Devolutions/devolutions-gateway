@@ -6,7 +6,9 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          <p-message *ngIf="messages.length > 0" [escape]="false" [closable]="false">{{ messages }}</p-message>
+          @if (messages.length > 0) {
+          <p-message [escape]="false" [closable]="false">{{ messages }}</p-message>
+          }
         </div>
         <div class="box-content grid nomargin nopad">
           <div class="col-4 gateway-form-group col-pad-right-lg">
@@ -32,26 +34,31 @@
                   (completeMethod)="filterHostname($event)" required></p-autoComplete>
               </span>
             </div>
-            <div class="form-helper-text"
-              *ngIf="connectSessionForm.get('autoComplete').hasError('required') && connectSessionForm.get('autoComplete').touched">
+            @if (connectSessionForm.get('autoComplete').hasError('required') &&
+            connectSessionForm.get('autoComplete').touched) {
+            <div class="form-helper-text">
               Hostname is required.
             </div>
+            }
           </div>
 
-          <rdp-form class="col-12" *ngIf="isSelectedProtocolRdp()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></rdp-form>
+          @if (isSelectedProtocolRdp()) {
+          <rdp-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></rdp-form>
+          }
 
           <!--// No telnet component required. KAH March 8, 2024 -->
 
-          <ssh-form class="col-12" *ngIf="isSelectedProtocolSsh()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></ssh-form>
+          @if (isSelectedProtocolSsh()) {
+          <ssh-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></ssh-form>
+          }
 
-          <vnc-form class="col-12" *ngIf="isSelectedProtocolVnc()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></vnc-form>
+          @if (isSelectedProtocolVnc()) {
+          <vnc-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></vnc-form>
+          }
 
-          <ard-form class="col-12" *ngIf="isSelectedProtocolArd()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></ard-form>
-
+          @if (isSelectedProtocolArd()) {
+          <ard-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></ard-form>
+          }
 
           <div class="col-12 gateway-form-group">
             <p-button [disabled]="!canConnect()" [type]="'submit'" [label]="'Connect Session'"

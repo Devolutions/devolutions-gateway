@@ -1,4 +1,4 @@
-import { KeyValue } from '@angular/common';
+import { KeyValue, KeyValuePipe } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { ApiService } from '@gateway/shared/services/api.service';
 import { BaseComponent } from '@shared/bases/base.component';
@@ -20,7 +20,7 @@ import { RouterMenuItem } from './model/router-menu-item.model';
   templateUrl: './app-menu.component.html',
   styleUrls: ['app-menu.component.scss'],
   standalone: true,
-  imports: [MenuGroupListItemComponent, MenuListItemComponent, MenuListActiveSessionsComponent, ButtonModule, TooltipModule]
+  imports: [KeyValuePipe, MenuGroupListItemComponent, MenuListItemComponent, MenuListActiveSessionsComponent, ButtonModule, TooltipModule]
 })
 export class AppMenuComponent extends BaseComponent implements OnInit {
   isAutoLoginOn = false;

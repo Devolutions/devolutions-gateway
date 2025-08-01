@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import { Tooltip, TooltipModule } from 'primeng/tooltip';
+import { TooltipModule } from 'primeng/tooltip';
 
 @Component({
   selector: 'gateway-menu-group-list-item',

@@ -1,30 +1,30 @@
-<div
-  class="menu-group-list-item"
-  [class.accordion]="accordion"
-  [class.hasHeader]="hasHeader"
-  [class.isSlim]="isMenuSlim"
-  [class.closed]="isClosed">
+<div class="menu-group-list-item" [class.accordion]="accordion" [class.hasHeader]="hasHeader"
+  [class.isSlim]="isMenuSlim" [class.closed]="isClosed">
 
-  <div
-    *ngIf="hasHeader"
-    class="menu-group-list-header"
-    [class.menu-group-list-header--slim]="isMenuSlim"
-    (click)="onToggleMenuGroupList($event)"
-    (mouseover)="onMenuGroupMouseOver()"
-    (mouseleave)="onMenuGroupMouseLeave()">
+  @if (hasHeader) {
+  <div class="menu-group-list-header" [class.menu-group-list-header--slim]="isMenuSlim"
+    (click)="onToggleMenuGroupList($event)" (mouseover)="onMenuGroupMouseOver()" (mouseleave)="onMenuGroupMouseLeave()">
 
-    <ng-container *ngIf="accordion">
-      <i class="dvl-icon" [class.dvl-icon-arrow-up]="isClosed" [class.dvl-icon-arrow-down]="!isClosed"> </i>
+    @if (accordion) {
+    <i class="dvl-icon" [class.dvl-icon-arrow-up]="isClosed" [class.dvl-icon-arrow-down]="!isClosed">
+    </i>
 
-      <ng-container *ngIf="isMenuSlim">
-        <i class="dvl-icon" [ngClass]="accordionIcon" [pTooltip]="title"></i>
-      </ng-container>
-    </ng-container>
-    <span *ngIf="title && !isMenuSlim">{{ title }}</span>
+    @if (isMenuSlim) {
+    <i class="dvl-icon" [ngClass]="accordionIcon" [pTooltip]="title">
+    </i>
+    }
+    }
+
+    @if (title && !isMenuSlim) {
+    <span>{{ title }}</span>
+    }
   </div>
+  }
 
-  <div class="menu-group-list-body" *ngIf="!isClosed">
+  @if (!isClosed) {
+  <div class="menu-group-list-body">
     <ng-content></ng-content>
   </div>
+  }
 
 </div>

@@ -14,7 +14,7 @@ import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-clien
 import { BaseComponent } from '@shared/bases/base.component';
 import { ComponentForSession, SessionDataTypeMap, SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { TabPanel, Tabs, TabsModule } from 'primeng/tabs';
+import { Tabs, TabsModule } from 'primeng/tabs';
 import { takeUntil } from 'rxjs/operators';
 import { DynamicTabComponent } from '../dynamic-tab/dynamic-tab.component';
 import { MainPanelComponent } from '../main-panel/main-panel.component';

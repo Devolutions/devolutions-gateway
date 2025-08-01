@@ -1,15 +1,11 @@
 <div [formGroup]="parentForm">
   <label for="kdcUrl">KDC Server URL</label>
   <div class="gateway-form-input">
-    <input pInputText
-           id="kdcUrl"
-           type="text"
-           autocomplete="on"
-           placeholder="Enter KDC Url"
-           formControlName="kdcUrl"/>
+    <input pInputText id="kdcUrl" type="text" autocomplete="on" placeholder="Enter KDC Url" formControlName="kdcUrl" />
   </div>
-  <div class="form-helper-text"
-       *ngIf="parentForm.get('kdcUrl').hasError('invalidKdcProtocol') && parentForm.get('kdcUrl').touched">
+  @if (parentForm.get('kdcUrl').hasError('invalidKdcProtocol') && parentForm.get('kdcUrl').touched) {
+  <div class="form-helper-text">
     Invalid URL - Must start with tcp:// or udp:// .
   </div>
+  }
 </div>

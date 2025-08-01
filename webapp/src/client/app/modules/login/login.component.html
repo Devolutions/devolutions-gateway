@@ -1,9 +1,9 @@
-<div id="gateway-loading" *ngIf="!autoLoginAttempted">
+@if (!autoLoginAttempted) {
+<div id="gateway-loading">
   <i class="dvl-icon dvl-icon-logo-gateway"></i>
 </div>
-
-<div *ngIf="autoLoginAttempted" class="login-background">
-
+} @else {
+<div class="login-background">
   <div class="login-box">
     <div class="login-box-header">
       <svg width="161" height="60" viewBox="0 0 161 60" fill="none" xmlns="http://www.w3.org/2000/svg"
@@ -25,7 +25,9 @@
       </span>
       <div class="login-form-message">
         <!-- TODO: check if this is the same after PrimeNG v20 migration -->
-        <p-message *ngIf="messages.length > 0" [closable]="false">{{ messages }}</p-message>
+        @if (messages.length > 0) {
+        <p-message [closable]="false">{{ messages }}</p-message>
+        }
       </div>
       <form name="login-form" [formGroup]="loginForm" autocomplete="on">
         <div class="login-form-content grid nomargin nopad">
@@ -35,10 +37,11 @@
               <input pInputText id="username" type="text" autocomplete="username" placeholder="Enter username"
                 formControlName="username" required />
             </div>
-            <div class="form-helper-text" *ngIf="loginForm.get('username').hasError('required') &&
-                    loginForm.get('username').touched">
+            @if (loginForm.get('username').hasError('required') && loginForm.get('username').touched) {
+            <div class="form-helper-text">
               Username is required.
             </div>
+            }
           </div>
 
           <div class="col-12 gateway-form-group">
@@ -51,10 +54,11 @@
                 <i (click)="toggleShowPassword()" class="dvl-icon dvl-icon-view"></i>
               </span>
             </div>
-            <div class="form-helper-text" *ngIf="loginForm.get('password').hasError('required') &&
-                    loginForm.get('password').touched">
+            @if (loginForm.get('password').hasError('required') && loginForm.get('password').touched) {
+            <div class="form-helper-text">
               Password is required.
             </div>
+            }
           </div>
 
           <div class="col-12 gateway-form-group">
@@ -68,3 +72,4 @@
     </div>
   </div>
 </div>
+}

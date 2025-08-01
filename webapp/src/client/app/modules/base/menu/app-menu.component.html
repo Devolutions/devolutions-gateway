@@ -37,8 +37,10 @@
 
   <!-- Primary -->
   <gateway-menu-group-list-item class="primary-menu-group-list" [accordion]="false">
-    <gateway-menu-list-item *ngFor="let menuKVP of mainMenus | keyvalue: asIsOrder" [label]="menuKVP.value.label"
-      [icon]="menuKVP.value.icon" [iconOnly]="isMenuSlim"></gateway-menu-list-item>
+    @for (menuKVP of mainMenus | keyvalue: asIsOrder; track menuKVP.key) {
+    <gateway-menu-list-item [label]="menuKVP.value.label" [icon]="menuKVP.value.icon" [iconOnly]="isMenuSlim">
+    </gateway-menu-list-item>
+    }
 
     <gateway-menu-list-active-sessions [isMenuSlim]="isMenuSlim">
     </gateway-menu-list-active-sessions>
@@ -52,23 +54,28 @@
   </gateway-menu-group-list-item>
 
   <!-- Logout -->
-  <gateway-menu-group-list-item *ngIf="!isAutoLoginOn" class="primary-menu-group-list" [accordion]="false">
-
+  @if (!isAutoLoginOn) {
+  <gateway-menu-group-list-item class="primary-menu-group-list" [accordion]="false">
     <div class="footer-group-list">
       <div class="menu-list-item footer-menu-list" [pTooltip]="isMenuSlim ? 'Logout' : ''"
         [tooltipDisabled]="!isMenuSlim" (click)="logout()">
         <i class="dvl-icon dvl-icon-logout"></i>
-        <span *ngIf="!isMenuSlim" class="menu-list-item-label">Logout</span>
+        @if (!isMenuSlim) {
+        <span class="menu-list-item-label">Logout</span>
+        }
       </div>
     </div>
   </gateway-menu-group-list-item>
+  }
 
   <div class="dgw-version">
     <label for="version">
       {{ version }}
     </label>
     <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
-      <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion()"></i>
+      @if (hasNewVersion()) {
+      <i class="dvl-icon dvl-icon-download download-icon"></i>
+      }
     </a>
   </div>
 
