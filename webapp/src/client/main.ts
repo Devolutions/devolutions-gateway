@@ -1,8 +1,8 @@
 import { APP_BASE_HREF } from '@angular/common';
 import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
-import { bootstrapApplication } from '@angular/platform-browser';
+import { bootstrapApplication, } from '@angular/platform-browser';
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { AuthInterceptor } from '@gateway/app-auth.interceptor';
-import { GatewayAlertMessageComponent } from '@shared/components/gateway-alert-message/gateway-alert-message.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { LoadingService } from '@shared/services/loading.service';
 // Services
@@ -30,5 +30,6 @@ bootstrapApplication(AppComponent, {
     MessageService,
     provideHttpClient(withInterceptorsFromDi()),
     provideRouter(routes),
+    provideAnimationsAsync(),
   ],
 }).catch(err => console.error(err));
