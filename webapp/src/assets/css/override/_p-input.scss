@@ -1,22 +1,26 @@
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
+
 body .p-inputtext {
   padding: 5px 0 5px 8px;
   line-height: 24px;
 }
 
 .p-inputtext {
-  color: $input-txt-color;
-  font-size: $fontSize;
+  color: theme-mode-variables.$input-txt-color;
+  font-size: variables.$fontSize;
   background: var(--input-txt-bg-color);
   padding: .429em;
-  border: 1px solid $input-txt-border-color;
-  @include transition(box-shadow $transitionDuration, border-color $transitionDuration);
-  @include border-radius($borderRadius);
+  border: 1px solid theme-mode-variables.$input-txt-border-color;
+  @include mixins.transition(box-shadow variables.$transitionDuration, border-color variables.$transitionDuration);
+  @include mixins.border-radius(variables.$borderRadius);
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
 
   &:enabled:hover:not(.p-state-error) {
-    border-color: $input-txt-border-hover-color;
+    border-color: theme-mode-variables.$input-txt-border-hover-color;
   }
 
   &.read-only {

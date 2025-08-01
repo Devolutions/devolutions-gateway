@@ -1,9 +1,12 @@
 <div #sessionsContainer class="tabview-container" [ngClass]="{'session-background': addBackgroundClass()}">
-    <p-tabView #tabView class="hidden-tab-headers">
-        <p-tabPanel *ngFor="let tab of webSessionTabs;">
-            <web-client-dynamic-tab [webSessionTab]="tab"
-                                    [sessionsContainerElement]="sessionsContainerRef"
-                                    (componentRefSizeChange)="measureSize()"></web-client-dynamic-tab>
-        </p-tabPanel>
-    </p-tabView>
+  <!-- TODO: check tab styling-->
+  <p-tabs #tabView class="hidden-tab-headers" [(value)]="activeIndex">
+    @for (tab of webSessionTabs; track tab.id) {
+    <p-tabpanel>
+      <web-client-dynamic-tab [webSessionTab]="tab" [sessionsContainerElement]="sessionsContainerRef"
+        (componentRefSizeChange)="measureSize()">
+      </web-client-dynamic-tab>
+    </p-tabpanel>
+    }
+  </p-tabs>
 </div>

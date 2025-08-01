@@ -1,3 +1,7 @@
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
+
 :root {
   --table-padding: 0.5em;
 }
@@ -30,20 +34,20 @@
   box-shadow: inset 0 -2px 0 var(--grid-header-title-txt-color);
   padding: 0.5em;
   text-align: left;
-  color: $grid-header-title-txt-color;
+  color: theme-mode-variables.$grid-header-title-txt-color;
   font-weight: 600;
 }
 
 .p-datatable-tbody {
   > tr {
-    background: $grid-main-row-bg-color;
+    background: theme-mode-variables.$grid-main-row-bg-color;
 
     > td:not(.empty-message) {
       background: inherit;
-      box-shadow: inset 1px -1px 0 $grid-item-border-color;
+      box-shadow: inset 1px -1px 0 theme-mode-variables.$grid-item-border-color;
 
       &:last-child {
-        border-right: 1px solid $grid-item-border-color;
+        border-right: 1px solid theme-mode-variables.$grid-item-border-color;
       }
 
       &:not(.col-actions):not(.col-main-actions):not(.col-message) {
@@ -57,13 +61,13 @@
     }
 
     &:nth-child(even) {
-      background-color: $grid-child-row-bg-color;
+      background-color: theme-mode-variables.$grid-child-row-bg-color;
     }
 
     &.user--disabled,
     &.vault--disabled {
-      color: $grid-disabled-txt-color;
-      background: $grid-disabled-row-bg-color;
+      color: theme-mode-variables.$grid-disabled-txt-color;
+      background: theme-mode-variables.$grid-disabled-row-bg-color;
 
       > td {
         &:not(.col-actions):not(.col-main-actions) {
@@ -76,13 +80,13 @@
 
   > tr.p-highlight,
   > tr:nth-child(even).p-highlight {
-    background-color: $paginator-active-bg-color;
-    color: $secondary-text-color;
+    background-color: theme-mode-variables.$paginator-active-bg-color;
+    color: theme-mode-variables.$secondary-text-color;
   }
 
   .p-datatable-hoverable-rows & > tr:not(.p-highlight):hover {
     cursor: default;
-    background-color: $grid-row-hover-bg-color;
+    background-color: theme-mode-variables.$grid-row-hover-bg-color;
   }
 }
 
@@ -100,7 +104,7 @@
 
 .p-datatable-thead,
 .p-datatable-tfoot {
-  background-color: $page-header-bg-color;
+  background-color: theme-mode-variables.$page-header-bg-color;
 }
 
 .p-datatable-thead > tr > th > *,
@@ -149,7 +153,7 @@
 
 .empty-message {
   font-style: italic;
-  color: $disabled-text-color;
+  color: theme-mode-variables.$disabled-text-color;
   margin: 0;
   border: none !important;
   white-space: nowrap;
@@ -184,7 +188,7 @@ body .edit-dialog-table {
 
 .p-datatable-caption,
 .p-datatable-summary {
-  padding: $headerPadding;
+  padding: variables.$headerPadding;
   text-align: center;
   font-weight: bold;
 }
@@ -202,43 +206,43 @@ body .edit-dialog-table {
 }
 
 .p-sortable-column {
-  color: $default-text-color;
+  color: theme-mode-variables.$default-text-color;
 
   .p-sortable-column-icon {
-    color: $lighter-default-text-color;
+    color: theme-mode-variables.$lighter-default-text-color;
     font-size: 18px;
   }
 
   .p-datatable-tbody &.p-highlight {
-    background-color: $default-btn-bg-color;
-    color: $secondary-text-color;
-    border-top-color: $default-btn-bg-color;
+    background-color: theme-mode-variables.$default-btn-bg-color;
+    color: theme-mode-variables.$secondary-text-color;
+    border-top-color: theme-mode-variables.$default-btn-bg-color;
 
     .p-sortable-column-icon {
-      color: $secondary-text-color;
+      color: theme-mode-variables.$secondary-text-color;
     }
   }
 }
 
 .p-sortable-column:not(.p-highlight):hover {
-  color: $grid-txt-color;
+  color: theme-mode-variables.$grid-txt-color;
 
   .p-sortable-column-icon {
     background: transparent;
-    color: $grid-txt-color;
+    color: theme-mode-variables.$grid-txt-color;
   }
 
   a:hover {
     background-color: transparent;
-    color: $grid-txt-color;
+    color: theme-mode-variables.$grid-txt-color;
   }
 }
 
 .p-column-filter-overlay {
-  background-color: $overlay-panel-bg-color;
+  background-color: theme-mode-variables.$overlay-panel-bg-color;
   color: var(--side-panel-text-color);
-  border-radius: $borderRadius;
-  box-shadow: $defaultBoxShadow;
+  border-radius: variables.$borderRadius;
+  box-shadow: variables.$defaultBoxShadow;
   min-width: 12.5rem;
   margin-top: 10px;
   margin-left: -30px;
@@ -349,8 +353,8 @@ p-columnfilter {
 
 .p-column-filter-overlay {
   border: 0 none;
-  border-radius: $borderRadius;
-  box-shadow: $defaultBoxShadow;
+  border-radius: variables.$borderRadius;
+  box-shadow: variables.$defaultBoxShadow;
   min-width: 12.5rem;
 }
 
@@ -381,18 +385,18 @@ p-columnfilter {
   padding: 1rem;
   border-bottom: 1px solid var(--hr-color);
   margin: 0;
-  border-top-right-radius: $borderRadius;
-  border-top-left-radius: $borderRadius;
+  border-top-right-radius: variables.$borderRadius;
+  border-top-left-radius: variables.$borderRadius;
 }
 
 .p-column-filter-row-item:hover:first-child {
-  border-top-right-radius: $borderRadius;
-  border-top-left-radius: $borderRadius;
+  border-top-right-radius: variables.$borderRadius;
+  border-top-left-radius: variables.$borderRadius;
 }
 
 .p-column-filter-row-item:hover:last-child {
-  border-bottom-right-radius: $borderRadius;
-  border-bottom-left-radius: $borderRadius;
+  border-bottom-right-radius: variables.$borderRadius;
+  border-bottom-left-radius: variables.$borderRadius;
 }
 
 .p-column-filter-overlay-menu .p-column-filter-constraint {
@@ -433,7 +437,7 @@ p-columnfilter {
   .p-datatable-thead > tr {
     th {
       background-color: var(--layout-container-bg-color);
-      @include sticky();
+      @include mixins.sticky();
     }
 
     &.secondary-color > th {
@@ -450,10 +454,10 @@ p-columnfilter {
     flex-direction: column;
 
     .p-datatable-wrapper {
-      @include custom-scrollbar();
+      @include mixins.custom-scrollbar();
 
       thead {
-        @include sticky();
+        @include mixins.sticky();
 
         // Change table header background color when in dialog
         .p-dialog & {
@@ -483,7 +487,7 @@ p-columnfilter {
   .table-style-v2 {
     .p-datatable-header {
       background-color: var(--grid-header-bg-color);
-      border-color: $grid-item-border-color;
+      border-color: theme-mode-variables.$grid-item-border-color;
     }
 
     .p-datatable-thead,

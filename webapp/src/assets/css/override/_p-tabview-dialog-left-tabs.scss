@@ -1,3 +1,7 @@
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
+
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li:not(.p-highlight):not(.p-disabled):hover,
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li.p-highlight {
   background-color: transparent;
@@ -5,7 +9,7 @@ body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li.p-highlight {
 
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li:not(.p-highlight):not(.p-disabled):hover a,
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li.p-highlight a {
-  color: $admin-item-bg-active-color;
+  color: theme-mode-variables.$admin-item-bg-active-color;
 }
 
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li a {
@@ -23,8 +27,8 @@ body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li a {
     z-index: 100;
     align-items: center;
     justify-content: space-between;
-    background: $page-header-bg-color;
-    @include custom-scrollbar()
+    background: theme-mode-variables.$page-header-bg-color;
+    @include mixins.custom-scrollbar()
   }
   .p-tabview-left>.p-tabview-panels {
     width: 100%;
