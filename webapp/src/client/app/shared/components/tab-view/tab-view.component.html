@@ -1,4 +1,5 @@
 <div #sessionsContainer class="tabview-container" [ngClass]="{'session-background': addBackgroundClass()}">
+  <!-- TODO: check tab styling-->
   <p-tabs #tabView class="hidden-tab-headers" [(value)]="activeIndex">
     @for (tab of webSessionTabs; track tab.id) {
     <p-tabpanel>
