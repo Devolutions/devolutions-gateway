@@ -715,6 +715,21 @@ jobs:
           name: bom.json
           path: bom.json
 
+      - name: Install devolutions toolbox
+        uses: devolutions/actions/toolbox-install@v1
+        with:
+          github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN  }}
+
+      - name: Upload SBOM to OneDrive Releases
+        uses: devolutions/actions/onedrive-upload@v1
+        with:
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+          conflict_behavior: replace
+          destination_path: /Gateway/${{ needs.preflight.outputs.version }}
+          remote: releases
+          source_path: bom.json
+
       # - name: Upload SBOM to Dependency-Track
       #   uses: ./.github/workflows/dtrack-upload-sbom
       #   with:
