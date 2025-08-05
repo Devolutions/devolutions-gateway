@@ -712,8 +712,8 @@ jobs:
       - name: Save SBOM
         uses: actions/upload-artifact@v4
         with:
-          name: bom.xml
-          path: bom.xml
+          name: bom.json
+          path: bom.json
 
       # - name: Upload SBOM to Dependency-Track
       #   uses: ./.github/workflows/dtrack-upload-sbom
