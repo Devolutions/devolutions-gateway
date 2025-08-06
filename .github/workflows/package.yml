@@ -712,10 +712,6 @@ jobs:
           name: bom.json
           path: bom.json
 
-      - name: Install devolutions toolbox
-        uses: devolutions/actions/toolbox-install@v1
-        with:
-          github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN  }}
 
       - name: Upload SBOM to OneDrive Releases
         uses: ./.github/workflows/onedrive-upload
