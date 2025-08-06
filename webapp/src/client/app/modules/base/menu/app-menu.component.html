@@ -4,25 +4,31 @@
       <svg width="39" height="39" viewBox="0 0 39 39" fill="none" xmlns="http://www.w3.org/2000/svg">
         <g id="Devolutions Gateway logo">
           <path
-            d="M36.0491 9.12978L37.1189 4.52832L32.0489 5.75411C30.5804 5.01745 28.9549 4.61174 27.2936 4.57274C24.2066 4.50015 21.2963 5.6642 19.109 7.85145L0.806641 26.1858L7.41172 26.4425L2.74581 31.1084L12.5619 31.3869L17.2224 36.0474L21.8818 31.3874C22.0286 31.3879 22.7485 31.3939 22.9516 31.3939C25.2104 31.3939 27.4447 31.187 29.9396 28.6921L34.7903 23.8414C38.8333 19.799 39.2986 13.5438 36.0491 9.12978Z" fill="white"/>
+            d="M36.0491 9.12978L37.1189 4.52832L32.0489 5.75411C30.5804 5.01745 28.9549 4.61174 27.2936 4.57274C24.2066 4.50015 21.2963 5.6642 19.109 7.85145L0.806641 26.1858L7.41172 26.4425L2.74581 31.1084L12.5619 31.3869L17.2224 36.0474L21.8818 31.3874C22.0286 31.3879 22.7485 31.3939 22.9516 31.3939C25.2104 31.3939 27.4447 31.187 29.9396 28.6921L34.7903 23.8414C38.8333 19.799 39.2986 13.5438 36.0491 9.12978Z"
+            fill="white" />
           <path
             d="M33.8481 9.57661C33.8378 9.56523 33.8264 9.5544 33.8161 9.54302L34.6714 6.97715L31.8499 7.91748C30.4795 7.07194 28.9065 6.59961 27.2484 6.56061C24.7048 6.50102 22.3165 7.45761 20.5188 9.25594L5.3418 24.46L12.2313 24.4383L7.27176 29.3978H17.2303L15.309 31.3191L17.2243 33.2344L21.0604 29.3978L22.9535 29.4049C24.9967 29.4049 26.5811 29.2391 28.5349 27.2859L33.3855 22.4352C36.9562 18.8635 37.1598 13.2155 33.8481 9.57661ZM31.4696 20.5199L26.619 25.3705C25.4068 26.5828 24.637 26.6971 22.9422 26.696L21.4369 25.1907L19.9381 26.6895H13.8102L16.0738 24.4259L19.293 24.4269C21.3172 24.4567 22.914 24.4806 24.9041 22.4905L24.9978 22.3968C27.379 20.0151 27.555 16.2261 25.3975 13.7702C24.4572 12.6999 23.2244 12.0011 21.8578 11.7492L22.4346 11.1713C23.7032 9.90269 25.39 9.22561 27.185 9.26948C28.9785 9.31173 30.6333 10.0684 31.8455 11.4004C34.1428 13.924 33.9743 18.0158 31.4696 20.5199ZM11.8927 21.7305L18.3602 15.2516C19.0378 14.6423 19.904 14.3249 20.8253 14.3546C21.8079 14.3866 22.7093 14.8134 23.3625 15.5571C24.5802 16.9433 24.4572 19.1067 23.083 20.4809L22.9893 20.5746C21.8556 21.7083 21.2321 21.7452 19.5443 21.7219L22.2234 19.0428L21.0745 17.8939L17.2541 21.7143L15.7174 21.7192L20.3086 17.128L19.1597 15.9791L13.411 21.7257L11.8927 21.7305ZM27.0106 10.4904C27.6086 10.4904 28.094 10.9757 28.094 11.5737C28.094 12.1717 27.6086 12.6571 27.0106 12.6571C26.4126 12.6571 25.9273 12.1717 25.9273 11.5737C25.9273 10.9757 26.4126 10.4904 27.0106 10.4904Z"
-            fill="#1E1F24"/>
+            fill="#1E1F24" />
         </g>
       </svg>
 
     </div>
-    <div class="title" *ngIf="!isMenuSlim">
+    @if (!isMenuSlim) {
+    <div class="title">
       <span class="header">Devolutions</span>
       <span class="sub-header">Gateway</span>
     </div>
+    }
 
     <div class="menu-mode-toggler" (click)="onMenuModeTogglerClick()">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <g id="sidebar">
-          <path id="Vector" d="M12.6667 2H3.33333C2.59695 2 2 2.59695 2 3.33333V12.6667C2 13.403 2.59695 14 3.33333 14H12.6667C13.403 14 14 13.403 14 12.6667V3.33333C14 2.59695 13.403 2 12.6667 2Z" stroke="#78797C" stroke-linecap="round" stroke-linejoin="round"/>
-          <path id="Vector_2" d="M4 2V14" stroke="#78797C" stroke-linecap="round" stroke-linejoin="round"/>
-          <path id="Rectangle 386" d="M2 4C2 2.89543 2.89543 2 4 2H5V14H4C2.89543 14 2 13.1046 2 12V4Z" fill="#78797C"/>
+          <path id="Vector"
+            d="M12.6667 2H3.33333C2.59695 2 2 2.59695 2 3.33333V12.6667C2 13.403 2.59695 14 3.33333 14H12.6667C13.403 14 14 13.403 14 12.6667V3.33333C14 2.59695 13.403 2 12.6667 2Z"
+            stroke="#78797C" stroke-linecap="round" stroke-linejoin="round" />
+          <path id="Vector_2" d="M4 2V14" stroke="#78797C" stroke-linecap="round" stroke-linejoin="round" />
+          <path id="Rectangle 386" d="M2 4C2 2.89543 2.89543 2 4 2H5V14H4C2.89543 14 2 13.1046 2 12V4Z"
+            fill="#78797C" />
         </g>
       </svg>
 
@@ -31,49 +37,47 @@
 
   <!-- Primary -->
   <gateway-menu-group-list-item class="primary-menu-group-list" [accordion]="false">
-    <gateway-menu-list-item *ngFor="let menuKVP of mainMenus | keyvalue: asIsOrder"
-                            [label]="menuKVP.value.label"
-                            [icon]="menuKVP.value.icon"
-                            [iconOnly]="isMenuSlim"></gateway-menu-list-item>
+    @for (menuKVP of mainMenus | keyvalue: asIsOrder; track menuKVP.key) {
+    <gateway-menu-list-item [label]="menuKVP.value.label" [icon]="menuKVP.value.icon" [iconOnly]="isMenuSlim">
+    </gateway-menu-list-item>
+    }
 
     <gateway-menu-list-active-sessions [isMenuSlim]="isMenuSlim">
     </gateway-menu-list-active-sessions>
 
     <div class="menu-list-item">
-      <p-button [type]="'button'"
-                [icon]="isMenuSlim ? 'dvl-icon dvl-icon-add' : ''"
-                [label]="!isMenuSlim ? 'New Session' : ''"
-                [pTooltip]="isMenuSlim ? 'New Session' : ''"
-                (click)="onClickGoToNewSessionTab()">
+      <p-button [type]="'button'" [icon]="isMenuSlim ? 'dvl-icon dvl-icon-add' : ''"
+        [label]="!isMenuSlim ? 'New Session' : ''" [pTooltip]="isMenuSlim ? 'New Session' : ''"
+        (click)="onClickGoToNewSessionTab()">
       </p-button>
     </div>
   </gateway-menu-group-list-item>
 
   <!-- Logout -->
-  <gateway-menu-group-list-item
-    *ngIf="!isAutoLoginOn"
-    class="primary-menu-group-list"
-    [accordion]="false">
-
+  @if (!isAutoLoginOn) {
+  <gateway-menu-group-list-item class="primary-menu-group-list" [accordion]="false">
     <div class="footer-group-list">
-      <div class="menu-list-item footer-menu-list"
-           [pTooltip]="isMenuSlim ? 'Logout' : ''"
-           [tooltipDisabled]="!isMenuSlim"
-           (click)="logout()">
+      <div class="menu-list-item footer-menu-list" [pTooltip]="isMenuSlim ? 'Logout' : ''"
+        [tooltipDisabled]="!isMenuSlim" (click)="logout()">
         <i class="dvl-icon dvl-icon-logout"></i>
-        <span *ngIf="!isMenuSlim" class="menu-list-item-label">Logout</span>
+        @if (!isMenuSlim) {
+        <span class="menu-list-item-label">Logout</span>
+        }
       </div>
     </div>
   </gateway-menu-group-list-item>
+  }
 
-    <div class="dgw-version">
-      <label for="version">
-        {{ version }}
-      </label>
-        <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
-          <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion()"></i>
-        </a>
-    </div>
-    
+  <div class="dgw-version">
+    <label for="version">
+      {{ version }}
+    </label>
+    <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
+      @if (hasNewVersion()) {
+      <i class="dvl-icon dvl-icon-download download-icon"></i>
+      }
+    </a>
+  </div>
+
 
 </div>

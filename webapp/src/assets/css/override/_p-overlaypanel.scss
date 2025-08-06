@@ -1,3 +1,6 @@
+@use 'theme-mode-variables';
+@use 'variables';
+
 .overlay-menu-with-switch {
   min-width: 150px;
   max-width: 300px;
@@ -17,10 +20,10 @@
 }
 
 .p-overlaypanel {
-  background-color: $overlay-panel-bg-color;
+  background-color: theme-mode-variables.$overlay-panel-bg-color;
   color: var(--side-panel-text-color);
-  border-radius: $borderRadius;
-  box-shadow: $defaultBoxShadow;
+  border-radius: variables.$borderRadius;
+  box-shadow: variables.$defaultBoxShadow;
 
   &.no-margin {
     margin-top: 0;

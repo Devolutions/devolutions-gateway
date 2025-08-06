@@ -1,23 +1,25 @@
 <div #sessionTelnetContainer id="web-telnet-terminal-app">
 
-  <div *ngIf="currentStatus.isDisabled" class="session-form">
-    <web-client-form
-      [webSessionId]="webSessionId"
-      [inputFormData]="formData"
-      [error]="clientError"
-      [isFormExists]="true"></web-client-form>
+  @if (currentStatus.isDisabled) {
+  <div class="session-form">
+    <web-client-form [webSessionId]="webSessionId" [inputFormData]="formData" [error]="clientError"
+      [isFormExists]="true">
+    </web-client-form>
   </div>
+  }
 
-  <session-toolbar
-    [sessionContainerParent]="sessionContainerElement"
-    [rightButtons]="rightToolbarButtons">
+  <session-toolbar [sessionContainerParent]="sessionContainerElement" [rightButtons]="rightToolbarButtons">
   </session-toolbar>
 
-  <div class="loading-info-container" *ngIf="loading">
+  @if (loading) {
+  <div class="loading-info-container">
     <div class="loading-info">
-      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
+      @if (!hideSpinnerOnly) {
+      <p-progressSpinner></p-progressSpinner>
+      }
     </div>
   </div>
+  }
 
   <web-telnet-gui [class.hide-from-view]="loading" #webTelnetGuiTerminal></web-telnet-gui>
 </div>

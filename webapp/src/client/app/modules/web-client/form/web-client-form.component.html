@@ -6,23 +6,23 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          <p-messages *ngIf="messages.length > 0"
-                      [escape]="false"
-                      [closable]="false"
-                      [value]="messages"></p-messages>
+          <!-- TODO: check styling of multiple messages after migration to PrimeNG 20-->
+          @for(message of messages; track message.text) {
+          <p-message [escape]="false" [closable]="false">{{ message.text }}</p-message>
+          }
         </div>
         <div class="box-content grid nomargin nopad">
           <div class="col-4 gateway-form-group col-pad-right-lg">
             <label for="protocol">Protocol</label>
             <div class="gateway-form-input">
-              <p-dropdown id="protocol" appendTo="body" formControlName="protocol" [options]="protocolOptions"
+              <p-select id="protocol" appendTo="body" formControlName="protocol" [options]="protocolOptions"
                 pTooltip="{{protocolSelectedTooltip}}" required>
                 <ng-template let-item pTemplate="item">
                   <div pTooltip="{{item.tooltipText}}" tooltipPosition="right">
                     {{item.label}}
                   </div>
                 </ng-template>
-              </p-dropdown>
+              </p-select>
             </div>
           </div>
 
@@ -30,31 +30,36 @@
             <label for="protocol">Hostname</label>
             <div class="gateway-form-input">
               <span class="p-fluid">
-                <p-autoComplete formControlName="autoComplete" id="hostname" field="hostname" 
-                  placeholder="Enter hostname" [suggestions]="filteredHostnames" [dropdown]="isHostnamesExists()" 
+                <p-autoComplete formControlName="autoComplete" id="hostname" field="hostname"
+                  placeholder="Enter hostname" [suggestions]="filteredHostnames" [dropdown]="isHostnamesExists()"
                   (completeMethod)="filterHostname($event)" required></p-autoComplete>
               </span>
             </div>
-            <div class="form-helper-text"
-              *ngIf="connectSessionForm.get('autoComplete').hasError('required') && connectSessionForm.get('autoComplete').touched">
+            @if (connectSessionForm.get('autoComplete').hasError('required') &&
+            connectSessionForm.get('autoComplete').touched) {
+            <div class="form-helper-text">
               Hostname is required.
             </div>
+            }
           </div>
 
-          <rdp-form class="col-12" *ngIf="isSelectedProtocolRdp()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></rdp-form>
+          @if (isSelectedProtocolRdp()) {
+          <rdp-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></rdp-form>
+          }
 
           <!--// No telnet component required. KAH March 8, 2024 -->
 
-          <ssh-form class="col-12" *ngIf="isSelectedProtocolSsh()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></ssh-form>
+          @if (isSelectedProtocolSsh()) {
+          <ssh-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></ssh-form>
+          }
 
-          <vnc-form class="col-12" *ngIf="isSelectedProtocolVnc()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></vnc-form>
+          @if (isSelectedProtocolVnc()) {
+          <vnc-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></vnc-form>
+          }
 
-          <ard-form class="col-12" *ngIf="isSelectedProtocolArd()" [form]="connectSessionForm"
-            [inputFormData]="inputFormData"></ard-form>
-
+          @if (isSelectedProtocolArd()) {
+          <ard-form class="col-12" [form]="connectSessionForm" [inputFormData]="inputFormData"></ard-form>
+          }
 
           <div class="col-12 gateway-form-group">
             <p-button [disabled]="!canConnect()" [type]="'submit'" [label]="'Connect Session'"

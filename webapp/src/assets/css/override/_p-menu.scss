@@ -1,15 +1,18 @@
+@use 'theme-mode-variables';
+@use 'variables';
+
 .p-menu {
   font-size: 90%;
   width: auto;
   min-width: 150px;
   max-width: 300px;
   padding: 0;
-  background: $overlay-panel-bg-color;
+  background: theme-mode-variables.$overlay-panel-bg-color;
 
   &.p-menu-overlay {
-    border: 1px solid $overlay-panel-border-color;
-    border-radius: $borderRadius;
-    box-shadow: $defaultBoxShadow;
+    border: 1px solid theme-mode-variables.$overlay-panel-border-color;
+    border-radius: variables.$borderRadius;
+    box-shadow: variables.$defaultBoxShadow;
     margin-top: 5px;
 
     .p-menu-list {
@@ -18,7 +21,7 @@
   }
 
   .p-menuitem-link {
-    padding: $listItemPadding;
+    padding: variables.$listItemPadding;
     color: var(--side-panel-text-color);
 
     .p-menuitem-text {
@@ -43,6 +46,6 @@
   .p-submenu-header {
     border: 0 none;
     margin: 0;
-    padding: $listItemPadding;
+    padding: variables.$listItemPadding;
   }
 }

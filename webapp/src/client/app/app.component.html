@@ -1,8 +1,10 @@
 <div class="app-content">
   <router-outlet #outlet="outlet"></router-outlet>
-  <div id="gateway-loading" *ngIf="!outlet.isActivated">
+  @if (!outlet.isActivated) {
+  <div id="gateway-loading">
     <i class="dvl-icon dvl-icon-logo-gateway"></i>
   </div>
+  }
 </div>
 
 <gateway-alert-message></gateway-alert-message>

@@ -1,47 +1,26 @@
 <div>
-    <div class="gateway-form-group">
-        <label>Private Key Data</label>
-        <div class="card flex justify-content-center">
-            <p-fileUpload
-                name="myFiles"
-                maxFileSize="10240"
-                (onSelect)="onSelect($event)"
-                customUpload="true"
-                [multiple]="false"
-                [showUploadButton]="false"
-                [showCancelButton]="false"
-                chooseLabel="Select File"
-                cancelLabel="Clear"
-                styleClass="private-key-file-upload"
-                chooseStyleClass = "select-file-button"
-            >
-                <ng-template
-                    let-file
-                    pTemplate="file"
-                >
-                <!-- Need to leave this as empty -->
-                </ng-template>
-                <ng-template pTemplate="content">
-                    <textarea
-                        cols="30"
-                        rows="5"
-                        class="private-key-textarea"
-                        name="privateKeyData"
-                        pInputTextarea
-                        [ngModel]="privateKeyContent"
-                        wrap="soft"
-                    >
+  <div class="gateway-form-group">
+    <label>Private Key Data</label>
+    <div class="card flex justify-content-center">
+      <p-fileUpload name="myFiles" maxFileSize="10240" (onSelect)="onSelect($event)" customUpload="true"
+        [multiple]="false" [showUploadButton]="false" [showCancelButton]="false" chooseLabel="Select File"
+        cancelLabel="Clear" styleClass="private-key-file-upload" chooseStyleClass="select-file-button">
+        <ng-template let-file pTemplate="file">
+          <!-- Need to leave this as empty -->
+        </ng-template>
+        <ng-template pTemplate="content">
+          <textarea cols="30" rows="5" class="private-key-textarea" name="privateKeyData" pInputTextarea
+            [ngModel]="privateKeyContent" wrap="soft">
                     </textarea>
-                </ng-template>
-            </p-fileUpload>
-        </div>
+        </ng-template>
+      </p-fileUpload>
     </div>
+  </div>
 </div>
 <div class="gateway-form-input password-container">
-    <div
-        class="form-helper-text"
-        *ngIf="privateKeyContent !== '' && !isValidFile()"
-    >
-        {{ getErrorMessage() }}
-    </div>
+  @if (privateKeyContent !== '' && !isValidFile()) {
+  <div class="form-helper-text">
+    {{ getErrorMessage() }}
+  </div>
+  }
 </div>
