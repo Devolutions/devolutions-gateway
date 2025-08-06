@@ -718,7 +718,7 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN  }}
 
       - name: Upload SBOM to OneDrive Releases
-        uses: devolutions/actions/onedrive-upload@v1
+        uses: ./.github/workflows/onedrive-upload
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
