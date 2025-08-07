@@ -1,10 +1,11 @@
-use crate::ReadWriteStream;
 use proxy_types::{BoundAddr, DestAddr, ToDestAddr};
 use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::ReadWriteStream;
 
 const SOCKS_VERSION: u8 = 0x05;
 const PASSWORD_NEGOTIATION_VERSION: u8 = 0x01;
@@ -362,6 +363,17 @@ where
     /// local address used to connect to the target host by the SOCKS server for a CONNECT command.
     pub async fn connected(mut self, bound_address: impl ToDestAddr) -> io::Result<S> {
         SocksResponse::success(bound_address.to_dest_addr()?)
+            .write(&mut self.inner)
+            .await?;
+        Ok(self.inner)
+    }
+
+    /// Sends UDP Associate reply.
+    ///
+    /// `relay_address` is the address and port where the UDP relay server is listening.
+    /// The client will send UDP packets to this address for relaying.
+    pub async fn udp_associated(mut self, relay_address: impl ToDestAddr) -> io::Result<S> {
+        SocksResponse::success(relay_address.to_dest_addr()?)
             .write(&mut self.inner)
             .await?;
         Ok(self.inner)
@@ -852,11 +864,322 @@ async fn server_password_authentication(
     Ok(())
 }
 
+/// SOCKS5 UDP datagram as defined in [RFC 1928].
+///
+/// This structure represents the format of UDP packets sent through a SOCKS5 UDP relay.
+/// The packet format is:
+/// ```text
+/// +----+------+------+----------+----------+----------+
+/// |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
+/// +----+------+------+----------+----------+----------+
+/// | 2  |  1   |  1   | Variable |    2     | Variable |
+/// +----+------+------+----------+----------+----------+
+/// ```
+///
+/// [RFC 1928]: https://tools.ietf.org/rfc/rfc1928.txt
+#[derive(Debug, Clone)]
+pub struct UdpDatagram {
+    /// Fragment field (currently unused, should be 0).
+    pub frag: u8,
+    /// Destination address for the UDP packet.
+    pub dest_addr: DestAddr,
+    /// UDP payload data.
+    pub payload: Vec<u8>,
+}
+
+impl UdpDatagram {
+    /// Creates a new UDP datagram with no fragmentation.
+    pub fn new(dest_addr: DestAddr, payload: Vec<u8>) -> Self {
+        Self {
+            frag: 0, // No fragmentation support.
+            dest_addr,
+            payload,
+        }
+    }
+
+    /// Parses a UDP datagram from raw bytes.
+    pub fn from_bytes(src: &[u8]) -> io::Result<Self> {
+        if src.len() < 4 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "datagram too short"));
+        }
+
+        // Check reserved bytes (must be 0x00, 0x00 per RFC 1928).
+        if src[0] != 0x00 || src[1] != 0x00 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid reserved bytes"));
+        }
+
+        let frag = src[2];
+
+        // Parse destination address from remaining bytes.
+        let (dest_addr, addr_len) = parse_address(&src[3..])?;
+        let data_offset = 3 + addr_len;
+
+        if src.len() < data_offset {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "datagram too short for address",
+            ));
+        }
+
+        let payload = src[data_offset..].to_vec();
+
+        return Ok(Self {
+            frag,
+            dest_addr,
+            payload,
+        });
+
+        fn parse_address(mut src: &[u8]) -> io::Result<(DestAddr, usize)> {
+            let Some(atyp) = src.split_off_first().copied() else {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "no address type"));
+            };
+
+            match atyp {
+                // IPv4 address type.
+                0x01 => {
+                    let Some(src) = src.first_chunk::<{
+                        4 /* IPv4 */ + 2 /* port */
+                    }>() else {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete IPv4 address"));
+                    };
+
+                    let ip = Ipv4Addr::new(src[0], src[1], src[2], src[3]);
+                    let port = u16::from_be_bytes([src[4], src[5]]);
+                    let addr = SocketAddr::V4(SocketAddrV4::new(ip, port));
+
+                    let offset = 1 /* atyp */ + 4 /* IPv4 */ + 2 /* port */;
+
+                    Ok((DestAddr::Ip(addr), offset))
+                }
+
+                // Domain name address type.
+                0x03 => {
+                    // 1 (atyp) + 1 (length) + length (name)
+                    let Some((domain_len, mut rest)) = src.split_first() else {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete domain length"));
+                    };
+
+                    let domain_len = usize::from(*domain_len);
+
+                    let Some(domain) = rest.split_off(..domain_len) else {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete domain address"));
+                    };
+
+                    let domain = str::from_utf8(domain)
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "domain name is not valid UTF-8"))?
+                        .to_owned();
+
+                    let Some(port) = rest.first_chunk::<2>() else {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete domain port"));
+                    };
+
+                    let port = u16::from_be_bytes(*port);
+
+                    let offset = 1 /* atyp */ + 1 /* length */ + domain_len + 2 /* port */;
+
+                    Ok((DestAddr::Domain(domain, port), offset))
+                }
+
+                // IPv6 address type.
+                0x04 => {
+                    let Some(src) = src.first_chunk::<{
+                        16 /* IPv6 */ + 2 /* port */
+                    }>() else {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete IPv6 address"));
+                    };
+
+                    let mut ip_bytes = [0u8; 16];
+                    ip_bytes.copy_from_slice(&src[..16]);
+                    let ip = Ipv6Addr::from(ip_bytes);
+
+                    let port = u16::from_be_bytes([src[16], src[17]]);
+
+                    let addr = SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0));
+
+                    let offset = 1 /* atyp */ + 16 /* IPv6 */ + 2 /* port */;
+
+                    Ok((DestAddr::Ip(addr), offset))
+                }
+
+                _ => Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported address type")),
+            }
+        }
+    }
+
+    /// Converts the UDP datagram to bytes for transmission.
+    pub fn write_into(&self, buf: &mut Vec<u8>) -> io::Result<()> {
+        let mut addr_buf = [0u8; ADDR_MAX_LEN];
+        let addr_len = write_addr(&self.dest_addr, &mut addr_buf)?;
+
+        // Reserved bytes (must be 0x00, 0x00 per RFC 1928).
+        buf.extend_from_slice(&[0x00, 0x00]);
+
+        // Fragment field (currently unused).
+        buf.push(self.frag);
+
+        // Destination address encoding.
+        buf.extend_from_slice(&addr_buf[..addr_len]);
+
+        // Data
+        buf.extend_from_slice(&self.payload);
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // NOTE: for more comprehensive tests, see `proxy-tester`.
+
+    #[test]
+    fn test_udp_datagram_ipv4() {
+        use std::net::{Ipv4Addr, SocketAddrV4};
+
+        let dest_addr = DestAddr::Ip(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 1), 80)));
+        let payload = b"Hello, World!";
+        let datagram = UdpDatagram::new(dest_addr.clone(), payload.to_vec());
+
+        // Test serialization
+        let mut encoded = Vec::new();
+        datagram.write_into(&mut encoded).expect("should serialize");
+
+        // Should start with reserved bytes (0x00, 0x00) and frag (0x00)
+        assert_eq!(&encoded[0..3], &[0x00, 0x00, 0x00]);
+
+        // Should contain address type (0x01 for IPv4)
+        assert_eq!(encoded[3], 0x01);
+
+        // Should contain IP address
+        assert_eq!(&encoded[4..8], &[192, 168, 1, 1]);
+
+        // Should contain port (80 = 0x0050)
+        assert_eq!(&encoded[8..10], &[0x00, 0x50]);
+
+        // Should contain data
+        assert_eq!(&encoded[10..], b"Hello, World!");
+
+        // Test deserialization
+        let parsed = UdpDatagram::from_bytes(&encoded).expect("should parse");
+        assert_eq!(parsed.frag, 0);
+        assert_eq!(parsed.dest_addr, dest_addr);
+        assert_eq!(parsed.payload, payload);
+    }
+
+    #[test]
+    fn test_udp_datagram_ipv6() {
+        use std::net::{Ipv6Addr, SocketAddrV6};
+
+        let dest_addr = DestAddr::Ip(SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            443,
+            0,
+            0,
+        )));
+        let payload = b"IPv6 test";
+        let datagram = UdpDatagram::new(dest_addr.clone(), payload.to_vec());
+
+        // Serialize to bytes.
+        let mut encoded = Vec::new();
+        datagram.write_into(&mut encoded).expect("should serialize");
+
+        // Deserialize from bytes.
+        let parsed = UdpDatagram::from_bytes(&encoded).expect("should parse");
+
+        // Verify round-trip integrity.
+        assert_eq!(parsed.frag, 0);
+        assert_eq!(parsed.dest_addr, dest_addr);
+        assert_eq!(parsed.payload, payload);
+    }
+
+    #[test]
+    fn test_udp_datagram_domain() {
+        let dest_addr = DestAddr::Domain("example.com".to_owned(), 443);
+        let payload = b"Domain test";
+        let datagram = UdpDatagram::new(dest_addr.clone(), payload.to_vec());
+
+        let mut encoded = Vec::new();
+        datagram.write_into(&mut encoded).expect("should serialize");
+
+        let parsed = UdpDatagram::from_bytes(&encoded).expect("should parse");
+
+        assert_eq!(parsed.frag, 0);
+        assert_eq!(parsed.dest_addr, dest_addr);
+        assert_eq!(parsed.payload, payload);
+    }
+
+    #[test]
+    fn test_udp_datagram_empty_data() {
+        use std::net::{Ipv4Addr, SocketAddrV4};
+
+        let dest_addr = DestAddr::Ip(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080)));
+        let payload = &[];
+        let datagram = UdpDatagram::new(dest_addr.clone(), payload.to_vec());
+
+        let mut encoded = Vec::new();
+        datagram.write_into(&mut encoded).expect("should serialize");
+
+        let parsed = UdpDatagram::from_bytes(&encoded).expect("should parse");
+
+        assert_eq!(parsed.frag, 0);
+        assert_eq!(parsed.dest_addr, dest_addr);
+        assert_eq!(parsed.payload, payload);
+    }
+
+    #[test]
+    fn test_udp_datagram_invalid_reserved_bytes() {
+        // Create invalid packet with non-zero reserved bytes
+        let invalid_bytes = &[0x01, 0x02, 0x00, 0x01, 127, 0, 0, 1, 0x00, 0x50];
+
+        let result = UdpDatagram::from_bytes(invalid_bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid reserved bytes"));
+    }
+
+    #[test]
+    fn test_udp_datagram_too_short() {
+        let invalid_bytes = &[0x00, 0x00]; // Too short
+
+        let result = UdpDatagram::from_bytes(invalid_bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("datagram too short"));
+    }
+
+    #[test]
+    fn test_udp_datagram_incomplete_address() {
+        // Valid header but incomplete IPv4 address
+        let invalid_bytes = &[0x00, 0x00, 0x00, 0x01, 127, 0]; // Missing IP and port bytes
+
+        let result = UdpDatagram::from_bytes(invalid_bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("incomplete IPv4 address"));
+    }
+
+    /// This tests the new udp_associated method exists and has correct signature
+    /// We can't easily test the actual network functionality in unit tests,
+    /// but we can verify the method compiles and exists
+    #[test]
+    fn test_socks5_acceptor_udp_associate_method() {
+        // This is more of a compilation test - if the method signature changes,
+        // this will fail to compile
+        fn _test_method_exists() {
+            use tokio_test::io::Builder;
+
+            async fn _inner() -> io::Result<()> {
+                let stream = Builder::new().build();
+                let acceptor = Socks5Acceptor {
+                    inner: stream,
+                    socks_request: SocksRequest {
+                        cmd: Command::UdpAssociate,
+                        dst: DestAddr::Ip("127.0.0.1:1234".parse().unwrap()),
+                    },
+                };
+                let _stream = acceptor.udp_associated("127.0.0.1:1234").await?;
+                Ok(())
+            }
+        }
+    }
 
     // Greeting messages tests using dummy stream to validate errors
 

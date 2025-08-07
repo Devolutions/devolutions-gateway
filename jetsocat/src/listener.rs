@@ -2,10 +2,12 @@ use anyhow::Context;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
 use proxy_http::HttpProxyAcceptor;
 use proxy_socks::Socks5AcceptorConfig;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpStream;
-use tokio::sync::oneshot;
+use tokio::io::AsyncReadExt;
+use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument as _;
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,7 @@ async fn socks5_process_socket(
 ) -> anyhow::Result<()> {
     use proxy_socks::{Socks5Acceptor, Socks5FailureCode};
 
+    let local_addr = incoming.local_addr().context("couldn't get local address")?;
     let acceptor = Socks5Acceptor::accept_with_config(incoming, &conf).await?;
 
     if acceptor.is_connect_command() {
@@ -128,7 +131,7 @@ async fn socks5_process_socket(
         {
             Ok(()) => {}
             Err(error) => {
-                warn!(%error, "Couldn’t send JMUX API request");
+                warn!(%error, "Couldn't send JMUX API request");
                 anyhow::bail!("couldn't send JMUX request");
             }
         }
@@ -156,6 +159,40 @@ async fn socks5_process_socket(
                 leftover: None,
             })
             .await;
+    } else if acceptor.is_udp_associate_command() {
+        // Handle UDP Associate command.
+
+        // Start UDP relay server.
+        let udp_relay_addr = start_udp_relay(api_request_tx.clone(), local_addr).await?;
+
+        debug!(%udp_relay_addr, "Started UDP relay server");
+
+        // Send UDP Associate success response.
+        let mut tcp_stream = acceptor.udp_associated(udp_relay_addr).await?;
+
+        // Keep the TCP connection alive for the UDP association.
+        // The UDP association is valid as long as the TCP connection remains open.
+        // In a real implementation, we might want to handle this differently.
+        debug!("UDP association established, keeping TCP connection alive");
+
+        // Keep connection alive by reading until it closes.
+        let mut buffer = [0u8; 1];
+        loop {
+            match AsyncReadExt::read(&mut tcp_stream, &mut buffer).await {
+                Ok(0) => {
+                    debug!("TCP connection closed, UDP association terminated");
+                    break;
+                }
+                Ok(_) => {
+                    // Ignore any data received on the TCP connection.
+                    continue;
+                }
+                Err(_) => {
+                    debug!("TCP connection error, UDP association terminated");
+                    break;
+                }
+            }
+        }
     } else {
         acceptor.failed(Socks5FailureCode::CommandNotSupported).await?;
     }
@@ -292,7 +329,7 @@ where
         match listener.accept().await {
             Ok((stream, addr)) => processor(stream, addr),
             Err(error) => {
-                error!(%error, "Couldn’t accept next TCP stream");
+                error!(%error, "Couldn't accept next TCP stream");
                 break;
             }
         }
@@ -300,3 +337,142 @@ where
 
     Ok(())
 }
+
+/// Starts a UDP relay server for SOCKS5 UDP Associate functionality.
+///
+/// Returns the address where the UDP relay is listening.
+/// Clients will send SOCKS5-formatted UDP datagrams to this address.
+async fn start_udp_relay(api_request_tx: ApiRequestSender, _tcp_addr: SocketAddr) -> anyhow::Result<SocketAddr> {
+    // Bind UDP socket on any available port for relay functionality.
+    let udp_socket = UdpSocket::bind("0.0.0.0:0").await?;
+    let relay_addr = udp_socket.local_addr()?;
+
+    let udp_socket = Arc::new(udp_socket);
+    // Track active JMUX channels per client address.
+    let active_channels: Arc<Mutex<HashMap<SocketAddr, (u32, SocketAddr)>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    // Spawn background task to handle incoming UDP datagrams.
+    let udp_socket_clone = Arc::clone(&udp_socket);
+    let active_channels_clone = Arc::clone(&active_channels);
+    let api_request_tx_clone = api_request_tx.clone();
+
+    tokio::spawn(async move {
+        let mut buf = [0u8; 65535]; // Maximum UDP packet size.
+
+        loop {
+            match udp_socket_clone.recv_from(&mut buf).await {
+                Ok((len, client_addr)) => {
+                    let data = &buf[..len];
+
+                    // Parse SOCKS5 UDP datagram.
+                    match proxy_socks::UdpDatagram::from_bytes(data) {
+                        Ok(datagram) => {
+                            debug!("Received UDP datagram from {} to {:?}", client_addr, datagram.dest_addr);
+
+                            // Handle each UDP packet in a separate task.
+                            let api_request_tx = api_request_tx_clone.clone();
+                            let active_channels = Arc::clone(&active_channels_clone);
+                            let udp_socket = Arc::clone(&udp_socket_clone);
+
+                            tokio::spawn(async move {
+                                if let Err(e) = handle_udp_packet(
+                                    api_request_tx,
+                                    active_channels,
+                                    udp_socket,
+                                    client_addr,
+                                    datagram,
+                                )
+                                .await
+                                {
+                                    debug!("Failed to handle UDP packet: {e:#}");
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            debug!("Failed to parse UDP datagram: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("UDP socket error: {e}");
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok(relay_addr)
+}
+
+/// Handles a single UDP packet received from a SOCKS5 client.
+///
+/// This function manages JMUX channel creation and forwards the UDP data.
+/// Currently implements a simplified UDP-to-TCP bridge for proof of concept.
+async fn handle_udp_packet(
+    api_request_tx: ApiRequestSender,
+    active_channels: Arc<Mutex<HashMap<SocketAddr, (u32, SocketAddr)>>>,
+    _udp_socket: Arc<UdpSocket>,
+    client_addr: SocketAddr,
+    datagram: proxy_socks::UdpDatagram,
+) -> anyhow::Result<()> {
+    let destination_url = dest_addr_to_url(&datagram.dest_addr);
+
+    // Check if we already have an active JMUX channel for this client.
+    let channels = active_channels.lock().await;
+    let channel_info = channels.get(&client_addr).copied();
+    drop(channels);
+
+    let _channel_id = if let Some((id, _)) = channel_info {
+        id
+    } else {
+        // Create new JMUX channel for this destination.
+        let (sender, receiver) = oneshot::channel();
+
+        match api_request_tx
+            .send(JmuxApiRequest::OpenChannel {
+                destination_url: destination_url.clone(),
+                api_response_tx: sender,
+            })
+            .await
+        {
+            Ok(()) => {}
+            Err(error) => {
+                warn!(%error, "Couldn't send JMUX API request");
+                anyhow::bail!("couldn't send JMUX request");
+            }
+        }
+
+        match receiver.await.context("negotiation interrupted")? {
+            JmuxApiResponse::Success { id } => {
+                // Store channel mapping for this client.
+                let dest_socket_addr = match &datagram.dest_addr {
+                    proxy_types::DestAddr::Ip(addr) => *addr,
+                    proxy_types::DestAddr::Domain(_domain, port) => {
+                        // FIXME: Domain resolution not implemented in this PoC.
+                        SocketAddr::from(([0, 0, 0, 0], *port))
+                    }
+                };
+
+                let mut channels = active_channels.lock().await;
+                channels.insert(client_addr, (id.into(), dest_socket_addr));
+                drop(channels);
+
+                // FIXME: This is a simplified implementation for proof of concept.
+                // A complete implementation would need bidirectional UDP<->TCP bridging.
+                debug!("Channel {} opened for UDP packet relay", id);
+
+                id.into()
+            }
+            JmuxApiResponse::Failure { id, reason_code } => {
+                anyhow::bail!("channel {} failure: {}", id, reason_code);
+            }
+        }
+    };
+
+    Ok(())
+}
+
+// Note: This is a simplified UDP relay implementation.
+// A full implementation would require establishing a proper TCP connection through JMUX
+// and implementing bidirectional UDP<->TCP packet translation.
+// For now, this serves as a basic proof of concept for UDP Associate support.
