@@ -683,6 +683,7 @@ jobs:
     name: Upload SBOM
     runs-on: ubuntu-latest
     needs: preflight
+    environment: sbom
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -709,8 +710,18 @@ jobs:
       - name: Save SBOM
         uses: actions/upload-artifact@v4
         with:
-          name: bom.xml
-          path: bom.xml
+          name: bom.json
+          path: bom.json
+
+      - name: Upload SBOM to OneDrive Releases
+        uses: ./.github/workflows/onedrive-upload
+        with:
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+          conflict_behavior: replace
+          destination_path: /Gateway/${{ needs.preflight.outputs.version }}
+          remote: releases
+          source_path: bom.json
 
       - name: Upload SBOM to Dependency-Track
         uses: ./.github/workflows/dtrack-upload-sbom
