@@ -713,7 +713,6 @@ jobs:
           name: bom.json
           path: bom.json
 
-
       - name: Upload SBOM to OneDrive Releases
         uses: ./.github/workflows/onedrive-upload
         with:
