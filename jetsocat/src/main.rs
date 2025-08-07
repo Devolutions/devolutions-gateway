@@ -204,7 +204,7 @@ fn jmux_proxy() -> Command {
 
 Listener formats:
     - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
-    - socks5-listen://<BINDING ADDRESS>
+    - socks5-listen://<BINDING ADDRESS>  (supports both TCP CONNECT and UDP ASSOCIATE)
     - http-listen://<BINDING ADDRESS>
 
 Example: JMUX proxy
@@ -215,7 +215,7 @@ Example: TCP to JMUX proxy
 
     {command} {subcommand} tcp://127.0.0.1:7772 tcp-listen://0.0.0.0:5002/neverssl.com:80 tcp-listen://0.0.0.0:5003/crates.io:443
 
-Example: SOCKS5 to JMUX proxy
+Example: SOCKS5 to JMUX proxy (supports UDP for tun2socks VPN)
 
     {command} {subcommand} tcp://127.0.0.1:7772 socks5-listen://0.0.0.0:2222"##,
         command = env!("CARGO_PKG_NAME"),
@@ -224,7 +224,7 @@ Example: SOCKS5 to JMUX proxy
     );
 
     let cmd = Command::new(JMUX_PROXY_SUBCOMMAND)
-        .description("Start a JMUX proxy redirecting TCP streams")
+        .description("Start a JMUX proxy redirecting TCP streams and UDP packets")
         .alias("jp")
         .usage(usage)
         .action(jmux_proxy_action);
