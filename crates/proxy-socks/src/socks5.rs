@@ -1077,11 +1077,14 @@ mod tests {
         let payload = b"IPv6 test";
         let datagram = UdpDatagram::new(dest_addr.clone(), payload.to_vec());
 
+        // Serialize to bytes.
         let mut encoded = Vec::new();
         datagram.write_into(&mut encoded).expect("should serialize");
 
+        // Deserialize from bytes.
         let parsed = UdpDatagram::from_bytes(&encoded).expect("should parse");
 
+        // Verify round-trip integrity.
         assert_eq!(parsed.frag, 0);
         assert_eq!(parsed.dest_addr, dest_addr);
         assert_eq!(parsed.payload, payload);
