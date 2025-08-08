@@ -929,36 +929,37 @@ impl UdpDatagram {
             payload,
         });
 
-        fn parse_address(src: &[u8]) -> io::Result<(DestAddr, usize)> {
-            if src.is_empty() {
+        fn parse_address(mut src: &[u8]) -> io::Result<(DestAddr, usize)> {
+            let Some(atyp) = src.split_off_first().copied() else {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "no address type"));
-            }
-
-            let atyp = src[0];
+            };
 
             match atyp {
                 // IPv4 address type.
                 0x01 => {
-                    // 1 (atyp) + 4 (IPv4) + 2 (port) = 7
-                    let Some(src) = src.first_chunk::<7>() else {
+                    let Some(src) = src.first_chunk::<{
+                        4 /* IPv4 */ + 2 /* port */
+                    }>() else {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete IPv4 address"));
                     };
 
-                    let ip = Ipv4Addr::new(src[1], src[2], src[3], src[4]);
-                    let port = u16::from_be_bytes([src[5], src[6]]);
+                    let ip = Ipv4Addr::new(src[0], src[1], src[2], src[3]);
+                    let port = u16::from_be_bytes([src[4], src[5]]);
                     let addr = SocketAddr::V4(SocketAddrV4::new(ip, port));
 
-                    Ok((DestAddr::Ip(addr), 7))
+                    let offset = 1 /* atyp */ + 4 /* IPv4 */ + 2 /* port */;
+
+                    Ok((DestAddr::Ip(addr), offset))
                 }
 
                 // Domain name address type.
                 0x03 => {
                     // 1 (atyp) + 1 (length) + length (name)
-                    let Some((header, mut rest)) = src.split_first_chunk::<2>() else {
+                    let Some((domain_len, mut rest)) = src.split_first() else {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete domain length"));
                     };
 
-                    let domain_len = usize::from(header[1]);
+                    let domain_len = usize::from(*domain_len);
 
                     let Some(domain) = rest.split_off(..domain_len) else {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete domain address"));
@@ -974,28 +975,30 @@ impl UdpDatagram {
 
                     let port = u16::from_be_bytes(*port);
 
-                    // 2 (header) + variable (domain) + 2 (port)
-                    let offset = 2 + domain_len + 2;
+                    let offset = 1 /* atyp */ + 1 /* length */ + domain_len + 2 /* port */;
 
                     Ok((DestAddr::Domain(domain, port), offset))
                 }
 
                 // IPv6 address type.
                 0x04 => {
-                    // 1 (atyp) + 16 (IPv6) + 2 (port) = 19
-                    let Some(src) = src.first_chunk::<19>() else {
+                    let Some(src) = src.first_chunk::<{
+                        16 /* IPv6 */ + 2 /* port */
+                    }>() else {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "incomplete IPv6 address"));
                     };
 
                     let mut ip_bytes = [0u8; 16];
-                    ip_bytes.copy_from_slice(&src[1..17]);
+                    ip_bytes.copy_from_slice(&src[..16]);
                     let ip = Ipv6Addr::from(ip_bytes);
 
-                    let port = u16::from_be_bytes([src[17], src[18]]);
+                    let port = u16::from_be_bytes([src[16], src[17]]);
 
                     let addr = SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0));
 
-                    Ok((DestAddr::Ip(addr), 19))
+                    let offset = 1 /* atyp */ + 16 /* IPv6 */ + 2 /* port */;
+
+                    Ok((DestAddr::Ip(addr), offset))
                 }
 
                 _ => Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported address type")),
