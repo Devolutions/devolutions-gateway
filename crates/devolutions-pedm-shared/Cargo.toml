@@ -11,7 +11,7 @@ publish = false
 anyhow = { version = "1.0", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 win-api-wrappers = { path = "../win-api-wrappers", optional = true }
-hyper = { version = "~0.14", features = ["client", "http1"], optional = true } # old version required for OpenAPI generator
+hyper = { version = "~1.6", features = ["client", "http1"], optional = true } # old version required for OpenAPI generator
 serde_json = { version = "1.0", optional = true }
 tokio = { version = "1.45", features = ["net", "sync"], optional = true }
 glob = { version = "0.3", optional = true }
@@ -19,7 +19,7 @@ regex = { version = "1.11", optional = true }
 schemars = { version = "0.8", features = ["uuid1"], optional = true }
 windows-registry = { version = "0.5", optional = true }
 devolutions-pedm-client-http = { path = "./devolutions-pedm-client-http", optional = true }
-tower = { version = "0.3", optional = true } # old version required for OpenAPI generator
+tower = { version = "0.5", optional = true } # old version required for OpenAPI generator
 pin-project = { version = "1.1", optional = true }
 uuid = { version = "1", features = ["v4", "serde"]}
 dunce = "1.0"
