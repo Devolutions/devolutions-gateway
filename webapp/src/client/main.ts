@@ -15,7 +15,9 @@ import { provideRouter } from '@angular/router';
 import { AppComponent } from '@gateway/app.component';
 import { routes } from '@gateway/app.routes';
 import { MessageService } from 'primeng/api';
-
+// Prime Theme
+import Aura from '@primeuix/themes/aura';
+import {providePrimeNG} from "primeng/config";
 
 bootstrapApplication(AppComponent, {
   providers: [
@@ -31,5 +33,15 @@ bootstrapApplication(AppComponent, {
     provideHttpClient(withInterceptorsFromDi()),
     provideRouter(routes),
     provideAnimationsAsync(),
+    providePrimeNG({
+      theme: {
+        preset: Aura,
+        options: {
+          prefix: 'p',              // default CSS variable prefix
+          darkModeSelector: 'system', // or your custom selector
+          cssLayer: false           // optional layering
+        }
+      }
+    }),
   ],
 }).catch(err => console.error(err));
