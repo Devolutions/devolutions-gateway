@@ -1,6 +1,8 @@
 import { UtilsService } from '../utils.service';
 
 export class UrlService {
+  private utils: UtilsService;
+
   constructor(parent: UtilsService) {
     this.utils = parent;
   }
