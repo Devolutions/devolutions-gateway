@@ -38,8 +38,8 @@ import { ComponentStatus } from '@shared/models/component-status.model';
 import { DesktopSize } from '@shared/models/desktop-size';
 import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
-import { UtilsService } from '@shared/services/utils.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
@@ -64,7 +64,7 @@ enum UserIronRdpErrorKind {
   providers: [MessageService],
   standalone: true,
   imports: [ProgressSpinnerModule, WebClientFormComponent, SessionToolbarComponent],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA]
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class WebClientVncComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;

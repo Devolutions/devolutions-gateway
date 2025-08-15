@@ -1,7 +1,11 @@
 import { APP_BASE_HREF } from '@angular/common';
 import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
-import { bootstrapApplication, } from '@angular/platform-browser';
+import { bootstrapApplication } from '@angular/platform-browser';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+// Components
+import { provideRouter } from '@angular/router';
+import { AppComponent } from '@gateway/app.component';
+import { routes } from '@gateway/app.routes';
 import { AuthInterceptor } from '@gateway/app-auth.interceptor';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { LoadingService } from '@shared/services/loading.service';
@@ -10,12 +14,7 @@ import { MainMenuService } from '@shared/services/main-menu.service';
 import { SshKeyService } from '@shared/services/ssh-key.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-// Components
-import { provideRouter } from '@angular/router';
-import { AppComponent } from '@gateway/app.component';
-import { routes } from '@gateway/app.routes';
 import { MessageService } from 'primeng/api';
-
 
 bootstrapApplication(AppComponent, {
   providers: [
@@ -32,4 +31,4 @@ bootstrapApplication(AppComponent, {
     provideRouter(routes),
     provideAnimationsAsync(),
   ],
-}).catch(err => console.error(err));
+}).catch((err) => console.error(err));

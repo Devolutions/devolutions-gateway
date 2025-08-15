@@ -11,7 +11,7 @@ import { GatewayAlertMessageService } from './gateway-alert-message.service';
   templateUrl: 'gateway-alert-message.component.html',
   styleUrls: ['gateway-alert-message.component.scss'],
   standalone: true,
-  imports: [ToastModule]
+  imports: [ToastModule],
 })
 export class GatewayAlertMessageComponent extends BaseComponent implements OnInit {
   @ViewChild('confirmMessageToast') confirmMessageToast: Toast;

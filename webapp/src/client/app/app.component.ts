@@ -12,7 +12,7 @@ import { GatewayAlertMessageComponent } from './shared/components/gateway-alert-
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
   standalone: true,
-  imports: [RouterModule, GatewayAlertMessageComponent]
+  imports: [RouterModule, GatewayAlertMessageComponent],
 })
 export class AppComponent extends BaseComponent implements OnInit, OnDestroy {
   title = 'gateway-ui';

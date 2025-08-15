@@ -98,9 +98,8 @@ const routes: Routes = [
     // ForceWsPortControlComponent,
     // RequestSharedSessionControlComponent,
     // SharingApprovalModeControlComponent,
-
   ],
   exports: [DynamicTabComponent, WebClientFormComponent, NetScanComponent],
   providers: [],
 })
-export class WebClientModule { }
+export class WebClientModule {}

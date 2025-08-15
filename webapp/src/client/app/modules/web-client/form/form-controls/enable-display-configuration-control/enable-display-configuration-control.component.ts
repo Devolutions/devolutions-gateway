@@ -9,7 +9,7 @@ import { WebFormService } from '@shared/services/web-form.service';
   templateUrl: 'enable-display-configuration-control.component.html',
   styleUrls: ['enable-display-configuration-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule]
+  imports: [ReactiveFormsModule],
 })
 export class EnableDisplayConfigurationControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

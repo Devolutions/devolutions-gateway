@@ -9,7 +9,7 @@ import { WebFormService } from '@shared/services/web-form.service';
   templateUrl: 'pre-connection-blob-control.component.html',
   styleUrls: ['pre-connection-blob-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule]
+  imports: [ReactiveFormsModule],
 })
 export class PreConnectionBlobControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

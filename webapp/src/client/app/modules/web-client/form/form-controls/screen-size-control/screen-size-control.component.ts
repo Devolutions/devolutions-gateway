@@ -12,7 +12,7 @@ import { takeUntil } from 'rxjs/operators';
   templateUrl: 'screen-size-control.component.html',
   styleUrls: ['screen-size-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, SelectModule]
+  imports: [ReactiveFormsModule, SelectModule],
 })
 export class ScreenSizeControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

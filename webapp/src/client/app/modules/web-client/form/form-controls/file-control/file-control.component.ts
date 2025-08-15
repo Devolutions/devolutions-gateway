@@ -10,7 +10,7 @@ import { ValidateFileResult } from '../../../../../shared/services/ssh-key.servi
   templateUrl: './file-control.component.html',
   styleUrls: ['./file-control.component.scss'],
   standalone: true,
-  imports: [FormsModule, FileUploadModule]
+  imports: [FormsModule, FileUploadModule],
 })
 export class FileControlComponent implements OnInit, OnDestroy {
   // TODO Check if this is necessary

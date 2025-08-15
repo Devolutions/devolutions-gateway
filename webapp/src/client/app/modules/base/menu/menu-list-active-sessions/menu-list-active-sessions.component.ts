@@ -12,7 +12,7 @@ import { takeUntil } from 'rxjs/operators';
   templateUrl: './menu-list-active-sessions.component.html',
   styleUrls: ['menu-list-active-sessions.component.scss'],
   standalone: true,
-  imports: [CommonModule, TooltipModule, ButtonModule]
+  imports: [CommonModule, TooltipModule, ButtonModule],
 })
 export class MenuListActiveSessionsComponent extends BaseComponent implements OnInit {
   // disables the menu item

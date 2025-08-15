@@ -8,7 +8,7 @@ import { TooltipModule } from 'primeng/tooltip';
   templateUrl: './menu-list-item.component.html',
   styleUrls: ['menu-list-item.component.scss'],
   standalone: true,
-  imports: [CommonModule, TooltipModule]
+  imports: [CommonModule, TooltipModule],
 })
 export class MenuListItemComponent extends BaseComponent {
   @Input() label = '';

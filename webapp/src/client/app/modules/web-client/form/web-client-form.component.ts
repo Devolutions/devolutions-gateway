@@ -15,8 +15,8 @@ import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.inte
 import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { BaseSessionComponent, SessionType, WebSession } from '@shared/models/web-session.model';
-import { UtilsService } from '@shared/services/utils.service';
 import { StorageService } from '@shared/services/utils/storage.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { ToastMessageOptions } from 'primeng/api';
@@ -37,7 +37,18 @@ import { VncFormComponent } from './form-components/vnc/vnc-form.component';
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, RdpFormComponent, SshFormComponent, VncFormComponent, ArdFormComponent, AutoCompleteModule, ButtonModule, MessageModule, SelectModule, TooltipModule]
+  imports: [
+    ReactiveFormsModule,
+    RdpFormComponent,
+    SshFormComponent,
+    VncFormComponent,
+    ArdFormComponent,
+    AutoCompleteModule,
+    ButtonModule,
+    MessageModule,
+    SelectModule,
+    TooltipModule,
+  ],
 })
 export class WebClientFormComponent extends BaseSessionComponent implements OnInit, OnChanges {
   @Input() isFormExists = false;

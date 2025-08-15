@@ -9,7 +9,7 @@ import { WebFormService } from '@shared/services/web-form.service';
   templateUrl: 'kdc-url-control.component.html',
   styleUrls: ['kdc-url-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule]
+  imports: [ReactiveFormsModule],
 })
 export class KdcUrlControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

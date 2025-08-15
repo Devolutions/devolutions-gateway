@@ -11,7 +11,7 @@ import { MultiSelectModule } from 'primeng/multiselect';
   templateUrl: 'enabled-encodings-control.component.html',
   styleUrls: ['enabled-encodings-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, MultiSelectModule]
+  imports: [ReactiveFormsModule, MultiSelectModule],
 })
 export class EnabledEncodingsControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

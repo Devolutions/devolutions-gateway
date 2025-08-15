@@ -25,8 +25,8 @@ import { SessionEventType } from '@shared/enums/session-event-type.enum';
 import { IronARDConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { ArdFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { UtilsService } from '@shared/services/utils.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
@@ -51,7 +51,7 @@ enum UserIronRdpErrorKind {
   providers: [MessageService],
   standalone: true,
   imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA]
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class WebClientArdComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;

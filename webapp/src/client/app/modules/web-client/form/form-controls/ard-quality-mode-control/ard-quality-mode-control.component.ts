@@ -11,7 +11,7 @@ import { SelectModule } from 'primeng/select';
   templateUrl: 'ard-quality-mode-control.component.html',
   styleUrls: ['ard-quality-mode-control.component.scss'],
   standalone: true,
-    imports: [ReactiveFormsModule, SelectModule ]
+  imports: [ReactiveFormsModule, SelectModule],
 })
 export class ArdQualityModeControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

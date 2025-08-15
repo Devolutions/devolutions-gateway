@@ -10,7 +10,7 @@ import { CheckboxModule } from 'primeng/checkbox';
   templateUrl: 'enable-cursor-control.component.html',
   styleUrls: ['enable-cursor-control.component.scss'],
   standalone: true,
-    imports: [ReactiveFormsModule, CheckboxModule]
+  imports: [ReactiveFormsModule, CheckboxModule],
 })
 export class EnableCursorControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

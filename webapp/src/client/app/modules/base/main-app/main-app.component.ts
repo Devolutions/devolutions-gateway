@@ -11,7 +11,7 @@ import { AppMenuComponent } from '../menu/app-menu.component';
   templateUrl: './main-app.component.html',
   styleUrls: ['./main-app.component.scss'],
   standalone: true,
-  imports: [CommonModule, AppMenuComponent, RouterModule]
+  imports: [CommonModule, AppMenuComponent, RouterModule],
 })
 export class MainAppComponent extends BaseComponent implements OnInit {
   staticMenuMobileActive = false;

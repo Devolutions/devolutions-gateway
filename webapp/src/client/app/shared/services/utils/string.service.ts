@@ -11,8 +11,6 @@ export interface ExtractedHostnamePort {
 }
 
 export class StringService {
-  private utils: UtilsService;
-
   constructor(parent: UtilsService) {
     this.utils = parent;
   }

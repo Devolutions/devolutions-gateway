@@ -13,7 +13,13 @@ import { UsernameControlComponent } from '../../form-controls/username-control/u
   templateUrl: 'ard-form.component.html',
   styleUrls: ['ard-form.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, UsernameControlComponent, PasswordControlComponent, ResolutionQualityControlComponent, ArdQualityModeControlComponent]
+  imports: [
+    ReactiveFormsModule,
+    UsernameControlComponent,
+    PasswordControlComponent,
+    ResolutionQualityControlComponent,
+    ArdQualityModeControlComponent,
+  ],
 })
 export class ArdFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
@@ -25,7 +31,7 @@ export class ArdFormComponent extends BaseComponent implements OnInit {
     super();
   }
 
-  ngOnInit(): void { }
+  ngOnInit(): void {}
 
   toggleMoreSettings(event: Event): void {
     event.preventDefault();

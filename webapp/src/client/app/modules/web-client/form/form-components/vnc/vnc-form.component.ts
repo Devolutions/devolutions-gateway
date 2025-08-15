@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, Input, OnInit } from '@angular/core';
+import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
@@ -26,7 +26,17 @@ interface FormInputVisibility {
   templateUrl: 'vnc-form.component.html',
   styleUrls: ['vnc-form.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, SelectModule, UsernameControlComponent, PasswordControlComponent, ScreenSizeControlComponent, UltraVirtualDisplayControlComponent, EnabledEncodingsControlComponent, EnableCursorControlComponent, ExtendedClipboardControlComponent],
+  imports: [
+    ReactiveFormsModule,
+    SelectModule,
+    UsernameControlComponent,
+    PasswordControlComponent,
+    ScreenSizeControlComponent,
+    UltraVirtualDisplayControlComponent,
+    EnabledEncodingsControlComponent,
+    EnableCursorControlComponent,
+    ExtendedClipboardControlComponent,
+  ],
 })
 export class VncFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
@@ -43,7 +53,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
 
   constructor(
     private formService: WebFormService,
-    private cdr: ChangeDetectorRef,
+    //private cdr: ChangeDetectorRef,
   ) {
     super();
   }

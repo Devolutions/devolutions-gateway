@@ -9,7 +9,7 @@ import { WebFormService } from '@shared/services/web-form.service';
   templateUrl: 'extended-clipboard-control.component.html',
   styleUrls: ['extended-clipboard-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule]
+  imports: [ReactiveFormsModule],
 })
 export class ExtendedClipboardControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

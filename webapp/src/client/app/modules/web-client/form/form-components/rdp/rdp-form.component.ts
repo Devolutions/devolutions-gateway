@@ -14,7 +14,15 @@ import { UsernameControlComponent } from '../../form-controls/username-control/u
   templateUrl: 'rdp-form.component.html',
   styleUrls: ['rdp-form.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, UsernameControlComponent, PasswordControlComponent, ScreenSizeControlComponent, EnableDisplayConfigurationControlComponent, KdcUrlControlComponent, PreConnectionBlobControlComponent]
+  imports: [
+    ReactiveFormsModule,
+    UsernameControlComponent,
+    PasswordControlComponent,
+    ScreenSizeControlComponent,
+    EnableDisplayConfigurationControlComponent,
+    KdcUrlControlComponent,
+    PreConnectionBlobControlComponent,
+  ],
 })
 export class RdpFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
@@ -27,7 +35,7 @@ export class RdpFormComponent extends BaseComponent implements OnInit {
     super();
   }
 
-  ngOnInit(): void { }
+  ngOnInit(): void {}
 
   toggleMoreSettings(event: Event): void {
     event.preventDefault();

@@ -9,7 +9,7 @@ import { WebFormService } from '@shared/services/web-form.service';
   templateUrl: 'password-control.component.html',
   styleUrls: ['password-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule]
+  imports: [ReactiveFormsModule],
 })
 export class PasswordControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

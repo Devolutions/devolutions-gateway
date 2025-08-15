@@ -6,7 +6,7 @@ import { BaseComponent } from '@shared/bases/base.component';
   templateUrl: 'web-client.component.html',
   styleUrls: ['web-client.component.scss'],
   standalone: true,
-  imports: [TabViewComponent]
+  imports: [TabViewComponent],
 })
 export class WebClientComponent extends BaseComponent {
   constructor() {

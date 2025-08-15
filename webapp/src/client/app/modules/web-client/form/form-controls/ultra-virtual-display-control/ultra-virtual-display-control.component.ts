@@ -10,7 +10,7 @@ import { CheckboxModule } from 'primeng/checkbox';
   templateUrl: 'ultra-virtual-display-control.component.html',
   styleUrls: ['ultra-virtual-display-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, CheckboxModule]
+  imports: [ReactiveFormsModule, CheckboxModule],
 })
 export class UltraVirtualDisplayControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

@@ -9,7 +9,7 @@ import { WebFormService } from '@shared/services/web-form.service';
   templateUrl: 'username-control.component.html',
   styleUrls: ['username-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule]
+  imports: [ReactiveFormsModule],
 })
 export class UsernameControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

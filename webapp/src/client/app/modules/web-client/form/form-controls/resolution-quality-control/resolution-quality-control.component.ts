@@ -11,7 +11,7 @@ import { SelectModule } from 'primeng/select';
   templateUrl: 'resolution-quality-control.component.html',
   styleUrls: ['resolution-quality-control.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, SelectModule]
+  imports: [ReactiveFormsModule, SelectModule],
 })
 export class ResolutionQualityControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

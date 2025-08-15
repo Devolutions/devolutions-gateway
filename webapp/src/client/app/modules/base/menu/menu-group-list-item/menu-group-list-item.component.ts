@@ -8,7 +8,7 @@ import { TooltipModule } from 'primeng/tooltip';
   templateUrl: './menu-group-list-item.component.html',
   styleUrls: ['menu-group-list-item.component.scss'],
   standalone: true,
-  imports: [CommonModule, TooltipModule]
+  imports: [CommonModule, TooltipModule],
 })
 export class MenuGroupListItemComponent extends BaseComponent implements OnInit, OnChanges {
   @Input() title = '';

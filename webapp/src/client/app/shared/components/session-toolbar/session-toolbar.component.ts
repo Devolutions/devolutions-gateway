@@ -12,7 +12,7 @@ import { SliderModule } from 'primeng/slider';
   templateUrl: 'session-toolbar.component.html',
   styleUrls: ['session-toolbar.component.scss'],
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonModule, CheckboxModule, SliderModule]
+  imports: [CommonModule, FormsModule, ButtonModule, CheckboxModule, SliderModule],
 })
 export class SessionToolbarComponent {
   @Input() sessionContainerParent: ElementRef;
@@ -62,7 +62,7 @@ export class SessionToolbarComponent {
   showToolbarDiv = true;
   loading = true;
 
-  constructor(protected utils: UtilsService) { }
+  constructor(protected utils: UtilsService) {}
 
   @HostListener('document:mousemove', ['$event'])
   onMouseMove(event: MouseEvent): void {

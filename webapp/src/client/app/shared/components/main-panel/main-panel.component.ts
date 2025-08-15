@@ -9,7 +9,7 @@ import { BaseSessionComponent } from '@gateway/shared/models/web-session.model';
   templateUrl: './main-panel.component.html',
   styleUrls: ['./main-panel.component.scss'],
   standalone: true,
-  imports: [WebClientFormComponent, NetScanComponent]
+  imports: [WebClientFormComponent, NetScanComponent],
 })
 export class MainPanelComponent extends BaseSessionComponent implements AfterViewInit {
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();

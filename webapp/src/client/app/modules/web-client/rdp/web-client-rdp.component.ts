@@ -31,8 +31,8 @@ import { DesktopSize } from '@shared/models/desktop-size';
 import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { NavigationService } from '@shared/services/navigation.service';
-import { UtilsService } from '@shared/services/utils.service';
 import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
@@ -361,9 +361,9 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     const parameters = this.rdpConfig
       ? this.parseRdpConfig(this.rdpConfig)
       : this.getFormData().pipe(
-        switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
-        switchMap(() => this.fetchParameters(this.formData)),
-      );
+          switchMap(() => this.setScreenSizeScale(this.formData.screenSize)),
+          switchMap(() => this.fetchParameters(this.formData)),
+        );
 
     parameters
       .pipe(

@@ -7,11 +7,10 @@ import {
   OnDestroy,
   OnInit,
   Output,
-  Renderer2,
   ViewChild,
 } from '@angular/core';
 import { LoggingLevel } from '@devolutions/terminal-shared';
-import { loggingService as sshLoggingService, SSHTerminal, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
+import { SSHTerminal, loggingService as sshLoggingService, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
 import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
 import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
@@ -20,8 +19,8 @@ import { GatewayAlertMessageService } from '@shared/components/gateway-alert-mes
 import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { UtilsService } from '@shared/services/utils.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
+import { UtilsService } from '@shared/services/utils.service';
 import { DefaultSshPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
@@ -60,7 +59,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
   private remoteTerminalEventListener: () => void;
 
   constructor(
-    private renderer: Renderer2,
+    //private renderer: Renderer2,
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
@@ -266,9 +265,9 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
-  private handleSubscriptionError(error): void {
-    console.error('Error in session event subscription', error);
-  }
+  // private handleSubscriptionError(error): void {
+  //   console.error('Error in session event subscription', error);
+  // }
 
   private handleClientConnectStarted(): void {
     this.loading = false;

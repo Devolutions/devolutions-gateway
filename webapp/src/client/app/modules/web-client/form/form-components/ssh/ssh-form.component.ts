@@ -23,7 +23,13 @@ interface FormInputVisibility {
   templateUrl: 'ssh-form.component.html',
   styleUrls: ['ssh-form.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, SelectModule, UsernameControlComponent, PasswordControlComponent, FileControlComponent]
+  imports: [
+    ReactiveFormsModule,
+    SelectModule,
+    UsernameControlComponent,
+    PasswordControlComponent,
+    FileControlComponent,
+  ],
 })
 export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
   @Input() form: FormGroup;

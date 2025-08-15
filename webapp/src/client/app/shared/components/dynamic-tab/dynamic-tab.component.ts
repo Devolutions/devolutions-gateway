@@ -13,8 +13,8 @@ import {
 
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
-import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { BaseComponent } from '@shared/bases/base.component';
+import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { ComponentListenerService } from '@shared/services/component-listener.service';
@@ -26,7 +26,7 @@ import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
   selector: 'web-client-dynamic-tab',
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss'],
-  standalone: true
+  standalone: true,
 })
 export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
   @Input() webSessionTab: WebSession<T>;

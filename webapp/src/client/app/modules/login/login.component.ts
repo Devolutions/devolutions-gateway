@@ -17,7 +17,7 @@ import { catchError, takeUntil } from 'rxjs/operators';
   templateUrl: './login.component.html',
   styleUrls: ['./login.component.scss'],
   standalone: true,
-  imports: [ReactiveFormsModule, ButtonModule, MessageModule]
+  imports: [ReactiveFormsModule, ButtonModule, MessageModule],
 })
 export class LoginComponent extends BaseComponent implements OnInit {
   loginForm: FormGroup;
@@ -84,12 +84,10 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private handleAutoLoginError(error: HttpErrorResponse): Observable<boolean> {
     if (error?.status !== 401) {
       console.error('Auto login:', error);
-      this.addMessage(
-        {
-          severity: 'error',
-          detail: error.message,
-        },
-      );
+      this.addMessage({
+        severity: 'error',
+        detail: error.message,
+      });
     }
     return of(false);
   }
@@ -101,13 +99,11 @@ export class LoginComponent extends BaseComponent implements OnInit {
       //For translation 'InvalidUserNameOrPasswordPleaseVerifyYourCredentials'
       message = 'Invalid username or password, please verify your credentials';
     }
-    this.addMessage(
-      {
-        severity: 'error',
-        summary: 'Error', //For translation lblError
-        detail: message,
-      },
-    );
+    this.addMessage({
+      severity: 'error',
+      summary: 'Error', //For translation lblError
+      detail: message,
+    });
     console.error('Login Error', error);
   }
 
