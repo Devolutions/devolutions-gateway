@@ -26,6 +26,7 @@ import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
   selector: 'web-client-dynamic-tab',
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss'],
+  standalone: true,
 })
 export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
   @Input() webSessionTab: WebSession<T>;

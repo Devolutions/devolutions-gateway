@@ -1,3 +1,6 @@
+@use 'theme-mode-variables';
+@use 'variables';
+
 .p-sidebar {
   background-color: var(--side-panel-background-color);
   overflow-y: auto;
@@ -60,7 +63,7 @@
   }
 
   &.p-sidebar-right {
-    background: $side-panel-background-color;
+    background: theme-mode-variables.$side-panel-background-color;
     max-width: 450px;
     width: 95vw;
   }
@@ -72,7 +75,7 @@
     font-size: 18px;
     width: 40px;
     height: 40px;
-    transition: background-color ease-in-out $transitionDuration;
+    transition: background-color ease-in-out variables.$transitionDuration;
     margin: 0;
 
     .pi-times:before {
@@ -81,11 +84,11 @@
     }
 
     &:hover:not(.p-disabled):not([disabled]) {
-      background-color: $action-btn-hover-bg-color;
+      background-color: theme-mode-variables.$action-btn-hover-bg-color;
     }
 
     &:active:not(.p-disabled):not([disabled]) {
-      background-color: $action-btn-pressed-bg-color;
+      background-color: theme-mode-variables.$action-btn-pressed-bg-color;
     }
   }
 }

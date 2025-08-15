@@ -1,6 +1,6 @@
 import { Component, OnInit, ViewChild } from '@angular/core';
 import { MessageService } from 'primeng/api';
-import { Toast } from 'primeng/toast';
+import { Toast, ToastModule } from 'primeng/toast';
 import { filter, takeUntil } from 'rxjs/operators';
 
 import { BaseComponent } from '../../bases/base.component';
@@ -10,6 +10,8 @@ import { GatewayAlertMessageService } from './gateway-alert-message.service';
   selector: 'gateway-alert-message',
   templateUrl: 'gateway-alert-message.component.html',
   styleUrls: ['gateway-alert-message.component.scss'],
+  standalone: true,
+  imports: [ToastModule],
 })
 export class GatewayAlertMessageComponent extends BaseComponent implements OnInit {
   @ViewChild('confirmMessageToast') confirmMessageToast: Toast;

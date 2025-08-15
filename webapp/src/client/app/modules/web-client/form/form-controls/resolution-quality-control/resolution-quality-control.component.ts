@@ -1,14 +1,17 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { FormGroup } from '@angular/forms';
+import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ResolutionQuality } from '@gateway/shared/enums/resolution-quality.enum';
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
+import { SelectModule } from 'primeng/select';
 
 @Component({
   selector: 'web-client-resolution-quality-control',
   templateUrl: 'resolution-quality-control.component.html',
   styleUrls: ['resolution-quality-control.component.scss'],
+  standalone: true,
+  imports: [ReactiveFormsModule, SelectModule],
 })
 export class ResolutionQualityControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

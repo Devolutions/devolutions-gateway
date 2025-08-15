@@ -1,12 +1,16 @@
 import { Component, Input, OnDestroy, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
+import { FileUploadModule } from 'primeng/fileupload';
 import { ValidateFileResult } from '../../../../../shared/services/ssh-key.service';
 
 @Component({
   selector: 'app-file-control',
   templateUrl: './file-control.component.html',
   styleUrls: ['./file-control.component.scss'],
+  standalone: true,
+  imports: [FormsModule, FileUploadModule],
 })
 export class FileControlComponent implements OnInit, OnDestroy {
   // TODO Check if this is necessary

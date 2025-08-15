@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
-import { RecordingPlayer } from './RecordingPlayer';
 import { useRecordingPlayerContext } from '../context/RecordingPlayerContext';
+import { RecordingPlayer } from './RecordingPlayer';
 
 export const RightPanel: React.FC = () => {
   const { showPlayer, setShowPlayer, selectedRecording } = useRecordingPlayerContext();

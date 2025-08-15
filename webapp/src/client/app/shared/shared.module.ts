@@ -7,8 +7,8 @@ import { PrimeNgModules } from '@shared/primeng.module';
 import { Tooltip } from 'primeng/tooltip';
 
 @NgModule({
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, PrimeNgModules],
-  declarations: [TooltipEllipsisDirective],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, PrimeNgModules, TooltipEllipsisDirective],
+  declarations: [],
   exports: [CommonModule, ReactiveFormsModule, RouterModule, PrimeNgModules, TooltipEllipsisDirective],
   providers: [Tooltip],
 })

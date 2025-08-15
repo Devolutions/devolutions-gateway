@@ -1,5 +1,6 @@
-@import "variables";
-@import 'mixins';
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
 
 :host {
   --box-background-color: white;
@@ -44,7 +45,7 @@
       .net-scan-list-item {
         display: flex;
         align-items: center;
-        color: $default-text-color;
+        color: theme-mode-variables.$default-text-color;
 
         margin-left: 10px;
         margin-right: 10px;
@@ -64,7 +65,7 @@
           overflow: hidden;
 
           .menu-label {
-            @include text-ellipsis();
+            @include mixins.text-ellipsis();
 
             width: 100%;
             font-size: 14px;

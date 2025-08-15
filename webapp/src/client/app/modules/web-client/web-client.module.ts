@@ -60,9 +60,6 @@ const routes: Routes = [
     FormsModule,
     NgOptimizedImage,
     CheckboxModule,
-  ],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  declarations: [
     MainPanelComponent,
     WebClientComponent,
     WebClientRdpComponent,
@@ -84,12 +81,6 @@ const routes: Routes = [
     PreConnectionBlobControlComponent,
     EnabledEncodingsControlComponent,
     EnableCursorControlComponent,
-    // TODO: iDRAC and VMWare support
-    // VmIdControlComponent,
-    // ForceFirmwareV7ControlComponent,
-    // ForceWsPortControlComponent,
-    // RequestSharedSessionControlComponent,
-    // SharingApprovalModeControlComponent,
     UltraVirtualDisplayControlComponent,
     ResolutionQualityControlComponent,
     ArdQualityModeControlComponent,
@@ -98,6 +89,15 @@ const routes: Routes = [
     SessionToolbarComponent,
     FileControlComponent,
     NetScanComponent,
+  ],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  declarations: [
+    // TODO: iDRAC and VMWare support
+    // VmIdControlComponent,
+    // ForceFirmwareV7ControlComponent,
+    // ForceWsPortControlComponent,
+    // RequestSharedSessionControlComponent,
+    // SharingApprovalModeControlComponent,
   ],
   exports: [DynamicTabComponent, WebClientFormComponent, NetScanComponent],
   providers: [],

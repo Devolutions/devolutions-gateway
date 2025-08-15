@@ -53,9 +53,6 @@
             "styles": [
               "src/assets/css/main.scss",
               "node_modules/primeicons/primeicons.css",
-              "node_modules/primeng/resources/primeng.min.css",
-              "node_modules/primeflex/primeflex.scss",
-              "node_modules/@devolutions/icons/scss/devolutions-icons.scss",
               "node_modules/@angular/cdk/overlay-prebuilt.css"
             ],
             "scripts": [],

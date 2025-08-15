@@ -8,7 +8,7 @@ import {
   Output,
   SimpleChanges,
 } from '@angular/core';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.interfaces';
@@ -19,14 +19,36 @@ import { StorageService } from '@shared/services/utils/storage.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Message } from 'primeng/api';
+import { ToastMessageOptions } from 'primeng/api';
+import { AutoCompleteModule } from 'primeng/autocomplete';
+import { ButtonModule } from 'primeng/button';
+import { MessageModule } from 'primeng/message';
+import { SelectModule } from 'primeng/select';
+import { TooltipModule } from 'primeng/tooltip';
 import { EMPTY, forkJoin, Observable, of } from 'rxjs';
 import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
+import { ArdFormComponent } from './form-components/ard/ard-form.component';
+import { RdpFormComponent } from './form-components/rdp/rdp-form.component';
+import { SshFormComponent } from './form-components/ssh/ssh-form.component';
+import { VncFormComponent } from './form-components/vnc/vnc-form.component';
 
 @Component({
   selector: 'web-client-form',
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
+  standalone: true,
+  imports: [
+    ReactiveFormsModule,
+    RdpFormComponent,
+    SshFormComponent,
+    VncFormComponent,
+    ArdFormComponent,
+    AutoCompleteModule,
+    ButtonModule,
+    MessageModule,
+    SelectModule,
+    TooltipModule,
+  ],
 })
 export class WebClientFormComponent extends BaseSessionComponent implements OnInit, OnChanges {
   @Input() isFormExists = false;
@@ -42,7 +64,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   protocolOptions: SelectItemWithTooltip[];
   protocolSelectedTooltip = '';
 
-  messages: Message[] = [];
+  messages: ToastMessageOptions[] = [];
 
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
@@ -239,15 +261,15 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
-  private addMessages(newMessages: Message[]): void {
-    const areThereNewMessages: boolean = newMessages.some(
+  private addMessages(newMessages: ToastMessageOptions[]): void {
+    const areThereNewToastMessageOptions: boolean = newMessages.some(
       (newMsg) =>
         !this.messages.some(
           (existingMsg) => existingMsg.summary === newMsg.summary && existingMsg.detail === newMsg.detail,
         ),
     );
 
-    if (areThereNewMessages) {
+    if (areThereNewToastMessageOptions) {
       this.messages = [...this.messages, ...newMessages];
     }
   }

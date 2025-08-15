@@ -1,5 +1,5 @@
-@import 'mixins';
-@import 'theme-mode-variables';
+@use 'mixins';
+@use 'theme-mode-variables';
 
 :host {
   width: 100%;
@@ -13,7 +13,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: $layout-wrapper-bg-color;
+  background: theme-mode-variables.$layout-wrapper-bg-color;
 }
 
 .layout-menu-container {
@@ -36,7 +36,7 @@
 }
 
 .layout-mask {
-  @include media-breakpoint-down(sm) {
+  @include mixins.media-breakpoint-down(sm) {
     display: none;
 
     .layout-mobile-active & {
@@ -54,7 +54,7 @@
 }
 
 .layout-main {
-  background: $layout-container-bg-color;
+  background: theme-mode-variables.$layout-container-bg-color;
   flex-grow: 1;
   min-width: 0; // Prevent container from going beyond screen
   display: flex;
@@ -80,7 +80,7 @@
 }
 
 ::ng-deep .sidebar-message-container {
-  background: $side-panel-background-color;
+  background: theme-mode-variables.$side-panel-background-color;
   width: 90vw !important;
 
   @media screen and (min-width: 500px) {
@@ -89,7 +89,7 @@
 }
 
 ::ng-deep .sidebar-notification-container {
-  background: $side-panel-background-color;
+  background: theme-mode-variables.$side-panel-background-color;
   width: 90vw !important;
 
   @media screen and (min-width: 500px) {

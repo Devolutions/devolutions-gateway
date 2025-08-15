@@ -1,5 +1,5 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { FormGroup } from '@angular/forms';
+import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -8,6 +8,8 @@ import { WebFormService } from '@shared/services/web-form.service';
   selector: 'web-client-pre-connection-blob-control',
   templateUrl: 'pre-connection-blob-control.component.html',
   styleUrls: ['pre-connection-blob-control.component.scss'],
+  standalone: true,
+  imports: [ReactiveFormsModule],
 })
 export class PreConnectionBlobControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

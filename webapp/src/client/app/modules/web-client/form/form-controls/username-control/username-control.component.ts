@@ -1,5 +1,5 @@
 import { Component, Input, OnInit, SimpleChanges } from '@angular/core';
-import { FormGroup } from '@angular/forms';
+import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -8,6 +8,8 @@ import { WebFormService } from '@shared/services/web-form.service';
   selector: 'web-client-username-control',
   templateUrl: 'username-control.component.html',
   styleUrls: ['username-control.component.scss'],
+  standalone: true,
+  imports: [ReactiveFormsModule],
 })
 export class UsernameControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

@@ -1,6 +1,6 @@
-@import "variables";
-@import "theme-mode-variables";
-@import 'mixins';
+@use 'variables';
+@use 'theme-mode-variables';
+@use 'mixins';
 
 :host {
   display: flex;
@@ -24,13 +24,13 @@
   height: 100%;
   transition: all ease-in-out .3s;
 
-  @include media-breakpoint-up(md) {
+  @include mixins.media-breakpoint-up(md) {
     width: 13vw;
     position: relative;
     flex-shrink: 0;
   }
 
-  @include media-breakpoint-down(sm) {
+  @include mixins.media-breakpoint-down(sm) {
     z-index: 900;
 
     .layout-mobile-active & {
@@ -147,7 +147,7 @@
   .menu-list-item {
     display: flex;
     align-items: center; // Ensure vertical alignment of all items
-    border-radius: $borderRadius;
+    border-radius: variables.$borderRadius;
     padding: 8px;
     width: 100%;
     height: 100%;
@@ -188,7 +188,7 @@
 .menu-list-item {
   display: inline-block;
   align-items: center; // Ensure vertical alignment of all items
-  border-radius: $borderRadius;
+  border-radius: variables.$borderRadius;
   width: 100%;
   background-color: transparent;
 

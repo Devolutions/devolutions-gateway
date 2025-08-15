@@ -1,4 +1,4 @@
-@import "mixins";
+@use 'mixins';
 
 .p-dataview {
   padding-top: 1em;
@@ -10,6 +10,6 @@
     border: none;
     margin-left: -0.5rem;
 
-    @include custom-scrollbar();
+    @include mixins.custom-scrollbar();
   }
 }

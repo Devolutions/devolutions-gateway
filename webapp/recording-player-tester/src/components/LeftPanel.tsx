@@ -1,6 +1,6 @@
 import React from 'react';
-import { StreamingList } from './StreamingList';
 import { RecordingList } from './RecordingList';
+import { StreamingList } from './StreamingList';
 
 export const LeftPanel: React.FC = () => {
   return (

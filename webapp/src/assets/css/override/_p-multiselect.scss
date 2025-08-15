@@ -1,3 +1,7 @@
+@use 'mixins';
+@use 'theme-mode-variables';
+@use 'variables';
+
 .p-multiselect {
   white-space: nowrap;
 
@@ -19,7 +23,7 @@
     width: 18rem;
 
     .p-multiselect-label-container {
-      @include text-ellipsis();
+      @include mixins.text-ellipsis();
     }
   }
 }
@@ -34,28 +38,28 @@
 }
 
 .p-multiselect:not(.p-disabled):hover {
-  border: 1px solid $input-default-border-hover-color;
+  border: 1px solid theme-mode-variables.$input-default-border-hover-color;
 }
 
 .p-multiselect:not(.p-disabled).p-focus {
-  border: 1px solid $input-default-border-hover-color;
+  border: 1px solid theme-mode-variables.$input-default-border-hover-color;
 }
 
 .p-multiselect-panel .p-multiselect-items-wrapper {
-  background: $dropdown-container-bg-color;
-  border-bottom-right-radius: $borderRadius;
-  border-bottom-left-radius: $borderRadius;
+  background: theme-mode-variables.$dropdown-container-bg-color;
+  border-bottom-right-radius: variables.$borderRadius;
+  border-bottom-left-radius: variables.$borderRadius;
 
-  @include custom-scrollbar();
+  @include mixins.custom-scrollbar();
 }
 
 .p-multiselect {
-  background: $dropdown-bg-color;
-  border: 1px solid $input-default-border-color;
-  @include transition(border-color $transitionDuration, box-shadow $transitionDuration);
+  background: theme-mode-variables.$dropdown-bg-color;
+  border: 1px solid theme-mode-variables.$input-default-border-color;
+  @include mixins.transition(border-color variables.$transitionDuration, box-shadow variables.$transitionDuration);
 
   .p-multiselect-label {
-    color: $input-txt-color;
+    color: theme-mode-variables.$input-txt-color;
     padding-right: 2.3em;
   }
 
@@ -67,26 +71,26 @@
     text-align: center;
 
     .pi {
-      color: $dropdown-trigger-color;
+      color: theme-mode-variables.$dropdown-trigger-color;
     }
   }
 
   &:not(.p-disabled):hover {
-    border: 1px solid $input-default-border-hover-color;
+    border: 1px solid theme-mode-variables.$input-default-border-hover-color;
   }
 
   &:not(.p-disabled).p-focus {
-    border: 1px solid $input-default-border-hover-color;
+    border: 1px solid theme-mode-variables.$input-default-border-hover-color;
 
     .p-multiselect-trigger {
       .pi {
-        color: $dropdown-trigger-color;
+        color: theme-mode-variables.$dropdown-trigger-color;
       }
     }
   }
 
   &.p-multiselect-open {
-    border: 1px solid $dropdown-overlay-border-color !important;
+    border: 1px solid theme-mode-variables.$dropdown-overlay-border-color !important;
     border-bottom-left-radius: 0 !important;
     border-bottom-right-radius: 0 !important;
   }
@@ -94,23 +98,23 @@
 
 .p-multiselect-panel {
   padding: 0;
-  background: $dropdown-container-bg-color;
+  background: theme-mode-variables.$dropdown-container-bg-color;
   min-width: 12em;
   margin-top: -1px; /* hack to simulate a thin line */
-  border: 1px solid $dropdown-overlay-border-color;
-  border-bottom-right-radius: $borderRadius;
-  border-bottom-left-radius: $borderRadius;
+  border: 1px solid theme-mode-variables.$dropdown-overlay-border-color;
+  border-bottom-right-radius: variables.$borderRadius;
+  border-bottom-left-radius: variables.$borderRadius;
 
   .p-multiselect-header {
-    padding: $headerPadding;
-    background: $dropdown-container-bg-color;
-    border-bottom: 1px solid $dropdown-filter-container-separator-color;
+    padding: variables.$headerPadding;
+    background: theme-mode-variables.$dropdown-container-bg-color;
+    border-bottom: 1px solid theme-mode-variables.$dropdown-filter-container-separator-color;
     border-radius: 0;
 
     .p-multiselect-filter-container {
-      padding: $headerPadding;
-      border-bottom: 1px solid $dropdown-filter-container-separator-color;
-      background: $dropdown-container-bg-color;
+      padding: variables.$headerPadding;
+      border-bottom: 1px solid theme-mode-variables.$dropdown-filter-container-separator-color;
+      background: theme-mode-variables.$dropdown-container-bg-color;
 
       .p-multiselect-filter {
         width: 100%;
@@ -127,7 +131,7 @@
       }
 
       .p-multiselect-filter-icon {
-        @include devolutions-dropdown-filter-icon-input();
+        @include mixins.devolutions-dropdown-filter-icon-input();
       }
     }
 
@@ -138,25 +142,25 @@
     }
 
     .p-multiselect-close {
-      color: $action-btn-default-icon-color;
-      font-size: $fontSize;
-      @include transition(color $transitionDuration);
+      color: theme-mode-variables.$action-btn-default-icon-color;
+      font-size: variables.$fontSize;
+      @include mixins.transition(color variables.$transitionDuration);
 
       &:hover {
         padding: 0;
-        color: $admin-text-hover-color;
+        color: theme-mode-variables.$admin-text-hover-color;
       }
 
       &:focus {
         outline: 0 none;
-        color: $input-txt-border-focus-color;
+        color: theme-mode-variables.$input-txt-border-focus-color;
       }
     }
   }
 
   .p-multiselect-items {
     .p-multiselect-item {
-      padding: $listItemPadding;
+      padding: variables.$listItemPadding;
 
       .p-checkbox {
         position: static;
@@ -174,7 +178,7 @@
       }
 
       &:not(.p-highlight):not(.p-disabled):hover {
-        background: $dropdown-item-selected-bg-hover-color;
+        background: theme-mode-variables.$dropdown-item-selected-bg-hover-color;
       }
 
       &.p-highlight {

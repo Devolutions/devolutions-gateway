@@ -1,12 +1,14 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit } from '@angular/core';
-import { FormControl, FormGroup, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
 import { UtilsService } from '@shared/services/utils.service';
-import { Message } from 'primeng/api';
+import { ToastMessageOptions } from 'primeng/api';
+import { ButtonModule } from 'primeng/button';
+import { MessageModule } from 'primeng/message';
 import { Observable, of } from 'rxjs';
 import { catchError, takeUntil } from 'rxjs/operators';
 
@@ -14,10 +16,12 @@ import { catchError, takeUntil } from 'rxjs/operators';
   selector: 'app-login',
   templateUrl: './login.component.html',
   styleUrls: ['./login.component.scss'],
+  standalone: true,
+  imports: [ReactiveFormsModule, ButtonModule, MessageModule],
 })
 export class LoginComponent extends BaseComponent implements OnInit {
   loginForm: FormGroup;
-  messages: Message[] = [];
+  message: ToastMessageOptions = {};
   showPassword = false;
   autoLoginAttempted = false;
 
@@ -48,7 +52,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
   }
 
   onSubmit(): void {
-    this.messages = [];
+    this.message = {};
     const submittedData = this.loginForm.value;
 
     this.authService.login(submittedData.username, submittedData.password).subscribe({
@@ -80,12 +84,10 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private handleAutoLoginError(error: HttpErrorResponse): Observable<boolean> {
     if (error?.status !== 401) {
       console.error('Auto login:', error);
-      this.addMessages([
-        {
-          severity: 'error',
-          detail: error.message,
-        },
-      ]);
+      this.addMessage({
+        severity: 'error',
+        detail: error.message,
+      });
     }
     return of(false);
   }
@@ -97,22 +99,18 @@ export class LoginComponent extends BaseComponent implements OnInit {
       //For translation 'InvalidUserNameOrPasswordPleaseVerifyYourCredentials'
       message = 'Invalid username or password, please verify your credentials';
     }
-    this.addMessages([
-      {
-        severity: 'error',
-        summary: 'Error', //For translation lblError
-        detail: message,
-      },
-    ]);
+    this.addMessage({
+      severity: 'error',
+      summary: 'Error', //For translation lblError
+      detail: message,
+    });
     console.error('Login Error', error);
   }
 
-  private addMessages(messages: Message[]) {
-    this.messages = [];
-    if (messages?.length > 0) {
-      for (const message of messages) {
-        this.messages.push(message);
-      }
+  private addMessage(message: ToastMessageOptions) {
+    this.message = {};
+    if (message.text?.length > 0) {
+      this.message = message;
     }
   }
 }

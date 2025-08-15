@@ -1,3 +1,6 @@
+@use 'mixins';
+@use 'variables';
+
 :root,
 .light-theme, // will be removed once we wrap our default css prop in :root
 .dark-theme { // will be removed once we wrap our default css prop in :root
@@ -29,7 +32,7 @@
 }
 
 .p-radiobutton-box {
-  @include transition(background-color $transitionDuration, border-color $transitionDuration, box-shadow $transitionDuration);
+  @include mixins.transition(background-color variables.$transitionDuration, border-color variables.$transitionDuration, box-shadow variables.$transitionDuration);
 
   width: var(--radio-size);
   height: var(--radio-size);

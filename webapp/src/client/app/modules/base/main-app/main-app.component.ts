@@ -1,12 +1,17 @@
+import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
+import { RouterModule } from '@angular/router';
 import { AppComponent } from '@gateway/app.component';
 import { BaseComponent } from '@shared/bases/base.component';
 import { MainMenuService } from '@shared/services/main-menu.service';
 import { takeUntil } from 'rxjs/operators';
+import { AppMenuComponent } from '../menu/app-menu.component';
 
 @Component({
   templateUrl: './main-app.component.html',
   styleUrls: ['./main-app.component.scss'],
+  standalone: true,
+  imports: [CommonModule, AppMenuComponent, RouterModule],
 })
 export class MainAppComponent extends BaseComponent implements OnInit {
   staticMenuMobileActive = false;

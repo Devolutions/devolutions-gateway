@@ -1,11 +1,18 @@
+import { CommonModule } from '@angular/common';
 import { Component, ElementRef, HostListener, Input } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { WebSession } from '@shared/models/web-session.model';
 import { UtilsService } from '@shared/services/utils.service';
+import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
+import { SliderModule } from 'primeng/slider';
 
 @Component({
   selector: 'session-toolbar',
   templateUrl: 'session-toolbar.component.html',
   styleUrls: ['session-toolbar.component.scss'],
+  standalone: true,
+  imports: [CommonModule, FormsModule, ButtonModule, CheckboxModule, SliderModule],
 })
 export class SessionToolbarComponent {
   @Input() sessionContainerParent: ElementRef;

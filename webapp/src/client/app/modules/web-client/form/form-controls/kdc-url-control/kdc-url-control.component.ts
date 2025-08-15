@@ -1,5 +1,5 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { AbstractControl, FormGroup, ValidatorFn } from '@angular/forms';
+import { AbstractControl, FormGroup, ReactiveFormsModule, ValidatorFn } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -8,6 +8,8 @@ import { WebFormService } from '@shared/services/web-form.service';
   selector: 'web-client-kdc-url-control',
   templateUrl: 'kdc-url-control.component.html',
   styleUrls: ['kdc-url-control.component.scss'],
+  standalone: true,
+  imports: [ReactiveFormsModule],
 })
 export class KdcUrlControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
