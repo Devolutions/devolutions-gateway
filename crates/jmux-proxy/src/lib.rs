@@ -30,7 +30,8 @@ use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
 
-const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
+const DATA_PACKET_OVERHEAD: u16 = 8;
+const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 8 * 1024 + DATA_PACKET_OVERHEAD; // 8 kiB + packet overhead
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
 
 // The JMUX channel will require at most `MAXIMUM_PACKET_SIZE_IN_BYTES × JMUX_MESSAGE_CHANNEL_SIZE` bytes to be kept alive.
@@ -792,7 +793,11 @@ impl DataReaderTask {
         } = self;
 
         let codec = tokio_util::codec::BytesCodec::new();
-        let mut bytes_stream = FramedRead::new(reader, codec);
+        let mut bytes_stream = FramedRead::with_capacity(
+            reader,
+            codec,
+            usize::from(MAXIMUM_PACKET_SIZE_IN_BYTES - DATA_PACKET_OVERHEAD),
+        );
         let maximum_packet_size = usize::from(maximum_packet_size);
 
         trace!("Started forwarding");
