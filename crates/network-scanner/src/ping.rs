@@ -158,7 +158,7 @@ async fn try_ping(addr: socket2::SockAddr, mut socket: AsyncRawSocket) -> anyhow
             sequence_number: 0,
             payload: vec![42; 32],
         }
-        .into(),
+        .encode(),
         _ => return Err(anyhow::anyhow!("Can't ping a unix socket")),
     };
 

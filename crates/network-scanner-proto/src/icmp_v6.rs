@@ -62,8 +62,8 @@ pub enum Icmpv6Message {
     },
 }
 
-impl Into<Vec<u8>> for Icmpv6Message {
-    fn into(self) -> Vec<u8> {
+impl Icmpv6Message {
+    pub fn encode(self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
         bytes.push(self.get_type() as u8);

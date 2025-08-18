@@ -1,17 +1,13 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
-use std::fs;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
-use std::io;
-use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{fs, io, mem};
 
-use camino::*;
-use chrono::{DateTime, TimeDelta, Utc};
-use serde::*;
+use camino::Utf8PathBuf;
+use serde::{Serialize, Deserialize};
+use time::{UtcDateTime};
 use thiserror::Error;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -35,7 +31,7 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
         .create(true)
         .write(true)
         .truncate(true)
-        .open(get_monitor_config_path(&state.cache_path))?;
+        .open(&state.cache_path)?;
 
     let mut config_write = state.config.write().await;
 
@@ -63,23 +59,22 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
 
             let monitor = async move {
                 loop {
-                    let start_time = Utc::now();
+                    let start_time = UtcDateTime::now();
 
                     let monitor_result = match definition_clone.probe {
                         ProbeType::Ping => do_ping_monitor(&definition_clone).await,
                         ProbeType::TcpOpen => do_tcpopen_monitor(&definition_clone).await,
-                        ProbeType::Unknown(_) => return, // TODO: shouldn't happen, they should be filtered out. Create a separate ProbeType enum without Unknown?
                     };
 
                     state.log.write(monitor_result);
 
-                    let elapsed = Utc::now() - start_time;
+                    let elapsed = UtcDateTime::now() - start_time;
                     let next_run_in =
                         (definition_clone.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
                     select! {
-                        _ = cancellation_monitor.cancelled() => { () }
+                        _ = cancellation_monitor.cancelled() => { return }
                         _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { () }
-                    }
+                    };
                 }
             };
 
@@ -109,9 +104,9 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
 }
 
 async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
-    let start_time = Utc::now();
+    let start_time = UtcDateTime::now();
 
-    let ping_result = async || -> anyhow::Result<TimeDelta> {
+    let ping_result = async || -> anyhow::Result<time::Duration> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
         ping::ping_addr(
             runtime,
@@ -121,7 +116,7 @@ async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
         .await?;
         // TODO: send more than 1 ping packet
 
-        Ok(Utc::now() - start_time)
+        Ok(UtcDateTime::now() - start_time)
     }()
     .await;
 
@@ -147,7 +142,7 @@ async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
 async fn do_tcpopen_monitor(definition: &MonitorDefinition) -> MonitorResult {
     MonitorResult {
         monitor_id: definition.id.clone(),
-        request_start_time: Utc::now(),
+        request_start_time: UtcDateTime::now(),
         response_success: false,
         response_messages: Some("not implemented".into()),
         response_time: f64::INFINITY,
@@ -158,13 +153,9 @@ pub fn drain_log(state: Arc<State>) -> VecDeque<MonitorResult> {
     return state.log.drain();
 }
 
-fn get_monitor_config_path(cache_path: &Utf8PathBuf) -> Utf8PathBuf {
-    cache_path.join("monitors_cache.json")
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MonitorsConfig {
-    monitors: Vec<MonitorDefinition>,
+    pub monitors: Vec<MonitorDefinition>,
 }
 
 impl MonitorsConfig {
@@ -191,33 +182,29 @@ impl MonitorsConfig {
 pub enum ProbeType {
     Ping,
     TcpOpen,
-    #[serde(untagged)]
-    Unknown(String),
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, Serialize, Deserialize, Debug)]
 pub struct MonitorDefinition {
-    id: String,
-    probe: ProbeType,
-    address: String,
-    interval: u64,
-    timeout: u64,
-    port: Option<i16>,
+    pub id: String,
+    pub probe: ProbeType,
+    pub address: String,
+    pub interval: u64,
+    pub timeout: u64,
+    pub port: Option<i16>,
 }
 
-#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct MonitorResult {
-    monitor_id: String,
-    request_start_time: DateTime<Utc>,
-    response_success: bool,
-    response_messages: Option<String>,
-    response_time: f64,
+    pub monitor_id: String,
+    pub request_start_time: UtcDateTime,
+    pub response_success: bool,
+    pub response_messages: Option<String>,
+    pub response_time: f64,
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate tempdir;
-
     use super::*;
     use tempdir::TempDir;
     use tokio_test::{self, assert_ok};
@@ -230,7 +217,8 @@ mod tests {
 
         let temp_path: Utf8PathBuf = Utf8Path::from_path(temp_dir.path())
             .expect("TempDir gave us a garbage path")
-            .to_path_buf();
+            .to_path_buf()
+            .join("monitors_cache.json");
 
         let state = State::mock(temp_path);
 

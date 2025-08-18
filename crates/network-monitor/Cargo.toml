@@ -1,19 +1,20 @@
 [package]
 name = "network-monitor"
-version = "0.1.0"
-edition = "2021"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
 
 [dependencies]
-devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 network-scanner = { path = "../network-scanner" }
 network-scanner-net = { path = "../network-scanner-net" }
 serde = { version = "1", features = ["derive"] }
 camino = { version = "1", features = ["serde1"] }
 serde_json = "1"
 thiserror = "1"
-chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1.45", features= ["full"] }
-tokio-util = { version = "0.7", features = ["full"] }
+time = { version = "0.3", features = ["serde"] }
+tokio = { version = "1.45", features= ["macros", "sync"] }
+tokio-util = { version = "0.7" }
 anyhow = "1"
 
 [dev-dependencies]

@@ -350,7 +350,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "021e862c184ae977658b36c4500f7feac3221ca5da43e3f25bd04ab6c79a29b5"
 dependencies = [
  "axum-core 0.5.2",
- "axum-macros",
  "base64 0.22.1",
  "bytes 1.10.1",
  "form_urlencoded",
@@ -444,17 +443,6 @@ dependencies = [
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
-]
-
-[[package]]
-name = "axum-macros"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
-dependencies = [
- "proc-macro2 1.0.95",
- "quote 1.0.40",
- "syn 2.0.104",
 ]
 
 [[package]]
@@ -3657,18 +3645,17 @@ dependencies = [
 
 [[package]]
 name = "network-monitor"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "camino",
- "chrono",
- "devolutions-agent-shared",
  "network-scanner",
  "network-scanner-net",
  "serde",
  "serde_json",
  "tempdir",
  "thiserror 1.0.69",
+ "time",
  "tokio 1.46.1",
  "tokio-test",
  "tokio-util",
@@ -6382,10 +6369,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
- "futures-util",
- "hashbrown 0.15.4",
  "pin-project-lite 0.2.16",
- "slab",
  "tokio 1.46.1",
 ]
 

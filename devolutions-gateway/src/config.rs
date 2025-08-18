@@ -87,6 +87,7 @@ pub struct Conf {
     pub ngrok: Option<dto::NgrokConf>,
     pub verbosity_profile: dto::VerbosityProfile,
     pub web_app: WebAppConf,
+    pub enable_network_monitoring: bool,
     pub debug: dto::DebugConf,
 }
 
@@ -282,6 +283,8 @@ impl Conf {
             }
         }
 
+        let enable_network_monitoring = conf_file.enable_network_monitoring.unwrap_or(false);
+
         Ok(Conf {
             id: conf_file.id,
             hostname,
@@ -306,6 +309,7 @@ impl Conf {
                 .map(WebAppConf::from_dto)
                 .unwrap_or_else(WebAppConf::from_env)
                 .context("webapp config")?,
+            enable_network_monitoring: enable_network_monitoring,
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -1028,6 +1032,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub job_queue_database: Option<Utf8PathBuf>,
 
+        /// (Unstable) Enable server monitoring system and its API
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub enable_network_monitoring: Option<bool>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -1079,6 +1087,7 @@ pub mod dto {
                 web_app: None,
                 sogar: None,
                 job_queue_database: None,
+                enable_network_monitoring: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }

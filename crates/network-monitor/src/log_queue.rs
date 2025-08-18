@@ -15,20 +15,20 @@ impl<T> LogQueue<T> {
     }
 
     pub(crate) fn write(&self, data: T) {
-        let mut entries = self.entries.lock().expect("Couldn't get LogQueue lock");
+        let mut entries = self.entries.lock().expect("poisoned");
 
         entries.push_back(data);
     }
 
     pub(crate) fn drain(&self) -> VecDeque<T> {
-        let mut entries = self.entries.lock().expect("Couldn't get LogQueue lock");
+        let mut entries = self.entries.lock().expect("poisoned");
 
         return mem::replace(&mut entries, VecDeque::new());
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
@@ -47,7 +47,7 @@ mod test {
     #[test]
     fn write_and_drain_clears_log() {
         // Given
-        let mut log: LogQueue<String> = LogQueue::new();
+        let log: LogQueue<String> = LogQueue::new();
         log.write(String::from("hey"));
 
         // When
