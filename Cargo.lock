@@ -3789,8 +3789,7 @@ checksum = "5e0826a989adedc2a244799e823aece04662b66609d96af8dff7ac6df9a8925d"
 [[package]]
 name = "now-proto-pdu"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063dca685ea8efa62d1a3566332b08be0198922f1d8aced1ead413c9f02fd89e"
+source = "git+https://github.com/Devolutions/now-proto.git?branch=fix%2Frun-directory-api#56c604ff2ebed64aa3a7209035b9b3754f01f68e"
 dependencies = [
  "bitflags 2.9.1",
  "ironrdp-core",

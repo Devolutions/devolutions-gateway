@@ -64,6 +64,12 @@ impl Task for DvcIoTask {
 
         let cloned_shutdown_event = io_thread_shutdown_event.clone();
 
+        info!(
+            "Starting NowProto DVC v{}.{}",
+            NowProtoVersion::CURRENT.major,
+            NowProtoVersion::CURRENT.minor
+        );
+
         // Spawning thread is relatively short operation, so it could be executed synchronously.
         let io_thread = std::thread::spawn(move || {
             let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event);
@@ -75,9 +81,13 @@ impl Task for DvcIoTask {
 
         // Join thread some time in future.
         tokio::task::spawn_blocking(move || {
-            if io_thread.join().is_err() {
-                error!("DVC IO thread join failed");
-            };
+            if let Err(panic_payload) = io_thread.join() {
+                if let Some(s) = panic_payload.downcast_ref::<&dyn std::fmt::Debug>() {
+                    error!("DVC IO thread panic: {:?}", s);
+                } else {
+                    error!("DVC IO thread join failed.");
+                }
+            }
         });
 
         info!("Processing DVC messages...");
@@ -131,30 +141,14 @@ async fn process_messages(
         return Ok(());
     }
 
-    let server_caps = NowChannelCapsetMsg::default()
-        .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
-        .with_session_capset(
-            NowSessionCapsetFlags::LOCK
-                | NowSessionCapsetFlags::LOGOFF
-                | NowSessionCapsetFlags::MSGBOX
-                | NowSessionCapsetFlags::SET_KBD_LAYOUT,
-        )
-        .with_exec_capset(
-            NowExecCapsetFlags::STYLE_RUN
-                | NowExecCapsetFlags::STYLE_PROCESS
-                | NowExecCapsetFlags::STYLE_BATCH
-                | NowExecCapsetFlags::STYLE_PWSH
-                | NowExecCapsetFlags::STYLE_WINPS,
-        );
-
+    let server_caps = default_server_caps();
     let heartbeat_interval = client_caps.heartbeat_interval().unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
-
     let downgraded_caps = client_caps.downgrade(&server_caps);
 
     // Send server capabilities back to the client.
     dvc_tx.send(server_caps.into()).await?;
 
-    let mut processor = MessageProcessor::new(downgraded_caps, dvc_tx.clone(), io_notification_tx);
+    let mut processor = MessageProcessor::new(downgraded_caps, dvc_tx.clone(), io_notification_tx.clone());
 
     info!("DVC negotiation completed");
 
@@ -168,6 +162,24 @@ async fn process_messages(
                             Ok(ProcessMessageAction::Shutdown) => {
                                 info!("Received channel shutdown message...");
                                 return Ok(());
+                            }
+                            Ok(ProcessMessageAction::Restart(client_caps)) => {
+                                info!("Restarting DVC IO thread with new capabilities...");
+
+                                // Re-negotiate capabilities with the client and initialize new
+                                // message processor.
+                                let server_caps = default_server_caps();
+                                let downgraded_caps = client_caps.downgrade(&server_caps);
+
+                                // Old exec sessions will be abandoned (IO loops will terminate
+                                // on old processor `Drop`).
+                                processor = MessageProcessor::new(
+                                    downgraded_caps,
+                                    dvc_tx.clone(),
+                                    io_notification_tx.clone()
+                                );
+
+                                dvc_tx.send(server_caps.into()).await?;
                             }
                             Err(error) => {
                                 error!(%error, "Failed to process DVC message");
@@ -245,9 +257,29 @@ async fn process_messages(
     }
 }
 
+fn default_server_caps() -> NowChannelCapsetMsg {
+    NowChannelCapsetMsg::default()
+        .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
+        .with_session_capset(
+            NowSessionCapsetFlags::LOCK
+                | NowSessionCapsetFlags::LOGOFF
+                | NowSessionCapsetFlags::MSGBOX
+                | NowSessionCapsetFlags::SET_KBD_LAYOUT,
+        )
+        .with_exec_capset(
+            NowExecCapsetFlags::STYLE_RUN
+                | NowExecCapsetFlags::STYLE_PROCESS
+                | NowExecCapsetFlags::STYLE_BATCH
+                | NowExecCapsetFlags::STYLE_PWSH
+                | NowExecCapsetFlags::STYLE_WINPS
+                | NowExecCapsetFlags::IO_REDIRECTION,
+        )
+}
+
 enum ProcessMessageAction {
     Continue,
     Shutdown,
+    Restart(NowChannelCapsetMsg),
 }
 
 struct MessageProcessor {
@@ -274,8 +306,11 @@ impl MessageProcessor {
 
     async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), ExecError> {
         if self.sessions.contains_key(&session_id) {
+            warn!(session_id, "Session ID is in use");
             return Err(ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::InUse)));
         }
+
+        warn!(session_id, "Session ID is free for use");
 
         Ok(())
     }
@@ -285,8 +320,8 @@ impl MessageProcessor {
         message: NowMessage<'static>,
     ) -> anyhow::Result<ProcessMessageAction> {
         match message {
-            NowMessage::Channel(NowChannelMessage::Capset(_)) => {
-                warn!("Received unexpected exec capset message, ignoring...");
+            NowMessage::Channel(NowChannelMessage::Capset(client_caps)) => {
+                return Ok(ProcessMessageAction::Restart(client_caps));
             }
             NowMessage::Channel(NowChannelMessage::Close(_)) => {
                 info!("Received channel close message, shutting down...");
@@ -484,6 +519,7 @@ impl MessageProcessor {
         let parameters = WideString::from("");
         let operation = WideString::from("open");
         let command: WideString = WideString::from(params.command());
+        let directory = params.directory().map(|dir| WideString::from(dir));
 
         info!(session_id, "Executing ShellExecuteW");
 
@@ -494,7 +530,7 @@ impl MessageProcessor {
                 operation.as_pcwstr(),
                 command.as_pcwstr(),
                 parameters.as_pcwstr(),
-                None,
+                directory.map(|d| d.as_pcwstr()).unwrap_or(PCWSTR::null()),
                 // Activate and show window
                 SW_RESTORE,
             )
@@ -530,7 +566,9 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        let process = run_process.run(exec_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process
+            .with_io_redirection(exec_msg.is_with_io_redirection())
+            .run(exec_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(exec_msg.session_id(), process);
 
@@ -553,7 +591,9 @@ impl MessageProcessor {
             run_batch = run_batch.with_current_directory(directory);
         }
 
-        let process = run_batch.run(batch_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_batch
+            .with_io_redirection(batch_msg.is_with_io_redirection())
+            .run(batch_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(batch_msg.session_id(), process);
 
@@ -583,7 +623,9 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        let process = run_process.run(winps_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process
+            .with_io_redirection(winps_msg.is_with_io_redirection())
+            .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
@@ -613,7 +655,9 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        let process = run_process.run(winps_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process
+            .with_io_redirection(winps_msg.is_with_io_redirection())
+            .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 

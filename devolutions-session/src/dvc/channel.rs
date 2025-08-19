@@ -25,6 +25,13 @@ impl<T: Send + Sync + Debug + 'static> WinapiSignaledSender<T> {
         Ok(())
     }
 
+    pub fn try_send(&self, message: T) -> anyhow::Result<()> {
+        self.tx.try_send(message)?;
+
+        self.semaphore.release(1)?;
+        Ok(())
+    }
+
     pub fn blocking_send(&self, message: T) -> anyhow::Result<()> {
         self.tx.blocking_send(message)?;
 

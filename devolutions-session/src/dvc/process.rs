@@ -1,20 +1,20 @@
 use tokio::sync::mpsc::Sender;
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, GetLastError, HWND, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, GetLastError, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Threading::{
-    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CreateProcessW, GetExitCodeProcess, INFINITE, NORMAL_PRIORITY_CLASS,
-    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW, TerminateProcess, WaitForMultipleObjects,
+    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CreateProcessW, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION,
+    STARTF_USESTDHANDLES, STARTUPINFOW, WaitForMultipleObjects,
 };
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, WM_QUIT};
-use windows::core::{BOOL, PCWSTR};
+use windows::Win32::UI::WindowsAndMessaging::WM_QUIT;
+use windows::core::PCWSTR;
 
 use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
-use win_api_wrappers::process::Process;
+use win_api_wrappers::process::{Process, post_message_for_pid};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::utils::{Pipe, WideString};
 
@@ -93,7 +93,6 @@ pub enum ServerChannelEvent {
 pub struct WinApiProcessCtx {
     session_id: u32,
 
-    input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
     io_notification_tx: Sender<ServerChannelEvent>,
 
     stdout_read_pipe: Option<Pipe>,
@@ -108,11 +107,107 @@ pub struct WinApiProcessCtx {
 }
 
 impl WinApiProcessCtx {
-    // Returns process exit code.
-    pub fn start_io_loop(&mut self) -> Result<u32, ExecError> {
+    pub fn process_abort(&mut self, exit_code: u32) -> Result<(), ExecError> {
+        info!(
+            session_id = self.session_id,
+            "Aborting process execution by user request"
+        );
+
+        self.process.terminate(exit_code)?;
+
+        Ok(())
+    }
+
+    pub fn process_cancel(&mut self) -> Result<(), ExecError> {
+        info!(
+            session_id = self.session_id,
+            "Cancelling process execution by user request"
+        );
+
+        post_message_for_pid(self.pid, WM_QUIT, WPARAM(0), LPARAM(0))?;
+
+        // TODO: Figure out how to correctly send CTRL+C to console applications.
+
+        // Acknowledge client that cancel request has been processed
+        // successfully.
+        self.io_notification_tx
+            .blocking_send(ServerChannelEvent::SessionCancelSuccess {
+                session_id: self.session_id,
+            })?;
+
+        Ok(())
+    }
+
+    pub fn wait(mut self, mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
-        info!(session_id, "Process IO loop has started");
+        info!(session_id, "Waiting for process to exit");
+
+        let wait_events = vec![input_event_rx.raw_wait_handle(), self.process.handle.raw()];
+
+        const WAIT_OBJECT_INPUT_MESSAGE: WAIT_EVENT = WAIT_OBJECT_0;
+        const WAIT_OBJECT_PROCESS_EXIT: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);
+
+        self.io_notification_tx
+            .blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+
+        loop {
+            // SAFETY: No preconditions.
+            let signaled_event = unsafe { WaitForMultipleObjects(&wait_events, false, INFINITE) };
+
+            match signaled_event {
+                WAIT_OBJECT_PROCESS_EXIT => {
+                    info!(session_id, "Process has signaled exit");
+
+                    return Ok(self.process.exit_code()?);
+                }
+                WAIT_OBJECT_INPUT_MESSAGE => {
+                    let process_io_message = input_event_rx.try_recv()?;
+
+                    trace!(session_id, ?process_io_message, "Received process IO message");
+
+                    match process_io_message {
+                        ProcessIoInputEvent::AbortExecution(exit_code) => {
+                            info!(session_id, "Aborting process execution by user request");
+
+                            self.process_abort(exit_code)?;
+                            return Err(ExecError::Aborted);
+                        }
+                        ProcessIoInputEvent::CancelExecution => {
+                            self.process_cancel()?;
+
+                            // wait for process to exit
+                            continue;
+                        }
+                        ProcessIoInputEvent::DataIn { .. } => {
+                            // DataIn messages ignored.
+                        }
+                        ProcessIoInputEvent::TerminateIo => {
+                            info!(session_id, "Terminating IO loop");
+
+                            // Terminate IO loop
+                            return Err(ExecError::Aborted);
+                        }
+                    }
+                }
+                _ => {
+                    // Unexpected event, spurious wakeup?
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Starts IO redirection loop for a launched process.
+    ///
+    /// Returns process exit code.
+    pub fn wait_with_io_redirection(
+        mut self,
+        mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
+    ) -> Result<u32, ExecError> {
+        let session_id = self.session_id;
+
+        info!(session_id, "Process IO redirection loop has started");
 
         // Events for overlapped IO
         let stdout_read_event = Event::new_unnamed()?;
@@ -121,7 +216,7 @@ impl WinApiProcessCtx {
         let wait_events = vec![
             stdout_read_event.raw(),
             stderr_read_event.raw(),
-            self.input_event_rx.raw_wait_handle(),
+            input_event_rx.raw_wait_handle(),
             self.process.handle.raw(),
         ];
 
@@ -189,18 +284,10 @@ impl WinApiProcessCtx {
                 WAIT_OBJECT_PROCESS_EXIT => {
                     info!(session_id, "Process has signaled exit");
 
-                    let mut code: u32 = 0;
-                    // SAFETY: process_handle is valid and `code` is a valid stack memory, therefore
-                    // it is safe to call GetExitCodeProcess.
-                    unsafe {
-                        GetExitCodeProcess(self.process.handle.raw(), &mut code as *mut _)?;
-                    }
-
-                    // Return standard Windows exit code.
-                    return Ok(code);
+                    return Ok(self.process.exit_code()?);
                 }
                 WAIT_OBJECT_INPUT_MESSAGE => {
-                    let process_io_message = self.input_event_rx.try_recv()?;
+                    let process_io_message = input_event_rx.try_recv()?;
 
                     trace!(session_id, ?process_io_message, "Received process IO message");
 
@@ -208,46 +295,11 @@ impl WinApiProcessCtx {
                         ProcessIoInputEvent::AbortExecution(exit_code) => {
                             info!(session_id, "Aborting process execution by user request");
 
-                            // Terminate process with requested status.
-                            // SAFETY: No preconditions.
-                            unsafe { TerminateProcess(self.process.handle.raw(), exit_code)? };
-
+                            self.process_abort(exit_code)?;
                             return Err(ExecError::Aborted);
                         }
                         ProcessIoInputEvent::CancelExecution => {
-                            info!(session_id, "Cancelling process execution by user request");
-
-                            let mut windows_enum_ctx = EnumWindowsContext {
-                                expected_pid: self.pid,
-                                threads: Default::default(),
-                            };
-
-                            // SAFETY: EnumWindows is safe to call with valid callback function
-                            // and context. Lifetime of windows_enum_ctx is guaranteed to be valid
-                            // until EnumWindows returns.
-                            unsafe {
-                                // Enumerate all windows associated with the process
-                                EnumWindows(
-                                    Some(windows_enum_func),
-                                    LPARAM(&mut windows_enum_ctx as *mut EnumWindowsContext as isize),
-                                )
-                            }?;
-
-                            // For GUI windows - send WM_CLOSE message
-                            if !windows_enum_ctx.threads.is_empty() {
-                                // Send cancel message to all windows
-                                for thread in windows_enum_ctx.threads {
-                                    // SAFETY: No outstanding preconditions.
-                                    let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
-                                }
-                            }
-
-                            // TODO: Figure out how to send CTRL+C to console applications.
-
-                            // Acknowledge client that cancel request has been processed
-                            // successfully.
-                            self.io_notification_tx
-                                .blocking_send(ServerChannelEvent::SessionCancelSuccess { session_id })?;
+                            self.process_cancel()?;
 
                             // wait for process to exit
                             continue;
@@ -423,6 +475,7 @@ pub struct WinApiProcessBuilder {
     executable: String,
     command_line: String,
     current_directory: String,
+    enable_io_redirection: bool,
     temp_files: Vec<TmpFileGuard>,
 }
 
@@ -432,6 +485,7 @@ impl WinApiProcessBuilder {
             executable: executable.to_owned(),
             command_line: String::new(),
             current_directory: String::new(),
+            enable_io_redirection: false,
             temp_files: Vec::new(),
         }
     }
@@ -454,9 +508,15 @@ impl WinApiProcessBuilder {
         self
     }
 
+    #[must_use]
+    pub fn with_io_redirection(mut self, enable: bool) -> Self {
+        self.enable_io_redirection = enable;
+        self
+    }
+
     /// Starts process execution and spawns IO thread to redirect stdio to/from dvc.
     pub fn run(
-        self,
+        mut self,
         session_id: u32,
         io_notification_tx: Sender<ServerChannelEvent>,
     ) -> Result<WinApiProcess, ExecError> {
@@ -470,89 +530,41 @@ impl WinApiProcessBuilder {
             "Starting process: `{command_line}`; cwd:`{current_directory}`"
         );
 
-        let mut command_line_wide = WideString::from(command_line);
-        let current_directory_wide = if current_directory.is_empty() {
+        let command_line = WideString::from(command_line);
+        let current_directory = if current_directory.is_empty() {
             WideString::default()
         } else {
             WideString::from(current_directory)
         };
 
-        let mut process_information = PROCESS_INFORMATION::default();
+        // Move out temp files guard from builder to transfer over `WinApiProcess` instance
+        // later.
+        let temp_files = std::mem::take(&mut self.temp_files);
 
-        let IoRedirectionPipes {
-            stdout_read_pipe,
-            stdout_write_pipe,
-            stderr_read_pipe,
-            stderr_write_pipe,
-            stdin_read_pipe,
-            stdin_write_pipe,
-        } = IoRedirectionPipes::new()?;
+        let io_redirection = self.enable_io_redirection;
 
-        let startup_info = STARTUPINFOW {
-            cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
-            dwFlags: STARTF_USESTDHANDLES,
-            hStdError: stderr_write_pipe.handle.raw(),
-            hStdInput: stdin_read_pipe.handle.raw(),
-            hStdOutput: stdout_write_pipe.handle.raw(),
-            ..Default::default()
+        let process_ctx = if io_redirection {
+            prepare_process_with_io_redirection(
+                session_id,
+                command_line,
+                current_directory,
+                io_notification_tx.clone(),
+            )?
+        } else {
+            prepare_process(session_id, command_line, current_directory, io_notification_tx.clone())?
         };
-
-        let security_attributes = SecurityAttributesInit {
-            inherit_handle: true,
-            ..Default::default()
-        }
-        .init();
-
-        // SAFETY: All parameters constructed above are valid and safe to use.
-        unsafe {
-            CreateProcessW(
-                PCWSTR::null(),
-                Some(command_line_wide.as_pwstr()),
-                Some(security_attributes.as_ptr()),
-                None,
-                true,
-                NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
-                None,
-                current_directory_wide.as_pcwstr(),
-                &startup_info as *const _,
-                &mut process_information as *mut _,
-            )?;
-        }
-
-        // We don't need the thread handle, so we close it
-
-        // SAFETY: FFI call with no outstanding precondition.
-        unsafe { CloseHandle(process_information.hThread) }?;
-
-        // Handles were duplicated by CreateProcessW, so we can close them immediately.
-        // Explicitly drop handles just for clarity.
-        drop(stdout_write_pipe);
-        drop(stderr_write_pipe);
-        drop(stdin_read_pipe);
-
-        let process_handle = Process::from(
-            // SAFETY: process_information is valid and contains valid process handle.
-            unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
-        );
-
-        let pid = process_information.dwProcessId;
 
         // Create channel for `task` -> `Process IO thread` communication
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
 
         let join_handle = std::thread::spawn(move || {
-            let mut process_ctx = WinApiProcessCtx {
-                session_id,
-                input_event_rx,
-                io_notification_tx: io_notification_tx.clone(),
-                stdout_read_pipe: Some(stdout_read_pipe),
-                stderr_read_pipe: Some(stderr_read_pipe),
-                stdin_write_pipe: Some(stdin_write_pipe),
-                pid,
-                process: process_handle,
+            let run_result = if io_redirection {
+                process_ctx.wait_with_io_redirection(input_event_rx)
+            } else {
+                process_ctx.wait(input_event_rx)
             };
 
-            let notification = match process_ctx.start_io_loop() {
+            let notification = match run_result {
                 Ok(exit_code) => ServerChannelEvent::SessionExited { session_id, exit_code },
                 Err(error) => ServerChannelEvent::SessionFailed { session_id, error },
             };
@@ -565,9 +577,142 @@ impl WinApiProcessBuilder {
         Ok(WinApiProcess {
             input_event_tx,
             join_handle,
-            _temp_files: self.temp_files,
+            _temp_files: temp_files,
         })
     }
+}
+
+fn prepare_process(
+    session_id: u32,
+    mut command_line: WideString,
+    current_directory: WideString,
+    io_notification_tx: Sender<ServerChannelEvent>,
+) -> Result<WinApiProcessCtx, ExecError> {
+    let mut process_information = PROCESS_INFORMATION::default();
+
+    let startup_info = STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
+        dwFlags: Default::default(),
+        ..Default::default()
+    };
+
+    // SAFETY: All parameters constructed above are valid and safe to use.
+    unsafe {
+        CreateProcessW(
+            PCWSTR::null(),
+            Some(command_line.as_pwstr()),
+            None,
+            None,
+            true,
+            NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
+            None,
+            current_directory.as_pcwstr(),
+            &startup_info as *const _,
+            &mut process_information as *mut _,
+        )?;
+    }
+
+    // The thread handle returned by CreateProcessW is only needed if you want to manage or
+    // wait on the primary thread of the new process. Since we only need to manage the process
+    // itself and not its main thread, we close the thread handle immediately to avoid
+    // resource leaks.
+
+    // SAFETY: FFI call with no outstanding precondition.
+    unsafe { CloseHandle(process_information.hThread) }?;
+
+    let process_handle = Process::from(
+        // SAFETY: process_information is valid and contains valid process handle.
+        unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
+    );
+
+    let pid = process_information.dwProcessId;
+
+    Ok(WinApiProcessCtx {
+        session_id,
+        io_notification_tx,
+        stdout_read_pipe: None,
+        stderr_read_pipe: None,
+        stdin_write_pipe: None,
+        pid,
+        process: process_handle,
+    })
+}
+
+fn prepare_process_with_io_redirection(
+    session_id: u32,
+    mut command_line: WideString,
+    current_directory: WideString,
+    io_notification_tx: Sender<ServerChannelEvent>,
+) -> Result<WinApiProcessCtx, ExecError> {
+    let mut process_information = PROCESS_INFORMATION::default();
+
+    let IoRedirectionPipes {
+        stdout_read_pipe,
+        stdout_write_pipe,
+        stderr_read_pipe,
+        stderr_write_pipe,
+        stdin_read_pipe,
+        stdin_write_pipe,
+    } = IoRedirectionPipes::new()?;
+
+    let startup_info = STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
+        dwFlags: STARTF_USESTDHANDLES,
+        hStdError: stderr_write_pipe.handle.raw(),
+        hStdInput: stdin_read_pipe.handle.raw(),
+        hStdOutput: stdout_write_pipe.handle.raw(),
+        ..Default::default()
+    };
+
+    let security_attributes = SecurityAttributesInit {
+        inherit_handle: true,
+        ..Default::default()
+    }
+    .init();
+
+    // SAFETY: All parameters constructed above are valid and safe to use.
+    unsafe {
+        CreateProcessW(
+            PCWSTR::null(),
+            Some(command_line.as_pwstr()),
+            Some(security_attributes.as_ptr()),
+            None,
+            true,
+            NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
+            None,
+            current_directory.as_pcwstr(),
+            &startup_info as *const _,
+            &mut process_information as *mut _,
+        )?;
+    }
+
+    // SAFETY: FFI call with no outstanding precondition.
+    unsafe { CloseHandle(process_information.hThread) }?;
+
+    // Handles were duplicated by CreateProcessW, so we can close them immediately.
+    // Explicitly drop handles just for clarity.
+    drop(stdout_write_pipe);
+    drop(stderr_write_pipe);
+    drop(stdin_read_pipe);
+
+    let process_handle = Process::from(
+        // SAFETY: process_information is valid and contains valid process handle.
+        unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
+    );
+
+    let pid = process_information.dwProcessId;
+
+    let process_ctx = WinApiProcessCtx {
+        session_id,
+        io_notification_tx,
+        stdout_read_pipe: Some(stdout_read_pipe),
+        stderr_read_pipe: Some(stderr_read_pipe),
+        stdin_write_pipe: Some(stdin_write_pipe),
+        pid,
+        process: process_handle,
+    };
+
+    Ok(process_ctx)
 }
 
 /// Represents spawned process with IO redirection.
@@ -575,6 +720,14 @@ pub struct WinApiProcess {
     input_event_tx: WinapiSignaledSender<ProcessIoInputEvent>,
     join_handle: std::thread::JoinHandle<()>,
     _temp_files: Vec<TmpFileGuard>,
+}
+
+impl Drop for WinApiProcess {
+    fn drop(&mut self) {
+        // Ensure that the input event channel is closed when the process is dropped.
+        // This will signal the IO thread to terminate if it is still running.
+        let _ = self.input_event_tx.try_send(ProcessIoInputEvent::TerminateIo);
+    }
 }
 
 impl WinApiProcess {
@@ -602,35 +755,4 @@ impl WinApiProcess {
     pub fn is_session_terminated(&self) -> bool {
         self.join_handle.is_finished()
     }
-}
-
-struct EnumWindowsContext {
-    expected_pid: u32,
-    threads: Vec<u32>,
-}
-
-extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    // SAFETY: lparam.0 set to valid EnumWindowsContext memory by caller (Windows itself).
-    let enum_ctx = unsafe { &mut *(lparam.0 as *mut EnumWindowsContext) };
-
-    let mut pid: u32 = 0;
-    // SAFETY: pid points to valid memory.
-    unsafe {
-        GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut _));
-    }
-    if pid == 0 || pid != enum_ctx.expected_pid {
-        // Continue enumeration.
-        return true.into();
-    }
-
-    // SAFETY: FFI call with no outstanding preconditions.
-    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
-    if thread_id == 0 {
-        // Continue enumeration.
-        return true.into();
-    }
-
-    enum_ctx.threads.push(thread_id);
-
-    true.into()
 }

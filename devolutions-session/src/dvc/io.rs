@@ -1,3 +1,4 @@
+use anyhow::Context;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
 use windows::Win32::Foundation::{ERROR_IO_PENDING, GetLastError, WAIT_EVENT, WAIT_OBJECT_0};
@@ -86,7 +87,15 @@ pub fn run_dvc_io(
 
                 let messages = message_dissector
                     .dissect(&pdu_chunk_buffer[HEADER_SIZE..HEADER_SIZE + chunk_data_size])
-                    .expect("BUG: Failed to dissect messages");
+                    .context("Failed to dissect DVC messages");
+
+                let messages = match messages {
+                    Ok(messages) => messages,
+                    Err(err) => {
+                        error!(?err, "Failed to dissect DVC messages");
+                        return Err(err);
+                    }
+                };
 
                 // Send all messages over the channel.
                 for message in messages {
@@ -94,14 +103,12 @@ pub fn run_dvc_io(
                     // We do non-blocking send to avoid blocking the IO thread. Processing
                     // task is expected to be fast enough to keep up with the incoming messages.
                     match read_tx.try_send(message) {
-                        Ok(_) => {
-                            trace!("Received DVC message is sent to the processing channel");
-                        }
+                        Ok(_) => {}
                         Err(TrySendError::Full(_)) => {
-                            trace!("DVC message is dropped due to busy channel");
+                            error!("DVC message was dropped due to channel overflow");
                         }
                         Err(e) => {
-                            trace!("DVC message is dropped due to closed channel");
+                            error!("DVC message was dropped due to closed channel");
                             return Err(e.into());
                         }
                     }
