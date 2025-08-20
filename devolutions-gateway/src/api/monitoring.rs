@@ -2,7 +2,7 @@ use crate::http::HttpError;
 use crate::DgwState;
 use axum::{Json, Router, extract, routing};
 use network_monitor;
-use time::{UtcDateTime, OffsetDateTime};
+use time::OffsetDateTime;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new()

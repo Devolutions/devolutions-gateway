@@ -41,10 +41,10 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
 
     let old_config = mem::replace(&mut *config_write, config);
 
-    let new_config_set: HashSet<&MonitorDefinition> = config_write.monitors.iter().collect();
-    let old_config_set: HashSet<&MonitorDefinition> = old_config.monitors.iter().collect();
+    let new_config_set: HashSet<MonitorDefinition> = config_write.monitors.clone().into_iter().collect();
+    let old_config_set: HashSet<MonitorDefinition> = old_config.monitors.clone().into_iter().collect();
 
-    let added = new_config_set.difference(&old_config_set);
+    let added = new_config_set.difference(&old_config_set).cloned();
     let deleted = old_config_set.difference(&new_config_set);
 
     let (new_cancellation_tokens, new_monitors): (
@@ -55,33 +55,32 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
             let cancellation_token = CancellationToken::new();
             let cancellation_monitor = cancellation_token.clone();
 
-            let definition_clone = (*definition).clone(); // TODO: is there a nicer way to do this?
-
             let state = Arc::clone(&state);
+            let definition_id = definition.id.clone();
 
             let monitor = async move {
                 loop {
                     let start_time = UtcDateTime::now();
 
-                    let monitor_result = match definition_clone.probe {
+                    let monitor_result = match &definition.probe {
                         ProbeType::Ping => {
                             let scanner_runtime = match &*state.scanner_runtime {
                                 Ok(scanner_runtime) => scanner_runtime.clone(),
                                 Err(error) => {
-                                    warn!(error = %error, monitor_id = definition_clone.id, "scanning runtime failed to start, aborting monitor");
+                                    warn!(error = %error, monitor_id = definition.id, "scanning runtime failed to start, aborting monitor");
                                     break;
                                 },
                             };
-                            do_ping_monitor(&definition_clone, scanner_runtime).await
+                            do_ping_monitor(&definition, scanner_runtime).await
                         },
-                        ProbeType::TcpOpen => do_tcpopen_monitor(&definition_clone).await,
+                        ProbeType::TcpOpen => do_tcpopen_monitor(&definition).await,
                     };
 
                     state.log.write(monitor_result);
 
                     let elapsed = UtcDateTime::now() - start_time;
                     let next_run_in =
-                        (definition_clone.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
+                        (definition.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
                     select! {
                         _ = cancellation_monitor.cancelled() => { return }
                         _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { () }
@@ -90,7 +89,7 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
             };
 
             return (
-                (definition.id.clone(), cancellation_token),
+                (definition_id.clone(), cancellation_token),
                 Box::pin(monitor) as Pin<Box<dyn Future<Output = ()> + Send>>,
             );
         })
