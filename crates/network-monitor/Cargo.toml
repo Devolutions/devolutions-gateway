@@ -16,6 +16,7 @@ time = { version = "0.3", features = ["serde"] }
 tokio = { version = "1.45", features= ["macros", "sync"] }
 tokio-util = { version = "0.7" }
 anyhow = "1"
+tracing = "0.1"
 
 [dev-dependencies]
 tempdir = "0.3"

@@ -92,7 +92,6 @@ fn hub_sample() -> Sample {
             verbosity_profile: Some(VerbosityProfile::Tls),
             web_app: None,
             enable_network_monitoring: None,
-            enable_network_monitoring: None,
             debug: None,
             rest: Default::default(),
         },

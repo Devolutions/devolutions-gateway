@@ -2,7 +2,7 @@ use crate::http::HttpError;
 use crate::DgwState;
 use axum::{Json, Router, extract, routing};
 use network_monitor;
-use time::UtcDateTime;
+use time::{UtcDateTime, OffsetDateTime};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new()
@@ -76,6 +76,7 @@ impl MonitorsConfig {
     fn lossy_into(self) -> (network_monitor::MonitorsConfig, Vec<MonitorDefinitionProbeTypeError>) {
         let (monitors, errors): (Vec<network_monitor::MonitorDefinition>, Vec<MonitorDefinitionProbeTypeError>) = self.monitors
             .into_iter()
+            //.map(MonitorDefinition::try_into)
             .map(|monitor| {
                 let whattt: Result<network_monitor::MonitorDefinition, MonitorDefinitionProbeTypeError> = monitor.try_into();
                 return whattt;
@@ -199,7 +200,8 @@ pub(crate) struct MonitoringLogResponse {
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct MonitorResult {
     monitor_id: String,
-    request_start_time: UtcDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    request_start_time: OffsetDateTime,
     response_success: bool,
     response_messages: Option<String>,
     response_time: f64,
@@ -209,7 +211,7 @@ impl From<network_monitor::MonitorResult> for MonitorResult {
     fn from(value: network_monitor::MonitorResult) -> Self {
         MonitorResult {
             monitor_id: value.monitor_id,
-            request_start_time: value.request_start_time,
+            request_start_time: value.request_start_time.into(),
             response_success: value.response_success,
             response_messages: value.response_messages,
             response_time: value.response_time

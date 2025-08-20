@@ -6,11 +6,13 @@ use std::time::Duration;
 use std::{fs, io, mem};
 
 use camino::Utf8PathBuf;
+use network_scanner_net::runtime::Socket2Runtime;
 use serde::{Serialize, Deserialize};
 use time::{UtcDateTime};
 use thiserror::Error;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use network_scanner::ping;
 
@@ -55,14 +57,23 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
 
             let definition_clone = (*definition).clone(); // TODO: is there a nicer way to do this?
 
-            let state = state.clone();
+            let state = Arc::clone(&state);
 
             let monitor = async move {
                 loop {
                     let start_time = UtcDateTime::now();
 
                     let monitor_result = match definition_clone.probe {
-                        ProbeType::Ping => do_ping_monitor(&definition_clone).await,
+                        ProbeType::Ping => {
+                            let scanner_runtime = match &*state.scanner_runtime {
+                                Ok(scanner_runtime) => scanner_runtime.clone(),
+                                Err(error) => {
+                                    warn!(error = %error, monitor_id = definition_clone.id, "scanning runtime failed to start, aborting monitor");
+                                    break;
+                                },
+                            };
+                            do_ping_monitor(&definition_clone, scanner_runtime).await
+                        },
                         ProbeType::TcpOpen => do_tcpopen_monitor(&definition_clone).await,
                     };
 
@@ -103,13 +114,12 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
     Ok(())
 }
 
-async fn do_ping_monitor(definition: &MonitorDefinition) -> MonitorResult {
+async fn do_ping_monitor(definition: &MonitorDefinition, scanner_runtime: Arc<Socket2Runtime>) -> MonitorResult {
     let start_time = UtcDateTime::now();
 
     let ping_result = async || -> anyhow::Result<time::Duration> {
-        let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
         ping::ping_addr(
-            runtime,
+            scanner_runtime,
             format!("{hostname}:0", hostname = definition.address),
             Duration::from_secs(definition.timeout),
         )
@@ -206,6 +216,7 @@ pub struct MonitorResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino::Utf8Path;
     use tempdir::TempDir;
     use tokio_test::{self, assert_ok};
 
