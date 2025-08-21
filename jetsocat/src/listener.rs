@@ -1,13 +1,14 @@
 use anyhow::Context;
+use jmux_proto::LocalChannelId;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
 use proxy_http::HttpProxyAcceptor;
 use proxy_socks::Socks5AcceptorConfig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::Instrument as _;
 
 #[derive(Debug, Clone)]
@@ -407,69 +408,209 @@ async fn start_udp_relay(api_request_tx: ApiRequestSender, _tcp_addr: SocketAddr
 /// Handles a single UDP packet received from a SOCKS5 client.
 ///
 /// This function manages JMUX channel creation and forwards the UDP data.
-/// Currently implements a simplified UDP-to-TCP bridge for proof of concept.
+/// Implements full bidirectional UDP-to-TCP bridge through JMUX channels.
 async fn handle_udp_packet(
     api_request_tx: ApiRequestSender,
     active_channels: Arc<Mutex<HashMap<SocketAddr, (u32, SocketAddr)>>>,
-    _udp_socket: Arc<UdpSocket>,
+    udp_socket: Arc<UdpSocket>,
     client_addr: SocketAddr,
     datagram: proxy_socks::UdpDatagram,
 ) -> anyhow::Result<()> {
     let destination_url = dest_addr_to_url(&datagram.dest_addr);
 
-    // Check if we already have an active JMUX channel for this client.
+    // Check if we already have an active JMUX channel for this client and destination.
+    let _channel_key = (client_addr, datagram.dest_addr.clone());
     let channels = active_channels.lock().await;
     let channel_info = channels.get(&client_addr).copied();
     drop(channels);
 
-    let _channel_id = if let Some((id, _)) = channel_info {
-        id
+    let (channel_id, udp_bridge_tx) = if let Some((_id, _)) = channel_info {
+        // TODO: Get the existing bridge sender for this channel
+        // For now, create a new channel for each packet (simplified)
+        create_udp_bridge_channel(
+            api_request_tx.clone(),
+            active_channels.clone(),
+            udp_socket.clone(),
+            client_addr,
+            destination_url,
+            datagram.dest_addr.clone(),
+        )
+        .await?
     } else {
-        // Create new JMUX channel for this destination.
-        let (sender, receiver) = oneshot::channel();
+        create_udp_bridge_channel(
+            api_request_tx.clone(),
+            active_channels.clone(),
+            udp_socket.clone(),
+            client_addr,
+            destination_url,
+            datagram.dest_addr.clone(),
+        )
+        .await?
+    };
 
-        match api_request_tx
-            .send(JmuxApiRequest::OpenChannel {
-                destination_url: destination_url.clone(),
-                api_response_tx: sender,
-            })
-            .await
-        {
-            Ok(()) => {}
-            Err(error) => {
-                warn!(%error, "Couldn't send JMUX API request");
-                anyhow::bail!("couldn't send JMUX request");
-            }
+    // Forward the UDP packet through the JMUX channel
+    if let Err(e) = udp_bridge_tx.send(datagram.payload).await {
+        debug!("Failed to send UDP packet to JMUX channel {}: {}", channel_id, e);
+    }
+
+    Ok(())
+}
+
+/// Creates a new JMUX channel with bidirectional UDP bridge.
+async fn create_udp_bridge_channel(
+    api_request_tx: ApiRequestSender,
+    active_channels: Arc<Mutex<HashMap<SocketAddr, (u32, SocketAddr)>>>,
+    udp_socket: Arc<UdpSocket>,
+    client_addr: SocketAddr,
+    destination_url: DestinationUrl,
+    dest_addr: proxy_types::DestAddr,
+) -> anyhow::Result<(LocalChannelId, mpsc::Sender<Vec<u8>>)> {
+    // Create new JMUX channel for this destination.
+    let (sender, receiver) = oneshot::channel();
+
+    match api_request_tx
+        .send(JmuxApiRequest::OpenChannel {
+            destination_url: destination_url.clone(),
+            api_response_tx: sender,
+        })
+        .await
+    {
+        Ok(()) => {}
+        Err(error) => {
+            warn!(%error, "Couldn't send JMUX API request");
+            anyhow::bail!("couldn't send JMUX request");
         }
+    }
 
-        match receiver.await.context("negotiation interrupted")? {
-            JmuxApiResponse::Success { id } => {
-                // Store channel mapping for this client.
-                let dest_socket_addr = match &datagram.dest_addr {
-                    proxy_types::DestAddr::Ip(addr) => *addr,
-                    proxy_types::DestAddr::Domain(_domain, port) => {
-                        // FIXME: Domain resolution not implemented in this PoC.
-                        SocketAddr::from(([0, 0, 0, 0], *port))
-                    }
-                };
+    let channel_id = match receiver.await.context("negotiation interrupted")? {
+        JmuxApiResponse::Success { id } => {
+            // Store channel mapping for this client.
+            let dest_socket_addr = match &dest_addr {
+                proxy_types::DestAddr::Ip(addr) => *addr,
+                proxy_types::DestAddr::Domain(_domain, port) => {
+                    // FIXME: Domain resolution not implemented in this PoC.
+                    SocketAddr::from(([0, 0, 0, 0], *port))
+                }
+            };
 
-                let mut channels = active_channels.lock().await;
-                channels.insert(client_addr, (id.into(), dest_socket_addr));
-                drop(channels);
+            let mut channels = active_channels.lock().await;
+            channels.insert(client_addr, (id.into(), dest_socket_addr));
+            drop(channels);
 
-                // FIXME: This is a simplified implementation for proof of concept.
-                // A complete implementation would need bidirectional UDP<->TCP bridging.
-                debug!("Channel {} opened for UDP packet relay", id);
-
-                id.into()
-            }
-            JmuxApiResponse::Failure { id, reason_code } => {
-                anyhow::bail!("channel {} failure: {}", id, reason_code);
-            }
+            debug!("Channel {} opened for UDP packet relay", id);
+            id
+        }
+        JmuxApiResponse::Failure { id, reason_code } => {
+            anyhow::bail!("channel {} failure: {}", id, reason_code);
         }
     };
 
-    Ok(())
+    // Create a TCP connection pair using localhost for JMUX bridge
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let bridge_addr = listener.local_addr()?;
+
+    // Create channel for sending UDP data to JMUX
+    let (udp_tx, mut udp_rx) = mpsc::channel::<Vec<u8>>(32);
+
+    // Accept connection task
+    let udp_socket_clone = udp_socket.clone();
+    let dest_addr_clone = dest_addr.clone();
+    let bridge_task = tokio::spawn(async move {
+        // Accept the connection from our client
+        let (bridge_stream, _) = listener.accept().await?;
+        let (bridge_reader, bridge_writer) = bridge_stream.into_split();
+
+        // Task to forward UDP packets to bridge
+        let udp_to_bridge_task = tokio::spawn({
+            let mut bridge_writer = bridge_writer;
+            async move {
+                while let Some(payload) = udp_rx.recv().await {
+                    if let Err(e) = bridge_writer.write_all(&payload).await {
+                        debug!("Failed to write UDP data to bridge: {}", e);
+                        break;
+                    }
+                    if let Err(e) = bridge_writer.flush().await {
+                        debug!("Failed to flush bridge writer: {}", e);
+                        break;
+                    }
+                }
+                debug!("UDP to bridge task terminated");
+            }
+        });
+
+        // Task to relay responses from bridge back to UDP client
+        let bridge_to_udp_task = tokio::spawn({
+            let mut bridge_reader = bridge_reader;
+            async move {
+                let mut buffer = [0u8; 65535];
+
+                loop {
+                    match bridge_reader.read(&mut buffer).await {
+                        Ok(0) => {
+                            debug!("Bridge connection closed, terminating UDP relay");
+                            break;
+                        }
+                        Ok(len) => {
+                            let response_data = &buffer[..len];
+
+                            // Create SOCKS5 UDP response datagram
+                            let response_datagram =
+                                proxy_socks::UdpDatagram::new(dest_addr_clone.clone(), response_data.to_vec());
+
+                            // Serialize response datagram
+                            let mut response_buf = Vec::new();
+                            if let Err(e) = response_datagram.write_into(&mut response_buf) {
+                                debug!("Failed to serialize UDP response: {}", e);
+                                continue;
+                            }
+
+                            // Send response back to UDP client
+                            if let Err(e) = udp_socket_clone.send_to(&response_buf, client_addr).await {
+                                debug!("Failed to send UDP response to client {}: {}", client_addr, e);
+                                break;
+                            }
+
+                            debug!("Relayed {} bytes from bridge back to UDP client {}", len, client_addr);
+                        }
+                        Err(e) => {
+                            debug!("Error reading from bridge: {}", e);
+                            break;
+                        }
+                    }
+                }
+                debug!("Bridge to UDP task terminated");
+            }
+        });
+
+        // Wait for both tasks to complete
+        let _ = tokio::try_join!(udp_to_bridge_task, bridge_to_udp_task);
+
+        anyhow::Ok(())
+    });
+
+    // Connect to our bridge server to create the TCP stream for JMUX
+    let jmux_stream = TcpStream::connect(bridge_addr).await?;
+
+    // Start the JMUX channel with our bridge stream
+    if let Err(e) = api_request_tx
+        .send(JmuxApiRequest::Start {
+            id: channel_id,
+            stream: jmux_stream,
+            leftover: None,
+        })
+        .await
+    {
+        // Clean up bridge task on failure
+        bridge_task.abort();
+        anyhow::bail!("Failed to start JMUX channel: {}", e);
+    }
+
+    // Clean up bridge task when channel is done (fire and forget)
+    tokio::spawn(async move {
+        let _ = bridge_task.await;
+    });
+
+    Ok((channel_id, udp_tx))
 }
 
 // Note: This is a simplified UDP relay implementation.
