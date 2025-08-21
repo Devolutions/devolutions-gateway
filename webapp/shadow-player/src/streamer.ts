@@ -52,7 +52,7 @@ export class ShadowPlayer extends HTMLElement {
       return;
     }
 
-    if (Object.hasOwn(this.videoElement, name)) {
+    if (Object.prototype.hasOwnProperty.call(this.videoElement, name)) {
       this.videoElement.setAttribute(name, newValue !== null ? newValue : '');
     }
   }

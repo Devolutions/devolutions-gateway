@@ -1,14 +1,10 @@
-import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import { TooltipModule } from 'primeng/tooltip';
 
 @Component({
   selector: 'gateway-menu-group-list-item',
   templateUrl: './menu-group-list-item.component.html',
   styleUrls: ['menu-group-list-item.component.scss'],
-  standalone: true,
-  imports: [CommonModule, TooltipModule],
 })
 export class MenuGroupListItemComponent extends BaseComponent implements OnInit, OnChanges {
   @Input() title = '';

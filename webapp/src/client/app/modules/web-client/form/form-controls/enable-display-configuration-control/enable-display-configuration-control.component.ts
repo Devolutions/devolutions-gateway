@@ -1,5 +1,5 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormGroup } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -8,8 +8,6 @@ import { WebFormService } from '@shared/services/web-form.service';
   selector: 'web-client-enable-display-configuration-control',
   templateUrl: 'enable-display-configuration-control.component.html',
   styleUrls: ['enable-display-configuration-control.component.scss'],
-  standalone: true,
-  imports: [ReactiveFormsModule],
 })
 export class EnableDisplayConfigurationControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

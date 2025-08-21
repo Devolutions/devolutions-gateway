@@ -1,18 +1,13 @@
-import { CommonModule } from '@angular/common';
 import { Component, Input, OnInit } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { ButtonModule } from 'primeng/button';
-import { TooltipModule } from 'primeng/tooltip';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'gateway-menu-list-active-sessions',
   templateUrl: './menu-list-active-sessions.component.html',
   styleUrls: ['menu-list-active-sessions.component.scss'],
-  standalone: true,
-  imports: [CommonModule, TooltipModule, ButtonModule],
 })
 export class MenuListActiveSessionsComponent extends BaseComponent implements OnInit {
   // disables the menu item

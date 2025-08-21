@@ -1,12 +1,9 @@
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-tieredmenu {
   width: auto;
   min-width: 200px;
 
   .p-menuitem-link {
-    padding: variables.$listItemPadding;
+    padding: $listItemPadding;
     color: var(--side-panel-text-color);
     user-select: none;
     display: flex;
@@ -20,9 +17,9 @@
   }
 
   &.p-tieredmenu-overlay {
-    border: 1px solid theme-mode-variables.$overlay-panel-border-color;
+    border: 1px solid $overlay-panel-border-color;
     border-radius: 4px;
-    box-shadow: variables.$defaultBoxShadow;
+    box-shadow: $defaultBoxShadow;
     background-color: var(--tiered-menu-bg-color);
     margin-top: 5px;
   }
@@ -54,7 +51,7 @@
   }
 
   .p-submenu-list {
-    border: 1px solid theme-mode-variables.$overlay-panel-border-color;
+    border: 1px solid $overlay-panel-border-color;
     border-radius: 4px;
     background: var(--tiered-menu-bg-color);
     max-width: 250px;

@@ -1,5 +1,3 @@
-@use 'mixins';
-
 p-virtualscroller {
   height: 100%;
 }
@@ -32,7 +30,7 @@ p-virtualscroller {
     height: 100%;
 
     cdk-virtual-scroll-viewport {
-      @include mixins.custom-scrollbar();
+      @include custom-scrollbar();
       height: 100%;
 
       .cdk-virtual-scroll-content-wrapper {

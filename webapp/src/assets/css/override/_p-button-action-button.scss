@@ -1,14 +1,12 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
+@import "theme-mode-variables";
 
 .p-inputgroup {
 
   .p-action-button {
     border-radius: 0;
     border-right: none;
-    border-top: 1px solid theme-mode-variables.$input-txt-border-color;
-    border-bottom: 1px solid theme-mode-variables.$input-txt-border-color;
+    border-top: 1px solid $input-txt-border-color;
+    border-bottom: 1px solid $input-txt-border-color;
     min-width: 2.15em;
     margin: 0;
     background-color: transparent !important;
@@ -19,14 +17,14 @@
     }
 
     &.stay-pressed, &:hover:not(.p-disabled):not([disabled]) {
-      color: theme-mode-variables.$action-btn-icon-color;
+      color: $action-btn-icon-color;
     }
 
     &:active:not(.p-disabled):not([disabled]) {
-      color: theme-mode-variables.$action-btn-icon-color;
+      color: $action-btn-icon-color;
     }
 
-    @include mixins.media-breakpoint-down(sm) {
+    @include media-breakpoint-down(sm) {
       min-width: 2.15em;
 
       .dvl-icon {
@@ -37,13 +35,13 @@
 
   sd-action-button .p-action-button {
     height: 100%;
-    background: theme-mode-variables.$input-txt-bg-color;
-    color: theme-mode-variables.$form-text-color;
+    background: $input-txt-bg-color;
+    color: $form-text-color;
     border: none;
   }
 
   sd-basic-copy-clipboard {
-    background: theme-mode-variables.$input-txt-bg-color;
+    background: $input-txt-bg-color;
 
     hub-container-actions-loader {
       height: 100%;
@@ -62,13 +60,13 @@
     }
 
     &:last-child .p-button {
-      border-radius: 0 (variables.$borderRadius - 2) (variables.$borderRadius - 2) 0 !important;
+      border-radius: 0 ($borderRadius - 2) ($borderRadius - 2) 0 !important;
     }
   }
 
   &:not(.filter-input-group) > *:last-child .p-button:not(.p-button-default),
   &:not(.filter-input-group) > .p-button:not(.p-button-default):last-child {
-    border-radius: 0 (variables.$borderRadius - 2) (variables.$borderRadius - 2) 0 !important;
+    border-radius: 0 ($borderRadius - 2) ($borderRadius - 2) 0 !important;
   }
 }
 

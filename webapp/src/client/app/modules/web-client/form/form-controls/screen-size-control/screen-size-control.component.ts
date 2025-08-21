@@ -1,18 +1,15 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormGroup } from '@angular/forms';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
-import { SelectModule } from 'primeng/select';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'web-client-screen-size-control',
   templateUrl: 'screen-size-control.component.html',
   styleUrls: ['screen-size-control.component.scss'],
-  standalone: true,
-  imports: [ReactiveFormsModule, SelectModule],
 })
 export class ScreenSizeControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

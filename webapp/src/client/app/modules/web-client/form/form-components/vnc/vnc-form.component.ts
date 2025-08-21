@@ -1,20 +1,12 @@
-import { Component, Input, OnInit } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { ChangeDetectorRef, Component, Input, OnInit } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { VncAuthMode } from '@shared/enums/web-client-auth-mode.enum';
 import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
-import { SelectModule } from 'primeng/select';
 import { Observable, of } from 'rxjs';
 import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
-import { EnableCursorControlComponent } from '../../form-controls/enable-cursor-control/enable-cursor-control.component';
-import { EnabledEncodingsControlComponent } from '../../form-controls/enabled-encodings-control/enabled-encodings-control.component';
-import { ExtendedClipboardControlComponent } from '../../form-controls/extended-clipboard-control/extended-clipboard-control.component';
-import { PasswordControlComponent } from '../../form-controls/password-control/password-control.component';
-import { ScreenSizeControlComponent } from '../../form-controls/screen-size-control/screen-size-control.component';
-import { UltraVirtualDisplayControlComponent } from '../../form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
-import { UsernameControlComponent } from '../../form-controls/username-control/username-control.component';
 
 interface FormInputVisibility {
   showUsernameInput?: boolean;
@@ -25,18 +17,6 @@ interface FormInputVisibility {
   selector: 'vnc-form',
   templateUrl: 'vnc-form.component.html',
   styleUrls: ['vnc-form.component.scss'],
-  standalone: true,
-  imports: [
-    ReactiveFormsModule,
-    SelectModule,
-    UsernameControlComponent,
-    PasswordControlComponent,
-    ScreenSizeControlComponent,
-    UltraVirtualDisplayControlComponent,
-    EnabledEncodingsControlComponent,
-    EnableCursorControlComponent,
-    ExtendedClipboardControlComponent,
-  ],
 })
 export class VncFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
@@ -53,7 +33,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
 
   constructor(
     private formService: WebFormService,
-    //private cdr: ChangeDetectorRef,
+    private cdr: ChangeDetectorRef,
   ) {
     super();
   }

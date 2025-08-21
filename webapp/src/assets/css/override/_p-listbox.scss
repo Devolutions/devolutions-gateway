@@ -1,7 +1,3 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-listbox {
   padding: 0;
   min-width: 12em;
@@ -12,13 +8,13 @@
   }
 
   .p-listbox-header {
-    padding: variables.$headerPadding;
+    padding: $headerPadding;
     display: flex;
     background: transparent;
-    color: theme-mode-variables.$default-text-color;
+    color: $default-text-color;
     border: 0 none;
     margin: 0 0 5px 0;
-    @include mixins.border-radius(0);
+    @include border-radius(0);
 
     .p-listbox-filter-container {
       .p-inputtext {
@@ -26,31 +22,31 @@
       }
 
       .p-listbox-filter-icon {
-        color: theme-mode-variables.$disabled-text-color;
+        color: $disabled-text-color;
         top: 19px;
         right: 9px;
         left: auto;
 
-        @include mixins.devolutions-dropdown-filter-icon-input();
+        @include devolutions-dropdown-filter-icon-input();
       }
     }
   }
 
   .p-listbox-list-wrapper {
-    @include mixins.custom-scrollbar();
+    @include custom-scrollbar();
   }
 
   .p-listbox-item {
     margin: 0;
-    padding: variables.$listItemPadding;
-    @include mixins.border-radius(0);
+    padding: $listItemPadding;
+    @include border-radius(0);
 
     &.p-highlight {
       background-color: var(--menu-text-active-background-color);
     }
 
     > td {
-      padding: variables.$listItemPadding;
+      padding: $listItemPadding;
     }
   }
 
@@ -65,20 +61,20 @@
 
   &.secondary-color .p-listbox-item {
     &.p-highlight {
-      background-color: theme-mode-variables.$tree-item-hover-bg-color;
-      color: theme-mode-variables.$tree-selector-text-color;
+      background-color: $tree-item-hover-bg-color;
+      color: $tree-selector-text-color;
     }
   }
 
   &.secondary-color:not(.p-disabled) {
     .p-listbox-item {
       &:not(.p-highlight):not(.p-disabled):hover {
-        background-color: theme-mode-variables.$tree-item-hover-bg-color;
-        color: theme-mode-variables.$tree-selector-text-color;
+        background-color: $tree-item-hover-bg-color;
+        color: $tree-selector-text-color;
       }
 
       &.p-highlight {
-        color: theme-mode-variables.$tree-selector-text-highlight-color;
+        color: $tree-selector-text-highlight-color;
       }
     }
   }
@@ -90,7 +86,7 @@
   &.p-disabled {
     .p-checkbox-box {
       &:not(.p-disabled):not(.p-highlight):hover {
-        border: 1px solid theme-mode-variables.$input-default-border-color;
+        border: 1px solid $input-default-border-color;
       }
     }
   }

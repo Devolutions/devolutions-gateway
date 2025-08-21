@@ -1,4 +1,4 @@
-@use 'variables';
+@import "variables";
 
 :host {
   display: flex;
@@ -16,7 +16,7 @@
   .spotlight-shortcut {
     margin: 5px;
     font-size: 10px;
-    border-radius: variables.$borderRadius;
+    border-radius: $borderRadius;
     border: 1px solid var(--border-secondary-color);
     background-color: var(--bg-secondary-color);
     white-space: nowrap;

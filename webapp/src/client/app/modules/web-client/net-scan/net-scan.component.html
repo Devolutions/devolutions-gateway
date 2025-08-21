@@ -2,50 +2,47 @@
   <div class="net-scan-main-box">
     <div class="net-scan-main-header">
       <span class="scan-title">Servers found ({{services.length}})</span>
-      @if (!ended) {
-      <div class="spinner">
+      <div class="spinner" *ngIf="!ended">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
             d="M12 22C10.6333 22 9.34167 21.7375 8.125 21.2125C6.90833 20.6875 5.84583 19.9708 4.9375 19.0625C4.02917 18.1542 3.3125 17.0917 2.7875 15.875C2.2625 14.6583 2 13.3667 2 12C2 10.6167 2.2625 9.32083 2.7875 8.1125C3.3125 6.90417 4.02917 5.84583 4.9375 4.9375C5.84583 4.02917 6.90833 3.3125 8.125 2.7875C9.34167 2.2625 10.6333 2 12 2C12.2833 2 12.5208 2.09583 12.7125 2.2875C12.9042 2.47917 13 2.71667 13 3C13 3.28333 12.9042 3.52083 12.7125 3.7125C12.5208 3.90417 12.2833 4 12 4C9.78333 4 7.89583 4.77917 6.3375 6.3375C4.77917 7.89583 4 9.78333 4 12C4 14.2167 4.77917 16.1042 6.3375 17.6625C7.89583 19.2208 9.78333 20 12 20C14.2167 20 16.1042 19.2208 17.6625 17.6625C19.2208 16.1042 20 14.2167 20 12C20 11.7167 20.0958 11.4792 20.2875 11.2875C20.4792 11.0958 20.7167 11 21 11C21.2833 11 21.5208 11.0958 21.7125 11.2875C21.9042 11.4792 22 11.7167 22 12C22 13.3667 21.7375 14.6583 21.2125 15.875C20.6875 17.0917 19.9708 18.1542 19.0625 19.0625C18.1542 19.9708 17.0958 20.6875 15.8875 21.2125C14.6792 21.7375 13.3833 22 12 22Z"
             fill="black" />
         </svg>
       </div>
-      } @else {
-      <div [pTooltip]="'Restart Network Scan'" class="hover-pointer-cursor" (click)="forceScan()">
+
+      <div *ngIf="ended" [pTooltip]="'Restart Network Scan'" class="hover-pointer-cursor" (click)="forceScan()">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
             d="M7.00065 12.0002C5.61898 12.0002 4.37398 11.436 3.47065 10.5302L5.33398 8.66683H0.333984V13.6668L2.29398 11.7068C3.49815 12.9152 5.15898 13.6668 7.00065 13.6668C10.1057 13.6668 12.7073 11.541 13.449 8.66683H11.7098C11.0232 10.6077 9.17648 12.0002 7.00065 12.0002ZM11.7073 2.2935C10.5032 1.08516 8.84232 0.333496 7.00065 0.333496C3.89565 0.333496 1.29398 2.45933 0.552318 5.3335H2.29148C2.97815 3.39266 4.82482 2.00016 7.00065 2.00016C8.38232 2.00016 9.62732 2.56433 10.5307 3.47016L8.66732 5.3335H13.6673V0.333496L11.7073 2.2935Z"
-            fill="black" fill-opacity="0.6" />
+            fill="black"
+            fill-opacity="0.6" />
         </svg>
       </div>
-      }
     </div>
 
-    @if (!ended || services.length !== 0) {
-    <div class="net-scan-list-container no-scroll">
-      @for (service of services; track service.hostname) {
-      <a class="net-scan-list-item" (click)="onServiceClick(service)">
+    <div class="net-scan-list-container no-scroll" *ngIf="!ended || services.length !== 0">
+      <a *ngFor="let service of services"
+         class="net-scan-list-item"
+         (click)="onServiceClick(service)">
         <i class="dvl-icon" [ngClass]="service.icon()"></i>
         <div class="net-scan-list-label">
           <span class="menu-label" [pTooltip]="serviceTitle(service)" tooltipEllipsis>{{ serviceTitle(service) }}</span>
-          @if (serviceSubtitle(service)) {
-          <small class="menu-list-sub-label">{{ serviceSubtitle(service) }}</small>
-          }
+          <small *ngIf="serviceSubtitle(service)" class="menu-list-sub-label">{{ serviceSubtitle(service) }}</small>
         </div>
         <div class="net-scan-prefill-form" [pTooltip]="'Prefill form'">
           <svg width="18" height="17" viewBox="0 0 18 17" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path
               d="M2.16667 17C1.70833 17 1.31597 16.8368 0.989583 16.5104C0.663194 16.184 0.5 15.7917 0.5 15.3333V3.66667C0.5 3.20833 0.663194 2.81597 0.989583 2.48958C1.31597 2.16319 1.70833 2 2.16667 2H9.60417L7.9375 3.66667H2.16667V15.3333H13.8333V9.54167L15.5 7.875V15.3333C15.5 15.7917 15.3368 16.184 15.0104 16.5104C14.684 16.8368 14.2917 17 13.8333 17H2.16667ZM5.5 12V8.45833L13.1458 0.8125C13.3125 0.645833 13.5 0.520833 13.7083 0.4375C13.9167 0.354167 14.125 0.3125 14.3333 0.3125C14.5556 0.3125 14.7674 0.354167 14.9687 0.4375C15.1701 0.520833 15.3542 0.645833 15.5208 0.8125L16.6875 2C16.8403 2.16667 16.9583 2.35069 17.0417 2.55208C17.125 2.75347 17.1667 2.95833 17.1667 3.16667C17.1667 3.375 17.1285 3.57986 17.0521 3.78125C16.9757 3.98264 16.8542 4.16667 16.6875 4.33333L9.04167 12H5.5ZM7.16667 10.3333H8.33333L13.1667 5.5L12.5833 4.91667L11.9792 4.33333L7.16667 9.14583V10.3333Z"
-              fill="black" fill-opacity="0.8" />
+              fill="black"
+              fill-opacity="0.8" />
           </svg>
         </div>
       </a>
-      }
     </div>
-    } @else {
-    <div class="net-scan-no-list">
+
+    <div class="net-scan-no-list" *ngIf="ended && services.length === 0">
       <img class="not-found-image" alt="not found" ngSrc="assets/images/netscan-not-found.png" height="221"
-        width="281" />
+           width="281"/>
       <span class="not-found-title">
         Not sure if it's us or you.
       </span>
@@ -55,6 +52,5 @@
 
       <p-button class="scan-button" [label]="'Scan again'" (onClick)="forceScan()"></p-button>
     </div>
-    }
   </div>
 </div>

@@ -1,14 +1,10 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-dialog {
   border: grey;
   display: flex;
   flex-direction: column;
   border-radius: 8px;
-  background: theme-mode-variables.$dialog-bg-color;
-  box-shadow: variables.$defaultBoxShadow;
+  background: $dialog-bg-color;
+  box-shadow: $defaultBoxShadow;
 
   // Prevents shrinking of dialog on small screen
   &:not(.p-confirm-dialog) {
@@ -17,7 +13,7 @@
 
   .p-dialog-header {
     border-bottom: 1px solid var(--dialog-header-border-color);
-    color: theme-mode-variables.$dialog-header-txt-color;
+    color: $dialog-header-txt-color;
     font-size: 18px;
     font-style: normal;
     font-weight: 600;
@@ -33,10 +29,10 @@
 
     .p-dialog-header-icon {
       border: 0 none;
-      font-size: variables.$closeButtonSize;
+      font-size: $closeButtonSize;
       margin-left: .35em;
       padding: 0;
-      @include mixins.transition(color variables.$transitionDuration);
+      @include transition(color $transitionDuration);
     }
 
     .icon-header {
@@ -53,7 +49,7 @@
     padding: var(--dialog-padding);
     white-space: pre-line;
 
-    @include mixins.custom-scrollbar();
+    @include custom-scrollbar();
 
     .toastui-editor-tooltip { // ToastUI tooltip doesn't like the pre-line property
       white-space: initial;
@@ -66,15 +62,15 @@
     border-top: 1px solid var(--dialog-header-border-color);
 
     button {
-      background: theme-mode-variables.$dialog-footer-btn-bg-color;
+      background: $dialog-footer-btn-bg-color;
       border: 0;
-      border-radius: variables.$buttonRadius;
+      border-radius: $buttonRadius;
       font-size: 14px;
       font-weight: 600;
       height: 30px;
       margin-right: 16px;
       min-width: 76px;
-      padding: variables.$buttonPadding;
+      padding: $buttonPadding;
 
       &.no-margin {
         margin: 0;
@@ -115,23 +111,23 @@
       }
 
       &:not(.p-disabled):not(.p-highlight):not([disabled]):hover {
-        background: theme-mode-variables.$dialog-footer-btn-bg-hover-color;
+        background: $dialog-footer-btn-bg-hover-color;
         color: #fff;
       }
 
       &:not(.p-disabled):not(.p-highlight):not([disabled]):active {
-        background: theme-mode-variables.$dialog-footer-btn-bg-pressed-color;
+        background: $dialog-footer-btn-bg-pressed-color;
       }
 
       &.p-button-delete-footer {
-        background: theme-mode-variables.$error-btn-bg-color;
+        background: $error-btn-bg-color;
 
         &:hover {
-          background: theme-mode-variables.$error-btn-bg-hover-color !important;
+          background: $error-btn-bg-hover-color !important;
         }
 
         &:active {
-          background: theme-mode-variables.$error-btn-bg-pressed-color !important;
+          background: $error-btn-bg-pressed-color !important;
         }
       }
     }
@@ -152,7 +148,7 @@
 
         &.p-icon {
           margin-right: .35em;
-          font-size: variables.$fontSize + 2;
+          font-size: $fontSize + 2;
         }
       }
 
@@ -167,11 +163,11 @@ body .confirmdialog-password-breach .p-dialog-content {
   display: flex;
 
   .dvl-icon-alert-error {
-    color: theme-mode-variables.$errorMessageBackgroundColor;
+    color: $errorMessageBackgroundColor;
   }
 
   .dvl-icon-alert-advise-bold {
-    color: theme-mode-variables.$warningMessageBackgroundColor;
+    color: $warningMessageBackgroundColor;
   }
 }
 
@@ -179,7 +175,7 @@ body .confirmdialog-password-breach .p-dialog-content {
   height: 100%;
   overflow-y: scroll;
 
-  @include mixins.custom-scrollbar()
+  @include custom-scrollbar()
 }
 
 .dialog-left-tab.p-tabview-left {
@@ -276,7 +272,7 @@ body .confirmdialog-password-breach .p-dialog-content {
     font-size: 18px;
     font-weight: 600;
 
-    @include mixins.text-ellipsis();
+    @include text-ellipsis();
   }
 }
 
@@ -292,7 +288,7 @@ body .confirmdialog-password-breach .p-dialog-content {
 .p-dialog .p-dialog-header .p-dialog-header-close {
   padding: 5px;
   border-radius: 50%;
-  transition: background-color ease-in-out variables.$transitionDuration;
+  transition: background-color ease-in-out $transitionDuration;
 
   .pi-times:before {
     font-family: devolutions-icons, sans-serif;
@@ -300,11 +296,11 @@ body .confirmdialog-password-breach .p-dialog-content {
   }
 
   &:hover:not(.p-disabled):not([disabled]) {
-    background-color: theme-mode-variables.$action-btn-hover-bg-color;
+    background-color: $action-btn-hover-bg-color;
   }
 
   &:active:not(.p-disabled):not([disabled]) {
-    background-color: theme-mode-variables.$action-btn-pressed-bg-color;
+    background-color: $action-btn-pressed-bg-color;
   }
 }
 
@@ -343,7 +339,7 @@ body .p-dialog-maximized {
 }
 
 .p-confirmdialog.p-dialog .p-dialog-content {
-  color: theme-mode-variables.$default-text-color;
+  color: $default-text-color;
 }
 
 .dvl-dialog-form {

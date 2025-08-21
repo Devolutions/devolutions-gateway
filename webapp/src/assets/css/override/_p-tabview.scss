@@ -1,9 +1,8 @@
-@use 'theme-mode-variables';
-@use 'variables';
+@import "theme-mode-variables";
 
 .p-tabview .p-tabview-nav {
   background: transparent;
-  border-bottom: 1px solid theme-mode-variables.$grid-item-border-color;
+  border-bottom: 1px solid $grid-item-border-color;
 }
 
 .p-tabview .p-tabview-nav li {
@@ -13,7 +12,7 @@
 .p-tabview .p-tabview-nav li .p-tabview-nav-link {
   border: 0;
   background: transparent;
-  color: theme-mode-variables.$input-txt-color;
+  color: $input-txt-color;
   padding: 1rem 1.5rem;
   font-weight: 600;
   border-top-right-radius: 4px;
@@ -29,15 +28,15 @@
 }
 
 .p-tabview .p-tabview-nav li:not(.p-highlight):not(.p-disabled):hover .p-tabview-nav-link {
-  background: theme-mode-variables.$tab-view-hover-color;
-  color: theme-mode-variables.$default-text-color;
+  background: $tab-view-hover-color;
+  color: $default-text-color;
   border-color: transparent;
 }
 
 .p-tabview .p-tabview-nav li.p-highlight .p-tabview-nav-link {
-  background: theme-mode-variables.$tab-view-hover-color;
+  background: $tab-view-hover-color;
   border-color: transparent;
-  color: theme-mode-variables.$tabview-active-txt-color;
+  color: $tabview-active-txt-color;
 }
 
 .p-tabview .p-tabview-left-icon {
@@ -73,6 +72,6 @@
   position: absolute;
   bottom: 0;
   height: 2px;
-  background-color: theme-mode-variables.$tabview-active-bg-color;
+  background-color: $tabview-active-bg-color;
   transition: 500ms cubic-bezier(0.35, 0, 0.25, 1);
 }

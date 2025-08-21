@@ -1,6 +1,6 @@
-@use 'mixins';
-@use 'variables';
-@use 'theme-mode-variables';
+@import '../../../../../../../assets/css/style/mixins';
+@import "../../../../../../../assets/css/style/variables";
+@import "../../../../../../../assets/css/theme/theme-mode-variables";
 
 ::ng-deep p-fileUpload .p-fileupload-content .p-progressbar {
   display: none !important;

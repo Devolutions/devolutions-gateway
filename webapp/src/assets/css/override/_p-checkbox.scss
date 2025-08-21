@@ -1,12 +1,8 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 :root,
 .light-theme, // will be removed once we wrap our default css prop in :root
 .dark-theme { // will be removed once we wrap our default css prop in :root
-  --checkbox-border-color: var(--input-border-color); // theme-mode-variables.$input-checkbox-border-color
-  --checkbox-background-color: var(--input-background-color); // theme-mode-variables.$input-checkbox-bg-color
+  --checkbox-border-color: var(--input-border-color); // $input-checkbox-border-color
+  --checkbox-background-color: var(--input-background-color); // $input-checkbox-bg-color
   --checkbox-label-color: var(--input-label-color);
   --checkbox-icon-color: var(--input-selected-indicator-color);
   --checkbox-box-shadow: var(--input-box-shadow);
@@ -23,14 +19,14 @@
 }
 
 .p-checkbox-box {
-  @include mixins.transition(background-color variables.$transitionDuration, border-color variables.$transitionDuration, box-shadow variables.$transitionDuration);
+  @include transition(background-color $transitionDuration, border-color $transitionDuration, box-shadow $transitionDuration);
 
   width: var(--checkbox-size);
   height: var(--checkbox-size);
 
   border: 2px solid var(--checkbox-border-color);
   background-color: var(--checkbox-background-color);
-  border-radius: variables.$borderRadius;
+  border-radius: $borderRadius;
   color: var(--checkbox-icon-color);
   font-size: var(--checkbox-icon-size);
   display: flex;

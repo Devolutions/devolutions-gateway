@@ -1,7 +1,3 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 body .p-tree .p-tree-container {
   overflow-x: hidden;
 }
@@ -13,7 +9,7 @@ body .p-tree .p-tree-container {
 body {
   .p-tree *.p-treenode:not(.blocked) > .p-treenode-content:not(.p-highlight) > .p-treenode-label:hover {
     padding: 2px;
-    color: theme-mode-variables.$tree-selector-text-color;
+    color: $tree-selector-text-color;
   }
 
   .p-tree .p-treenode .p-treenode-content {
@@ -37,8 +33,8 @@ body {
   }
 
   .p-tree .p-treenode .p-treenode-content.p-treenode-selectable.p-highlight {
-    background-color: theme-mode-variables.$tree-item-selected-bg-color;
-    color: theme-mode-variables.$tree-selector-text-highlight-color;
+    background-color: $tree-item-selected-bg-color;
+    color: $tree-selector-text-highlight-color;
   }
 
   .p-tree .p-treenode.restricted:not(.current) {
@@ -49,7 +45,7 @@ body {
 
   .p-tree *.p-treenode:not(.blocked) {
     > .p-treenode-content {
-      color: theme-mode-variables.$tree-selector-text-color;
+      color: $tree-selector-text-color;
 
 
       *.p-treenode-label {
@@ -71,12 +67,12 @@ body {
 
   .p-tree .p-treenode .p-treenode-content.p-highlight > span > div > span:hover {
     background-color: transparent;
-    color: theme-mode-variables.$tree-selector-text-highlight-color;
+    color: $tree-selector-text-highlight-color;
   }
 
   .p-tree .p-treenode .p-treenode-content.p-highlight > span > span:hover {
     background-color: transparent;
-    color: theme-mode-variables.$tree-selector-text-highlight-color;
+    color: $tree-selector-text-highlight-color;
   }
 
   .p-tree .p-treenode-droppoint {
@@ -107,7 +103,7 @@ body {
 
       .p-tree-container {
 
-        @include mixins.media-breakpoint-down(sm) {
+        @include media-breakpoint-down(sm) {
           padding: 0;
         }
       }
@@ -121,7 +117,7 @@ body {
       }
 
       .p-tree-toggler {
-        color: theme-mode-variables.$lighter-default-text-color;
+        color: $lighter-default-text-color;
         width: 18px;
 
         .p-tree-toggler-icon.pi-chevron-down,
@@ -143,7 +139,7 @@ body {
 
 
       .p-treenode-leaf-icon {
-        color: theme-mode-variables.$default-text-color;
+        color: $default-text-color;
         width: 18px;
       }
 
@@ -174,7 +170,7 @@ body {
           > .p-treenode-content {
             background-color: var(--tree-item-selected-bg-color);
             border: 1px solid var(--input-txt-border-focus-color);
-            border-radius: variables.$borderRadius;
+            border-radius: $borderRadius;
           }
         }
       }
@@ -193,7 +189,7 @@ body {
 
 asm-navigation-tree,
 .dvl-navigation-tree {
-  @include mixins.media-breakpoint-down(sm) {
+  @include media-breakpoint-down(sm) {
     max-width: none !important;
     width: 100%;
   }

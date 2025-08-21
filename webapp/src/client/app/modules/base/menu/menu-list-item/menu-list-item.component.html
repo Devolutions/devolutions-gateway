@@ -1,6 +1,4 @@
-@if (icon) {
-<i class="dvl-icon" [ngClass]="icon"></i>
-}
+<i *ngIf="icon" class="dvl-icon" [ngClass]="icon"></i>
 <div class="menu-list-label">
   <span class="menu-label" [pTooltip]="label" tooltipEllipsis>{{ label }}</span>
 </div>

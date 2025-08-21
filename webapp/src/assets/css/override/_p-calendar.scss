@@ -1,18 +1,15 @@
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-datepicker {
-  background: theme-mode-variables.$dropdown-container-bg-color;
+  background: $dropdown-container-bg-color;
   //margin-top: -1px; /* hack to simulate a thin line */
-  border: 1px solid theme-mode-variables.$dropdown-overlay-border-color;
-  box-shadow: variables.$defaultBoxShadow;
-  border-radius: 0 0 variables.$borderRadius variables.$borderRadius;
+  border: 1px solid $dropdown-overlay-border-color;
+  box-shadow: $defaultBoxShadow;
+  border-radius: 0 0 $borderRadius $borderRadius;
   padding: 0.5rem;
 }
 
 .p-datepicker .p-datepicker-header {
   padding: 0.3rem;
-  background: theme-mode-variables.$dropdown-container-bg-color;
+  background: $dropdown-container-bg-color;
   font-weight: 600;
   margin: 0;
 }
@@ -21,7 +18,7 @@
 .p-datepicker .p-datepicker-header .p-datepicker-next {
   width: 2.5rem;
   height: 2.5rem;
-  color: theme-mode-variables.$action-btn-secondary-icon-color;
+  color: $action-btn-secondary-icon-color;
   border: 0 none;
   background: transparent;
   border-radius: 50%;
@@ -30,12 +27,12 @@
 
 .p-datepicker .p-datepicker-header .p-datepicker-prev:enabled:hover,
 .p-datepicker .p-datepicker-header .p-datepicker-next:enabled:hover {
-  background: theme-mode-variables.$action-btn-secondary-hover-bg-color;
+  background: $action-btn-secondary-hover-bg-color;
 }
 
 .p-datepicker .p-datepicker-header .p-datepicker-prev:enabled:active,
 .p-datepicker .p-datepicker-header .p-datepicker-next:enabled:active {
-  background: theme-mode-variables.$action-btn-secondary-pressed-bg-color;
+  background: $action-btn-secondary-pressed-bg-color;
 }
 
 .p-datepicker .p-datepicker-header .p-datepicker-prev:focus,
@@ -264,7 +261,7 @@
 }
 
 .p-calendar-clearable span.p-calendar i.p-calendar-clear-icon {
-  color: theme-mode-variables.$action-btn-secondary-icon-color;
+  color: $action-btn-secondary-icon-color;
   right: 0;
   top: 55%;
 }
