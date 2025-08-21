@@ -1,26 +1,26 @@
 <div #sessionArdContainer>
-  @if (currentStatus.isDisabled) {
-  <div class="session-form">
-    <web-client-form [webSessionId]="webSessionId" [inputFormData]="formData" [error]="ardError" [isFormExists]="true">
-    </web-client-form>
+  <div *ngIf="currentStatus.isDisabled" class="session-form">
+    <web-client-form
+      [webSessionId]="webSessionId"
+      [inputFormData]="formData"
+      [error]="ardError"
+      [isFormExists]="true"></web-client-form>
   </div>
-  }
 
-  <session-toolbar [sessionContainerParent]="sessionContainerElement" [middleButtons]="middleToolbarButtons"
-    [middleToggleButtons]="middleToolbarToggleButtons" [rightButtons]="rightToolbarButtons" [sliders]="sliders">
+  <session-toolbar
+    [sessionContainerParent]="sessionContainerElement"
+    [middleButtons]="middleToolbarButtons"
+    [middleToggleButtons]="middleToolbarToggleButtons"
+    [rightButtons]="rightToolbarButtons"
+    [sliders]="sliders">
   </session-toolbar>
 
-  @if (loading) {
-  <div class="loading-info-container">
+  <div class="loading-info-container" *ngIf="loading">
     <div class="loading-info">
-      @if (!hideSpinnerOnly) {
-      <p-progressSpinner></p-progressSpinner>
-      }
+      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
     </div>
   </div>
-  }
 
-  <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true"
-    [module]="backendRef"></iron-remote-desktop>
+  <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true" [module]="backendRef"></iron-remote-desktop>
 
 </div>

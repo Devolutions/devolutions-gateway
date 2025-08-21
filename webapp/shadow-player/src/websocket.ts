@@ -1,4 +1,4 @@
-import { ClientMessage, parseClientMessage, parseServerMessage, ServerMessage } from './protocol';
+import { ClientMessage, ServerMessage, parseClientMessage, parseServerMessage } from './protocol';
 
 export class ServerWebSocket {
   ws: WebSocket;

@@ -1,8 +1,6 @@
 @font-face {
   font-family: "VideoJS";
-  src:
-    url("./fonts/VideoJS.woff") format("woff"),
-    url("./fonts/VideoJS.ttf") format("truetype");
+  src: url("./fonts/VideoJS.woff") format("woff"), url("./fonts/VideoJS.ttf") format("truetype");
 }
 
 .vjs-devolutions-progress-control {

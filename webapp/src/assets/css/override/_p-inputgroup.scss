@@ -1,12 +1,8 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-inputgroup {
   background: var(--input-txt-bg-color);
-  border: 1px solid theme-mode-variables.$input-default-border-color;
-  @include mixins.border-radius(variables.$borderRadius);
-  @include mixins.transition(border-color variables.$transitionDuration);
+  border: 1px solid $input-default-border-color;
+  @include border-radius($borderRadius);
+  @include transition(border-color $transitionDuration);
 
   input, .p-dropdown, p-inputMask {
     width: 100% !important;
@@ -14,7 +10,7 @@
     &[type=text] {
 
       &::placeholder {
-        color: theme-mode-variables.$input-txt-placeholder;
+        color: $input-txt-placeholder;
         position: relative;
         top: 1px;
       }
@@ -23,7 +19,7 @@
 
   .p-inputgroup-addon {
     border: none;
-    background-color: theme-mode-variables.$input-txt-bg-color;
+    background-color: $input-txt-bg-color;
     padding: 9px 5px;
     color: var(--form-text-color);
     font-size: 20px;
@@ -34,11 +30,11 @@
   }
 
   > .p-inputgroup-addon:first-child, > input:first-child, > .p-dropdown:first-child {
-    border-radius: variables.$borderRadius 0 0 variables.$borderRadius;
+    border-radius: $borderRadius 0 0 $borderRadius;
   }
 
   > *:last-child {
-    border-radius: 0 variables.$borderRadius variables.$borderRadius 0;
+    border-radius: 0 $borderRadius $borderRadius 0;
   }
 
 
@@ -96,16 +92,16 @@
   }
 
   &.ng-invalid.ng-touched {
-    border-color: theme-mode-variables.$input-txt-border-error-color;
+    border-color: $input-txt-border-error-color;
   }
 
   &:not(.p-disabled):hover {
-    border-color: theme-mode-variables.$input-txt-border-hover-color;
+    border-color: $input-txt-border-hover-color;
   }
 
   &:not(.p-disabled).focus {
-    border-color: theme-mode-variables.$input-txt-border-focus-color;
-    box-shadow: 0 3px 6px 0 theme-mode-variables.$input-txt-shadow-color;
+    border-color: $input-txt-border-focus-color;
+    box-shadow: 0 3px 6px 0 $input-txt-shadow-color;
   }
 
   &.filter-input-group {
@@ -119,7 +115,7 @@
     }
 
     .p-inputtext {
-      border-radius: variables.$borderRadius;
+      border-radius: $borderRadius;
     }
 
     .p-inputgroup-addon {
@@ -127,7 +123,7 @@
       font-size: 20px;
       padding: 4px;
       min-width: 40px;
-      background: theme-mode-variables.$tree-search-input-bg-color;
+      background: $tree-search-input-bg-color;
       transition: all 300ms;
 
       &.filter {
@@ -137,7 +133,7 @@
           cursor: pointer;
 
           &:hover {
-            color: theme-mode-variables.$side-panel-search-active-clear;
+            color: $side-panel-search-active-clear;
           }
         }
       }

@@ -1,14 +1,10 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 p-inputNumber {
   display: flex;
   width: 100%;
   background: var(--input-txt-bg-color);
-  border: 1px solid theme-mode-variables.$input-default-border-color;
-  border-radius: variables.$borderRadius;
-  @include mixins.transition(border-color variables.$transitionDuration);
+  border: 1px solid $input-default-border-color;
+  border-radius: $borderRadius;
+  @include transition(border-color $transitionDuration);
 
   input, .p-inputtext {
     border: none !important;
@@ -18,8 +14,8 @@ p-inputNumber {
   .p-inputnumber {
     width: 100%;
     margin-right: 5px;
-    border-radius: variables.$borderRadius;
-    background: theme-mode-variables.$input-txt-bg-color;
+    border-radius: $borderRadius;
+    background: $input-txt-bg-color;
 
     .p-inputnumber-button-group {
       flex: 1 0 auto;
@@ -27,13 +23,13 @@ p-inputNumber {
       .p-button {
         background-color: transparent;
         border: none;
-        color: theme-mode-variables.$dropdown-trigger-color;
+        color: $dropdown-trigger-color;
         margin-right: 0;
         padding: 0;
         z-index: auto;
 
         &:not(.p-disabled):hover, &:not(.p-disabled):focus, &:not(.p-disabled):active {
-          color: theme-mode-variables.$default-text-color;
+          color: $default-text-color;
           background-color: transparent;
         }
 
@@ -44,7 +40,7 @@ p-inputNumber {
 
         &:hover {
           .p-button-icon {
-            color: theme-mode-variables.$default-btn-bg-color;
+            color: $default-btn-bg-color;
           }
         }
 
@@ -66,15 +62,15 @@ p-inputNumber {
   }
 
   &.ng-invalid.ng-touched {
-    border-color: theme-mode-variables.$input-txt-border-error-color;
+    border-color: $input-txt-border-error-color;
   }
 
   &:not(.p-disabled):hover {
-    border: 1px solid theme-mode-variables.$input-txt-border-hover-color;
+    border: 1px solid $input-txt-border-hover-color;
   }
 
   &:not(.p-disabled).p-inputwrapper-focus {
-    border: 1px solid theme-mode-variables.$input-txt-border-focus-color;
-    box-shadow: 0 3px 6px 0 theme-mode-variables.$input-txt-shadow-color;
+    border: 1px solid $input-txt-border-focus-color;
+    box-shadow: 0 3px 6px 0 $input-txt-shadow-color;
   }
 }

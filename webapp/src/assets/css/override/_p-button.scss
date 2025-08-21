@@ -1,10 +1,7 @@
-@use 'theme-mode-variables';
-@use 'variables';
-
 .cancel-button .p-button {
   background-color: transparent !important;
   box-shadow: none !important;
-  color: theme-mode-variables.$dialog-footer-txt-color !important;
+  color: $dialog-footer-txt-color !important;
   font-weight: 600;
 
   &.secondary {
@@ -13,7 +10,7 @@
   }
 
   &:not(.p-disabled):hover {
-    color: theme-mode-variables.$dialog-footer-txt-color;
+    color: $dialog-footer-txt-color;
   }
 
   .p-button-label {
@@ -21,7 +18,7 @@
     border-bottom: 1px solid transparent;
 
     &:hover {
-      border-bottom: 1px solid theme-mode-variables.$dialog-footer-txt-color;
+      border-bottom: 1px solid $dialog-footer-txt-color;
     }
   }
 
@@ -33,7 +30,7 @@
 .p-inputgroup {
   .p-button.p-button-secondary {
     &:hover:not([disabled]), &:focus:not([disabled]) {
-      color: theme-mode-variables.$input-txt-border-focus-color;
+      color: $input-txt-border-focus-color;
     }
   }
 
@@ -71,16 +68,16 @@ button:after {
 }
 
 .p-button {
-  background-color: theme-mode-variables.$default-btn-bg-color;
+  background-color: $default-btn-bg-color;
   color: #fff;
   font-weight: 400;
-  padding: variables.$buttonPadding;
+  padding: $buttonPadding;
   border: 0;
   margin-right: 6px;
-  border-radius: variables.$buttonRadius;
+  border-radius: $buttonRadius;
   line-height: 14px;
   font-size: 14px;
-  transition: background-color ease-in-out variables.$transitionDuration;
+  transition: background-color ease-in-out $transitionDuration;
 
   .p-button-label {
     line-height: 14px;
@@ -101,8 +98,8 @@ button:after {
     border-radius: 14px;
     border: none;
     min-width: 120px;
-    background-color: theme-mode-variables.$default-btn-bg-color;
-    color: theme-mode-variables.$default-btn-text-color;
+    background-color: $default-btn-bg-color;
+    color: $default-btn-text-color;
     transition: ease-in-out 300ms;
 
     &.p-button-label-only .p-button-label {
@@ -112,11 +109,11 @@ button:after {
   }
 
   &:hover:not(.p-disabled):not([disabled]) {
-    background-color: theme-mode-variables.$default-btn-bg-hover-color;
+    background-color: $default-btn-bg-hover-color;
   }
 
   &:active:not(.p-disabled):not([disabled]) {
-    background-color: theme-mode-variables.$default-btn-bg-pressed-color;
+    background-color: $default-btn-bg-pressed-color;
   }
 
   &.error {
@@ -129,17 +126,17 @@ button:after {
 }
 
 .p-btn-link {
-  color: theme-mode-variables.$default-btn-link-text-color !important;
+  color: $default-btn-link-text-color !important;
   cursor: pointer;
 
   &:hover:not(.p-disabled):not([disabled]) {
-    color: theme-mode-variables.$default-btn-link-text-color-darker !important;
+    color: $default-btn-link-text-color-darker !important;
   }
 }
 
 .p-button.p-button-outlined {
   background-color: transparent;
-  color: theme-mode-variables.$checkoutRequestIconNeutralColor;
+  color: $checkoutRequestIconNeutralColor;
   border: 0 none;
 
   .p-button-label {
@@ -170,13 +167,13 @@ button:after {
 }
 
 .p-button.p-button-link {
-  color: theme-mode-variables.$default-btn-link-text-color;
+  color: $default-btn-link-text-color;
   background: transparent;
   border: transparent;
 }
 .p-button.p-button-link:enabled:hover {
   background: transparent;
-  color: theme-mode-variables.$default-btn-link-text-color;
+  color: $default-btn-link-text-color;
   border-color: transparent;
 }
 .p-button.p-button-link:enabled:hover .p-button-label {
@@ -189,6 +186,6 @@ button:after {
 }
 .p-button.p-button-link:enabled:active {
   background: transparent;
-  color: theme-mode-variables.$default-btn-link-text-color;
+  color: $default-btn-link-text-color;
   border-color: transparent;
 }

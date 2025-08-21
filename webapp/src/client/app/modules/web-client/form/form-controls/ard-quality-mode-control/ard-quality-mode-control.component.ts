@@ -1,17 +1,14 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormGroup } from '@angular/forms';
 import { ArdQualityMode } from '@gateway/shared/enums/ard-quality-mode.enum';
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
-import { SelectModule } from 'primeng/select';
 
 @Component({
   selector: 'web-client-ard-quality-mode-control',
   templateUrl: 'ard-quality-mode-control.component.html',
   styleUrls: ['ard-quality-mode-control.component.scss'],
-  standalone: true,
-  imports: [ReactiveFormsModule, SelectModule],
 })
 export class ArdQualityModeControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

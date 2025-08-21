@@ -1,47 +1,41 @@
 import {
   Component,
-  CUSTOM_ELEMENTS_SCHEMA,
   ElementRef,
   EventEmitter,
   Input,
   OnDestroy,
   OnInit,
   Output,
+  Renderer2,
   ViewChild,
 } from '@angular/core';
+import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
+import { TelnetFormDataInput } from '@shared/interfaces/forms.interfaces';
+import { ComponentStatus } from '@shared/models/component-status.model';
+import { UtilsService } from '@shared/services/utils.service';
+import { DefaultTelnetPort, WebClientService } from '@shared/services/web-client.service';
+import { WebSessionService } from '@shared/services/web-session.service';
+import { MessageService } from 'primeng/api';
+import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
+import { v4 as uuidv4 } from 'uuid';
+import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
 import {
   LoggingLevel,
   TelnetTerminal,
   TerminalConnectionStatus,
   loggingService as telnetLoggingService,
 } from '@devolutions/web-telnet-gui';
-import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
 import { DVL_TELNET_ICON, DVL_WARNING_ICON, JET_TELNET_URL } from '@gateway/app.constants';
-import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
-import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
-import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
-import { TelnetFormDataInput } from '@shared/interfaces/forms.interfaces';
-import { ComponentStatus } from '@shared/models/component-status.model';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
-import { UtilsService } from '@shared/services/utils.service';
-import { DefaultTelnetPort, WebClientService } from '@shared/services/web-client.service';
-import { WebSessionService } from '@shared/services/web-session.service';
-import { MessageService } from 'primeng/api';
-import { ProgressSpinnerModule } from 'primeng/progressspinner';
-import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
-import { v4 as uuidv4 } from 'uuid';
-import { WebClientFormComponent } from '../form/web-client-form.component';
 
 @Component({
   templateUrl: 'web-client-telnet.component.html',
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],
-  standalone: true,
-  imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class WebClientTelnetComponent extends WebClientBaseComponent implements OnInit, OnDestroy {
   @Input() webSessionId: string;
@@ -63,7 +57,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   private unsubscribeTerminalEvent: () => void;
 
   constructor(
-    //private renderer: Renderer2,
+    private renderer: Renderer2,
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
@@ -259,9 +253,9 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
-  // private handleSubscriptionError(error): void {
-  //   console.error('Error in session event subscription', error);
-  // }
+  private handleSubscriptionError(error): void {
+    console.error('Error in session event subscription', error);
+  }
 
   private handleClientConnectStarted(): void {
     this.loading = false;

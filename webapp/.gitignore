@@ -38,7 +38,6 @@ web/.angular/cache
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
-pnpm-lock.yaml
 
 # MacOS
 .DS_Store

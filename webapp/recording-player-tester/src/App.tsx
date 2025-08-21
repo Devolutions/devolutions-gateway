@@ -1,6 +1,6 @@
+import { RecordingPlayerProvider } from './context/RecordingPlayerContext';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
-import { RecordingPlayerProvider } from './context/RecordingPlayerContext';
 
 function App() {
   return (

@@ -1,10 +1,10 @@
 <div [formGroup]="parentForm">
   <label for="ardQualityMode">Quality Mode</label>
   <div class="gateway-form-input">
-    <p-select id="ardQualityMode"
+    <p-dropdown id="ardQualityMode"
                 styleClass="full-width-dropdown"
                 appendTo="body"
                 formControlName="ardQualityMode"
-                [options]="ardQualityModeOptions"></p-select>
+                [options]="ardQualityModeOptions"></p-dropdown>
   </div>
 </div>
