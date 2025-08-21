@@ -2,42 +2,53 @@
   <div class="col-12 gateway-form-group">
     <label for="screenSize">Screen Size</label>
     <div class="gateway-form-input">
-      <p-select id="screenSize" styleClass="full-width-dropdown" appendTo="body" formControlName="screenSize"
-        [options]="screenSizeOptions"></p-select>
+      <p-dropdown id="screenSize"
+                  styleClass="full-width-dropdown"
+                  appendTo="body"
+                  formControlName="screenSize"
+                  [options]="screenSizeOptions"></p-dropdown>
     </div>
   </div>
 
   <div class="col-12 grid nomargin nopad">
-    @if (showCustomSize) {
-    <div class="col-6 gateway-form-group col-pad-right-md">
+    <div *ngIf="showCustomSize"
+         class="col-6 gateway-form-group col-pad-right-md">
 
       <label for="customWidth">Desktop Width</label>
       <div class="gateway-form-input">
-        <input pInputText id="customWidth" type="number" [min]="0" [max]="4096" autocomplete="on"
-          placeholder="Size in px" formControlName="customWidth" pKeyFilter="pint" />
+        <input pInputText
+               id="customWidth"
+               type="number"
+               [min]="0" [max]="4096"
+               autocomplete="on"
+               placeholder="Size in px"
+               formControlName="customWidth"
+               pKeyFilter="pint"/>
       </div>
-      @if (parentForm.get('customWidth').hasError('max') && parentForm.get('customWidth').touched) {
-      <div class="form-helper-text">
+      <div class="form-helper-text"
+           *ngIf="parentForm.get('customWidth').hasError('max') && parentForm.get('customWidth').touched">
         Maximum value is 4096
       </div>
-      }
     </div>
-    }
 
-    @if (showCustomSize) {
-    <div class="col-6 gateway-form-group">
+    <div *ngIf="showCustomSize"
+         class="col-6 gateway-form-group">
       <label for="customHeight">Desktop Height</label>
       <div class="gateway-form-input">
-        <input pInputText id="customHeight" type="number" [min]="0" [max]="2048" autocomplete="on"
-          placeholder="Size in px" formControlName="customHeight" pKeyFilter="pint" />
+        <input pInputText
+               id="customHeight"
+               type="number"
+               [min]="0" [max]="2048"
+               autocomplete="on"
+               placeholder="Size in px"
+               formControlName="customHeight"
+               pKeyFilter="pint"/>
       </div>
-      @if (parentForm.get('customHeight').hasError('max') && parentForm.get('customHeight').touched) {
-      <div class="form-helper-text">
+      <div class="form-helper-text"
+           *ngIf="parentForm.get('customHeight').hasError('max') && parentForm.get('customHeight').touched">
         Maximum value is 2048
       </div>
-      }
     </div>
-    }
   </div>
 
 </div>

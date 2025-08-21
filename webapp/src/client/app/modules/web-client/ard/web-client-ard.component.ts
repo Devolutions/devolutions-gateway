@@ -1,7 +1,6 @@
 import {
   AfterViewInit,
   Component,
-  CUSTOM_ELEMENTS_SCHEMA,
   ElementRef,
   EventEmitter,
   HostListener,
@@ -13,11 +12,6 @@ import {
   ViewChild,
 } from '@angular/core';
 import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
-import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
-import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
-import { DVL_ARD_ICON, DVL_WARNING_ICON, JET_ARD_URL } from '@gateway/app.constants';
-import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
-import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -25,16 +19,18 @@ import { SessionEventType } from '@shared/enums/session-event-type.enum';
 import { IronARDConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { ArdFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
-import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
+import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
+import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
+import { DVL_ARD_ICON, DVL_WARNING_ICON, JET_ARD_URL } from '@gateway/app.constants';
+import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
-import { WebClientFormComponent } from '../form/web-client-form.component';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -49,9 +45,6 @@ enum UserIronRdpErrorKind {
   templateUrl: 'web-client-ard.component.html',
   styleUrls: ['web-client-ard.component.scss'],
   providers: [MessageService],
-  standalone: true,
-  imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class WebClientArdComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;

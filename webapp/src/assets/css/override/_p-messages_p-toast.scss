@@ -1,5 +1,4 @@
-@use 'theme-mode-variables';
-@use 'variables';
+@import "theme-mode-variables";
 
 .p-inline-message,
 .p-message {
@@ -88,7 +87,7 @@
   background-image: linear-gradient(0deg, var(--status-banner-background-color), var(--status-banner-background-color)), linear-gradient(0deg, rgb(var(--base-color-inverted-rgb)), rgb(var(--base-color-inverted-rgb)));
   border: 1px solid var(--status-banner-border-color);
   border-radius: var(--status-banner-radius);
-  color: theme-mode-variables.$messageFontColor;
+  color: $messageFontColor;
   margin-bottom: 0;
   position: relative;
   text-align: center;
@@ -152,7 +151,7 @@
   }
 
   .p-toast-icon-close {
-    color: theme-mode-variables.$messageFontColor;
+    color: $messageFontColor;
 
     .p-toast-icon-close-icon:before {
       font-family: 'devolutions-icons' !important;
@@ -168,7 +167,7 @@
 
   .p-messages-close {
     top: -10px;
-    color: theme-mode-variables.$messageFontColor;
+    color: $messageFontColor;
 
     &:before {
       font-family: 'devolutions-icons' !important;
@@ -189,3 +188,4 @@
     padding-left: 1em;
   }
 }
+

@@ -1,8 +1,5 @@
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-badge {
-  background: theme-mode-variables.$default-btn-bg-color;
+  background: $default-btn-bg-color;
   padding: 0 !important;
 
   height: 10px;

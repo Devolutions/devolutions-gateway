@@ -1,41 +1,41 @@
 <div [formGroup]="form">
-  <div class="col-12 gateway-form-group">
-    <web-client-username-control [parentForm]="form" [inputFormData]="inputFormData"></web-client-username-control>
-  </div>
-
-  <div class="col-12 gateway-form-group">
-    <web-client-password-control [parentForm]="form" [inputFormData]="inputFormData"></web-client-password-control>
-  </div>
-
-  <div class="col-12 gateway-form-group">
-    <a href="#" (click)="toggleMoreSettings($event)">More Settings
-      @if (!isMoreSettingsOpened()) {
-      <span>+</span>
-      } @else {
-      <span>-</span>
-      }
-    </a>
-  </div>
-
-  <div [hidden]="!showMoreSettingsToggle" class="col-12 gateway-form-group">
-
-    <web-client-screen-size-control [parentForm]="form"
-      [inputFormData]="inputFormData"></web-client-screen-size-control>
-
     <div class="col-12 gateway-form-group">
-      <web-client-enable-display-configuration-control [parentForm]="form"
-        [inputFormData]="inputFormData"></web-client-enable-display-configuration-control>
+      <web-client-username-control [parentForm]="form"
+                                    [inputFormData]="inputFormData"></web-client-username-control>
     </div>
 
     <div class="col-12 gateway-form-group">
-      <web-client-kdc-url-control [parentForm]="form" [inputFormData]="inputFormData"></web-client-kdc-url-control>
+      <web-client-password-control [parentForm]="form"
+                                   [inputFormData]="inputFormData"></web-client-password-control>
     </div>
 
     <div class="col-12 gateway-form-group">
-      <web-client-pre-connection-blob-control [parentForm]="form"
-        [inputFormData]="inputFormData"></web-client-pre-connection-blob-control>
+      <a href="#" (click)="toggleMoreSettings($event)">More Settings
+        <span *ngIf="!isMoreSettingsOpened()" >+</span>
+        <span *ngIf="isMoreSettingsOpened()">-</span>
+      </a>
     </div>
 
-  </div>
+    <div [hidden]="!showMoreSettingsToggle" class="col-12 gateway-form-group">
+
+      <web-client-screen-size-control [parentForm]="form"
+                                      [inputFormData]="inputFormData"></web-client-screen-size-control>
+
+      <div class="col-12 gateway-form-group">
+        <web-client-enable-display-configuration-control [parentForm]="form"
+                                                         [inputFormData]="inputFormData"></web-client-enable-display-configuration-control>
+      </div>
+
+      <div class="col-12 gateway-form-group">
+        <web-client-kdc-url-control [parentForm]="form"
+                                    [inputFormData]="inputFormData"></web-client-kdc-url-control>
+      </div>
+
+      <div class="col-12 gateway-form-group">
+        <web-client-pre-connection-blob-control [parentForm]="form"
+                                                [inputFormData]="inputFormData"></web-client-pre-connection-blob-control>
+      </div>
+
+    </div>
 
 </div>

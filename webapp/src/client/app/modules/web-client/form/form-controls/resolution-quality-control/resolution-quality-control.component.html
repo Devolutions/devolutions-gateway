@@ -1,10 +1,10 @@
 <div [formGroup]="parentForm">
   <label for="resolutionQuality">Resolution Quality</label>
   <div class="gateway-form-input">
-    <p-select id="resolutionQuality"
+    <p-dropdown id="resolutionQuality"
                 styleClass="full-width-dropdown"
                 appendTo="body"
                 formControlName="resolutionQuality"
-                [options]="resolutionQualityOptions"></p-select>
+                [options]="resolutionQualityOptions"></p-dropdown>
   </div>
 </div>

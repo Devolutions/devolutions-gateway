@@ -1,10 +1,8 @@
-@use 'variables';
-
 .p-confirm-popup {
   background-color: var(--overlay-panel-bg-color);
   color: var(--side-panel-text-color);
-  border-radius: variables.$borderRadius;
-  box-shadow: variables.$defaultBoxShadow;
+  border-radius: $borderRadius;
+  box-shadow: $defaultBoxShadow;
   border: 0 none;
 }
 

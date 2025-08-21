@@ -1,16 +1,12 @@
 import { AfterViewInit, ChangeDetectorRef, Component, Injectable, Input, OnDestroy, OnInit } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormGroup } from '@angular/forms';
 import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { BaseComponent } from '@shared/bases/base.component';
 import { SelectItem } from 'primeng/api';
-import { SelectModule } from 'primeng/select';
 import { Observable, of } from 'rxjs';
 import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
-import { FileControlComponent } from '../../form-controls/file-control/file-control.component';
-import { PasswordControlComponent } from '../../form-controls/password-control/password-control.component';
-import { UsernameControlComponent } from '../../form-controls/username-control/username-control.component';
 
 interface FormInputVisibility {
   showPasswordInput?: boolean;
@@ -22,14 +18,6 @@ interface FormInputVisibility {
   selector: 'ssh-form',
   templateUrl: 'ssh-form.component.html',
   styleUrls: ['ssh-form.component.scss'],
-  standalone: true,
-  imports: [
-    ReactiveFormsModule,
-    SelectModule,
-    UsernameControlComponent,
-    PasswordControlComponent,
-    FileControlComponent,
-  ],
 })
 export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
   @Input() form: FormGroup;

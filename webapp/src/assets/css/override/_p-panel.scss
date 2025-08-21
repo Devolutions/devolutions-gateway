@@ -1,9 +1,6 @@
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-panel {
   .p-panel-header {
-    border-bottom: 3px solid theme-mode-variables.$input-txt-border-color;
+    border-bottom: 3px solid $input-txt-border-color;
     padding: 5px 0;
     margin: 0;
 

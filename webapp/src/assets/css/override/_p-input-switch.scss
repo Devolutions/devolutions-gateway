@@ -1,6 +1,3 @@
-@use 'theme-mode-variables';
-@use 'variables';
-
 :root{
   --switch-width: 32px;
   --switch-padding: 2px;
@@ -29,7 +26,7 @@
 }
 
 .p-inputswitch-slider {
-  background-color: theme-mode-variables.$input-switch-default-bg-color;
+  background-color: $input-switch-default-bg-color;
   transition: .3s;
   border-radius: 30px;
 
@@ -48,13 +45,13 @@
   // Hover style
   .p-inputswitch-focus &,
   .p-inputswitch:not(.p-disabled):hover &{
-    background-color: theme-mode-variables.$input-switch-default-bg-color;
+    background-color: $input-switch-default-bg-color;
   }
 
   // Selected
   .p-inputswitch-checked &{
-    background-color: theme-mode-variables.$input-switch-active-bg-color;
-    border-color: theme-mode-variables.$input-switch-active-bg-color;
+    background-color: $input-switch-active-bg-color;
+    border-color: $input-switch-active-bg-color;
 
     &::before{
       background-color: #fff;
@@ -65,7 +62,7 @@
   // Selected hover style
   .p-inputswitch-checked:not(.p-disabled):hover &,
   .p-inputswitch-checked.p-inputswitch-focus &{
-    background-color: theme-mode-variables.$input-switch-active-hover-bg-color;
-    border-color: theme-mode-variables.$input-switch-active-hover-bg-color;
+    background-color: $input-switch-active-hover-bg-color;
+    border-color: $input-switch-active-hover-bg-color;
   }
 }

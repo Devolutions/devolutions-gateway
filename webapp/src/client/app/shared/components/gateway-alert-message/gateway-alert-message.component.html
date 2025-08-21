@@ -3,13 +3,8 @@
   <ng-template let-message pTemplate="message">
     <div class="confirm-message-content">
       <div class="confirm-message-title">
-        @if (message.icon) {
-        <i class="confirm-message-infos-icon dvl-icon {{message.icon}}"></i>
-        }
-
-        @if (message.summary) {
-        <h4>{{ message.summary }}</h4>
-        }
+        <i *ngIf="message.icon" class="confirm-message-infos-icon dvl-icon {{message.icon}}"></i>
+        <h4 *ngIf="message.summary">{{message.summary}}</h4>
       </div>
     </div>
   </ng-template>

@@ -5,7 +5,6 @@ import './custom-time-tooltip';
 import { Options, Percentage, Status } from '../util';
 import CustomPlayProgressBar from './custom-play-progress-bar';
 import CustomTimeTooltip from './custom-time-tooltip';
-
 const Slider = videojs.getComponent('Slider');
 
 export class SingleVideoSeekBar extends Slider {

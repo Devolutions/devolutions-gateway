@@ -1,4 +1,4 @@
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { listRecordings } from '../api-client';
 
 export interface Recording {
@@ -65,7 +65,11 @@ export const useRecordingPlayerContext = () => {
   return context;
 };
 
-export const RecordingPlayerProvider = ({ children }: { children: ReactNode }) => {
+export const RecordingPlayerProvider = ({
+  children,
+}: {
+  children: ReactNode;
+}) => {
   const value = contextCreator();
   return <RecordingPlayerContext.Provider value={value}>{children}</RecordingPlayerContext.Provider>;
 };

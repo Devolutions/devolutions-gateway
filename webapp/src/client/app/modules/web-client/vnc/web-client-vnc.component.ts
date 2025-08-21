@@ -1,7 +1,6 @@
 import {
   AfterViewInit,
   Component,
-  CUSTOM_ELEMENTS_SCHEMA,
   ElementRef,
   EventEmitter,
   HostListener,
@@ -13,6 +12,22 @@ import {
   ViewChild,
 } from '@angular/core';
 import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { ScreenScale } from '@shared/enums/screen-scale.enum';
+import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { SessionEventType } from '@shared/enums/session-event-type.enum';
+import { IronVNCConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
+import { VncFormDataInput } from '@shared/interfaces/forms.interfaces';
+import { ComponentStatus } from '@shared/models/component-status.model';
+import { DesktopSize } from '@shared/models/desktop-size';
+import { UtilsService } from '@shared/services/utils.service';
+import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
+import { WebSessionService } from '@shared/services/web-session.service';
+import { MessageService } from 'primeng/api';
+import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
+import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
   dynamicResizingSupportedCallback,
@@ -22,32 +37,13 @@ import {
   ultraVirtualDisplay,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
-import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
-import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
-import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { Encoding } from '@shared/enums/encoding.enum';
-import { ScreenScale } from '@shared/enums/screen-scale.enum';
-import { ScreenSize } from '@shared/enums/screen-size.enum';
-import { SessionEventType } from '@shared/enums/session-event-type.enum';
-import { IronVNCConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
-import { VncFormDataInput } from '@shared/interfaces/forms.interfaces';
-import { ComponentStatus } from '@shared/models/component-status.model';
-import { DesktopSize } from '@shared/models/desktop-size';
 import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
-import { UtilsService } from '@shared/services/utils.service';
-import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
-import { WebSessionService } from '@shared/services/web-session.service';
-import { MessageService } from 'primeng/api';
-import { ProgressSpinnerModule } from 'primeng/progressspinner';
-import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription, throwError } from 'rxjs';
-import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
-import { WebClientFormComponent } from '../form/web-client-form.component';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -62,9 +58,6 @@ enum UserIronRdpErrorKind {
   templateUrl: 'web-client-vnc.component.html',
   styleUrls: ['web-client-vnc.component.scss'],
   providers: [MessageService],
-  standalone: true,
-  imports: [ProgressSpinnerModule, WebClientFormComponent, SessionToolbarComponent],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class WebClientVncComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;

@@ -1,5 +1,5 @@
 import { Component, Input, OnInit, SimpleChanges } from '@angular/core';
-import { FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormGroup, Validators } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -8,8 +8,6 @@ import { WebFormService } from '@shared/services/web-form.service';
   selector: 'web-client-password-control',
   templateUrl: 'password-control.component.html',
   styleUrls: ['password-control.component.scss'],
-  standalone: true,
-  imports: [ReactiveFormsModule],
 })
 export class PasswordControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;

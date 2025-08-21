@@ -1,5 +1,5 @@
-@use 'variables';
-@use 'mixins';
+@import "variables";
+@import 'mixins';
 
 :host {
   display: block;
@@ -14,7 +14,7 @@
   .menu-list-item {
     display: flex;
     align-items: center;
-    border-radius: variables.$borderRadius;
+    border-radius: $borderRadius;
     padding: 8px;
     width: 100%;
     height: 100%;
@@ -33,7 +33,7 @@
     }
 
     .menu-list-item-label {
-      @include mixins.text-ellipsis();
+      @include text-ellipsis();
     }
 
     .dvl-icon-warning {

@@ -1,33 +1,29 @@
-@use 'mixins';
-@use 'theme-mode-variables';
-@use 'variables';
-
 .p-selectbutton {
   .p-button {
-    background-color: theme-mode-variables.$side-panel-select-btn-inactive-bg-color;
-    color: theme-mode-variables.$select-btn-txt-color;
+    background-color: $side-panel-select-btn-inactive-bg-color;
+    color: $select-btn-txt-color;
     border: 1px solid transparent;
-    @include mixins.border-radius(0px);
+    @include border-radius(0px);
 
     &:not(.p-disabled):not(.p-highlight):hover, &:not(.p-disabled):not(.p-highlight):active {
-      background-color: theme-mode-variables.$action-btn-secondary-hover-bg-color;
+      background-color: $action-btn-secondary-hover-bg-color;
     }
 
     &.p-highlight {
       pointer-events: none;
-      background-color: theme-mode-variables.$side-panel-btn-bg-color;
+      background-color: $side-panel-btn-bg-color;
       color: #fff;
     }
   }
 
   .p-button:first-child {
-    border-top-left-radius: variables.$borderRadius;
-    border-bottom-left-radius: variables.$borderRadius;
+    border-top-left-radius: $borderRadius;
+    border-bottom-left-radius: $borderRadius;
   }
 
   .p-button:last-child {
-    border-top-right-radius: variables.$borderRadius;
-    border-bottom-right-radius: variables.$borderRadius;
+    border-top-right-radius: $borderRadius;
+    border-bottom-right-radius: $borderRadius;
   }
 }
 
