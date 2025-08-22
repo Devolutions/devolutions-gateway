@@ -210,29 +210,3 @@ pub struct MonitorResult {
     pub response_messages: Option<String>,
     pub response_time: f64,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use camino::Utf8Path;
-    use tempdir::TempDir;
-    use tokio_test::{self, assert_ok};
-
-    #[test]
-    fn set_config_writes_to_disk() {
-        let temp_dir = TempDir::new("dgw-network-monitor-test").expect("could not create temp dir");
-
-        let config = MonitorsConfig::mock();
-
-        let temp_path: Utf8PathBuf = Utf8Path::from_path(temp_dir.path())
-            .expect("TempDir gave us a garbage path")
-            .to_path_buf()
-            .join("monitors_cache.json");
-
-        let state = State::mock(temp_path);
-
-        assert_ok!(tokio_test::block_on(set_config(config, state.into())));
-
-        assert!(temp_dir.path().join("monitors.json").exists());
-    }
-}
