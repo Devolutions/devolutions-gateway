@@ -70,24 +70,22 @@ pub fn run_dvc_io(
 
                 if bytes_read
                     < u32::try_from(size_of::<CHANNEL_PDU_HEADER>())
-                        .expect("BUG CHANNEL_PDU_HEADER size always fits into u32")
+                        .expect("CHANNEL_PDU_HEADER size always fits into u32")
                 {
                     // Channel is closed abruptly; abort loop.
                     return Ok(());
                 }
 
                 let chunk_data_size = usize::try_from(bytes_read)
-                    .expect(
-                        "BUG: Read size can't be breater than CHANNEL_CHUNK_LENGTH, therefore it should fit into usize",
-                    )
+                    .expect("read size can't be breater than CHANNEL_CHUNK_LENGTH, therefore it should fit into usize")
                     .checked_sub(size_of::<CHANNEL_PDU_HEADER>())
-                    .expect("BUG: Read size is less than header size; Correctness of this should be ensured by the OS");
+                    .expect("read size is less than header size; Correctness of this should be ensured by the OS");
 
                 const HEADER_SIZE: usize = size_of::<CHANNEL_PDU_HEADER>();
 
                 let messages = message_dissector
                     .dissect(&pdu_chunk_buffer[HEADER_SIZE..HEADER_SIZE + chunk_data_size])
-                    .context("Failed to dissect DVC messages");
+                    .context("failed to dissect DVC messages");
 
                 let messages = match messages {
                     Ok(messages) => messages,

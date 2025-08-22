@@ -20,7 +20,7 @@ impl NowMessageDissector {
                 .pdu_body_buffer
                 .filled_len()
                 .checked_sub(self.start_pos)
-                .context("Failed to get usable chunk size")?;
+                .context("failed to get usable chunk size")?;
 
             let mut cursor = ReadCursor::new(&self.pdu_body_buffer.filled()[self.start_pos..]);
 
