@@ -1,3 +1,4 @@
+use anyhow::Context;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
 use windows::Win32::Foundation::{ERROR_IO_PENDING, GetLastError, WAIT_EVENT, WAIT_OBJECT_0};
@@ -69,24 +70,30 @@ pub fn run_dvc_io(
 
                 if bytes_read
                     < u32::try_from(size_of::<CHANNEL_PDU_HEADER>())
-                        .expect("BUG CHANNEL_PDU_HEADER size always fits into u32")
+                        .expect("CHANNEL_PDU_HEADER size always fits into u32")
                 {
                     // Channel is closed abruptly; abort loop.
                     return Ok(());
                 }
 
                 let chunk_data_size = usize::try_from(bytes_read)
-                    .expect(
-                        "BUG: Read size can't be breater than CHANNEL_CHUNK_LENGTH, therefore it should fit into usize",
-                    )
+                    .expect("read size can't be breater than CHANNEL_CHUNK_LENGTH, therefore it should fit into usize")
                     .checked_sub(size_of::<CHANNEL_PDU_HEADER>())
-                    .expect("BUG: Read size is less than header size; Correctness of this should be ensured by the OS");
+                    .expect("read size is less than header size; Correctness of this should be ensured by the OS");
 
                 const HEADER_SIZE: usize = size_of::<CHANNEL_PDU_HEADER>();
 
                 let messages = message_dissector
                     .dissect(&pdu_chunk_buffer[HEADER_SIZE..HEADER_SIZE + chunk_data_size])
-                    .expect("BUG: Failed to dissect messages");
+                    .context("failed to dissect DVC messages");
+
+                let messages = match messages {
+                    Ok(messages) => messages,
+                    Err(err) => {
+                        error!(?err, "Failed to dissect DVC messages");
+                        return Err(err);
+                    }
+                };
 
                 // Send all messages over the channel.
                 for message in messages {
@@ -94,14 +101,12 @@ pub fn run_dvc_io(
                     // We do non-blocking send to avoid blocking the IO thread. Processing
                     // task is expected to be fast enough to keep up with the incoming messages.
                     match read_tx.try_send(message) {
-                        Ok(_) => {
-                            trace!("Received DVC message is sent to the processing channel");
-                        }
+                        Ok(_) => {}
                         Err(TrySendError::Full(_)) => {
-                            trace!("DVC message is dropped due to busy channel");
+                            error!("DVC message was dropped due to channel overflow");
                         }
                         Err(e) => {
-                            trace!("DVC message is dropped due to closed channel");
+                            error!("DVC message was dropped due to closed channel");
                             return Err(e.into());
                         }
                     }

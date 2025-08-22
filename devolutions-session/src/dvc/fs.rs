@@ -8,7 +8,7 @@ impl TmpFileGuard {
         // Create empty temporary file and release the handle.
         let (_file, path) = tempfile::Builder::new()
             .prefix("devolutions-")
-            .suffix(&format!(".{}", extension))
+            .suffix(&format!(".{extension}"))
             .tempfile()?
             .keep()?;
 

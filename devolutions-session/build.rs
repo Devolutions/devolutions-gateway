@@ -8,23 +8,23 @@ mod win {
     use std::{env, fs};
 
     pub(super) fn embed_version_rc() {
-        let out_dir = env::var("OUT_DIR").expect("BUG: failed to get OUT_DIR");
-        let version_rc_file = format!("{}/version.rc", out_dir);
+        let out_dir = env::var("OUT_DIR").expect("failed to get OUT_DIR");
+        let version_rc_file = format!("{out_dir}/version.rc");
         let version_rc_data = generate_version_rc();
-        fs::write(&version_rc_file, version_rc_data).expect("BUG: failed to write version.rc");
+        fs::write(&version_rc_file, version_rc_data).expect("failed to write version.rc");
 
         embed_resource::compile(&version_rc_file, embed_resource::NONE)
             .manifest_required()
-            .unwrap();
+            .expect("failed to compile version.rc");
     }
 
     fn generate_version_rc() -> String {
         let output_name = "DevolutionsSession";
-        let filename = format!("{}.exe", output_name);
+        let filename = format!("{output_name}.exe");
         let company_name = "Devolutions Inc.";
-        let legal_copyright = format!("Copyright 2020-2024 {}", company_name);
+        let legal_copyright = format!("Copyright 2020-2024 {company_name}");
 
-        let mut version_number = env::var("CARGO_PKG_VERSION").expect("BUG: failed to get CARGO_PKG_VERSION");
+        let mut version_number = env::var("CARGO_PKG_VERSION").expect("failed to get CARGO_PKG_VERSION");
         version_number.push_str(".0");
         let version_commas = version_number.replace('.', ",");
         let file_description = output_name;

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use now_proto_pdu::NowMessage;
 use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf};
 
@@ -19,7 +20,8 @@ impl NowMessageDissector {
                 .pdu_body_buffer
                 .filled_len()
                 .checked_sub(self.start_pos)
-                .expect("start_pos is greater than filled_len");
+                .context("failed to get usable chunk size")?;
+
             let mut cursor = ReadCursor::new(&self.pdu_body_buffer.filled()[self.start_pos..]);
 
             match NowMessage::decode(&mut cursor) {

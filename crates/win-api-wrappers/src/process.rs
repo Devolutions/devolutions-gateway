@@ -7,8 +7,8 @@ use std::{ptr, slice};
 
 use anyhow::{Context, Result, bail};
 use windows::Win32::Foundation::{
-    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, MAX_PATH, WAIT_EVENT,
-    WAIT_FAILED,
+    E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM, MAX_PATH,
+    WAIT_EVENT, WAIT_FAILED, WPARAM,
 };
 use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -29,8 +29,10 @@ use windows::Win32::System::Threading::{
     STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
-use windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD;
-use windows::core::PCWSTR;
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, SHOW_WINDOW_CMD,
+};
+use windows::core::{BOOL, PCWSTR};
 
 use crate::Error;
 use crate::handle::{Handle, HandleWrapper};
@@ -308,6 +310,14 @@ impl Process {
         } else {
             bail!(Error::from_win32(ERROR_INCORRECT_SIZE))
         }
+    }
+
+    /// Terminates the process and provides the exit code.
+    pub fn terminate(&self, exit_code: u32) -> Result<()> {
+        // SAFETY: FFI call with no outstanding preconditions.
+        unsafe { TerminateProcess(self.handle.raw(), exit_code) }?;
+
+        Ok(())
     }
 }
 
@@ -896,4 +906,65 @@ fn process_id_to_session(pid: u32) -> Result<u32> {
     // SAFETY: `session_id` is always pointing to a valid memory location.
     unsafe { ProcessIdToSessionId(pid, &mut session_id as *mut _) }?;
     Ok(session_id)
+}
+
+struct EnumWindowsContext {
+    expected_pid: u32,
+    threads: Vec<u32>,
+}
+
+extern "system" fn windows_enum_func(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    // SAFETY: lparam.0 set to valid EnumWindowsContext memory by caller (Windows itself).
+    let enum_ctx = unsafe { &mut *(lparam.0 as *mut EnumWindowsContext) };
+
+    let mut pid: u32 = 0;
+    // SAFETY: pid points to valid memory.
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut _));
+    }
+    if pid == 0 || pid != enum_ctx.expected_pid {
+        // Continue enumeration.
+        return true.into();
+    }
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
+    if thread_id == 0 {
+        // Continue enumeration.
+        return true.into();
+    }
+
+    enum_ctx.threads.push(thread_id);
+
+    true.into()
+}
+
+/// Posts message with given WPARAM and LPARAM values to the specific
+/// appication with provided `pid`.
+pub fn post_message_for_pid(pid: u32, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Result<()> {
+    let mut windows_enum_ctx = EnumWindowsContext {
+        expected_pid: pid,
+        threads: Default::default(),
+    };
+
+    // SAFETY: EnumWindows is safe to call with valid callback function
+    // and context. Lifetime of windows_enum_ctx is guaranteed to be valid
+    // until EnumWindows returns.
+    unsafe {
+        // Enumerate all windows associated with the process.
+        EnumWindows(
+            Some(windows_enum_func),
+            LPARAM(&mut windows_enum_ctx as *mut EnumWindowsContext as isize),
+        )
+    }?;
+
+    // Send message to all threads.
+    if !windows_enum_ctx.threads.is_empty() {
+        for thread in windows_enum_ctx.threads {
+            // SAFETY: No outstanding preconditions.
+            let _ = unsafe { PostThreadMessageW(thread, msg, wparam, lparam) };
+        }
+    }
+
+    Ok(())
 }
