@@ -242,9 +242,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .await
         .context("failed to initialize job queue context")?;
     let credential_store = CredentialStoreHandle::new();
-    let monitoring_state = Arc::new(
-        network_monitor::State::new(config::get_data_dir().join("monitors_cache.json"))
-    );
+    let monitoring_state = Arc::new(network_monitor::State::new(
+        config::get_data_dir().join("monitors_cache.json"),
+    ));
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),

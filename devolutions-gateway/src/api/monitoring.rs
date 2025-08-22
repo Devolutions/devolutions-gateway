@@ -1,5 +1,5 @@
-use crate::http::HttpError;
 use crate::DgwState;
+use crate::http::HttpError;
 use axum::{Json, Router, extract, routing};
 use network_monitor;
 use time::OffsetDateTime;
@@ -13,9 +13,9 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 }
 
 /// Replaces the existing monitoring config with the one provided in the body.
-/// This request will immediately start any new monitors, and will stop 
+/// This request will immediately start any new monitors, and will stop
 /// currently active monitors that are no longer in the config.
-/// 
+///
 /// The configuration is not persisted across restarts.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -37,16 +37,17 @@ async fn handle_set_monitoring_config(
 ) -> Result<Json<SetConfigResponse>, HttpError> {
     let (processed_config, probe_type_errors) = config.lossy_into();
 
-    network_monitor::set_config(
-        processed_config,
-        monitoring_state
-    )
+    network_monitor::set_config(processed_config, monitoring_state)
         .await
         .map(|_| Json(SetConfigResponse::new(probe_type_errors)))
-        .map_err(HttpError::internal().with_msg("Failed to set up network monitoring").err())
+        .map_err(
+            HttpError::internal()
+                .with_msg("Failed to set up network monitoring")
+                .err(),
+        )
 }
 
-/// Monitors store their results in a temporary log, which is returned here. 
+/// Monitors store their results in a temporary log, which is returned here.
 /// Once the log is downloaded, gateway purges it from memory.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -80,29 +81,25 @@ pub struct MonitorsConfig {
 
 impl MonitorsConfig {
     fn lossy_into(self) -> (network_monitor::MonitorsConfig, Vec<MonitorDefinitionProbeTypeError>) {
-        let (monitors, errors): (Vec<network_monitor::MonitorDefinition>, Vec<MonitorDefinitionProbeTypeError>) = self.monitors
-            .into_iter()
-            //.map(MonitorDefinition::try_into)
-            .map(|monitor| {
-                let whattt: Result<network_monitor::MonitorDefinition, MonitorDefinitionProbeTypeError> = monitor.try_into();
-                return whattt;
-            })
-            .fold(
-                (Vec::<network_monitor::MonitorDefinition>::new(), Vec::<MonitorDefinitionProbeTypeError>::new()), 
-                |mut partitions, conversion_result| {
-                    match conversion_result {
-                        Ok(value) => partitions.0.push(value),
-                        Err(error) => partitions.1.push(error),
-                    };
+        let (monitors, errors): (
+            Vec<network_monitor::MonitorDefinition>,
+            Vec<MonitorDefinitionProbeTypeError>,
+        ) = self.monitors.into_iter().map(MonitorDefinition::try_into).fold(
+            (
+                Vec::<network_monitor::MonitorDefinition>::new(),
+                Vec::<MonitorDefinitionProbeTypeError>::new(),
+            ),
+            |mut partitions, conversion_result| {
+                match conversion_result {
+                    Ok(value) => partitions.0.push(value),
+                    Err(error) => partitions.1.push(error),
+                };
 
-                    return partitions;
-                }
+                return partitions;
+            },
         );
 
-
-        let config = network_monitor::MonitorsConfig {
-            monitors: monitors
-        };
+        let config = network_monitor::MonitorsConfig { monitors: monitors };
 
         return (config, errors);
     }
@@ -128,7 +125,7 @@ impl TryFrom<MonitoringProbeType> for network_monitor::ProbeType {
         match value {
             MonitoringProbeType::Ping => Ok(network_monitor::ProbeType::Ping),
             MonitoringProbeType::TcpOpen => Ok(network_monitor::ProbeType::TcpOpen),
-            MonitoringProbeType::Unknown(unknown_type) => Err(MonitoringProbeTypeError { probe: unknown_type } ),
+            MonitoringProbeType::Unknown(unknown_type) => Err(MonitoringProbeTypeError { probe: unknown_type }),
         }
     }
 }
@@ -157,20 +154,19 @@ impl TryFrom<MonitorDefinition> for network_monitor::MonitorDefinition {
     type Error = MonitorDefinitionProbeTypeError;
 
     fn try_from(value: MonitorDefinition) -> Result<network_monitor::MonitorDefinition, Self::Error> {
-        Ok(
-            network_monitor::MonitorDefinition {
-                id: value.id.clone(),
-                probe: value.probe.try_into()
-                    .map_err(|type_error: MonitoringProbeTypeError| MonitorDefinitionProbeTypeError { 
-                        id: value.id.clone(),
-                        probe: type_error.probe 
-                    })?,
-                address: value.address,
-                interval: value.interval,
-                timeout: value.timeout,
-                port: value.port,
-            }
-        )
+        Ok(network_monitor::MonitorDefinition {
+            id: value.id.clone(),
+            probe: value.probe.try_into().map_err(|type_error: MonitoringProbeTypeError| {
+                MonitorDefinitionProbeTypeError {
+                    id: value.id.clone(),
+                    probe: type_error.probe,
+                }
+            })?,
+            address: value.address,
+            interval: value.interval,
+            timeout: value.timeout,
+            port: value.port,
+        })
     }
 }
 

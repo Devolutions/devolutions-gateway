@@ -7,9 +7,9 @@ use std::{fs, io, mem};
 
 use camino::Utf8PathBuf;
 use network_scanner_net::runtime::Socket2Runtime;
-use serde::{Serialize, Deserialize};
-use time::{UtcDateTime};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use time::UtcDateTime;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -65,7 +65,7 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
                     let monitor_result = match &definition.probe {
                         ProbeType::Ping => {
                             let scanner_runtime = match &*state.scanner_runtime {
-                                Ok(scanner_runtime) => scanner_runtime.clone(),
+                                Ok(scanner_runtime) => Arc::clone(scanner_runtime),
                                 Err(error) => {
                                     warn!(error = %error, monitor_id = definition.id, "scanning runtime failed to start, aborting monitor");
                                     break;
@@ -89,7 +89,7 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
             };
 
             return (
-                (definition_id.clone(), cancellation_token),
+                (definition_id, cancellation_token),
                 Box::pin(monitor) as Pin<Box<dyn Future<Output = ()> + Send>>,
             );
         })
@@ -141,7 +141,7 @@ async fn do_ping_monitor(definition: &MonitorDefinition, scanner_runtime: Arc<So
             monitor_id: definition.id.clone(),
             request_start_time: start_time,
             response_success: false,
-            response_messages: Some(format!("{error:#}").into()),
+            response_messages: Some(format!("{error:#}")),
             response_time: f64::INFINITY,
         },
     };
@@ -158,7 +158,7 @@ async fn do_tcpopen_monitor(definition: &MonitorDefinition) -> MonitorResult {
 }
 
 pub fn drain_log(state: Arc<State>) -> VecDeque<MonitorResult> {
-    return state.log.drain();
+    state.log.drain()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,9 +174,9 @@ impl MonitorsConfig {
     fn mock() -> MonitorsConfig {
         MonitorsConfig {
             monitors: vec![MonitorDefinition {
-                id: "a".to_string(),
+                id: "a".to_owned(),
                 probe: ProbeType::Ping,
-                address: "c".to_string(),
+                address: "c".to_owned(),
                 interval: 1,
                 timeout: 2,
                 port: Some(3),

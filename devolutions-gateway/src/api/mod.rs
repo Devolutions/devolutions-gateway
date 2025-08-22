@@ -44,6 +44,6 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
     if state.conf_handle.get_conf().debug.enable_unstable {
         router = router.nest("/jet/net/monitor", monitoring::make_router(state.clone()));
     }
-    
+
     router.with_state(state)
 }
