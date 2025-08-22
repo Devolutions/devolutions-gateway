@@ -12,12 +12,17 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     router.with_state(state)
 }
 
+/// Replaces the existing monitoring config with the one provided in the body.
+/// This request will immediately start any new monitors, and will stop 
+/// currently active monitors that are no longer in the config.
+/// 
+/// The configuration is not persisted across restarts.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
-    operation_id = "DrainLog",
+    operation_id = "SetMonitoringConfig",
     tag = "NetworkMonitoring",
-    path = "/jet/monitoring/config",
-    request_body(content = network_monitor::MonitorsConfig, description = "JSON object containing a list of monitors", content_type = "application/json"),
+    path = "/jet/net/monitor//config",
+    request_body(content = MonitorsConfig, description = "JSON object containing a list of monitors", content_type = "application/json"),
     responses(
         (status = 200, description = "New configuration was accepted"),
         (status = 400, description = "Bad request"),
@@ -25,7 +30,6 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         (status = 403, description = "Insufficient permissions"),
         (status = 500, description = "Unexpected server error while starting monitors"),
     ),
-    security(("scope_token" = ["TODO: create a scope"])),
 ))]
 async fn handle_set_monitoring_config(
     extract::State(DgwState { monitoring_state, .. }): extract::State<DgwState>,
@@ -42,11 +46,13 @@ async fn handle_set_monitoring_config(
         .map_err(HttpError::internal().with_msg("Failed to set up network monitoring").err())
 }
 
+/// Monitors store their results in a temporary log, which is returned here. 
+/// Once the log is downloaded, gateway purges it from memory.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
-    operation_id = "DrainLog",
+    operation_id = "DrainMonitoringLog",
     tag = "NetworkMonitoring",
-    path = "/jet/monitoring/log/drain",
+    path = "/jet/net/monitor/log/drain",
     responses(
         (status = 200, description = "Log was flushed and returned in the response body", body = MonitoringLogResponse),
         (status = 400, description = "Bad request"),
@@ -54,7 +60,6 @@ async fn handle_set_monitoring_config(
         (status = 403, description = "Insufficient permissions"),
         (status = 500, description = "Unexpected server error"),
     ),
-    security(("scope_token" = ["TODO: create a scope"])),
 ))]
 async fn handle_drain_log(
     extract::State(DgwState { monitoring_state, .. }): extract::State<DgwState>,
@@ -67,6 +72,7 @@ async fn handle_drain_log(
     })
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MonitorsConfig {
     monitors: Vec<MonitorDefinition>,
@@ -174,17 +180,17 @@ impl TryFrom<MonitorDefinition> for network_monitor::MonitorDefinition {
 #[derive(Debug, Clone, Serialize)]
 struct SetConfigResponse {
     /// An optional list of probes that this server could not parse.
-    probe_type_errors: Option<Vec<MonitorDefinitionProbeTypeError>>
+    probe_type_errors: Option<Vec<MonitorDefinitionProbeTypeError>>,
 }
 
 impl SetConfigResponse {
     fn new(probe_type_errors: Vec<MonitorDefinitionProbeTypeError>) -> SetConfigResponse {
         match probe_type_errors.is_empty() {
             false => SetConfigResponse {
-                probe_type_errors: Some(probe_type_errors)
+                probe_type_errors: Some(probe_type_errors),
             },
             true => SetConfigResponse {
-                probe_type_errors: None
+                probe_type_errors: None,
             },
         }
     }
@@ -214,7 +220,7 @@ impl From<network_monitor::MonitorResult> for MonitorResult {
             request_start_time: value.request_start_time.into(),
             response_success: value.response_success,
             response_messages: value.response_messages,
-            response_time: value.response_time
+            response_time: value.response_time,
         }
     }
 }

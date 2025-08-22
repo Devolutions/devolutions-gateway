@@ -138,7 +138,6 @@ async fn do_ping_monitor(definition: &MonitorDefinition, scanner_runtime: Arc<So
             response_time: time.as_seconds_f64(),
         },
         Err(error) => MonitorResult {
-            // TODO: store error in the result
             monitor_id: definition.id.clone(),
             request_start_time: start_time,
             response_success: false,

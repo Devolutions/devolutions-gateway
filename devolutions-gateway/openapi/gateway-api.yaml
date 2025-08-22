@@ -337,55 +337,6 @@ paths:
       security:
       - scope_token:
         - gateway.jrl.read
-  /jet/monitoring/config:
-    post:
-      tags:
-      - NetworkMonitoring
-      operationId: DrainLog
-      requestBody:
-        description: JSON object containing a list of monitors
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/network_monitor.MonitorsConfig'
-        required: true
-      responses:
-        '200':
-          description: New configuration was accepted
-        '400':
-          description: Bad request
-        '401':
-          description: Invalid or missing authorization token
-        '403':
-          description: Insufficient permissions
-        '500':
-          description: Unexpected server error while starting monitors
-      security:
-      - scope_token:
-        - 'TODO: create a scope'
-  /jet/monitoring/log/drain:
-    post:
-      tags:
-      - NetworkMonitoring
-      operationId: DrainLog
-      responses:
-        '200':
-          description: Log was flushed and returned in the response body
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MonitoringLogResponse'
-        '400':
-          description: Bad request
-        '401':
-          description: Invalid or missing authorization token
-        '403':
-          description: Insufficient permissions
-        '500':
-          description: Unexpected server error
-      security:
-      - scope_token:
-        - 'TODO: create a scope'
   /jet/net/config:
     get:
       tags:
@@ -415,6 +366,57 @@ paths:
           description: Unexpected server error
       security:
       - netscan_token: []
+  /jet/net/monitor//config:
+    post:
+      tags:
+      - NetworkMonitoring
+      summary: Replaces the existing monitoring config with the one provided in the body.
+      description: |-
+        This request will immediately start any new monitors, and will stop
+        currently active monitors that are no longer in the config.
+
+        The configuration is not persisted across restarts.
+      operationId: SetMonitoringConfig
+      requestBody:
+        description: JSON object containing a list of monitors
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MonitorsConfig'
+        required: true
+      responses:
+        '200':
+          description: New configuration was accepted
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error while starting monitors
+  /jet/net/monitor/log/drain:
+    post:
+      tags:
+      - NetworkMonitoring
+      summary: Monitors store their results in a temporary log, which is returned here.
+      description: Once the log is downloaded, gateway purges it from memory.
+      operationId: DrainMonitoringLog
+      responses:
+        '200':
+          description: Log was flushed and returned in the response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoringLogResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
   /jet/preflight:
     post:
       tags:
@@ -602,6 +604,654 @@ paths:
       security:
       - web_app_token: []
 components:
+  schemas:
+    AccessScope:
+      type: string
+      enum:
+      - '*'
+      - gateway.sessions.read
+      - gateway.session.terminate
+      - gateway.associations.read
+      - gateway.diagnostics.read
+      - gateway.jrl.read
+      - gateway.config.write
+      - gateway.heartbeat.read
+      - gateway.recording.delete
+      - gateway.recordings.read
+      - gateway.update
+      - gateway.preflight
+    AddressFamily:
+      type: string
+      enum:
+      - IPv4
+      - IPv6
+    AppCredential:
+      type: object
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/AppCredentialKind'
+        password:
+          type: string
+          description: |-
+            Password for the credential.
+
+            Required for "username-password" kind.
+          nullable: true
+        username:
+          type: string
+          description: |-
+            Username for the credential.
+
+            Required for "username-password" kind.
+          nullable: true
+    AppCredentialKind:
+      type: string
+      enum:
+      - username-password
+    AppTokenContentType:
+      type: string
+      enum:
+      - WEBAPP
+    AppTokenSignRequest:
+      type: object
+      required:
+      - content_type
+      - subject
+      properties:
+        content_type:
+          $ref: '#/components/schemas/AppTokenContentType'
+        lifetime:
+          type: integer
+          format: int64
+          description: |-
+            The validity duration in seconds for the app token.
+
+            This value cannot exceed the configured maximum lifetime.
+            If no value is provided, the configured maximum lifetime will be granted.
+          nullable: true
+          minimum: 0
+        subject:
+          type: string
+          description: The username used to request the app token.
+    ClockDiagnostic:
+      type: object
+      required:
+      - timestamp_secs
+      - timestamp_millis
+      properties:
+        timestamp_millis:
+          type: integer
+          format: int64
+          description: Current time in milliseconds
+        timestamp_secs:
+          type: integer
+          format: int64
+          description: Current time in seconds
+    ConfigDiagnostic:
+      type: object
+      description: Service configuration diagnostic
+      required:
+      - hostname
+      - version
+      - listeners
+      properties:
+        hostname:
+          type: string
+          description: This Gateway's hostname
+        id:
+          type: string
+          format: uuid
+          description: This Gateway's unique ID
+          nullable: true
+        listeners:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListenerUrls'
+          description: Listeners configured on this instance
+        version:
+          type: string
+          description: Gateway service version
+    ConfigPatch:
+      type: object
+      properties:
+        Id:
+          type: string
+          format: uuid
+          description: This Gateway's unique ID
+          nullable: true
+        SubProvisionerPublicKey:
+          allOf:
+          - $ref: '#/components/schemas/SubProvisionerKey'
+          nullable: true
+        Subscriber:
+          allOf:
+          - $ref: '#/components/schemas/Subscriber'
+          nullable: true
+    ConnectionMode:
+      type: string
+      enum:
+      - rdv
+      - fwd
+    DataEncoding:
+      type: string
+      enum:
+      - Multibase
+      - Base64
+      - Base64Pad
+      - Base64Url
+      - Base64UrlPad
+    DeleteManyResult:
+      type: object
+      required:
+      - found_count
+      - not_found_count
+      properties:
+        found_count:
+          type: integer
+          description: Number of recordings found
+          minimum: 0
+        not_found_count:
+          type: integer
+          description: Number of recordings not found
+          minimum: 0
+    Heartbeat:
+      type: object
+      required:
+      - hostname
+      - version
+      - running_session_count
+      properties:
+        agent_version:
+          type: string
+          description: Agent version, if installed.
+          nullable: true
+        hostname:
+          type: string
+          description: This Gateway's hostname.
+        id:
+          type: string
+          format: uuid
+          description: This Gateway's unique ID.
+          nullable: true
+        recording_storage_available_space:
+          type: integer
+          format: int64
+          description: |-
+            The remaining available space to store recordings, in bytes.
+
+            Since v2024.1.6.
+          nullable: true
+          minimum: 0
+        recording_storage_is_writeable:
+          type: boolean
+          description: |-
+            Whether the recording storage is writeable or not.
+
+            Since v2024.1.6.
+          nullable: true
+        recording_storage_total_space:
+          type: integer
+          format: int64
+          description: |-
+            The total space of the disk used to store recordings, in bytes.
+
+            Since v2024.1.6.
+          nullable: true
+          minimum: 0
+        running_session_count:
+          type: integer
+          description: Number of running sessions.
+          minimum: 0
+        version:
+          type: string
+          description: Gateway service version.
+    Identity:
+      type: object
+      required:
+      - hostname
+      properties:
+        hostname:
+          type: string
+          description: This Gateway's hostname
+        id:
+          type: string
+          format: uuid
+          description: This Gateway's unique ID
+          nullable: true
+        version:
+          type: string
+          description: Gateway service version
+          nullable: true
+    InterfaceInfo:
+      type: object
+      required:
+      - family
+      - address
+      properties:
+        address:
+          type: string
+        broadcast:
+          type: string
+          nullable: true
+        family:
+          $ref: '#/components/schemas/AddressFamily'
+        mac:
+          type: string
+          nullable: true
+        netmask:
+          type: string
+          nullable: true
+    JrlInfo:
+      type: object
+      required:
+      - jti
+      - iat
+      properties:
+        iat:
+          type: integer
+          format: int64
+          description: JWT "Issued At" claim of JRL
+        jti:
+          type: string
+          format: uuid
+          description: Unique ID for current JRL
+    ListenerUrls:
+      type: object
+      required:
+      - internal_url
+      - external_url
+      properties:
+        external_url:
+          type: string
+          description: URL to use from external networks
+        internal_url:
+          type: string
+          description: URL to use on local network
+    MonitorDefinition:
+      type: object
+      required:
+      - id
+      - probe
+      - address
+      - interval
+      - timeout
+      properties:
+        address:
+          type: string
+        id:
+          type: string
+        interval:
+          type: integer
+          format: int64
+          minimum: 0
+        port:
+          type: integer
+          format: int32
+          nullable: true
+        probe:
+          $ref: '#/components/schemas/MonitoringProbeType'
+        timeout:
+          type: integer
+          format: int64
+          minimum: 0
+    MonitorDefinitionProbeTypeError:
+      type: object
+      required:
+      - id
+      - probe
+      properties:
+        id:
+          type: string
+          description: The ID of the monitor definition in the client-provided config
+        probe:
+          type: string
+          description: The monitor type that was not supported
+    MonitorResult:
+      type: object
+      required:
+      - monitor_id
+      - request_start_time
+      - response_success
+      - response_time
+      properties:
+        monitor_id:
+          type: string
+        request_start_time:
+          type: string
+          format: date-time
+        response_messages:
+          type: string
+          nullable: true
+        response_success:
+          type: boolean
+        response_time:
+          type: number
+          format: double
+    MonitoringLogResponse:
+      type: object
+      required:
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorResult'
+    MonitoringProbeType:
+      oneOf:
+      - type: string
+        enum:
+        - ping
+      - type: string
+        enum:
+        - tcpOpen
+      - type: object
+        required:
+        - unknown
+        properties:
+          unknown:
+            type: string
+    MonitorsConfig:
+      type: object
+      required:
+      - monitors
+      properties:
+        monitors:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorDefinition'
+    PreflightAlertStatus:
+      type: string
+      enum:
+      - general-failure
+      - info
+      - warn
+      - unsupported-operation
+      - invalid-parameters
+      - internal-server-error
+      - host-resolution-failure
+      - agent-version-lookup-failure
+    PreflightOperation:
+      type: object
+      required:
+      - id
+      - kind
+      properties:
+        host_to_resolve:
+          type: string
+          description: |-
+            The hostname to perform DNS resolution on.
+
+            Required for "resolve-host" kind.
+          nullable: true
+        id:
+          type: string
+          format: uuid
+          description: Unique ID identifying the preflight operation.
+        kind:
+          $ref: '#/components/schemas/PreflightOperationKind'
+        proxy_credential:
+          allOf:
+          - $ref: '#/components/schemas/AppCredential'
+          nullable: true
+        target_credential:
+          allOf:
+          - $ref: '#/components/schemas/AppCredential'
+          nullable: true
+        time_to_live:
+          type: integer
+          format: int32
+          description: |-
+            Minimum persistance duration in seconds for the data provisioned via this operation.
+
+            Optional parameter for "provision-token" and "provision-credentials" kinds.
+          nullable: true
+          minimum: 0
+        token:
+          type: string
+          description: |-
+            The token to be stored on the proxy-side.
+
+            Required for "provision-token" and "provision-credentials" kinds.
+          nullable: true
+    PreflightOperationKind:
+      type: string
+      enum:
+      - get-version
+      - get-agent-version
+      - get-running-session-count
+      - get-recording-storage-health
+      - provision-token
+      - provision-credentials
+      - resolve-host
+    PreflightOutput:
+      type: object
+      required:
+      - operation_id
+      - kind
+      properties:
+        agent_version:
+          type: string
+          description: |-
+            Agent service version, if installed.
+
+            Set for "agent-version" kind.
+          nullable: true
+        alert_message:
+          type: string
+          description: |-
+            Message describing the problem.
+
+            Set for "alert" kind.
+          nullable: true
+        alert_status:
+          allOf:
+          - $ref: '#/components/schemas/PreflightAlertStatus'
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/PreflightOutputKind'
+        operation_id:
+          type: string
+          format: uuid
+          description: The ID of the preflight operation associated to this result.
+        recording_storage_available_space:
+          type: integer
+          format: int64
+          description: |-
+            The remaining available space to store recordings, in bytes.
+
+            set for "recording-storage-health" kind.
+          nullable: true
+          minimum: 0
+        recording_storage_is_writeable:
+          type: boolean
+          description: |-
+            Whether the recording storage is writeable or not.
+
+            Set for "recording-storage-health" kind.
+          nullable: true
+        recording_storage_total_space:
+          type: integer
+          format: int64
+          description: |-
+            The total space of the disk used to store recordings, in bytes.
+
+            Set for "recording-storage-health" kind.
+          nullable: true
+          minimum: 0
+        resolved_addresses:
+          type: array
+          items:
+            type: string
+          description: |-
+            Resolved IP addresses.
+
+            Set for "resolved-host" kind.
+          nullable: true
+        resolved_host:
+          type: string
+          description: |-
+            Hostname that was resolved.
+
+            Set for "resolved-host" kind.
+          nullable: true
+        running_session_count:
+          type: integer
+          description: |-
+            Number of running sessions.
+
+            Set for "running-session-count" kind.
+          nullable: true
+          minimum: 0
+        version:
+          type: string
+          description: |-
+            Service version.
+
+            Set for "version" kind.
+          nullable: true
+    PreflightOutputKind:
+      type: string
+      enum:
+      - version
+      - agent-version
+      - running-session-count
+      - recording-storage-health
+      - resolved-host
+      - alert
+    PubKeyFormat:
+      type: string
+      enum:
+      - Spki
+      - Pkcs1
+    SessionInfo:
+      type: object
+      description: Information about an ongoing Gateway session
+      required:
+      - association_id
+      - application_protocol
+      - recording_policy
+      - filtering_policy
+      - start_timestamp
+      - connection_mode
+      properties:
+        application_protocol:
+          type: string
+          description: Protocol used during this session
+        association_id:
+          type: string
+          format: uuid
+          description: Unique ID for this session
+        connection_mode:
+          $ref: '#/components/schemas/ConnectionMode'
+        destination_host:
+          type: string
+          description: Destination Host
+          nullable: true
+        filtering_policy:
+          type: boolean
+          description: Filtering Policy
+        recording_policy:
+          type: boolean
+          description: Recording Policy
+        start_timestamp:
+          type: string
+          format: date-time
+          description: Date this session was started
+        time_to_live:
+          type: integer
+          format: int64
+          description: Maximum session duration in minutes (0 is used for the infinite duration)
+          nullable: true
+          minimum: 0
+    SessionTokenContentType:
+      type: string
+      enum:
+      - ASSOCIATION
+      - JMUX
+      - KDC
+    SessionTokenSignRequest:
+      type: object
+      required:
+      - content_type
+      - lifetime
+      properties:
+        content_type:
+          $ref: '#/components/schemas/SessionTokenContentType'
+        destination:
+          type: string
+          description: Destination host.
+          nullable: true
+        krb_kdc:
+          type: string
+          description: |-
+            Kerberos KDC address.
+
+            E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`.
+            Default scheme is `tcp`.
+            Default port is `88`.
+          nullable: true
+        krb_realm:
+          type: string
+          description: |-
+            Kerberos realm.
+
+            E.g.: `ad.it-help.ninja`.
+            Should be lowercased (actual validation is case-insensitive though).
+          nullable: true
+        lifetime:
+          type: integer
+          format: int64
+          description: |-
+            The validity duration in seconds for the session token.
+
+            This value cannot exceed 2 hours.
+          minimum: 0
+        protocol:
+          type: string
+          description: 'Protocol for the session (e.g.: "rdp").'
+          nullable: true
+        session_id:
+          type: string
+          format: uuid
+          description: Unique ID for this session.
+          nullable: true
+    SubProvisionerKey:
+      type: object
+      required:
+      - Id
+      - Value
+      properties:
+        Encoding:
+          allOf:
+          - $ref: '#/components/schemas/DataEncoding'
+          nullable: true
+        Format:
+          allOf:
+          - $ref: '#/components/schemas/PubKeyFormat'
+          nullable: true
+        Id:
+          type: string
+          description: The key ID for this subkey
+        Value:
+          type: string
+          description: The binary-to-text-encoded key data
+    Subscriber:
+      type: object
+      description: Subscriber configuration
+      required:
+      - Url
+      - Token
+      properties:
+        Token:
+          type: string
+          description: Bearer token to use when making HTTP requests
+        Url:
+          type: string
+          description: HTTP URL where notification messages are to be sent
+    UpdateResponse:
+      type: object
   securitySchemes:
     jrec_token:
       type: http
