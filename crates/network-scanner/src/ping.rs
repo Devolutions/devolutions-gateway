@@ -1,5 +1,6 @@
+use std::default;
 use std::mem::MaybeUninit;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,9 +8,10 @@ use anyhow::Context;
 use network_scanner_net::runtime::Socket2Runtime;
 use network_scanner_net::socket::AsyncRawSocket;
 use network_scanner_proto::icmp_v4;
+use network_scanner_proto::icmp_v6::Icmpv6Message;
 use tokio::time::timeout;
 
-use crate::create_echo_request;
+use crate::create_v4_echo_request;
 use crate::ip_utils::IpAddrRange;
 
 #[derive(Debug, Clone)]
@@ -109,23 +111,60 @@ pub fn ping_range(
     Ok(receiver)
 }
 
-pub async fn ping(runtime: Arc<Socket2Runtime>, ip: impl Into<IpAddr>, duration: Duration) -> anyhow::Result<()> {
+pub async fn ping_addr(
+    runtime: Arc<Socket2Runtime>,
+    addr: impl ToSocketAddrs,
+    duration: Duration,
+) -> anyhow::Result<()> {
+    let socket_addr = addr.to_socket_addrs()?.next().context("Hostname not found")?; //TODO return proper error
+    let socket2_sockaddr: socket2::SockAddr = socket_addr.into();
+
     let socket = runtime.new_socket(
-        socket2::Domain::IPV4,
+        socket2_sockaddr.domain(),
         socket2::Type::RAW,
-        Some(socket2::Protocol::ICMPV4),
+        match socket_addr {
+            SocketAddr::V4(_) => Some(socket2::Protocol::ICMPV4),
+            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6),
+        },
     )?;
-    let addr = SocketAddr::new(ip.into(), 0);
-    timeout(duration, try_ping(addr.into(), socket)).await?
+
+    timeout(duration, try_ping(socket2_sockaddr, socket)).await?
+}
+
+pub async fn ping(runtime: Arc<Socket2Runtime>, ip: impl Into<IpAddr>, duration: Duration) -> anyhow::Result<()> {
+    let socket_addr = SocketAddr::new(ip.into(), 0);
+    let socket2_sockaddr: socket2::SockAddr = socket_addr.into();
+
+    let socket = runtime.new_socket(
+        socket2_sockaddr.domain(),
+        socket2::Type::RAW,
+        match socket_addr {
+            SocketAddr::V4(_) => Some(socket2::Protocol::ICMPV4),
+            SocketAddr::V6(_) => Some(socket2::Protocol::ICMPV6),
+        },
+    )?;
+
+    timeout(duration, try_ping(socket2_sockaddr, socket)).await?
 }
 
 async fn try_ping(addr: socket2::SockAddr, mut socket: AsyncRawSocket) -> anyhow::Result<()> {
     // skip verification, we are not interested in the response
-    let (packet, _) = create_echo_request()?;
-    let packet_bytes = packet.to_bytes(true);
+    let (packet, _) = create_v4_echo_request()?;
+
+    let packet_bytes = match addr.domain() {
+        socket2::Domain::IPV4 => create_v4_echo_request()?.0.to_bytes(true),
+        socket2::Domain::IPV6 => Icmpv6Message::EchoRequest {
+            identifier: 42,
+            sequence_number: 0,
+            payload: vec![42; 32],
+        }
+        .encode(),
+        _ => return Err(anyhow::anyhow!("Can't ping a unix socket")),
+    };
 
     socket.send_to(&packet_bytes, &addr).await?;
 
+    // TODO: because this is a raw socket, packets indicating failure will reach us. we need to check the response code
     let mut buffer = [MaybeUninit::uninit(); icmp_v4::ICMPV4_MTU];
     socket.recv_from(&mut buffer).await?;
     Ok(())
@@ -140,7 +179,7 @@ pub fn blocking_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     let addr = SocketAddr::new(ip.into(), 0);
 
-    let (packet, _) = create_echo_request()?;
+    let (packet, _) = create_v4_echo_request()?;
 
     socket
         .send_to(&packet.to_bytes(true), &addr.into())

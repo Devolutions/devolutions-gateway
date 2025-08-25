@@ -27,6 +27,8 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::api::update::trigger_update_check,
         crate::api::preflight::post_preflight,
         crate::api::net::get_net_config,
+        crate::api::monitoring::handle_set_monitoring_config,
+        crate::api::monitoring::handle_drain_log,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -58,6 +60,12 @@ use crate::api::preflight::PreflightAlertStatus;
         SessionTokenSignRequest,
         InterfaceInfo,
         AddressFamily,
+        crate::api::monitoring::MonitoringLogResponse,
+        crate::api::monitoring::MonitorResult,
+        crate::api::monitoring::MonitorsConfig,
+        crate::api::monitoring::MonitorDefinition,
+        crate::api::monitoring::MonitoringProbeType,
+        crate::api::monitoring::MonitorDefinitionProbeTypeError,
     )),
     modifiers(&SecurityAddon),
 )]

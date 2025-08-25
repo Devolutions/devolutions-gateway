@@ -7,6 +7,7 @@ pub mod jmux;
 pub mod jrec;
 pub mod jrl;
 pub mod kdc_proxy;
+pub mod monitoring;
 pub mod net;
 pub mod preflight;
 pub mod rdp;
@@ -38,6 +39,10 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
             "/",
             axum::routing::get(|| async { axum::response::Redirect::temporary("/jet/webapp/client") }),
         );
+    }
+
+    if state.conf_handle.get_conf().debug.enable_unstable {
+        router = router.nest("/jet/net/monitor", monitoring::make_router(state.clone()));
     }
 
     router.with_state(state)

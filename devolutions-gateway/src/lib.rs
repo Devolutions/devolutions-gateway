@@ -1,5 +1,6 @@
 // Used by devolutions-gateway binary.
 use ceviche as _;
+use tempdir::TempDir;
 
 // Used by tests.
 #[cfg(test)]
@@ -43,6 +44,8 @@ pub mod ws;
 
 use std::sync::Arc;
 
+use camino::{Utf8Path, Utf8PathBuf};
+
 #[derive(Clone)]
 pub struct DgwState {
     pub conf_handle: config::ConfHandle,
@@ -54,6 +57,7 @@ pub struct DgwState {
     pub recordings: recording::RecordingMessageSender,
     pub job_queue_handle: job_queue::JobQueueHandle,
     pub credential_store: credential::CredentialStoreHandle,
+    pub monitoring_state: Arc<network_monitor::State>,
 }
 
 #[doc(hidden)]
@@ -78,6 +82,14 @@ impl DgwState {
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let credential_store = credential::CredentialStoreHandle::new();
 
+        let temp_dir = TempDir::new("dgw-network-monitor-test").expect("Could not create temp dir");
+        let temp_path: Utf8PathBuf = Utf8Path::from_path(temp_dir.path())
+            .expect("TempDir gave us a garbage path")
+            .to_path_buf()
+            .join("monitors_cache.json");
+
+        let monitoring_state = Arc::new(network_monitor::State::mock(temp_path));
+
         let state = Self {
             conf_handle,
             token_cache,
@@ -88,6 +100,7 @@ impl DgwState {
             recordings: recording_manager_handle,
             job_queue_handle,
             credential_store,
+            monitoring_state,
         };
 
         let handles = MockHandles {
