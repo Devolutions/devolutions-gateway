@@ -12,11 +12,13 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     router.with_state(state)
 }
 
-/// Replaces the existing monitoring config with the one provided in the body.
-/// This request will immediately start any new monitors, and will stop
-/// currently active monitors that are no longer in the config.
+/// Replace the current monitoring configuration with the configuration in the request body.
 ///
-/// The configuration is not persisted across restarts.
+/// Changes take effect immediately:
+/// - Starts any monitors newly defined in the payload.
+/// - Stops any currently running monitors that are omitted from the payload.
+///
+/// Note: The configuration is not persisted across process restarts.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     operation_id = "SetMonitoringConfig",
