@@ -1150,7 +1150,7 @@ dependencies = [
  "ironrdp",
  "notify-debouncer-mini",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.9.1",
  "reqwest",
  "rustls-pemfile 2.2.0",
  "serde",
@@ -4179,9 +4179,9 @@ dependencies = [
 
 [[package]]
 name = "picky"
-version = "7.0.0-rc.15"
+version = "7.0.0-rc.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83be360ca0cc8659abfbda932098e606fe52fa129508b92f0ce2998c00679170"
+checksum = "33807ce79d4b14a8918e968a8606e5142ddc6aec933acef79de0bd769cae5fb1"
 dependencies = [
  "aes",
  "aes-gcm",
