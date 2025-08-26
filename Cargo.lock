@@ -1211,12 +1211,12 @@ dependencies = [
  "http-body-util",
  "hyper 1.6.0",
  "hyper-util",
- "ironrdp-acceptor 0.5.0",
- "ironrdp-connector 0.5.1",
+ "ironrdp-acceptor 0.6.0",
+ "ironrdp-connector 0.6.0",
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "ironrdp-rdcleanpath",
- "ironrdp-tokio 0.5.1",
+ "ironrdp-tokio 0.6.0",
  "jmux-proxy",
  "job-queue",
  "job-queue-libsql",
@@ -2602,12 +2602,12 @@ dependencies = [
 
 [[package]]
 name = "ironrdp-acceptor"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad348cb50d990c23b7c6f4f8f4c42b6678d5d0c6d7acd57f14685b41d77d9ff7"
+checksum = "a7bbe1fd9a54d5e9669e4006f4840ea89339cebff2a7fb345dc925b17547925b"
 dependencies = [
- "ironrdp-async 0.5.0",
- "ironrdp-connector 0.5.1",
+ "ironrdp-async 0.6.0",
+ "ironrdp-connector 0.6.0",
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "ironrdp-svc 0.4.1",
@@ -2639,12 +2639,12 @@ dependencies = [
 
 [[package]]
 name = "ironrdp-async"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bb8b3d345988b6791fd780befc08df35c81a030603e4588c6fb9bf4b14dd3ab"
+checksum = "724ce488772b7850f6307b4d82559d87dadb7afdf816a35f6cf6e5a989a716f0"
 dependencies = [
  "bytes 1.10.1",
- "ironrdp-connector 0.5.1",
+ "ironrdp-connector 0.6.0",
  "ironrdp-core",
  "ironrdp-pdu 0.5.0",
  "tracing",
@@ -2679,9 +2679,9 @@ dependencies = [
 
 [[package]]
 name = "ironrdp-connector"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "131d5060ff071a244f69e43d3efa19704b2930a41700e0288685d2f3c91d2e28"
+checksum = "0cb98a29bdd7ef95b490050ddabe4ddd816e527ea0df9f25cc7a9a30d2584dc1"
 dependencies = [
  "ironrdp-core",
  "ironrdp-error 0.1.3",
@@ -2691,7 +2691,7 @@ dependencies = [
  "picky-asn1-der 0.5.2",
  "picky-asn1-x509 0.14.4",
  "rand_core 0.6.4",
- "sspi 0.15.14",
+ "sspi 0.16.0",
  "tracing",
  "url",
 ]
@@ -2875,12 +2875,12 @@ dependencies = [
 
 [[package]]
 name = "ironrdp-tokio"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95af93439e7322763477bafd4b153ab64fe29b138f87fe80c188fcfa04634584"
+checksum = "6a5815ae4dd7866a6730efb653281406a77fd1f5426d77dd959fc04e3512410f"
 dependencies = [
  "bytes 1.10.1",
- "ironrdp-async 0.5.0",
+ "ironrdp-async 0.6.0",
  "tokio 1.46.1",
 ]
 
@@ -5765,9 +5765,9 @@ dependencies = [
 
 [[package]]
 name = "sspi"
-version = "0.15.14"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "214ee905dcdd4b7ab11404b616e58dc6944d80fe8592fbdc13abc87d7e2bff0a"
+checksum = "6ebd88036b841e6e50370c1d2b7711ae1fc04d4269abda80427cda4b8230a53d"
 dependencies = [
  "async-dnssd",
  "async-recursion",
