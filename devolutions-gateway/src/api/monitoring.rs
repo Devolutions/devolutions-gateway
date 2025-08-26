@@ -23,7 +23,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     post,
     operation_id = "SetMonitoringConfig",
     tag = "NetworkMonitoring",
-    path = "/jet/net/monitor//config",
+    path = "/jet/net/monitor/config",
     request_body(content = MonitorsConfig, description = "JSON object containing a list of monitors", content_type = "application/json"),
     responses(
         (status = 200, description = "New configuration was accepted"),
