@@ -270,7 +270,7 @@ And here is how the response may look like:
 ]
 ```
 
-## Server monitoring API
+## Network monitoring API
 
 Basic monitors can be set up to scan servers on an interval. Currently only ping is supported. Managing the 
 configuration and storing the logs is expected to be done by an external server.
