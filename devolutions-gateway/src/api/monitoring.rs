@@ -44,7 +44,7 @@ async fn handle_set_monitoring_config(
         .map(|_| Json(SetConfigResponse::new(probe_type_errors)))
         .map_err(
             HttpError::internal()
-                .with_msg("Failed to set up network monitoring")
+                .with_msg("failed to set up network monitoring")
                 .err(),
         )
 }
@@ -101,7 +101,7 @@ impl MonitorsConfig {
             },
         );
 
-        let config = network_monitor::MonitorsConfig { monitors: monitors };
+        let config = network_monitor::MonitorsConfig { monitors };
 
         return (config, errors);
     }
@@ -178,6 +178,7 @@ impl TryFrom<MonitorDefinition> for network_monitor::MonitorDefinition {
 #[derive(Debug, Clone, Serialize)]
 struct SetConfigResponse {
     /// An optional list of probes that this server could not parse.
+    #[serde(skip_serializing_if = "Option::is_none")]
     probe_type_errors: Option<Vec<MonitorDefinitionProbeTypeError>>,
 }
 
@@ -207,6 +208,7 @@ pub struct MonitorResult {
     #[serde(with = "time::serde::rfc3339")]
     request_start_time: OffsetDateTime,
     response_success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     response_messages: Option<String>,
     response_time: f64,
 }
