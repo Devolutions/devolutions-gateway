@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, io, mem};
 
+use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use network_scanner_net::runtime::Socket2Runtime;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,7 @@ pub use crate::state::State;
 pub enum SetConfigError {
     Io(#[from] io::Error),
     Serde(#[from] serde_json::Error),
+    Other(#[from] anyhow::Error),
 }
 
 pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(), SetConfigError> {
@@ -35,14 +37,16 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
         .truncate(true)
         .open(&state.cache_path)?;
 
-    let mut config_write = state.config.write().await;
+    let mut config_write = state.config.write().map_err(|_| anyhow!("config lock poisoned"))?;
 
     serde_json::to_writer_pretty(&file, &config)?;
 
     let old_config = mem::replace(&mut *config_write, config);
 
     let new_config_set: HashSet<MonitorDefinition> = config_write.monitors.clone().into_iter().collect();
-    let old_config_set: HashSet<MonitorDefinition> = old_config.monitors.clone().into_iter().collect();
+    let old_config_set: HashSet<MonitorDefinition> = old_config.monitors.into_iter().collect();
+
+    drop(config_write);
 
     let added = new_config_set.difference(&old_config_set).cloned();
     let deleted = old_config_set.difference(&new_config_set);
@@ -83,19 +87,22 @@ pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(),
                         (definition.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
                     select! {
                         _ = cancellation_monitor.cancelled() => { return }
-                        _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { () }
+                        _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { }
                     };
                 }
             };
 
-            return (
+            (
                 (definition_id, cancellation_token),
                 Box::pin(monitor) as Pin<Box<dyn Future<Output = ()> + Send>>,
-            );
+            )
         })
         .unzip();
 
-    let mut cancellation_tokens_write = state.cancellation_tokens.lock().await;
+    let mut cancellation_tokens_write = state
+        .cancellation_tokens
+        .lock()
+        .map_err(|_| anyhow!("cancellation token lock poisoned"))?;
 
     for definition in deleted {
         cancellation_tokens_write[&definition.id].cancel();
@@ -129,7 +136,7 @@ async fn do_ping_monitor(definition: &MonitorDefinition, scanner_runtime: Arc<So
     }()
     .await;
 
-    return match ping_result {
+    match ping_result {
         Ok(time) => MonitorResult {
             monitor_id: definition.id.clone(),
             request_start_time: start_time,
@@ -144,7 +151,7 @@ async fn do_ping_monitor(definition: &MonitorDefinition, scanner_runtime: Arc<So
             response_messages: Some(format!("{error:#}")),
             response_time: f64::INFINITY,
         },
-    };
+    }
 }
 
 async fn do_tcpopen_monitor(definition: &MonitorDefinition) -> MonitorResult {

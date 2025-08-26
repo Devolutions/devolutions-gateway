@@ -121,7 +121,7 @@ impl Icmpv6Message {
             }
         };
 
-        return bytes;
+        bytes
     }
 }
 

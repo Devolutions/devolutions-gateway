@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use tokio::sync::{Mutex, RwLock};
+use std::sync::{Mutex, RwLock};
 
 use network_scanner_net::runtime::Socket2Runtime;
 
@@ -26,6 +26,7 @@ impl State {
         }
     }
 
+    #[doc(hidden)]
     pub fn mock(cache_path: Utf8PathBuf) -> State {
         State {
             cache_path: cache_path,

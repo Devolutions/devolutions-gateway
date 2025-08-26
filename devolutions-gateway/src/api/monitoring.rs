@@ -77,7 +77,7 @@ async fn handle_drain_log(
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MonitorsConfig {
+pub(crate) struct MonitorsConfig {
     monitors: Vec<MonitorDefinition>,
 }
 
@@ -110,13 +110,13 @@ impl MonitorsConfig {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Eq, PartialEq, Hash, Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub enum MonitoringProbeType {
+pub(crate) enum MonitoringProbeType {
     Ping,
     TcpOpen,
     #[serde(untagged)]
     Unknown(String),
 }
-pub struct MonitoringProbeTypeError {
+pub(crate) struct MonitoringProbeTypeError {
     probe: String,
 }
 
@@ -134,7 +134,7 @@ impl TryFrom<MonitoringProbeType> for network_monitor::ProbeType {
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Eq, PartialEq, Hash, Clone, Serialize, Deserialize, Debug)]
-pub struct MonitorDefinition {
+pub(crate) struct MonitorDefinition {
     id: String,
     probe: MonitoringProbeType,
     address: String,
@@ -145,7 +145,7 @@ pub struct MonitorDefinition {
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
-pub struct MonitorDefinitionProbeTypeError {
+pub(crate) struct MonitorDefinitionProbeTypeError {
     /// The ID of the monitor definition in the client-provided config
     id: String,
     /// The monitor type that was not supported
@@ -176,7 +176,7 @@ impl TryFrom<MonitorDefinition> for network_monitor::MonitorDefinition {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 #[derive(Debug, Clone, Serialize)]
-struct SetConfigResponse {
+pub(crate) struct SetConfigResponse {
     /// An optional list of probes that this server could not parse.
     #[serde(skip_serializing_if = "Option::is_none")]
     probe_type_errors: Option<Vec<MonitorDefinitionProbeTypeError>>,
@@ -203,7 +203,7 @@ pub(crate) struct MonitoringLogResponse {
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
-pub struct MonitorResult {
+pub(crate) struct MonitorResult {
     monitor_id: String,
     #[serde(with = "time::serde::rfc3339")]
     request_start_time: OffsetDateTime,
