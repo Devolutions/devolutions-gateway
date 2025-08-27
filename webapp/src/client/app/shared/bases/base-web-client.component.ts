@@ -39,22 +39,19 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     this.analyticHandle = this.analyticService.sendOpenEvent(this.getProtocol());
   }
 
-  protected webClientConnectionFail(message?: string, trace?: string): void {
-    this.hideSpinnerOnly = true;
-    //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-    const errorMessage = message || 'Connection error: Please verify your connection settings.';
+  protected webClientError(errorMessage: string): void {
     this.gatewayAlertMessageService.addError(errorMessage);
     console.error(errorMessage);
-
-    if (trace) {
-      console.error(trace);
-    }
-
-    this.analyticService.sendCloseEvent(this.analyticHandle);
   }
 
   protected webClientConnectionClosed(): void {
-    this.analyticService.sendCloseEvent(this.analyticHandle);
+    if (this.analyticHandle) {
+      this.analyticService.sendCloseEvent(this.analyticHandle);
+    }
+  }
+
+  protected getIronErrorMessage(errorData: { backtrace: () => string } | string): string {
+    return typeof errorData === 'string' ? errorData : errorData.backtrace();
   }
 
   protected abstract getProtocol(): ProtocolString;

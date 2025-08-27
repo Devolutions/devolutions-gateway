@@ -1,11 +1,5 @@
-import { UtilsService } from '../utils.service';
-
 export class UrlService {
-  private utils: UtilsService;
-
-  constructor(parent: UtilsService) {
-    this.utils = parent;
-  }
+  constructor() {}
 
   trimPortFromUrl(url: string): string {
     if (!url || url === '') {

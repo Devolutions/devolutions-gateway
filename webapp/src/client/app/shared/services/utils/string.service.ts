@@ -1,5 +1,3 @@
-import { UtilsService } from '../utils.service';
-
 export interface ExtractedUsernameDomain {
   username: string;
   domain: string;
@@ -11,11 +9,7 @@ export interface ExtractedHostnamePort {
 }
 
 export class StringService {
-  private utils: UtilsService;
-
-  constructor(parent: UtilsService) {
-    this.utils = parent;
-  }
+  constructor() {}
 
   //DOMAIN\username
   extractDomain(fullUsername: string): ExtractedUsernameDomain {
