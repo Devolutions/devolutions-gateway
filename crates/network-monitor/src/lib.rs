@@ -178,6 +178,7 @@ impl MonitorsConfig {
         MonitorsConfig { monitors: Vec::new() }
     }
 
+    #[doc(hidden)]
     fn mock() -> MonitorsConfig {
         MonitorsConfig {
             monitors: vec![MonitorDefinition {

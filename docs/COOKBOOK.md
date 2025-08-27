@@ -294,7 +294,7 @@ curl -v http://127.0.0.1:7171/jet/net/monitor/log/drain -X POST -H "Authorizatio
 The response will look similar to this:
 
 ```json
-{"entries":[{"monitor_id":"monitor1","request_start_time":"2025-08-22T17:07:34.3370521Z","response_success":true,"response_messages":null,"response_time":0.0585181}]}
+{"entries":[{"monitor_id":"monitor1","request_start_time":"2025-08-22T17:07:34.3370521Z","response_success":true,"response_time":0.0585181}]}
 ```
 
 Each log entry is only returned once. After you make this request, the existing log is deleted from memory.
