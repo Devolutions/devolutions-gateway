@@ -89,6 +89,10 @@ internal class Program
 
     private static string DevolutionsSession => ResolveArtifact("DAGENT_SESSION_EXECUTABLE", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions-session.exe");
 
+    private static string DevolutionsTun2SocksExe => ResolveArtifact("DAGENT_TUN2SOCKS_EXE", "..\\..\\tun2socks.exe");
+
+    private static string DevolutionsWintunDll => ResolveArtifact("DAGENT_WINTUN_DLL", "..\\..\\wintun.dll");
+
     private static string TargetOutputPath => ResolveDirectory("TARGET_OUTPUT_PATH", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\");
 
     private static Version DevolutionsAgentVersion
@@ -258,9 +262,12 @@ internal class Program
                 Dirs = new[]
                 {
                     new Dir(Features.PEDM_FEATURE, "desktop", new Files(Features.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
-                    new Dir(Features.PEDM_FEATURE, "ShellExt", 
-                        new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll), 
-                        new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix))
+                    new Dir(Features.PEDM_FEATURE, "ShellExt",
+                        new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll),
+                        new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix)),
+                    new Dir(Features.AGENT_FEATURE, "tun2socks", 
+                        new File(Features.AGENT_FEATURE, DevolutionsTun2SocksExe), 
+                        new File(Features.AGENT_FEATURE, DevolutionsWintunDll))
                 }
             })),
         };
