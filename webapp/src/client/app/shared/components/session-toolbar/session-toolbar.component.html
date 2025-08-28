@@ -68,6 +68,19 @@
     </ng-container>
   </div>
 
+  <div class="session-toolbar-right-group" *ngIf="clipboardActionButtons.length > 0">
+    <ng-container *ngFor="let button of clipboardActionButtons; let i = index; let last = last">
+      <p-button (click)="button.action()"
+                [label]="button.label"
+                [pTooltip]="button.tooltip"
+                [icon]="button.icon"
+                [disabled]="!button.enabled()"
+                iconPos="left"></p-button>
+
+      <div class="separator" *ngIf="!last"></div>
+    </ng-container>
+  </div>
+
   <div class="session-toolbar-right-group" *ngIf="rightButtons.length > 0">
     <ng-container *ngFor="let button of rightButtons; let i = index; let last = last">
       <p-button (click)="button.action()"

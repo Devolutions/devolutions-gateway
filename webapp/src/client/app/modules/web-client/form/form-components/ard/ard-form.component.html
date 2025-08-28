@@ -17,7 +17,7 @@
     </div>
 
     <div [hidden]="!showMoreSettings" class="col-12 gateway-form-group">
-  
+
       <div class="col-12 gateway-form-group">
         <web-client-resolution-quality-control [parentForm]="form"
                                                [inputFormData]="inputFormData"></web-client-resolution-quality-control>
@@ -28,6 +28,11 @@
                                              [inputFormData]="inputFormData"></web-client-ard-quality-mode-control>
       </div>
 
-    </div>
-    
+      <div *ngIf="showAutoClipboardCheckbox" class="col-12 gateway-form-group">
+        <web-client-auto-clipboard-control [parentForm]="form"
+                                           [inputFormData]="inputFormData"></web-client-auto-clipboard-control>
+      </div>
+
+  </div>
+
 </div>
