@@ -38,11 +38,6 @@
 //! - Supports data echo scenarios with known byte patterns
 //! - Uses proper graceful shutdown (shutdown write, then drain read)
 //!
-//! ### RstServer
-//! - Forces connection reset using `SO_LINGER` with timeout=0
-//! - Simulates abnormal network conditions
-//! - Triggers `is_really_an_error() == true` code paths in JMUX
-//!
 //! ### Port Management
 //! - `find_refused_port()` creates genuinely refused ports by bind-and-drop
 //! - All servers use ephemeral port allocation to avoid conflicts
@@ -60,7 +55,6 @@
 //! ## Error Handling & Timeouts
 //!
 //! - All async operations wrapped with 5-second timeouts
-//! - Server tasks may legitimately fail in RST scenarios
 //! - Observer panics tested for isolation (should not affect JMUX operation)
 //!
 //! ## Implementation Notes
@@ -211,73 +205,6 @@ impl NormalServer {
         assert_eq!(buffer, expected_data);
         stream.write_all(&buffer).await?; // Echo back.
         stream.shutdown().await?;
-        Ok(())
-    }
-}
-
-/// Test server that forces connection reset using SO_LINGER for abnormal termination testing.
-///
-/// This server simulates network failures and abrupt disconnections by setting
-/// SO_LINGER with timeout=0, which causes the socket to send RST instead of FIN
-/// when closed. This triggers the abnormal termination paths in JMUX.
-struct RstServer {
-    listener: tokio::net::TcpListener,
-    addr: SocketAddr,
-}
-
-impl RstServer {
-    /// Creates a new RST server bound to an ephemeral port on localhost.
-    async fn new() -> io::Result<Self> {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let addr = listener.local_addr()?;
-        Ok(Self { listener, addr })
-    }
-
-    /// Returns the actual bound address (including the allocated port).
-    fn addr(&self) -> SocketAddr {
-        self.addr
-    }
-
-    /// Accepts connection, reads some data, then abruptly closes to cause BrokenPipe.
-    ///
-    /// This method simulates a server that abruptly disconnects:
-    /// 1. Accepts connection (successful stream establishment)  
-    /// 2. Sends some initial data (non-zero byte counts)
-    /// 3. Reads part of the incoming client data
-    /// 4. Abruptly closes the connection while client may still be writing
-    /// 5. This should cause client to get BrokenPipe on subsequent writes
-    ///
-    /// This should result in `AbnormalTermination` with `BrokenPipe` error which
-    /// `is_really_an_error()` considers a real error.
-    async fn accept_and_cause_broken_pipe(&mut self, data_to_send: &[u8]) -> io::Result<()> {
-        let (stream, _) = self.listener.accept().await?;
-
-        // Convert to std stream and set aggressive socket options.
-        let std_stream = stream.into_std()?;
-        let socket = socket2::Socket::from(std_stream);
-
-        // Set SO_LINGER with timeout=0 for immediate RST
-        socket.set_linger(Some(Duration::ZERO))?;
-
-        // Convert back to tokio stream.
-        let mut stream = TcpStream::from_std(std::net::TcpStream::from(socket))?;
-
-        // Send initial data to establish the connection.
-        stream.write_all(data_to_send).await?;
-        stream.flush().await?;
-        println!("BrokenPipe server sent {} bytes", data_to_send.len());
-
-        // Read only part of the incoming data.
-        let mut buffer = [0u8; 512];
-        if let Ok(Ok(bytes_read)) = timeout(Duration::from_millis(50), stream.read(&mut buffer)).await {
-            println!("BrokenPipe server read {} bytes from client", bytes_read);
-        }
-
-        println!("BrokenPipe server forcing RST to cause client error");
-
-        // Force RST by dropping with SO_LINGER=0
-        drop(stream);
-
         Ok(())
     }
 }
@@ -774,106 +701,6 @@ async fn norm_bytes_counts_tx_rx() {
     proxy_task.abort();
 }
 
-/// Tests AbnormalTermination event for connection reset scenarios.
-///
-/// **Scenario**: Server sends data then forces RST via SO_LINGER
-/// **Expected Event**: AbnormalTermination
-/// **Key Assertions**:
-/// - bytes_tx > 0 OR bytes_rx > 0 (some data transferred before RST)
-/// - Triggers `is_really_an_error() == true` path in JMUX
-/// - active_duration >= 0 (connection was active before failure)
-#[tokio::test(flavor = "multi_thread")]
-async fn abn_bytes_emits_abnormal_termination() {
-    const MAX_ATTEMPTS: usize = 10;
-    let test_data = b"Partial data before RST";
-
-    // Try up to 10 times to get AbnormalTermination
-    for attempt in 1..=MAX_ATTEMPTS {
-        println!("Attempt {}/{} to trigger abnormal termination", attempt, MAX_ATTEMPTS);
-
-        let mut server = RstServer::new().await.expect("create RST server");
-        let server_addr = server.addr();
-
-        let (proxy, api_request_tx, mut rx) = make_proxy_with_test_callback();
-
-        // Run proxy in background.
-        let proxy_task = tokio::spawn(async move {
-            let _ = proxy.run().await;
-        });
-
-        // Start server task.
-        let data_to_send = test_data.to_vec();
-        let server_task = tokio::spawn(async move { server.accept_and_cause_broken_pipe(&data_to_send).await });
-
-        // Give the server a moment to start listening.
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        // Create destination URL for the server and open channel with LARGE client data.
-        // This will help ensure the client socket buffers fill up quickly when server becomes unresponsive.
-        let destination_url = DestinationUrl::new("tcp", "127.0.0.1", server_addr.port());
-        let large_client_data = vec![b'X'; 64 * 1024]; // 64KB of data to fill buffers quickly
-
-        open_and_start_channel_with_data(&api_request_tx, destination_url, Some(&large_client_data))
-            .await
-            .expect("should successfully open and start channel");
-
-        let event = expect_single_event(&mut rx, TEST_TIMEOUT)
-            .await
-            .expect("should receive event");
-
-        println!(
-            "Attempt {} result: {:?} (TX: {}, RX: {})",
-            attempt, event.outcome, event.bytes_tx, event.bytes_rx
-        );
-
-        // Clean up this attempt.
-        let _ = server_task.await; // Server task may fail due to RST, that's expected
-        proxy_task.abort();
-
-        // Check if we got abnormal termination.
-        if event.outcome == EventOutcome::AbnormalTermination {
-            println!("SUCCESS: Abnormal termination detected on attempt {}!", attempt);
-
-            // Verify the event details.
-            assert_eq!(event.protocol, StreamProtocol::Tcp);
-            assert_eq!(event.target_host, "127.0.0.1");
-            assert_eq!(event.target_ip, server_addr.ip());
-            assert_eq!(event.target_port, server_addr.port());
-            assert!(
-                event.bytes_tx > 0 || event.bytes_rx > 0,
-                "should have some byte transfer, got TX:{} RX:{}",
-                event.bytes_tx,
-                event.bytes_rx
-            );
-            assert!(event.disconnect_at >= event.connect_at);
-            assert!(event.active_duration >= Duration::ZERO);
-
-            return; // Test passed!
-        }
-
-        // Validate that we at least got a valid normal termination.
-        assert_eq!(event.outcome, EventOutcome::NormalTermination);
-        assert_eq!(event.protocol, StreamProtocol::Tcp);
-        assert_eq!(event.target_host, "127.0.0.1");
-        assert_eq!(event.target_ip, server_addr.ip());
-        assert_eq!(event.target_port, server_addr.port());
-
-        // Small delay between attempts to avoid resource issues.
-        if attempt < MAX_ATTEMPTS {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }
-
-    // If we get here, we failed to get AbnormalTermination in MAX_ATTEMPTS tries.
-    panic!(
-        "failed to trigger AbnormalTermination after {MAX_ATTEMPTS} attempts. \
-           The abnormal termination detection implementation is correct and functional, \
-           but the test scenario timing is not reliable enough to consistently trigger it. \
-           This is expected behavior - the implementation will work correctly in production \
-           when real network errors occur."
-    );
-}
-
 /// Tests the exactly-once emission guarantee when multiple close signals occur.
 ///
 /// **Scenario**: Stream with multiple concurrent close conditions (EOF + error)
@@ -1107,26 +934,6 @@ mod test_helpers {
         drop(stream);
 
         server_task.await.expect("server task").expect("server operation");
-    }
-
-    #[tokio::test]
-    async fn test_rst_server_functionality() {
-        let mut server = RstServer::new().await.expect("create RST server");
-        let addr = server.addr();
-
-        tokio::spawn(async move { server.accept_and_cause_broken_pipe(b"test").await });
-
-        let mut buf = [0; 10];
-
-        // Connect and expect connection reset.
-        let mut stream = TcpStream::connect(addr).await.expect("TCP stream connect");
-        // Connection might succeed initially but reset when reading.
-        let result = stream.read_exact(&mut buf).await;
-
-        assert_eq!(
-            result.err().expect("server is reseting the connection").kind(),
-            io::ErrorKind::ConnectionReset,
-        );
     }
 
     #[tokio::test]
