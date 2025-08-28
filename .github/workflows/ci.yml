@@ -762,6 +762,22 @@ jobs:
           name: devolutions-pedm-desktop
           path: devolutions-pedm-desktop
 
+      - name: Download tun2socks
+        id: tun2socks
+        shell: pwsh
+        if: matrix.os == 'windows'
+        run: |
+          $Arch = @{'x86_64'='x64';'arm64'='arm64'}['${{ matrix.arch }}']
+          $Destination = Join-Path $PWD "tun2socks"
+          ./ci/download-tun2socks.ps1 -Architecture $Arch -Destination $Destination
+          $Tun2SocksExecutablePath = Join-Path $Destination "tun2socks.exe"
+          $WintunLibraryPath = Join-Path $Destination "wintun.dll"
+          echo "tun2socks-executable-path=$Tun2SocksExecutablePath" >> $Env:GITHUB_OUTPUT
+          echo "wintun-library-path=$WintunLibraryPath" >> $Env:GITHUB_OUTPUT
+          @($Tun2SocksExecutablePath, $WintunLibraryPath) | % {
+            if (-Not (Test-Path $_)) { throw "$_ not found" }
+          }
+
       - name: Setup LLVM
         uses: Devolutions/actions-public/setup-llvm@v1
         if: runner.os == 'Linux'
@@ -835,6 +851,8 @@ jobs:
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
+            $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
+            $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
@@ -864,6 +882,8 @@ jobs:
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
+            $Env:DAGENT_TUN2SOCKS_EXE = "${{ steps.tun2socks.outputs.tun2socks-executable-path }}"
+            $Env:DAGENT_WINTUN_DLL = "${{ steps.tun2socks.outputs.wintun-library-path }}"
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
