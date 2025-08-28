@@ -48,7 +48,22 @@ pub async fn handle(
 
     crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, Arc::clone(&notify_kill), None).await?;
 
-    let proxy_fut = JmuxProxy::new(reader, writer).with_config(config).run();
+    let proxy_fut = JmuxProxy::new(reader, writer)
+        .with_config(config)
+        .with_outgoing_stream_event_callback(|event| {
+            debug!(
+                outcome = ?event.outcome,
+                protocol = ?event.protocol,
+                %event.target_host,
+                %event.target_ip,
+                %event.target_port,
+                bytes_tx = event.bytes_tx,
+                bytes_rx = event.bytes_rx,
+                duration_ms = event.active_duration.as_millis(),
+                "outgoing stream audit event"
+            );
+        })
+        .run();
     let proxy_handle = ChildTask::spawn(proxy_fut);
     let join_fut = proxy_handle.join();
     tokio::pin!(join_fut);

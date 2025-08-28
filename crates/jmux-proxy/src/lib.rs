@@ -7,12 +7,15 @@ extern crate tracing;
 
 mod codec;
 mod config;
+mod event;
 mod id_allocator;
 
 pub use self::config::{FilteringRule, JmuxConfig};
+pub use self::event::{EventOutcome, StreamEvent, StreamProtocol};
 pub use jmux_proto::DestinationUrl;
 
 use self::codec::JmuxCodec;
+use self::event::StreamCallback;
 use self::id_allocator::IdAllocator;
 use anyhow::Context as _;
 use bytes::Bytes;
@@ -21,7 +24,8 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -73,6 +77,7 @@ pub struct JmuxProxy {
     api_request_rx: Option<ApiRequestReceiver>,
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
+    stream_callback: Option<StreamCallback>,
 }
 
 impl JmuxProxy {
@@ -86,6 +91,7 @@ impl JmuxProxy {
             api_request_rx: None,
             jmux_reader,
             jmux_writer,
+            stream_callback: None,
         }
     }
 
@@ -101,6 +107,66 @@ impl JmuxProxy {
         self
     }
 
+    /// Configures an outgoing-stream callback for lifecycle event monitoring.
+    ///
+    /// The provided callback will be invoked exactly once per outgoing stream at the end of its
+    /// lifecycle, providing comprehensive audit information including connection metadata,
+    /// byte counts, timing, and termination classification.
+    ///
+    /// # Event Emission
+    ///
+    /// Events are emitted for:
+    /// - **ConnectFailure**: DNS resolves but TCP connection fails (port refused, timeout, etc.)
+    /// - **NormalTermination**: Streams that complete successfully with graceful shutdown  
+    /// - **AbnormalTermination**: Streams that terminate due to network errors or resets
+    ///
+    /// Events are **NOT** emitted for:
+    /// - DNS resolution failures (no concrete IP address available)
+    /// - Internal JMUX protocol errors before stream establishment
+    ///
+    /// For hostnames with multiple IP addresses, connection attempts follow a Happy Eyeballs
+    /// approach, and ConnectFailure events report the last failed address.
+    ///
+    /// # Callback Contract
+    ///
+    /// - **Exactly once**: Each stream generates precisely one event, protected by atomic guards
+    /// - **At stream end**: Events are emitted during cleanup, not during operation
+    /// - **Synchronous**: The callback is called synchronously from JMUX task contexts
+    /// - **Thread safe**: Must be `Send + Sync + 'static` for multi-threaded access
+    ///
+    /// # Async Handling
+    ///
+    /// The callback itself is synchronous, but consumers can handle async work by spawning
+    /// tasks or using message passing patterns:
+    ///
+    /// ```rust,ignore
+    /// proxy.with_stream_event_callback(|event| {
+    ///     // Option 1: Spawn async work
+    ///     tokio::spawn(async move {
+    ///         database.log_stream_event(event).await;
+    ///     });
+    ///     
+    ///     // Option 2: Send to async processor
+    ///     audit_channel.try_send(event).ok();
+    ///     
+    ///     // Option 3: Synchronous logging
+    ///     log::info!("Stream completed: {} bytes", event.bytes_tx + event.bytes_rx);
+    /// });
+    /// ```
+    ///
+    /// # Performance Considerations
+    ///
+    /// Keep callback implementations lightweight to avoid blocking the JMUX event loop.
+    /// Heavy processing should be offloaded to background tasks or queues.
+    #[must_use]
+    pub fn with_outgoing_stream_event_callback<C>(mut self, callback: C) -> Self
+    where
+        C: Fn(StreamEvent) + Send + Sync + 'static,
+    {
+        self.stream_callback = Some(Arc::new(callback));
+        self
+    }
+
     pub async fn run(self) -> anyhow::Result<()> {
         let span = Span::current();
         run_proxy_impl(self, span.clone()).instrument(span).await
@@ -113,6 +179,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         api_request_rx,
         jmux_reader,
         jmux_writer,
+        stream_callback,
     } = proxy;
 
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
@@ -132,6 +199,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         jmux_stream,
         msg_to_send_tx,
         api_request_rx,
+        stream_callback,
         parent_span: span,
     }
     .spawn();
@@ -174,6 +242,20 @@ struct JmuxChannelCtx {
     maximum_packet_size: u16,
 
     span: Span,
+
+    // Stream audit metadata
+    target_host: String,
+    /// Target server resolved address IP
+    target_ip: Option<std::net::IpAddr>,
+    /// Target server port
+    target_port: u16,
+    connect_at: SystemTime,
+    /// Number of bytes sent to the target server.
+    bytes_tx: Arc<AtomicU64>,
+    /// Number of bytes received from the target server.
+    bytes_rx: Arc<AtomicU64>,
+    /// Whether the callback was called and the event emitted.
+    audit_emitted: Arc<AtomicBool>,
 }
 
 struct JmuxCtx {
@@ -211,8 +293,40 @@ impl JmuxCtx {
         self.channels.get_mut(&id)
     }
 
-    fn unregister(&mut self, id: LocalChannelId) {
-        self.channels.remove(&id);
+    fn unregister(&mut self, id: LocalChannelId, stream_callback: &Option<StreamCallback>, is_abnormal_error: bool) {
+        if let Some(channel) = self.channels.remove(&id) {
+            // Emit audit event if we have a callback and haven't already emitted.
+            // For now, we only emit an event when the IP address is known = on the "server side".
+            if let Some(callback) = stream_callback
+                && let Some(target_ip) = channel.target_ip
+                && !channel.audit_emitted.swap(true, Ordering::SeqCst)
+            {
+                let disconnect_at = SystemTime::now();
+                let active_duration = disconnect_at.duration_since(channel.connect_at).unwrap_or_default();
+
+                let outcome = if is_abnormal_error {
+                    EventOutcome::AbnormalTermination
+                } else {
+                    EventOutcome::NormalTermination
+                };
+
+                let event = StreamEvent {
+                    outcome,
+                    protocol: StreamProtocol::Tcp,
+                    target_host: channel.target_host,
+                    target_ip,
+                    target_port: channel.target_port,
+                    connect_at: channel.connect_at,
+                    disconnect_at,
+                    active_duration,
+                    bytes_tx: channel.bytes_tx.load(Ordering::SeqCst),
+                    bytes_rx: channel.bytes_rx.load(Ordering::SeqCst),
+                };
+
+                callback(event);
+            }
+        }
+
         self.id_allocator.free(id);
     }
 }
@@ -227,6 +341,7 @@ type InternalMessageSender = mpsc::Sender<InternalMessage>;
 enum InternalMessage {
     Eof { id: LocalChannelId },
     StreamResolved { channel: JmuxChannelCtx, stream: TcpStream },
+    AbnormalTermination { id: LocalChannelId },
 }
 
 // === internal tasks === //
@@ -292,6 +407,7 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     jmux_stream: FramedRead<T, JmuxCodec>,
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
+    stream_callback: Option<StreamCallback>,
     parent_span: Span,
 }
 
@@ -312,6 +428,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         mut jmux_stream,
         msg_to_send_tx,
         mut api_request_rx,
+        stream_callback,
         parent_span,
     } = task;
 
@@ -371,6 +488,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
+                            bytes_tx: Arc::clone(&channel.bytes_rx), // Invert rx and tx on "client side".
+                            internal_msg_tx: internal_msg_tx.clone(),
+                            local_id: channel.local_id,
                         }
                         .spawn(channel.span.clone())
                         .detach();
@@ -384,6 +504,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size: channel.maximum_packet_size,
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
+                            bytes_rx: Arc::clone(&channel.bytes_tx), // Invert rx and tx on "client side".
                         }
                         .spawn(channel.span.clone())
                         .detach();
@@ -414,16 +535,32 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                     .context("couldn’t send CLOSE message")?;
                             },
                             JmuxChannelState::Closed => {
-                                jmux_ctx.unregister(local_id);
+                                jmux_ctx.unregister(local_id, &stream_callback, false); // Normal termination via EOF
                                 msg_to_send_tx
                                     .send(Message::close(distant_id))
                                     .await
-                                    .context("couldn’t send CLOSE message")?;
+                                    .context("couldn't send CLOSE message")?;
                                 channel_span.in_scope(|| {
                                     debug!("Channel closed");
                                 });
                             },
                         }
+                    }
+                    InternalMessage::AbnormalTermination { id } => {
+                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("couldn't find channel with id {id}"))?;
+                        let channel_span = channel.span.clone();
+                        let local_id = channel.local_id;
+                        let distant_id = channel.distant_id;
+
+                        // Signal abnormal termination and close the channel.
+                        jmux_ctx.unregister(local_id, &stream_callback, true); // Abnormal termination
+                        msg_to_send_tx
+                            .send(Message::close(distant_id))
+                            .await
+                            .context("couldn't send CLOSE message for abnormal termination")?;
+                        channel_span.in_scope(|| {
+                            debug!("Channel closed due to abnormal termination");
+                        });
                     }
                     InternalMessage::StreamResolved {
                         channel, stream
@@ -435,6 +572,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let window_size_updated = Arc::clone(&channel.window_size_updated);
                         let window_size = Arc::clone(&channel.window_size);
                         let channel_span = channel.span.clone();
+                        let bytes_tx = Arc::clone(&channel.bytes_tx);
+                        let bytes_rx = Arc::clone(&channel.bytes_rx);
 
                         let (data_tx, data_rx) = mpsc::channel::<Bytes>(CHANNEL_DATA_MPSC_CHANNEL_SIZE);
 
@@ -458,6 +597,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
+                            bytes_tx,
+                            internal_msg_tx: internal_msg_tx.clone(),
+                            local_id,
                         }
                         .spawn(channel_span.clone())
                         .detach();
@@ -471,6 +613,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size,
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
+                            bytes_rx,
                         }
                         .spawn(channel_span)
                         .detach();
@@ -564,6 +707,15 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size: msg.maximum_packet_size,
 
                             span: channel_span,
+
+                            // Stream audit metadata.
+                            target_host: msg.destination_url.host().to_owned(),
+                            target_ip: None, // Will be set when connection succeeds.
+                            target_port: msg.destination_url.port(),
+                            connect_at: SystemTime::now(),
+                            bytes_tx: Arc::new(AtomicU64::new(0)),
+                            bytes_rx: Arc::new(AtomicU64::new(0)),
+                            audit_emitted: Arc::new(AtomicBool::new(false)),
                         };
 
                         StreamResolverTask {
@@ -571,6 +723,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             destination_url: msg.destination_url,
                             internal_msg_tx: internal_msg_tx.clone(),
                             msg_to_send_tx: msg_to_send_tx.clone(),
+                            stream_callback: stream_callback.clone(),
                         }
                         .spawn()
                         .detach();
@@ -608,6 +761,15 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size: msg.maximum_packet_size,
 
                             span: channel_span.exit(),
+
+                            // Stream audit metadata (for external API channels)
+                            target_host: destination_url.host().to_owned(),
+                            target_ip: None, // Not available for external API.
+                            target_port: destination_url.port(),
+                            connect_at: SystemTime::now(),
+                            bytes_tx: Arc::new(AtomicU64::new(0)),
+                            bytes_rx: Arc::new(AtomicU64::new(0)),
+                            audit_emitted: Arc::new(AtomicBool::new(false)),
                         })?;
                     }
                     Message::WindowAdjust(msg) => {
@@ -667,7 +829,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             debug!("Distant peer EOFed");
                         });
 
-                        // Remove associated data sender
+                        // Remove associated data sender.
                         data_senders.remove(&id);
 
                         match channel.local_state {
@@ -719,7 +881,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
 
                         if channel.local_state == JmuxChannelState::Closed {
-                            jmux_ctx.unregister(local_id);
+                            jmux_ctx.unregister(local_id, &stream_callback, false); // Normal close
                             trace!("Channel closed");
                         }
                     }
@@ -762,14 +924,33 @@ struct DataReaderTask {
     maximum_packet_size: u16,
     msg_to_send_tx: MessageSender,
     internal_msg_tx: InternalMessageSender,
+    /// Tracks bytes read from the stream.
+    bytes_rx: Arc<AtomicU64>,
 }
 
 impl DataReaderTask {
     fn spawn(self, span: Span) -> ChildTask<()> {
+        let internal_msg_tx = self.internal_msg_tx.clone();
+        let local_id = self.local_id;
         let handle = tokio::spawn(
             async move {
                 if let Err(error) = self.run().await {
                     debug!(error = format!("{error:#}"), "Reader task failed");
+
+                    // Check if this is a "real error" that should trigger abnormal termination.
+                    // Need to check the source error since anyhow::Error wraps the original error.
+                    let is_abnormal = if let Some(source_error) = error.source() {
+                        is_really_an_error(source_error)
+                    } else {
+                        // If no source error, treat as abnormal.
+                        true
+                    };
+
+                    if is_abnormal {
+                        let _ = internal_msg_tx
+                            .send(InternalMessage::AbnormalTermination { id: local_id })
+                            .await;
+                    }
                 }
             }
             .instrument(span),
@@ -789,6 +970,7 @@ impl DataReaderTask {
             maximum_packet_size,
             msg_to_send_tx,
             internal_msg_tx,
+            bytes_rx,
         } = self;
 
         let codec = tokio_util::codec::BytesCodec::new();
@@ -827,20 +1009,22 @@ impl DataReaderTask {
 
                         if window_size_now > 0 {
                             let to_send_now = chunk.split_to(window_size_now);
+                            bytes_rx.fetch_add(to_send_now.len() as u64, Ordering::SeqCst);
                             window_size.fetch_sub(to_send_now.len(), Ordering::SeqCst);
                             msg_to_send_tx
                                 .send(Message::data(distant_id, to_send_now.freeze()))
                                 .await
-                                .context("couldn’t send DATA message")?;
+                                .context("couldn't send DATA message")?;
                         }
 
                         window_size_updated.notified().await;
                     } else {
+                        bytes_rx.fetch_add(chunk.len() as u64, Ordering::SeqCst);
                         window_size.fetch_sub(chunk.len(), Ordering::SeqCst);
                         msg_to_send_tx
                             .send(Message::data(distant_id, chunk.freeze()))
                             .await
-                            .context("couldn’t send DATA message")?;
+                            .context("couldn't send DATA message")?;
                         break;
                     }
                 }
@@ -863,6 +1047,10 @@ impl DataReaderTask {
 struct DataWriterTask {
     writer: OwnedWriteHalf,
     data_rx: DataReceiver,
+    /// Tracks bytes written into the stream.
+    bytes_tx: Arc<AtomicU64>,
+    internal_msg_tx: InternalMessageSender,
+    local_id: LocalChannelId,
 }
 
 impl DataWriterTask {
@@ -870,6 +1058,9 @@ impl DataWriterTask {
         let Self {
             mut writer,
             mut data_rx,
+            bytes_tx,
+            internal_msg_tx,
+            local_id,
         } = self;
 
         let handle = tokio::spawn(
@@ -877,8 +1068,18 @@ impl DataWriterTask {
                 while let Some(data) = data_rx.recv().await {
                     if let Err(error) = writer.write_all(&data).await {
                         warn!(%error, "Writer task failed");
+
+                        // Check if this is a "real error" that should trigger abnormal termination.
+                        if is_really_an_error(&error) {
+                            let _ = internal_msg_tx
+                                .send(InternalMessage::AbnormalTermination { id: local_id })
+                                .await;
+                        }
+
                         break;
                     }
+
+                    bytes_tx.fetch_add(data.len() as u64, Ordering::SeqCst);
                 }
             }
             .instrument(span),
@@ -895,6 +1096,7 @@ struct StreamResolverTask {
     destination_url: DestinationUrl,
     internal_msg_tx: InternalMessageSender,
     msg_to_send_tx: MessageSender,
+    stream_callback: Option<StreamCallback>,
 }
 
 impl StreamResolverTask {
@@ -915,10 +1117,11 @@ impl StreamResolverTask {
 
     async fn run(self) -> anyhow::Result<()> {
         let Self {
-            channel,
+            mut channel,
             destination_url,
             internal_msg_tx,
             msg_to_send_tx,
+            stream_callback,
         } = self;
 
         let scheme = destination_url.scheme();
@@ -926,15 +1129,68 @@ impl StreamResolverTask {
         let port = destination_url.port();
 
         match scheme {
-            "tcp" => match TcpStream::connect((host, port)).await {
-                Ok(stream) => {
-                    internal_msg_tx
-                        .send(InternalMessage::StreamResolved { channel, stream })
-                        .await
-                        .context("could't send back resolved stream through internal mpsc channel")?;
+            "tcp" => {
+                // Perform DNS resolution first to get concrete IP addresses.
+                let socket_addrs = match tokio::net::lookup_host((host, port)).await {
+                    Ok(addrs) => addrs,
+                    Err(error) => {
+                        debug!(?error, "DNS resolution failed");
+                        // No event emission for DNS failures - cannot determine target IP.
+                        msg_to_send_tx
+                            .send(Message::open_failure(
+                                channel.distant_id,
+                                ReasonCode::from(error.kind()),
+                                error.to_string(),
+                            ))
+                            .await
+                            .context("couldn't send OPEN FAILURE message through mpsc channel")?;
+                        anyhow::bail!("couldn't resolve {host}:{port}: {error}");
+                    }
+                };
+
+                // Try connecting to each resolved address (Happy Eyeballs style).
+                let mut last_error = None;
+
+                for socket_addr in socket_addrs {
+                    match TcpStream::connect(socket_addr).await {
+                        Ok(stream) => {
+                            // Update channel with resolved target IP.
+                            channel.target_ip = Some(socket_addr.ip());
+
+                            internal_msg_tx
+                                .send(InternalMessage::StreamResolved { channel, stream })
+                                .await
+                                .context("couldn't send back resolved stream through internal mpsc channel")?;
+
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            debug!(?error, ?socket_addr, "TcpStream::connect failed");
+                            last_error = Some((socket_addr, error));
+                        }
+                    }
                 }
-                Err(error) => {
-                    debug!(?error, "TcpStream::connect failed");
+
+                // All connection attempts failed - emit ConnectFailure for the last attempted address.
+                if let Some((failed_addr, error)) = last_error {
+                    // Emit ConnectFailure event - we always have a concrete IP at this point.
+                    if let Some(callback) = &stream_callback {
+                        let connect_time = channel.connect_at;
+                        let event = StreamEvent {
+                            outcome: EventOutcome::ConnectFailure,
+                            protocol: StreamProtocol::Tcp,
+                            target_host: channel.target_host.clone(),
+                            target_ip: failed_addr.ip(),
+                            target_port: failed_addr.port(),
+                            connect_at: connect_time,
+                            disconnect_at: connect_time,
+                            active_duration: std::time::Duration::ZERO,
+                            bytes_tx: 0,
+                            bytes_rx: 0,
+                        };
+                        callback(event);
+                    }
+
                     msg_to_send_tx
                         .send(Message::open_failure(
                             channel.distant_id,
@@ -942,14 +1198,15 @@ impl StreamResolverTask {
                             error.to_string(),
                         ))
                         .await
-                        .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
-                    anyhow::bail!("couldn’t open TCP stream to {}:{}: {}", host, port, error);
-                }
-            },
-            _ => anyhow::bail!("unsupported scheme: {}", scheme),
-        }
+                        .context("couldn't send OPEN FAILURE message through mpsc channel")?;
 
-        Ok(())
+                    anyhow::bail!("couldn't open TCP stream to {host}:{port}: {error}");
+                } else {
+                    anyhow::bail!("no addresses resolved for {host}:{port}");
+                }
+            }
+            _ => anyhow::bail!("unsupported scheme: {scheme}"),
+        }
     }
 }
 

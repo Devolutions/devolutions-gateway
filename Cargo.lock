@@ -2975,6 +2975,7 @@ dependencies = [
  "bytes 1.10.1",
  "futures-util",
  "jmux-proto",
+ "socket2",
  "tokio 1.46.1",
  "tokio-util",
  "tracing",
