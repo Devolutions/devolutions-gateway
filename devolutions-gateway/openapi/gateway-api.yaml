@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2025.2.2
+  version: 2025.2.3
 paths:
   /jet/config:
     patch:
@@ -366,6 +366,57 @@ paths:
           description: Unexpected server error
       security:
       - netscan_token: []
+  /jet/net/monitor//config:
+    post:
+      tags:
+      - NetworkMonitoring
+      summary: Replaces the existing monitoring config with the one provided in the body.
+      description: |-
+        This request will immediately start any new monitors, and will stop
+        currently active monitors that are no longer in the config.
+
+        The configuration is not persisted across restarts.
+      operationId: SetMonitoringConfig
+      requestBody:
+        description: JSON object containing a list of monitors
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MonitorsConfig'
+        required: true
+      responses:
+        '200':
+          description: New configuration was accepted
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error while starting monitors
+  /jet/net/monitor/log/drain:
+    post:
+      tags:
+      - NetworkMonitoring
+      summary: Monitors store their results in a temporary log, which is returned here.
+      description: Once the log is downloaded, gateway purges it from memory.
+      operationId: DrainMonitoringLog
+      responses:
+        '200':
+          description: Log was flushed and returned in the response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoringLogResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
   /jet/preflight:
     post:
       tags:
@@ -818,6 +869,98 @@ components:
         internal_url:
           type: string
           description: URL to use on local network
+    MonitorDefinition:
+      type: object
+      required:
+      - id
+      - probe
+      - address
+      - interval
+      - timeout
+      properties:
+        address:
+          type: string
+        id:
+          type: string
+        interval:
+          type: integer
+          format: int64
+          minimum: 0
+        port:
+          type: integer
+          format: int32
+          nullable: true
+        probe:
+          $ref: '#/components/schemas/MonitoringProbeType'
+        timeout:
+          type: integer
+          format: int64
+          minimum: 0
+    MonitorDefinitionProbeTypeError:
+      type: object
+      required:
+      - id
+      - probe
+      properties:
+        id:
+          type: string
+          description: The ID of the monitor definition in the client-provided config
+        probe:
+          type: string
+          description: The monitor type that was not supported
+    MonitorResult:
+      type: object
+      required:
+      - monitor_id
+      - request_start_time
+      - response_success
+      - response_time
+      properties:
+        monitor_id:
+          type: string
+        request_start_time:
+          type: string
+          format: date-time
+        response_messages:
+          type: string
+          nullable: true
+        response_success:
+          type: boolean
+        response_time:
+          type: number
+          format: double
+    MonitoringLogResponse:
+      type: object
+      required:
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorResult'
+    MonitoringProbeType:
+      oneOf:
+      - type: string
+        enum:
+        - ping
+      - type: string
+        enum:
+        - tcpOpen
+      - type: object
+        required:
+        - unknown
+        properties:
+          unknown:
+            type: string
+    MonitorsConfig:
+      type: object
+      required:
+      - monitors
+      properties:
+        monitors:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorDefinition'
     PreflightAlertStatus:
       type: string
       enum:

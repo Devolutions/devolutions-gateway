@@ -270,6 +270,36 @@ And here is how the response may look like:
 ]
 ```
 
+## Network monitoring API
+
+Basic monitors can be set up to scan servers on an interval. Currently only ping is supported. Managing the 
+configuration and storing the logs is expected to be done by an external server.
+
+Set up a ping monitor for example.com which fires every 10 seconds and times out after 5 seconds.
+
+```shell
+curl -v http://127.0.0.1:7171/jet/net/monitor/config --json '{"monitors":[{"id":"monitor1","probe":"ping","address":"example.com","interval":10,"timeout":5}]}' -H "Authorization: Bearer $dgwkey"
+```
+
+The monitor will start immediately. Calling this API again will overwrite the configuration, stopping any 
+monitors no longer present. A body is returned which may contain a list of monitors that could not be started 
+due their type (set in the field `probe`) being unsupported.
+
+Retrieve the logs:
+
+```shell
+curl -v http://127.0.0.1:7171/jet/net/monitor/log/drain -X POST -H "Authorization: Bearer $dgwkey"
+```
+
+The response will look similar to this:
+
+```json
+{"entries":[{"monitor_id":"monitor1","request_start_time":"2025-08-22T17:07:34.3370521Z","response_success":true,"response_time":0.0585181}]}
+```
+
+Each log entry is only returned once. After you make this request, the existing log is deleted from memory.
+
+
 ## Proxy-based credentials injection for RDP
 
 ### How it works

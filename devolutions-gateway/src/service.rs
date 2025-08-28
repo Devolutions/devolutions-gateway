@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use devolutions_gateway::DgwState;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::credential::CredentialStoreHandle;
 use devolutions_gateway::listener::GatewayListener;
@@ -11,6 +10,7 @@ use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
+use devolutions_gateway::{DgwState, config};
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;
@@ -242,6 +242,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .await
         .context("failed to initialize job queue context")?;
     let credential_store = CredentialStoreHandle::new();
+    let monitoring_state = Arc::new(network_monitor::State::new(
+        config::get_data_dir().join("monitors_cache.json"),
+    ));
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -253,6 +256,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         recordings: recording_manager_handle.clone(),
         job_queue_handle: job_queue_ctx.job_queue_handle.clone(),
         credential_store: credential_store.clone(),
+        monitoring_state: monitoring_state,
     };
 
     conf.listeners
