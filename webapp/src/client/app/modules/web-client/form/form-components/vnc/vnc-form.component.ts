@@ -7,6 +7,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
 import { Observable, of } from 'rxjs';
 import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
+import { UAParser } from 'ua-parser-js';
 
 interface FormInputVisibility {
   showUsernameInput?: boolean;
@@ -30,6 +31,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
   };
 
   showMoreSettings = false;
+  showAutoClipboardCheckbox = false;
 
   constructor(
     private formService: WebFormService,
@@ -88,6 +90,8 @@ export class VncFormComponent extends BaseComponent implements OnInit {
         },
         error: (error) => console.error('Error fetching dropdown options', error),
       });
+
+    this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink';
   }
 
   private subscribeToAuthModeChanges(): void {

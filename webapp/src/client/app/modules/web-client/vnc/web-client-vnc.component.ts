@@ -78,6 +78,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
 
+  saveRemoteClipboardButtonEnabled = false;
+
   leftToolbarButtons = [
     {
       label: 'Start',
@@ -146,6 +148,37 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
+  clipboardActionButtons: {
+    label: string;
+    tooltip: string;
+    icon: string;
+    action: () => Promise<void>;
+    enabled: () => boolean;
+  }[] = [];
+
+  private setupClipboardHandling(): void {
+    if (this.formData.autoClipboard === true) {
+      return;
+    }
+
+    this.clipboardActionButtons.push(
+      {
+        label: 'Save Clipboard',
+        tooltip: 'Copy received clipboard content to your local clipboard.',
+        icon: 'dvl-icon dvl-icon-save',
+        action: () => this.saveRemoteClipboard(),
+        enabled: () => this.saveRemoteClipboardButtonEnabled,
+      },
+      {
+        label: 'Send Clipboard',
+        tooltip: 'Send your local clipboard content to the remote server.',
+        icon: 'dvl-icon dvl-icon-send',
+        action: () => this.sendClipboard(),
+        enabled: () => true,
+      },
+    );
+  }
+
   protected removeElement: Subject<unknown> = new Subject();
   private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
@@ -172,6 +205,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
+    this.setupClipboardHandling();
   }
 
   ngAfterViewInit(): void {
@@ -217,6 +251,25 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {
     this.remoteClient.setKeyboardUnicodeMode(useUnicode);
+  }
+
+  async saveRemoteClipboard(): Promise<void> {
+    const result = await this.remoteClient.saveRemoteClipboardData();
+    // We handle only the successful result. On failure, an error event is raised,
+    // which we handle separately.
+    if (result) {
+      super.webClientSuccess('Clipboard content has been copied to your clipboard!');
+      this.saveRemoteClipboardButtonEnabled = false;
+    }
+  }
+
+  async sendClipboard(): Promise<void> {
+    const result = await this.remoteClient.sendClipboardData();
+    // We handle only the successful result. On failure, an error event is raised,
+    // which we handle separately.
+    if (result) {
+      super.webClientSuccess('Clipboard content has been sent to the remote server!');
+    }
   }
 
   toggleCursorKind(): void {
@@ -346,6 +399,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   private readyRemoteClientEventListener(event: Event): void {
     const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
+
+    if (this.formData.autoClipboard !== true) {
+      this.remoteClient.setEnableAutoClipboard(false);
+    }
 
     this.initSessionEventHandler();
     this.startConnectionProcess();
@@ -481,6 +538,9 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
           break;
         case SessionEventType.ERROR:
           this.handleSessionError(event);
+          break;
+        case SessionEventType.CLIPBOARD_REMOTE_UPDATE:
+          this.saveRemoteClipboardButtonEnabled = true;
           break;
       }
     };

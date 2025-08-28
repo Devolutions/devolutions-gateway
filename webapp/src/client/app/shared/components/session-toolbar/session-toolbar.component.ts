@@ -51,6 +51,14 @@ export class SessionToolbarComponent {
     step: number;
   }[] = [];
 
+  @Input() clipboardActionButtons: {
+    label: string;
+    tooltip: string;
+    icon: string;
+    action: () => Promise<void>;
+    enabled: () => boolean;
+  }[] = [];
+
   isFullScreenMode = false;
   showToolbarDiv = true;
   loading = true;
