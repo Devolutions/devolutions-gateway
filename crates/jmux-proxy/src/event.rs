@@ -93,7 +93,7 @@ pub enum EventOutcome {
 ///
 /// - `target_host`: Original host string from connection request (before DNS)
 /// - `target_ip`: Concrete IP address (post-resolution or peer address)
-/// - `port`: Target port number
+/// - `target_port`: Target port number
 ///
 /// DNS resolution failures result in no event emission since `target_ip`
 /// cannot be determined. For multi-address hostnames (Happy Eyeballs),
