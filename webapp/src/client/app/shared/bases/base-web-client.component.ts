@@ -39,6 +39,10 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     this.analyticHandle = this.analyticService.sendOpenEvent(this.getProtocol());
   }
 
+  protected webClientSuccess(message: string): void {
+    this.gatewayAlertMessageService.addSuccess(message);
+  }
+
   protected webClientError(errorMessage: string): void {
     this.gatewayAlertMessageService.addError(errorMessage);
     console.error(errorMessage);
