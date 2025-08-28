@@ -7,12 +7,11 @@ use std::time::{Duration, SystemTime};
 /// Protocol used for the stream connection.
 ///
 /// Represents the network protocol type for JMUX stream connections.
-/// Currently TCP is the primary supported protocol, with UDP planned for future support.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StreamProtocol {
     /// Transmission Control Protocol - reliable, ordered, connection-oriented
     Tcp,
-    /// User Datagram Protocol - unreliable, connectionless (future support)
+    /// User Datagram Protocol - unreliable, connectionless
     Udp,
 }
 
