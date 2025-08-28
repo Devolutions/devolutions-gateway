@@ -107,7 +107,7 @@ impl JmuxProxy {
         self
     }
 
-    /// Configures an outgoing stream callback for lifecycle event monitoring.
+    /// Configures an outgoing-stream callback for lifecycle event monitoring.
     ///
     /// The provided callback will be invoked exactly once per outgoing stream at the end of its
     /// lifecycle, providing comprehensive audit information including connection metadata,
