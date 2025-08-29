@@ -52,7 +52,8 @@ pub async fn set_config(new_config: MonitorsConfig, state: Arc<State>) -> Result
         let mut cancellation_tokens = state.cancellation_tokens.lock().expect("poisoned");
 
         for definition in added {
-            let (monitor_id, cancellation_token) = spawn_monitor(Arc::clone(&state), definition);
+            let monitor_id = definition.id.clone();
+            let cancellation_token = spawn_monitor(Arc::clone(&state), definition);
             cancellation_tokens.insert(monitor_id, cancellation_token);
         }
 
@@ -68,36 +69,38 @@ pub async fn set_config(new_config: MonitorsConfig, state: Arc<State>) -> Result
 
     return Ok(());
 
-    fn spawn_monitor(state: Arc<State>, definition: MonitorDefinition) -> (MonitorId, CancellationToken) {
+    fn spawn_monitor(state: Arc<State>, definition: MonitorDefinition) -> CancellationToken {
         let cancellation_token = CancellationToken::new();
-        let cancellation_monitor = cancellation_token.clone();
-        let definition_id = definition.id.clone();
 
-        let monitor_task = async move {
-            let mut interval = tokio::time::interval(definition.interval);
+        let monitor_task = {
+            let cancellation_token = cancellation_token.clone();
 
-            loop {
-                tokio::select! {
-                    // The first time, it ticks immediately.
-                    _ = interval.tick() => {}
+            async move {
+                let mut interval = tokio::time::interval(definition.interval);
 
-                    _ = cancellation_monitor.cancelled() => {
-                        break;
-                    }
-                };
+                loop {
+                    tokio::select! {
+                        // The first time, it ticks immediately.
+                        _ = interval.tick() => {}
 
-                let monitor_result = match &definition.probe {
-                    ProbeType::Ping => do_ping_monitor(&definition, Arc::clone(&state.scanner_runtime)).await,
-                    ProbeType::TcpOpen => do_tcpopen_monitor(&definition).await,
-                };
+                        _ = cancellation_token.cancelled() => {
+                            break;
+                        }
+                    };
 
-                state.log.write(monitor_result);
+                    let monitor_result = match &definition.probe {
+                        ProbeType::Ping => do_ping_monitor(&definition, Arc::clone(&state.scanner_runtime)).await,
+                        ProbeType::TcpOpen => do_tcpopen_monitor(&definition).await,
+                    };
+
+                    state.log.write(monitor_result);
+                }
             }
         };
 
         tokio::spawn(monitor_task);
 
-        (definition_id, cancellation_token)
+        cancellation_token
     }
 }
 
