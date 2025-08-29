@@ -64,7 +64,6 @@ backoff = "0.4"
 sysinfo = { version = "0.35", default-features = false, features = ["disk"] }
 dunce = "1.0"
 bitflags = "2.9"
-tempdir = "0.3"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
