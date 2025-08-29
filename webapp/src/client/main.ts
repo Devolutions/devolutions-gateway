@@ -1,8 +1,6 @@
 import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
-
-import { AppModule } from './app/app.module';
-
 import { UAParser } from 'ua-parser-js';
+import { AppModule } from './app/app.module';
 
 // The minimum required browser versions were determined by manual testing.
 const CHROME_MINIMUM_REQUIRED_VERSION = [102];
