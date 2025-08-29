@@ -74,9 +74,9 @@ pub async fn set_config(new_config: MonitorsConfig, state: Arc<State>) -> Result
         let definition_id = definition.id.clone();
 
         let monitor_task = async move {
-            loop {
-                let mut interval = tokio::time::interval(definition.interval);
+            let mut interval = tokio::time::interval(definition.interval);
 
+            loop {
                 tokio::select! {
                     // The first time, it ticks immediately.
                     _ = interval.tick() => {}
