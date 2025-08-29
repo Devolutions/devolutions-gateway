@@ -889,7 +889,6 @@ jobs:
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
-        if: matrix.arch != 'arm64'
         uses: actions/upload-artifact@v4
         with:
           name: devolutions-agent-${{ matrix.os }}-${{ matrix.arch }}
