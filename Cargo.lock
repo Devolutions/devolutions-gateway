@@ -3649,16 +3649,11 @@ name = "network-monitor"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "camino",
  "network-scanner",
  "network-scanner-net",
- "serde",
- "serde_json",
- "tempdir",
  "thiserror 1.0.69",
  "time",
  "tokio 1.46.1",
- "tokio-test",
  "tokio-util",
  "tracing",
 ]

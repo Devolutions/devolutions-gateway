@@ -1,155 +1,133 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::Future;
-use std::pin::Pin;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
-use std::{fs, io, mem};
-
-use anyhow::anyhow;
-use camino::Utf8PathBuf;
-use network_scanner_net::runtime::Socket2Runtime;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use time::UtcDateTime;
-use tokio::select;
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use std::time::{Duration, Instant};
 
 use network_scanner::ping;
+use thiserror::Error;
+use time::UtcDateTime;
+use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 mod log_queue;
 mod state;
 
-pub use crate::state::State;
+pub use crate::state::{ConfigCache, State};
+pub use network_scanner_net::runtime::Socket2Runtime;
 
 #[derive(Error, Debug)]
-#[error(transparent)]
 pub enum SetConfigError {
-    Io(#[from] io::Error),
-    Serde(#[from] serde_json::Error),
-    Other(#[from] anyhow::Error),
+    #[error("failed to store the new config in cache")]
+    CacheStore { source: anyhow::Error },
 }
 
-pub async fn set_config(config: MonitorsConfig, state: Arc<State>) -> Result<(), SetConfigError> {
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&state.cache_path)?;
+pub async fn set_config(new_config: MonitorsConfig, state: Arc<State>) -> Result<(), SetConfigError> {
+    // Ensure set_config is never run concurrently using a 1-permit semaphore.
+    let _guard = state
+        .set_config_permit
+        .acquire()
+        .await
+        .expect("as per invariant, semaphore is never closed");
 
-    let mut config_write = state.config.write().map_err(|_| anyhow!("config lock poisoned"))?;
+    // Update the config in the cache.
+    state
+        .config_cache
+        .store(&new_config)
+        .map_err(|source| SetConfigError::CacheStore { source })?;
 
-    serde_json::to_writer_pretty(&file, &config)?;
+    let new_config_set: HashSet<MonitorDefinition> = new_config.monitors.iter().cloned().collect();
 
-    let old_config = mem::replace(&mut *config_write, config);
+    // Update the config in the state.
+    let old_config = {
+        let mut config = state.config.write().expect("poisoned");
+        std::mem::replace(&mut *config, new_config)
+    };
 
-    let new_config_set: HashSet<MonitorDefinition> = config_write.monitors.clone().into_iter().collect();
     let old_config_set: HashSet<MonitorDefinition> = old_config.monitors.into_iter().collect();
-
-    drop(config_write);
 
     let added = new_config_set.difference(&old_config_set).cloned();
     let deleted = old_config_set.difference(&new_config_set);
 
-    let (new_cancellation_tokens, new_monitors): (
-        Vec<(String, CancellationToken)>,
-        Vec<Pin<Box<dyn Future<Output = ()> + Send>>>,
-    ) = added
-        .map(|definition| {
-            let cancellation_token = CancellationToken::new();
-            let cancellation_monitor = cancellation_token.clone();
+    // Spawn added monitors, and cancel deleted monitors.
+    {
+        let mut cancellation_tokens = state.cancellation_tokens.lock().expect("poisoned");
 
-            let state = Arc::clone(&state);
-            let definition_id = definition.id.clone();
+        for definition in added {
+            let (monitor_id, cancellation_token) = spawn_monitor(Arc::clone(&state), definition);
+            cancellation_tokens.insert(monitor_id, cancellation_token);
+        }
 
-            let monitor = async move {
-                loop {
-                    let start_time = UtcDateTime::now();
+        for definition in deleted {
+            match cancellation_tokens.get(&definition.id) {
+                Some(token) => token.cancel(),
+                None => warn!("cancellation token for monitor {} not found", definition.id),
+            }
 
-                    let monitor_result = match &definition.probe {
-                        ProbeType::Ping => {
-                            let scanner_runtime = match &*state.scanner_runtime {
-                                Ok(scanner_runtime) => Arc::clone(scanner_runtime),
-                                Err(error) => {
-                                    warn!(error = %error, monitor_id = definition.id, "scanning runtime failed to start, aborting monitor");
-                                    break;
-                                },
-                            };
-                            do_ping_monitor(&definition, scanner_runtime).await
-                        },
-                        ProbeType::TcpOpen => do_tcpopen_monitor(&definition).await,
-                    };
-
-                    state.log.write(monitor_result);
-
-                    let elapsed = UtcDateTime::now() - start_time;
-                    let next_run_in =
-                        (definition.interval as f64 - elapsed.as_seconds_f64()).clamp(1.0, f64::INFINITY);
-                    select! {
-                        _ = cancellation_monitor.cancelled() => { return }
-                        _ = tokio::time::sleep(Duration::from_secs_f64(next_run_in)) => { }
-                    };
-                }
-            };
-
-            (
-                (definition_id, cancellation_token),
-                Box::pin(monitor) as Pin<Box<dyn Future<Output = ()> + Send>>,
-            )
-        })
-        .unzip();
-
-    let mut cancellation_tokens_write = state
-        .cancellation_tokens
-        .lock()
-        .map_err(|_| anyhow!("cancellation token lock poisoned"))?;
-
-    for definition in deleted {
-        cancellation_tokens_write[&definition.id].cancel();
-        cancellation_tokens_write.remove(&definition.id);
+            cancellation_tokens.remove(&definition.id);
+        }
     }
 
-    for (monitor_id, cancellation_token) in new_cancellation_tokens {
-        cancellation_tokens_write.insert(monitor_id, cancellation_token);
-    }
+    return Ok(());
 
-    for monitoring_task in new_monitors {
-        tokio::spawn(monitoring_task);
-    }
+    fn spawn_monitor(state: Arc<State>, definition: MonitorDefinition) -> (MonitorId, CancellationToken) {
+        let cancellation_token = CancellationToken::new();
+        let cancellation_monitor = cancellation_token.clone();
+        let definition_id = definition.id.clone();
 
-    Ok(())
+        let monitor_task = async move {
+            loop {
+                let mut interval = tokio::time::interval(definition.interval);
+
+                tokio::select! {
+                    // The first time, it ticks immediately.
+                    _ = interval.tick() => {}
+
+                    _ = cancellation_monitor.cancelled() => {
+                        break;
+                    }
+                };
+
+                let monitor_result = match &definition.probe {
+                    ProbeType::Ping => do_ping_monitor(&definition, Arc::clone(&state.scanner_runtime)).await,
+                    ProbeType::TcpOpen => do_tcpopen_monitor(&definition).await,
+                };
+
+                state.log.write(monitor_result);
+            }
+        };
+
+        tokio::spawn(monitor_task);
+
+        (definition_id, cancellation_token)
+    }
 }
 
 async fn do_ping_monitor(definition: &MonitorDefinition, scanner_runtime: Arc<Socket2Runtime>) -> MonitorResult {
-    let start_time = UtcDateTime::now();
+    let request_start_time = UtcDateTime::now();
+    let start_instant = Instant::now();
 
-    let ping_result = async || -> anyhow::Result<time::Duration> {
-        ping::ping_addr(
-            scanner_runtime,
-            format!("{hostname}:0", hostname = definition.address),
-            Duration::from_secs(definition.timeout),
-        )
-        .await?;
-        // TODO: send more than 1 ping packet
-
-        Ok(UtcDateTime::now() - start_time)
-    }()
+    let ping_result = ping::ping_addr(
+        scanner_runtime,
+        format!("{hostname}:0", hostname = definition.address),
+        definition.timeout,
+    )
     .await;
 
+    // TODO: send more than 1 ping packet
+
     match ping_result {
-        Ok(time) => MonitorResult {
+        Ok(()) => MonitorResult {
             monitor_id: definition.id.clone(),
-            request_start_time: start_time,
+            request_start_time,
             response_success: true,
-            response_messages: None,
-            response_time: time.as_seconds_f64(),
+            response_message: None,
+            response_time: Some(start_instant.elapsed()),
         },
         Err(error) => MonitorResult {
             monitor_id: definition.id.clone(),
-            request_start_time: start_time,
+            request_start_time,
             response_success: false,
-            response_messages: Some(format!("{error:#}")),
-            response_time: f64::INFINITY,
+            response_message: Some(format!("{error:#}")),
+            response_time: None,
         },
     }
 }
@@ -159,8 +137,8 @@ async fn do_tcpopen_monitor(definition: &MonitorDefinition) -> MonitorResult {
         monitor_id: definition.id.clone(),
         request_start_time: UtcDateTime::now(),
         response_success: false,
-        response_messages: Some("not implemented".into()),
-        response_time: f64::INFINITY,
+        response_message: Some("not implemented".to_owned()),
+        response_time: None,
     }
 }
 
@@ -168,7 +146,7 @@ pub fn drain_log(state: Arc<State>) -> VecDeque<MonitorResult> {
     state.log.drain()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct MonitorsConfig {
     pub monitors: Vec<MonitorDefinition>,
 }
@@ -177,44 +155,52 @@ impl MonitorsConfig {
     fn empty() -> MonitorsConfig {
         MonitorsConfig { monitors: Vec::new() }
     }
-
-    #[doc(hidden)]
-    fn mock() -> MonitorsConfig {
-        MonitorsConfig {
-            monitors: vec![MonitorDefinition {
-                id: "a".to_owned(),
-                probe: ProbeType::Ping,
-                address: "c".to_owned(),
-                interval: 1,
-                timeout: 2,
-                port: Some(3),
-            }],
-        }
-    }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub enum ProbeType {
     Ping,
     TcpOpen,
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Serialize, Deserialize, Debug)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct MonitorDefinition {
-    pub id: String,
+    pub id: MonitorId,
     pub probe: ProbeType,
     pub address: String,
-    pub interval: u64,
-    pub timeout: u64,
-    pub port: Option<i16>,
+    pub interval: Duration,
+    pub timeout: Duration,
+    pub port: Option<u16>,
 }
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct MonitorResult {
-    pub monitor_id: String,
+    pub monitor_id: MonitorId,
     pub request_start_time: UtcDateTime,
     pub response_success: bool,
-    pub response_messages: Option<String>,
-    pub response_time: f64,
+    pub response_message: Option<String>,
+    pub response_time: Option<Duration>,
+}
+
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
+pub struct MonitorId(String);
+
+impl MonitorId {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for MonitorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
