@@ -23,7 +23,7 @@ import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { EMPTY, from, Observable, of, Subject } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
@@ -279,7 +279,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
         switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.fetchTokens(params)),
         catchError((error) => {
-          console.error(error.message);
           this.handleIronRDPError(error.message);
           return EMPTY;
         }),
@@ -346,10 +345,10 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
 
     from(this.remoteClient.connect(config))
       .pipe(
-        // @ts-ignore // update iron-remote-gui rxjs to 7.8.1
         takeUntil(this.destroyed$),
-        catchError((err) => {
-          return throwError(() => err);
+        catchError((_err) => {
+          // Ignore the error, we will handle it in the `onSessionEvent` handler.
+          return EMPTY;
         }),
       )
       .subscribe();
@@ -362,8 +361,10 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
           this.handleSessionStarted(event);
           break;
         case SessionEventType.TERMINATED:
+          this.handleSessionTerminated(event);
+          break;
         case SessionEventType.ERROR:
-          this.handleSessionEndedOrError(event);
+          this.handleSessionError(event);
           break;
       }
     };
@@ -376,14 +377,19 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     this.initializeStatus();
   }
 
-  private handleSessionEndedOrError(event: SessionEvent): void {
+  private handleSessionTerminated(event: SessionEvent): void {
     if (document.fullscreenElement) {
       this.exitFullScreen();
     }
 
-    this.notifyUser(event, event.data);
+    this.notifyUser(event);
     this.disableComponentStatus();
     super.webClientConnectionClosed();
+  }
+
+  private handleSessionError(event: SessionEvent): void {
+    const errorMessage = super.getIronErrorMessage(event.data);
+    this.webClientError(errorMessage);
   }
 
   private handleIronRDPConnectStarted(): void {
@@ -393,15 +399,16 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     this.webClientConnectionSuccess();
   }
 
-  private notifyUser(event: SessionEvent, errorData: IronError | string): void {
+  private notifyUser(event: SessionEvent): void {
     const eventType = event.type.valueOf();
+    const errorData = event.data;
+
     this.ardError = {
       kind: this.getMessage(errorData),
-      backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : '',
+      backtrace: super.getIronErrorMessage(errorData),
     };
 
-    const icon: string =
-      eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ? DVL_WARNING_ICON : DVL_ARD_ICON;
+    const icon: string = eventType !== SessionEventType.STARTED ? DVL_WARNING_ICON : DVL_ARD_ICON;
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
@@ -414,7 +421,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   private notifyUserAboutError(error: IronError | string): void {
     this.ardError = {
       kind: this.getMessage(error),
-      backtrace: typeof error !== 'string' ? error?.backtrace() : '',
+      backtrace: super.getIronErrorMessage(error),
     };
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
@@ -423,8 +430,9 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   private getMessage(errorData: IronError | string): string {
     let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
     if (typeof errorData === 'string') {
-      return errorData;
+      return 'The session is terminated';
     }
+
     errorKind = errorData.kind().valueOf();
 
     //For translation 'UnknownError'
