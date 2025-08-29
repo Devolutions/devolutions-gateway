@@ -661,6 +661,10 @@ jobs:
 
           ./ci/tlk.ps1 package -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
+          # cleanup staging directory before uploading artifacts we want to keep
+          $StagingPath = '${{ steps.load-variables.outputs.staging-path }}'
+          Get-ChildItem -Path $StagingPath -Exclude "DevolutionsAgent*"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
