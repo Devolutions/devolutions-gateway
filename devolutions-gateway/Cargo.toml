@@ -15,7 +15,6 @@ workspace = true
 [features]
 default = []
 openapi = ["dep:utoipa"]
-mock = ["dep:tempdir"]
 
 [dependencies]
 
@@ -117,9 +116,6 @@ etherparse = "0.15"
 
 # For KDC proxy
 portpicker = "0.1"
-
-# For integration tests
-tempdir = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 rustls-cng = { version = "0.5", default-features = false, features = ["logging", "tls12", "ring"] }
