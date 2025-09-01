@@ -48,6 +48,11 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     console.error(errorMessage);
   }
 
+  protected webClientWarning(message: string): void {
+    this.gatewayAlertMessageService.addWarning(message);
+    console.warn(message);
+  }
+
   protected webClientConnectionClosed(): void {
     if (this.analyticHandle) {
       this.analyticService.sendCloseEvent(this.analyticHandle);
