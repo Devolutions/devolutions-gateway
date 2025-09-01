@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
+use anyhow::Context as _;
 use network_scanner_net::runtime::Socket2Runtime;
 use tokio_util::sync::CancellationToken;
 
@@ -33,14 +34,18 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(config_cache: Arc<dyn ConfigCache>, scanner_runtime: Arc<Socket2Runtime>) -> State {
-        State {
+    pub fn new(config_cache: Arc<dyn ConfigCache>) -> anyhow::Result<State> {
+        let scanner_runtime = Socket2Runtime::new(None).context("create socket2 runtime")?;
+
+        let state = State {
             config_cache,
             log: LogQueue::new(),
             config: RwLock::new(MonitorsConfig::empty()),
             cancellation_tokens: Mutex::new(HashMap::new()),
             scanner_runtime,
             set_config_permit: tokio::sync::Semaphore::new(1),
-        }
+        };
+
+        Ok(state)
     }
 }

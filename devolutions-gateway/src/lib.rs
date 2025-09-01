@@ -79,8 +79,7 @@ impl DgwState {
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let credential_store = credential::CredentialStoreHandle::new();
 
-        let socket2runtime = network_monitor::Socket2Runtime::new(None)?;
-        let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache), socket2runtime));
+        let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
             conf_handle,

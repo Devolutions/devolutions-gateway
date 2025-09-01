@@ -246,11 +246,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let filesystem_monitor_config_cache = devolutions_gateway::api::monitoring::FilesystemConfigCache::new(
         config::get_data_dir().join("monitors_cache.json"),
     );
-    let socket2runtime = network_monitor::Socket2Runtime::new(None).context("init Socket2Runtime")?;
-    let monitoring_state = Arc::new(network_monitor::State::new(
-        Arc::new(filesystem_monitor_config_cache),
-        socket2runtime,
-    ));
+    let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),

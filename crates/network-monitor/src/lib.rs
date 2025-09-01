@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use network_scanner::ping;
+use network_scanner_net::runtime::Socket2Runtime;
 use thiserror::Error;
 use time::UtcDateTime;
 use tokio_util::sync::CancellationToken;
@@ -12,7 +13,6 @@ mod log_queue;
 mod state;
 
 pub use crate::state::{ConfigCache, State};
-pub use network_scanner_net::runtime::Socket2Runtime;
 
 #[derive(Error, Debug)]
 pub enum SetConfigError {
