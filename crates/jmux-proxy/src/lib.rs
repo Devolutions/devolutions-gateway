@@ -251,10 +251,8 @@ struct JmuxChannelCtx {
     target_ip: Option<std::net::IpAddr>,
     /// Target server port
     target_port: u16,
-    /// Time the channel was opened at
-    open_at: SystemTime,
     /// Time the connection with target peer was established at
-    connect_at: Option<SystemTime>,
+    connect_at: SystemTime,
     /// Number of bytes sent to the target server.
     bytes_tx: Arc<AtomicU64>,
     /// Number of bytes received from the target server.
@@ -308,8 +306,7 @@ impl JmuxCtx {
                 && !channel.audit_emitted.swap(true, Ordering::SeqCst)
             {
                 let disconnect_at = SystemTime::now();
-                let connect_at = channel.connect_at.unwrap_or(channel.open_at);
-                let active_duration = disconnect_at.duration_since(connect_at).unwrap_or_default();
+                let active_duration = disconnect_at.duration_since(channel.connect_at).unwrap_or_default();
 
                 let outcome = if is_abnormal_error {
                     EventOutcome::AbnormalTermination
@@ -323,7 +320,7 @@ impl JmuxCtx {
                     target_host: channel.target_host,
                     target_ip,
                     target_port: channel.target_port,
-                    connect_at,
+                    connect_at: channel.connect_at,
                     disconnect_at,
                     active_duration,
                     bytes_tx: channel.bytes_tx.load(Ordering::SeqCst),
@@ -719,8 +716,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             target_host: msg.destination_url.host().to_owned(),
                             target_ip: None, // Will be set when connection succeeds.
                             target_port: msg.destination_url.port(),
-                            open_at: SystemTime::now(),
-                            connect_at: None,
+                            connect_at: std::time::UNIX_EPOCH, // Sentinel value.
                             bytes_tx: Arc::new(AtomicU64::new(0)),
                             bytes_rx: Arc::new(AtomicU64::new(0)),
                             audit_emitted: Arc::new(AtomicBool::new(false)),
@@ -754,8 +750,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             continue;
                         }
 
-                        let now = SystemTime::now();
-
                         jmux_ctx.register_channel(JmuxChannelCtx {
                             distant_id: peer_id,
                             distant_state: JmuxChannelState::Streaming,
@@ -776,8 +770,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             target_host: destination_url.host().to_owned(),
                             target_ip: None, // Not available for external API.
                             target_port: destination_url.port(),
-                            open_at: now,
-                            connect_at: Some(now),
+                            connect_at: SystemTime::now(),
                             bytes_tx: Arc::new(AtomicU64::new(0)),
                             bytes_rx: Arc::new(AtomicU64::new(0)),
                             audit_emitted: Arc::new(AtomicBool::new(false)),
@@ -1165,9 +1158,9 @@ impl StreamResolverTask {
                 for socket_addr in socket_addrs {
                     match TcpStream::connect(socket_addr).await {
                         Ok(stream) => {
-                            // Update channel with resolved target IP.
+                            // Update channel with resolved target IP and connect time.
                             channel.target_ip = Some(socket_addr.ip());
-                            channel.connect_at = Some(SystemTime::now());
+                            channel.connect_at = SystemTime::now();
 
                             internal_msg_tx
                                 .send(InternalMessage::StreamResolved { channel, stream })
