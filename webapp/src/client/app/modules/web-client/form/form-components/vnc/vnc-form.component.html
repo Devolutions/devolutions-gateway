@@ -53,7 +53,12 @@
       <web-client-extended-clipboard-control [parentForm]="form"
                                              [inputFormData]="inputFormData"></web-client-extended-clipboard-control>
     </div>
-    
+
+    <div *ngIf="showAutoClipboardCheckbox" class="col-12 gateway-form-group">
+      <web-client-auto-clipboard-control [parentForm]="form"
+                                         [inputFormData]="inputFormData"></web-client-auto-clipboard-control>
+    </div>
+
   </div>
 
 </div>

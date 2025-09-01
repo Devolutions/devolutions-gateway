@@ -3,6 +3,7 @@ import { FormGroup } from '@angular/forms';
 import { ArdFormDataInput } from '@gateway/shared/interfaces/forms.interfaces';
 
 import { BaseComponent } from '@shared/bases/base.component';
+import { UAParser } from 'ua-parser-js';
 
 @Component({
   selector: 'ard-form',
@@ -14,12 +15,15 @@ export class ArdFormComponent extends BaseComponent implements OnInit {
   @Input() inputFormData: ArdFormDataInput;
 
   showMoreSettings = false;
+  showAutoClipboardCheckbox = false;
 
   constructor() {
     super();
   }
 
-  ngOnInit(): void {}
+  ngOnInit(): void {
+    this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink';
+  }
 
   toggleMoreSettings(event: Event): void {
     event.preventDefault();

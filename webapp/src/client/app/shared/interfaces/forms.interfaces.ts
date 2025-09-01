@@ -28,6 +28,7 @@ export interface RdpFormDataInput {
   preConnectionBlob: string;
   protocol: number;
   screenSize: ScreenSize;
+  autoClipboard?: boolean;
   customWidth?: number;
   customHeight?: number;
 }
@@ -44,6 +45,7 @@ export interface VncFormDataInput {
   enabledEncodings: Encoding[];
   wheelSpeedFactor: number;
   screenSize: ScreenSize;
+  autoClipboard?: boolean;
   customWidth?: number;
   customHeight?: number;
 }
@@ -57,6 +59,7 @@ export interface ArdFormDataInput {
   wheelSpeedFactor: number;
   resolutionQuality: ResolutionQuality;
   ardQualityMode: ArdQualityMode;
+  autoClipboard?: boolean;
 }
 
 export interface TelnetFormDataInput {

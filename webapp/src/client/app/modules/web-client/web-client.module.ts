@@ -27,6 +27,7 @@ import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
 import { KeyFilterModule } from 'primeng/keyfilter';
 import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
+import { AutoClipboardControlComponent } from './form/form-controls/auto-clipboard-control/auto-clipboard-control.component';
 // TODO: uncomment when adding support for iDRAC and VMWare
 // import { VmIdControlComponent } from './form/form-controls/vm-id-control/vm-id-control.component';
 // import { ForceFirmwareV7ControlComponent } from './form/form-controls/force-firmware-v7-control/force-firmware-v7-control.component';
@@ -84,6 +85,7 @@ const routes: Routes = [
     PreConnectionBlobControlComponent,
     EnabledEncodingsControlComponent,
     EnableCursorControlComponent,
+    AutoClipboardControlComponent,
     // TODO: iDRAC and VMWare support
     // VmIdControlComponent,
     // ForceFirmwareV7ControlComponent,
