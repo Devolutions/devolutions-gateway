@@ -4,8 +4,8 @@ import { UrlService } from './utils/url.service';
 
 @Injectable({ providedIn: 'root' })
 export class UtilsService {
-  url: UrlService = new UrlService(this);
-  string: StringService = new StringService(this);
+  url: UrlService = new UrlService();
+  string: StringService = new StringService();
 
   constructor() {}
 }
