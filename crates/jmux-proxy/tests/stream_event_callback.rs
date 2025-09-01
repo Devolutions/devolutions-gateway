@@ -1,31 +1,31 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
-//! Integration tests for JMUX stream event callbacks.
+//! Integration tests for JMUX traffic event callbacks.
 //!
-//! This test suite provides comprehensive coverage of the JMUX stream event callback functionality.
-//! It verifies that exactly one event is emitted per stream with correct field values across
+//! This test suite provides comprehensive coverage of the JMUX traffic event callback functionality.
+//! It verifies that exactly one event is emitted per traffic item with correct field values across
 //! various network scenarios including connection failures, normal termination, and abnormal termination.
 //!
 //! # Test Strategy
 //!
-//! Tests use the public JmuxProxy API with ApiRequestSender to create realistic stream scenarios.
+//! Tests use the public JmuxProxy API with ApiRequestSender to create realistic traffic scenarios.
 //! All tests use localhost-based servers to ensure reliability in CI environments and avoid
 //! external network dependencies.
 //!
 //! ## Event Classification Rules
 //!
-//! - **ConnectFailure**: Connection attempt fails before stream establishment
+//! - **ConnectFailure**: Connection attempt fails before traffic item establishment
 //!   - `bytes_tx = bytes_rx = 0`
 //!   - `connect_at = disconnect_at` (same timestamp)
 //!   - `active_duration = Duration::ZERO`
 //!
-//! - **NormalTermination**: Stream established and closed cleanly
+//! - **NormalTermination**: Traffic item established and closed cleanly
 //!   - Triggered by graceful EOF→Close sequence
 //!   - `bytes_tx/rx` may be 0 or >0
 //!   - `active_duration >= Duration::ZERO`
 //!
-//! - **AbnormalTermination**: Stream established but closed due to error
+//! - **AbnormalTermination**: Traffic item established but closed due to error
 //!   - Triggered by connection reset, network errors, etc.
 //!   - `bytes_tx/rx` may be 0 or >0 (partial transfer)
 //!   - `active_duration >= Duration::ZERO`
@@ -47,7 +47,7 @@
 //!
 //! Tests use a standard pattern:
 //! 1. Create `test_observer()` that captures events in mpsc channel
-//! 2. Attach observer to `JmuxProxy` via `with_stream_event_callback()`
+//! 2. Attach observer to `JmuxProxy` via `with_traffic_event_callback()`
 //! 3. Trigger JMUX stream operations using ApiRequestSender (OpenChannel + Start)
 //! 4. Use `expect_single_event()` with timeout to verify exactly-once semantics
 //! 5. Assert all event fields match expected values
@@ -68,7 +68,7 @@
 //! When UDP support is added to JMUX:
 //! - Add UDP server helpers similar to TCP versions  
 //! - Test UDP-specific scenarios (datagram vs stream semantics)
-//! - Verify `StreamProtocol::Udp` classification works correctly
+//! - Verify `TransportProtocol::Udp` classification works correctly
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener};
@@ -76,7 +76,7 @@ use std::time::Duration;
 
 use jmux_proxy::{
     ApiRequestSender, DestinationUrl, EventOutcome, JmuxApiRequest, JmuxApiResponse, JmuxConfig, JmuxProxy,
-    StreamEvent, StreamProtocol,
+    TrafficEvent, TransportProtocol,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -89,13 +89,13 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// Creates a test observer closure that captures stream events in an mpsc channel.
 ///
 /// Returns a tuple of:
-/// - A callback function compatible with `JmuxProxy::with_stream_event_callback()`
+/// - A callback function compatible with `JmuxProxy::with_traffic_event_callback()`
 /// - An mpsc receiver for capturing emitted events
 ///
 /// The callback is synchronous - the consumer is responsible for handling async work.
 fn test_observer() -> (
-    impl Fn(StreamEvent) + Send + Sync + 'static,
-    mpsc::Receiver<StreamEvent>,
+    impl Fn(TrafficEvent) + Send + Sync + 'static,
+    mpsc::Receiver<TrafficEvent>,
 ) {
     let (tx, rx) = mpsc::channel(16);
 
@@ -120,7 +120,7 @@ fn test_observer() -> (
 /// The proxy uses tokio duplex streams for I/O, allowing bidirectional communication
 /// without external network dependencies. The API request sender can be used to trigger
 /// actual JMUX stream connections that will emit stream events.
-fn make_proxy_with_test_callback() -> (JmuxProxy, ApiRequestSender, mpsc::Receiver<StreamEvent>) {
+fn make_proxy_with_test_callback() -> (JmuxProxy, ApiRequestSender, mpsc::Receiver<TrafficEvent>) {
     let (reader, writer) = tokio::io::duplex(8192);
 
     // Box the I/O streams to match JmuxProxy's expected types.
@@ -135,7 +135,7 @@ fn make_proxy_with_test_callback() -> (JmuxProxy, ApiRequestSender, mpsc::Receiv
     let proxy = JmuxProxy::new(reader, writer)
         .with_config(JmuxConfig::permissive())
         .with_requester_api(api_request_rx)
-        .with_outgoing_stream_event_callback(callback);
+        .with_outgoing_traffic_event_callback(callback);
 
     (proxy, api_request_tx, rx)
 }
@@ -219,9 +219,9 @@ impl NormalServer {
 /// Returns the single received event, or an error describing the violation.
 /// This is crucial for testing the exactly-once emission guarantee.
 async fn expect_single_event(
-    rx: &mut mpsc::Receiver<StreamEvent>,
+    rx: &mut mpsc::Receiver<TrafficEvent>,
     timeout_duration: Duration,
-) -> Result<StreamEvent, String> {
+) -> Result<TrafficEvent, String> {
     let event = timeout(timeout_duration, rx.recv())
         .await
         .map_err(|_| "Timeout waiting for stream event")?
@@ -242,7 +242,7 @@ async fn expect_single_event(
 /// that no events were generated.
 ///
 /// Returns Ok(()) if no events received, or an error describing what was received.
-async fn expect_no_events(rx: &mut mpsc::Receiver<StreamEvent>, wait_duration: Duration) -> Result<(), String> {
+async fn expect_no_events(rx: &mut mpsc::Receiver<TrafficEvent>, wait_duration: Duration) -> Result<(), String> {
     match timeout(wait_duration, rx.recv()).await {
         Ok(Some(event)) => Err(format!("Unexpected stream event received: {:?}", event)),
         Ok(None) => Err("Channel closed unexpectedly".to_string()),
@@ -398,7 +398,7 @@ async fn cf_ipv4_tcp_refused_port_emits_connect_failure() {
         .expect("Should receive ConnectFailure event");
 
     assert_eq!(event.outcome, EventOutcome::ConnectFailure);
-    assert_eq!(event.protocol, StreamProtocol::Tcp);
+    assert_eq!(event.protocol, TransportProtocol::Tcp);
     assert_eq!(event.target_host, "127.0.0.1");
     assert_eq!(event.target_ip, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
     assert_eq!(event.target_port, refused_port);
@@ -462,7 +462,7 @@ async fn cf_ipv6_tcp_refused_port_emits_connect_failure() {
         .expect("receive ConnectFailure event");
 
     assert_eq!(event.outcome, EventOutcome::ConnectFailure);
-    assert_eq!(event.protocol, StreamProtocol::Tcp);
+    assert_eq!(event.protocol, TransportProtocol::Tcp);
     assert_eq!(event.target_host, "::1");
     assert_eq!(event.target_ip, IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));
     assert_eq!(event.target_port, 1);
@@ -613,7 +613,7 @@ async fn norm_zero_bytes_emits_normal_termination() {
         .expect("receive NormalTermination event");
 
     assert_eq!(event.outcome, EventOutcome::NormalTermination);
-    assert_eq!(event.protocol, StreamProtocol::Tcp);
+    assert_eq!(event.protocol, TransportProtocol::Tcp);
     assert_eq!(event.target_host, "127.0.0.1");
     assert_eq!(event.target_ip, server_addr.ip());
     assert_eq!(event.target_port, server_addr.port());
@@ -672,7 +672,7 @@ async fn norm_bytes_counts_tx_rx() {
         .expect("receive NormalTermination event");
 
     assert_eq!(event.outcome, EventOutcome::NormalTermination);
-    assert_eq!(event.protocol, StreamProtocol::Tcp);
+    assert_eq!(event.protocol, TransportProtocol::Tcp);
     assert_eq!(event.target_host, "127.0.0.1");
     assert_eq!(event.target_ip, server_addr.ip());
     assert_eq!(event.target_port, server_addr.port());
@@ -741,7 +741,7 @@ async fn exactly_once_on_multiple_close_signals() {
         event.outcome,
         EventOutcome::NormalTermination | EventOutcome::AbnormalTermination
     ));
-    assert_eq!(event.protocol, StreamProtocol::Tcp);
+    assert_eq!(event.protocol, TransportProtocol::Tcp);
     assert_eq!(event.target_host, "127.0.0.1");
     assert_eq!(event.target_ip, server_addr.ip());
     assert_eq!(event.target_port, server_addr.port());
@@ -821,7 +821,7 @@ async fn concurrent_streams_emit_independent_events() {
     // All events should be NormalTermination.
     for event in &events {
         assert_eq!(event.outcome, EventOutcome::NormalTermination);
-        assert_eq!(event.protocol, StreamProtocol::Tcp);
+        assert_eq!(event.protocol, TransportProtocol::Tcp);
     }
 
     server1_task
@@ -871,7 +871,7 @@ async fn callback_observer_panic_does_not_affect_jmux() {
     let proxy = JmuxProxy::new(reader, writer)
         .with_config(JmuxConfig::permissive())
         .with_requester_api(api_request_rx)
-        .with_outgoing_stream_event_callback(panicking_callback);
+        .with_outgoing_traffic_event_callback(panicking_callback);
 
     // Run proxy in background.
     let proxy_task = tokio::spawn(async move {

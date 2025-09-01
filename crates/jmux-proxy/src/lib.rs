@@ -11,21 +11,19 @@ mod event;
 mod id_allocator;
 
 pub use self::config::{FilteringRule, JmuxConfig};
-pub use self::event::{EventOutcome, StreamEvent, StreamProtocol};
+pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 pub use jmux_proto::DestinationUrl;
 
-use self::codec::JmuxCodec;
-use self::event::StreamCallback;
-use self::id_allocator::IdAllocator;
-use anyhow::Context as _;
-use bytes::Bytes;
-use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::SystemTime;
+
+use anyhow::Context as _;
+use bytes::Bytes;
+use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -33,6 +31,10 @@ use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
+
+use self::codec::JmuxCodec;
+use self::event::TrafficCallback;
+use self::id_allocator::IdAllocator;
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB
@@ -77,7 +79,7 @@ pub struct JmuxProxy {
     api_request_rx: Option<ApiRequestReceiver>,
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
-    stream_callback: Option<StreamCallback>,
+    traffic_callback: Option<TrafficCallback>,
 }
 
 impl JmuxProxy {
@@ -91,7 +93,7 @@ impl JmuxProxy {
             api_request_rx: None,
             jmux_reader,
             jmux_writer,
-            stream_callback: None,
+            traffic_callback: None,
         }
     }
 
@@ -107,7 +109,7 @@ impl JmuxProxy {
         self
     }
 
-    /// Configures an outgoing-stream callback for lifecycle event monitoring.
+    /// Configures an outgoing-traffic callback for lifecycle event monitoring.
     ///
     /// The provided callback will be invoked exactly once per outgoing stream at the end of its
     /// lifecycle, providing comprehensive audit information including connection metadata,
@@ -129,7 +131,7 @@ impl JmuxProxy {
     ///
     /// # Callback Contract
     ///
-    /// - **Exactly once**: Each stream generates precisely one event, protected by atomic guards
+    /// - **Exactly once**: Each traffic item generates precisely one event, protected by atomic guards
     /// - **At stream end**: Events are emitted during cleanup, not during operation
     /// - **Synchronous**: The callback is called synchronously from JMUX task contexts
     /// - **Thread safe**: Must be `Send + Sync + 'static` for multi-threaded access
@@ -140,10 +142,10 @@ impl JmuxProxy {
     /// tasks or using message passing patterns:
     ///
     /// ```rust,ignore
-    /// proxy.with_stream_event_callback(|event| {
+    /// proxy.with_traffic_event_callback(|event| {
     ///     // Option 1: Spawn async work
     ///     tokio::spawn(async move {
-    ///         database.log_stream_event(event).await;
+    ///         database.log_traffic_event(event).await;
     ///     });
     ///     
     ///     // Option 2: Send to async processor
@@ -159,11 +161,11 @@ impl JmuxProxy {
     /// Keep callback implementations lightweight to avoid blocking the JMUX event loop.
     /// Heavy processing should be offloaded to background tasks or queues.
     #[must_use]
-    pub fn with_outgoing_stream_event_callback<C>(mut self, callback: C) -> Self
+    pub fn with_outgoing_traffic_event_callback<C>(mut self, callback: C) -> Self
     where
-        C: Fn(StreamEvent) + Send + Sync + 'static,
+        C: Fn(TrafficEvent) + Send + Sync + 'static,
     {
-        self.stream_callback = Some(Arc::new(callback));
+        self.traffic_callback = Some(Arc::new(callback));
         self
     }
 
@@ -179,7 +181,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         api_request_rx,
         jmux_reader,
         jmux_writer,
-        stream_callback,
+        traffic_callback,
     } = proxy;
 
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::channel::<Message>(JMUX_MESSAGE_MPSC_CHANNEL_SIZE);
@@ -199,7 +201,7 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
         jmux_stream,
         msg_to_send_tx,
         api_request_rx,
-        stream_callback,
+        traffic_callback,
         parent_span: span,
     }
     .spawn();
@@ -243,12 +245,13 @@ struct JmuxChannelCtx {
 
     span: Span,
 
-    // Stream audit metadata
+    // Traffic audit metadata
     target_host: String,
     /// Target server resolved address IP
     target_ip: Option<std::net::IpAddr>,
     /// Target server port
     target_port: u16,
+    /// Time the connection with target peer was established at
     connect_at: SystemTime,
     /// Number of bytes sent to the target server.
     bytes_tx: Arc<AtomicU64>,
@@ -282,6 +285,7 @@ impl JmuxCtx {
                 replaced_channel.local_id
             );
         };
+
         Ok(())
     }
 
@@ -293,11 +297,11 @@ impl JmuxCtx {
         self.channels.get_mut(&id)
     }
 
-    fn unregister(&mut self, id: LocalChannelId, stream_callback: &Option<StreamCallback>, is_abnormal_error: bool) {
+    fn unregister(&mut self, id: LocalChannelId, traffic_callback: &Option<TrafficCallback>, is_abnormal_error: bool) {
         if let Some(channel) = self.channels.remove(&id) {
             // Emit audit event if we have a callback and haven't already emitted.
             // For now, we only emit an event when the IP address is known = on the "server side".
-            if let Some(callback) = stream_callback
+            if let Some(callback) = traffic_callback
                 && let Some(target_ip) = channel.target_ip
                 && !channel.audit_emitted.swap(true, Ordering::SeqCst)
             {
@@ -310,9 +314,9 @@ impl JmuxCtx {
                     EventOutcome::NormalTermination
                 };
 
-                let event = StreamEvent {
+                let event = TrafficEvent {
                     outcome,
-                    protocol: StreamProtocol::Tcp,
+                    protocol: TransportProtocol::Tcp,
                     target_host: channel.target_host,
                     target_ip,
                     target_port: channel.target_port,
@@ -407,7 +411,7 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     jmux_stream: FramedRead<T, JmuxCodec>,
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
-    stream_callback: Option<StreamCallback>,
+    traffic_callback: Option<TrafficCallback>,
     parent_span: Span,
 }
 
@@ -428,7 +432,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         mut jmux_stream,
         msg_to_send_tx,
         mut api_request_rx,
-        stream_callback,
+        traffic_callback,
         parent_span,
     } = task;
 
@@ -535,7 +539,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                     .context("couldn’t send CLOSE message")?;
                             },
                             JmuxChannelState::Closed => {
-                                jmux_ctx.unregister(local_id, &stream_callback, false); // Normal termination via EOF
+                                jmux_ctx.unregister(local_id, &traffic_callback, false); // Normal termination via EOF
                                 msg_to_send_tx
                                     .send(Message::close(distant_id))
                                     .await
@@ -553,7 +557,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let distant_id = channel.distant_id;
 
                         // Signal abnormal termination and close the channel.
-                        jmux_ctx.unregister(local_id, &stream_callback, true); // Abnormal termination
+                        jmux_ctx.unregister(local_id, &traffic_callback, true); // Abnormal termination
                         msg_to_send_tx
                             .send(Message::close(distant_id))
                             .await
@@ -708,11 +712,11 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             span: channel_span,
 
-                            // Stream audit metadata.
+                            // Traffic audit metadata.
                             target_host: msg.destination_url.host().to_owned(),
                             target_ip: None, // Will be set when connection succeeds.
                             target_port: msg.destination_url.port(),
-                            connect_at: SystemTime::now(),
+                            connect_at: std::time::UNIX_EPOCH, // Sentinel value.
                             bytes_tx: Arc::new(AtomicU64::new(0)),
                             bytes_rx: Arc::new(AtomicU64::new(0)),
                             audit_emitted: Arc::new(AtomicBool::new(false)),
@@ -723,7 +727,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             destination_url: msg.destination_url,
                             internal_msg_tx: internal_msg_tx.clone(),
                             msg_to_send_tx: msg_to_send_tx.clone(),
-                            stream_callback: stream_callback.clone(),
+                            traffic_callback: traffic_callback.clone(),
                         }
                         .spawn()
                         .detach();
@@ -762,7 +766,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             span: channel_span.exit(),
 
-                            // Stream audit metadata (for external API channels)
+                            // Traffic audit metadata (for external API channels)
                             target_host: destination_url.host().to_owned(),
                             target_ip: None, // Not available for external API.
                             target_port: destination_url.port(),
@@ -881,7 +885,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
 
                         if channel.local_state == JmuxChannelState::Closed {
-                            jmux_ctx.unregister(local_id, &stream_callback, false); // Normal close
+                            jmux_ctx.unregister(local_id, &traffic_callback, false); // Normal close
                             trace!("Channel closed");
                         }
                     }
@@ -1096,7 +1100,7 @@ struct StreamResolverTask {
     destination_url: DestinationUrl,
     internal_msg_tx: InternalMessageSender,
     msg_to_send_tx: MessageSender,
-    stream_callback: Option<StreamCallback>,
+    traffic_callback: Option<TrafficCallback>,
 }
 
 impl StreamResolverTask {
@@ -1121,7 +1125,7 @@ impl StreamResolverTask {
             destination_url,
             internal_msg_tx,
             msg_to_send_tx,
-            stream_callback,
+            traffic_callback,
         } = self;
 
         let scheme = destination_url.scheme();
@@ -1154,8 +1158,9 @@ impl StreamResolverTask {
                 for socket_addr in socket_addrs {
                     match TcpStream::connect(socket_addr).await {
                         Ok(stream) => {
-                            // Update channel with resolved target IP.
+                            // Update channel with resolved target IP and connect time.
                             channel.target_ip = Some(socket_addr.ip());
+                            channel.connect_at = SystemTime::now();
 
                             internal_msg_tx
                                 .send(InternalMessage::StreamResolved { channel, stream })
@@ -1174,21 +1179,21 @@ impl StreamResolverTask {
                 // All connection attempts failed - emit ConnectFailure for the last attempted address.
                 if let Some((failed_addr, error)) = last_error {
                     // Emit ConnectFailure event - we always have a concrete IP at this point.
-                    if let Some(callback) = &stream_callback {
-                        let connect_time = channel.connect_at;
-                        let event = StreamEvent {
+                    if let Some(callback) = &traffic_callback {
+                        let connect_and_disconnect_time = SystemTime::now();
+
+                        callback(TrafficEvent {
                             outcome: EventOutcome::ConnectFailure,
-                            protocol: StreamProtocol::Tcp,
+                            protocol: TransportProtocol::Tcp,
                             target_host: channel.target_host.clone(),
                             target_ip: failed_addr.ip(),
                             target_port: failed_addr.port(),
-                            connect_at: connect_time,
-                            disconnect_at: connect_time,
+                            connect_at: connect_and_disconnect_time,
+                            disconnect_at: connect_and_disconnect_time,
                             active_duration: std::time::Duration::ZERO,
                             bytes_tx: 0,
                             bytes_rx: 0,
-                        };
-                        callback(event);
+                        });
                     }
 
                     msg_to_send_tx

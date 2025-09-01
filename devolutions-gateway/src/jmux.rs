@@ -50,7 +50,7 @@ pub async fn handle(
 
     let proxy_fut = JmuxProxy::new(reader, writer)
         .with_config(config)
-        .with_outgoing_stream_event_callback(|event| {
+        .with_outgoing_traffic_event_callback(|event| {
             debug!(
                 outcome = ?event.outcome,
                 protocol = ?event.protocol,
@@ -60,7 +60,7 @@ pub async fn handle(
                 bytes_tx = event.bytes_tx,
                 bytes_rx = event.bytes_rx,
                 duration_ms = event.active_duration.as_millis(),
-                "outgoing stream audit event"
+                "outgoing traffic audit event"
             );
         })
         .run();
