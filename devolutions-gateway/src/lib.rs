@@ -1,6 +1,5 @@
 // Used by devolutions-gateway binary.
 use ceviche as _;
-use tempdir::TempDir;
 
 // Used by tests.
 #[cfg(test)]
@@ -44,8 +43,6 @@ pub mod ws;
 
 use std::sync::Arc;
 
-use camino::{Utf8Path, Utf8PathBuf};
-
 #[derive(Clone)]
 pub struct DgwState {
     pub conf_handle: config::ConfHandle,
@@ -82,13 +79,7 @@ impl DgwState {
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let credential_store = credential::CredentialStoreHandle::new();
 
-        let temp_dir = TempDir::new("dgw-network-monitor-test").expect("Could not create temp dir");
-        let temp_path: Utf8PathBuf = Utf8Path::from_path(temp_dir.path())
-            .expect("TempDir gave us a garbage path")
-            .to_path_buf()
-            .join("monitors_cache.json");
-
-        let monitoring_state = Arc::new(network_monitor::State::mock(temp_path));
+        let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
             conf_handle,
@@ -111,7 +102,15 @@ impl DgwState {
             shutdown_handle,
         };
 
-        Ok((state, handles))
+        return Ok((state, handles));
+
+        struct MockMonitorsCache;
+
+        impl network_monitor::ConfigCache for MockMonitorsCache {
+            fn store(&self, _: &network_monitor::MonitorsConfig) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
     }
 }
 

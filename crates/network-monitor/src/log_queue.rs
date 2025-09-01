@@ -23,7 +23,7 @@ impl<T> LogQueue<T> {
     pub(crate) fn drain(&self) -> VecDeque<T> {
         let mut entries = self.entries.lock().expect("poisoned");
 
-        return mem::replace(&mut entries, VecDeque::new());
+        mem::take(&mut entries)
     }
 }
 

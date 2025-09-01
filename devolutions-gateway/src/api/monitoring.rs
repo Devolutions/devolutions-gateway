@@ -1,8 +1,11 @@
+use std::time::Duration;
+
+use anyhow::Context as _;
+use axum::{Json, Router, extract, routing};
+use time::OffsetDateTime;
+
 use crate::DgwState;
 use crate::http::HttpError;
-use axum::{Json, Router, extract, routing};
-use network_monitor;
-use time::OffsetDateTime;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     let router = Router::new()
@@ -97,13 +100,13 @@ impl MonitorsConfig {
                     Err(error) => partitions.1.push(error),
                 };
 
-                return partitions;
+                partitions
             },
         );
 
         let config = network_monitor::MonitorsConfig { monitors };
 
-        return (config, errors);
+        (config, errors)
     }
 }
 
@@ -140,7 +143,7 @@ pub(crate) struct MonitorDefinition {
     address: String,
     interval: u64,
     timeout: u64,
-    port: Option<i16>,
+    port: Option<u16>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -157,16 +160,16 @@ impl TryFrom<MonitorDefinition> for network_monitor::MonitorDefinition {
 
     fn try_from(value: MonitorDefinition) -> Result<network_monitor::MonitorDefinition, Self::Error> {
         Ok(network_monitor::MonitorDefinition {
-            id: value.id.clone(),
+            id: network_monitor::MonitorId::new(value.id.clone()),
             probe: value.probe.try_into().map_err(|type_error: MonitoringProbeTypeError| {
                 MonitorDefinitionProbeTypeError {
-                    id: value.id.clone(),
+                    id: value.id,
                     probe: type_error.probe,
                 }
             })?,
             address: value.address,
-            interval: value.interval,
-            timeout: value.timeout,
+            interval: Duration::from_secs(value.interval),
+            timeout: Duration::from_secs(value.timeout),
             port: value.port,
         })
     }
@@ -174,8 +177,8 @@ impl TryFrom<MonitorDefinition> for network_monitor::MonitorDefinition {
 
 /// This body is returned when the config is successfully set, even if one or all probes were not understood.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "camelCase")]
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SetConfigResponse {
     /// An optional list of probes that this server could not parse.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,18 +212,76 @@ pub(crate) struct MonitorResult {
     request_start_time: OffsetDateTime,
     response_success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    response_messages: Option<String>,
+    response_message: Option<String>,
+    /// Duration it took for the response to be received, in seconds.
+    ///
+    /// On error, this value is set to f64::INFINITY.
     response_time: f64,
 }
 
 impl From<network_monitor::MonitorResult> for MonitorResult {
     fn from(value: network_monitor::MonitorResult) -> Self {
         MonitorResult {
-            monitor_id: value.monitor_id,
+            monitor_id: value.monitor_id.into_string(),
             request_start_time: value.request_start_time.into(),
             response_success: value.response_success,
-            response_messages: value.response_messages,
-            response_time: value.response_time,
+            response_message: value.response_message,
+            response_time: value
+                .response_time
+                .as_ref()
+                .map(Duration::as_secs_f64)
+                .unwrap_or(f64::INFINITY),
         }
+    }
+}
+
+pub struct FilesystemConfigCache {
+    cache_path: camino::Utf8PathBuf,
+}
+
+impl FilesystemConfigCache {
+    pub fn new(cache_path: camino::Utf8PathBuf) -> Self {
+        Self { cache_path }
+    }
+}
+
+impl network_monitor::ConfigCache for FilesystemConfigCache {
+    fn store(&self, new_config: &network_monitor::MonitorsConfig) -> anyhow::Result<()> {
+        use std::io::Write as _;
+
+        let monitors = new_config
+            .monitors
+            .iter()
+            .map(|definition| MonitorDefinition {
+                id: definition.id.as_str().to_owned(),
+                probe: match definition.probe {
+                    network_monitor::ProbeType::Ping => MonitoringProbeType::Ping,
+                    network_monitor::ProbeType::TcpOpen => MonitoringProbeType::TcpOpen,
+                },
+                address: definition.address.clone(),
+                interval: definition.interval.as_secs(),
+                timeout: definition.timeout.as_secs(),
+                port: definition.port,
+            })
+            .collect();
+
+        let new_config = MonitorsConfig { monitors };
+
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&self.cache_path)
+            .with_context(|| format!("open cache file at {}", self.cache_path))?;
+
+        let mut file = std::io::BufWriter::new(file);
+
+        serde_json::to_writer_pretty(&mut file, &new_config).context("serialize configuration")?;
+
+        // Ensure the file is written immediately.
+        file.flush()
+            .with_context(|| format!("write cache file at {}", self.cache_path))?;
+
+        Ok(())
     }
 }

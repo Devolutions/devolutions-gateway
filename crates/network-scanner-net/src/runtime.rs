@@ -145,7 +145,7 @@ impl Socket2Runtime {
                 }
                 debug!("I/O event loop terminated");
             })
-            .with_context(|| "failed to spawn io event loop thread")?;
+            .context("failed to spawn io event loop thread")?;
 
         Ok(())
     }

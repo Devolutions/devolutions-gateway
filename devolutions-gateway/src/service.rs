@@ -242,9 +242,11 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .await
         .context("failed to initialize job queue context")?;
     let credential_store = CredentialStoreHandle::new();
-    let monitoring_state = Arc::new(network_monitor::State::new(
+
+    let filesystem_monitor_config_cache = devolutions_gateway::api::monitoring::FilesystemConfigCache::new(
         config::get_data_dir().join("monitors_cache.json"),
-    ));
+    );
+    let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -256,7 +258,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         recordings: recording_manager_handle.clone(),
         job_queue_handle: job_queue_ctx.job_queue_handle.clone(),
         credential_store: credential_store.clone(),
-        monitoring_state: monitoring_state,
+        monitoring_state,
     };
 
     conf.listeners
