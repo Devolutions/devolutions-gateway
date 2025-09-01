@@ -19,13 +19,19 @@ openapi = ["dep:utoipa"]
 [dependencies]
 
 # In-house
-transport = { path = "../crates/transport" }
-jmux-proxy = { path = "../crates/jmux-proxy" }
-devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
-devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
-devolutions-log = { path = "../crates/devolutions-log" }
-job-queue = { path = "../crates/job-queue" }
-job-queue-libsql = { path = "../crates/job-queue-libsql" }
+transport.path = "../crates/transport"
+jmux-proxy.path = "../crates/jmux-proxy"
+devolutions-agent-shared.path = "../crates/devolutions-agent-shared"
+devolutions-gateway-task.path = "../crates/devolutions-gateway-task"
+devolutions-log.path = "../crates/devolutions-log"
+job-queue.path = "../crates/job-queue"
+job-queue-libsql.path = "../crates/job-queue-libsql"
+traffic-audit.path = "../crates/traffic-audit"
+traffic-audit-libsql.path = "../crates/traffic-audit-libsql"
+network-scanner.path = "../crates/network-scanner"
+video-streamer.path = "../crates/video-streamer"
+terminal-streamer.path = "../crates/terminal-streamer"
+network-monitor.path = "../crates/network-monitor"
 ironrdp-pdu = { version = "0.5", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.1"
@@ -34,10 +40,6 @@ ironrdp-connector = { version = "0.5" }
 ironrdp-acceptor = { version = "0.5" }
 ceviche = "0.6.1"
 picky-krb = "0.11"
-network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
-video-streamer = { path = "../crates/video-streamer" }
-terminal-streamer = { path = "../crates/terminal-streamer" }
-network-monitor = { version = "0.0.0", path = "../crates/network-monitor" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

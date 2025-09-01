@@ -13,6 +13,7 @@ use crate::http::HttpError;
 use crate::session::SessionMessageSender;
 use crate::subscriber::SubscriberSender;
 use crate::token::JmuxTokenClaims;
+use crate::traffic_audit::TrafficAuditHandle;
 
 pub async fn handler(
     State(DgwState {
@@ -20,6 +21,7 @@ pub async fn handler(
         subscriber_tx,
         shutdown_signal,
         conf_handle,
+        traffic_audit_handle,
         ..
     }): State<DgwState>,
     JmuxToken(claims): JmuxToken,
@@ -32,6 +34,7 @@ pub async fn handler(
             shutdown_signal,
             sessions,
             subscriber_tx,
+            traffic_audit_handle,
             claims,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -46,6 +49,7 @@ async fn handle_socket(
     shutdown_signal: ShutdownSignal,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
+    traffic_audit_handle: TrafficAuditHandle,
     claims: JmuxTokenClaims,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -56,7 +60,7 @@ async fn handle_socket(
         keep_alive_interval,
     );
 
-    let result = crate::jmux::handle(stream, claims, sessions, subscriber_tx)
+    let result = crate::jmux::handle(stream, claims, sessions, subscriber_tx, traffic_audit_handle)
         .instrument(info_span!("jmux", client = %source_addr))
         .await;
 

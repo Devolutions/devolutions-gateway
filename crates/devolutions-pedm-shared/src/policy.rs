@@ -260,10 +260,7 @@ impl ElevationRequest {
         Self {
             target,
             asker,
-            unix_timestamp_seconds: cur
-                .duration_since(UNIX_EPOCH)
-                .expect("Have we gone back in time?")
-                .as_secs(),
+            unix_timestamp_seconds: cur.duration_since(UNIX_EPOCH).expect("now after UNIX_EPOCH").as_secs(),
         }
     }
 }

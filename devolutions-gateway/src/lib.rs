@@ -38,6 +38,7 @@ pub mod subscriber;
 pub mod target_addr;
 pub mod tls;
 pub mod token;
+pub mod traffic_audit;
 pub mod utils;
 pub mod ws;
 
@@ -55,6 +56,7 @@ pub struct DgwState {
     pub job_queue_handle: job_queue::JobQueueHandle,
     pub credential_store: credential::CredentialStoreHandle,
     pub monitoring_state: Arc<network_monitor::State>,
+    pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
 }
 
 #[doc(hidden)]
@@ -63,6 +65,7 @@ pub struct MockHandles {
     pub recording_manager_rx: recording::RecordingMessageReceiver,
     pub subscriber_rx: subscriber::SubscriberReceiver,
     pub job_queue_rx: job_queue::JobQueueReceiver,
+    pub traffic_audit_rx: traffic_audit::TrafficAuditReceiver,
     pub shutdown_handle: devolutions_gateway_task::ShutdownHandle,
 }
 
@@ -77,8 +80,8 @@ impl DgwState {
         let (subscriber_tx, subscriber_rx) = subscriber::subscriber_channel();
         let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
+        let (traffic_audit_handle, traffic_audit_rx) = traffic_audit::TrafficAuditHandle::new();
         let credential_store = credential::CredentialStoreHandle::new();
-
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
@@ -90,6 +93,7 @@ impl DgwState {
             shutdown_signal,
             recordings: recording_manager_handle,
             job_queue_handle,
+            traffic_audit_handle,
             credential_store,
             monitoring_state,
         };
@@ -99,6 +103,7 @@ impl DgwState {
             recording_manager_rx,
             subscriber_rx,
             job_queue_rx,
+            traffic_audit_rx,
             shutdown_handle,
         };
 
