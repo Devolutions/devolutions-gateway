@@ -49,7 +49,7 @@
                                          [inputFormData]="inputFormData"></web-client-enable-cursor-control>
     </div>
 
-    <div class="col-12 gateway-form-group">
+    <div *ngIf="showExtendedClipboardCheckbox" class="col-12 gateway-form-group">
       <web-client-extended-clipboard-control [parentForm]="form"
                                              [inputFormData]="inputFormData"></web-client-extended-clipboard-control>
     </div>

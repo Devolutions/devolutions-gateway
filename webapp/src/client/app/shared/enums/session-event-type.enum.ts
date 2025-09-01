@@ -2,7 +2,8 @@ enum SessionEventType {
   STARTED = 0,
   TERMINATED = 1,
   ERROR = 2,
-  CLIPBOARD_REMOTE_UPDATE = 3,
+  WARNING = 3,
+  CLIPBOARD_REMOTE_UPDATE = 4,
 }
 
 namespace SessionEventType {

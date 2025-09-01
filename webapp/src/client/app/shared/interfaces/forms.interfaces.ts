@@ -40,7 +40,7 @@ export interface VncFormDataInput {
   password: string;
   protocol: number;
   enableCursor: boolean;
-  enableExtendedClipboard: boolean;
+  enableExtendedClipboard?: boolean;
   ultraVirtualDisplay: boolean;
   enabledEncodings: Encoding[];
   wheelSpeedFactor: number;

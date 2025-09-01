@@ -31,6 +31,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
   };
 
   showMoreSettings = false;
+  showExtendedClipboardCheckbox = false;
   showAutoClipboardCheckbox = false;
 
   constructor(
@@ -91,6 +92,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
         error: (error) => console.error('Error fetching dropdown options', error),
       });
 
+    this.showExtendedClipboardCheckbox = !!(navigator.clipboard.read && navigator.clipboard.write);
     this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink';
   }
 

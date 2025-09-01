@@ -162,22 +162,25 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       return;
     }
 
-    this.clipboardActionButtons.push(
-      {
-        label: 'Save Clipboard',
-        tooltip: 'Copy received clipboard content to your local clipboard.',
-        icon: 'dvl-icon dvl-icon-save',
-        action: () => this.saveRemoteClipboard(),
-        enabled: () => this.saveRemoteClipboardButtonEnabled,
-      },
-      {
+    // We don't check for clipboard write support, as all recent browser versions support it.
+    this.clipboardActionButtons.push({
+      label: 'Save Clipboard',
+      tooltip: 'Copy received clipboard content to your local clipboard.',
+      icon: 'dvl-icon dvl-icon-save',
+      action: () => this.saveRemoteClipboard(),
+      enabled: () => this.saveRemoteClipboardButtonEnabled,
+    });
+
+    // Check if the browser supports reading local clipboard.
+    if (navigator.clipboard.readText) {
+      this.clipboardActionButtons.push({
         label: 'Send Clipboard',
         tooltip: 'Send your local clipboard content to the remote server.',
         icon: 'dvl-icon dvl-icon-send',
         action: () => this.sendClipboard(),
         enabled: () => true,
-      },
-    );
+      });
+    }
   }
 
   protected removeElement = new Subject();
@@ -575,6 +578,9 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
         case SessionEventType.ERROR:
           this.handleSessionError(event);
           break;
+        case SessionEventType.WARNING:
+          this.handleSessionWarning(event);
+          break;
         case SessionEventType.CLIPBOARD_REMOTE_UPDATE:
           this.saveRemoteClipboardButtonEnabled = true;
           break;
@@ -602,6 +608,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   private handleSessionError(event: SessionEvent): void {
     const errorMessage = super.getIronErrorMessage(event.data);
     this.webClientError(errorMessage);
+  }
+
+  private handleSessionWarning(event: SessionEvent): void {
+    const message = super.getIronErrorMessage(event.data);
+    this.webClientWarning(message);
   }
 
   private handleIronRDPConnectStarted(): void {
