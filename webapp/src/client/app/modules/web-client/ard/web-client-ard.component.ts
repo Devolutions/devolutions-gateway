@@ -347,7 +347,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       .pipe(
         takeUntil(this.destroyed$),
         catchError((_err) => {
-          // Ignore the error, we will handle it in the `onSessionEvent` handler.
+          // FIXME: refactor `remoteClient.connect` to return an actual error instead of a dummy
           return EMPTY;
         }),
       )
