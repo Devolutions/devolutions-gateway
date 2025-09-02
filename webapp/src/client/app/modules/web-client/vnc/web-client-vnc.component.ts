@@ -157,6 +157,11 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }[] = [];
 
   private setupClipboardHandling(): void {
+    // Clipboard API is available only in secure contexts (HTTPS).
+    if (!window.isSecureContext) {
+      return;
+    }
+
     if (this.formData.autoClipboard === true) {
       return;
     }
