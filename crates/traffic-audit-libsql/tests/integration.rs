@@ -701,3 +701,54 @@ async fn ack_only_deletes_correct_events() {
         "after lease expiry, acked events should NOT return"
     );
 }
+
+/// Protocol field should be correctly stored and retrieved.
+///
+/// This test catches regressions in the protocol field handling.
+///
+/// **Expected behavior**:
+/// - TCP events are stored and retrieved as TCP
+/// - UDP events are stored and retrieved as UDP
+/// - Protocol mapping functions work correctly in both directions
+#[tokio::test(flavor = "current_thread")]
+async fn protocol_field_correctly_preserved() {
+    let repo = open_repo(":memory:").await;
+
+    // Create a TCP event
+    let mut tcp_event = make_event(100);
+    tcp_event.protocol = TransportProtocol::Tcp;
+
+    // Create a UDP event
+    let mut udp_event = make_event(200);
+    udp_event.protocol = TransportProtocol::Udp;
+
+    // Push both events
+    repo.push(tcp_event.clone()).await.expect("push TCP event");
+    repo.push(udp_event.clone()).await.expect("push UDP event");
+
+    // Claim both events
+    let claimed = repo.claim("protocol_test", 60000, 10).await.expect("claim events");
+    assert_eq!(claimed.len(), 2, "should claim both events");
+
+    // Find the events by their distinctive bytes_tx values
+    let claimed_tcp = claimed
+        .iter()
+        .find(|e| e.event.bytes_tx == tcp_event.bytes_tx)
+        .expect("should find TCP event");
+    let claimed_udp = claimed
+        .iter()
+        .find(|e| e.event.bytes_tx == udp_event.bytes_tx)
+        .expect("should find UDP event");
+
+    // Verify protocols are preserved correctly
+    assert_eq!(
+        claimed_tcp.event.protocol,
+        TransportProtocol::Tcp,
+        "TCP event should be stored and retrieved as TCP"
+    );
+    assert_eq!(
+        claimed_udp.event.protocol,
+        TransportProtocol::Udp,
+        "UDP event should be stored and retrieved as UDP"
+    );
+}
