@@ -92,8 +92,9 @@ export class VncFormComponent extends BaseComponent implements OnInit {
         error: (error) => console.error('Error fetching dropdown options', error),
       });
 
-    this.showExtendedClipboardCheckbox = !!(navigator.clipboard.read && navigator.clipboard.write);
-    this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink';
+    this.showExtendedClipboardCheckbox =
+      !!(navigator.clipboard.read && navigator.clipboard.write) && window.isSecureContext;
+    this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink' && window.isSecureContext;
   }
 
   private subscribeToAuthModeChanges(): void {

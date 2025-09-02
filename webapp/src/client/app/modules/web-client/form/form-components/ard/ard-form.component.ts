@@ -22,7 +22,7 @@ export class ArdFormComponent extends BaseComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink';
+    this.showAutoClipboardCheckbox = new UAParser().getEngine().name === 'Blink' && window.isSecureContext;
   }
 
   toggleMoreSettings(event: Event): void {

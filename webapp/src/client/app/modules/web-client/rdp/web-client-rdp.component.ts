@@ -151,6 +151,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }[] = [];
 
   private setupClipboardHandling(): void {
+    // Clipboard API is available only in secure contexts (HTTPS).
+    if (!window.isSecureContext) {
+      return;
+    }
+
     let autoClipboardMode: boolean;
 
     // If the user connects to the session via URL.
