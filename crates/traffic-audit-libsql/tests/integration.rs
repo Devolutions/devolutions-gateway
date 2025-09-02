@@ -198,8 +198,8 @@ async fn claim_all_in_batches(
 ///
 /// **Expected behavior**:
 /// - Push 5 events
-/// - Consumer c1 claims with short lease (100ms)
-/// - Sleep 150ms to expire lease
+/// - Consumer c1 claims with short lease (10ms)
+/// - Sleep 50ms to expire lease
 /// - Consumer c2 should be able to claim the same events
 #[tokio::test(flavor = "current_thread")]
 async fn lease_expiry_reclaim() {
@@ -211,11 +211,11 @@ async fn lease_expiry_reclaim() {
     }
 
     // Consumer 1 claims with short lease.
-    let claimed1 = repo.claim("c1", 100, 10).await.expect("c1 claim");
+    let claimed1 = repo.claim("c1", 10, 10).await.expect("c1 claim");
     assert_eq!(claimed1.len(), 5, "c1 should claim all 5 events");
 
     // Sleep to expire lease.
-    sleep(Duration::from_millis(150)).await;
+    sleep(Duration::from_millis(50)).await;
 
     // Consumer 2 should now be able to claim the same events.
     let claimed2 = repo.claim("c2", 30_000, 10).await.expect("c2 claim");
