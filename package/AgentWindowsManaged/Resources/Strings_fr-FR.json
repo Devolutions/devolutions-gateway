@@ -17,6 +17,14 @@
         {
           "id": "ProductDescription",
           "text": "Service à l’échelle du système pour étendre les fonctionnalités de Devolutions Gateway."
+        },
+        {
+          "id": "FeatureSessionName",
+          "text": "Extension RDP"
+        },
+        {
+          "id": "FeatureSessionDescription",
+          "text": "Installe l'extension RDP"
         }
       ],
       "messages": [

@@ -432,6 +432,7 @@ internal class Program
         if (installedVersion is null)
         {
             features.Add(Features.AGENT_UPDATER_FEATURE.Id);
+            features.Add(Features.SESSION_FEATURE.Id);
         }
 
         e.Session["ADDLOCAL"] = features.ToString();
