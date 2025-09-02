@@ -15,7 +15,7 @@ public partial class FeaturesDialog : AgentDialog
 {
     private FeatureItem[] features;
 
-    private ImageList imageList = new ImageList();
+    private readonly ImageList imageList = new ImageList();
 
     public FeaturesDialog()
     {

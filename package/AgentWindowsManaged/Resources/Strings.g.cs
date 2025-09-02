@@ -29,7 +29,7 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeatureAgentName = "FeatureAgentName";		
 		/// <summary>
-		/// Install the Devolutions Agent service
+		/// Installs the Devolutions Agent service
 		/// </summary>
 		public const string FeatureAgentDescription = "FeatureAgentDescription";		
 		/// <summary>
@@ -37,7 +37,7 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeatureAgentUpdaterName = "FeatureAgentUpdaterName";		
 		/// <summary>
-		/// Enable the Devolutions Gateway updater
+		/// Enables the Devolutions Gateway updater
 		/// </summary>
 		public const string FeatureAgentUpdaterDescription = "FeatureAgentUpdaterDescription";		
 		/// <summary>
@@ -45,15 +45,15 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeaturePedmName = "FeaturePedmName";		
 		/// <summary>
-		/// Enable PEDM features and install the shell extension
+		/// Enables PEDM features and installs the shell extension
 		/// </summary>
 		public const string FeaturePedmDescription = "FeaturePedmDescription";		
 		/// <summary>
-		/// Devolutions Session
+		/// RDP Extension
 		/// </summary>
 		public const string FeatureSessionName = "FeatureSessionName";		
 		/// <summary>
-		/// Install the Devolutions Session application
+		/// Installs the RDP Extension
 		/// </summary>
 		public const string FeatureSessionDescription = "FeatureSessionDescription";		
 		/// <summary>

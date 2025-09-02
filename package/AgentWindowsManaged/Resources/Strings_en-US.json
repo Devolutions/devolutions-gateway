@@ -24,7 +24,7 @@
         },
         {
           "id": "FeatureAgentDescription",
-          "text": "Install the Devolutions Agent service"
+          "text": "Installs the Devolutions Agent service"
         },
         {
           "id": "FeatureAgentUpdaterName",
@@ -32,7 +32,7 @@
         },
         {
           "id": "FeatureAgentUpdaterDescription",
-          "text": "Enable the Devolutions Gateway updater"
+          "text": "Enables the Devolutions Gateway updater"
         },
         {
           "id": "FeaturePedmName",
@@ -40,15 +40,15 @@
         },
         {
           "id": "FeaturePedmDescription",
-          "text": "Enable PEDM features and install the shell extension"
+          "text": "Enables PEDM features and installs the shell extension"
         },
         {
           "id": "FeatureSessionName",
-          "text": "Devolutions Session"
+          "text": "RDP Extension"
         },
         {
           "id": "FeatureSessionDescription",
-          "text": "Install the Devolutions Session application"
+          "text": "Installs the RDP Extension"
         }
       ],
       "messages": [

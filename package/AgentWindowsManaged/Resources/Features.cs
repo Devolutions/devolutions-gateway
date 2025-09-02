@@ -10,7 +10,7 @@ namespace DevolutionsAgent.Resources
     {
         internal const string FEATURE_ID_PREFIX = "F.";
 
-        internal static IEnumerable<Feature> ExperimentalFeatures => [ SESSION_FEATURE ];
+        internal static IEnumerable<Feature> ExperimentalFeatures => [ ];
 
         internal static Feature AGENT_UPDATER_FEATURE = new("!(loc.FeatureAgentUpdaterName)", "!(loc.FeatureAgentUpdaterDescription)", true, true)
         {
@@ -29,7 +29,7 @@ namespace DevolutionsAgent.Resources
             Id = $"{FEATURE_ID_PREFIX}Pedm"
         };
 
-        internal static Feature SESSION_FEATURE = new("!(loc.FeatureSessionName)", "!(loc.FeatureSessionDescription)", false)
+        internal static Feature SESSION_FEATURE = new("!(loc.FeatureSessionName)", "!(loc.FeatureSessionDescription)", true)
         {
             Id = $"{FEATURE_ID_PREFIX}Session"
         };

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <WixLocalization Culture="en-us" Codepage="1252" Language="1033" xmlns="http://schemas.microsoft.com/wix/2006/localization">
         <!-- metadata -->
-                <String Id="FeatureAgentDescription">Install the Devolutions Agent service</String>
+                <String Id="FeatureAgentDescription">Installs the Devolutions Agent service</String>
                 <String Id="FeatureAgentName">Devolutions Agent</String>
-                <String Id="FeatureAgentUpdaterDescription">Enable the Devolutions Gateway updater</String>
+                <String Id="FeatureAgentUpdaterDescription">Enables the Devolutions Gateway updater</String>
                 <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
-                <String Id="FeaturePedmDescription">Enable PEDM features and install the shell extension</String>
+                <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
-                <String Id="FeatureSessionDescription">Install the Devolutions Session application</String>
-                <String Id="FeatureSessionName">Devolutions Session</String>
+                <String Id="FeatureSessionDescription">Installs the RDP Extension</String>
+                <String Id="FeatureSessionName">RDP Extension</String>
                 <String Id="Language">1033</String>
                 <String Id="ProductDescription">System-wide service for extending Devolutions Gateway functionality.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
