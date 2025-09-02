@@ -236,11 +236,11 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
     async fn claim(
         &self,
         consumer_id: &str,
-        lease_duration_ms: i64,
+        lease_duration_ms: u32,
         limit: usize,
     ) -> anyhow::Result<Vec<ClaimedEvent>> {
         let now = now_ms();
-        let lock_until = now + lease_duration_ms;
+        let lock_until = now + i64::from(lease_duration_ms);
 
         trace!(consumer_id, lease_duration_ms, limit, "Starting claim operation");
 
@@ -398,10 +398,10 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
         Ok(claimed_events)
     }
 
-    async fn ack(&self, ids: &[i64]) -> anyhow::Result<()> {
+    async fn ack(&self, ids: &[i64]) -> anyhow::Result<u64> {
         if ids.is_empty() {
             trace!("No IDs to acknowledge");
-            return Ok(());
+            return Ok(0);
         }
 
         trace!(ids = ?ids, "Acknowledging events");
@@ -429,7 +429,8 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
                     requested_ids = ids.len(),
                     "Successfully acknowledged events"
                 );
-                Ok(())
+
+                Ok(deleted_count)
             }
             Err(e) => {
                 // Rollback on error

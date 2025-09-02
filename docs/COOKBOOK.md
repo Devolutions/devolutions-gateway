@@ -6,7 +6,9 @@ Developer-oriented cookbook for testing purposes.
 - [WebSocket-to-TCP tunnel using jetsocat](#websocket-to-tcp-tunnel-using-jetsocat)
 - [Standalone web application custom authentication](#standalone-web-application-custom-authentication)
 - [Preflight API](#preflight-api)
+- [Network monitoring API](#network-monitoring-api)
 - [Proxy-based credentials injection for RDP](#proxy-based-credentials-injection-for-rdp)
+- [Traffic Audit API](#traffic-audit-api)
 
 ## RDP routing
 
@@ -345,4 +347,100 @@ You may also add the option `/cert:ignore` if the certificate you configured is 
 ### Demo
 
 [proxy-based-credentials-injection-prototype.webm](https://github.com/user-attachments/assets/d5380053-810d-4529-b3f9-1ed84c2d77c4)
+
+## Traffic Audit API
+
+The Traffic Audit API provides endpoints to claim and acknowledge traffic events for external processing.
+This enables integration with external auditing and compliance systems.
+
+### Overview
+
+The traffic audit system uses a lease-based claim/acknowledgment pattern:
+
+1. **Claim** events with a lease duration to prevent concurrent processing
+2. **Process** the events in your external system
+3. **Acknowledge** the events to remove them from the queue
+
+### Authentication
+
+Both endpoints require a SCOPE token with appropriate scopes:
+- `/jet/traffic/claim` requires `gateway.traffic.claim` or `*` scope
+- `/jet/traffic/ack` requires `gateway.traffic.ack` or `*` scope
+
+Use `tokengen`:
+
+```shell
+tokengen --provisioner-key <path/to/provisioner.key> scope 'gateway.traffic.claim'
+tokengen --provisioner-key <path/to/provisioner.key> scope 'gateway.traffic.ack'
+```
+
+Or alternatively, the `New-DGatewayToken` cmdlet:
+
+```pwsh
+New-DGatewayToken -Type SCOPE -Scope 'gateway.traffic.claim'
+New-DGatewayToken -Type SCOPE -Scope 'gateway.traffic.ack'
+```
+
+### Claiming Traffic Events
+
+Claim up to a specified number of traffic events with a lease duration.
+
+```bash
+# Basic claim request (uses defaults: lease_ms=300000, max=100)
+curl -X POST "https://gateway.example.com/jet/traffic/claim" \
+  -H "Authorization: Bearer <TOKEN>"
+
+# Claim with custom parameters
+curl -X POST "https://gateway.example.com/jet/traffic/claim?lease_ms=60000&max=50" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Query Parameters:**
+- `lease_ms` (optional): Lease duration in milliseconds (1000-3600000, default: 300000 = 5 minutes)
+- `max` (optional): Maximum number of events to claim (1-1000, default: 100)
+
+**Response:**
+```json
+[
+  {
+    "id": 123,
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "outcome": "normal_termination",
+    "protocol": "tcp",
+    "target_host": "example.com",
+    "target_ip": "192.168.1.100",
+    "target_port": 80,
+    "connect_at_ms": 1672531200000,
+    "disconnect_at_ms": 1672531260000,
+    "active_duration_ms": 60000,
+    "bytes_tx": 1024,
+    "bytes_rx": 2048
+  }
+]
+```
+
+### Acknowledging Traffic Events
+
+Acknowledge processed events to remove them from the queue.
+
+```bash
+# Acknowledge specific event IDs
+curl -X POST "https://gateway.example.com/jet/traffic/ack" \
+  -H "Authorization: Bearer <TOKEN>" \
+  --json '{"ids": [123, 124, 125]}'
+```
+
+**Response:**
+```json
+{
+  "deleted_count": 3
+}
+```
+
+### Notes
+
+- Events are returned in ascending ID order
+- Claimed events are locked for the specified lease duration
+- If not acknowledged before lease expiry, events become available for reclaiming
+- Events are permanently deleted after acknowledgment (no retention)
 

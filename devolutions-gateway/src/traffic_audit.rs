@@ -24,13 +24,13 @@ pub enum TrafficAuditMessage {
     },
     Claim {
         consumer_id: String,
-        lease_duration_ms: i64,
+        lease_duration_ms: u32,
         max_events: usize,
         channel: oneshot::Sender<anyhow::Result<Vec<ClaimedEvent>>>,
     },
     Ack {
         ids: Vec<i64>,
-        channel: oneshot::Sender<anyhow::Result<()>>,
+        channel: oneshot::Sender<anyhow::Result<u64>>,
     },
 }
 
@@ -87,7 +87,7 @@ impl TrafficAuditHandle {
     pub async fn claim(
         &self,
         consumer_id: impl Into<String>,
-        lease_duration_ms: i64,
+        lease_duration_ms: u32,
         max_events: usize,
     ) -> anyhow::Result<Vec<ClaimedEvent>> {
         let (tx, rx) = oneshot::channel();
@@ -107,7 +107,7 @@ impl TrafficAuditHandle {
     }
 
     /// Acknowledge processing of claimed traffic events
-    pub async fn ack(&self, ids: Vec<i64>) -> anyhow::Result<()> {
+    pub async fn ack(&self, ids: Vec<i64>) -> anyhow::Result<u64> {
         let (tx, rx) = oneshot::channel();
 
         self.0

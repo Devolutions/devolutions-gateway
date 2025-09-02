@@ -451,6 +451,10 @@ pub enum AccessScope {
     Update,
     #[serde(rename = "gateway.preflight")]
     Preflight,
+    #[serde(rename = "gateway.traffic.claim")]
+    TrafficClaim,
+    #[serde(rename = "gateway.traffic.ack")]
+    TrafficAck,
 }
 
 #[derive(Clone, Deserialize)]
