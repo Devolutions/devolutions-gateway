@@ -480,7 +480,7 @@ async fn concurrent_claim_stress_exactly_once() {
 /// Basic throughput sanity check with 10k events.
 ///
 /// **Expected behavior**:
-/// - Process 10,000 events in reasonable time (< 30 seconds)
+/// - Process 10,000 events in reasonable time (< 5 seconds)
 /// - All events should be processed without errors
 /// - Memory usage should remain reasonable
 #[tokio::test(flavor = "current_thread")]
@@ -526,8 +526,8 @@ async fn throughput_10k_events_sanity_check() {
 
     // Sanity check: should complete in reasonable time.
     assert!(
-        total_elapsed.as_secs() < 30,
-        "throughput test should complete within 30 seconds"
+        total_elapsed.as_secs() < 5,
+        "throughput test should complete within 5 seconds"
     );
 }
 
