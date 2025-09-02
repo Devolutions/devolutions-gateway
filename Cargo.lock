@@ -1254,6 +1254,8 @@ dependencies = [
  "tracing",
  "tracing-cov-mark",
  "tracing-subscriber",
+ "traffic-audit",
+ "traffic-audit-libsql",
  "transport",
  "tungstenite",
  "typed-builder",
@@ -6721,6 +6723,29 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "traffic-audit"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "uuid",
+]
+
+[[package]]
+name = "traffic-audit-libsql"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "libsql",
+ "tempfile",
+ "tokio 1.46.1",
+ "tracing",
+ "traffic-audit",
+ "uuid",
 ]
 
 [[package]]

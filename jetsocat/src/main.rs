@@ -417,7 +417,7 @@ impl CommonArgs {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .context("couldn't retrieve duration since UNIX epoch")?;
+                .expect("now after UNIX_EPOCH");
             filepath.push("jetsocat");
             std::fs::create_dir_all(&filepath).context("couldn't create jetsocat folder")?;
             filepath.push(format!("{}_{}", action, now.as_secs()));

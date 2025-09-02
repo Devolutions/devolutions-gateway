@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{JmuxTokenClaims, RecordingPolicy};
+use crate::traffic_audit::TrafficAuditHandle;
 
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
@@ -17,6 +18,7 @@ pub async fn handle(
     claims: JmuxTokenClaims,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
+    traffic_audit_handle: TrafficAuditHandle,
 ) -> anyhow::Result<()> {
     match claims.jet_rec {
         RecordingPolicy::None | RecordingPolicy::Stream => (),
@@ -48,21 +50,64 @@ pub async fn handle(
 
     crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, Arc::clone(&notify_kill), None).await?;
 
+    let traffic_event_callback = move |event: jmux_proxy::TrafficEvent| {
+        let traffic_audit_handle = traffic_audit_handle.clone();
+
+        tokio::spawn(async move {
+            use std::time::UNIX_EPOCH;
+
+            let outcome = match event.outcome {
+                jmux_proxy::EventOutcome::ConnectFailure => traffic_audit::EventOutcome::ConnectFailure,
+                jmux_proxy::EventOutcome::AbnormalTermination => traffic_audit::EventOutcome::AbnormalTermination,
+                jmux_proxy::EventOutcome::NormalTermination => traffic_audit::EventOutcome::NormalTermination,
+            };
+
+            let protocol = match event.protocol {
+                jmux_proxy::TransportProtocol::Tcp => traffic_audit::TransportProtocol::Tcp,
+                jmux_proxy::TransportProtocol::Udp => traffic_audit::TransportProtocol::Udp,
+            };
+
+            let connect_at_ms = i64::try_from(
+                event
+                    .connect_at
+                    .duration_since(UNIX_EPOCH)
+                    .expect("after UNIX_EPOCH")
+                    .as_millis(),
+            )
+            .expect("u128-to-i64");
+
+            let disconnect_at_ms = i64::try_from(
+                event
+                    .disconnect_at
+                    .duration_since(UNIX_EPOCH)
+                    .expect("after UNIX_EPOCH")
+                    .as_millis(),
+            )
+            .expect("u128-to-i64");
+
+            let active_duration_ms = i64::try_from(event.active_duration.as_millis()).expect("u128-to-i64");
+
+            let _ = traffic_audit_handle
+                .push(traffic_audit::TrafficEvent {
+                    session_id,
+                    outcome,
+                    protocol,
+                    target_host: event.target_host,
+                    target_ip: event.target_ip,
+                    target_port: event.target_port,
+                    connect_at_ms,
+                    disconnect_at_ms,
+                    active_duration_ms,
+                    bytes_tx: event.bytes_tx,
+                    bytes_rx: event.bytes_rx,
+                })
+                .await;
+        });
+    };
+
     let proxy_fut = JmuxProxy::new(reader, writer)
         .with_config(config)
-        .with_outgoing_traffic_event_callback(|event| {
-            debug!(
-                outcome = ?event.outcome,
-                protocol = ?event.protocol,
-                %event.target_host,
-                %event.target_ip,
-                %event.target_port,
-                bytes_tx = event.bytes_tx,
-                bytes_rx = event.bytes_rx,
-                duration_ms = event.active_duration.as_millis(),
-                "outgoing traffic audit event"
-            );
-        })
+        .with_outgoing_traffic_event_callback(traffic_event_callback)
         .run();
     let proxy_handle = ChildTask::spawn(proxy_fut);
     let join_fut = proxy_handle.join();

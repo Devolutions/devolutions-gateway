@@ -232,15 +232,27 @@ impl Tasks {
 async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let conf = conf_handle.get_conf();
 
-    let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
-    let jrl = load_jrl_from_disk(&conf)?;
-    let (session_manager_handle, session_manager_rx) = session_manager_channel();
-    let (recording_manager_handle, recording_manager_rx) = recording_message_channel();
-    let (subscriber_tx, subscriber_rx) = subscriber_channel();
     let mut tasks = Tasks::new();
+
+    let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
+
+    let jrl = load_jrl_from_disk(&conf)?;
+
+    let (session_manager_handle, session_manager_rx) = session_manager_channel();
+
+    let (recording_manager_handle, recording_manager_rx) = recording_message_channel();
+
+    let (subscriber_tx, subscriber_rx) = subscriber_channel();
+
     let job_queue_ctx = devolutions_gateway::job_queue::JobQueueCtx::init(conf.job_queue_database.as_std_path())
         .await
         .context("failed to initialize job queue context")?;
+
+    let traffic_audit_task =
+        devolutions_gateway::traffic_audit::TrafficAuditManagerTask::init(conf.traffic_audit_database.as_str())
+            .await
+            .context("failed to initialize traffic audit manager")?;
+
     let credential_store = CredentialStoreHandle::new();
 
     let filesystem_monitor_config_cache = devolutions_gateway::api::monitoring::FilesystemConfigCache::new(
@@ -259,6 +271,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         job_queue_handle: job_queue_ctx.job_queue_handle.clone(),
         credential_store: credential_store.clone(),
         monitoring_state,
+        traffic_audit_handle: traffic_audit_task.handle(),
     };
 
     conf.listeners
@@ -320,8 +333,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     ));
 
     tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
-
     tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
+
+    tasks.register(traffic_audit_task);
 
     Ok(tasks)
 }

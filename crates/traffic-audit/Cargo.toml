@@ -1,0 +1,14 @@
+[package]
+name = "traffic-audit"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+uuid = { version = "1.17", features = ["v4"] }
