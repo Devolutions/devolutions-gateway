@@ -23,7 +23,10 @@ pub fn make_router<S>(state: crate::DgwState) -> Router<S> {
     operation_id = "ClaimTrafficEvents",
     tag = "Traffic",
     path = "/jet/traffic/claim",
-    params(ClaimQuery),
+    params(
+        ("lease_ms" = u32, Query, description = "Lease duration in milliseconds (1000-3600000, default: 300000 = 5 minutes)"),
+        ("max" = usize, Query, description = "Maximum number of events to claim (1-1000, default: 100)"),
+    ),
     responses(
         (status = 200, description = "Successfully claimed traffic events", body = Vec<ClaimedTrafficEvent>),
         (status = 400, description = "Invalid query parameters"),
@@ -33,7 +36,7 @@ pub fn make_router<S>(state: crate::DgwState) -> Router<S> {
     ),
     security(("scope_token" = ["gateway.traffic.claim"])),
 ))]
-pub async fn post_traffic_claim(
+pub(crate) async fn post_traffic_claim(
     _scope: TrafficClaimScope,
     State(state): State<crate::DgwState>,
     Query(q): Query<ClaimQuery>,
@@ -92,7 +95,7 @@ pub async fn post_traffic_claim(
     ),
     security(("scope_token" = ["gateway.traffic.ack"])),
 ))]
-pub async fn post_traffic_ack(
+pub(crate) async fn post_traffic_ack(
     _scope: TrafficAckScope,
     State(state): State<crate::DgwState>,
     Json(req): Json<AckRequest>,
@@ -116,15 +119,14 @@ pub async fn post_traffic_ack(
     Ok(Json(AckResponse { deleted_count }))
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
-pub struct ClaimQuery {
+pub(crate) struct ClaimQuery {
     /// Lease duration in milliseconds (1000-3600000, default: 300000 = 5 minutes)
     #[serde(default = "default_lease_ms")]
-    pub lease_ms: u32,
+    lease_ms: u32,
     /// Maximum number of events to claim (1-1000, default: 100)
     #[serde(default = "default_max")]
-    pub max: usize,
+    max: usize,
 }
 
 fn default_lease_ms() -> u32 {
@@ -137,59 +139,59 @@ fn default_max() -> usize {
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
-pub struct AckRequest {
+pub(crate) struct AckRequest {
     /// Array of event IDs to acknowledge (1-10000 items)
-    pub ids: Vec<i64>,
+    ids: Vec<i64>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
-pub struct AckResponse {
+pub(crate) struct AckResponse {
     /// Number of events that were acknowledged and deleted
-    pub deleted_count: u64,
+    deleted_count: u64,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
-pub struct ClaimedTrafficEvent {
+pub(crate) struct ClaimedTrafficEvent {
     /// Database ID of the claimed event (used for acknowledgment)
-    pub id: i64,
+    id: i64,
     /// Traffic event data
     #[serde(flatten)]
-    pub event: TrafficEventResponse,
+    event: TrafficEventResponse,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
-pub struct TrafficEventResponse {
+pub(crate) struct TrafficEventResponse {
     /// Unique identifier for the session/tunnel this traffic item belongs to
-    pub session_id: Uuid,
+    session_id: Uuid,
     /// Classification of how the traffic item lifecycle ended
-    pub outcome: EventOutcomeResponse,
+    outcome: EventOutcomeResponse,
     /// Transport protocol used for the connection attempt
-    pub protocol: TransportProtocolResponse,
+    protocol: TransportProtocolResponse,
     /// Original target host string before DNS resolution
-    pub target_host: String,
+    target_host: String,
     /// Concrete target IP address after resolution
-    pub target_ip: IpAddr,
+    target_ip: IpAddr,
     /// Target port number for the connection
-    pub target_port: u16,
+    target_port: u16,
     /// Timestamp when the connection attempt began (epoch milliseconds)
-    pub connect_at_ms: i64,
+    connect_at_ms: i64,
     /// Timestamp when the traffic item was closed or connection failed (epoch milliseconds)
-    pub disconnect_at_ms: i64,
+    disconnect_at_ms: i64,
     /// Total duration the traffic item was active (milliseconds)
-    pub active_duration_ms: i64,
+    active_duration_ms: i64,
     /// Total bytes transmitted to the remote peer
-    pub bytes_tx: u64,
+    bytes_tx: u64,
     /// Total bytes received from the remote peer
-    pub bytes_rx: u64,
+    bytes_rx: u64,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EventOutcomeResponse {
+pub(crate) enum EventOutcomeResponse {
     /// Could not establish a transport to a concrete socket address
     ConnectFailure,
     /// Data path was established and the traffic item ended cleanly
@@ -211,7 +213,7 @@ impl From<EventOutcome> for EventOutcomeResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransportProtocolResponse {
+pub(crate) enum TransportProtocolResponse {
     /// Transmission Control Protocol
     Tcp,
     /// User Datagram Protocol  
