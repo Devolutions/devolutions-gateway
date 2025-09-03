@@ -71,6 +71,61 @@ namespace Devolutions.Agent.Desktop.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized resource of type System.Byte[].
+        /// </summary>
+        internal static byte[] devolutions_agent_icon_shadow {
+            get {
+                object obj = ResourceManager.GetObject("devolutions-agent-icon-shadow", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to About.
+        /// </summary>
+        internal static string lblAbout {
+            get {
+                return ResourceManager.GetString("lblAbout", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Copyright.
+        /// </summary>
+        internal static string lblCopyright {
+            get {
+                return ResourceManager.GetString("lblCopyright", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Devolutions Agent.
+        /// </summary>
+        internal static string lblProductName {
+            get {
+                return ResourceManager.GetString("lblProductName", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Devolutions Inc..
+        /// </summary>
+        internal static string lblVendor {
+            get {
+                return ResourceManager.GetString("lblVendor", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to About.
+        /// </summary>
+        internal static string mnuAbout {
+            get {
+                return ResourceManager.GetString("mnuAbout", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Exit.
         /// </summary>
         internal static string mnuExit {

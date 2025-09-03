@@ -123,7 +123,7 @@ namespace Devolutions.Agent.Desktop
             {
                 Icon = Resources.AppIcon,
                 ContextMenu = contextMenu,
-                Text = $"Devolutions Agent v{version.Major}.{version.Minor}.{version.Build}",
+                Text = $"{Resources.lblProductName} v{version.Major}.{version.Minor}.{version.Build}",
                 Visible = true,
             };
         }
@@ -131,6 +131,14 @@ namespace Devolutions.Agent.Desktop
         private void ContextMenuOnPopup(object sender, EventArgs e)
         {
             this.contextMenu.MenuItems.Clear();
+
+            this.contextMenu.MenuItems.Add(Resources.mnuAbout, (_, _) =>
+            {
+                using About aboutWindow = new();
+                aboutWindow.ShowDialog();
+            });
+
+            this.contextMenu.MenuItems.Add(new MenuItem("-"));
 
             if (Client.Available)
             {
@@ -184,6 +192,7 @@ namespace Devolutions.Agent.Desktop
                 this.contextMenu.MenuItems.Add(new MenuItem(Resources.mnuServiceUnavailable) { Enabled = false });
             }
 
+            this.contextMenu.MenuItems.Add(new MenuItem("-"));
             this.contextMenu.MenuItems.Add(new MenuItem(Resources.mnuExit, OnExit_Click));
         }
 
