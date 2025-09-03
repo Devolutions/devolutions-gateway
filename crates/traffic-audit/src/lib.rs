@@ -99,14 +99,14 @@ pub trait TrafficAuditRepo: Send + Sync {
     /// * `consumer_id` - Unique identifier for this consumer instance
     /// * `lease_duration_ms` - How long to hold the lease (milliseconds)
     /// * `limit` - Maximum number of events to claim
-    async fn claim(&self, consumer_id: &str, lease_duration_ms: i64, limit: usize)
+    async fn claim(&self, consumer_id: &str, lease_duration_ms: u32, limit: usize)
     -> anyhow::Result<Vec<ClaimedEvent>>;
 
     /// Acknowledges processing completion and removes events from the repository.
     ///
     /// Events are permanently deleted after acknowledgment as we don't retain
-    /// audit data after forwarding. This operation should be idempotent.
-    async fn ack(&self, ids: &[i64]) -> anyhow::Result<()>;
+    /// audit data after forwarding.
+    async fn ack(&self, ids: &[i64]) -> anyhow::Result<u64>;
 
     /// Extends the lease on claimed events to prevent timeout.
     ///

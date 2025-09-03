@@ -109,7 +109,8 @@ async fn push_then_claim_then_ack_happy_path() {
 
     // Ack all events.
     let ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
-    repo.ack(&ids).await.expect("ack events");
+    let n_acked = repo.ack(&ids).await.expect("ack events");
+    assert_eq!(ids.len() as u64, n_acked);
 
     // Subsequent claim should return nothing.
     let claimed2 = repo.claim("t2", 30_000, 10).await.expect("second claim");
@@ -167,7 +168,7 @@ async fn concurrent_claimers_get_disjoint_sets() {
 async fn claim_all_in_batches(
     repo: LibSqlTrafficAuditRepo,
     consumer_id: &str,
-    lease_ms: i64,
+    lease_ms: u32,
     batch_size: usize,
 ) -> Vec<i64> {
     let mut all_ids = Vec::new();
@@ -677,7 +678,8 @@ async fn ack_only_deletes_correct_events() {
     ids_to_ack.push(88888); // Another non-existent ID
 
     // Ack should work (be safe with non-existent IDs)
-    repo.ack(&ids_to_ack).await.expect("ack with mixed IDs should be safe");
+    let n_acked = repo.ack(&ids_to_ack).await.expect("ack with mixed IDs should be safe");
+    assert_eq!(n_acked, 3); // The non-existent IDs should be ignored.
 
     // Immediately after ack, claimed events still aren't claimable (lease hasn't expired)
     let immediate_remaining = repo.claim("consumer2", 300_000, 10).await.expect("immediate claim");

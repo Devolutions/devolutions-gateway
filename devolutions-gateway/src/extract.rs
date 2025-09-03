@@ -316,6 +316,42 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct TrafficClaimScope;
+
+impl<S> FromRequestParts<S> for TrafficClaimScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::TrafficClaim => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct TrafficAckScope;
+
+impl<S> FromRequestParts<S> for TrafficAckScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::TrafficAck => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WebAppToken(pub WebAppTokenClaims);
 
