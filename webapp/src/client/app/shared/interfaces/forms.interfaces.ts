@@ -40,6 +40,7 @@ export interface VncFormDataInput {
   password: string;
   protocol: number;
   enableCursor: boolean;
+  // The extended clipboard control may not be initialized if the browser does not support the clipboard API.
   enableExtendedClipboard?: boolean;
   ultraVirtualDisplay: boolean;
   enabledEncodings: Encoding[];
