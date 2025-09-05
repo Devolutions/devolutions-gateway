@@ -6,9 +6,9 @@ use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Threading::{
     CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CreateProcessW, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION,
-    STARTF_USESTDHANDLES, STARTUPINFOW, WaitForMultipleObjects,
+    STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOW, WaitForMultipleObjects,
 };
-use windows::Win32::UI::WindowsAndMessaging::WM_QUIT;
+use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
 use windows::core::PCWSTR;
 
 use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
@@ -657,7 +657,8 @@ fn prepare_process_with_io_redirection(
 
     let startup_info = STARTUPINFOW {
         cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
-        dwFlags: STARTF_USESTDHANDLES,
+        dwFlags: STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW,
+        wShowWindow: SW_HIDE.0 as u16,
         hStdError: stderr_write_pipe.handle.raw(),
         hStdInput: stdin_read_pipe.handle.raw(),
         hStdOutput: stdout_write_pipe.handle.raw(),
