@@ -34,6 +34,7 @@ import {
   enableCursor,
   enabledEncodings,
   enableExtendedClipboard,
+  pixelFormat,
   ultraVirtualDisplay,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
@@ -450,6 +451,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       enableCursor,
       enableExtendedClipboard,
       enabledEncodings,
+      colorFormat,
       ultraVirtualDisplay,
       wheelSpeedFactor = 1,
     } = formData;
@@ -471,6 +473,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       screenSize: desktopScreenSize,
       sessionId,
       enabledEncodings: enabledEncodings.join(','),
+      colorFormat,
       enableCursor,
       enableExtendedClipboard: enableExtendedClipboard ?? false,
       ultraVirtualDisplay,
@@ -518,6 +521,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       configBuilder.withExtension(enabledEncodings(connectionParameters.enabledEncodings));
     } else {
       configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
+    }
+
+    if (connectionParameters.colorFormat) {
+      configBuilder.withExtension(pixelFormat(connectionParameters.colorFormat));
     }
 
     const config = configBuilder.build();

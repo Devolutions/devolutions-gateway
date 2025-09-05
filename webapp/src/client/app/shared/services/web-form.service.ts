@@ -1,9 +1,11 @@
 import { ChangeDetectorRef, Injectable } from '@angular/core';
 import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms';
 import { BaseComponent } from '@shared/bases/base.component';
+import { ColorFormat } from '@shared/enums/color-format.enum';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { WebClientAuthMode } from '@shared/enums/web-client-auth-mode.enum';
 import { WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
+import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
 import { SelectItem } from 'primeng/api';
 import { Observable, of } from 'rxjs';
 import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
@@ -44,6 +46,10 @@ export class WebFormService extends BaseComponent {
 
   getArdQualityModeOptions(): SelectItem[] {
     return ArdQualityMode.getSelectItems();
+  }
+
+  getColorFormatOptions(): SelectItemWithTooltip[] {
+    return ColorFormat.getSelectItems();
   }
 
   getSupportedEncodings(): SelectItem[] {
