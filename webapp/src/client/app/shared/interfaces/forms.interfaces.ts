@@ -1,3 +1,4 @@
+import { ColorFormat } from '@shared/enums/color-format.enum';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
 import { Encoding } from '../enums/encoding.enum';
@@ -44,6 +45,7 @@ export interface VncFormDataInput {
   enableExtendedClipboard?: boolean;
   ultraVirtualDisplay: boolean;
   enabledEncodings: Encoding[];
+  colorFormat: ColorFormat;
   wheelSpeedFactor: number;
   screenSize: ScreenSize;
   autoClipboard?: boolean;
