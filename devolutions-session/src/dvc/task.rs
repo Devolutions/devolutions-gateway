@@ -581,7 +581,9 @@ impl MessageProcessor {
         let tmp_file = TmpFileGuard::new("bat")?;
         tmp_file.write_content(batch_msg.command())?;
 
-        let parameters = format!("/c \"{}\"", tmp_file.path_string());
+        // "/Q" - Turns command echo off.
+        // "/C" - Carries out the command specified by string and then terminates.
+        let parameters = format!("/Q /C \"{}\"", tmp_file.path_string());
 
         let mut run_batch = WinApiProcessBuilder::new("cmd.exe")
             .with_temp_file(tmp_file)
@@ -610,6 +612,7 @@ impl MessageProcessor {
 
         append_ps_args(&mut params, &winps_msg);
 
+        // "-Command" runs script without command echo and terminates.
         params.push("-Command".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
@@ -642,6 +645,7 @@ impl MessageProcessor {
 
         append_pwsh_args(&mut params, &winps_msg);
 
+        // "-Command" runs script without command echo and terminates.
         params.push("-Command".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
