@@ -610,7 +610,7 @@ impl MessageProcessor {
 
         append_ps_args(&mut params, &winps_msg);
 
-        params.push("-File".to_owned());
+        params.push("-Command".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
         let params_str = params.join(" ");
@@ -642,7 +642,7 @@ impl MessageProcessor {
 
         append_pwsh_args(&mut params, &winps_msg);
 
-        params.push("-File".to_owned());
+        params.push("-Command".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
         let params_str = params.join(" ");
