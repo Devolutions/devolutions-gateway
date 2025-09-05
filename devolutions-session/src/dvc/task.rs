@@ -640,10 +640,7 @@ impl MessageProcessor {
 
         let tmp_file = TmpFileGuard::new("ps1")?;
 
-        // Suppress ANSI escape codes in pwsh output.
-        let mut script = "$PSStyle.OutputRendering = 'PlainText';\n".to_owned();
-        script.push_str(winps_msg.command());
-        tmp_file.write_content(&script)?;
+        tmp_file.write_content(winps_msg.command())?;
 
         let mut params = Vec::new();
 
@@ -657,7 +654,8 @@ impl MessageProcessor {
 
         let mut run_process = WinApiProcessBuilder::new("pwsh.exe")
             .with_temp_file(tmp_file)
-            .with_command_line(&params_str);
+            .with_command_line(&params_str)
+            .with_env("NO_COLOR", "1"); // Suppress ANSI escape codes in pwsh output.
 
         if let Some(directory) = winps_msg.directory() {
             run_process = run_process.with_current_directory(directory);

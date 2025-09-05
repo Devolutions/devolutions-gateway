@@ -5,8 +5,9 @@ use windows::Win32::Foundation::{
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Threading::{
-    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CreateProcessW, INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION,
-    STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOW, WaitForMultipleObjects,
+    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, INFINITE,
+    NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOW,
+    WaitForMultipleObjects,
 };
 use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
 use windows::core::PCWSTR;
@@ -19,8 +20,11 @@ use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::utils::{Pipe, WideString};
 
 use crate::dvc::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_signaled_mpsc_channel};
+use crate::dvc::env::make_environment_block;
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::{IoRedirectionPipes, ensure_overlapped_io_result};
+
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
@@ -476,6 +480,7 @@ pub struct WinApiProcessBuilder {
     command_line: String,
     current_directory: String,
     enable_io_redirection: bool,
+    env: HashMap<String, String>,
     temp_files: Vec<TmpFileGuard>,
 }
 
@@ -486,6 +491,7 @@ impl WinApiProcessBuilder {
             command_line: String::new(),
             current_directory: String::new(),
             enable_io_redirection: false,
+            env: HashMap::new(),
             temp_files: Vec::new(),
         }
     }
@@ -511,6 +517,12 @@ impl WinApiProcessBuilder {
     #[must_use]
     pub fn with_io_redirection(mut self, enable: bool) -> Self {
         self.enable_io_redirection = enable;
+        self
+    }
+
+    #[must_use]
+    pub fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.env.insert(key.to_owned(), value.to_owned());
         self
     }
 
@@ -548,10 +560,17 @@ impl WinApiProcessBuilder {
                 session_id,
                 command_line,
                 current_directory,
+                self.env,
                 io_notification_tx.clone(),
             )?
         } else {
-            prepare_process(session_id, command_line, current_directory, io_notification_tx.clone())?
+            prepare_process(
+                session_id,
+                command_line,
+                current_directory,
+                self.env,
+                io_notification_tx.clone(),
+            )?
         };
 
         // Create channel for `task` -> `Process IO thread` communication
@@ -586,6 +605,7 @@ fn prepare_process(
     session_id: u32,
     mut command_line: WideString,
     current_directory: WideString,
+    env: HashMap<String, String>,
     io_notification_tx: Sender<ServerChannelEvent>,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
@@ -596,6 +616,13 @@ fn prepare_process(
         ..Default::default()
     };
 
+    let environment_block = (!env.is_empty()).then(|| make_environment_block(env)).transpose()?;
+
+    let mut creation_flags = NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE;
+    if environment_block.is_some() {
+        creation_flags |= CREATE_UNICODE_ENVIRONMENT;
+    }
+
     // SAFETY: All parameters constructed above are valid and safe to use.
     unsafe {
         CreateProcessW(
@@ -604,8 +631,8 @@ fn prepare_process(
             None,
             None,
             true,
-            NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
-            None,
+            creation_flags,
+            environment_block.as_ref().map(|block| block.as_ptr() as *const _),
             current_directory.as_pcwstr(),
             &startup_info as *const _,
             &mut process_information as *mut _,
@@ -642,6 +669,7 @@ fn prepare_process_with_io_redirection(
     session_id: u32,
     mut command_line: WideString,
     current_directory: WideString,
+    env: HashMap<String, String>,
     io_notification_tx: Sender<ServerChannelEvent>,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
@@ -658,7 +686,7 @@ fn prepare_process_with_io_redirection(
     let startup_info = STARTUPINFOW {
         cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
         dwFlags: STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW,
-        wShowWindow: SW_HIDE.0 as u16,
+        wShowWindow: u16::try_from(SW_HIDE.0).expect("SW_HIDE fits into u16"),
         hStdError: stderr_write_pipe.handle.raw(),
         hStdInput: stdin_read_pipe.handle.raw(),
         hStdOutput: stdout_write_pipe.handle.raw(),
@@ -671,6 +699,13 @@ fn prepare_process_with_io_redirection(
     }
     .init();
 
+    let environment_block = (!env.is_empty()).then(|| make_environment_block(env)).transpose()?;
+
+    let mut creation_flags = NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE;
+    if environment_block.is_some() {
+        creation_flags |= CREATE_UNICODE_ENVIRONMENT;
+    }
+
     // SAFETY: All parameters constructed above are valid and safe to use.
     unsafe {
         CreateProcessW(
@@ -679,8 +714,8 @@ fn prepare_process_with_io_redirection(
             Some(security_attributes.as_ptr()),
             None,
             true,
-            NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
-            None,
+            creation_flags,
+            environment_block.as_ref().map(|block| block.as_ptr() as *const _),
             current_directory.as_pcwstr(),
             &startup_info as *const _,
             &mut process_information as *mut _,
