@@ -639,7 +639,11 @@ impl MessageProcessor {
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
         let tmp_file = TmpFileGuard::new("ps1")?;
-        tmp_file.write_content(winps_msg.command())?;
+
+        // Suppress ANSI escape codes in pwsh output.
+        let mut script = "$PSStyle.OutputRendering = 'PlainText';\n".to_owned();
+        script.push_str(winps_msg.command());
+        tmp_file.write_content(&script)?;
 
         let mut params = Vec::new();
 
