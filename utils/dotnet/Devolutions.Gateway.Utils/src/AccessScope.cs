@@ -24,6 +24,8 @@ public struct AccessScope
     public static AccessScope GatewayRecordingsRead = new AccessScope("gateway.recordings.read");
     public static AccessScope GatewayUpdate = new AccessScope("gateway.update");
     public static AccessScope GatewayPreflight = new AccessScope("gateway.preflight");
+    public static AccessScope GatewayTrafficClaim = new AccessScope("gateway.traffic.claim");
+    public static AccessScope GatewayTrafficAck = new AccessScope("gateway.traffic.ack");
 
     public override string? ToString()
     {
