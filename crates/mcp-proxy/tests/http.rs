@@ -60,7 +60,7 @@ async fn http_plain_json_ok() {
     let body = json!({"result":{"tools":[{"name":"ping"}]}}).to_string();
     let addr = spawn_http_server(body, "HTTP/1.1 200 OK", &[("Content-Type", "application/json")], None);
 
-    let mut proxy = McpProxy::new(Config::http(format!("http://{addr}"), None))
+    let mut proxy = McpProxy::init(Config::http(format!("http://{addr}"), None))
         .await
         .unwrap();
 
@@ -80,7 +80,7 @@ async fn http_sse_parsed() {
     let sse = "event: message\r\ndata: {\"result\": {\"ok\": true}}\r\n\r\n".to_owned();
     let addr = spawn_http_server(sse, "HTTP/1.1 200 OK", &[("Content-Type", "text/event-stream")], None);
 
-    let mut proxy = McpProxy::new(Config::http(format!("http://{addr}"), None))
+    let mut proxy = McpProxy::init(Config::http(format!("http://{addr}"), None))
         .await
         .unwrap();
 
@@ -104,7 +104,7 @@ async fn http_empty_body_errors() {
         None,
     );
 
-    let mut proxy = McpProxy::new(Config::http(format!("http://{addr}"), None))
+    let mut proxy = McpProxy::init(Config::http(format!("http://{addr}"), None))
         .await
         .unwrap();
 
@@ -129,7 +129,7 @@ async fn http_timeout_triggers() {
         Some(Duration::from_millis(200)),
     );
 
-    let mut proxy = McpProxy::new(Config::http(format!("http://{addr}"), Some(Duration::from_millis(50))))
+    let mut proxy = McpProxy::init(Config::http(format!("http://{addr}"), Some(Duration::from_millis(50))))
         .await
         .unwrap();
 
@@ -147,7 +147,7 @@ async fn http_timeout_triggers() {
 
 #[tokio::test]
 async fn microsoft_learn() {
-    let mut proxy = McpProxy::new(Config::http(
+    let mut proxy = McpProxy::init(Config::http(
         "https://learn.microsoft.com/api/mcp",
         Some(Duration::from_secs(5)),
     ))

@@ -73,7 +73,7 @@ fn args_to_config(args: Args) -> anyhow::Result<Config> {
     Ok(cfg)
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     // 1) Parse CLI.
     let args = parse_cli().context("failed to parse CLI")?;
@@ -95,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 4) Init proxy.
-    let mut proxy = McpProxy::new(config).await?;
+    let mut proxy = McpProxy::init(config).await?;
 
     // 5) Stream JSON-RPC from stdin, emit responses to stdout.
     let reader = BufReader::new(io::stdin());

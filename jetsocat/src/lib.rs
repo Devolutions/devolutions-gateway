@@ -221,11 +221,11 @@ pub async fn mcp_proxy(cfg: McpProxyCfg) -> anyhow::Result<()> {
     debug!(?cfg);
 
     let pipe = utils::timeout(cfg.pipe_timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg))
-        .instrument(info_span!("open_pipe_a"))
+        .instrument(info_span!("open_mcp_request_pipe"))
         .await
-        .context("couldn't open pipe A")?;
+        .context("couldn't open MCP request pipe")?;
 
-    let mcp_proxy = mcp_proxy::McpProxy::new(cfg.mcp_proxy_cfg)
+    let mcp_proxy = utils::timeout(cfg.pipe_timeout, mcp_proxy::McpProxy::init(cfg.mcp_proxy_cfg))
         .await
         .context("failed to initialize MCP proxy")?;
 

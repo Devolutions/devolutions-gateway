@@ -50,7 +50,7 @@ fn unwrap_json_rpc_inner_result_passthrough() {
 
 #[tokio::test]
 async fn initialize_shape_is_stable() {
-    let mut p = McpProxy::new(Config::http("http://unused".to_owned(), None))
+    let mut p = McpProxy::init(Config::http("http://unused".to_owned(), None))
         .await
         .unwrap();
     let resp = p
@@ -73,7 +73,7 @@ async fn initialize_shape_is_stable() {
 
 #[tokio::test]
 async fn unknown_method_is_32601() {
-    let mut p = McpProxy::new(Config::http("http://unused".to_owned(), None))
+    let mut p = McpProxy::init(Config::http("http://unused".to_owned(), None))
         .await
         .unwrap();
     let resp = p

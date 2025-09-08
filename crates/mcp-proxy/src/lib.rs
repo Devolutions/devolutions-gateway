@@ -96,7 +96,7 @@ enum InnerTransport {
 }
 
 impl McpProxy {
-    pub async fn new(config: Config) -> Result<Self> {
+    pub async fn init(config: Config) -> Result<Self> {
         let transport = match config.transport_mode {
             TransportMode::Http { url, timeout } => InnerTransport::Http {
                 url,
