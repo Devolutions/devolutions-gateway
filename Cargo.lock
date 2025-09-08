@@ -1150,7 +1150,7 @@ dependencies = [
  "ironrdp",
  "notify-debouncer-mini",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.9.1",
  "reqwest",
  "rustls-pemfile 2.2.0",
  "serde",
@@ -1228,7 +1228,7 @@ dependencies = [
  "parking_lot",
  "pcap-file",
  "picky",
- "picky-krb 0.11.0",
+ "picky-krb 0.11.1",
  "pin-project-lite 0.2.16",
  "portpicker",
  "proptest",
@@ -4220,9 +4220,9 @@ dependencies = [
 
 [[package]]
 name = "picky"
-version = "7.0.0-rc.15"
+version = "7.0.0-rc.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83be360ca0cc8659abfbda932098e606fe52fa129508b92f0ce2998c00679170"
+checksum = "33807ce79d4b14a8918e968a8606e5142ddc6aec933acef79de0bd769cae5fb1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4363,9 +4363,9 @@ dependencies = [
 
 [[package]]
 name = "picky-krb"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b45ffe5f2122cdda5e9059ab837a65ba1b77729db43fc1500f2fce6b27070eab"
+checksum = "1e78a55491723b0a10bc2c02709a8d92d74ef674fe1b569cb4a08bac3d105487"
 dependencies = [
  "aes",
  "byteorder",
@@ -5829,7 +5829,7 @@ dependencies = [
  "picky-asn1 0.10.1",
  "picky-asn1-der 0.5.2",
  "picky-asn1-x509 0.14.4",
- "picky-krb 0.11.0",
+ "picky-krb 0.11.1",
  "rand 0.8.5",
  "rsa",
  "rustls 0.23.28",
@@ -7001,9 +7001,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.17.0"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
+checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
 dependencies = [
  "getrandom 0.3.3",
  "js-sys",
