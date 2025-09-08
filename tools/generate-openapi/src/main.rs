@@ -23,7 +23,7 @@ fn main() {
         }
         Some("gateway") | None => ApiDoc::openapi().to_yaml().unwrap(),
         Some("pedm") => pedm_yaml(),
-        _ => panic!("Unknown API doc"),
+        _ => panic!("unknown API doc"),
     };
     println!("{yaml}");
 }

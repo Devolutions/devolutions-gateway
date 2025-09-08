@@ -2,7 +2,7 @@
 
 Protocol-aware fine-grained relay server
 
-The version of the OpenAPI document: 2025.2.2
+The version of the OpenAPI document: 2025.2.3
 
 ### Building
 

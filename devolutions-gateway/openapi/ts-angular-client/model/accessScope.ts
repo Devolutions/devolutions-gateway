@@ -9,7 +9,7 @@
  */
 
 
-export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recording.delete' | 'gateway.recordings.read' | 'gateway.update' | 'gateway.preflight';
+export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recording.delete' | 'gateway.recordings.read' | 'gateway.update' | 'gateway.preflight' | 'gateway.traffic.claim' | 'gateway.traffic.ack';
 
 export const AccessScope = {
     Star: '*' as AccessScope,
@@ -23,6 +23,8 @@ export const AccessScope = {
     GatewayRecordingDelete: 'gateway.recording.delete' as AccessScope,
     GatewayRecordingsRead: 'gateway.recordings.read' as AccessScope,
     GatewayUpdate: 'gateway.update' as AccessScope,
-    GatewayPreflight: 'gateway.preflight' as AccessScope
+    GatewayPreflight: 'gateway.preflight' as AccessScope,
+    GatewayTrafficClaim: 'gateway.traffic.claim' as AccessScope,
+    GatewayTrafficAck: 'gateway.traffic.ack' as AccessScope
 };
 

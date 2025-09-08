@@ -366,16 +366,17 @@ paths:
           description: Unexpected server error
       security:
       - netscan_token: []
-  /jet/net/monitor//config:
+  /jet/net/monitor/config:
     post:
       tags:
       - NetworkMonitoring
-      summary: Replaces the existing monitoring config with the one provided in the body.
+      summary: Replace the current monitoring configuration with the configuration in the request body.
       description: |-
-        This request will immediately start any new monitors, and will stop
-        currently active monitors that are no longer in the config.
+        Changes take effect immediately:
+        - Starts any monitors newly defined in the payload.
+        - Stops any currently running monitors that are omitted from the payload.
 
-        The configuration is not persisted across restarts.
+        Note: The configuration is not persisted across process restarts.
       operationId: SetMonitoringConfig
       requestBody:
         description: JSON object containing a list of monitors
@@ -505,6 +506,81 @@ paths:
       security:
       - scope_token:
         - gateway.sessions.read
+  /jet/traffic/ack:
+    post:
+      tags:
+      - Traffic
+      summary: Acknowledge traffic audit events and remove them from the queue
+      operationId: AckTrafficEvents
+      requestBody:
+        description: Array of event IDs to acknowledge
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AckRequest'
+        required: true
+      responses:
+        '200':
+          description: Successfully acknowledged events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AckResponse'
+        '400':
+          description: Invalid request body (empty ids array)
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '413':
+          description: Payload too large (more than 10,000 IDs)
+        '500':
+          description: Internal server error
+      security:
+      - scope_token:
+        - gateway.traffic.ack
+  /jet/traffic/claim:
+    post:
+      tags:
+      - Traffic
+      summary: Claim traffic audit events for processing
+      operationId: ClaimTrafficEvents
+      parameters:
+      - name: lease_ms
+        in: query
+        description: 'Lease duration in milliseconds (1000-3600000, default: 300000 = 5 minutes)'
+        required: true
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: max
+        in: query
+        description: 'Maximum number of events to claim (1-1000, default: 100)'
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Successfully claimed traffic events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClaimedTrafficEvent'
+        '400':
+          description: Invalid query parameters
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Internal server error
+      security:
+      - scope_token:
+        - gateway.traffic.claim
   /jet/update:
     post:
       tags:
@@ -620,6 +696,29 @@ components:
       - gateway.recordings.read
       - gateway.update
       - gateway.preflight
+      - gateway.traffic.claim
+      - gateway.traffic.ack
+    AckRequest:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: Array of event IDs to acknowledge (1-10000 items)
+    AckResponse:
+      type: object
+      required:
+      - deleted_count
+      properties:
+        deleted_count:
+          type: integer
+          format: int64
+          description: Number of events that were acknowledged and deleted
+          minimum: 0
     AddressFamily:
       type: string
       enum:
@@ -675,6 +774,17 @@ components:
         subject:
           type: string
           description: The username used to request the app token.
+    ClaimedTrafficEvent:
+      allOf:
+      - $ref: '#/components/schemas/TrafficEventResponse'
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: integer
+            format: int64
+            description: Database ID of the claimed event (used for acknowledgment)
     ClockDiagnostic:
       type: object
       required:
@@ -756,6 +866,12 @@ components:
           type: integer
           description: Number of recordings not found
           minimum: 0
+    EventOutcomeResponse:
+      type: string
+      enum:
+      - connect_failure
+      - normal_termination
+      - abnormal_termination
     Heartbeat:
       type: object
       required:
@@ -890,6 +1006,7 @@ components:
           type: integer
           format: int32
           nullable: true
+          minimum: 0
         probe:
           $ref: '#/components/schemas/MonitoringProbeType'
         timeout:
@@ -921,7 +1038,7 @@ components:
         request_start_time:
           type: string
           format: date-time
-        response_messages:
+        response_message:
           type: string
           nullable: true
         response_success:
@@ -929,6 +1046,10 @@ components:
         response_time:
           type: number
           format: double
+          description: |-
+            Duration it took for the response to be received, in seconds.
+
+            On error, this value is set to f64::INFINITY.
     MonitoringLogResponse:
       type: object
       required:
@@ -1250,6 +1371,67 @@ components:
         Url:
           type: string
           description: HTTP URL where notification messages are to be sent
+    TrafficEventResponse:
+      type: object
+      required:
+      - session_id
+      - outcome
+      - protocol
+      - target_host
+      - target_ip
+      - target_port
+      - connect_at_ms
+      - disconnect_at_ms
+      - active_duration_ms
+      - bytes_tx
+      - bytes_rx
+      properties:
+        active_duration_ms:
+          type: integer
+          format: int64
+          description: Total duration the traffic item was active (milliseconds)
+        bytes_rx:
+          type: integer
+          format: int64
+          description: Total bytes received from the remote peer
+          minimum: 0
+        bytes_tx:
+          type: integer
+          format: int64
+          description: Total bytes transmitted to the remote peer
+          minimum: 0
+        connect_at_ms:
+          type: integer
+          format: int64
+          description: Timestamp when the connection attempt began (epoch milliseconds)
+        disconnect_at_ms:
+          type: integer
+          format: int64
+          description: Timestamp when the traffic item was closed or connection failed (epoch milliseconds)
+        outcome:
+          $ref: '#/components/schemas/EventOutcomeResponse'
+        protocol:
+          $ref: '#/components/schemas/TransportProtocolResponse'
+        session_id:
+          type: string
+          format: uuid
+          description: Unique identifier for the session/tunnel this traffic item belongs to
+        target_host:
+          type: string
+          description: Original target host string before DNS resolution
+        target_ip:
+          type: string
+          description: Concrete target IP address after resolution
+        target_port:
+          type: integer
+          format: int32
+          description: Target port number for the connection
+          minimum: 0
+    TransportProtocolResponse:
+      type: string
+      enum:
+      - tcp
+      - udp
     UpdateResponse:
       type: object
   securitySchemes:

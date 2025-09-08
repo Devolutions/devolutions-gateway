@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2025.2.2
+2025.2.3
 :toc: left
 :numbered:
 :toclevels: 4
@@ -1188,6 +1188,176 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.NetworkMonitoring]
+=== NetworkMonitoring
+
+
+[.drainMonitoringLog]
+==== drainMonitoringLog
+
+`POST /jet/net/monitor/log/drain`
+
+Monitors store their results in a temporary log, which is returned here.
+
+===== Description
+
+Once the log is downloaded, gateway purges it from memory.
+
+
+// markup not found, no include::{specDir}jet/net/monitor/log/drain/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+-
+
+
+===== Return Type
+
+<<MonitoringLogResponse>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Log was flushed and returned in the response body
+|  <<MonitoringLogResponse>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/net/monitor/log/drain/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.setMonitoringConfig]
+==== setMonitoringConfig
+
+`POST /jet/net/monitor/config`
+
+Replace the current monitoring configuration with the configuration in the request body.
+
+===== Description
+
+Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  Note: The configuration is not persisted across process restarts.
+
+
+// markup not found, no include::{specDir}jet/net/monitor/config/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+-
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| MonitorsConfig
+| JSON object containing a list of monitors <<MonitorsConfig>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+
+
+-
+
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| New configuration was accepted
+|  <<>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Unexpected server error while starting monitors
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/net/monitor/config/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Preflight]
 === Preflight
 
@@ -1472,6 +1642,223 @@ ifdef::internal-generation[]
 ===== Implementation
 
 // markup not found, no include::{specDir}jet/session/\{id\}/terminate/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.Traffic]
+=== Traffic
+
+
+[.ackTrafficEvents]
+==== ackTrafficEvents
+
+`POST /jet/traffic/ack`
+
+Acknowledge traffic audit events and remove them from the queue
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/traffic/ack/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| AckRequest
+| Array of event IDs to acknowledge <<AckRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<AckResponse>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Successfully acknowledged events
+|  <<AckResponse>>
+
+
+| 400
+| Invalid request body (empty ids array)
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 413
+| Payload too large (more than 10,000 IDs)
+|  <<>>
+
+
+| 500
+| Internal server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/traffic/ack/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.claimTrafficEvents]
+==== claimTrafficEvents
+
+`POST /jet/traffic/claim`
+
+Claim traffic audit events for processing
+
+===== Description
+
+
+
+
+// markup not found, no include::{specDir}jet/traffic/claim/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+
+
+
+====== Query Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| lease_ms
+| Lease duration in milliseconds (1000-3600000, default: 300000 = 5 minutes) 
+| X
+| null
+| 
+
+| max
+| Maximum number of events to claim (1-1000, default: 100) 
+| X
+| null
+| 
+
+|===
+
+
+===== Return Type
+
+array[<<ClaimedTrafficEvent>>]
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Successfully claimed traffic events
+| List[<<ClaimedTrafficEvent>>] 
+
+
+| 400
+| Invalid query parameters
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Internal server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/traffic/claim/POST/implementation.adoc[opts=optional]
 
 
 endif::internal-generation[]
@@ -1825,8 +2212,54 @@ endif::internal-generation[]
 | gateway.recordings.read
 | gateway.update
 | gateway.preflight
+| gateway.traffic.claim
+| gateway.traffic.ack
 
 |===
+
+
+[#AckRequest]
+=== _AckRequest_ 
+
+
+
+
+[.fields-AckRequest]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| ids
+| X
+| 
+|   List   of <<long>>
+| Array of event IDs to acknowledge (1-10000 items)
+| int64    
+
+|===
+
+
+
+[#AckResponse]
+=== _AckResponse_ 
+
+
+
+
+[.fields-AckResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| deleted_count
+| X
+| 
+|   Long  
+| Number of events that were acknowledged and deleted
+| int64    
+
+|===
+
 
 
 [#AddressFamily]
@@ -1951,6 +2384,105 @@ endif::internal-generation[]
 |   String  
 | The username used to request the app token.
 |     
+
+|===
+
+
+
+[#ClaimedTrafficEvent]
+=== _ClaimedTrafficEvent_ 
+
+
+
+
+[.fields-ClaimedTrafficEvent]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| active_duration_ms
+| X
+| 
+|   Long  
+| Total duration the traffic item was active (milliseconds)
+| int64    
+
+| bytes_rx
+| X
+| 
+|   Long  
+| Total bytes received from the remote peer
+| int64    
+
+| bytes_tx
+| X
+| 
+|   Long  
+| Total bytes transmitted to the remote peer
+| int64    
+
+| connect_at_ms
+| X
+| 
+|   Long  
+| Timestamp when the connection attempt began (epoch milliseconds)
+| int64    
+
+| disconnect_at_ms
+| X
+| 
+|   Long  
+| Timestamp when the traffic item was closed or connection failed (epoch milliseconds)
+| int64    
+
+| outcome
+| X
+| 
+|  <<EventOutcomeResponse>>  
+| 
+|    connect_failure, normal_termination, abnormal_termination,  
+
+| protocol
+| X
+| 
+|  <<TransportProtocolResponse>>  
+| 
+|    tcp, udp,  
+
+| session_id
+| X
+| 
+|   UUID  
+| Unique identifier for the session/tunnel this traffic item belongs to
+| uuid    
+
+| target_host
+| X
+| 
+|   String  
+| Original target host string before DNS resolution
+|     
+
+| target_ip
+| X
+| 
+|   String  
+| Concrete target IP address after resolution
+|     
+
+| target_port
+| X
+| 
+|   Integer  
+| Target port number for the connection
+| int32    
+
+| id
+| X
+| 
+|   Long  
+| Database ID of the claimed event (used for acknowledgment)
+| int64    
 
 |===
 
@@ -2132,6 +2664,26 @@ Service configuration diagnostic
 
 |===
 
+
+
+[#EventOutcomeResponse]
+=== _EventOutcomeResponse_ 
+
+
+
+
+
+
+[.fields-EventOutcomeResponse]
+[cols="1"]
+|===
+| Enum Values
+
+| connect_failure
+| normal_termination
+| abnormal_termination
+
+|===
 
 
 [#Heartbeat]
@@ -2343,6 +2895,230 @@ Service configuration diagnostic
 | 
 |   String  
 | URL to use on local network
+|     
+
+|===
+
+
+
+[#MonitorDefinition]
+=== _MonitorDefinition_ 
+
+
+
+
+[.fields-MonitorDefinition]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| address
+| X
+| 
+|   String  
+| 
+|     
+
+| id
+| X
+| 
+|   String  
+| 
+|     
+
+| interval
+| X
+| 
+|   Long  
+| 
+| int64    
+
+| port
+| 
+| X
+|   Integer  
+| 
+| int32    
+
+| probe
+| X
+| 
+| <<MonitoringProbeType>>    
+| 
+|     
+
+| timeout
+| X
+| 
+|   Long  
+| 
+| int64    
+
+|===
+
+
+
+[#MonitorDefinitionProbeTypeError]
+=== _MonitorDefinitionProbeTypeError_ 
+
+
+
+
+[.fields-MonitorDefinitionProbeTypeError]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| id
+| X
+| 
+|   String  
+| The ID of the monitor definition in the client-provided config
+|     
+
+| probe
+| X
+| 
+|   String  
+| The monitor type that was not supported
+|     
+
+|===
+
+
+
+[#MonitorResult]
+=== _MonitorResult_ 
+
+
+
+
+[.fields-MonitorResult]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| monitor_id
+| X
+| 
+|   String  
+| 
+|     
+
+| request_start_time
+| X
+| 
+|   Date  
+| 
+| date-time    
+
+| response_message
+| 
+| X
+|   String  
+| 
+|     
+
+| response_success
+| X
+| 
+|   Boolean  
+| 
+|     
+
+| response_time
+| X
+| 
+|   Double  
+| Duration it took for the response to be received, in seconds.  On error, this value is set to f64::INFINITY.
+| double    
+
+|===
+
+
+
+[#MonitoringLogResponse]
+=== _MonitoringLogResponse_ 
+
+
+
+
+[.fields-MonitoringLogResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| entries
+| X
+| 
+|   List   of <<MonitorResult>>
+| 
+|     
+
+|===
+
+
+
+[#MonitoringProbeType]
+=== _MonitoringProbeType_ 
+
+
+
+
+[.fields-MonitoringProbeType]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| unknown
+| X
+| 
+|   String  
+| 
+|     
+
+|===
+
+
+
+[#MonitoringProbeTypeOneOf]
+=== _MonitoringProbeTypeOneOf_ 
+
+
+
+
+[.fields-MonitoringProbeTypeOneOf]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| unknown
+| X
+| 
+|   String  
+| 
+|     
+
+|===
+
+
+
+[#MonitorsConfig]
+=== _MonitorsConfig_ 
+
+
+
+
+[.fields-MonitorsConfig]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| monitors
+| X
+| 
+|   List   of <<MonitorDefinition>>
+| 
 |     
 
 |===
@@ -2828,5 +3604,116 @@ Subscriber configuration
 
 |===
 
+
+
+[#TrafficEventResponse]
+=== _TrafficEventResponse_ 
+
+
+
+
+[.fields-TrafficEventResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| active_duration_ms
+| X
+| 
+|   Long  
+| Total duration the traffic item was active (milliseconds)
+| int64    
+
+| bytes_rx
+| X
+| 
+|   Long  
+| Total bytes received from the remote peer
+| int64    
+
+| bytes_tx
+| X
+| 
+|   Long  
+| Total bytes transmitted to the remote peer
+| int64    
+
+| connect_at_ms
+| X
+| 
+|   Long  
+| Timestamp when the connection attempt began (epoch milliseconds)
+| int64    
+
+| disconnect_at_ms
+| X
+| 
+|   Long  
+| Timestamp when the traffic item was closed or connection failed (epoch milliseconds)
+| int64    
+
+| outcome
+| X
+| 
+|  <<EventOutcomeResponse>>  
+| 
+|    connect_failure, normal_termination, abnormal_termination,  
+
+| protocol
+| X
+| 
+|  <<TransportProtocolResponse>>  
+| 
+|    tcp, udp,  
+
+| session_id
+| X
+| 
+|   UUID  
+| Unique identifier for the session/tunnel this traffic item belongs to
+| uuid    
+
+| target_host
+| X
+| 
+|   String  
+| Original target host string before DNS resolution
+|     
+
+| target_ip
+| X
+| 
+|   String  
+| Concrete target IP address after resolution
+|     
+
+| target_port
+| X
+| 
+|   Integer  
+| Target port number for the connection
+| int32    
+
+|===
+
+
+
+[#TransportProtocolResponse]
+=== _TransportProtocolResponse_ 
+
+
+
+
+
+
+[.fields-TransportProtocolResponse]
+[cols="1"]
+|===
+| Enum Values
+
+| tcp
+| udp
+
+|===
 
 
