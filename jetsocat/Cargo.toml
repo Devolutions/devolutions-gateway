@@ -31,6 +31,9 @@ proxy-socks = { path = "../crates/proxy-socks" }
 proxy-types = { path = "../crates/proxy-types" }
 proxy_cfg = { version = "0.4", optional = true }
 
+# MCP proxy support
+mcp-proxy.path = "../crates/mcp-proxy"
+
 # cli
 seahorse = "2.2"
 humantime = "2.2"
@@ -56,7 +59,7 @@ dirs-next = "2.0"
 sysinfo = { version = "0.35", default-features = false, features = ["system"] }
 
 # doctor
-tinyjson = "2.5" # Small JSON library; used to avoid including a bigger like serde-json
+tinyjson = "2.5" # Small JSON library; used to avoid including a bigger one like serde-json
 native-tls = { version = "0.2", optional = true } # Same dependency as tokio-tungstenite
 rustls = { version = "0.23", optional = true, default-features = false, features = ["tls12", "std", "ring", "logging"] } # Same dependency as tokio-tungstenite
 rustls-native-certs = { version = "0.8", optional = true } # Same dependency as tokio-tungstenite

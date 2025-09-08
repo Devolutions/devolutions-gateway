@@ -34,6 +34,7 @@ use seahorse::{App, Command, Context, Flag, FlagType};
 use std::env;
 use std::future::Future;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::runtime;
 
 fn main() {
@@ -53,6 +54,7 @@ fn main() {
         .usage(generate_usage())
         .command(forward_command())
         .command(jmux_proxy())
+        .command(mcp_proxy())
         .command(doctor());
 
     app.run(args);
@@ -107,7 +109,7 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
         }
     }
 
-    rt.shutdown_timeout(std::time::Duration::from_millis(100)); // Just to be safe.
+    rt.shutdown_timeout(Duration::from_millis(100)); // Just to be safe.
 
     Ok(())
 }
@@ -147,7 +149,7 @@ fn forward_command() -> Command {
     let usage = format!(
         r##"{command} {subcommand} <PIPE A> <PIPE B>
 
-{pipe_formats}
+{PIPE_FORMATS}
 
 Example: unauthenticated PowerShell server
 
@@ -161,7 +163,6 @@ Example: unauthenticated sftp client
 
     JETSOCAT_ARGS="{subcommand} - tcp://192.168.122.178:2222" sftp -D {command}"##,
         command = env!("CARGO_PKG_NAME"),
-        pipe_formats = PIPE_FORMATS,
         subcommand = FORWARD_SUBCOMMAND,
     );
 
@@ -200,7 +201,7 @@ fn jmux_proxy() -> Command {
     let usage = format!(
         r##"{command} {subcommand} <PIPE> [<LISTENER> ...]
 
-{pipe_formats}
+{PIPE_FORMATS}
 
 Listener formats:
     - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
@@ -220,7 +221,6 @@ Example: SOCKS5 to JMUX proxy
     {command} {subcommand} tcp://127.0.0.1:7772 socks5-listen://0.0.0.0:2222"##,
         command = env!("CARGO_PKG_NAME"),
         subcommand = JMUX_PROXY_SUBCOMMAND,
-        pipe_formats = PIPE_FORMATS,
     );
 
     let cmd = Command::new(JMUX_PROXY_SUBCOMMAND)
@@ -246,6 +246,68 @@ pub fn jmux_proxy_action(c: &Context) {
         };
 
         run(jetsocat::jmux_proxy(cfg))
+    });
+    exit(res);
+}
+
+// mcp-proxy
+
+const MCP_PROXY_SUBCOMMAND: &str = "mcp-proxy";
+
+fn mcp_proxy() -> Command {
+    let usage = format!(
+        r##"{command} {subcommand} <REQUEST_PIPE> <MCP_TRANSPORT>
+
+MCP Proxy - Bridge different MCP transport protocols
+
+{PIPE_FORMATS}
+
+MCP transport modes:
+    - `http://<DESTINATION>`: Use the plain HTTP transport
+    - `https://<DESTINATION>`: Use the TLS secure HTTP transport
+    - `np://<SERVER NAME>/pipe/<PIPE NAME>`: Use the named pipe transport (Windows)
+    - `np://<UNIX SOCKET PATH>`: Use the UNIX socket transport (non-Windows)
+    - `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on windows or `sh -c` otherwise
+
+Example: HTTP MCP server
+
+    {command} {subcommand} - https://learn.microsoft.com/api/mcp
+
+Example: STDIO MCP server
+
+    {command} {subcommand} - cmd://'python3 "mcp-server.py --stdio"'
+
+Example: Named pipe MCP server
+
+    {command} {subcommand} - np:///tmp/mcp-server.sock
+
+The tool reads JSON-RPC requests from stdin and writes responses to stdout."##,
+        command = env!("CARGO_PKG_NAME"),
+        subcommand = MCP_PROXY_SUBCOMMAND,
+    );
+
+    let cmd = Command::new(MCP_PROXY_SUBCOMMAND)
+        .description("MCP (Model Context Protocol) proxy for different transport modes")
+        .alias("mcp")
+        .usage(usage)
+        .action(mcp_proxy_action);
+
+    apply_mcp_flags(apply_common_flags(cmd))
+}
+
+pub fn mcp_proxy_action(c: &Context) {
+    let res = McpProxyArgs::parse(c).and_then(|args| {
+        let _log_guard = setup_logger(&args.common.logging);
+
+        let cfg = jetsocat::McpProxyCfg {
+            pipe_mode: args.pipe_mode,
+            proxy_cfg: args.common.proxy_cfg,
+            pipe_timeout: args.common.pipe_timeout,
+            watch_process: args.common.watch_process,
+            mcp_proxy_cfg: args.mcp_proxy_cfg,
+        };
+
+        run(jetsocat::mcp_proxy(cfg))
     });
     exit(res);
 }
@@ -282,7 +344,7 @@ The link JSON objects have the following fields:
     - "href" (Required): The URL to the web page.
     - "description" (Required): A short description of the contents.
 
-{pipe_formats}
+{PIPE_FORMATS}
 
 Example: from a chain file on the disk
 
@@ -297,7 +359,6 @@ Example: for an invalid domain
     {command} {subcommand} --subject-name expired.badssl.com --network"##,
         command = env!("CARGO_PKG_NAME"),
         subcommand = DOCTOR_SUBCOMMAND,
-        pipe_formats = PIPE_FORMATS,
     );
 
     let cmd = Command::new(DOCTOR_SUBCOMMAND)
@@ -399,7 +460,7 @@ enum Logging {
 struct CommonArgs {
     logging: Logging,
     proxy_cfg: Option<ProxyConfig>,
-    pipe_timeout: Option<core::time::Duration>,
+    pipe_timeout: Option<Duration>,
     watch_process: Option<sysinfo::Pid>,
 }
 
@@ -560,6 +621,83 @@ impl JmuxProxyArgs {
     }
 }
 
+fn apply_mcp_flags(cmd: Command) -> Command {
+    cmd.flag(Flag::new("http-timeout", FlagType::Int).description("Timeout in seconds for HTTP requests (default: 30)"))
+}
+
+struct McpProxyArgs {
+    common: CommonArgs,
+    pipe_mode: PipeMode,
+    mcp_proxy_cfg: mcp_proxy::Config,
+}
+
+impl McpProxyArgs {
+    fn parse(c: &Context) -> anyhow::Result<Self> {
+        let common = CommonArgs::parse(MCP_PROXY_SUBCOMMAND, c)?;
+
+        let mut args = c.args.iter();
+
+        let request_pipe = args.next().context("<REQUEST_PIPE> is missing")?.clone();
+        let request_pipe = parse_pipe_mode(request_pipe).context("bad <REQUEST_PIPE>")?;
+
+        let mcp_transport = args.next().context("<MCP_TRANSPORT> is missing")?.clone();
+        let mcp_transport = parse_mcp_transport_mode(mcp_transport).context("bad <MCP_TRANSPORT>")?;
+
+        let http_timeout = c.int_flag("http-timeout").unwrap_or(30);
+        let http_timeout = Duration::from_secs(u64::try_from(http_timeout).context("invalid http-timeout value")?);
+
+        let mcp_cfg = match mcp_transport {
+            TransportMode::Http { url } => mcp_proxy::Config::http(url, Some(http_timeout)),
+            TransportMode::SpawnProcess { command } => mcp_proxy::Config::spawn_process(command),
+            TransportMode::NamedPipe { pipe_path } => mcp_proxy::Config::named_pipe(pipe_path),
+        };
+
+        return Ok(Self {
+            common,
+            pipe_mode: request_pipe,
+            mcp_proxy_cfg: mcp_cfg,
+        });
+
+        enum TransportMode {
+            Http { url: String },
+            SpawnProcess { command: String },
+            NamedPipe { pipe_path: String },
+        }
+
+        fn parse_mcp_transport_mode(arg: String) -> anyhow::Result<TransportMode> {
+            const SCHEME_SEPARATOR: &str = "://";
+
+            let scheme_end_idx = arg
+                .find(SCHEME_SEPARATOR)
+                .context("invalid format: missing scheme (e.g.: tcp://<ADDRESS>)")?;
+            let scheme = &arg[..scheme_end_idx];
+            let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
+
+            match scheme {
+                "http" | "https" => Ok(TransportMode::Http { url: arg }),
+                "np" => {
+                    #[cfg(windows)]
+                    {
+                        Ok(TransportMode::NamedPipe {
+                            pipe_path: format!("\\\\{}", value.replace('/', "\\")),
+                        })
+                    }
+                    #[cfg(unix)]
+                    {
+                        Ok(TransportMode::NamedPipe {
+                            pipe_path: value.to_owned(),
+                        })
+                    }
+                }
+                "cmd" => Ok(TransportMode::SpawnProcess {
+                    command: value.to_owned(),
+                }),
+                _ => anyhow::bail!("unknown pipe scheme: {scheme}"),
+            }
+        }
+    }
+}
+
 fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     use uuid::Uuid;
 
@@ -650,7 +788,7 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
                 })
             }
         }
-        _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
+        _ => anyhow::bail!("unknown pipe scheme: {scheme}"),
     }
 }
 
@@ -680,7 +818,7 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
         "http-listen" => Ok(ListenerMode::Http {
             bind_addr: value.to_owned(),
         }),
-        _ => anyhow::bail!("Unknown listener scheme: {}", scheme),
+        _ => anyhow::bail!("unknown listener scheme: {scheme}"),
     }
 }
 
