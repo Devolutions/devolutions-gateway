@@ -275,7 +275,7 @@ Example: HTTP MCP server
 
 Example: STDIO MCP server
 
-    {command} {subcommand} - cmd://'python3 --args "mcp-server.py --stdio"'
+    {command} {subcommand} - cmd://'python3 "mcp-server.py --stdio"'
 
 Example: Named pipe MCP server
 

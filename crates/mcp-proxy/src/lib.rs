@@ -479,9 +479,7 @@ pub mod internal {
 
             #[cfg(not(any(unix, windows)))]
             {
-                Err(anyhow::anyhow!(
-                    "named pipe transport is not supported on this platform"
-                ))
+                anyhow::bail!("named pipe transport is not supported on this platform")
             }
         }
     }
@@ -491,7 +489,7 @@ pub mod internal {
         agent: &ureq::Agent,
         req: McpRequest,
     ) -> Result<tinyjson::JsonValue> {
-        let url = base_url.trim_end_matches('/');
+        let url = base_url.trim_end_matches('/').to_owned();
 
         let rpc_request = JsonRpcRequest {
             jsonrpc: "2.0".to_owned(),
@@ -501,12 +499,11 @@ pub mod internal {
         };
 
         let request_json = serialize_jsonrpc_request(&rpc_request)?;
-        let url_owned = url.to_string();
-        let agent_clone = agent.clone();
+        let agent = agent.clone();
 
         let body_text = tokio::task::spawn_blocking(move || -> Result<String> {
-            let response = agent_clone
-                .post(&url_owned)
+            let response = agent
+                .post(&url)
                 .set("Content-Type", "application/json")
                 .set("Accept", "application/json, text/event-stream")
                 .send_string(&request_json)
@@ -526,12 +523,12 @@ pub mod internal {
         .context("HTTP request task failed")??;
 
         if body_text.trim().is_empty() {
-            return Err(anyhow::anyhow!("empty response body from MCP server"));
+            anyhow::bail!("empty response body from MCP server");
         }
 
         let mut json_response: tinyjson::JsonValue = if body_text.starts_with("event:") || body_text.contains("data:") {
             let Some(json_data) = extract_sse_json_line(&body_text) else {
-                return Err(anyhow::anyhow!("no data found in SSE response"));
+                anyhow::bail!("no data found in SSE response");
             };
 
             json_data

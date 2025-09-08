@@ -62,6 +62,7 @@ fn spawn_http_server(
             }
 
             if let Some(delay) = delay {
+                println!("Server sleep for {delay:?}");
                 thread::sleep(delay);
             }
 
@@ -72,9 +73,13 @@ fn spawn_http_server(
             response.push_str(&format!("Content-Length: {}\r\n", body.as_bytes().len()));
             response.push_str("\r\n");
 
+            println!("Server write response...");
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.write_all(body.as_bytes());
             let _ = stream.flush();
+
+            thread::sleep(Duration::from_millis(50));
+            println!("Server shutdown...");
         }
     });
 
