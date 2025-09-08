@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2025.2.2
+  version: 2025.2.3
 paths:
   /dgw/subscriber:
     post:
