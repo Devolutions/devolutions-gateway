@@ -96,7 +96,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .stdout(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
-                .with_context(|| format!("Spawn with command: {cmd:?}"))?;
+                .with_context(|| format!("spawn with command: {cmd:?}"))?;
 
             let stdout = handle.stdout.take().expect("spawned above");
             let stdin = handle.stdin.take().expect("spawned above");
