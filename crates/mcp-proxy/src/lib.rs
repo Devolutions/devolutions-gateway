@@ -2,7 +2,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
 use tracing::{debug, error, warn};
@@ -16,35 +16,55 @@ use tokio::net::UnixStream;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::ClientOptions;
 
-use self::private::*;
+use self::internal::*;
 
-#[derive(Serialize, Deserialize)]
 pub struct McpRequest {
     pub method: String,
-    pub params: serde_json::Value,
+    pub params: tinyjson::JsonValue,
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: Option<i32>,
     pub method: String,
-    pub params: Option<serde_json::Value>,
+    pub params: Option<tinyjson::JsonValue>,
 }
 
-#[derive(Serialize)]
+impl JsonRpcRequest {
+    pub fn parse(json_str: &str) -> Result<Self> {
+        let json: tinyjson::JsonValue = json_str.parse().context("failed to parse JSON")?;
+        parse_jsonrpc_request(json)
+    }
+}
+
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<serde_json::Value>,
+    pub result: Option<tinyjson::JsonValue>,
+    pub error: Option<tinyjson::JsonValue>,
 }
 
 impl JsonRpcResponse {
     pub fn to_string(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self).context("failed to serialize JSON-RPC response")
+        let mut obj = HashMap::new();
+        obj.insert("jsonrpc".to_owned(), tinyjson::JsonValue::String(self.jsonrpc.clone()));
+
+        if let Some(id) = self.id {
+            obj.insert("id".to_owned(), tinyjson::JsonValue::Number(id as f64));
+        } else {
+            obj.insert("id".to_owned(), tinyjson::JsonValue::Null);
+        }
+
+        if let Some(result) = &self.result {
+            obj.insert("result".to_owned(), result.clone());
+        }
+
+        if let Some(error) = &self.error {
+            obj.insert("error".to_owned(), error.clone());
+        }
+
+        let json_obj = tinyjson::JsonValue::Object(obj);
+        Ok(json_obj.stringify().unwrap())
     }
 }
 
@@ -90,7 +110,7 @@ pub struct McpProxy {
 }
 
 enum InnerTransport {
-    Http { url: String, client: reqwest::Client },
+    Http { url: String, agent: ureq::Agent },
     Process(ProcessMcpClient),
     NamedPipe(NamedPipeMcpClient),
 }
@@ -98,13 +118,10 @@ enum InnerTransport {
 impl McpProxy {
     pub async fn init(config: Config) -> Result<Self> {
         let transport = match config.transport_mode {
-            TransportMode::Http { url, timeout } => InnerTransport::Http {
-                url,
-                client: reqwest::Client::builder()
-                    .timeout(timeout)
-                    .build()
-                    .context("failed to create HTTP client")?,
-            },
+            TransportMode::Http { url, timeout } => {
+                let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+                InnerTransport::Http { url, agent }
+            }
             TransportMode::SpawnProcess { command } => {
                 InnerTransport::Process(ProcessMcpClient::spawn(&command).await?)
             }
@@ -114,9 +131,9 @@ impl McpProxy {
         Ok(McpProxy { transport })
     }
 
-    pub async fn send_request(&mut self, request: McpRequest) -> Result<serde_json::Value> {
+    pub async fn send_request(&mut self, request: McpRequest) -> Result<tinyjson::JsonValue> {
         match &mut self.transport {
-            InnerTransport::Http { url, client } => send_mcp_request_http(client, url, request).await,
+            InnerTransport::Http { url, agent } => send_mcp_request_http(url, agent, request).await,
             InnerTransport::Process(stdio_mcp_client) => send_mcp_request_stdio(stdio_mcp_client, request).await,
             InnerTransport::NamedPipe(named_pipe_mcp_client) => {
                 send_mcp_request_named_pipe(named_pipe_mcp_client, request).await
@@ -125,8 +142,9 @@ impl McpProxy {
     }
 
     pub async fn handle_jsonrpc_request_str(&mut self, line: &str) -> Result<Option<JsonRpcResponse>> {
-        let req: JsonRpcRequest =
-            serde_json::from_str(line).with_context(|| format!("failed to parse JSON-RPC request: \"{line}\""))?;
+        let req =
+            JsonRpcRequest::parse(line).with_context(|| format!("invalid JSON-RPC request format: \"{line}\""))?;
+
         self.handle_jsonrpc_request(req).await
     }
 
@@ -135,22 +153,29 @@ impl McpProxy {
             "initialize" => {
                 debug!("Handling initialize request");
 
+                let capabilities = create_json_object(vec![
+                    (
+                        "tools",
+                        create_json_object(vec![("listChanged", tinyjson::JsonValue::Boolean(true))]),
+                    ),
+                    ("logging", create_json_object(vec![])),
+                ]);
+
+                let server_info = create_json_object(vec![
+                    ("name", tinyjson::JsonValue::String("mcp-proxy".to_owned())),
+                    ("version", tinyjson::JsonValue::String("1.0.0".to_owned())),
+                ]);
+
+                let result = create_json_object(vec![
+                    ("protocolVersion", tinyjson::JsonValue::String("2024-11-05".to_owned())),
+                    ("capabilities", capabilities),
+                    ("serverInfo", server_info),
+                ]);
+
                 Ok(Some(JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
+                    jsonrpc: "2.0".to_owned(),
                     id: request.id,
-                    result: Some(serde_json::json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {
-                                "listChanged": true
-                            },
-                            "logging": {}
-                        },
-                        "serverInfo": {
-                            "name": "mcp-proxy",
-                            "version": "1.0.0"
-                        }
-                    })),
+                    result: Some(result),
                     error: None,
                 }))
             }
@@ -177,7 +202,7 @@ impl McpProxy {
 
                 let mcp_req = McpRequest {
                     method: "tools/list".to_owned(),
-                    params: serde_json::Value::Object(serde_json::Map::new()),
+                    params: create_json_object(vec![]),
                 };
 
                 match self.send_request(mcp_req).await {
@@ -185,7 +210,7 @@ impl McpProxy {
                         let result = unwrap_json_rpc_inner_result(result);
 
                         Ok(Some(JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
+                            jsonrpc: "2.0".to_owned(),
                             id: request.id,
                             result: Some(result),
                             error: None,
@@ -195,13 +220,13 @@ impl McpProxy {
                         error!("tools/list request failed: {e}");
 
                         Ok(Some(JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
+                            jsonrpc: "2.0".to_owned(),
                             id: request.id,
                             result: None,
-                            error: Some(serde_json::json!({
-                                "code": -32603,
-                                "message": format!("Internal error: {e}")
-                            })),
+                            error: Some(create_json_object(vec![
+                                ("code", tinyjson::JsonValue::Number(-32603.0)),
+                                ("message", tinyjson::JsonValue::String(format!("Internal error: {e}"))),
+                            ])),
                         }))
                     }
                 }
@@ -223,8 +248,8 @@ impl McpProxy {
                 }
 
                 let mcp_req = McpRequest {
-                    method: "tools/call".to_string(),
-                    params: request.params.unwrap_or_default(),
+                    method: "tools/call".to_owned(),
+                    params: request.params.unwrap_or_else(|| create_json_object(vec![])),
                 };
 
                 match self.send_request(mcp_req).await {
@@ -232,7 +257,7 @@ impl McpProxy {
                         let result = unwrap_json_rpc_inner_result(result);
 
                         Ok(Some(JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
+                            jsonrpc: "2.0".to_owned(),
                             id: request.id,
                             result: Some(result),
                             error: None,
@@ -242,38 +267,98 @@ impl McpProxy {
                         error!("tools/call request failed: {e}");
 
                         Ok(Some(JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
+                            jsonrpc: "2.0".to_owned(),
                             id: request.id,
                             result: None,
-                            error: Some(serde_json::json!({
-                                "code": -32603,
-                                "message": format!("Internal error: {e}")
-                            })),
+                            error: Some(create_json_object(vec![
+                                ("code", tinyjson::JsonValue::Number(-32603.0)),
+                                ("message", tinyjson::JsonValue::String(format!("Internal error: {e}"))),
+                            ])),
                         }))
                     }
                 }
             }
             _ => {
-                warn!("[WARN] Unknown method: {}", request.method);
+                warn!("Unknown method: {}", request.method);
 
                 Ok(Some(JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
+                    jsonrpc: "2.0".to_owned(),
                     id: request.id,
                     result: None,
-                    error: Some(serde_json::json!({
-                        "code": -32601,
-                        "message": format!("Method not found: {}", &request.method)
-                    })),
+                    error: Some(create_json_object(vec![
+                        ("code", tinyjson::JsonValue::Number(-32601.0)),
+                        (
+                            "message",
+                            tinyjson::JsonValue::String(format!("Method not found: {}", &request.method)),
+                        ),
+                    ])),
                 }))
             }
         }
     }
 }
 
-#[doc(hidden)]
-pub mod private {
-    use serde_json::Value;
+fn parse_jsonrpc_request(json: tinyjson::JsonValue) -> Result<JsonRpcRequest> {
+    let obj = json
+        .get::<HashMap<String, tinyjson::JsonValue>>()
+        .ok_or_else(|| anyhow::anyhow!("JSON-RPC request must be an object"))?;
 
+    let jsonrpc = obj
+        .get("jsonrpc")
+        .and_then(|v| v.get::<String>())
+        .cloned()
+        .unwrap_or_else(|| "2.0".to_owned());
+
+    let id = obj.get("id").and_then(|v| v.get::<f64>()).map(|f| *f as i32);
+
+    let method = obj
+        .get("method")
+        .and_then(|v| v.get::<String>())
+        .ok_or_else(|| anyhow::anyhow!("JSON-RPC request missing 'method' field"))?
+        .clone();
+
+    let params = obj.get("params").cloned();
+
+    Ok(JsonRpcRequest {
+        jsonrpc,
+        id,
+        method,
+        params,
+    })
+}
+
+fn create_json_object(pairs: Vec<(&str, tinyjson::JsonValue)>) -> tinyjson::JsonValue {
+    let mut obj = HashMap::new();
+    for (key, value) in pairs {
+        obj.insert(key.to_owned(), value);
+    }
+    tinyjson::JsonValue::Object(obj)
+}
+
+fn serialize_jsonrpc_request(req: &JsonRpcRequest) -> Result<String> {
+    let mut pairs = vec![
+        ("jsonrpc", tinyjson::JsonValue::String(req.jsonrpc.clone())),
+        ("method", tinyjson::JsonValue::String(req.method.clone())),
+    ];
+
+    if let Some(id) = req.id {
+        pairs.push(("id", tinyjson::JsonValue::Number(id as f64)));
+    }
+
+    if let Some(params) = &req.params {
+        pairs.push(("params", params.clone()));
+    }
+
+    let json_obj = create_json_object(pairs);
+    Ok(json_obj.stringify().unwrap())
+}
+
+fn success_status_code(status: u16) -> bool {
+    (200..300).contains(&status)
+}
+
+#[doc(hidden)]
+pub mod internal {
     use super::*;
 
     pub struct ProcessMcpClient {
@@ -324,7 +409,7 @@ pub mod private {
             let mut response = String::new();
             self.stdout.read_line(&mut response).await?;
 
-            Ok(response.trim().to_string())
+            Ok(response.trim().to_owned())
         }
     }
 
@@ -344,7 +429,7 @@ pub mod private {
                     let mut response = String::new();
                     reader.read_line(&mut response).await?;
 
-                    return Ok(response.trim().to_string());
+                    return Ok(response.trim().to_owned());
                 }
 
                 let mut write_file = OpenOptions::new()
@@ -367,7 +452,7 @@ pub mod private {
                 let mut response = String::new();
                 reader.read_line(&mut response).await?;
 
-                Ok(response.trim().to_string())
+                Ok(response.trim().to_owned())
             }
 
             #[cfg(windows)]
@@ -389,7 +474,7 @@ pub mod private {
                 let mut response = String::new();
                 reader.read_line(&mut response).await?;
 
-                Ok(response.trim().to_string())
+                Ok(response.trim().to_owned())
             }
 
             #[cfg(not(any(unix, windows)))]
@@ -402,51 +487,61 @@ pub mod private {
     }
 
     pub async fn send_mcp_request_http(
-        client: &reqwest::Client,
         base_url: &str,
+        agent: &ureq::Agent,
         req: McpRequest,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<tinyjson::JsonValue> {
         let url = base_url.trim_end_matches('/');
 
         let rpc_request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".to_owned(),
             id: Some(1),
             method: req.method.clone(),
             params: Some(req.params.clone()),
         };
 
-        let res = client
-            .post(url)
-            .json(&rpc_request)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
-            .send()
-            .await
-            .context("failed to send request to MCP server")?;
+        let request_json = serialize_jsonrpc_request(&rpc_request)?;
+        let url_owned = url.to_string();
+        let agent_clone = agent.clone();
 
-        let status = res.status();
-        let body_text = res.text().await.context("failed to read response body")?;
+        let body_text = tokio::task::spawn_blocking(move || -> Result<String> {
+            let response = agent_clone
+                .post(&url_owned)
+                .set("Content-Type", "application/json")
+                .set("Accept", "application/json, text/event-stream")
+                .send_string(&request_json)
+                .context("failed to send request to MCP server")?;
+
+            let status_code = response.status();
+            let body = response.into_string().context("failed to read response body")?;
+
+            if !success_status_code(status_code) {
+                debug!("MCP server returned error: {status_code}");
+                debug!("Response body: {body}");
+            }
+
+            Ok(body)
+        })
+        .await
+        .context("HTTP request task failed")??;
 
         if body_text.trim().is_empty() {
             return Err(anyhow::anyhow!("empty response body from MCP server"));
         }
 
-        let mut json_response: serde_json::Value = if body_text.starts_with("event:") || body_text.contains("data:") {
+        let mut json_response: tinyjson::JsonValue = if body_text.starts_with("event:") || body_text.contains("data:") {
             let Some(json_data) = extract_sse_json_line(&body_text) else {
                 return Err(anyhow::anyhow!("no data found in SSE response"));
             };
 
-            serde_json::from_str(json_data)
-                .with_context(|| format!("failed to parse SSE JSON data; status: {status}, data: {json_data}"))?
+            json_data
+                .parse()
+                .with_context(|| format!("failed to parse SSE JSON data; data: {json_data}"))?
         } else {
-            serde_json::from_str(&body_text)
-                .with_context(|| format!("failed to parse JSON response; status: {status}, body: {body_text}"))?
+            body_text
+                .parse()
+                .with_context(|| format!("failed to parse JSON response; body: {body_text}"))?
         };
-
-        if !status.is_success() {
-            debug!("MCP server returned error: {status}");
-            debug!("Response body: {body_text}");
-        }
 
         // Apply custom text decoding.
         decode_content_texts(&mut json_response);
@@ -457,18 +552,19 @@ pub mod private {
     pub async fn send_mcp_request_stdio(
         stdio_client: &mut ProcessMcpClient,
         req: McpRequest,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<tinyjson::JsonValue> {
         let rpc_request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".to_owned(),
             id: Some(1),
             method: req.method.clone(),
             params: Some(req.params.clone()),
         };
 
-        let request_json = serde_json::to_string(&rpc_request)?;
+        let request_json = serialize_jsonrpc_request(&rpc_request)?;
         let response_json = stdio_client.send_request(&request_json).await?;
 
-        let json_response: serde_json::Value = serde_json::from_str(&response_json)
+        let json_response: tinyjson::JsonValue = response_json
+            .parse()
             .with_context(|| format!("failed to parse JSON response: {response_json}"))?;
 
         Ok(json_response)
@@ -477,7 +573,7 @@ pub mod private {
     pub async fn send_mcp_request_named_pipe(
         pipe_client: &NamedPipeMcpClient,
         req: McpRequest,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<tinyjson::JsonValue> {
         let rpc_request = JsonRpcRequest {
             jsonrpc: "2.0".to_owned(),
             id: Some(1),
@@ -485,10 +581,11 @@ pub mod private {
             params: Some(req.params.clone()),
         };
 
-        let request_json = serde_json::to_string(&rpc_request)?;
+        let request_json = serialize_jsonrpc_request(&rpc_request)?;
         let response_json = pipe_client.send_request(&request_json).await?;
 
-        let json_response: serde_json::Value = serde_json::from_str(&response_json)
+        let json_response: tinyjson::JsonValue = response_json
+            .parse()
             .with_context(|| format!("failed to parse JSON response: {response_json}"))?;
 
         Ok(json_response)
@@ -500,21 +597,27 @@ pub mod private {
     }
 
     /// Perform the library's custom unescaping for result.content[].text.
-    pub fn decode_content_texts(v: &mut Value) {
-        if let Some(result) = v.get_mut("result") {
-            if let Some(content) = result.get_mut("content") {
-                if let Some(arr) = content.as_array_mut() {
-                    for item in arr.iter_mut() {
-                        if let Some(text) = item.get_mut("text") {
-                            if let Some(s) = text.as_str() {
-                                let decoded = s
-                                    .replace("\\u0027", "'")
-                                    .replace("\\u0060", "`")
-                                    .replace("\\u0022", "\"")
-                                    .replace("\\u003C", "<")
-                                    .replace("\\u003E", ">")
-                                    .replace("\\n", "\n");
-                                *text = Value::String(decoded);
+    pub fn decode_content_texts(v: &mut tinyjson::JsonValue) {
+        if let Some(result_obj) = v.get_mut::<HashMap<String, tinyjson::JsonValue>>() {
+            if let Some(result) = result_obj.get_mut("result") {
+                if let Some(result_inner) = result.get_mut::<HashMap<String, tinyjson::JsonValue>>() {
+                    if let Some(content) = result_inner.get_mut("content") {
+                        if let Some(arr) = content.get_mut::<Vec<tinyjson::JsonValue>>() {
+                            for item in arr.iter_mut() {
+                                if let Some(item_obj) = item.get_mut::<HashMap<String, tinyjson::JsonValue>>() {
+                                    if let Some(text) = item_obj.get_mut("text") {
+                                        if let Some(s) = text.get::<String>() {
+                                            let decoded = s
+                                                .replace("\\u0027", "'")
+                                                .replace("\\u0060", "`")
+                                                .replace("\\u0022", "\"")
+                                                .replace("\\u003C", "<")
+                                                .replace("\\u003E", ">")
+                                                .replace("\\n", "\n");
+                                            *text = tinyjson::JsonValue::String(decoded);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -524,10 +627,12 @@ pub mod private {
     }
 
     /// If the value is a JSON-RPC envelope with a top-level "result", return that.
-    pub fn unwrap_json_rpc_inner_result(mut v: Value) -> Value {
-        match v.get_mut("result") {
-            Some(result) => result.take(),
-            None => v,
+    pub fn unwrap_json_rpc_inner_result(mut v: tinyjson::JsonValue) -> tinyjson::JsonValue {
+        if let Some(obj) = v.get_mut::<HashMap<String, tinyjson::JsonValue>>() {
+            if let Some(result) = obj.remove("result") {
+                return result;
+            }
         }
+        v
     }
 }

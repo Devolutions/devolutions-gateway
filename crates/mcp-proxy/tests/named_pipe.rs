@@ -2,8 +2,22 @@
 #![allow(clippy::unwrap_used)]
 
 use mcp_proxy::{Config, McpProxy, McpRequest};
+use std::collections::HashMap;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+fn get_bool_path(json: &tinyjson::JsonValue, path: &[&str]) -> bool {
+    let mut current = json;
+    for &segment in path {
+        if let Some(obj) = current.get::<HashMap<String, tinyjson::JsonValue>>() {
+            current = obj.get(segment).unwrap();
+        } else if let Some(arr) = current.get::<Vec<tinyjson::JsonValue>>() {
+            let index: usize = segment.parse().unwrap();
+            current = &arr[index];
+        }
+    }
+    *current.get::<bool>().unwrap()
+}
 
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -46,12 +60,12 @@ async fn uds_named_pipe_round_trip() {
         let out = proxy
             .send_request(McpRequest {
                 method: "x".into(),
-                params: Default::default(),
+                params: tinyjson::JsonValue::Object(HashMap::new()),
             })
             .await
             .unwrap();
 
-        assert_eq!(out["result"]["ok"], true);
+        assert_eq!(get_bool_path(&out, &["result", "ok"]), true);
 
         server.await.unwrap();
     }
@@ -88,12 +102,12 @@ async fn uds_named_pipe_round_trip() {
         let out = proxy
             .send_request(McpRequest {
                 method: "x".into(),
-                params: Default::default(),
+                params: tinyjson::JsonValue::Object(HashMap::new()),
             })
             .await
             .unwrap();
 
-        assert_eq!(out["result"]["ok"], true);
+        assert_eq!(get_bool_path(&out, &["result", "ok"]), true);
 
         server.await.unwrap();
     }

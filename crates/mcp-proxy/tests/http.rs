@@ -7,7 +7,33 @@ use std::thread;
 use std::time::Duration;
 
 use mcp_proxy::{Config, McpProxy, McpRequest};
-use serde_json::json;
+use std::collections::HashMap;
+
+fn get_string_path(json: &tinyjson::JsonValue, path: &[&str]) -> String {
+    let mut current = json;
+    for &segment in path {
+        if let Some(obj) = current.get::<HashMap<String, tinyjson::JsonValue>>() {
+            current = obj.get(segment).unwrap();
+        } else if let Some(arr) = current.get::<Vec<tinyjson::JsonValue>>() {
+            let index: usize = segment.parse().unwrap();
+            current = &arr[index];
+        }
+    }
+    current.get::<String>().unwrap().clone()
+}
+
+fn get_bool_path(json: &tinyjson::JsonValue, path: &[&str]) -> bool {
+    let mut current = json;
+    for &segment in path {
+        if let Some(obj) = current.get::<HashMap<String, tinyjson::JsonValue>>() {
+            current = obj.get(segment).unwrap();
+        } else if let Some(arr) = current.get::<Vec<tinyjson::JsonValue>>() {
+            let index: usize = segment.parse().unwrap();
+            current = &arr[index];
+        }
+    }
+    *current.get::<bool>().unwrap()
+}
 
 fn spawn_http_server(
     body: String,
@@ -57,7 +83,19 @@ fn spawn_http_server(
 
 #[tokio::test]
 async fn http_plain_json_ok() {
-    let body = json!({"result":{"tools":[{"name":"ping"}]}}).to_string();
+    let mut tools = HashMap::new();
+    tools.insert("name".to_string(), tinyjson::JsonValue::String("ping".to_string()));
+
+    let mut result = HashMap::new();
+    result.insert(
+        "tools".to_string(),
+        tinyjson::JsonValue::Array(vec![tinyjson::JsonValue::Object(tools)]),
+    );
+
+    let mut response = HashMap::new();
+    response.insert("result".to_string(), tinyjson::JsonValue::Object(result));
+
+    let body = tinyjson::JsonValue::Object(response).stringify().unwrap();
     let addr = spawn_http_server(body, "HTTP/1.1 200 OK", &[("Content-Type", "application/json")], None);
 
     let mut proxy = McpProxy::init(Config::http(format!("http://{addr}"), None))
@@ -67,12 +105,12 @@ async fn http_plain_json_ok() {
     let out = proxy
         .send_request(McpRequest {
             method: "tools/list".into(),
-            params: serde_json::Value::Object(Default::default()),
+            params: tinyjson::JsonValue::Object(HashMap::new()),
         })
         .await
         .unwrap();
 
-    assert_eq!(out["result"]["tools"][0]["name"], "ping");
+    assert_eq!(get_string_path(&out, &["result", "tools", "0", "name"]), "ping");
 }
 
 #[tokio::test]
@@ -87,12 +125,12 @@ async fn http_sse_parsed() {
     let out = proxy
         .send_request(McpRequest {
             method: "x".into(),
-            params: Default::default(),
+            params: tinyjson::JsonValue::Object(HashMap::new()),
         })
         .await
         .unwrap();
 
-    assert_eq!(out["result"]["ok"], true);
+    assert_eq!(get_bool_path(&out, &["result", "ok"]), true);
 }
 
 #[tokio::test]
@@ -111,7 +149,7 @@ async fn http_empty_body_errors() {
     let err = proxy
         .send_request(McpRequest {
             method: "x".into(),
-            params: Default::default(),
+            params: tinyjson::JsonValue::Object(HashMap::new()),
         })
         .await
         .unwrap_err();
@@ -136,7 +174,7 @@ async fn http_timeout_triggers() {
     let err = proxy
         .send_request(McpRequest {
             method: "x".into(),
-            params: Default::default(),
+            params: tinyjson::JsonValue::Object(HashMap::new()),
         })
         .await
         .unwrap_err();
@@ -157,10 +195,13 @@ async fn microsoft_learn() {
     let out = proxy
         .send_request(McpRequest {
             method: "tools/list".to_owned(),
-            params: Default::default(),
+            params: tinyjson::JsonValue::Object(HashMap::new()),
         })
         .await
         .unwrap();
 
-    assert_eq!(out["result"]["tools"][0]["name"], "microsoft_docs_search");
+    assert_eq!(
+        get_string_path(&out, &["result", "tools", "0", "name"]),
+        "microsoft_docs_search"
+    );
 }

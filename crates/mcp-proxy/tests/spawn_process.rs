@@ -1,10 +1,24 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
+use std::collections::HashMap;
 use std::fs;
 
 use mcp_proxy::{Config, McpProxy, McpRequest};
 use tempfile::TempDir;
+
+fn get_bool_path(json: &tinyjson::JsonValue, path: &[&str]) -> bool {
+    let mut current = json;
+    for &segment in path {
+        if let Some(obj) = current.get::<HashMap<String, tinyjson::JsonValue>>() {
+            current = obj.get(segment).unwrap();
+        } else if let Some(arr) = current.get::<Vec<tinyjson::JsonValue>>() {
+            let index: usize = segment.parse().unwrap();
+            current = &arr[index];
+        }
+    }
+    *current.get::<bool>().unwrap()
+}
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -51,10 +65,10 @@ async fn stdio_round_trip_json_line() {
     let out = proxy
         .send_request(McpRequest {
             method: "tools/list".into(),
-            params: Default::default(),
+            params: tinyjson::JsonValue::Object(HashMap::new()),
         })
         .await
         .unwrap();
 
-    assert_eq!(out["result"]["ok"], true);
+    assert_eq!(get_bool_path(&out, &["result", "ok"]), true);
 }
