@@ -455,6 +455,10 @@ pub enum AccessScope {
     TrafficClaim,
     #[serde(rename = "gateway.traffic.ack")]
     TrafficAck,
+    #[serde(rename = "gateway.net.monitor.config")]
+    NetMonitorConfig,
+    #[serde(rename = "gateway.net.monitor.drain")]
+    NetMonitorDrain,
 }
 
 #[derive(Clone, Deserialize)]

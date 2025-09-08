@@ -352,6 +352,42 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct NetMonitorConfigScope;
+
+impl<S> FromRequestParts<S> for NetMonitorConfigScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::NetMonitorConfig => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct NetMonitorDrainScope;
+
+impl<S> FromRequestParts<S> for NetMonitorDrainScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::NetMonitorDrain => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WebAppToken(pub WebAppTokenClaims);
 

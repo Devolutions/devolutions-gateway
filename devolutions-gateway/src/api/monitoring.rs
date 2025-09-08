@@ -5,6 +5,7 @@ use axum::{Json, Router, extract, routing};
 use time::OffsetDateTime;
 
 use crate::DgwState;
+use crate::extract::{NetMonitorConfigScope, NetMonitorDrainScope};
 use crate::http::HttpError;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -37,6 +38,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     ),
 ))]
 async fn handle_set_monitoring_config(
+    _scope: NetMonitorConfigScope,
     extract::State(DgwState { monitoring_state, .. }): extract::State<DgwState>,
     Json(config): Json<MonitorsConfig>,
 ) -> Result<Json<SetConfigResponse>, HttpError> {
@@ -68,6 +70,7 @@ async fn handle_set_monitoring_config(
     ),
 ))]
 async fn handle_drain_log(
+    _scope: NetMonitorDrainScope,
     extract::State(DgwState { monitoring_state, .. }): extract::State<DgwState>,
 ) -> Json<MonitoringLogResponse> {
     Json(MonitoringLogResponse {
