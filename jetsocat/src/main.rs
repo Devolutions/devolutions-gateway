@@ -226,6 +226,7 @@ Example: SOCKS5 to JMUX proxy
     let cmd = Command::new(JMUX_PROXY_SUBCOMMAND)
         .description("Start a JMUX proxy redirecting TCP streams")
         .alias("jp")
+        .alias("jmux")
         .usage(usage)
         .action(jmux_proxy_action);
 
