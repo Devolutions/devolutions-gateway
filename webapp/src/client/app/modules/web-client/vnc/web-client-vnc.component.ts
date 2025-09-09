@@ -529,7 +529,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     if (connectionParameters.colorFormat) {
       configBuilder.withExtension(pixelFormat(connectionParameters.colorFormat));
-    } 
+    }
 
     if (connectionParameters.jpegQualityLevel != null) {
       configBuilder.withExtension(jpegQualityLevel(connectionParameters.jpegQualityLevel));
