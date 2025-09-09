@@ -29,8 +29,9 @@ debug = 1
 
 [profile.production]
 inherits = "release"
-lto = true
 strip = "symbols"
+codegen-units = 1
+lto = true
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
