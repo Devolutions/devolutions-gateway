@@ -12,6 +12,7 @@ export async function handleWebm(gatewayApi: GatewayAccessApi) {
   videoPlayer.setAttribute('height', '100%');
   videoPlayer.setAttribute('controls', '');
   videoPlayer.setAttribute('muted', '');
+  videoPlayer.setAttribute('autoplay', '');
   document.body.appendChild(videoPlayer);
 
   videoPlayer.play(

@@ -14,6 +14,7 @@ pub mod pipe;
 pub mod proxy;
 
 mod jet;
+mod mcp;
 mod process_watcher;
 mod utils;
 
@@ -198,6 +199,41 @@ pub async fn doctor(cfg: DoctorCfg) -> anyhow::Result<()> {
     if num_failed > 0 {
         anyhow::bail!("Found {num_failed} issue(s)");
     }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct McpProxyCfg {
+    pub pipe_mode: pipe::PipeMode,
+    pub pipe_timeout: Option<Duration>,
+    pub watch_process: Option<sysinfo::Pid>,
+    pub proxy_cfg: Option<proxy::ProxyConfig>,
+    pub mcp_proxy_cfg: mcp_proxy::Config,
+}
+
+#[instrument(skip_all)]
+pub async fn mcp_proxy(cfg: McpProxyCfg) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use pipe::open_pipe;
+
+    info!("Start MCP proxy action");
+    debug!(?cfg);
+
+    let pipe = utils::timeout(cfg.pipe_timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg))
+        .instrument(info_span!("open_mcp_request_pipe"))
+        .await
+        .context("couldn't open MCP request pipe")?;
+
+    let mcp_proxy = utils::timeout(cfg.pipe_timeout, mcp_proxy::McpProxy::init(cfg.mcp_proxy_cfg))
+        .await
+        .context("failed to initialize MCP proxy")?;
+
+    let mcp_proxy_fut = mcp::run_mcp_proxy(pipe, mcp_proxy);
+
+    utils::while_process_is_running(cfg.watch_process, mcp_proxy_fut)
+        .await
+        .context("failed to pipe")?;
 
     Ok(())
 }

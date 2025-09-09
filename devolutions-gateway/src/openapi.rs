@@ -29,6 +29,8 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::api::net::get_net_config,
         crate::api::monitoring::handle_set_monitoring_config,
         crate::api::monitoring::handle_drain_log,
+        crate::api::traffic::post_traffic_claim,
+        crate::api::traffic::post_traffic_ack,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -66,6 +68,12 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::api::monitoring::MonitorDefinition,
         crate::api::monitoring::MonitoringProbeType,
         crate::api::monitoring::MonitorDefinitionProbeTypeError,
+        crate::api::traffic::ClaimedTrafficEvent,
+        crate::api::traffic::AckRequest,
+        crate::api::traffic::AckResponse,
+        crate::api::traffic::TrafficEventResponse,
+        crate::api::traffic::EventOutcomeResponse,
+        crate::api::traffic::TransportProtocolResponse,
     )),
     modifiers(&SecurityAddon),
 )]

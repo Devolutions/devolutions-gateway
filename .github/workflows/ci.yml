@@ -663,7 +663,7 @@ jobs:
 
           # cleanup staging directory before uploading artifacts we want to keep
           $StagingPath = '${{ steps.load-variables.outputs.staging-path }}'
-          Get-ChildItem -Path $StagingPath -Exclude "DevolutionsAgent*"
+          Get-ChildItem -Path $StagingPath -Exclude "DevolutionsAgent*" | Remove-Item -Recurse -Force
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

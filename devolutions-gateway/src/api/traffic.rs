@@ -173,6 +173,7 @@ pub(crate) struct TrafficEventResponse {
     /// Original target host string before DNS resolution
     target_host: String,
     /// Concrete target IP address after resolution
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     target_ip: IpAddr,
     /// Target port number for the connection
     target_port: u16,

@@ -581,7 +581,9 @@ impl MessageProcessor {
         let tmp_file = TmpFileGuard::new("bat")?;
         tmp_file.write_content(batch_msg.command())?;
 
-        let parameters = format!("/c \"{}\"", tmp_file.path_string());
+        // "/Q" - Turns command echo off.
+        // "/C" - Carries out the command specified by string and then terminates.
+        let parameters = format!("/Q /C \"{}\"", tmp_file.path_string());
 
         let mut run_batch = WinApiProcessBuilder::new("cmd.exe")
             .with_temp_file(tmp_file)
@@ -610,7 +612,8 @@ impl MessageProcessor {
 
         append_ps_args(&mut params, &winps_msg);
 
-        params.push("-File".to_owned());
+        // "-Command" runs script without command echo and terminates.
+        params.push("-Command".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
         let params_str = params.join(" ");
@@ -636,20 +639,23 @@ impl MessageProcessor {
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
         let tmp_file = TmpFileGuard::new("ps1")?;
+
         tmp_file.write_content(winps_msg.command())?;
 
         let mut params = Vec::new();
 
         append_pwsh_args(&mut params, &winps_msg);
 
-        params.push("-File".to_owned());
+        // "-Command" runs script without command echo and terminates.
+        params.push("-Command".to_owned());
         params.push(format!("\"{}\"", tmp_file.path_string()));
 
         let params_str = params.join(" ");
 
         let mut run_process = WinApiProcessBuilder::new("pwsh.exe")
             .with_temp_file(tmp_file)
-            .with_command_line(&params_str);
+            .with_command_line(&params_str)
+            .with_env("NO_COLOR", "1"); // Suppress ANSI escape codes in pwsh output.
 
         if let Some(directory) = winps_msg.directory() {
             run_process = run_process.with_current_directory(directory);

@@ -37,6 +37,7 @@ export interface IronVNCConnectionParameters {
   screenSize?: DesktopSize;
   enabledEncodings?: string;
   colorFormat: string;
+  jpegQualityLevel?: number;
   enableCursor: boolean;
   enableExtendedClipboard: boolean;
   ultraVirtualDisplay: boolean;

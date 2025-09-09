@@ -1,0 +1,22 @@
+[package]
+name = "mcp-proxy"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Cross-platform MCP (Model Context Protocol) proxy tool"
+readme = "README.md"
+keywords = ["mcp", "proxy", "cli", "llm", "json-rpc"]
+categories = ["command-line-utilities", "network-programming"]
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "macros", "io-util", "process", "fs", "net"] }
+ureq = "2"
+tinyjson = "2"
+anyhow = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+# For tiny HTTP servers in tests (we implement raw TCP manually, so no heavy web stack)
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }

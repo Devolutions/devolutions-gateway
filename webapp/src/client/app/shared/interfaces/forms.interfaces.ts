@@ -46,6 +46,8 @@ export interface VncFormDataInput {
   ultraVirtualDisplay: boolean;
   enabledEncodings: Encoding[];
   colorFormat: ColorFormat;
+  jpegEnabled: boolean;
+  jpegQualityLevel: number;
   wheelSpeedFactor: number;
   screenSize: ScreenSize;
   autoClipboard?: boolean;
