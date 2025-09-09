@@ -1130,6 +1130,35 @@ pub mod dto {
         }
     }
 
+    /// Domain user credentials.
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    pub struct DomainUser {
+        pub username: String,
+        pub domain: String,
+        pub password: String,
+    }
+
+    /// Kerberos server config
+    ///
+    /// This config is used to configure the Kerberos server during RDP proxying.
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    pub struct KerberosServer {
+        /// The maximum allowed time difference between client and proxy clocks
+        ///
+        /// The value must be in seconds.
+        pub max_time_skew: u64,
+        /// Ticket decryption key
+        ///
+        /// This key is used to decrypt the TGS ticket sent by the client. If you do not plan
+        /// to use Kerberos U2U authentication, then the `ticket_decryption_key' is required.
+        pub ticket_decryption_key: Option<Vec<u8>>,
+        /// The domain user credentials for the Kerberos U2U authentication
+        ///
+        /// This field is needed only for Kerberos User-to-User authentication. If you do not plan
+        /// to use Kerberos U2U, do not specify it.
+        pub service_user: Option<DomainUser>,
+    }
+
     /// Unsafe debug options that should only ever be used at development stage
     ///
     /// These options might change or get removed without further notice.
@@ -1170,6 +1199,11 @@ pub mod dto {
         #[serde(default = "ws_keep_alive_interval_default_value")]
         pub ws_keep_alive_interval: u64,
 
+        /// Kerberos application server configuration
+        ///
+        /// It is used only during RDP proxying.
+        pub kerberos_server: Option<KerberosServer>,
+
         /// Enable unstable features which may break at any point
         #[serde(default)]
         pub enable_unstable: bool,
@@ -1187,6 +1221,7 @@ pub mod dto {
                 capture_path: None,
                 lib_xmf_path: None,
                 enable_unstable: false,
+                kerberos_server: None,
                 ws_keep_alive_interval: ws_keep_alive_interval_default_value(),
             }
         }
