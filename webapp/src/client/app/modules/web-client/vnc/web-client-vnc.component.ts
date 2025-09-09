@@ -34,6 +34,7 @@ import {
   enableCursor,
   enabledEncodings,
   enableExtendedClipboard,
+  jpegQualityLevel,
   ultraVirtualDisplay,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
@@ -451,6 +452,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       enableExtendedClipboard,
       enabledEncodings,
       ultraVirtualDisplay,
+      jpegEnabled,
+      jpegQualityLevel,
       wheelSpeedFactor = 1,
     } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultVncPort);
@@ -471,6 +474,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       screenSize: desktopScreenSize,
       sessionId,
       enabledEncodings: enabledEncodings.join(','),
+      jpegQualityLevel: jpegEnabled ? jpegQualityLevel : undefined,
       enableCursor,
       enableExtendedClipboard: enableExtendedClipboard ?? false,
       ultraVirtualDisplay,
@@ -518,6 +522,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       configBuilder.withExtension(enabledEncodings(connectionParameters.enabledEncodings));
     } else {
       configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
+    }
+
+    if (connectionParameters.jpegQualityLevel != null) {
+      configBuilder.withExtension(jpegQualityLevel(connectionParameters.jpegQualityLevel));
     }
 
     const config = configBuilder.build();

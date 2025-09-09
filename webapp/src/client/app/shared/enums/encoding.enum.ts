@@ -5,8 +5,6 @@ enum Encoding {
   Zlib = 'zlib',
   Hextile = 'hextile',
   Tight = 'tight',
-  JpegLow = 'jpeg-low',
-  JpegHigh = 'jpeg-high',
   TightPng = 'tight-png',
 }
 
