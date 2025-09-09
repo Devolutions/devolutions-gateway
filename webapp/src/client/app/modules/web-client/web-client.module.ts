@@ -37,6 +37,7 @@ import { AutoClipboardControlComponent } from './form/form-controls/auto-clipboa
 import { EnabledEncodingsControlComponent } from './form/form-controls/enabled-encodings-control/enabled-encodings-control.component';
 import { ExtendedClipboardControlComponent } from './form/form-controls/extended-clipboard-control/extended-clipboard-control.component';
 import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
+import { JpegQualityLevelControlComponent } from './form/form-controls/jpeg-quality-level-control/jpeg-quality-level-control.component';
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
 import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
 import { NetScanComponent } from './net-scan/net-scan.component';
@@ -79,6 +80,7 @@ const routes: Routes = [
     UsernameControlComponent,
     PasswordControlComponent,
     ExtendedClipboardControlComponent,
+    JpegQualityLevelControlComponent,
     ScreenSizeControlComponent,
     EnableDisplayConfigurationControlComponent,
     KdcUrlControlComponent,
