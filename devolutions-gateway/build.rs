@@ -1,6 +1,9 @@
 fn main() {
     #[cfg(target_os = "windows")]
     win::embed_version_rc();
+
+    #[cfg(target_os = "windows")]
+    win::embed_devolutions_gateway_mc();
 }
 
 #[cfg(target_os = "windows")]
@@ -82,5 +85,94 @@ END"#,
         );
 
         version_rc
+    }
+
+    pub(super) fn embed_devolutions_gateway_mc() {
+        use std::env;
+        use std::path::PathBuf;
+        use std::process::Command;
+
+        // --- gate: only release builds -------------------------------------
+        let profile = env::var("PROFILE").unwrap_or_default();
+        if profile != "release" {
+            return;
+        }
+
+        // --- gate: ignore with a warning when mc is not found --------------
+        let mc_exe_path = match find_mc() {
+            Some(path) => path,
+            None => {
+                println!("cargo:warning=Did not find mc.exe");
+                return;
+            }
+        };
+
+        // --- inputs/paths ---------------------------------------------------
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+        let mc_file = manifest_dir.join("devolutions-gateway.mc"); // adjust if stored elsewhere
+
+        // Always tell Cargo to re-run if the .mc changes
+        println!("cargo:rerun-if-changed={}", mc_file.display());
+
+        // --- prepare OUT_DIR ------------------------------------------------
+        let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
+        // We'll run mc.exe with current_dir = OUT_DIR so the generated .rc lands in OUT_DIR.
+        let rc_path = out_dir.join("devolutions-gateway.rc");
+
+        // --- run mc.exe -----------------------------------------------------
+        // Requires Windows SDK tools in PATH (use a "x64 Native Tools Command Prompt for VS").
+        // Flags:
+        //   -u : Unicode
+        //   -m : Generate message resource .bin files
+        //   -h <dir> : header output dir (we put it in OUT_DIR; the header is unused by Rust)
+        //   -r <dir> : message .bin output dir (OUT_DIR)
+        let status = Command::new(mc_exe_path)
+            .current_dir(&out_dir)
+            .arg("-um")
+            .arg("-h")
+            .arg(".")
+            .arg("-r")
+            .arg(".")
+            .arg(mc_file.canonicalize().expect("failed to canonicalize .mc path"))
+            .status()
+            .expect("failed to spawn mc.exe");
+        if !status.success() {
+            panic!("mc.exe failed with status {status}");
+        }
+
+        // --- compile the generated .rc via embed-resource -------------------
+        if !rc_path.exists() {
+            panic!("mc.exe did not produce expected .rc file at {}", rc_path.display());
+        }
+
+        // Compile/link the .rc into the final binary.
+        // This will call rc.exe under the hood.
+        embed_resource::compile(rc_path, embed_resource::NONE)
+            .manifest_required()
+            .unwrap();
+
+        // Optional: make Cargo re-run if locale bins change (paranoid but harmless)
+        // These are standard names emitted by mc.exe for EN/FR/DE in our .mc.
+        for loc in &["MSG00409.bin", "MSG0040c.bin", "MSG00407.bin"] {
+            let p = out_dir.join(loc);
+            println!("cargo:rerun-if-changed={}", p.display());
+        }
+    }
+
+    fn find_mc() -> Option<std::path::PathBuf> {
+        if let Ok(sdk_bin) = env::var("WindowsSdkVerBinPath") {
+            let p = std::path::Path::new(&sdk_bin).join("mc.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        if let Ok(sdk_dir) = env::var("WindowsSdkDir") {
+            // e.g. C:\Program Files (x86)\Windows Kits\10\
+            let candidate = std::path::Path::new(&sdk_dir).join("bin").join("x64").join("mc.exe");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+        None
     }
 }

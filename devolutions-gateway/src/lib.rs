@@ -44,6 +44,9 @@ pub mod ws;
 
 use std::sync::Arc;
 
+pub const SYSTEM_LOGGER: std::sync::LazyLock<Arc<dyn sysevent::SystemEventSink>> =
+    std::sync::LazyLock::new(init_system_logger);
+
 #[derive(Clone)]
 pub struct DgwState {
     pub conf_handle: config::ConfHandle,
@@ -147,4 +150,25 @@ pub fn make_http_service(state: DgwState) -> axum::Router<()> {
                 }))
                 .layer(TimeoutLayer::new(Duration::from_secs(15))),
         )
+}
+
+fn init_system_logger() -> Arc<dyn sysevent::SystemEventSink> {
+    cfg_if::cfg_if! {
+        if #[cfg(all(not(debug_assertions), unix))] {
+            let options = sysevent_syslog::SyslogOptions::default()
+                .log_pid(true)
+                .facility(sysevent::Facility::Daemon);
+            match sysevent_syslog::Syslog::new(c"devolutions-gateway", options) {
+                Ok(syslog) => Arc::new(syslog),
+                Err(_) => Arc::new(sysevent::NoopSink),
+            }
+        } else if #[cfg(all(not(debug_assertions), windows))] {
+            match sysevent_winevent::WinEvent::new("Devolutions Gateway") {
+                Ok(winevent) => Arc::new(winevent),
+                Err(_) => Arc::new(sysevent::NoopSink),
+            }
+        } else {
+            Arc::new(sysevent::NoopSink)
+        }
+    }
 }

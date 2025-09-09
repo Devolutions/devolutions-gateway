@@ -1,0 +1,12 @@
+[package]
+name = "sysevent"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Core API for system-wide critical event logging with pluggable backends"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Devolutions/devolutions-gateway"
+publish = false
+
+[lints]
+workspace = true

@@ -33,6 +33,7 @@ use anyhow::Context;
 use ceviche::controller::{Controller, ControllerInterface, dispatch};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
+use devolutions_gateway::SYSTEM_LOGGER;
 use devolutions_gateway::config::ConfHandle;
 use std::sync::mpsc;
 use tap::prelude::*;
@@ -52,7 +53,7 @@ fn main() -> anyhow::Result<()> {
         let bootstacktrace_path = devolutions_gateway::config::get_data_dir().join("boot.stacktrace");
 
         if let Err(write_error) = std::fs::write(&bootstacktrace_path, format!("{error:?}")) {
-            eprintln!("Failed to the boot stacktrace to {bootstacktrace_path}: {write_error}");
+            eprintln!("Failed to write the boot stacktrace to {bootstacktrace_path}: {write_error}");
         }
     })
 }
@@ -70,7 +71,7 @@ fn run() -> anyhow::Result<()> {
             if let Some(path) = args.next() {
                 config_path = Some(path);
             } else {
-                return Err(anyhow::anyhow!("missing value for --config-path"));
+                anyhow::bail!("missing value for --config-path");
             }
         } else {
             remaining_args.push(arg);
@@ -198,9 +199,15 @@ fn gateway_service_main(
     _args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let Ok(conf_handle) = ConfHandle::init() else {
-        // At this point, the logger is not yet initialized.
-        return BAD_CONFIG_ERR_CODE;
+    let conf_handle = match ConfHandle::init() {
+        Ok(conf_handle) => conf_handle,
+        Err(error) => {
+            let _ = SYSTEM_LOGGER.emit(sysevent_codes::config_invalid(
+                &error,
+                devolutions_gateway::config::get_data_dir().join("gateway.json"),
+            ));
+            return BAD_CONFIG_ERR_CODE;
+        }
     };
 
     let mut service = match GatewayService::load(conf_handle) {
@@ -208,14 +215,19 @@ fn gateway_service_main(
         Err(error) => {
             // At this point, the logger may or may not be initialized.
             error!(error = format!("{error:#}"), "Failed to load service");
+            let _ = SYSTEM_LOGGER.emit(sysevent_codes::start_failed(&error, "service_load"));
             return START_FAILED_ERR_CODE;
         }
     };
 
     match service.start() {
-        Ok(()) => info!("{} service started", SERVICE_NAME),
+        Ok(()) => {
+            info!("{} service started", SERVICE_NAME);
+            let _ = SYSTEM_LOGGER.emit(sysevent_codes::service_started(env!("CARGO_PKG_VERSION")));
+        }
         Err(error) => {
             error!(error = format!("{error:#}"), "Failed to start");
+            let _ = SYSTEM_LOGGER.emit(sysevent_codes::start_failed(&error, "service_start"));
             return START_FAILED_ERR_CODE;
         }
     }
@@ -232,6 +244,7 @@ fn gateway_service_main(
     }
 
     info!("{} service stopping", SERVICE_NAME);
+    let _ = SYSTEM_LOGGER.emit(sysevent_codes::service_stopping("received stop control code"));
 
     0
 }

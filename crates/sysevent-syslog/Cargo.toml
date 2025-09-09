@@ -1,0 +1,19 @@
+[package]
+name = "sysevent-syslog"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Syslog backend for system-wide critical event logging"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Devolutions/devolutions-gateway"
+publish = false
+
+[dependencies]
+sysevent.path = "../sysevent"
+libc = "0.2"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

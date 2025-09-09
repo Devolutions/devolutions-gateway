@@ -353,6 +353,12 @@ internal class Program
                 AttributesDefinition = "Type=string; Component:Permanent=yes",
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
+            },
+            new (RegistryHive.LocalMachine, $"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\{Includes.PRODUCT_NAME}", "EventMessageFile", $"[{GatewayProperties.InstallDir}]{Includes.EXECUTABLE_NAME}")
+            {
+                AttributesDefinition = "Type=string",
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.create,
             }
         };
         project.Properties = GatewayProperties.Properties.Select(x => x.ToWixSharpProperty()).ToArray();

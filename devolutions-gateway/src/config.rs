@@ -15,6 +15,7 @@ use tokio_rustls::rustls::pki_types;
 use url::Url;
 use uuid::Uuid;
 
+use crate::SYSTEM_LOGGER;
 use crate::credential::Password;
 use crate::listener::ListenerUrls;
 use crate::target_addr::TargetAddr;
@@ -184,9 +185,12 @@ impl Conf {
                         private_key,
                     };
 
-                    Tls::init(cert_source, strict_checks)
-                        .context("failed to initialize TLS configuration")?
-                        .pipe(Some)
+                    let tls =
+                        Tls::init(cert_source, strict_checks).context("failed to initialize TLS configuration")?;
+
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_configured("filesystem"));
+
+                    Some(tls)
                 }
             },
             dto::CertSource::System => match conf_file.tls_certificate_subject_name.clone() {
@@ -207,9 +211,12 @@ impl Conf {
                         store_name,
                     };
 
-                    Tls::init(cert_source, strict_checks)
-                        .context("failed to initialize TLS configuration")?
-                        .pipe(Some)
+                    let tls =
+                        Tls::init(cert_source, strict_checks).context("failed to initialize TLS configuration")?;
+
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_configured("system"));
+
+                    Some(tls)
                 }
             },
         };

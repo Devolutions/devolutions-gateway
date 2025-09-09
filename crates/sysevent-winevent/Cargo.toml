@@ -1,0 +1,19 @@
+[package]
+name = "sysevent-winevent"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Windows Event Log backend for system-wide critical event logging"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Devolutions/devolutions-gateway"
+publish = false
+
+[dependencies]
+sysevent.path = "../sysevent"
+windows-sys = { version = "0.52", features = [
+    "Win32_System_EventLog",
+    "Win32_Foundation"
+] }
+
+[lints]
+workspace = true

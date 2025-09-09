@@ -32,6 +32,8 @@ network-scanner.path = "../crates/network-scanner"
 video-streamer.path = "../crates/video-streamer"
 terminal-streamer.path = "../crates/terminal-streamer"
 network-monitor.path = "../crates/network-monitor"
+sysevent.path = "../crates/sysevent"
+sysevent-codes.path = "../crates/sysevent-codes"
 ironrdp-pdu = { version = "0.5", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.1"
@@ -119,8 +121,12 @@ etherparse = "0.15"
 # For KDC proxy
 portpicker = "0.1"
 
+[target.'cfg(unix)'.dependencies]
+sysevent-syslog.path = "../crates/sysevent-syslog"
+
 [target.'cfg(windows)'.dependencies]
 rustls-cng = { version = "0.5", default-features = false, features = ["logging", "tls12", "ring"] }
+sysevent-winevent.path = "../crates/sysevent-winevent"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0"

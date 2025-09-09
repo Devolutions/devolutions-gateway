@@ -10,12 +10,12 @@ use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
 
-use crate::DgwState;
 use crate::config::Conf;
 use crate::http::HttpError;
 use crate::recording::ActiveRecordings;
 use crate::session::DisconnectedInfo;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache, TokenValidator};
+use crate::{DgwState, SYSTEM_LOGGER};
 
 struct AuthException {
     method: Method,
@@ -150,7 +150,7 @@ pub async fn auth_middleware(
 
         let conf = conf_handle.get_conf();
 
-        let access_token_claims = authenticate(
+        let result = authenticate(
             source_addr,
             token,
             &conf,
@@ -158,8 +158,26 @@ pub async fn auth_middleware(
             &jrl,
             &recordings.active_recordings,
             disconnected_info,
-        )
-        .map_err(HttpError::unauthorized().err())?;
+        );
+
+        let access_token_claims = match result {
+            Ok(access_token_claims) => access_token_claims,
+            Err(error) => {
+                match &error {
+                    crate::token::TokenError::SignatureVerification { source, key } => {
+                        let _ = SYSTEM_LOGGER.emit(
+                            sysevent_codes::jwt_rejected("bad_signature", format!("{source:#}")).field("key", key),
+                        );
+                    }
+                    crate::token::TokenError::UnexpectedReplay { reason } => {
+                        let _ = SYSTEM_LOGGER.emit(sysevent_codes::jwt_rejected("unexpected_replay", reason));
+                    }
+                    _ => {}
+                }
+
+                return Err(HttpError::unauthorized().err()(error));
+            }
+        };
 
         let mut request = Request::from_parts(parts, body);
 

@@ -6,6 +6,7 @@ members = [
     "devolutions-gateway",
     "devolutions-session",
     "jetsocat",
+    "testsuite",
     "tools/generate-openapi",
 ]
 default-members = [
@@ -36,6 +37,10 @@ strip = "symbols"
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
 
 [workspace.lints.rust]
+# Declare the custom cfgs.
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(build_profile, values("dev","release","production"))',
+]}
 
 # == Safer unsafe == #
 unsafe_op_in_unsafe_fn = "warn"
@@ -54,6 +59,9 @@ noop_method_call = "warn"
 # == Compile-time / optimization == #
 unused_crate_dependencies = "warn"
 unused_macro_rules = "warn"
+
+[workspace.dependencies]
+proptest = "1.0"
 
 [workspace.lints.clippy]
 

@@ -1,0 +1,13 @@
+[package]
+name = "sysevent-codes"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+sysevent.path = "../sysevent"

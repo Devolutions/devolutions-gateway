@@ -145,6 +145,7 @@ pub mod windows {
     use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
     use tokio_rustls::rustls::sign::CertifiedKey;
 
+    use crate::SYSTEM_LOGGER;
     use crate::config::dto;
     use crate::tls::{CertIssues, check_certificate};
 
@@ -289,6 +290,13 @@ pub mod windows {
                                     issues = %report.issues,
                                     "Filtered out certificate because it has significant issues"
                                 );
+                                let _ = SYSTEM_LOGGER.emit(
+                                    sysevent_codes::tls_certificate_rejected(
+                                        report.subject,
+                                        report.issues.iter_names().next().expect("at least one issue").0,
+                                    )
+                                    .severity(sysevent::Severity::Notice),
+                                );
                                 return None;
                             }
 
@@ -336,6 +344,9 @@ pub mod windows {
                 })
                 .with_context(|| {
                     format!("no usable certificate found in the system store; observed issues: {cert_issues}")
+                })
+                .inspect_err(|error| {
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_no_suitable_certificate(error, cert_issues));
                 })?;
 
             trace!(idx = context.idx, not_after = %context.not_after, key_algorithm_group = ?key.key().algorithm_group(), key_algorithm = ?key.key().algorithm(), "Selected certificate");

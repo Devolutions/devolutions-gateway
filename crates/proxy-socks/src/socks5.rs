@@ -276,10 +276,8 @@ impl From<io::ErrorKind> for Socks5FailureCode {
         match kind {
             io::ErrorKind::ConnectionRefused => Socks5FailureCode::ConnectionRefused,
             io::ErrorKind::TimedOut => Socks5FailureCode::TtlExpired,
-            #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
-            std::io::ErrorKind::HostUnreachable => Socks5FailureCode::HostUnreachable,
-            #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
-            std::io::ErrorKind::NetworkUnreachable => Socks5FailureCode::NetworkUnreachable,
+            io::ErrorKind::HostUnreachable => Socks5FailureCode::HostUnreachable,
+            io::ErrorKind::NetworkUnreachable => Socks5FailureCode::NetworkUnreachable,
             _ => Socks5FailureCode::GeneralSocksServerFailure,
         }
     }
