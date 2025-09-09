@@ -34,8 +34,8 @@ import {
   enableCursor,
   enabledEncodings,
   enableExtendedClipboard,
-  pixelFormat,
   jpegQualityLevel,
+  pixelFormat,
   ultraVirtualDisplay,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
