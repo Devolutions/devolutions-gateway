@@ -10,7 +10,7 @@ enum ColorFormat {
 }
 
 enum Tooltips {
-  Default = 'Color format advertised by a server',
+  Default = 'Use the color format advertised by the server',
   Full = 'True 24-bit color',
   High = 'High 16-bit color',
   Medium = '256 colors',
