@@ -126,7 +126,7 @@ pub fn exit(res: anyhow::Result<()>) -> ! {
 
 const PIPE_FORMATS: &str = r#"Pipe formats:
     `stdio` or `-`: Standard input output
-    `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on windows or `sh -c` otherwise
+    `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on Windows or `sh -c` otherwise
     `write-file://<PATH>`: Open specified file in write mode
     `read-file://<PATH>`: Open specified file in read mode
     `tcp://<ADDRESS>`: Plain TCP stream
@@ -136,10 +136,12 @@ const PIPE_FORMATS: &str = r#"Pipe formats:
     `ws://<URL>`: WebSocket
     `wss://<URL>`: WebSocket Secure
     `ws-listen://<BINDING ADDRESS>`: WebSocket listener
+    `np://<PIPE NAME>`: Connect to a named pipe, expanded to `./pipe/<PIPE NAME>` (Windows)
     `np://<SERVER NAME>/pipe/<PIPE NAME>`: Connect to a named pipe (Windows)
+    `np-listen://<PIPE NAME>`: Open a named pipe and listen, expanded to `./pipe/<PIPE NAME>` (Windows)
     `np-listen://./pipe/<PIPE NAME>`: Open a named pipe and listen on it (Windows)
-    `np://<UNIX SOCKET PATH>`: Connect to a UNIX socket (non-Windows)
-    `np-listen://<UNIX SOCKET PATH>`: Create a UNIX socket and listen on it (non-Windows)"#;
+    `np://<UNIX SOCKET PATH>`: Connect to a UNIX socket; when path does not start with / or ., it gets expanded to `/tmp/<UNIX SOCKET PATH>` (non-Windows)
+    `np-listen://<UNIX SOCKET PATH>`: Create a UNIX socket and listen on it; when path does not start with / or ., it gets expanded to `/tmp/<UNIX SOCKET PATH>` (non-Windows)"#;
 
 // forward
 
@@ -204,9 +206,9 @@ fn jmux_proxy() -> Command {
 {PIPE_FORMATS}
 
 Listener formats:
-    - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
-    - socks5-listen://<BINDING ADDRESS>
-    - http-listen://<BINDING ADDRESS>
+    - `tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>`
+    - `socks5-listen://<BINDING ADDRESS>`
+    - `http-listen://<BINDING ADDRESS>`
 
 Example: JMUX proxy
 
@@ -257,18 +259,21 @@ const MCP_PROXY_SUBCOMMAND: &str = "mcp-proxy";
 
 fn mcp_proxy() -> Command {
     let usage = format!(
-        r##"{command} {subcommand} <REQUEST_PIPE> <MCP_TRANSPORT>
+        r##"{command} {subcommand} <REQUEST PIPE> <MCP TRANSPORT>
 
 MCP Proxy - Bridge different MCP transport protocols
 
 {PIPE_FORMATS}
 
-MCP transport modes:
+MCP transport formats:
     - `http://<DESTINATION>`: Use the plain HTTP transport
     - `https://<DESTINATION>`: Use the TLS secure HTTP transport
+    - `np://<PIPE NAME>`: Use the named pipe transport, defaults to `./pipe/<PIPE NAME>` on Windows or `/tmp/<PIPE NAME>` on Unix (only when PIPE NAME contains no path separators)
     - `np://<SERVER NAME>/pipe/<PIPE NAME>`: Use the named pipe transport (Windows)
-    - `np://<UNIX SOCKET PATH>`: Use the UNIX socket transport (non-Windows)
-    - `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on windows or `sh -c` otherwise
+    - `np://./socket.sock`: Use UNIX socket in current directory (Unix)
+    - `np:///absolute/path/socket.sock`: Use UNIX socket with absolute path (Unix)
+    - `np://<UNIX SOCKET PATH>`: Use the UNIX socket transport (non-Windows, when path starts with / or .)
+    - `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on Windows or `sh -c` otherwise
 
 Example: HTTP MCP server
 
@@ -282,7 +287,7 @@ Example: Named pipe MCP server
 
     {command} {subcommand} - np:///tmp/mcp-server.sock
 
-The tool reads JSON-RPC requests from stdin and writes responses to stdout."##,
+The tool reads JSON-RPC requests from the <REQUEST_PIPE> and writes responses back to it."##,
         command = env!("CARGO_PKG_NAME"),
         subcommand = MCP_PROXY_SUBCOMMAND,
     );
@@ -623,7 +628,7 @@ impl JmuxProxyArgs {
 }
 
 fn apply_mcp_flags(cmd: Command) -> Command {
-    cmd.flag(Flag::new("http-timeout", FlagType::Int).description("Timeout in seconds for HTTP requests (default: 30)"))
+    cmd.flag(Flag::new("http-timeout", FlagType::String).description("Timeout for HTTP requests (default: 30s)"))
 }
 
 struct McpProxyArgs {
@@ -644,8 +649,11 @@ impl McpProxyArgs {
         let mcp_transport = args.next().context("<MCP_TRANSPORT> is missing")?.clone();
         let mcp_transport = parse_mcp_transport_mode(mcp_transport).context("bad <MCP_TRANSPORT>")?;
 
-        let http_timeout = c.int_flag("http-timeout").unwrap_or(30);
-        let http_timeout = Duration::from_secs(u64::try_from(http_timeout).context("invalid http-timeout value")?);
+        let http_timeout = if let Ok(timeout) = c.string_flag("http-timeout") {
+            humantime::parse_duration(&timeout).context("invalid value for http timeout")?
+        } else {
+            Duration::from_secs(30)
+        };
 
         let mcp_cfg = match mcp_transport {
             TransportMode::Http { url } => mcp_proxy::Config::http(url, Some(http_timeout)),
@@ -679,14 +687,24 @@ impl McpProxyArgs {
                 "np" => {
                     #[cfg(windows)]
                     {
+                        let resolved_value = if value.starts_with('.') {
+                            value.to_owned()
+                        } else {
+                            format!(".\\pipe\\{}", value)
+                        };
                         Ok(TransportMode::NamedPipe {
-                            pipe_path: format!("\\\\{}", value.replace('/', "\\")),
+                            pipe_path: format!("\\\\{}", resolved_value.replace('/', "\\")),
                         })
                     }
                     #[cfg(unix)]
                     {
+                        let resolved_value = if value.starts_with('/') || value.starts_with('.') {
+                            value.to_owned()
+                        } else {
+                            format!("/tmp/{}", value)
+                        };
                         Ok(TransportMode::NamedPipe {
-                            pipe_path: value.to_owned(),
+                            pipe_path: resolved_value,
                         })
                     }
                 }
@@ -764,28 +782,48 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
         "np" => {
             #[cfg(windows)]
             {
+                let resolved_value = if value.starts_with('.') {
+                    value.to_owned()
+                } else {
+                    format!(".\\pipe\\{}", value)
+                };
                 Ok(PipeMode::NamedPipe {
-                    name: format!("\\\\{}", value.replace('/', "\\")),
+                    name: format!("\\\\{}", resolved_value.replace('/', "\\")),
                 })
             }
             #[cfg(unix)]
             {
+                let resolved_value = if value.starts_with('/') || value.starts_with('.') {
+                    value.to_owned()
+                } else {
+                    format!("/tmp/{}", value)
+                };
                 Ok(PipeMode::UnixSocket {
-                    path: PathBuf::from(value.to_owned()),
+                    path: PathBuf::from(resolved_value),
                 })
             }
         }
         "np-listen" => {
             #[cfg(windows)]
             {
+                let resolved_value = if value.starts_with('.') {
+                    value.to_owned()
+                } else {
+                    format!(".\\pipe\\{}", value)
+                };
                 Ok(PipeMode::NamedPipeListen {
-                    name: format!("\\\\{}", value.replace('/', "\\")),
+                    name: format!("\\\\{}", resolved_value.replace('/', "\\")),
                 })
             }
             #[cfg(unix)]
             {
+                let resolved_value = if value.starts_with('/') || value.starts_with('.') {
+                    value.to_owned()
+                } else {
+                    format!("/tmp/{}", value)
+                };
                 Ok(PipeMode::UnixSocketListen {
-                    path: PathBuf::from(value.to_owned()),
+                    path: PathBuf::from(resolved_value),
                 })
             }
         }
