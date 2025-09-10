@@ -11,18 +11,17 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { IronError, SessionEvent, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
-import { SessionEventType } from '@shared/enums/session-event-type.enum';
 import { IronARDConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { ArdFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { MessageService } from 'primeng/api';
+import { Message, MessageService } from 'primeng/api';
 import { EMPTY, from, Observable, of, Subject } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
@@ -57,7 +56,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   backendRef = Backend;
 
   formData: ArdFormDataInput;
-  ardError: { kind: string; backtrace: string };
+  sessionTerminationMessage: Message;
   isFullScreenMode = false;
   cursorOverrideActive = false;
 
@@ -207,21 +206,23 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   }
 
   async saveRemoteClipboard(): Promise<void> {
-    const result = await this.remoteClient.saveRemoteClipboardData();
-    // We handle only the successful result. On failure, an error event is raised,
-    // which we handle separately.
-    if (result) {
+    try {
+      await this.remoteClient.saveRemoteClipboardData();
+
       super.webClientSuccess('Clipboard content has been copied to your clipboard!');
       this.saveRemoteClipboardButtonEnabled = false;
+    } catch (err) {
+      this.handleSessionError(err);
     }
   }
 
   async sendClipboard(): Promise<void> {
-    const result = await this.remoteClient.sendClipboardData();
-    // We handle only the successful result. On failure, an error event is raised,
-    // which we handle separately.
-    if (result) {
+    try {
+      await this.remoteClient.sendClipboardData();
+
       super.webClientSuccess('Clipboard content has been sent to the remote server!');
+    } catch (err) {
+      this.handleSessionError(err);
     }
   }
 
@@ -333,7 +334,14 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       this.remoteClient.setEnableAutoClipboard(false);
     }
 
-    this.initSessionEventHandler();
+    // Register callbacks for events.
+    this.remoteClient.onWarningCallback((data: string) => {
+      this.webClientWarning(data);
+    });
+    this.remoteClient.onClipboardRemoteUpdateCallback(() => {
+      this.saveRemoteClipboardButtonEnabled = true;
+    });
+
     this.startConnectionProcess();
   }
 
@@ -344,7 +352,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
         switchMap(() => this.fetchParameters(this.formData)),
         switchMap((params) => this.fetchTokens(params)),
         catchError((error) => {
-          this.handleIronRDPError(error.message);
+          this.handleError(error.message);
           return EMPTY;
         }),
       )
@@ -411,105 +419,92 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
     from(this.remoteClient.connect(config))
       .pipe(
         takeUntil(this.destroyed$),
-        catchError((_err) => {
-          // FIXME: refactor `remoteClient.connect` to return an actual error instead of a dummy
-          return EMPTY;
+        switchMap((newSessionInfo) => {
+          this.handleSessionStarted();
+          return from(newSessionInfo.run());
         }),
       )
-      .subscribe();
+      .subscribe({
+        next: (sessionTerminationInfo) => this.handleSessionTerminatedGracefully(sessionTerminationInfo),
+        error: (err) => this.handleSessionTerminatedWithError(err),
+      });
   }
 
-  private initSessionEventHandler(): void {
-    const handler = (event: SessionEvent): void => {
-      switch (event.type) {
-        case SessionEventType.STARTED:
-          this.handleSessionStarted(event);
-          break;
-        case SessionEventType.TERMINATED:
-          this.handleSessionTerminated(event);
-          break;
-        case SessionEventType.ERROR:
-          this.handleSessionError(event);
-          break;
-        case SessionEventType.WARNING:
-          this.handleSessionWarning(event);
-          break;
-        case SessionEventType.CLIPBOARD_REMOTE_UPDATE:
-          this.saveRemoteClipboardButtonEnabled = true;
-          break;
-      }
-    };
-
-    this.remoteClient.onSessionEvent(handler);
-  }
-
-  private handleSessionStarted(_event: SessionEvent): void {
-    this.handleIronRDPConnectStarted();
-    this.initializeStatus();
-  }
-
-  private handleSessionTerminated(event: SessionEvent): void {
-    if (document.fullscreenElement) {
-      this.exitFullScreen();
-    }
-
-    this.notifyUser(event);
-    this.disableComponentStatus();
-    super.webClientConnectionClosed();
-  }
-
-  private handleSessionError(event: SessionEvent): void {
-    const errorMessage = super.getIronErrorMessage(event.data);
-    this.webClientError(errorMessage);
-  }
-
-  private handleSessionWarning(event: SessionEvent): void {
-    const message = super.getIronErrorMessage(event.data);
-    this.webClientWarning(message);
-  }
-
-  private handleIronRDPConnectStarted(): void {
+  private handleSessionStarted(): void {
     this.loading = false;
     this.remoteClient.setVisibility(true);
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_ARD_ICON);
     this.webClientConnectionSuccess();
+    this.initializeStatus();
   }
 
-  private notifyUser(event: SessionEvent): void {
-    const eventType = event.type.valueOf();
-    const errorData = event.data;
-
-    this.ardError = {
-      kind: this.getMessage(errorData),
-      backtrace: super.getIronErrorMessage(errorData),
+  private handleSessionTerminatedGracefully(sessionTerminationInfo: SessionTerminationInfo): void {
+    this.sessionTerminationMessage = {
+      summary: 'Session terminated gracefully',
+      detail: sessionTerminationInfo.reason(),
+      severity: 'success',
     };
 
-    const icon: string = eventType !== SessionEventType.STARTED ? DVL_WARNING_ICON : DVL_ARD_ICON;
-
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
+    this.handleSessionTerminated();
   }
 
-  private handleIronRDPError(error: IronError | string): void {
-    this.notifyUserAboutError(error);
+  private handleSessionTerminatedWithError(error: unknown): void {
+    if (this.isIronError(error)) {
+      this.sessionTerminationMessage = {
+        summary: this.getIronErrorMessageTitle(error),
+        detail: error.backtrace(),
+        severity: 'error',
+      };
+    } else {
+      this.sessionTerminationMessage = {
+        summary: 'Unexpected error occurred',
+        detail: `${error}`,
+        severity: 'error',
+      };
+    }
+
+    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
+
+    this.handleSessionTerminated();
+  }
+
+  private handleSessionTerminated(): void {
+    if (document.fullscreenElement) {
+      this.exitFullScreen();
+    }
+
+    this.disableComponentStatus();
+    super.webClientConnectionClosed();
+  }
+
+  private handleSessionError(err: unknown): void {
+    if (this.isIronError(err)) {
+      this.webClientError(err.backtrace());
+    } else {
+      this.webClientError(`${err}`);
+    }
+  }
+
+  private isIronError(error: unknown): error is IronError {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      typeof (error as IronError).backtrace === 'function' &&
+      typeof (error as IronError).kind === 'function'
+    );
+  }
+
+  private handleError(error: string): void {
+    this.sessionTerminationMessage = {
+      summary: 'Unexpected error occurred',
+      detail: error,
+      severity: 'error',
+    };
     this.disableComponentStatus();
   }
 
-  private notifyUserAboutError(error: IronError | string): void {
-    this.ardError = {
-      kind: this.getMessage(error),
-      backtrace: super.getIronErrorMessage(error),
-    };
-
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
-  }
-
-  private getMessage(errorData: IronError | string): string {
-    let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
-    if (typeof errorData === 'string') {
-      return 'The session is terminated';
-    }
-
-    errorKind = errorData.kind().valueOf();
+  private getIronErrorMessageTitle(error: IronError): string {
+    const errorKind: UserIronRdpErrorKind = error.kind().valueOf();
 
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
