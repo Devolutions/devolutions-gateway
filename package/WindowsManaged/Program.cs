@@ -358,7 +358,7 @@ internal class Program
             {
                 AttributesDefinition = "Type=string",
                 Win64 = project.Platform == Platform.x64,
-                RegistryKeyAction = RegistryKeyAction.create,
+                RegistryKeyAction = RegistryKeyAction.createAndRemoveOnUninstall,
             }
         };
         project.Properties = GatewayProperties.Properties.Select(x => x.ToWixSharpProperty()).ToArray();
