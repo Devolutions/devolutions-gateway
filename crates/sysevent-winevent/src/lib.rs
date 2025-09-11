@@ -72,18 +72,18 @@ impl WinEvent {
         let mut string_ptrs = Vec::new(); // Will be actually used as the parameter of the FFI function.
         let mut utf16_strings = Vec::new(); // Keep the UTF-16 strings alive.
 
-        // For messages with parameters, pass field values as insertion strings.
+        // Add the English message as the first parameter for debugging context.
+        let message_utf16 = to_null_terminated_utf16(&truncated_message);
+        string_ptrs.push(message_utf16.as_ptr());
+        utf16_strings.push(message_utf16);
+
+        // Pass field values as insertion strings.
         // The .mc message template will format the complete message using %1, %2, etc, so the key is ignored.
         for (_key, value) in &entry.fields {
             let value_utf16 = to_null_terminated_utf16(value);
             string_ptrs.push(value_utf16.as_ptr());
             utf16_strings.push(value_utf16);
         }
-
-        // Add the English message as the final parameter for debugging context.
-        let message_utf16 = to_null_terminated_utf16(&truncated_message);
-        string_ptrs.push(message_utf16.as_ptr());
-        utf16_strings.push(message_utf16);
 
         let num_strings = u16::try_from(string_ptrs.len()).expect("not too many fields");
 
