@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nExample completed. Check the Windows Event Log:");
     println!("  1. Open Event Viewer (eventvwr.exe)");
     println!("  2. Navigate to Windows Logs > Application");
-    println!("  3. Look for events from source 'SystemWideLogExample'");
+    println!("  3. Look for events from source 'DgwSystemWideLogExample'");
     println!(
         "  4. Or use PowerShell: Get-WinEvent -FilterHashtable @{{LogName='Application'; ProviderName='DgwSystemWideLogExample'}}"
     );
