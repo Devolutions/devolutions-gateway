@@ -366,11 +366,18 @@ jobs:
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+
           $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
           $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
           $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
+
+          Write-Host "DGATEWAY_EXECUTABLE = ${Env:DGATEWAY_EXECUTABLE}"
+          Write-Host "DGATEWAY_PSMODULE_PATH = ${Env:DGATEWAY_PSMODULE_PATH}"
+          Write-Host "DGATEWAY_WEBCLIENT_PATH = ${Env:DGATEWAY_WEBCLIENT_PATH}"
+          Write-Host "DGATEWAY_WEBPLAYER_PATH = ${Env:DGATEWAY_WEBPLAYER_PATH}"
+          Write-Host "DGATEWAY_LIB_XMF_PATH = ${Env:DGATEWAY_LIB_XMF_PATH}"
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption generate
 
@@ -403,16 +410,36 @@ jobs:
               AzureSignTool @Params $_.FullName
           }
 
+      - name: Download tun2socks artifacts
+        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+          gh run download ${{ needs.preflight.outputs.run }} -n tun2socks-windows-x86_64 -D "$PackageRoot\tun2socks"
+
       - name: Regenerate Agent MSI
         if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
           $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
           $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
+          $Env:DAGENT_TUN2SOCKS_EXE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'tun2socks.exe' | Select -First 1
+          $Env:DAGENT_WINTUN_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'wintun.dll' | Select -First 1
+
+          Write-Host "DAGENT_EXECUTABLE = ${Env:DAGENT_EXECUTABLE}"
+          Write-Host "DAGENT_DESKTOP_AGENT_PATH = ${Env:DAGENT_DESKTOP_AGENT_PATH}"
+          Write-Host "DAGENT_PEDM_SHELL_EXT_DLL = ${Env:DAGENT_PEDM_SHELL_EXT_DLL}"
+          Write-Host "DAGENT_PEDM_SHELL_EXT_MSIX = ${Env:DAGENT_PEDM_SHELL_EXT_MSIX}"
+          Write-Host "DAGENT_SESSION_EXECUTABLE = ${Env:DAGENT_SESSION_EXECUTABLE}"
+          Write-Host "DAGENT_TUN2SOCKS_EXE = ${Env:DAGENT_TUN2SOCKS_EXE}"
+          Write-Host "DAGENT_WINTUN_DLL = ${Env:DAGENT_WINTUN_DLL}"
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 

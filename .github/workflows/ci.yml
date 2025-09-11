@@ -782,6 +782,13 @@ jobs:
             if (-Not (Test-Path $_)) { throw "$_ not found" }
           }
 
+      - name: Upload tun2socks artifacts
+        uses: actions/upload-artifact@v4
+        if: matrix.os == 'windows'
+        with:
+          name: tun2socks-${{ matrix.os }}-${{ matrix.arch }}
+          path: tun2socks/
+
       - name: Setup LLVM
         uses: Devolutions/actions-public/setup-llvm@v1
         if: runner.os == 'Linux'
