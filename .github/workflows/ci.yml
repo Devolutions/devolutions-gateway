@@ -896,20 +896,12 @@ jobs:
         shell: pwsh
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
-            # Remove devolutions-pedm-desktop artifacts to avoid duplicates
+            # Remove devolutions-pedm-desktop folder completely to avoid duplicates
             # These will be available separately from the devolutions-pedm-desktop job
-            $StagingPath = '${{ steps.load-variables.outputs.staging-path }}'
-            $FilesToRemove = @(
-              "DevolutionsPedmShellExt.dll",
-              "DevolutionsPedmShellExt.msix", 
-              "DevolutionsSession.exe"
-            )
-            foreach ($file in $FilesToRemove) {
-              $FilePath = Get-ChildItem -Path $StagingPath -Recurse -Filter $file -ErrorAction SilentlyContinue
-              if ($FilePath) {
-                Write-Host "Removing architecture-agnostic file: $($FilePath.FullName)"
-                Remove-Item $FilePath.FullName -Force
-              }
+            $DesktopStagingPath = Join-Path (Get-Location) "devolutions-pedm-desktop"
+            if (Test-Path $DesktopStagingPath) {
+              Write-Host "Removing devolutions-pedm-desktop folder: $DesktopStagingPath"
+              Remove-Item $DesktopStagingPath -Recurse -Force
             }
           }
 
@@ -1209,6 +1201,13 @@ jobs:
 
           $allFiles = Get-ChildItem -Path "$sourceFolder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
 
+          # Exclude some files that are already bundled in installers
+          $excludeFiles = @(
+            'DevolutionsPedmShellExt.dll',
+            'DevolutionsPedmShellExt.msix',
+            'DevolutionsSession.exe'
+          )
+
           Write-Host
 
           foreach ($file in $allFiles) {
@@ -1216,6 +1215,12 @@ jobs:
             $name = $file.Name
             $source = "$dir/$name"
             $destination = "$destinationFolder/$name"
+
+            # Skip architecture-specific files that are part of installers
+            if ($name -in $excludeFiles) {
+              Write-Host "Skipping $source"
+              continue
+            }
 
             Write-Host "$source --> $destination"
 
