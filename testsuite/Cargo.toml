@@ -1,0 +1,28 @@
+[package]
+name = "testsuite"
+version = "0.0.0"
+edition = "2024"
+description = "Devolutions Gateway Rust test suite"
+publish = false
+autotests = false
+
+[lib]
+doctest = false
+test = false
+
+[[test]]
+name = "integration_tests"
+path = "tests/main.rs"
+harness = true
+
+[dependencies]
+sysevent.path = "../crates/sysevent"
+
+[target.'cfg(unix)'.dependencies]
+sysevent-syslog.path = "../crates/sysevent-syslog"
+
+[target.'cfg(windows)'.dependencies]
+sysevent-winevent.path = "../crates/sysevent-winevent"
+
+[lints]
+workspace = true

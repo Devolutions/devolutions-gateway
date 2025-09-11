@@ -10,7 +10,7 @@ use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
-use devolutions_gateway::{DgwState, config};
+use devolutions_gateway::{DgwState, SYSTEM_LOGGER, config};
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;
@@ -59,6 +59,7 @@ impl GatewayService {
                 ?conf.debug,
                 "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**",
             );
+            let _ = SYSTEM_LOGGER.emit(sysevent_codes::debug_options_enabled(format!("{:?}", conf.debug)));
         }
 
         if conf_file.tls_private_key_password.is_some() {
@@ -70,6 +71,9 @@ impl GatewayService {
 
         if matches!(conf_file.tls_verify_strict, None | Some(false)) {
             warn!("TlsVerifyStrict option is absent or set to false. This may hide latent issues.");
+            let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_verify_strict_disabled(
+                "TlsVerifyStrict option is absent or set to false",
+            ));
         }
 
         if let Some((cert_subject_name, hostname)) = conf_file
@@ -81,9 +85,13 @@ impl GatewayService {
                 warn!(
                     %hostname,
                     %cert_subject_name,
-                    "Hostname doesn’t match the TLS certificate subject name configured; \
+                    "Hostname doesn't match the TLS certificate subject name configured; \
                     not necessarily a problem if it is instead matched by an alternative subject name"
-                )
+                );
+                let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_certificate_name_mismatch(
+                    hostname,
+                    cert_subject_name,
+                ));
             }
         }
 
@@ -100,11 +108,14 @@ impl GatewayService {
 
             match result {
                 Ok(_) => info!(%path, "XMF native library loaded and installed"),
-                Err(error) => warn!(
-                    %path,
-                    %error,
-                    "Failed to load XMF native library, features requiring video processing such as remuxing and shadowing are disabled"
-                ),
+                Err(error) => {
+                    warn!(
+                        %path,
+                        %error,
+                        "Failed to load XMF native library, features requiring video processing such as remuxing and shadowing are disabled"
+                    );
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::xmf_not_found(path, &error));
+                }
             }
         }
 
@@ -279,6 +290,15 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .map(|listener| {
             GatewayListener::init_and_bind(listener, state.clone())
                 .with_context(|| format!("failed to initialize {}", listener.internal_url))
+                .inspect(|_| {
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::listener_started(
+                        &listener.internal_url,
+                        listener.internal_url.scheme(),
+                    ));
+                })
+                .inspect_err(|error| {
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::listener_bind_failed(&listener.internal_url, error));
+                })
         })
         .collect::<anyhow::Result<Vec<GatewayListener>>>()
         .context("failed to bind listener")?

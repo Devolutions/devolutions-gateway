@@ -1240,6 +1240,10 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "smol_str",
+ "sysevent",
+ "sysevent-codes",
+ "sysevent-syslog",
+ "sysevent-winevent",
  "sysinfo",
  "tap",
  "terminal-streamer",
@@ -5937,6 +5941,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysevent"
+version = "0.0.0"
+
+[[package]]
+name = "sysevent-codes"
+version = "0.0.0"
+dependencies = [
+ "sysevent",
+]
+
+[[package]]
+name = "sysevent-syslog"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "proptest",
+ "sysevent",
+]
+
+[[package]]
+name = "sysevent-winevent"
+version = "0.0.0"
+dependencies = [
+ "sysevent",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "sysinfo"
 version = "0.35.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6020,6 +6052,15 @@ dependencies = [
  "tokio 1.46.1",
  "tokio-tungstenite",
  "transport",
+]
+
+[[package]]
+name = "testsuite"
+version = "0.0.0"
+dependencies = [
+ "sysevent",
+ "sysevent-syslog",
+ "sysevent-winevent",
 ]
 
 [[package]]
