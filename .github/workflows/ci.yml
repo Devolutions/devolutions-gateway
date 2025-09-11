@@ -892,6 +892,27 @@ jobs:
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
+      - name: Clean up architecture-agnostic files before upload
+        shell: pwsh
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            # Remove devolutions-pedm-desktop artifacts to avoid duplicates
+            # These will be available separately from the devolutions-pedm-desktop job
+            $StagingPath = '${{ steps.load-variables.outputs.staging-path }}'
+            $FilesToRemove = @(
+              "DevolutionsPedmShellExt.dll",
+              "DevolutionsPedmShellExt.msix", 
+              "DevolutionsSession.exe"
+            )
+            foreach ($file in $FilesToRemove) {
+              $FilePath = Get-ChildItem -Path $StagingPath -Recurse -Filter $file -ErrorAction SilentlyContinue
+              if ($FilePath) {
+                Write-Host "Removing architecture-agnostic file: $($FilePath.FullName)"
+                Remove-Item $FilePath.FullName -Force
+              }
+            }
+          }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
