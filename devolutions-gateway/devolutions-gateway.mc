@@ -29,51 +29,51 @@ LanguageNames=(
 MessageId=1000
 SymbolicName=SERVICE_STARTED
 Language=English
-Service started. Version=%1
+Service started. Version=%1 Context=%2
 Language=French
-Service démarré. Version=%1
+Service démarré. Version=%1 Contexte=%2
 Language=German
-Dienst gestartet. Version=%1
+Dienst gestartet. Version=%1 Kontext=%2
 .
 
 MessageId=1001
 SymbolicName=SERVICE_STOPPING
 Language=English
-Service stopping. Reason=%1
+Service stopping. Reason=%1 Context=%2
 Language=French
-Arrêt du service. Raison=%1
+Arrêt du service. Raison=%1 Contexte=%2
 Language=German
-Dienst wird gestoppt. Grund=%1
+Dienst wird gestoppt. Grund=%1 Kontext=%2
 .
 
 MessageId=1010
 SymbolicName=CONFIG_INVALID
 Language=English
-Configuration invalid. Path=%1 Error=%2 Reason=%3
+Configuration invalid. Path=%1 Error=%2 Reason=%3 Context=%4
 Language=French
-Configuration invalide. Chemin=%1 Erreur=%2 Raison=%3
+Configuration invalide. Chemin=%1 Erreur=%2 Raison=%3 Contexte=%4
 Language=German
-Ungültige Konfiguration. Pfad=%1 Fehler=%2 Grund=%3
+Ungültige Konfiguration. Pfad=%1 Fehler=%2 Grund=%3 Kontext=%4
 .
 
 MessageId=1020
 SymbolicName=START_FAILED
 Language=English
-Start failed. Cause=%1 Error=%2
+Start failed. Cause=%1 Error=%2 Context=%3
 Language=French
-Échec du démarrage. Cause=%1 Erreur=%2
+Échec du démarrage. Cause=%1 Erreur=%2 Contexte=%3
 Language=German
-Start fehlgeschlagen. Ursache=%1 Fehler=%2
+Start fehlgeschlagen. Ursache=%1 Fehler=%2 Kontext=%3
 .
 
 MessageId=1030
 SymbolicName=BOOT_STACKTRACE_WRITTEN
 Language=English
-Boot stacktrace written. Path=%1
+Boot stacktrace written. Path=%1 Context=%2
 Language=French
-Trace d’amorçage écrite. Chemin=%1
+Trace d’amorçage écrite. Chemin=%1 Contexte=%2
 Language=German
-Boot-Stacktrace geschrieben. Pfad=%1
+Boot-Stacktrace geschrieben. Pfad=%1 Kontext=%2
 .
 
 ; ======================================================================
@@ -83,31 +83,31 @@ Boot-Stacktrace geschrieben. Pfad=%1
 MessageId=2000
 SymbolicName=LISTENER_STARTED
 Language=English
-Listener started. Address=%1 Proto=%2
+Listener started. Address=%1 Proto=%2 Context=%3
 Language=French
-Écouteur démarré. Adresse=%1 Protocole=%2
+Écouteur démarré. Adresse=%1 Protocole=%2 Contexte=%3
 Language=German
-Listener gestartet. Adresse=%1 Protokoll=%2
+Listener gestartet. Adresse=%1 Protokoll=%2 Kontext=%3
 .
 
 MessageId=2001
 SymbolicName=LISTENER_BIND_FAILED
 Language=English
-Listener bind failed. Address=%1 Error=%2
+Listener bind failed. Address=%1 Error=%2 Context=%3
 Language=French
-Échec de l’attachement de l’écouteur. Adresse=%1 Erreur=%2
+Échec de l’attachement de l’écouteur. Adresse=%1 Erreur=%2 Contexte=%3
 Language=German
-Listener-Bind fehlgeschlagen. Adresse=%1 Fehler=%2
+Listener-Bind fehlgeschlagen. Adresse=%1 Fehler=%2 Kontext=%3
 .
 
 MessageId=2002
 SymbolicName=LISTENER_STOPPED
 Language=English
-Listener stopped. Address=%1 Reason=%2
+Listener stopped. Address=%1 Reason=%2 Context=%3
 Language=French
-Écouteur arrêté. Adresse=%1 Raison=%2
+Écouteur arrêté. Adresse=%1 Raison=%2 Contexte=%3
 Language=German
-Listener gestoppt. Adresse=%1 Grund=%2
+Listener gestoppt. Adresse=%1 Grund=%2 Kontext=%3
 .
 
 ; ======================================================================
@@ -117,71 +117,71 @@ Listener gestoppt. Adresse=%1 Grund=%2
 MessageId=3000
 SymbolicName=TLS_CONFIGURED
 Language=English
-TLS configured. Source=%1
+TLS configured. Source=%1 Context=%2
 Language=French
-TLS configuré. Source=%1
+TLS configuré. Source=%1 Contexte=%2
 Language=German
-TLS konfiguriert. Quelle=%1
+TLS konfiguriert. Quelle=%1 Kontext=%2
 .
 
 MessageId=3001
 SymbolicName=TLS_VERIFY_STRICT_DISABLED
 Language=English
-TLS strict verification disabled. Mode=%1
+TLS strict verification disabled. Mode=%1 Context=%2
 Language=French
-Vérification stricte TLS désactivée. Mode=%1
+Vérification stricte TLS désactivée. Mode=%1 Contexte=%2
 Language=German
-Strikte TLS-Überprüfung deaktiviert. Modus=%1
+Strikte TLS-Überprüfung deaktiviert. Modus=%1 Kontext=%2
 .
 
 MessageId=3002
 SymbolicName=TLS_CERTIFICATE_REJECTED
 Language=English
-Certificate rejected. Subject=%1 Reason=%2
+Certificate rejected. Subject=%1 Reason=%2 Context=%3
 Language=French
-Certificat rejeté. Sujet=%1 Raison=%2
+Certificat rejeté. Sujet=%1 Raison=%2 Contexte=%3
 Language=German
-Zertifikat abgelehnt. Betreff=%1 Grund=%2
+Zertifikat abgelehnt. Betreff=%1 Grund=%2 Kontext=%3
 .
 
 MessageId=3003
 SymbolicName=SYSTEM_CERT_SELECTED
 Language=English
-System certificate selected. Thumbprint=%1 Subject=%2
+System certificate selected. Thumbprint=%1 Subject=%2 Context=%3
 Language=French
-Certificat système sélectionné. Empreinte=%1 Sujet=%2
+Certificat système sélectionné. Empreinte=%1 Sujet=%2 Contexte=%3
 Language=German
-Systemzertifikat ausgewählt. Fingerabdruck=%1 Betreff=%2
+Systemzertifikat ausgewählt. Fingerabdruck=%1 Betreff=%2 Kontext=%3
 .
 
 MessageId=3004
 SymbolicName=TLS_KEY_LOAD_FAILED
 Language=English
-TLS key/cert load failed. Path=%1 Error=%2 Reason=%3
+TLS key/cert load failed. Path=%1 Error=%2 Reason=%3 Context=%4
 Language=French
-Échec du chargement de la clé/cert TLS. Chemin=%1 Erreur=%2 Raison=%3
+Échec du chargement de la clé/cert TLS. Chemin=%1 Erreur=%2 Raison=%3 Contexte=%4
 Language=German
-TLS-Schlüssel/Zertifikat konnte nicht geladen werden. Pfad=%1 Fehler=%2 Grund=%3
+TLS-Schlüssel/Zertifikat konnte nicht geladen werden. Pfad=%1 Fehler=%2 Grund=%3 Kontext=%4
 .
 
 MessageId=3005
 SymbolicName=TLS_CERTIFICATE_NAME_MISMATCH
 Language=English
-TLS certificate name mismatch. Hostname=%1 Subject=%2 Reason=%3
+TLS certificate name mismatch. Hostname=%1 Subject=%2 Reason=%3 Context=%4
 Language=French
-Nom du certificat TLS non concordant. Hôte=%1 Sujet=%2 Raison=%3
+Nom du certificat TLS non concordant. Hôte=%1 Sujet=%2 Raison=%3 Contexte=%4
 Language=German
-TLS-Zertifikat-Namen stimmt nicht überein. Hostname=%1 Betreff=%2 Grund=%3
+TLS-Zertifikat-Namen stimmt nicht überein. Hostname=%1 Betreff=%2 Grund=%3 Kontext=%4
 .
 
 MessageId=3006
 SymbolicName=TLS_NO_SUITABLE_CERTIFICATE
 Language=English
-No suitable certificate found. Error=%1 Issues=%2
+No suitable certificate found. Error=%1 Issues=%2 Context=%3
 Language=French
-Aucun certificat approprié trouvé. Erreur=%1 Problèmes=%2
+Aucun certificat approprié trouvé. Erreur=%1 Problèmes=%2 Contexte=%3
 Language=German
-Kein geeignetes Zertifikat gefunden. Fehler=%1 Probleme=%2
+Kein geeignetes Zertifikat gefunden. Fehler=%1 Probleme=%2 Kontext=%3
 .
 
 ; ======================================================================
@@ -191,81 +191,81 @@ Kein geeignetes Zertifikat gefunden. Fehler=%1 Probleme=%2
 MessageId=4000
 SymbolicName=SESSION_OPENED
 Language=English
-Session opened. Protocol=%1 Client=%2 Target=%3 TokenId=%4
+Session opened. Protocol=%1 Client=%2 Target=%3 TokenId=%4 Context=%5
 Language=French
-Session ouverte. Protocole=%1 Client=%2 Cible=%3 Jeton=%4
+Session ouverte. Protocole=%1 Client=%2 Cible=%3 Jeton=%4 Contexte=%5
 Language=German
-Sitzung geöffnet. Protokoll=%1 Client=%2 Ziel=%3 Token=%4
+Sitzung geöffnet. Protokoll=%1 Client=%2 Ziel=%3 Token=%4 Kontext=%5
 .
 
 MessageId=4001
 SymbolicName=SESSION_CLOSED
 Language=English
-Session closed. DurationMs=%1 BytesTx=%2 BytesRx=%3 Outcome=%4
+Session closed. DurationMs=%1 BytesTx=%2 BytesRx=%3 Outcome=%4 Context=%5
 Language=French
-Session fermée. DuréeMs=%1 OctetsTx=%2 OctetsRx=%3 Résultat=%4
+Session fermée. DuréeMs=%1 OctetsTx=%2 OctetsRx=%3 Résultat=%4 Contexte=%5
 Language=German
-Sitzung geschlossen. DauerMs=%1 BytesTx=%2 BytesRx=%3 Ergebnis=%4
+Sitzung geschlossen. DauerMs=%1 BytesTx=%2 BytesRx=%3 Ergebnis=%4 Kontext=%5
 .
 
 MessageId=4010
 SymbolicName=TOKEN_PROVISIONED
 Language=English
-Token provisioned. TokenId=%1
+Token provisioned. TokenId=%1 Context=%2
 Language=French
-Jeton provisionné. Jeton=%1
+Jeton provisionné. Jeton=%1 Contexte=%2
 Language=German
-Token bereitgestellt. Token=%1
+Token bereitgestellt. Token=%1 Kontext=%2
 .
 
 MessageId=4011
 SymbolicName=TOKEN_REUSED
 Language=English
-Token reused. TokenId=%1 ReuseCount=%2
+Token reused. TokenId=%1 ReuseCount=%2 Context=%3
 Language=French
-Jeton réutilisé. Jeton=%1 Réutilisations=%2
+Jeton réutilisé. Jeton=%1 Réutilisations=%2 Contexte=%3
 Language=German
-Token wiederverwendet. Token=%1 Anzahl=%2
+Token wiederverwendet. Token=%1 Anzahl=%2 Kontext=%3
 .
 
 MessageId=4012
 SymbolicName=TOKEN_REUSE_LIMIT_EXCEEDED
 Language=English
-Token reuse limit exceeded. TokenId=%1 Limit=%2 Reason=%3
+Token reuse limit exceeded. TokenId=%1 Limit=%2 Reason=%3 Context=%4
 Language=French
-Limite de réutilisation du jeton dépassée. Jeton=%1 Limite=%2 Raison=%3
+Limite de réutilisation du jeton dépassée. Jeton=%1 Limite=%2 Raison=%3 Contexte=%4
 Language=German
-Token-Wiederverwendungsgrenze überschritten. Token=%1 Limit=%2 Grund=%3
+Token-Wiederverwendungsgrenze überschritten. Token=%1 Limit=%2 Grund=%3 Kontext=%4
 .
 
 MessageId=4030
 SymbolicName=RECORDING_STARTED
 Language=English
-Recording started. Destination=%1
+Recording started. Destination=%1 Context=%2
 Language=French
-Enregistrement démarré. Destination=%1
+Enregistrement démarré. Destination=%1 Contexte=%2
 Language=German
-Aufnahme gestartet. Ziel=%1
+Aufnahme gestartet. Ziel=%1 Kontext=%2
 .
 
 MessageId=4031
 SymbolicName=RECORDING_STOPPED
 Language=English
-Recording stopped. Bytes=%1 Files=%2
+Recording stopped. Bytes=%1 Files=%2 Context=%3
 Language=French
-Enregistrement arrêté. Octets=%1 Fichiers=%2
+Enregistrement arrêté. Octets=%1 Fichiers=%2 Contexte=%3
 Language=German
-Aufnahme gestoppt. Bytes=%1 Dateien=%2
+Aufnahme gestoppt. Bytes=%1 Dateien=%2 Kontext=%3
 .
 
 MessageId=4032
 SymbolicName=RECORDING_ERROR
 Language=English
-Recording error. Path=%1 Error=%2
+Recording error. Path=%1 Error=%2 Context=%3
 Language=French
-Erreur d’enregistrement. Chemin=%1 Erreur=%2
+Erreur d’enregistrement. Chemin=%1 Erreur=%2 Contexte=%3
 Language=German
-Aufnahmefehler. Pfad=%1 Fehler=%2
+Aufnahmefehler. Pfad=%1 Fehler=%2 Kontext=%3
 .
 
 ; ======================================================================
@@ -275,41 +275,41 @@ Aufnahmefehler. Pfad=%1 Fehler=%2
 MessageId=5001
 SymbolicName=JWT_REJECTED
 Language=English
-JWT rejected. ReasonCode=%1 Reason=%2
+JWT rejected. ReasonCode=%1 Reason=%2 Context=%3
 Language=French
-JWT rejeté. CodeRaison=%1 Raison=%2
+JWT rejeté. CodeRaison=%1 Raison=%2 Contexte=%3
 Language=German
-JWT abgelehnt. GrundCode=%1 Grund=%2
+JWT abgelehnt. GrundCode=%1 Grund=%2 Kontext=%3
 .
 
 MessageId=5002
 SymbolicName=JWT_ANOMALY
 Language=English
-JWT anomaly. Issuer=%1 Audience=%2 Kid=%3 Kind=%4 Detail=%5
+JWT anomaly. Issuer=%1 Audience=%2 Kid=%3 Kind=%4 Detail=%5 Context=%6
 Language=French
-Anomalie JWT. Émetteur=%1 Audience=%2 Kid=%3 Type=%4 Détail=%5
+Anomalie JWT. Émetteur=%1 Audience=%2 Kid=%3 Type=%4 Détail=%5 Contexte=%6
 Language=German
-JWT-Anomalie. Aussteller=%1 Audience=%2 Kid=%3 Typ=%4 Detail=%5
+JWT-Anomalie. Aussteller=%1 Audience=%2 Kid=%3 Typ=%4 Detail=%5 Kontext=%6
 .
 
 MessageId=5010
 SymbolicName=AUTHORIZATION_DENIED
 Language=English
-Authorization denied. Subject=%1 Action=%2 Resource=%3 Rule=%4 Reason=%5
+Authorization denied. Subject=%1 Action=%2 Resource=%3 Rule=%4 Reason=%5 Context=%6
 Language=French
-Autorisation refusée. Sujet=%1 Action=%2 Ressource=%3 Règle=%4 Raison=%5
+Autorisation refusée. Sujet=%1 Action=%2 Ressource=%3 Règle=%4 Raison=%5 Contexte=%6
 Language=German
-Autorisierung verweigert. Subjekt=%1 Aktion=%2 Ressource=%3 Regel=%4 Grund=%5
+Autorisierung verweigert. Subjekt=%1 Aktion=%2 Ressource=%3 Regel=%4 Grund=%5 Kontext=%6
 .
 
 MessageId=5090
 SymbolicName=AUTH_SUMMARY
 Language=English
-Auth summary. IntervalSec=%1 JwtOk=%2 JwtRejected=%3 Denied=%4 ByReason=%5
+Auth summary. IntervalSec=%1 JwtOk=%2 JwtRejected=%3 Denied=%4 ByReason=%5 Context=%6
 Language=French
-Résumé d’auth. IntervalSec=%1 JwtOk=%2 JwtRejeté=%3 Refusé=%4 ParRaison=%5
+Résumé d’auth. IntervalSec=%1 JwtOk=%2 JwtRejeté=%3 Refusé=%4 ParRaison=%5 Contexte=%6
 Language=German
-Auth-Zusammenfassung. IntervallSek=%1 JwtOk=%2 JwtAbgelehnt=%3 Verweigert=%4 NachGrund=%5
+Auth-Zusammenfassung. IntervallSek=%1 JwtOk=%2 JwtAbgelehnt=%3 Verweigert=%4 NachGrund=%5 Kontext=%6
 .
 
 ; ======================================================================
@@ -319,51 +319,51 @@ Auth-Zusammenfassung. IntervallSek=%1 JwtOk=%2 JwtAbgelehnt=%3 Verweigert=%4 Nac
 MessageId=6000
 SymbolicName=USER_SESSION_PROCESS_STARTED
 Language=English
-User session process started. SessionId=%1 Kind=%2 Exe=%3
+User session process started. SessionId=%1 Kind=%2 Exe=%3 Context=%4
 Language=French
-Processus de session utilisateur démarré. SessionId=%1 Type=%2 Exe=%3
+Processus de session utilisateur démarré. SessionId=%1 Type=%2 Exe=%3 Contexte=%4
 Language=German
-Benutzersitzungsprozess gestartet. SessionId=%1 Typ=%2 Exe=%3
+Benutzersitzungsprozess gestartet. SessionId=%1 Typ=%2 Exe=%3 Kontext=%4
 .
 
 MessageId=6001
 SymbolicName=USER_SESSION_PROCESS_TERMINATED
 Language=English
-User session process terminated. SessionId=%1 ExitCode=%2 By=%3
+User session process terminated. SessionId=%1 ExitCode=%2 By=%3 Context=%4
 Language=French
-Processus de session utilisateur terminé. SessionId=%1 CodeSortie=%2 Par=%3
+Processus de session utilisateur terminé. SessionId=%1 CodeSortie=%2 Par=%3 Contexte=%4
 Language=German
-Benutzersitzungsprozess beendet. SessionId=%1 ExitCode=%2 Durch=%3
+Benutzersitzungsprozess beendet. SessionId=%1 ExitCode=%2 Durch=%3 Kontext=%4
 .
 
 MessageId=6010
 SymbolicName=UPDATER_TASK_ENABLED
 Language=English
-Updater task enabled.
+Updater task enabled. Context=%1
 Language=French
-Tâche de mise à jour activée.
+Tâche de mise à jour activée. Contexte=%1
 Language=German
-Update-Aufgabe aktiviert.
+Update-Aufgabe aktiviert. Kontext=%1
 .
 
 MessageId=6011
 SymbolicName=UPDATER_ERROR
 Language=English
-Updater error. Step=%1 Error=%2
+Updater error. Step=%1 Error=%2 Context=%3
 Language=French
-Erreur de mise à jour. Étape=%1 Erreur=%2
+Erreur de mise à jour. Étape=%1 Erreur=%2 Contexte=%3
 Language=German
-Update-Fehler. Schritt=%1 Fehler=%2
+Update-Fehler. Schritt=%1 Fehler=%2 Kontext=%3
 .
 
 MessageId=6020
 SymbolicName=PEDM_ENABLED
 Language=English
-PEDM enabled.
+PEDM enabled. Context=%1
 Language=French
-PEDM activé.
+PEDM activé. Contexte=%1
 Language=German
-PEDM aktiviert.
+PEDM aktiviert. Kontext=%1
 .
 
 ; ======================================================================
@@ -373,11 +373,11 @@ PEDM aktiviert.
 MessageId=7010
 SymbolicName=RECORDING_STORAGE_LOW
 Language=English
-Recording storage low. RemainingBytes=%1 ThresholdBytes=%2
+Recording storage low. RemainingBytes=%1 ThresholdBytes=%2 Context=%3
 Language=French
-Espace d’enregistrement faible. OctetsRestants=%1 Seuil=%2
+Espace d’enregistrement faible. OctetsRestants=%1 Seuil=%2 Contexte=%3
 Language=German
-Aufnahmespeicher niedrig. VerbleibendeBytes=%1 Schwelle=%2
+Aufnahmespeicher niedrig. VerbleibendeBytes=%1 Schwelle=%2 Kontext=%3
 .
 
 ; ======================================================================
@@ -387,19 +387,19 @@ Aufnahmespeicher niedrig. VerbleibendeBytes=%1 Schwelle=%2
 MessageId=9001
 SymbolicName=DEBUG_OPTIONS_ENABLED
 Language=English
-Debug options enabled. Options=%1
+Debug options enabled. Options=%1 Context=%2
 Language=French
-Options de débogage activées. Options=%1
+Options de débogage activées. Options=%1 Contexte=%2
 Language=German
-Debug-Optionen aktiviert. Optionen=%1
+Debug-Optionen aktiviert. Optionen=%1 Kontext=%2
 .
 
 MessageId=9002
 SymbolicName=XMF_NOT_FOUND
 Language=English
-XMF not found. Path=%1 Error=%2
+XMF not found. Path=%1 Error=%2 Context=%3
 Language=French
-XMF introuvable. Chemin=%1 Erreur=%2
+XMF introuvable. Chemin=%1 Erreur=%2 Contexte=%3
 Language=German
-XMF nicht gefunden. Pfad=%1 Fehler=%2
+XMF nicht gefunden. Pfad=%1 Fehler=%2 Kontext=%3
 .

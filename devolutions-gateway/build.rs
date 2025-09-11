@@ -166,6 +166,7 @@ END"#,
                 return Some(p);
             }
         }
+
         if let Ok(sdk_dir) = env::var("WindowsSdkDir") {
             // e.g. C:\Program Files (x86)\Windows Kits\10\
             let candidate = std::path::Path::new(&sdk_dir).join("bin").join("x64").join("mc.exe");
@@ -173,6 +174,7 @@ END"#,
                 return Some(candidate);
             }
         }
+
         None
     }
 }
