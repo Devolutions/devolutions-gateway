@@ -605,22 +605,33 @@ impl MessageProcessor {
     async fn process_exec_winps(&mut self, winps_msg: NowExecWinPsMsg<'_>) -> Result<(), ExecError> {
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
-        let tmp_file = TmpFileGuard::new("ps1")?;
-        tmp_file.write_content(winps_msg.command())?;
-
         let mut params = Vec::new();
 
         append_ps_args(&mut params, &winps_msg);
 
-        // "-Command" runs script without command echo and terminates.
-        params.push("-Command".to_owned());
-        params.push(format!("\"{}\"", tmp_file.path_string()));
+        let tmp_file = if winps_msg.is_server_mode() {
+            // IMPORTANT: It is absolutely necessary to pass "-s" as the last parameter to make
+            // PowerShell run in server mode.
+            params.push("-s".to_owned());
+            None
+        } else {
+            let tmp_file = TmpFileGuard::new("ps1")?;
+            tmp_file.write_content(winps_msg.command())?;
+
+            // "-Command" runs script without command echo and terminates.
+            params.push("-Command".to_owned());
+            params.push(format!("\"{}\"", tmp_file.path_string()));
+
+            Some(tmp_file)
+        };
 
         let params_str = params.join(" ");
 
-        let mut run_process = WinApiProcessBuilder::new("powershell.exe")
-            .with_temp_file(tmp_file)
-            .with_command_line(&params_str);
+        let mut run_process = WinApiProcessBuilder::new("powershell.exe").with_command_line(&params_str);
+
+        if let Some(tmp_file) = tmp_file {
+            run_process = run_process.with_temp_file(tmp_file);
+        }
 
         if let Some(directory) = winps_msg.directory() {
             run_process = run_process.with_current_directory(directory);
@@ -638,24 +649,35 @@ impl MessageProcessor {
     async fn process_exec_pwsh(&mut self, winps_msg: NowExecPwshMsg<'_>) -> Result<(), ExecError> {
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
-        let tmp_file = TmpFileGuard::new("ps1")?;
-
-        tmp_file.write_content(winps_msg.command())?;
-
         let mut params = Vec::new();
 
         append_pwsh_args(&mut params, &winps_msg);
 
-        // "-Command" runs script without command echo and terminates.
-        params.push("-Command".to_owned());
-        params.push(format!("\"{}\"", tmp_file.path_string()));
+        let tmp_file = if winps_msg.is_server_mode() {
+            // IMPORTANT: It is absolutely necessary to pass "-s" as the last parameter to make
+            // PowerShell run in server mode.
+            params.push("-s".to_owned());
+            None
+        } else {
+            let tmp_file = TmpFileGuard::new("ps1")?;
+            tmp_file.write_content(winps_msg.command())?;
+
+            // "-Command" runs script without command echo and terminates.
+            params.push("-Command".to_owned());
+            params.push(format!("\"{}\"", tmp_file.path_string()));
+
+            Some(tmp_file)
+        };
 
         let params_str = params.join(" ");
 
         let mut run_process = WinApiProcessBuilder::new("pwsh.exe")
-            .with_temp_file(tmp_file)
             .with_command_line(&params_str)
             .with_env("NO_COLOR", "1"); // Suppress ANSI escape codes in pwsh output.
+
+        if let Some(tmp_file) = tmp_file {
+            run_process = run_process.with_temp_file(tmp_file);
+        }
 
         if let Some(directory) = winps_msg.directory() {
             run_process = run_process.with_current_directory(directory);
