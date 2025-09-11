@@ -1,4 +1,5 @@
-//! Integration tests for backend implementations
+//! Integration tests for syslog backend.
+
 #![cfg(unix)]
 
 use sysevent::{Entry, Facility, Severity, SystemEventSink};

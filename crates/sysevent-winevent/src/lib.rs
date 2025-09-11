@@ -1,4 +1,5 @@
-#![cfg_attr(doc, doc = include_str!("../README.md"))]
+#![cfg_attr(all(doc, windows), doc = include_str!("../README.md"))]
+#![cfg(windows)]
 
 use std::sync::Arc;
 
@@ -45,9 +46,10 @@ impl WinEvent {
             entry.message
         };
 
-        // Truncate message to Windows Event Log limits (31,839 characters).
+        // Windows Event Log limits has a 31,839 characters size limit.
+        // Defensively truncate when the message is big (31836 bytes of UTF-8).
         let truncated_message = if message.len() > 31836 {
-            // Leave room for "...".
+            // Enough space should be available for "...".
             let mut idx = 31836;
 
             // Ensure idx is on a char boundary.

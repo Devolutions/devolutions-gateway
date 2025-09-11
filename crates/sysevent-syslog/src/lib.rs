@@ -1,4 +1,5 @@
-#![cfg_attr(doc, doc = include_str!("../README.md"))]
+#![cfg_attr(all(doc, unix), doc = include_str!("../README.md"))]
+#![cfg(unix)]
 
 use std::ffi::{CStr, CString};
 

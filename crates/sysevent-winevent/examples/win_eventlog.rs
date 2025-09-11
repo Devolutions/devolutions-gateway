@@ -1,7 +1,11 @@
-use sysevent::{Entry, Severity, SystemEventSink};
-use sysevent_winevent::WinEvent;
+#[cfg(unix)]
+fn main() {}
 
+#[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use sysevent::{Entry, Severity, SystemEventSink};
+    use sysevent_winevent::WinEvent;
+
     println!("Windows Event Log Backend Example");
     println!("==================================");
 

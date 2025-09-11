@@ -1,4 +1,5 @@
-//! Integration tests for backend implementations
+//! Integration tests for WinEvent backend.
+
 #![cfg(windows)]
 
 use sysevent::{Entry, Severity, SystemEventSink};

@@ -1,7 +1,11 @@
-use sysevent::{Entry, Facility, Severity, SystemEventSink};
-use sysevent_syslog::{Syslog, SyslogOptions};
+#[cfg(windows)]
+fn main() {}
 
+#[cfg(unix)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use sysevent::{Entry, Facility, Severity, SystemEventSink};
+    use sysevent_syslog::{Syslog, SyslogOptions};
+
     println!("Unix Syslog Backend Example");
     println!("===========================");
 
