@@ -464,3 +464,35 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./ci/remove-labels.ps1 -Label 'release-required'
 
+  upload-sbom:
+    name: Upload SBOM
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.skip-publishing == 'false' && inputs.dry-run == false
+    environment: sbom
+
+    steps:
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+
+      - name: Upload SBOM to OneDrive Releases
+        uses: ./.github/workflows/onedrive-upload
+        with:
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+          conflict_behavior: replace
+          destination_path: /Gateway/${{ needs.preflight.outputs.version }}
+          remote: releases
+          source_path: bom.json
+
+      - name: Upload SBOM to Dependency-Track
+        uses: ./.github/workflows/dtrack-upload-sbom
+        with:
+          api_key: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
+          autocreate: 'true'
+          bom_filename: bom.xml
+          project_name: devolutions-gateway
+          project_version: ${{ needs.preflight.outputs.version }}
+          server_hostname: 'dtrack-api.devolutions.com'
