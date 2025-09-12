@@ -1209,7 +1209,10 @@ jobs:
             'DevolutionsPedmShellExt.dll',
             'DevolutionsPedmShellExt.msix',
             'DevolutionsSession.exe',
-             # NOTE: We may want to include that in the future, but needs to be renamed per platform.
+            # NOTE: We may want to include that in the future, but needs to be renamed per platform.
+            # TODO(@awakecoding): We could create a zip with the same name as
+            # the package except ".symbols" at the end, so we'd end up with arch-specific zips
+            # containing the debug symbols. I've done this for MsRdpEx.
             'DevolutionsPedmShellExt.pdb',
             'DevolutionsSession.pdb'
           )
