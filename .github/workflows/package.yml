@@ -706,13 +706,10 @@ jobs:
           path: jetsocat/nuget/*.nupkg
           if-no-files-found: error
 
-  # FIXME: Looks like the wrong place to _upload_ that. There is no guarantee we actually deploy the package at this point.
   generate-sbom:
-    name: Upload SBOM
+    name: Generate SBOM
     runs-on: ubuntu-latest
     needs: preflight
-    if: ${{ github.ref == 'refs/heads/master' }}
-    environment: sbom
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -736,28 +733,8 @@ jobs:
       - name: Generate SBOM
         uses: ./.github/workflows/cdxgen
 
-      - name: Save SBOM
+      - name: Save SBOM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bom.json
+          name: sbom
           path: bom.json
-
-      - name: Upload SBOM to OneDrive Releases
-        uses: ./.github/workflows/onedrive-upload
-        with:
-          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
-          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
-          conflict_behavior: replace
-          destination_path: /Gateway/${{ needs.preflight.outputs.version }}
-          remote: releases
-          source_path: bom.json
-
-      - name: Upload SBOM to Dependency-Track
-        uses: ./.github/workflows/dtrack-upload-sbom
-        with:
-          api_key: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
-          autocreate: 'true'
-          bom_filename: bom.xml
-          project_name: devolutions-gateway
-          project_version: ${{ needs.preflight.outputs.version }}
-          server_hostname: 'dtrack-api.devolutions.com'
