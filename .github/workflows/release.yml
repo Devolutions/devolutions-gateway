@@ -475,7 +475,7 @@ jobs:
       - name: Download SBOM artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ steps.get-run.outputs.run }} -n sbom --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n sbom --repo $Env:GITHUB_REPOSITORY
 
       - name: Upload SBOM to OneDrive Releases
         uses: ./.github/workflows/onedrive-upload
