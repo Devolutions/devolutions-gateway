@@ -260,7 +260,12 @@ jobs:
 
           # Verify the archive.
           Write-Host "Verify archive at $PSModuleTarFilePath"
-          tar -t "$PSModuleTarFilePath"
+          # tar -tvf "$PSModuleTarFilePath" | Out-Null
+          & 7z t "$PSModuleTarFilePath"
+
+          if ($LASTEXITCODE -ne 0) { 
+            throw "tar verify failed: $PSModuleTarFilePath is invalid." 
+          }
 
           Set-PSDebug -Off # Too many traces are logged when running New-ModulePackage.
           New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
