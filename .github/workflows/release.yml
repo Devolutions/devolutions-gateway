@@ -106,7 +106,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     strategy:
       fail-fast: false
       matrix:
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
 
     steps:
       - name: Configure runner
@@ -273,7 +273,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
 
     steps:
       - name: Download artifacts
@@ -325,7 +325,7 @@ jobs:
     name: OneDrive (Devolutions Gateway)
     runs-on: ubuntu-latest
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     environment: onedrive-upload # for OneDrive secrets
 
     steps:
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
+        if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
@@ -386,7 +386,7 @@ jobs:
     name: OneDrive (Devolutions Agent)
     runs-on: ubuntu-latest
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     environment: onedrive-upload # for OneDrive secrets
 
     steps:
@@ -434,7 +434,7 @@ jobs:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
+        if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
@@ -443,16 +443,68 @@ jobs:
           remote: releases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
 
+  jetsocat-publish:
+    name: Jetsocat NuGet publish
+    runs-on: ubuntu-latest
+    environment: publish-prod
+    needs: preflight
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+
+    steps:
+      - name: Download jetsocat-nuget artifact
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-nuget --repo $Env:GITHUB_REPOSITORY
+
+      - name: Publish Jetsocat NuGet package
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+
+          $Package = Get-ChildItem -Recurse -Filter "Devolutions.Jetsocat.*.nupkg" -File | Select-Object -First 1
+          Write-Host "Package = $Package"
+
+          $PushCmd = @(
+            'dotnet', 
+            'nuget', 
+            'push', 
+            "$($Package.FullName)",
+            '--api-key',
+            '${{ secrets.NUGET_API_KEY }}',
+            '--source',
+            'https://api.nuget.org/v3/index.json',
+            '--skip-duplicate'
+          )
+
+          $PushCmd = $PushCmd -Join ' '
+          Write-Host $PushCmd
+
+          $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
+          if (-Not $DryRun) {
+            try {
+              Invoke-Expression $PushCmd
+            } catch {
+              if ($_.Exception.Message -ilike "*package already exists*" -Or $_.Exception.Message -ilike "*already has a package*") {
+                echo "::warning::Jetsocat NuGet package not published; this version is already listed on NuGet.org"
+              } else {
+                Write-Error $_
+                exit 1
+              }
+            }
+          }
+
   remove-labels:
     name: Remove release-required labels
     runs-on: ubuntu-latest
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
     needs:
       - container
       - github-release
       - psgallery-release
       - onedrive-gateway
       - onedrive-agent
+      - jetsocat-publish
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -468,7 +520,7 @@ jobs:
     name: Upload SBOM
     runs-on: ubuntu-latest
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' && inputs.dry-run == false
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
     environment: sbom
 
     steps:
