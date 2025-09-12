@@ -1,0 +1,22 @@
+@import '../../../../../../../assets/css/style/mixins';
+@import "../../../../../../../assets/css/style/variables";
+@import "../../../../../../../assets/css/theme/theme-mode-variables";
+
+.gateway-form-input {
+  display: flex;
+  align-items: center;
+}
+
+.form-helper-text {
+  line-height: 11px;
+  word-wrap: break-word;
+  color: var(--status-error-text-color);
+  font-size: 11px;
+  font-family: Open Sans;
+  font-weight: 400;
+  padding-left: 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  display: inline-flex;
+}
