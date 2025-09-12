@@ -2,6 +2,143 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.3.0 (2025-9-12)
+
+### Security
+
+- _dgw_: emit syslogs and Windows events for important events ([#1491](https://github.com/Devolutions/devolutions-gateway/issues/1491)) ([15321b89bb](https://github.com/Devolutions/devolutions-gateway/commit/15321b89bbf315cecb8b82f78a4e483285b73128)) ([DGW-63](https://devolutions.atlassian.net/browse/DGW-63)) 
+
+  Easier auditability of Devolutions Gateway service by emitting system-wide logs.
+
+### Features
+
+- _webapp_: implement MVP for self-contained session URLs ([#1433](https://github.com/Devolutions/devolutions-gateway/issues/1433)) ([9f5d4d190f](https://github.com/Devolutions/devolutions-gateway/commit/9f5d4d190fceb75bb99bf181d5f7eeed6c28f1c6)) 
+
+  Introduced support for launching sessions directly from specially crafted URLs.
+  These URLs include all necessary information to immediately initialize and
+  (optionally) auto-connect a session upon opening.
+  
+  New query parameters:
+  
+  - `config`: Encoded session configuration data
+  - `autoconnect`: If set to `true`, the session starts automatically
+  - `protocol`: Specifies the protocol to use (currently only `rdp` is supported)
+
+- _webapp_: support clipboard for SSH and Telnet clients ([#1437](https://github.com/Devolutions/devolutions-gateway/issues/1437)) ([5a5c065d1e](https://github.com/Devolutions/devolutions-gateway/commit/5a5c065d1ee990324bccc04449562418d14035ac)) ([ARC-266](https://devolutions.atlassian.net/browse/ARC-266)) 
+
+- _dgw_: (Unstable) basic network monitoring ([#1446](https://github.com/Devolutions/devolutions-gateway/issues/1446)) ([d135342682](https://github.com/Devolutions/devolutions-gateway/commit/d135342682e3c02f9c26c050259cd013cf9a0b36)) ([DGW-302](https://devolutions.atlassian.net/browse/DGW-302)) 
+
+  Introduces an endpoint monitor that checks the uptime of a list of hosts
+  provided through a remotely-submitted configuration file. The monitor
+  results are saved to a temporary in-memory buffer and can be fetched by
+  means of a REST endpoint.
+  
+  The monitor system is structured as an agent, meant to be driven by a
+  third party (for example our DVLS), so the configuration is ephemeral, and
+  monitor results are deleted from the buffer after being fetched.
+  Gateway is not itself the source of truth for the monitor configuration,
+  and it does not persist the log entries.
+  
+  Two authenticated endpoints are introduced:
+  
+  - `POST /jet/net/monitor/config`
+  - `POST /jet/net/monitor/log/drain`
+
+- _webapp_: add fallback screen for unsupported browsers ([#1461](https://github.com/Devolutions/devolutions-gateway/issues/1461)) ([61ac8a2003](https://github.com/Devolutions/devolutions-gateway/commit/61ac8a20036b1ed87a03399fa0087908afc09e02)) 
+
+- _dgw_: keep records of traffic transferred via JMUX tunnels ([#1466](https://github.com/Devolutions/devolutions-gateway/issues/1466)) ([d23c29c9fa](https://github.com/Devolutions/devolutions-gateway/commit/d23c29c9fa799ce877a6ced6851f740a7af0f0fc)) ([DGW-270](https://devolutions.atlassian.net/browse/DGW-270)) 
+
+- _dgw_: implement traffic audit claim/ack HTTP endpoints ([#1468](https://github.com/Devolutions/devolutions-gateway/issues/1468)) ([2328ba5fea](https://github.com/Devolutions/devolutions-gateway/commit/2328ba5feae050bad31409009c6a033551265cea)) ([DGW-271](https://devolutions.atlassian.net/browse/DGW-271)) 
+
+  Add two new endpoints for external traffic audit integration:
+  
+  - `POST /jet/traffic/claim` - Claim events with lease-based locking
+  - `POST /jet/traffic/ack` - Acknowledge processed events
+
+- _agent-installer_: rename the session feature and make it available by default ([127dd773c6](https://github.com/Devolutions/devolutions-gateway/commit/127dd773c61757bc26dae8ee7005aca57423eb4f)) 
+
+- _agent_: minimalist "About" window for tray icon ([#1471](https://github.com/Devolutions/devolutions-gateway/issues/1471)) ([a43bd6609e](https://github.com/Devolutions/devolutions-gateway/commit/a43bd6609e25196e065b1c898680314e10a0e539)) 
+
+- _jetsocat_: MCP proxy ([#1478](https://github.com/Devolutions/devolutions-gateway/issues/1478)) ([3eadd1ddfb](https://github.com/Devolutions/devolutions-gateway/commit/3eadd1ddfb2f9540d9e17bd598f27ef6b5668f9f)) 
+
+  Example usage:
+  
+  ```shell
+  echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jetsocat mcp-proxy - https://learn.microsoft.com/api/mcp
+  ```
+
+- _jetsocat_: add "jmux" alias for jmux-proxy command ([#1486](https://github.com/Devolutions/devolutions-gateway/issues/1486)) ([76c9cde1c9](https://github.com/Devolutions/devolutions-gateway/commit/76c9cde1c96286415924efac0ea3326a9c25ca31)) 
+
+- _jetsocat_: expand simple pipe names ([#1485](https://github.com/Devolutions/devolutions-gateway/issues/1485)) ([abe9972186](https://github.com/Devolutions/devolutions-gateway/commit/abe99721860fadc8c06599e7fd88f0f948aaeef8)) 
+
+  Add automatic path expansion for `np://` and `np-listen://` schemes:
+  - Windows: simple names expand to `./pipe/<NAME>`
+  - Unix: simple names expand to `/tmp/<NAME>`
+
+- _webapp_: granular JPEG Quality option instead of explicit `TightLow` and `TightHigh` pseudo-encodings ([#1488](https://github.com/Devolutions/devolutions-gateway/issues/1488)) ([7cb9fd2a8d](https://github.com/Devolutions/devolutions-gateway/commit/7cb9fd2a8d737d4c7733cae37e8cd6f98a509c0a)) 
+
+- _webapp_: add color format selector for VNC session ([#1475](https://github.com/Devolutions/devolutions-gateway/issues/1475)) ([9ddf10c24f](https://github.com/Devolutions/devolutions-gateway/commit/9ddf10c24fcb49a1c8aba899b912dd07e61dc54d)) 
+
+  Allow the user to tune the session quality more deeply
+  (e.g, lower image quality if the network is slow).
+
+- _agent_: in RDP extension, add PowerShell server mode support ([b626323386](https://github.com/Devolutions/devolutions-gateway/commit/b626323386044bf98a2d84b56c591da539216795)) ([#1498](https://github.com/Devolutions/devolutions-gateway/pull/1498)) ([ARC-383](https://devolutions.atlassian.net/browse/ARC-383))
+
+### Improvements
+
+- Improve container image for Azure Web App usage ([ba8c4c218d](https://github.com/Devolutions/devolutions-gateway/commit/ba8c4c218df0d1d0ca4c42215df685b16c33e155)) 
+
+- _webapp_: improved error handling in remote desktop clients ([#1456](https://github.com/Devolutions/devolutions-gateway/issues/1456)) ([c6dcb1666d](https://github.com/Devolutions/devolutions-gateway/commit/c6dcb1666d221978c76a6deb1fbce5cdc0a69ff6)) 
+
+- _webapp_: [**breaking**] add manual clipboard mode for RDP, VNC and ARD ([#1459](https://github.com/Devolutions/devolutions-gateway/issues/1459)) ([b4e231f853](https://github.com/Devolutions/devolutions-gateway/commit/b4e231f853863488ec5d2da2d2d1f6b8fea70623)) 
+
+  The original auto clipboard mode, can now be enabled/disabled in the connection form.
+  It's available only for browsers based on _Blink_ engine (e.g.: Chrome).
+  
+  For others, auto clipboard mode is always disabled.
+  
+  When disabled, two new buttons are showed in the toolbar: _Save Clipboard_ and _Send Clipboard_.
+  These buttons allow the user to manually send the content of the client host clipboard, or receive from
+  the server clipboard.
+  
+  Note that Firefox used to have a partially working autoclipboard mode, but it was
+  completely removed because the cases where it failed were confusing more than helpful.
+  The auto clipboard mode is the most convenient, but the manual clipboard mode
+  has a predictable behavior on all platforms.
+
+- _webapp_: improve clipboard interaction for outdated versions of the Firefox browser ([#1464](https://github.com/Devolutions/devolutions-gateway/issues/1464)) ([0c547d4596](https://github.com/Devolutions/devolutions-gateway/commit/0c547d4596f5f518fe1a2c73bd68a02c03a1687b)) 
+
+- _webapp_: disable clipboard in non-secure context ([#1467](https://github.com/Devolutions/devolutions-gateway/issues/1467)) ([9111ff85a1](https://github.com/Devolutions/devolutions-gateway/commit/9111ff85a17b3375a56a1e22a31450aaab08a77f)) 
+
+### Bug Fixes
+
+- _webapp_: incorrect user domain parsing for UPN format ([#1431](https://github.com/Devolutions/devolutions-gateway/issues/1431)) ([0638e665c9](https://github.com/Devolutions/devolutions-gateway/commit/0638e665c9e4a0d47950baced8296a13177765e9)) ([DGW-297](https://devolutions.atlassian.net/browse/DGW-297)) 
+
+  Fix username parsing logic to correctly handle UPN and down-level
+  formats.
+  Only splits `DOMAIN\user` format; preserves `user@domain.com` as-is.
+
+- _agent_: change PowerShell exec session run params ([#1474](https://github.com/Devolutions/devolutions-gateway/issues/1474)) ([ef0465d1fa](https://github.com/Devolutions/devolutions-gateway/commit/ef0465d1fabed53becce3d91a861ffbc3e4b6faa)) 
+
+- _agent_: remove command echo for batch(cmd) execution ([f461a6ddf1](https://github.com/Devolutions/devolutions-gateway/commit/f461a6ddf13167844bc5bcfa015555cb8b05d414)) 
+
+- _agent_: hide console window for exec sessions with IO redirection ([bb50b6ab05](https://github.com/Devolutions/devolutions-gateway/commit/bb50b6ab05ce4ff2d31715dad09640586b82cfc3)) 
+
+- _agent_: suppress ANSI escape codes in pwsh output ([fa67ff1e27](https://github.com/Devolutions/devolutions-gateway/commit/fa67ff1e276678d583351f08fbbe8843d8c0de12)) 
+
+- _player_: add autoplay attribute to WebM video player ([#1487](https://github.com/Devolutions/devolutions-gateway/issues/1487)) ([0fac6ddc81](https://github.com/Devolutions/devolutions-gateway/commit/0fac6ddc8187572c34f5fee6b32eca6babb29ffd)) 
+
+  Fixes issue where recordings were not auto-starting when embedded in
+  iframes
+  
+  DGW-296
+
+### Build
+
+- _agent-installer_: add tun2socks.exe and wintun.dll to Devolutions Agent package ([#1457](https://github.com/Devolutions/devolutions-gateway/issues/1457)) ([e6f335c970](https://github.com/Devolutions/devolutions-gateway/commit/e6f335c97052b122cea6dedbb703bb1a5a0dbd6e)) 
+
+- _jetsocat,dgw_: optimize binary size ([#1489](https://github.com/Devolutions/devolutions-gateway/issues/1489)) ([8ad7ea0e96](https://github.com/Devolutions/devolutions-gateway/commit/8ad7ea0e96b11fe8a61266841cfe4fbdc4ac8c08)) 
+
 ## 2025.2.3 (2025-07-11)
 
 ### Features
