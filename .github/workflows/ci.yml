@@ -607,6 +607,9 @@ jobs:
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
           choco install nasm
 
+          # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
+          Install-Module VsDevShell -Force
+
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
@@ -614,46 +617,9 @@ jobs:
         id: find_mc
         if: matrix.os == 'windows'
         run: |
-          $arch = @{'x86_64'='x64';'arm64'='arm64'}['${{ matrix.arch }}']
-
-          # Candidate roots (most SDK installs are in Program Files (x86))
-          $roots = @()
-          if (${env:ProgramFiles(x86)}) {
-            $roots += (Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath 'Windows Kits\10\bin')
-            $roots += (Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath 'Windows Kits\11\bin')
-          }
-          if (${env:ProgramFiles}) {
-            $roots += (Join-Path -Path ${env:ProgramFiles} -ChildPath 'Windows Kits\10\bin')
-            $roots += (Join-Path -Path ${env:ProgramFiles} -ChildPath 'Windows Kits\11\bin')
-          }
-          $roots = $roots | Where-Object { Test-Path $_ } | Select-Object -Unique
-
-          $matches = foreach ($root in $roots) {
-            Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-              $ver = $null
-              if ([Version]::TryParse($_.Name, [ref]$ver)) {
-                $archDir = Join-Path $_.FullName $arch
-                $mcPath  = Join-Path $archDir 'mc.exe'
-                if (Test-Path $mcPath) {
-                  [pscustomobject]@{
-                    Version = $ver
-                    Parent  = $archDir
-                    McExe   = $mcPath
-                  }
-                }
-              }
-            }
-          }
-
-          if (-not $matches) {
-            Write-Error "mc.exe not found under 'Windows Kits\10\bin'/'Windows Kits\11\bin' for arch '$arch'. Is the Windows 10/11 SDK installed?"
-            exit 1
-          }
-
-          $latest = $matches | Sort-Object Version -Descending | Select-Object -First 1
-
-          # Output just the parent folder path (the directory containing mc.exe, e.g. ...\x64)
-          Write-Output "windows_sdk_ver_bin_path=$($latest.Parent)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Enter-VsDevShell
+          $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
+          Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build
         shell: pwsh
