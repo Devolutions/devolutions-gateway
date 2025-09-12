@@ -706,6 +706,7 @@ jobs:
           path: jetsocat/nuget/*.nupkg
           if-no-files-found: error
 
+  # FIXME: Looks like the wrong place to _upload_ that. There is no guarantee we actually deploy the package at this point.
   generate-sbom:
     name: Upload SBOM
     runs-on: ubuntu-latest
