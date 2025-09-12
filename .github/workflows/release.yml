@@ -106,7 +106,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     strategy:
       fail-fast: false
       matrix:
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
 
     steps:
       - name: Configure runner
@@ -273,7 +273,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
 
     steps:
       - name: Download artifacts
@@ -325,7 +325,7 @@ jobs:
     name: OneDrive (Devolutions Gateway)
     runs-on: ubuntu-latest
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     environment: onedrive-upload # for OneDrive secrets
 
     steps:
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
+        if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
@@ -386,7 +386,7 @@ jobs:
     name: OneDrive (Devolutions Agent)
     runs-on: ubuntu-latest
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     environment: onedrive-upload # for OneDrive secrets
 
     steps:
@@ -434,7 +434,7 @@ jobs:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
+        if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
@@ -448,7 +448,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
 
     steps:
       - name: Download jetsocat-nuget artifact
@@ -497,7 +497,7 @@ jobs:
   remove-labels:
     name: Remove release-required labels
     runs-on: ubuntu-latest
-    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
     needs:
       - container
       - github-release
@@ -520,7 +520,7 @@ jobs:
     name: Upload SBOM
     runs-on: ubuntu-latest
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' && inputs.dry-run == false
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
     environment: sbom
 
     steps:
