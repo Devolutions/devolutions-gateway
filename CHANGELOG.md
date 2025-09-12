@@ -82,6 +82,8 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   Allow the user to tune the session quality more deeply
   (e.g, lower image quality if the network is slow).
 
+- _agent_: in RDP extension, add PowerShell server mode support ([b626323386](https://github.com/Devolutions/devolutions-gateway/commit/b626323386044bf98a2d84b56c591da539216795)) ([#1498](https://github.com/Devolutions/devolutions-gateway/pull/1498)) ([ARC-383](https://devolutions.atlassian.net/browse/ARC-383))
+
 ### Improvements
 
 - Improve container image for Azure Web App usage ([ba8c4c218d](https://github.com/Devolutions/devolutions-gateway/commit/ba8c4c218df0d1d0ca4c42215df685b16c33e155)) 
