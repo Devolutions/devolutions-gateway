@@ -1,4 +1,4 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { Encoding } from '@gateway/shared/enums/encoding.enum';
 import { BaseComponent } from '@shared/bases/base.component';
@@ -6,13 +6,15 @@ import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
 
 @Component({
-  selector: 'web-client-enabled-encodings-control',
-  templateUrl: 'enabled-encodings-control.component.html',
-  styleUrls: ['enabled-encodings-control.component.scss'],
+  selector: 'web-client-enabled-encoding-control',
+  templateUrl: 'enabled-encoding-control.component.html',
+  styleUrls: ['enabled-encoding-control.component.scss'],
 })
-export class EnabledEncodingsControlComponent extends BaseComponent implements OnInit {
+export class EnabledEncodingControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
   @Input() inputFormData;
+
+  @Output() controlReady = new EventEmitter<void>();
 
   supportedEncodings: SelectItem[];
 
@@ -24,10 +26,12 @@ export class EnabledEncodingsControlComponent extends BaseComponent implements O
     this.supportedEncodings = this.formService.getSupportedEncodings();
     this.formService.addControlToForm({
       formGroup: this.parentForm,
-      controlName: 'enabledEncodings',
+      controlName: 'enabledEncoding',
       inputFormData: this.inputFormData,
       isRequired: false,
-      defaultValue: Encoding.getAllEncodings(),
+      defaultValue: Encoding.Default,
     });
+
+    this.controlReady.emit();
   }
 }

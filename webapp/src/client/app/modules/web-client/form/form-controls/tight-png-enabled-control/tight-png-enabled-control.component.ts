@@ -5,55 +5,39 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
-  selector: 'web-client-jpeg-quality-level-control',
-  templateUrl: 'jpeg-quality-level-control.component.html',
-  styleUrls: ['jpeg-quality-level-control.component.scss'],
+  selector: 'web-client-tight-png-enabled-control',
+  templateUrl: 'tight-png-enabled-control.component.html',
+  styleUrls: ['tight-png-enabled-control.component.scss'],
 })
-export class JpegQualityLevelControlComponent extends BaseComponent implements OnInit, OnDestroy {
+export class TightPngEnabledControlComponent extends BaseComponent implements OnInit, OnDestroy {
   @Input() parentForm: FormGroup;
   @Input() inputFormData;
 
   @Output() controlReady = new EventEmitter<void>();
 
-  jpegEnabled = true;
-
   constructor(private formService: WebFormService) {
     super();
   }
 
-  toggleCheckbox() {
-    this.jpegEnabled = !this.jpegEnabled;
-  }
-
   ngOnInit(): void {
-    if (!this.parentForm.contains('jpegEnabled')) {
+    if (!this.parentForm.contains('pngEnabled')) {
       this.formService.addControlToForm({
         formGroup: this.parentForm,
-        controlName: 'jpegEnabled',
+        controlName: 'pngEnabled',
         inputFormData: this.inputFormData,
         isRequired: false,
         defaultValue: true,
       });
 
-      this.formService.addControlToForm({
-        formGroup: this.parentForm,
-        controlName: 'jpegQualityLevel',
-        inputFormData: this.inputFormData,
-        isRequired: false,
-        defaultValue: 9,
-      });
-
       this.controlReady.emit();
     } else {
-      this.parentForm.get('jpegEnabled').enable();
+      this.parentForm.get('pngEnabled').enable();
     }
-
-    this.jpegEnabled = this.parentForm.get('jpegEnabled').value;
   }
 
   ngOnDestroy() {
     super.ngOnDestroy();
     // Disable the control to ignore it when reading the form. At the same time, the value is preserved.
-    this.parentForm.get('jpegEnabled').disable();
+    this.parentForm.get('pngEnabled').disable();
   }
 }

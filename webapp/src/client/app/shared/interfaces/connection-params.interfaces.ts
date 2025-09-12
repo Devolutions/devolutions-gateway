@@ -1,3 +1,4 @@
+import { Encoding } from '@shared/enums/encoding.enum';
 import { DesktopSize } from '@shared/models/desktop-size';
 
 export interface SessionTokenParameters {
@@ -35,7 +36,7 @@ export interface IronVNCConnectionParameters {
   gatewayAddress?: string;
   token?: string;
   screenSize?: DesktopSize;
-  enabledEncodings?: string;
+  enabledEncoding: Encoding;
   colorFormat: string;
   jpegQualityLevel?: number;
   enableCursor: boolean;

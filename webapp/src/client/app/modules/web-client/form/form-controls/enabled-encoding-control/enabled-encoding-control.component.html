@@ -1,0 +1,10 @@
+<div [formGroup]="parentForm">
+  <label for="enabledEncoding">Enabled Encoding</label>
+  <div class="gateway-form-input">
+    <p-dropdown id="enabledEncoding"
+                styleClass="full-with-dropdown"
+                appendTo="body"
+                formControlName="enabledEncoding"
+                [options]="supportedEncodings"/>
+  </div>
+</div>
