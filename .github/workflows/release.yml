@@ -492,7 +492,7 @@ jobs:
         with:
           api_key: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
           autocreate: 'true'
-          bom_filename: bom.xml
+          bom_filename: bom.json
           project_name: devolutions-gateway
           project_version: ${{ needs.preflight.outputs.version }}
           server_hostname: 'dtrack-api.devolutions.com'
