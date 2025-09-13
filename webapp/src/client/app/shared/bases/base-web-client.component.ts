@@ -59,9 +59,5 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     }
   }
 
-  protected getIronErrorMessage(errorData: { backtrace: () => string } | string): string {
-    return typeof errorData === 'string' ? errorData : errorData.backtrace();
-  }
-
   protected abstract getProtocol(): ProtocolString;
 }

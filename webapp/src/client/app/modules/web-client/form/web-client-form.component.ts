@@ -32,7 +32,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   @Input() isFormExists = false;
   @Input() webSessionId: string | undefined;
   @Input() inputFormData;
-  @Input() error;
+  @Input() sessionTerminationMessage: Message;
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -67,8 +67,8 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes.error && this.error) {
-      this.displayErrorMessages(this.error);
+    if (changes.sessionTerminationMessage && this.sessionTerminationMessage) {
+      this.displayMessage();
     }
   }
 
@@ -256,18 +256,16 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return this.connectSessionForm.get('protocol').value;
   }
 
-  private displayErrorMessages(error): void {
-    const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error.kind ?? error);
-    const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error.backtrace ?? '');
+  private displayMessage(): void {
+    this.sessionTerminationMessage.summary = this.utils.string.replaceNewlinesWithBR(
+      this.sessionTerminationMessage.summary,
+    );
+    this.sessionTerminationMessage.detail = this.utils.string.replaceNewlinesWithBR(
+      this.sessionTerminationMessage.detail,
+    );
 
     setTimeout(() => {
-      this.addMessages([
-        {
-          severity: 'error',
-          summary: formattedSummary,
-          detail: formattedDetail,
-        },
-      ]);
+      this.addMessages([this.sessionTerminationMessage]);
     }, 500);
   }
 
