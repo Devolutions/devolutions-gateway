@@ -2,6 +2,12 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.3.1 (2025-9-13)
+
+### Bug Fixes
+
+- _jetsocat_: missing newline after MCP proxy JSON-RPC responses ([#1507](https://github.com/Devolutions/devolutions-gateway/issues/1507)) ([702cf76acc](https://github.com/Devolutions/devolutions-gateway/commit/702cf76acc40a6561f708fce54d313dd7c712620)) 
+
 ## 2025.3.0 (2025-9-12)
 
 ### Security
