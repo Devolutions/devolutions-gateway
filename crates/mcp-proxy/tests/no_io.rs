@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 
 use mcp_proxy::internal::{decode_content_texts, extract_sse_json_line, unwrap_json_rpc_inner_result};
-use mcp_proxy::{Config, JsonRpcRequest, McpProxy};
+use mcp_proxy::{Config, JsonRpcRequest, JsonRpcResponse, McpProxy};
 
 use std::collections::HashMap;
 
@@ -50,18 +50,18 @@ fn sse_no_data_is_none() {
 fn decode_escaped_texts_works() {
     let mut text_obj = HashMap::new();
     text_obj.insert(
-        "text".to_string(),
-        tinyjson::JsonValue::String("hello\\u0027world\\ncode:\\u003Ctag\\u003E".to_string()),
+        "text".to_owned(),
+        tinyjson::JsonValue::String("hello\\u0027world\\ncode:\\u003Ctag\\u003E".to_owned()),
     );
 
     let mut content_obj = HashMap::new();
     content_obj.insert(
-        "content".to_string(),
+        "content".to_owned(),
         tinyjson::JsonValue::Array(vec![tinyjson::JsonValue::Object(text_obj)]),
     );
 
     let mut result_obj = HashMap::new();
-    result_obj.insert("result".to_string(), tinyjson::JsonValue::Object(content_obj));
+    result_obj.insert("result".to_owned(), tinyjson::JsonValue::Object(content_obj));
 
     let mut v = tinyjson::JsonValue::Object(result_obj);
     decode_content_texts(&mut v);
@@ -75,10 +75,10 @@ fn decode_escaped_texts_works() {
 #[test]
 fn unwrap_json_rpc_inner_result_prefers_result() {
     let mut tools_obj = HashMap::new();
-    tools_obj.insert("tools".to_string(), tinyjson::JsonValue::Array(vec![]));
+    tools_obj.insert("tools".to_owned(), tinyjson::JsonValue::Array(vec![]));
 
     let mut v_obj = HashMap::new();
-    v_obj.insert("result".to_string(), tinyjson::JsonValue::Object(tools_obj.clone()));
+    v_obj.insert("result".to_owned(), tinyjson::JsonValue::Object(tools_obj.clone()));
 
     let v = tinyjson::JsonValue::Object(v_obj);
     let got = unwrap_json_rpc_inner_result(v);
@@ -90,7 +90,7 @@ fn unwrap_json_rpc_inner_result_prefers_result() {
 #[test]
 fn unwrap_json_rpc_inner_result_passthrough() {
     let mut v_obj = HashMap::new();
-    v_obj.insert("tools".to_string(), tinyjson::JsonValue::Array(vec![]));
+    v_obj.insert("tools".to_owned(), tinyjson::JsonValue::Array(vec![]));
 
     let v = tinyjson::JsonValue::Object(v_obj);
     let got = unwrap_json_rpc_inner_result(v.clone());
@@ -136,4 +136,41 @@ async fn unknown_method_is_32601() {
         .unwrap()
         .unwrap();
     assert_eq!(get_number_path(resp.error.as_ref().unwrap(), &["code"]), -32601.0);
+}
+
+#[test]
+fn response_omits_null_id() {
+    let response = JsonRpcResponse {
+        jsonrpc: "2.0".to_owned(),
+        id: None,
+        result: Some(tinyjson::JsonValue::String("test".to_owned())),
+        error: None,
+    };
+
+    let json_str = response.to_string().unwrap();
+    let parsed: tinyjson::JsonValue = json_str.parse().unwrap();
+    let obj = parsed.get::<HashMap<String, tinyjson::JsonValue>>().unwrap();
+
+    // The id field should not be present when None
+    assert!(!obj.contains_key("id"));
+    assert!(obj.contains_key("jsonrpc"));
+    assert!(obj.contains_key("result"));
+}
+
+#[test]
+fn response_includes_id_when_present() {
+    let response = JsonRpcResponse {
+        jsonrpc: "2.0".to_owned(),
+        id: Some(42),
+        result: Some(tinyjson::JsonValue::String("test".to_owned())),
+        error: None,
+    };
+
+    let json_str = response.to_string().unwrap();
+    let parsed: tinyjson::JsonValue = json_str.parse().unwrap();
+    let obj = parsed.get::<HashMap<String, tinyjson::JsonValue>>().unwrap();
+
+    // The id field should be present when Some
+    assert!(obj.contains_key("id"));
+    assert_eq!(obj.get("id").unwrap().get::<f64>().unwrap(), &42.0);
 }

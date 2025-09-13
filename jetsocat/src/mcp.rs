@@ -13,33 +13,37 @@ pub(crate) async fn run_mcp_proxy(pipe: Pipe, mut mcp_client: mcp_proxy::McpProx
     loop {
         line.clear();
 
-        match reader.read_line(&mut line).await? {
-            0 => break, // EOF
-            _ => {
-                let line = line.trim();
+        let n_read = reader.read_line(&mut line).await.context("read_line")?;
 
-                if line.is_empty() {
-                    continue;
-                }
+        if n_read == 0 {
+            debug!("Pipe EOFed");
+            return Ok(());
+        }
 
-                trace!(request = %line, "Received request");
+        let line = line.trim();
 
-                match mcp_client.handle_jsonrpc_request_str(line).await {
-                    Ok(Some(resp)) => {
-                        let response = resp.to_string()?;
-                        writer
-                            .write_all(response.as_bytes())
-                            .await
-                            .context("failed to write response")?;
-                    }
-                    Ok(None) => {} // Notification; no response.
-                    Err(e) => {
-                        error!(error = format!("{e:#}"), "failed to handle request");
-                    }
-                }
+        if line.is_empty() {
+            continue;
+        }
+
+        trace!(request = %line, "Received request");
+
+        match mcp_client.handle_jsonrpc_request_str(line).await {
+            Ok(Some(resp)) => {
+                let mut response = resp.to_string()?;
+                trace!(%response, "Sending response");
+                response.push('\n'); // Push a newline to delemitate the message.
+
+                writer
+                    .write_all(response.as_bytes())
+                    .await
+                    .context("failed to write response")?;
+                writer.flush().await.context("failed to flush writer")?;
+            }
+            Ok(None) => {} // Notification; no response.
+            Err(e) => {
+                error!(error = format!("{e:#}"), "failed to handle request");
             }
         }
     }
-
-    Ok(())
 }
