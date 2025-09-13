@@ -1,5 +1,9 @@
 # Packaging changelog
 
+## 2025.3.1 (2025-09-14)
+
+- No changes.
+
 ## 2025.3.0 (2025-09-12)
 
 - No changes.
