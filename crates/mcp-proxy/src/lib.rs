@@ -51,8 +51,6 @@ impl JsonRpcResponse {
 
         if let Some(id) = self.id {
             obj.insert("id".to_owned(), tinyjson::JsonValue::Number(id as f64));
-        } else {
-            obj.insert("id".to_owned(), tinyjson::JsonValue::Null);
         }
 
         if let Some(result) = &self.result {
@@ -64,7 +62,7 @@ impl JsonRpcResponse {
         }
 
         let json_obj = tinyjson::JsonValue::Object(obj);
-        Ok(json_obj.stringify().unwrap())
+        json_obj.stringify().context("failed to stringify response")
     }
 }
 
@@ -181,6 +179,11 @@ impl McpProxy {
             }
             "notifications/initialized" => {
                 debug!("Received initialized notification");
+
+                Ok(None)
+            }
+            "logging/setLevel" => {
+                debug!("Received logging/setLevel with parameters {:?}", request.params);
 
                 Ok(None)
             }
