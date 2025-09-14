@@ -117,7 +117,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docker
-          path: package/**/Dockerfile
+          path: |
+            package/Linux/Dockerfile
+            package/Linux/entrypoint.ps1
+            package/AgentLinux/Dockerfile
 
       - name: Upload changelog artifacts
         uses: actions/upload-artifact@v4
@@ -223,6 +226,15 @@ jobs:
           choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Delete PowerShell module archive
+        if: matrix.os != 'windows' && matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
+          $PSModuleTarFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
+          Write-Host "Remove PS module archive at $PSModuleTarFilePath"
+          Remove-Item -Path $PSModuleTarFilePath
+
       - name: Sign PowerShell module contents
         if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
         shell: pwsh
@@ -252,20 +264,22 @@ jobs:
 
           $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
 
-          # For some reason, when using Compress-Archive we end up with a corrupted archive once in the release.yml workflow.
-          # Maybe because of the double compression via the upload-artifact action?
-          # With a tarball archive, there is no problem.
           Write-Host "Recreate archive at $PSModuleTarFilePath"
           tar -cvf "$PSModuleTarFilePath" -C "$PSModuleParentPath" DevolutionsGateway
 
           # Verify the archive.
           Write-Host "Verify archive at $PSModuleTarFilePath"
-          # tar -tvf "$PSModuleTarFilePath" | Out-Null
-          & 7z t "$PSModuleTarFilePath"
-
+          tar -tvf "$PSModuleTarFilePath" | Out-Null
           if ($LASTEXITCODE -ne 0) { 
             throw "tar verify failed: $PSModuleTarFilePath is invalid." 
           }
+          & 7z t "$PSModuleTarFilePath"
+          if ($LASTEXITCODE -ne 0) { 
+            throw "7z verify failed: $PSModuleTarFilePath is invalid." 
+          }
+
+          $psModuleArchiveHash = (Get-FileHash -Path "$PSModuleTarFilePath").Hash
+          Write-Host "PS module archive hash: $psModuleArchiveHash"
 
           Set-PSDebug -Off # Too many traces are logged when running New-ModulePackage.
           New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
@@ -562,67 +576,49 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.project }}-${{ matrix.os }}
+          name: ${{ matrix.project }}-${{ matrix.os }}-signed
           path: ${{ runner.temp }}/${{ matrix.project }}
           if-no-files-found: error
           retention-days: 1
 
   devolutions-gateway-merge:
-    name: Merge gateway artifacts
+    name: Devolutions Gateway merge artifacts
     runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+    needs: [codesign]
 
     steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
         with:
-          pattern: devolutions-gateway-*
-          merge-multiple: true
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ github.workspace }}/**/*
-          name: devolutions-gateway
-          overwrite: true
+          name: devolutions-gateway-signed
+          pattern: devolutions-gateway-*-signed
+          delete-merged: false
 
   devolutions-agent-merge:
-    name: Merge agent artifacts
+    name: Devolutions Agent merge artifacts
     runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+    needs: [codesign]
 
     steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
         with:
-          pattern: devolutions-agent-*
-          merge-multiple: true
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ github.workspace }}/**/*
-          name: devolutions-agent
-          overwrite: true
+          name: devolutions-agent-signed
+          pattern: devolutions-agent-*-signed
+          delete-merged: false
 
   jetsocat-merge:
-    name: Merge jetsocat artifacts
+    name: Jetsocat merge artifacts
     runs-on: ubuntu-latest
-    needs: [preflight, codesign]
+    needs: [codesign]
 
     steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
         with:
-          pattern: jetsocat-*
-          merge-multiple: true
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: ${{ github.workspace }}/**/*
-          name: jetsocat
-          overwrite: true
+          name: jetsocat-signed
+          pattern: jetsocat-*-signed
+          delete-merged: false
 
   web-app:
     name: Web App
@@ -661,7 +657,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: jetsocat
+          name: jetsocat-signed
           path: jetsocat/nuget/bin
 
       - name: Rename artifacts
