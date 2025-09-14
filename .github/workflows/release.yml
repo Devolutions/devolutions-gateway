@@ -123,7 +123,9 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway -n native-libs --repo $Env:GITHUB_REPOSITORY
+        run: |
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
+          Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
@@ -171,6 +173,8 @@ jobs:
           tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
 
           $PowerShellArchive = Get-ChildItem -Recurse -Filter "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
+          $psModuleArchiveHash = (Get-FileHash -Path "$PowerShellArchive").Hash
+          Write-Host "PS module archive hash: $psModuleArchiveHash"
           tar -xvf "$PowerShellArchive" -C "$PkgDir"
 
       - name: Build container
@@ -187,6 +191,7 @@ jobs:
           docker build -t "$ImageName" -t "$LatestImageName" .
           echo "image-name=$ImageName" >> $Env:GITHUB_OUTPUT
           echo "latest-image-name=$LatestImageName" >> $Env:GITHUB_OUTPUT
+
           Get-ChildItem -Recurse
 
       - name: Push container
@@ -222,7 +227,11 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n devolutions-agent -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
+        run: |
+          gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-signed -n devolutions-gateway-signed -n devolutions-agent-signed -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
+          Move-Item -Path jetsocat-signed -Destination jetsocat
+          Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
+          Move-Item -Path devolutions-agent-signed -Destination devolutions-agent
 
       - name: Manage artifacts
         shell: pwsh
@@ -280,7 +289,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed --repo $Env:GITHUB_REPOSITORY
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
@@ -348,7 +357,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare upload
         id: prepare
@@ -409,7 +418,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare upload
         id: prepare
