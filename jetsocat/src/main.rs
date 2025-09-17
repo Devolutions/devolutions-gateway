@@ -31,10 +31,10 @@ use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{ProxyConfig, ProxyType, detect_proxy};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
-use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::{env, error::Error};
 use tokio::runtime;
 
 fn main() {
@@ -474,7 +474,7 @@ impl CommonArgs {
     fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
         let logging = if c.bool_flag("log-term") {
             Logging::Term
-        } else if let Ok(filepath) = c.string_flag("log-file") {
+        } else if let Some(filepath) = opt_string_flag(c, "log-file")? {
             let filepath = PathBuf::from(filepath);
             Logging::File {
                 filepath,
@@ -498,17 +498,17 @@ impl CommonArgs {
             Logging::Term
         };
 
-        let proxy_cfg = if let Ok(addr) = c.string_flag("socks5") {
+        let proxy_cfg = if let Some(addr) = opt_string_flag(c, "socks5")? {
             Some(ProxyConfig {
                 ty: ProxyType::Socks5,
                 addr,
             })
-        } else if let Ok(addr) = c.string_flag("socks4") {
+        } else if let Some(addr) = opt_string_flag(c, "socks4")? {
             Some(ProxyConfig {
                 ty: ProxyType::Socks4,
                 addr,
             })
-        } else if let Ok(addr) = c.string_flag("https-proxy") {
+        } else if let Some(addr) = opt_string_flag(c, "https-proxy")? {
             Some(ProxyConfig {
                 ty: ProxyType::Https,
                 addr,
@@ -519,14 +519,14 @@ impl CommonArgs {
             detect_proxy()
         };
 
-        let pipe_timeout = if let Ok(timeout) = c.string_flag("pipe-timeout") {
+        let pipe_timeout = if let Some(timeout) = opt_string_flag(c, "pipe-timeout")? {
             let timeout = humantime::parse_duration(&timeout).context("invalid value for pipe timeout")?;
             Some(timeout)
         } else {
             None
         };
 
-        let watch_process = if let Ok(process_id) = c.int_flag("watch-process") {
+        let watch_process = if let Some(process_id) = opt_int_flag(c, "watch-process")? {
             let pid = u32::try_from(process_id).context("invalid value for process ID")?;
             Some(sysinfo::Pid::from_u32(pid))
         } else if c.bool_flag("watch-parent") {
@@ -553,7 +553,7 @@ impl CommonArgs {
 }
 
 fn apply_forward_flags(cmd: Command) -> Command {
-    cmd.flag(Flag::new("repeat-count", FlagType::Int).description("How many times piping is repeated [default = 0]"))
+    cmd.flag(Flag::new("repeat-count", FlagType::Uint).description("How many times piping is repeated [default = 0]"))
 }
 
 struct ForwardArgs {
@@ -567,8 +567,7 @@ impl ForwardArgs {
     fn parse(c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(FORWARD_SUBCOMMAND, c)?;
 
-        let repeat_count =
-            usize::try_from(c.int_flag("repeat-count").unwrap_or(0)).context("bad repeat-count value")?;
+        let repeat_count = opt_uint_flag(c, "repeat-count")?.unwrap_or(0);
 
         let mut args = c.args.iter();
 
@@ -649,7 +648,7 @@ impl McpProxyArgs {
         let mcp_transport = args.next().context("<MCP_TRANSPORT> is missing")?.clone();
         let mcp_transport = parse_mcp_transport_mode(mcp_transport).context("bad <MCP_TRANSPORT>")?;
 
-        let http_timeout = if let Ok(timeout) = c.string_flag("http-timeout") {
+        let http_timeout = if let Some(timeout) = opt_string_flag(c, "http-timeout")? {
             humantime::parse_duration(&timeout).context("invalid value for http timeout")?
         } else {
             Duration::from_secs(30)
@@ -887,16 +886,16 @@ impl DoctorArgs {
     fn parse(c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(JMUX_PROXY_SUBCOMMAND, c)?;
 
-        let chain_path = c.string_flag("chain").map(PathBuf::from).ok();
-        let subject_name = c.string_flag("subject-name").ok();
+        let chain_path = opt_string_flag(c, "chain")?.map(PathBuf::from);
+        let subject_name = opt_string_flag(c, "subject-name")?;
 
-        let server_port = if let Ok(port) = c.uint_flag("server-port") {
+        let server_port = if let Some(port) = opt_uint_flag(c, "server-port")? {
             Some(u16::try_from(port).context("invalid port number")?)
         } else {
             None
         };
 
-        let format = if let Ok(format) = c.string_flag("format") {
+        let format = if let Some(format) = opt_string_flag(c, "format")? {
             match format.as_str() {
                 "human" => DoctorOutputFormat::Human,
                 "json" => DoctorOutputFormat::Json,
@@ -906,7 +905,7 @@ impl DoctorArgs {
             DoctorOutputFormat::Human
         };
 
-        let pipe_mode = if let Ok(pipe) = c.string_flag("pipe") {
+        let pipe_mode = if let Some(pipe) = opt_string_flag(c, "pipe")? {
             parse_pipe_mode(pipe).context("bad <PIPE>")?
         } else {
             PipeMode::Stdio
@@ -1045,4 +1044,40 @@ fn clean_old_log_files(logging: &Logging) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[expect(
+    deprecated,
+    reason = "seahorse uses description() for the human readable description"
+)]
+fn opt_string_flag(context: &Context, name: &str) -> anyhow::Result<Option<String>> {
+    match context.string_flag(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(seahorse::error::FlagError::NotFound) => Ok(None),
+        Err(e) => Err(anyhow::Error::msg(e.description().to_owned()).context(format!("invalid '{name}'"))),
+    }
+}
+
+#[expect(
+    deprecated,
+    reason = "seahorse uses description() for the human readable description"
+)]
+fn opt_int_flag(context: &Context, name: &str) -> anyhow::Result<Option<isize>> {
+    match context.int_flag(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(seahorse::error::FlagError::NotFound) => Ok(None),
+        Err(e) => Err(anyhow::Error::msg(e.description().to_owned()).context(format!("invalid '{name}'"))),
+    }
+}
+
+#[expect(
+    deprecated,
+    reason = "seahorse uses description() for the human readable description"
+)]
+fn opt_uint_flag(context: &Context, name: &str) -> anyhow::Result<Option<usize>> {
+    match context.uint_flag(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(seahorse::error::FlagError::NotFound) => Ok(None),
+        Err(e) => Err(anyhow::Error::msg(e.description().to_owned()).context(format!("invalid '{name}'"))),
+    }
 }
