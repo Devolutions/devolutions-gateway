@@ -243,6 +243,9 @@ struct JmuxChannelCtx {
 
     maximum_packet_size: u16,
 
+    /// For payload received from the peer before JmuxApiRequest::Start is received.
+    pending_data: Vec<Bytes>,
+
     span: Span,
 
     // Traffic audit metadata
@@ -287,10 +290,6 @@ impl JmuxCtx {
         };
 
         Ok(())
-    }
-
-    fn get_channel(&mut self, id: LocalChannelId) -> Option<&JmuxChannelCtx> {
-        self.channels.get(&id)
     }
 
     fn get_channel_mut(&mut self, id: LocalChannelId) -> Option<&mut JmuxChannelCtx> {
@@ -472,13 +471,12 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
                     }
                     JmuxApiRequest::Start { id, stream, leftover } => {
-                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
+                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
 
                         let (data_tx, data_rx) = mpsc::channel::<Bytes>(CHANNEL_DATA_MPSC_CHANNEL_SIZE);
 
-                        if data_senders.insert(id, data_tx).is_some() {
-                            anyhow::bail!("detected two streams with the same ID {}", id);
-                        }
+                        let data_tx = data_senders.entry(id).insert_entry(data_tx);
+                        let data_tx = data_tx.get();
 
                         // Send leftover bytes if any.
                         if let Some(leftover) = leftover {
@@ -512,6 +510,21 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
                         .spawn(channel.span.clone())
                         .detach();
+
+                        if !channel.pending_data.is_empty() {
+                            channel.span.in_scope(|| {
+                                debug!("Send pending data sent by peer");
+                            });
+
+                            for data in channel.pending_data.drain(..) {
+                                let _ = data_tx.send(data).await;
+                            }
+
+                            // Release some memory.
+                            channel.pending_data.shrink_to_fit();
+
+                            needs_window_adjustment.insert(id);
+                        }
                     }
                 }
             }
@@ -710,6 +723,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             maximum_packet_size: msg.maximum_packet_size,
 
+                            pending_data: Vec::new(),
+
                             span: channel_span,
 
                             // Traffic audit metadata.
@@ -764,6 +779,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             maximum_packet_size: msg.maximum_packet_size,
 
+                            pending_data: Vec::new(),
+
                             span: channel_span.exit(),
 
                             // Traffic audit metadata (for external API channels)
@@ -804,16 +821,20 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             continue;
                         }
 
-                        let Some(data_tx) = data_senders.get_mut(&id) else {
-                            channel.span.in_scope(|| {
-                                warn!("Received data but associated data sender is missing");
-                            });
-                            continue;
-                        };
+                        match data_senders.get_mut(&id) {
+                            Some(data_tx) => {
+                                let _ = data_tx.send(msg.transfer_data).await;
+                                needs_window_adjustment.insert(id);
+                            }
+                            None => {
+                                channel.span.in_scope(|| {
+                                    debug!("Received data but associated data sender is not yet available; storing data as pending");
+                                });
 
-                        let _ = data_tx.send(msg.transfer_data).await;
-
-                        needs_window_adjustment.insert(id);
+                                // Temporarily store the transfer data.
+                                channel.pending_data.push(msg.transfer_data);
+                            }
+                        }
                     }
                     Message::Eof(msg) => {
                         // Per the spec:
