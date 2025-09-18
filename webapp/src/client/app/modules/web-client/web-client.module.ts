@@ -35,11 +35,12 @@ import { ColorFormatControlComponent } from './form/form-controls/color-format-c
 // import { ForceWsPortControlComponent } from './form/form-controls/force-ws-port-control/force-ws-port-control.component';
 // import { RequestSharedSessionControlComponent } from './form/form-controls/request-shared-session-control/request-shared-session-control.component';
 // import { SharingApprovalModeControlComponent } from './form/form-controls/sharing-approval-mode-control/sharing-approval-mode-control.component';
-import { EnabledEncodingsControlComponent } from './form/form-controls/enabled-encodings-control/enabled-encodings-control.component';
+import { EnabledEncodingControlComponent } from './form/form-controls/enabled-encoding-control/enabled-encoding-control.component';
 import { ExtendedClipboardControlComponent } from './form/form-controls/extended-clipboard-control/extended-clipboard-control.component';
 import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
 import { JpegQualityLevelControlComponent } from './form/form-controls/jpeg-quality-level-control/jpeg-quality-level-control.component';
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
+import { TightPngEnabledControlComponent } from './form/form-controls/tight-png-enabled-control/tight-png-enabled-control.component';
 import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
 import { NetScanComponent } from './net-scan/net-scan.component';
 import { WebClientRdpComponent } from './rdp/web-client-rdp.component';
@@ -82,11 +83,12 @@ const routes: Routes = [
     PasswordControlComponent,
     ExtendedClipboardControlComponent,
     JpegQualityLevelControlComponent,
+    TightPngEnabledControlComponent,
     ScreenSizeControlComponent,
     EnableDisplayConfigurationControlComponent,
     KdcUrlControlComponent,
     PreConnectionBlobControlComponent,
-    EnabledEncodingsControlComponent,
+    EnabledEncodingControlComponent,
     ColorFormatControlComponent,
     EnableCursorControlComponent,
     AutoClipboardControlComponent,
