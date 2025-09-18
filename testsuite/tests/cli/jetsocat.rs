@@ -1,4 +1,5 @@
-use std::{io::Read, time::Duration};
+use std::io::Read;
+use std::time::Duration;
 
 use expect_test::expect;
 use test_utils::find_unused_ports;
