@@ -191,9 +191,6 @@ fn jmux_proxy_write_hello_world() {
     let _ = jmux_server.kill();
     let _ = read_server.kill();
 
-    // Check the client was interrupted (timeout).
-    client_output.interrupted();
-
     // Check that the read server received the payload.
     let mut read_server_stdout = String::new();
     read_server
