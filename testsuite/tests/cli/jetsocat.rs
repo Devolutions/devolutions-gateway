@@ -44,7 +44,7 @@ fn forward_hello_world() {
     let mut listener = jetsocat_cmd()
         .env(
             "JETSOCAT_ARGS",
-            format!("forward tcp-listen://127.0.0.1:{port} 'cmd://echo hello world' --no-proxy"),
+            format!("forward tcp-listen://127.0.0.1:{port} 'cmd://printf \"hello world\"' --no-proxy"),
         )
         .spawn()
         .expect("failed to start jetsocat listener");
@@ -62,7 +62,7 @@ fn forward_hello_world() {
     let _ = listener.kill();
 
     // Check that we got the expected output.
-    client_output.success().stdout("hello world\n");
+    client_output.success().stdout("hello world");
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn jmux_proxy_read_hello_world() {
     let mut echo_server = jetsocat_cmd()
         .env(
             "JETSOCAT_ARGS",
-            format!("forward tcp-listen://127.0.0.1:{echo_server_port} 'cmd://echo hello world' --no-proxy"),
+            format!("forward tcp-listen://127.0.0.1:{echo_server_port} 'cmd://printf \"hello world\"' --no-proxy"),
         )
         .spawn()
         .expect("failed to start echo server");
@@ -127,7 +127,7 @@ fn jmux_proxy_read_hello_world() {
     let _ = echo_server.kill();
 
     // Check that we got the expected output through the JMUX proxy.
-    client_output.success().stdout("hello world\n");
+    client_output.success().stdout("hello world");
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn jmux_proxy_write_hello_world() {
     jetsocat_assert_cmd()
         .env(
             "JETSOCAT_ARGS",
-            format!("forward tcp://127.0.0.1:{proxy_listen_port} 'cmd://echo hello world'"),
+            format!("forward tcp://127.0.0.1:{proxy_listen_port} 'cmd://printf \"hello world\"'"),
         )
         .timeout(COMMAND_TIMEOUT)
         .assert();
@@ -198,7 +198,7 @@ fn jmux_proxy_write_hello_world() {
         .unwrap()
         .read_to_string(&mut read_server_stdout)
         .unwrap();
-    assert_eq!(read_server_stdout, "hello world\n");
+    assert_eq!(read_server_stdout, "hello world");
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn doctor_invalid_server_port() {
 #[test]
 fn env_args_single_quoted_arguments() {
     jetsocat_assert_cmd()
-        .env("JETSOCAT_ARGS", "forward 'cmd://echo hello world' stdio")
+        .env("JETSOCAT_ARGS", "forward 'cmd://printf \"hello world\"' stdio")
         .assert()
         .success();
 }
@@ -387,7 +387,7 @@ fn env_args_single_quoted_arguments() {
 #[test]
 fn env_args_double_quoted_arguments() {
     jetsocat_assert_cmd()
-        .env("JETSOCAT_ARGS", "forward \"cmd://echo hello world\" stdio")
+        .env("JETSOCAT_ARGS", "forward \"cmd://printf 'hello world'\" stdio")
         .assert()
         .success();
 }
@@ -396,7 +396,7 @@ fn env_args_double_quoted_arguments() {
 fn jetsocat_log_environment_variable() {
     let output = jetsocat_assert_cmd()
         .env("JETSOCAT_LOG", "debug")
-        .env("JETSOCAT_ARGS", "forward - cmd://'echo hello' --log-term")
+        .env("JETSOCAT_ARGS", "forward - cmd://'printf hello' --log-term")
         .timeout(COMMAND_TIMEOUT)
         .assert();
 
