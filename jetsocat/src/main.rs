@@ -31,10 +31,11 @@ use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{ProxyConfig, ProxyType, detect_proxy};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
+use std::env;
+use std::error::Error;
 use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::{env, error::Error};
 use tokio::runtime;
 
 fn main() {
