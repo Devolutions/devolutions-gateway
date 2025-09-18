@@ -14,7 +14,11 @@ use uuid::Uuid;
 #[serde(tag = "kind")]
 pub enum AppCredential {
     #[serde(rename = "username-password")]
-    UsernamePassword { username: String, password: Password },
+    UsernamePassword {
+        username: String,
+        domain: Option<String>,
+        password: Password,
+    },
 }
 
 /// Application protocol level credential mapping
