@@ -24,6 +24,12 @@ pub fn jetsocat_cmd() -> std::process::Command {
     cmd
 }
 
+pub fn jetsocat_tokio_cmd() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(&*JETSOCAT_BIN_PATH);
+    cmd.env("RUST_BACKTRACE", "0");
+    cmd
+}
+
 pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_test::Expect) {
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);

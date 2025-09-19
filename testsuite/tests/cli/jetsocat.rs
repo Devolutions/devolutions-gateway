@@ -4,7 +4,7 @@ use std::time::Duration;
 use expect_test::expect;
 use rstest::rstest;
 use test_utils::find_unused_ports;
-use testsuite::cli::{assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd};
+use testsuite::cli::{assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsocat_tokio_cmd};
 
 const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(50);
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(150);
@@ -563,4 +563,377 @@ fn forward_negative_repeat_count() {
                 Value type mismatch
         "#]],
     );
+}
+
+#[rstest]
+#[tokio::test]
+async fn mcp_proxy_smoke_test(#[values(true, false)] http_transport: bool) {
+    use testsuite::mcp_client::McpClient;
+    use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer, NamedPipeTransport};
+
+    // Configure MCP server transport.
+    let (transport, pipe) = if http_transport {
+        let http_transport = HttpTransport::bind().await.unwrap();
+        let server_url = http_transport.url();
+        (DynMcpTransport::new_box(http_transport), server_url)
+    } else {
+        let np_transport = NamedPipeTransport::bind().unwrap();
+        let name = np_transport.name().to_owned();
+        (DynMcpTransport::new_box(np_transport), format!("np://{name}"))
+    };
+
+    // Start MCP server.
+    let server = McpServer::new(transport);
+    let _server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &pipe])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    let init_result = mcp_client.connect().await.expect("connect to MCP server");
+    expect![[r#"
+        InitializeResult {
+            protocol_version: "2025-06-18",
+            capabilities: Object {
+                "tools": Object {
+                    "listChanged": Bool(false),
+                },
+            },
+            server_info: Object {
+                "name": String("testsuite-mcp-server"),
+                "version": String("1.0.0"),
+            },
+        }
+    "#]]
+    .assert_debug_eq(&init_result);
+
+    // List available tools.
+    let tools_result = mcp_client.list_tools().await.expect("list tools");
+    // Empty, because we didn’t configure any on the MCP server.
+    expect![["
+        ToolsListResult {
+            tools: [],
+        }
+    "]]
+    .assert_debug_eq(&tools_result);
+}
+
+#[rstest]
+#[tokio::test]
+async fn mcp_proxy_with_tools(#[values(true, false)] http_transport: bool) {
+    use testsuite::mcp_client::{McpClient, ToolCallParams};
+    use testsuite::mcp_server::{
+        CalculatorTool, DynMcpTransport, EchoTool, HttpTransport, McpServer, NamedPipeTransport, ServerConfig,
+    };
+
+    // Configure MCP server transport.
+    let (transport, pipe) = if http_transport {
+        let http_transport = HttpTransport::bind().await.unwrap();
+        let server_url = http_transport.url();
+        (DynMcpTransport::new_box(http_transport), server_url)
+    } else {
+        let np_transport = NamedPipeTransport::bind().unwrap();
+        let name = np_transport.name().to_owned();
+        (DynMcpTransport::new_box(np_transport), format!("np://{name}"))
+    };
+
+    // Start MCP server.
+    let server =
+        McpServer::new(transport).with_config(ServerConfig::new().with_tool(EchoTool).with_tool(CalculatorTool));
+    let _server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &pipe])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    mcp_client.connect().await.expect("connect to MCP server");
+
+    // List available tools.
+    let tools_result = mcp_client.list_tools().await.expect("list tools");
+    expect![[r#"
+        ToolsListResult {
+            tools: [
+                Object {
+                    "description": String("Echo back the input"),
+                    "inputSchema": Object {
+                        "properties": Object {
+                            "message": Object {
+                                "type": String("string"),
+                            },
+                        },
+                        "required": Array [
+                            String("message"),
+                        ],
+                        "type": String("object"),
+                    },
+                    "name": String("echo"),
+                },
+                Object {
+                    "description": String("Perform basic math operations"),
+                    "inputSchema": Object {
+                        "properties": Object {
+                            "a": Object {
+                                "type": String("number"),
+                            },
+                            "b": Object {
+                                "type": String("number"),
+                            },
+                            "operation": Object {
+                                "enum": Array [
+                                    String("add"),
+                                    String("subtract"),
+                                    String("multiply"),
+                                    String("divide"),
+                                ],
+                                "type": String("string"),
+                            },
+                        },
+                        "required": Array [
+                            String("operation"),
+                            String("a"),
+                            String("b"),
+                        ],
+                        "type": String("object"),
+                    },
+                    "name": String("calculator"),
+                },
+            ],
+        }
+    "#]]
+    .assert_debug_eq(&tools_result);
+
+    let echo_result = mcp_client.call_tool(ToolCallParams::echo("hello world")).await.unwrap();
+    expect![[r#"
+        ToolCallResult {
+            content: [
+                Object {
+                    "text": String("hello world"),
+                    "type": String("text"),
+                },
+            ],
+            is_error: Some(
+                false,
+            ),
+        }
+    "#]]
+    .assert_debug_eq(&echo_result);
+
+    let calculate_result = mcp_client
+        .call_tool(ToolCallParams::calculate("add", 2.0, 3.0))
+        .await
+        .unwrap();
+    expect![[r#"
+        ToolCallResult {
+            content: [
+                Object {
+                    "text": String("5"),
+                    "type": String("text"),
+                },
+            ],
+            is_error: Some(
+                false,
+            ),
+        }
+    "#]]
+    .assert_debug_eq(&calculate_result);
+}
+
+#[rstest]
+#[tokio::test]
+async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
+    use testsuite::mcp_client::McpClient;
+    use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer, NamedPipeTransport, ServerConfig};
+
+    let probe = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Configure MCP server transport.
+    let (transport, pipe) = if http_transport {
+        let http_transport = HttpTransport::bind().await.unwrap();
+        let server_url = http_transport.url();
+        (DynMcpTransport::new_box(http_transport), server_url)
+    } else {
+        let np_transport = NamedPipeTransport::bind().unwrap();
+        let name = np_transport.name().to_owned();
+        (DynMcpTransport::new_box(np_transport), format!("np://{name}"))
+    };
+
+    // Start MCP server.
+    let notification_handler = {
+        let probe = probe.clone();
+        move |method: &str, _: serde_json::Value| {
+            assert_eq!(method, "notifications/it-works");
+            probe.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    };
+    let server =
+        McpServer::new(transport).with_config(ServerConfig::new().with_notification_handler(notification_handler));
+    let _server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &pipe])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    mcp_client.connect().await.expect("connect to MCP server");
+
+    // Send a notification.
+    mcp_client
+        .send_notification("notifications/it-works", None)
+        .await
+        .expect("send notification");
+
+    // For sanitiy, list available tools.
+    mcp_client.list_tools().await.expect("list tools");
+
+    // Wait for the handler to be called.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Check the probe.
+    assert_eq!(probe.load(std::sync::atomic::Ordering::SeqCst), true);
+}
+
+async fn execute_mcp_request(request: &str) -> String {
+    use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer};
+    use tokio::io::AsyncWriteExt as _;
+
+    // Start MCP server.
+    let transport = HttpTransport::bind().await.unwrap();
+    let server_url = transport.url();
+    let server = McpServer::new(DynMcpTransport::new_box(transport));
+    let server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let mut stdin = jetsocat_process.stdin.take().expect("get stdin");
+
+    // Write the request.
+    stdin.write_all(request.as_bytes()).await.unwrap();
+
+    tokio::time::sleep(COMMAND_TIMEOUT).await;
+
+    // Shutdown the MCP server.
+    server_handle.shutdown();
+
+    // Terminate the Jetsocat process.
+    jetsocat_process.start_kill().unwrap();
+
+    let output = jetsocat_process.wait_with_output().await.unwrap();
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[tokio::test]
+async fn mcp_proxy_malformed_request_with_id() {
+    let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
+    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
+    assert!(stdout.contains("Unexpected EOF"), "{stdout}");
+    assert!(stdout.contains("id=1"), "{stdout}");
+}
+
+#[tokio::test]
+async fn mcp_proxy_malformed_request_no_id() {
+    let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
+    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
+    assert!(stdout.contains("Invalid character"), "{stdout}");
+    assert!(!stdout.contains("id=1"), "{stdout}");
+}
+
+#[tokio::test]
+async fn mcp_proxy_http_error() {
+    use testsuite::mcp_client::McpClient;
+    use testsuite::mcp_server::{DynMcpTransport, HttpError, HttpTransport, McpServer};
+
+    // Start MCP server.
+    let transport = HttpTransport::bind().await.unwrap().with_error_response(
+        "initialize",
+        HttpError {
+            status_code: 418,
+            body: "I’m a tea pot".to_owned(),
+        },
+    );
+    let server_url = transport.url();
+    let server = McpServer::new(DynMcpTransport::new_box(transport));
+    let _server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &server_url])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    let error = mcp_client.connect().await.unwrap_err();
+    let error_string = error.to_string();
+    assert!(error_string.contains("-32099"), "{error}");
+    assert!(error_string.contains("status code 418"), "{error}");
 }
