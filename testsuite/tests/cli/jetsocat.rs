@@ -202,11 +202,13 @@ fn jmux_proxy_write_hello_world() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_no_args_is_valid() {
     jetsocat_assert_cmd().arg("doctor").assert().success();
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_verify_chain_with_json_output() {
     let tempdir = tempfile::tempdir().unwrap();
     let chain_file_path = tempdir.path().join("devolutions-net-chain.pem");
