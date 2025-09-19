@@ -19,12 +19,17 @@ harness = true
 assert_cmd = "2.0"
 escargot = "0.5"
 expect-test = "1.5"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1.0"
 
 [dev-dependencies]
 sysevent.path = "../crates/sysevent"
 test-utils.path = "../crates/test-utils"
+mcp-proxy.path = "../crates/mcp-proxy"
 tempfile = "3"
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"
