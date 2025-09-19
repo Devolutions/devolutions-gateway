@@ -16,12 +16,20 @@ path = "tests/main.rs"
 harness = true
 
 [dependencies]
-sysevent.path = "../crates/sysevent"
+assert_cmd = "2.0"
+escargot = "0.5"
+expect-test = "1.5"
 
-[target.'cfg(unix)'.dependencies]
+[dev-dependencies]
+sysevent.path = "../crates/sysevent"
+test-utils.path = "../crates/test-utils"
+tempfile = "3"
+serde_json = "1"
+
+[target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(windows)'.dev-dependencies]
 sysevent-winevent.path = "../crates/sysevent-winevent"
 
 [lints]
