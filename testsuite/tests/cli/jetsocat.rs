@@ -500,3 +500,255 @@ fn forward_negative_repeat_count() {
         "#]],
     );
 }
+
+#[test]
+fn mcp_proxy_smoke_test() {
+    use testsuite::mcp_client::FakeMcpClient;
+    use testsuite::mcp_server::FakeMcpServer;
+
+    // Start fake MCP server on HTTP.
+    let server = FakeMcpServer::new().unwrap();
+    let server_url = server.url();
+    let server_handle = server.start().expect("failed to start MCP server");
+
+    // Give the server time to start.
+    std::thread::sleep(LISTENER_WAIT_DURATION);
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_cmd()
+        .args(&["mcp-proxy", "stdio", &server_url])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("failed to get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("failed to get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = FakeMcpClient::new(Box::new(stdout), Box::new(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    let init_result = mcp_client.connect().expect("failed to connect to MCP server");
+    expect![[r#"
+        InitializeResult {
+            protocol_version: "2025-06-18",
+            capabilities: Object {
+                "logging": Null,
+                "prompts": Object {
+                    "listChanged": Bool(false),
+                },
+                "resources": Object {
+                    "listChanged": Bool(false),
+                    "subscribe": Bool(false),
+                },
+                "tools": Object {
+                    "listChanged": Bool(false),
+                },
+            },
+            server_info: Object {
+                "name": String("fake-mcp-server"),
+                "version": String("1.0.0"),
+            },
+        }
+    "#]]
+    .assert_debug_eq(&init_result);
+
+    // List available tools.
+    let tools_result = mcp_client.list_tools().expect("list tools");
+    // Empty, because we didn’t configure any on the MCP server.
+    expect![["
+        ToolsListResult {
+            tools: [],
+        }
+    "]]
+    .assert_debug_eq(&tools_result);
+
+    // Kill processes.
+    let _ = jetsocat_process.kill();
+    server_handle.shutdown();
+}
+
+#[test]
+fn mcp_proxy_with_tools() {
+    use testsuite::mcp_client::{FakeMcpClient, ToolCallParams};
+    use testsuite::mcp_server::{FakeMcpServer, Tool};
+
+    // Start fake MCP server on HTTP.
+    let server = FakeMcpServer::new()
+        .unwrap()
+        .add_tool(Tool::echo())
+        .add_tool(Tool::calculator());
+    let server_url = server.url();
+    let server_handle = server.start().expect("failed to start MCP server");
+
+    // Give the server time to start.
+    std::thread::sleep(LISTENER_WAIT_DURATION);
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_cmd()
+        .args(&["mcp-proxy", "stdio", &server_url])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("failed to get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("failed to get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = FakeMcpClient::new(Box::new(stdout), Box::new(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    mcp_client.connect().expect("failed to connect to MCP server");
+
+    // List available tools.
+    let tools_result = mcp_client.list_tools().expect("failed to list tools");
+    expect![[r#"
+        ToolsListResult {
+            tools: [
+                Object {
+                    "description": String("Echo back the input"),
+                    "inputSchema": Object {
+                        "properties": Object {
+                            "message": Object {
+                                "type": String("string"),
+                            },
+                        },
+                        "required": Array [
+                            String("message"),
+                        ],
+                        "type": String("object"),
+                    },
+                    "name": String("echo"),
+                },
+                Object {
+                    "description": String("Perform basic math operations"),
+                    "inputSchema": Object {
+                        "properties": Object {
+                            "a": Object {
+                                "type": String("number"),
+                            },
+                            "b": Object {
+                                "type": String("number"),
+                            },
+                            "operation": Object {
+                                "enum": Array [
+                                    String("add"),
+                                    String("subtract"),
+                                    String("multiply"),
+                                    String("divide"),
+                                ],
+                                "type": String("string"),
+                            },
+                        },
+                        "required": Array [
+                            String("operation"),
+                            String("a"),
+                            String("b"),
+                        ],
+                        "type": String("object"),
+                    },
+                    "name": String("calculator"),
+                },
+            ],
+        }
+    "#]]
+    .assert_debug_eq(&tools_result);
+
+    let echo_result = mcp_client.call_tool(ToolCallParams::echo("hello world")).unwrap();
+    expect![[r#"
+        ToolCallResult {
+            content: [
+                Object {
+                    "text": String("hello world"),
+                    "type": String("text"),
+                },
+            ],
+            is_error: Some(
+                false,
+            ),
+        }
+    "#]]
+    .assert_debug_eq(&echo_result);
+
+    let calculate_result = mcp_client
+        .call_tool(ToolCallParams::calculate("add", 2.0, 3.0))
+        .unwrap();
+    expect![[r#"
+        ToolCallResult {
+            content: [
+                Object {
+                    "text": String("5"),
+                    "type": String("text"),
+                },
+            ],
+            is_error: Some(
+                false,
+            ),
+        }
+    "#]]
+    .assert_debug_eq(&calculate_result);
+
+    // Kill processes.
+    let _ = jetsocat_process.kill();
+    server_handle.shutdown();
+}
+
+// TODO: add support for notifications, and verify that too.
+
+fn execute_request(request: &str) -> String {
+    use std::io::Write as _;
+
+    use testsuite::mcp_server::FakeMcpServer;
+
+    // Start fake MCP server on HTTP.
+    let server = FakeMcpServer::new().unwrap();
+    let server_url = server.url();
+    let server_handle = server.start().expect("failed to start MCP server");
+
+    // Give the server time to start.
+    std::thread::sleep(LISTENER_WAIT_DURATION);
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_cmd()
+        .args(&["mcp-proxy", "stdio", &server_url, "--log-term"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let mut stdin = jetsocat_process.stdin.take().expect("failed to get stdin");
+
+    // Write the request.
+    stdin.write_all(request.as_bytes()).unwrap();
+
+    std::thread::sleep(COMMAND_TIMEOUT);
+
+    // Kill processes.
+    let _ = jetsocat_process.kill();
+    server_handle.shutdown();
+
+    let output = jetsocat_process.wait_with_output().unwrap();
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn mcp_proxy_malformed_request_with_id() {
+    let stdout = execute_request("{\"jsonrpc\":\"2.0\",\"id\":1\n");
+    assert!(stdout.contains("Malformed JSON-RPC request from client"));
+    assert!(stdout.contains("Unexpected EOF"));
+    assert!(stdout.contains("id"));
+    // assert!(stdout.contains("id=1"));
+}
+
+#[test]
+fn mcp_proxy_malformed_request_no_id() {
+    let stdout = execute_request("{\"jsonrpc\":\"2.0\",}\n");
+    assert!(stdout.contains("Malformed JSON-RPC request from client"));
+    assert!(stdout.contains("Invalid character"));
+    assert!(!stdout.contains("id="));
+}

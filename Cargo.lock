@@ -3493,7 +3493,6 @@ name = "mcp-proxy"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "tempfile",
  "tinyjson",
  "tokio 1.46.1",
  "tracing",
@@ -6147,15 +6146,19 @@ dependencies = [
 name = "testsuite"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "assert_cmd",
  "escargot",
  "expect-test",
+ "mcp-proxy",
+ "serde",
  "serde_json",
  "sysevent",
  "sysevent-syslog",
  "sysevent-winevent",
  "tempfile",
  "test-utils",
+ "tokio 1.46.1",
 ]
 
 [[package]]
