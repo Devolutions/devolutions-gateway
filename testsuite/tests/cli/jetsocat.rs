@@ -43,11 +43,11 @@ fn all_subcommands() {
 #[case(&["--color=auto"], &[], true)]
 #[case(&["--color=always"], &[("NO_COLOR", "")], true)]
 #[case(&["--color=auto"], &[("NO_COLOR", "")], true)]
-#[case(&[], &[("NO_COLOR", "")], false)]
+#[case(&[], &[("NO_COLOR", ""), ("FORCE_COLOR", "1")], false)]
 #[case(&[], &[("TERM", "dumb")], false)]
 #[case(&[], &[("TERM", "other")], true)]
 #[case(&[], &[("FORCE_COLOR", "0")], false)]
-#[case(&[], &[("FORCE_COLOR", "1")], true)]
+#[case(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let output = jetsocat_assert_cmd()
         .timeout(Duration::from_millis(30))
@@ -73,11 +73,11 @@ fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
 #[case(&["--color", "auto"], &[], false)]
 #[case(&["--color", "always"], &[("NO_COLOR", "1")], true)]
 #[case(&["--color", "auto"], &[("FORCE_COLOR", "1")], false)]
-#[case(&[], &[("NO_COLOR", "1")], false)]
+#[case(&[], &[("NO_COLOR", "1"), ("FORCE_COLOR", "1")], false)]
 #[case(&[], &[("TERM", "dumb")], false)]
 #[case(&[], &[("TERM", "other")], false)]
 #[case(&[], &[("FORCE_COLOR", "0")], false)]
-#[case(&[], &[("FORCE_COLOR", "1")], true)]
+#[case(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let tempdir = tempfile::tempdir().unwrap();
     let log_file_path = tempdir.path().join("jetsocat.log");
