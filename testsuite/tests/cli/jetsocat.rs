@@ -2,6 +2,7 @@ use std::io::Read;
 use std::time::Duration;
 
 use expect_test::expect;
+use rstest::rstest;
 use test_utils::find_unused_ports;
 use testsuite::cli::{assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd};
 
@@ -32,6 +33,71 @@ fn all_subcommands() {
         let output = jetsocat_assert_cmd().args(&[subcommand, "--help"]).assert().success();
         let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
         assert!(stdout.contains(help_substr));
+    }
+}
+
+#[rstest]
+#[case(&[], &[], true)]
+#[case(&["--color=always"], &[], true)]
+#[case(&["--color", "always"], &[], true)]
+#[case(&["--color=never"], &[], false)]
+#[case(&["--color=auto"], &[], true)]
+#[case(&["--color=always"], &[("NO_COLOR", "")], true)]
+#[case(&["--color=auto"], &[("NO_COLOR", "")], true)]
+#[case(&[], &[("NO_COLOR", "")], false)]
+#[case(&[], &[("TERM", "dumb")], false)]
+#[case(&[], &[("TERM", "other")], true)]
+#[case(&[], &[("FORCE_COLOR", "0")], false)]
+#[case(&[], &[("FORCE_COLOR", "1")], true)]
+fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
+    let output = jetsocat_assert_cmd()
+        .timeout(Duration::from_millis(30))
+        .args(&["forward", "-", "-", "--log-term"])
+        .args(args)
+        .envs(envs.iter().cloned())
+        .assert()
+        .success();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+
+    if expect_ansi {
+        assert!(stdout.contains(" [32m INFO[0m [2mjetsocat[0m"), "{stdout}");
+    } else {
+        assert!(stdout.contains("  INFO jetsocat"), "{stdout}");
+    }
+}
+
+#[rstest]
+#[case(&[], &[], false)]
+#[case(&["--color=always"], &[], true)]
+#[case(&["--color", "always"], &[], true)]
+#[case(&["--color=never"], &[], false)]
+#[case(&["--color=auto"], &[], false)]
+#[case(&["--color=always"], &[("NO_COLOR", "")], true)]
+#[case(&["--color=auto"], &[("FORCE_COLOR", "1")], false)]
+#[case(&[], &[("NO_COLOR", "")], false)]
+#[case(&[], &[("TERM", "dumb")], false)]
+#[case(&[], &[("TERM", "other")], false)]
+#[case(&[], &[("FORCE_COLOR", "0")], false)]
+#[case(&[], &[("FORCE_COLOR", "1")], true)]
+fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
+    let tempdir = tempfile::tempdir().unwrap();
+    let log_file_path = tempdir.path().join("jetsocat.log");
+
+    jetsocat_assert_cmd()
+        .timeout(Duration::from_millis(30))
+        .args(&["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
+        .args(args)
+        .envs(envs.iter().cloned())
+        .assert()
+        .success();
+
+    let logs = std::fs::read_to_string(log_file_path).unwrap();
+
+    if expect_ansi {
+        assert!(logs.contains(" [32m INFO[0m [2mjetsocat[0m"), "{logs}");
+    } else {
+        assert!(logs.contains("  INFO jetsocat"), "{logs}");
     }
 }
 

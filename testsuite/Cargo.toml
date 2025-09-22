@@ -25,6 +25,7 @@ sysevent.path = "../crates/sysevent"
 test-utils.path = "../crates/test-utils"
 tempfile = "3"
 serde_json = "1"
+rstest = "0.25"
 
 [target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"
