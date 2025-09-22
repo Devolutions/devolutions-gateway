@@ -395,7 +395,7 @@ dependencies = [
  "sha1",
  "sync_wrapper 1.0.2",
  "tokio 1.46.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -1285,7 +1285,7 @@ dependencies = [
  "tokio 1.46.1",
  "tokio-rustls",
  "tokio-test",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "tower 0.5.2",
  "tower-http 0.5.2",
  "tracing",
@@ -1294,7 +1294,7 @@ dependencies = [
  "traffic-audit",
  "traffic-audit-libsql",
  "transport",
- "tungstenite",
+ "tungstenite 0.26.2",
  "typed-builder",
  "url",
  "utoipa",
@@ -3013,7 +3013,7 @@ dependencies = [
  "test-utils",
  "tinyjson",
  "tokio 1.46.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -5096,9 +5096,9 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
 name = "reqwest"
-version = "0.12.22"
+version = "0.12.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbc931937e6ca3a06e3b6c0aa7841849b160a90351d6ab467a8b9b9959767531"
+checksum = "d429f34c8092b2d42c7c93cec323bb4adeb7c67698f70839adec842ec10c7ceb"
 dependencies = [
  "base64 0.22.1",
  "bytes 1.10.1",
@@ -6139,7 +6139,7 @@ dependencies = [
  "portpicker",
  "proptest",
  "tokio 1.46.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "transport",
 ]
 
@@ -6444,6 +6444,18 @@ checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
 dependencies = [
  "futures-util",
  "log",
+ "tokio 1.46.1",
+ "tungstenite 0.26.2",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "489a59b6730eda1b0171fcfda8b121f4bee2b35cba8645ca35c5f7ba3eb736c1"
+dependencies = [
+ "futures-util",
+ "log",
  "native-tls",
  "rustls 0.23.28",
  "rustls-native-certs",
@@ -6451,7 +6463,7 @@ dependencies = [
  "tokio 1.46.1",
  "tokio-native-tls",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.27.0",
 ]
 
 [[package]]
@@ -6941,6 +6953,23 @@ dependencies = [
  "http 1.3.1",
  "httparse",
  "log",
+ "rand 0.9.1",
+ "sha1",
+ "thiserror 2.0.12",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eadc29d668c91fcc564941132e17b28a7ceb2f3ebf0b9dae3e03fd7a6748eb0d"
+dependencies = [
+ "bytes 1.10.1",
+ "data-encoding",
+ "http 1.3.1",
+ "httparse",
+ "log",
  "native-tls",
  "rand 0.9.1",
  "rustls 0.23.28",
@@ -7178,7 +7207,7 @@ dependencies = [
  "num_cpus",
  "thiserror 2.0.12",
  "tokio 1.46.1",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.27.0",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
