@@ -508,7 +508,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   private callConnect(connectionParameters: IronVNCConnectionParameters): void {
     const configBuilder = this.remoteClient
       .configBuilder()
-      .withPassword(connectionParameters.password)
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
       .withAuthToken(connectionParameters.token)
@@ -523,6 +522,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     if (connectionParameters.username != null) {
       configBuilder.withUsername(connectionParameters.username);
+    }
+
+    if (connectionParameters.password != null) {
+      configBuilder.withPassword(connectionParameters.password);
     }
 
     if (connectionParameters.screenSize != null) {
