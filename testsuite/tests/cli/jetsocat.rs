@@ -565,15 +565,25 @@ fn forward_negative_repeat_count() {
     );
 }
 
+#[rstest]
 #[tokio::test]
-async fn mcp_proxy_smoke_test() {
+async fn mcp_proxy_smoke_test(#[values(true, false)] http_transport: bool) {
     use testsuite::mcp_client::McpClient;
-    use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer};
+    use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer, NamedPipeTransport};
+
+    // Configure MCP server transport.
+    let (transport, pipe) = if http_transport {
+        let http_transport = HttpTransport::bind().await.unwrap();
+        let server_url = http_transport.url();
+        (DynMcpTransport::new_box(http_transport), server_url)
+    } else {
+        let np_transport = NamedPipeTransport::bind().unwrap();
+        let name = np_transport.name().to_owned();
+        (DynMcpTransport::new_box(np_transport), format!("np://{name}"))
+    };
 
     // Start MCP server.
-    let transport = HttpTransport::bind().await.unwrap();
-    let server_url = transport.url();
-    let server = McpServer::new(DynMcpTransport::new_box(transport));
+    let server = McpServer::new(transport);
     let server_handle = server.start().expect("start MCP server");
 
     // Give the server time to start.
@@ -581,7 +591,7 @@ async fn mcp_proxy_smoke_test() {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &server_url])
+        .args(&["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -627,16 +637,28 @@ async fn mcp_proxy_smoke_test() {
     server_handle.shutdown();
 }
 
+#[rstest]
 #[tokio::test]
-async fn mcp_proxy_with_tools() {
+async fn mcp_proxy_with_tools(#[values(true, false)] http_transport: bool) {
     use testsuite::mcp_client::{McpClient, ToolCallParams};
-    use testsuite::mcp_server::{CalculatorTool, DynMcpTransport, EchoTool, HttpTransport, McpServer, ServerConfig};
+    use testsuite::mcp_server::{
+        CalculatorTool, DynMcpTransport, EchoTool, HttpTransport, McpServer, NamedPipeTransport, ServerConfig,
+    };
+
+    // Configure MCP server transport.
+    let (transport, pipe) = if http_transport {
+        let http_transport = HttpTransport::bind().await.unwrap();
+        let server_url = http_transport.url();
+        (DynMcpTransport::new_box(http_transport), server_url)
+    } else {
+        let np_transport = NamedPipeTransport::bind().unwrap();
+        let name = np_transport.name().to_owned();
+        (DynMcpTransport::new_box(np_transport), format!("np://{name}"))
+    };
 
     // Start MCP server.
-    let transport = HttpTransport::bind().await.unwrap();
-    let server_url = transport.url();
-    let server = McpServer::new(DynMcpTransport::new_box(transport))
-        .with_config(ServerConfig::new().with_tool(EchoTool).with_tool(CalculatorTool));
+    let server =
+        McpServer::new(transport).with_config(ServerConfig::new().with_tool(EchoTool).with_tool(CalculatorTool));
     let server_handle = server.start().expect("start MCP server");
 
     // Give the server time to start.
@@ -644,7 +666,7 @@ async fn mcp_proxy_with_tools() {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &server_url])
+        .args(&["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
