@@ -6129,6 +6129,7 @@ dependencies = [
  "assert_cmd",
  "escargot",
  "expect-test",
+ "rstest",
  "serde_json",
  "sysevent",
  "sysevent-syslog",

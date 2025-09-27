@@ -180,7 +180,7 @@ Example: unauthenticated sftp client
 
 pub fn forward_action(c: &Context) {
     let res = ForwardArgs::parse(c).and_then(|args| {
-        let _log_guard = setup_logger(&args.common.logging);
+        let _log_guard = setup_logger(&args.common.logging, args.common.coloring);
 
         let cfg = jetsocat::ForwardCfg {
             pipe_a_mode: args.pipe_a_mode,
@@ -238,7 +238,7 @@ Example: SOCKS5 to JMUX proxy
 
 pub fn jmux_proxy_action(c: &Context) {
     let res = JmuxProxyArgs::parse(c).and_then(|args| {
-        let _log_guard = setup_logger(&args.common.logging);
+        let _log_guard = setup_logger(&args.common.logging, args.common.coloring);
 
         let cfg = jetsocat::JmuxProxyCfg {
             pipe_mode: args.pipe_mode,
@@ -304,7 +304,7 @@ The tool reads JSON-RPC requests from the <REQUEST_PIPE> and writes responses ba
 
 pub fn mcp_proxy_action(c: &Context) {
     let res = McpProxyArgs::parse(c).and_then(|args| {
-        let _log_guard = setup_logger(&args.common.logging);
+        let _log_guard = setup_logger(&args.common.logging, args.common.coloring);
 
         let cfg = jetsocat::McpProxyCfg {
             pipe_mode: args.pipe_mode,
@@ -378,7 +378,7 @@ Example: for an invalid domain
 
 pub fn doctor_action(c: &Context) {
     let res = DoctorArgs::parse(c).and_then(|args| {
-        let _log_guard = setup_logger(&args.common.logging);
+        let _log_guard = setup_logger(&args.common.logging, args.common.coloring);
 
         let cfg = jetsocat::DoctorCfg {
             pipe_mode: args.pipe_mode,
@@ -442,6 +442,10 @@ fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
         .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stdout instead of log file"))
         .flag(
+            Flag::new("color", FlagType::String)
+                .description("When to enable colored output for logs (possible values: `always`, `never` and `auto`)"),
+        )
+        .flag(
             Flag::new("pipe-timeout", FlagType::String)
                 .description("Timeout when opening pipes (mostly useful for listeners)"),
         )
@@ -464,8 +468,16 @@ enum Logging {
     File { filepath: PathBuf, clean_old: bool },
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Coloring {
+    Never,
+    Always,
+    Auto,
+}
+
 struct CommonArgs {
     logging: Logging,
+    coloring: Coloring,
     proxy_cfg: Option<ProxyConfig>,
     pipe_timeout: Option<Duration>,
     watch_process: Option<sysinfo::Pid>,
@@ -544,12 +556,44 @@ impl CommonArgs {
             None
         };
 
-        Ok(Self {
+        let coloring = match opt_string_flag(c, "color")?.as_deref() {
+            Some("never") => Coloring::Never,
+            Some("always") => Coloring::Always,
+            Some("auto") => Coloring::Auto,
+            Some(_) => anyhow::bail!("invalid value for 'color'; expect: `never`, `always` or `auto`"),
+            None => {
+                // Infer using the environment.
+                parse_env_for_coloring()
+            }
+        };
+
+        return Ok(Self {
             logging,
+            coloring,
             proxy_cfg,
             pipe_timeout,
             watch_process,
-        })
+        });
+
+        fn parse_env_for_coloring() -> Coloring {
+            // https://no-color.org/
+            if env::var("NO_COLOR").is_ok() {
+                return Coloring::Never;
+            }
+
+            match env::var("FORCE_COLOR").as_deref() {
+                Ok("0" | "false" | "no" | "off") => return Coloring::Never,
+                Ok(_) => return Coloring::Always,
+                Err(_) => {}
+            }
+
+            match env::var("TERM").as_deref() {
+                Ok("dumb") => return Coloring::Never,
+                _ => {}
+            }
+
+            Coloring::Auto
+        }
     }
 }
 
@@ -932,29 +976,43 @@ struct LoggerGuard {
     _worker_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
-fn setup_logger(logging: &Logging) -> LoggerGuard {
+fn setup_logger(logging: &Logging, coloring: Coloring) -> LoggerGuard {
     use std::fs::OpenOptions;
     use std::panic;
+
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{EnvFilter, fmt};
 
     let (layer, guard) = match &logging {
         Logging::Term => {
+            let ansi = match coloring {
+                Coloring::Never => false,
+                Coloring::Always => true,
+                Coloring::Auto => true,
+            };
+
             let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout());
-            let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
+            let stdio_layer = fmt::layer().with_writer(non_blocking_stdio).with_ansi(ansi);
+
             (stdio_layer, guard)
         }
         Logging::File { filepath, clean_old: _ } => {
+            let ansi = match coloring {
+                Coloring::Never => false,
+                Coloring::Always => true,
+                Coloring::Auto => false,
+            };
+
             let file = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(false)
                 .open(filepath)
-                .expect("couldn't create log file");
+                .expect("create log file");
 
             let (non_blocking, guard) = tracing_appender::non_blocking(file);
-            let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
+            let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(ansi);
 
             (file_layer, guard)
         }
