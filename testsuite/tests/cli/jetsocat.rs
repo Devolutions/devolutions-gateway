@@ -37,20 +37,20 @@ fn all_subcommands() {
 }
 
 #[rstest]
-#[case(&[], &[], true)]
-#[case(&["--color=always"], &[], true)]
-#[case(&["--color=never"], &[], false)]
-#[case(&["--color=auto"], &[], true)]
-#[case(&["--color=always"], &[("NO_COLOR", "")], true)]
-#[case(&["--color=auto"], &[("NO_COLOR", "")], true)]
-#[case(&[], &[("NO_COLOR", ""), ("FORCE_COLOR", "1")], false)]
-#[case(&[], &[("TERM", "dumb")], false)]
-#[case(&[], &[("TERM", "other")], true)]
-#[case(&[], &[("FORCE_COLOR", "0")], false)]
-#[case(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
+#[case::default(&[], &[], true)]
+#[case::cli_always(&["--color=always"], &[], true)]
+#[case::cli_never(&["--color=never"], &[], false)]
+#[case::cli_auto(&["--color=auto"], &[], true)]
+#[case::cli_always_and_env(&["--color=always"], &[("NO_COLOR", "")], true)]
+#[case::cli_auto_and_env(&["--color=auto"], &[("NO_COLOR", "")], true)]
+#[case::env_no_color(&[], &[("NO_COLOR", ""), ("FORCE_COLOR", "1")], false)]
+#[case::env_term_dumb(&[], &[("TERM", "dumb")], false)]
+#[case::env_term_other(&[], &[("TERM", "other")], true)]
+#[case::env_force_color_0(&[], &[("FORCE_COLOR", "0")], false)]
+#[case::env_force_color_1(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let output = jetsocat_assert_cmd()
-        .timeout(Duration::from_millis(30))
+        .timeout(Duration::from_millis(50))
         .args(&["forward", "-", "-", "--log-term"])
         .args(args)
         .envs(envs.iter().cloned())
@@ -67,23 +67,23 @@ fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
 }
 
 #[rstest]
-#[case(&[], &[], false)]
-#[case(&["--color", "always"], &[], true)]
-#[case(&["--color", "never"], &[], false)]
-#[case(&["--color", "auto"], &[], false)]
-#[case(&["--color", "always"], &[("NO_COLOR", "1")], true)]
-#[case(&["--color", "auto"], &[("FORCE_COLOR", "1")], false)]
-#[case(&[], &[("NO_COLOR", "1"), ("FORCE_COLOR", "1")], false)]
-#[case(&[], &[("TERM", "dumb")], false)]
-#[case(&[], &[("TERM", "other")], false)]
-#[case(&[], &[("FORCE_COLOR", "0")], false)]
-#[case(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
+#[case::default(&[], &[], false)]
+#[case::cli_always(&["--color", "always"], &[], true)]
+#[case::cli_never(&["--color", "never"], &[], false)]
+#[case::cli_auto(&["--color", "auto"], &[], false)]
+#[case::cli_always_and_env(&["--color", "always"], &[("NO_COLOR", "1")], true)]
+#[case::cli_auto_and_env(&["--color", "auto"], &[("FORCE_COLOR", "1")], false)]
+#[case::env_no_color(&[], &[("NO_COLOR", "1"), ("FORCE_COLOR", "1")], false)]
+#[case::env_term_dumb(&[], &[("TERM", "dumb")], false)]
+#[case::env_term_other(&[], &[("TERM", "other")], false)]
+#[case::env_force_color_0(&[], &[("FORCE_COLOR", "0")], false)]
+#[case::env_force_color_1(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let tempdir = tempfile::tempdir().unwrap();
     let log_file_path = tempdir.path().join("jetsocat.log");
 
     jetsocat_assert_cmd()
-        .timeout(Duration::from_millis(30))
+        .timeout(Duration::from_millis(50))
         .args(&["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
         .args(args)
         .envs(envs.iter().cloned())
