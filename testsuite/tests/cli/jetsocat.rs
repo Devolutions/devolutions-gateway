@@ -570,7 +570,7 @@ async fn mcp_proxy_smoke_test() {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer};
 
-    // Start fake MCP server.
+    // Start MCP server.
     let transport = HttpTransport::bind().await.unwrap();
     let server_url = transport.url();
     let server = McpServer::new(DynMcpTransport::new_box(transport));
@@ -601,14 +601,6 @@ async fn mcp_proxy_smoke_test() {
         InitializeResult {
             protocol_version: "2025-06-18",
             capabilities: Object {
-                "logging": Null,
-                "prompts": Object {
-                    "listChanged": Bool(false),
-                },
-                "resources": Object {
-                    "listChanged": Bool(false),
-                    "subscribe": Bool(false),
-                },
                 "tools": Object {
                     "listChanged": Bool(false),
                 },
@@ -638,14 +630,13 @@ async fn mcp_proxy_smoke_test() {
 #[tokio::test]
 async fn mcp_proxy_with_tools() {
     use testsuite::mcp_client::{McpClient, ToolCallParams};
-    use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer, Tool};
+    use testsuite::mcp_server::{CalculatorTool, DynMcpTransport, EchoTool, HttpTransport, McpServer, ServerConfig};
 
-    // Start fake MCP server.
+    // Start MCP server.
     let transport = HttpTransport::bind().await.unwrap();
     let server_url = transport.url();
     let server = McpServer::new(DynMcpTransport::new_box(transport))
-        .with_tool(Tool::echo())
-        .with_tool(Tool::calculator());
+        .with_config(ServerConfig::new().with_tool(EchoTool).with_tool(CalculatorTool));
     let server_handle = server.start().expect("start MCP server");
 
     // Give the server time to start.
@@ -769,7 +760,7 @@ async fn execute_mcp_request(request: &str) -> String {
     use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer};
     use tokio::io::AsyncWriteExt as _;
 
-    // Start fake MCP server.
+    // Start MCP server.
     let transport = HttpTransport::bind().await.unwrap();
     let server_url = transport.url();
     let server = McpServer::new(DynMcpTransport::new_box(transport));
@@ -819,4 +810,51 @@ async fn mcp_proxy_malformed_request_no_id() {
     assert!(stdout.contains("Malformed JSON-RPC request from client"));
     assert!(stdout.contains("Invalid character"));
     assert!(!stdout.contains("id=1"));
+}
+
+#[tokio::test]
+async fn mcp_proxy_http_error() {
+    use testsuite::mcp_client::McpClient;
+    use testsuite::mcp_server::{DynMcpTransport, HttpError, HttpTransport, McpServer};
+
+    // Start MCP server.
+    let transport = HttpTransport::bind().await.unwrap().with_error_response(
+        "initialize",
+        HttpError {
+            status_code: 418,
+            body: "I’m a tea pot".to_owned(),
+        },
+    );
+    let server_url = transport.url();
+    let server = McpServer::new(DynMcpTransport::new_box(transport));
+    let server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &server_url])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    let error = mcp_client.connect().await.unwrap_err();
+    assert!(
+        error.to_string().contains("status code 418"),
+        "Unexpected failure: {error}"
+    );
+
+    // Shutdown the MCP server.
+    server_handle.shutdown();
 }

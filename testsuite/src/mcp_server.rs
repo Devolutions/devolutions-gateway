@@ -1,23 +1,36 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt as _, AsyncWriteExt, BufReader};
 
+const ERROR_CODE_INVALID_REQUEST: i32 = -32600;
+const ERROR_CODE_METHOD_NOT_FOUND: i32 = -32601;
+const ERROR_CODE_INVALID_PARAMS: i32 = -32602;
+
 #[dynosaur::dynosaur(pub DynMcpTransport = dyn(box) McpTransport)]
 #[allow(unreachable_pub)] // false positive.
-pub trait McpTransport: Send {
+pub trait McpTransport: Send + Sync {
     fn accept_client(&mut self) -> impl Future<Output = anyhow::Result<Box<DynMcpPeer<'static>>>> + Send;
 }
 
 #[dynosaur::dynosaur(pub DynMcpPeer = dyn(box) McpPeer)]
 #[allow(unreachable_pub)] // false positive.
-pub trait McpPeer: Send {
+pub trait McpPeer: Send + Sync {
     fn read_message(&mut self) -> impl Future<Output = anyhow::Result<String>> + Send;
     fn write_message(&mut self, message: &str) -> impl Future<Output = anyhow::Result<()>> + Send;
+}
+
+/// A tool that the server can execute
+pub trait McpTool: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn descriptor(&self) -> ToolDescriptor;
+    fn call(&self, params: serde_json::Value) -> ToolResult;
+}
+
+pub trait McpNotificationHandler: Send + Sync {
+    fn handle(&self, method: &str, params: serde_json::Value);
 }
 
 #[derive(Clone)]
@@ -31,6 +44,304 @@ impl McpShutdownSignal {
     pub fn shutdown(&self) {
         self.0.notify_one();
     }
+}
+
+/// A MCP server for testing purposes that implements
+/// the Model Context Protocol 2025-06-18 specification.
+pub struct McpServer {
+    transport: Box<DynMcpTransport<'static>>,
+    config: Arc<ServerConfig>,
+}
+
+/// Configuration for the MCP server behavior
+pub struct ServerConfig {
+    /// Server information returned in initialize response.
+    pub server_info: ServerInfo,
+    /// Available tools that can be listed/called.
+    pub tools: Vec<Box<dyn McpTool>>,
+    /// Response delay simulation.
+    pub response_delay: Option<Duration>,
+    /// Notification handler.
+    pub notification_handler: Option<Box<dyn McpNotificationHandler>>,
+}
+
+/// Server information metadata.
+#[derive(Debug, Clone)]
+pub struct ServerInfo {
+    pub name: &'static str,
+    pub version: &'static str,
+}
+
+/// Describes the tool.
+#[derive(Debug, Clone)]
+pub struct ToolDescriptor {
+    pub description: Option<&'static str>,
+    pub input_schema: serde_json::Value,
+}
+
+impl ServerConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_name(mut self, name: &'static str) -> Self {
+        self.server_info.name = name;
+        self
+    }
+
+    pub fn with_version(mut self, version: &'static str) -> Self {
+        self.server_info.version = version;
+        self
+    }
+
+    pub fn with_tool(mut self, tool: impl McpTool + 'static) -> Self {
+        self.tools.push(Box::new(tool));
+        self
+    }
+
+    pub fn with_response_delay(mut self, delay: Duration) -> Self {
+        self.response_delay = Some(delay);
+        self
+    }
+
+    pub fn with_notification_handler(mut self, handler: impl McpNotificationHandler + 'static) -> Self {
+        self.notification_handler = Some(Box::new(handler));
+        self
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            server_info: ServerInfo {
+                name: "testsuite-mcp-server",
+                version: "1.0.0",
+            },
+            tools: Vec::new(),
+            response_delay: None,
+            notification_handler: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolResult {
+    pub content: Vec<ToolContent>,
+    pub is_error: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum ToolContent {
+    Text(String),
+}
+
+impl McpServer {
+    /// Create a new MCP server with the given transport
+    pub fn new(transport: Box<DynMcpTransport<'static>>) -> Self {
+        Self {
+            transport,
+            config: Arc::new(ServerConfig::default()),
+        }
+    }
+
+    pub fn with_config(mut self, config: ServerConfig) -> Self {
+        self.config = Arc::new(config);
+        self
+    }
+
+    /// Start the server and return a handle for control
+    pub fn start(self) -> anyhow::Result<McpShutdownSignal> {
+        let shutdown_signal = McpShutdownSignal::new();
+
+        tokio::spawn({
+            let shutdown_signal = shutdown_signal.clone();
+            async move {
+                eprintln!("[MCP-SERVER] spawn task after.");
+                if let Err(e) = self.run(shutdown_signal).await {
+                    eprintln!("[MCP-SERVER] Error running the MCP server: {e:#}");
+                }
+            }
+        });
+
+        Ok(shutdown_signal)
+    }
+
+    pub async fn run(mut self, shutdown_signal: McpShutdownSignal) -> anyhow::Result<()> {
+        eprintln!("[MCP-SERVER] Running.");
+
+        loop {
+            eprintln!("[MCP-SERVER] Wait for peer...");
+            tokio::select! {
+                peer = self.transport.accept_client() => {
+                    let peer = peer.context("accept peer")?;
+
+                    tokio::spawn({
+                        let shutdown_signal = shutdown_signal.clone();
+                        let config = Arc::clone(&self.config);
+                        async move {
+                            if let Err(e) = handle_peer(peer, shutdown_signal, &config).await {
+                                eprintln!("[MCP-SERVER] Error handling connection: {e:#}");
+                            }
+                        }
+                    });
+                }
+                _ = shutdown_signal.0.notified() => {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+async fn handle_peer(
+    mut peer: Box<DynMcpPeer<'static>>,
+    shutdown_signal: McpShutdownSignal,
+    config: &ServerConfig,
+) -> anyhow::Result<()> {
+    loop {
+        tokio::select! {
+            request = peer.read_message() => {
+                let request = request.context("read peer request")?;
+                let response = process_mcp_request(config, &request);
+                let response = serde_json::to_string(&response).unwrap();
+                peer.write_message(&response).await.context("write peer request")?;
+            }
+            _ = shutdown_signal.0.notified() => {
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Process MCP JSON-RPC request.
+fn process_mcp_request(config: &ServerConfig, request: &str) -> Option<serde_json::Value> {
+    let request: Request<'_> = match serde_json::from_str(request) {
+        Ok(request) => request,
+        Err(error) => {
+            return Some(serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": ERROR_CODE_INVALID_REQUEST,
+                    "message": format!("invalid JSON-RPC format: {error:#}")
+                }
+            }));
+        }
+    };
+
+    match request.id {
+        Some(id) => {
+            let response = match request.method {
+                "initialize" => handle_initialize(config, id),
+                "tools/list" => handle_tools_list(config, id),
+                "tools/call" => handle_tools_call(config, id, request.params),
+                _ => create_error_response(
+                    id,
+                    ERROR_CODE_METHOD_NOT_FOUND,
+                    format!("Method '{}' not found", request.method),
+                ),
+            };
+
+            return Some(response);
+        }
+        None => {
+            eprintln!("[MCP-SERVER] Received notification: {}", request.method);
+
+            if let Some(handler) = &config.notification_handler {
+                handler.handle(request.method, request.params);
+            }
+
+            return None;
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Request<'a> {
+        method: &'a str,
+        id: Option<u64>,
+        #[serde(default)]
+        params: serde_json::Value,
+    }
+}
+
+fn handle_initialize(config: &ServerConfig, id: u64) -> serde_json::Value {
+    let result = serde_json::json!({
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+            "name": config.server_info.name,
+            "version": config.server_info.version
+        },
+        "capabilities": {
+            "tools": {
+                "listChanged": false,
+            },
+        },
+    });
+
+    create_success_response(id, result)
+}
+
+fn handle_tools_list(config: &ServerConfig, id: u64) -> serde_json::Value {
+    let tools: Vec<serde_json::Value> = config
+        .tools
+        .iter()
+        .map(|tool| {
+            let name = tool.name();
+            let descriptor = tool.descriptor();
+
+            serde_json::json!({
+                "name": name,
+                "description": descriptor.description,
+                "inputSchema": descriptor.input_schema
+            })
+        })
+        .collect();
+
+    let result = serde_json::json!({
+        "tools": tools
+    });
+
+    create_success_response(id, result)
+}
+
+fn handle_tools_call(config: &ServerConfig, id: u64, params: serde_json::Value) -> serde_json::Value {
+    let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+
+    let Some(tool) = config.tools.iter().find(|tool| tool.name() == tool_name) else {
+        return create_error_response(id, ERROR_CODE_INVALID_PARAMS, format!("Tool '{tool_name}' not found"));
+    };
+
+    let tool_result = tool.call(params);
+
+    let result = serde_json::json!({
+        "content": tool_result.content.into_iter().map(|content| match content {
+            ToolContent::Text(text) => serde_json::json!({
+                "type": "text",
+                "text": text,
+            }),
+        }).collect::<Vec<_>>(),
+        "isError": tool_result.is_error,
+    });
+
+    create_success_response(id, result)
+}
+
+fn create_success_response(id: u64, result: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    })
+}
+
+fn create_error_response(id: u64, code: i32, message: String) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    })
 }
 
 /// Named pipe transport for MCP server.
@@ -120,13 +431,29 @@ impl McpPeer for NamedPipePeer {
 /// HTTP transport for MCP server.
 pub struct HttpTransport {
     listener: tokio::net::TcpListener,
+    error_responses: Vec<(String, HttpError)>,
+}
+
+/// HTTP-level errors for testing error conditions
+#[derive(Clone)]
+pub struct HttpError {
+    pub status_code: u16,
+    pub body: String,
 }
 
 impl HttpTransport {
     /// Create a new HTTP transport.
     pub async fn bind() -> anyhow::Result<Self> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        Ok(Self { listener })
+        Ok(Self {
+            listener,
+            error_responses: Vec::new(),
+        })
+    }
+
+    pub fn with_error_response(mut self, substring: impl Into<String>, http_error: HttpError) -> Self {
+        self.error_responses.push((substring.into(), http_error));
+        self
     }
 
     /// Get the HTTP URL for this transport.
@@ -146,12 +473,14 @@ impl McpTransport for HttpTransport {
 
         Ok(DynMcpPeer::new_box(HttpPeer {
             stream: BufReader::new(stream),
+            error_responses: self.error_responses.clone(),
         }))
     }
 }
 
 struct HttpPeer {
     stream: BufReader<tokio::net::TcpStream>,
+    error_responses: Vec<(String, HttpError)>,
 }
 
 impl McpPeer for HttpPeer {
@@ -197,6 +526,18 @@ impl McpPeer for HttpPeer {
         self.stream.read_exact(&mut body).await?;
         let message = String::from_utf8(body)?;
 
+        // Check for simulated error responses.
+        for (substring, http_error) in &self.error_responses {
+            if message.contains(substring) {
+                let response = format!(
+                    "HTTP/1.1 {}\r\nConnection: close\r\n\r\n{}",
+                    http_error.status_code, http_error.body
+                );
+                self.stream.write_all(response.as_bytes()).await?;
+                anyhow::bail!("simulated error");
+            }
+        }
+
         Ok(message)
     }
 
@@ -218,547 +559,16 @@ impl McpPeer for HttpPeer {
     }
 }
 
-/// A MCP server for testing purposes that implements
-/// the Model Context Protocol 2025-06-18 specification.
-pub struct McpServer {
-    transport: Box<DynMcpTransport<'static>>,
-    config: ServerConfig,
-}
+pub struct EchoTool;
 
-/// Configuration for the MCP server behavior
-#[derive(Debug, Clone)]
-pub struct ServerConfig {
-    /// Server information returned in initialize response
-    pub server_info: ServerInfo,
-    /// Protocol version to advertise
-    pub protocol_version: String,
-    /// Server capabilities to advertise
-    pub capabilities: ServerCapabilities,
-    /// Available tools that can be listed/called
-    pub tools: Vec<Tool>,
-    /// Available resources that can be listed/read
-    pub resources: Vec<Resource>,
-    /// Available prompts that can be listed/used
-    pub prompts: Vec<Prompt>,
-    /// HTTP response delay simulation
-    pub response_delay: Option<Duration>,
-    /// Whether to return HTTP errors for certain requests
-    pub error_responses: HashMap<String, HttpError>,
-}
-
-/// Server information metadata
-#[derive(Debug, Clone)]
-pub struct ServerInfo {
-    pub name: String,
-    pub version: String,
-}
-
-/// Server capabilities as per MCP spec
-#[derive(Debug, Clone)]
-pub struct ServerCapabilities {
-    /// Whether server supports listing/reading resources
-    pub resources: Option<ResourcesCapability>,
-    /// Whether server supports listing/getting prompts
-    pub prompts: Option<PromptsCapability>,
-    /// Whether server supports listing/calling tools
-    pub tools: Option<ToolsCapability>,
-    /// Whether server supports logging
-    pub logging: Option<LoggingCapability>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ResourcesCapability {
-    pub subscribe: bool,
-    pub list_changed: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct PromptsCapability {
-    pub list_changed: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ToolsCapability {
-    pub list_changed: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct LoggingCapability;
-
-/// A tool that the server can execute
-#[derive(Debug, Clone)]
-pub struct Tool {
-    pub name: String,
-    pub description: Option<String>,
-    pub input_schema: serde_json::Value,
-}
-
-/// A resource that the server provides
-#[derive(Debug, Clone)]
-pub struct Resource {
-    pub uri: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub mime_type: Option<String>,
-}
-
-/// A prompt template that the server provides
-#[derive(Debug, Clone)]
-pub struct Prompt {
-    pub name: String,
-    pub description: Option<String>,
-    pub arguments: Option<Vec<PromptArgument>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PromptArgument {
-    pub name: String,
-    pub description: Option<String>,
-    pub required: bool,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            server_info: ServerInfo {
-                name: "testsuite-mcp-server".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            protocol_version: "2025-06-18".to_string(),
-            capabilities: ServerCapabilities {
-                resources: Some(ResourcesCapability {
-                    subscribe: false,
-                    list_changed: false,
-                }),
-                prompts: Some(PromptsCapability { list_changed: false }),
-                tools: Some(ToolsCapability { list_changed: false }),
-                logging: None,
-            },
-            tools: Vec::new(),
-            resources: Vec::new(),
-            prompts: Vec::new(),
-            response_delay: None,
-            error_responses: HashMap::new(),
-        }
-    }
-}
-
-/// MCP protocol errors
-#[derive(Debug, Clone)]
-pub struct McpError {
-    pub code: i32,
-    pub message: String,
-    pub data: Option<serde_json::Value>,
-}
-
-/// HTTP-level errors for testing error conditions
-#[derive(Debug, Clone)]
-pub struct HttpError {
-    pub status_code: u16,
-    pub body: String,
-}
-
-/// Tool execution result
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    pub content: Vec<ToolContent>,
-    pub is_error: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ToolContent {
-    pub content_type: String,
-    pub text: String,
-}
-
-impl McpServer {
-    /// Create a new MCP server with the given transport
-    pub fn new(transport: Box<DynMcpTransport<'static>>) -> Self {
-        Self {
-            transport,
-            config: ServerConfig::default(),
-        }
+impl McpTool for EchoTool {
+    fn name(&self) -> &'static str {
+        "echo"
     }
 
-    /// Create a new MCP server with custom configuration
-    pub fn with_config(mut self, config: ServerConfig) -> Self {
-        self.config = config;
-        self
-    }
-
-    /// Add a tool to the server
-    pub fn with_tool(mut self, tool: Tool) -> Self {
-        self.config.tools.push(tool);
-        self
-    }
-
-    /// Add a resource to the server
-    pub fn with_resource(mut self, resource: Resource) -> Self {
-        self.config.resources.push(resource);
-        self
-    }
-
-    /// Add a prompt to the server
-    pub fn with_prompt(mut self, prompt: Prompt) -> Self {
-        self.config.prompts.push(prompt);
-        self
-    }
-
-    /// Set response delay for testing timeouts
-    pub fn with_response_delay(mut self, delay: Duration) -> Self {
-        self.config.response_delay = Some(delay);
-        self
-    }
-
-    /// Add an HTTP error response for a specific method
-    pub fn with_http_error(mut self, method: String, error: HttpError) -> Self {
-        self.config.error_responses.insert(method, error);
-        self
-    }
-
-    /// Start the server and return a handle for control
-    pub fn start(self) -> anyhow::Result<McpShutdownSignal> {
-        let shutdown_signal = McpShutdownSignal::new();
-
-        tokio::spawn({
-            let shutdown_signal = shutdown_signal.clone();
-            async move {
-                eprintln!("[MCP-SERVER] spawn task after.");
-                if let Err(e) = self.run(shutdown_signal).await {
-                    eprintln!("[MCP-SERVER] Error running the MCP server: {e:#}");
-                }
-            }
-        });
-
-        Ok(shutdown_signal)
-    }
-
-    pub async fn run(mut self, shutdown_signal: McpShutdownSignal) -> anyhow::Result<()> {
-        eprintln!("[MCP-SERVER] Running.");
-
-        loop {
-            eprintln!("[MCP-SERVER] Wait for peer...");
-            tokio::select! {
-                peer = self.transport.accept_client() => {
-                    let peer = peer.context("accept peer")?;
-
-                    tokio::spawn({
-                        let shutdown_signal = shutdown_signal.clone();
-                        let config = self.config.clone();
-                        async move {
-                            if let Err(e) = handle_peer(peer, shutdown_signal, &config).await {
-                                eprintln!("[MCP-SERVER] Error handling connection: {e:#}");
-                            }
-                        }
-                    });
-                }
-                _ = shutdown_signal.0.notified() => {
-                    return Ok(());
-                }
-            }
-        }
-    }
-}
-
-async fn handle_peer(
-    mut peer: Box<DynMcpPeer<'static>>,
-    shutdown_signal: McpShutdownSignal,
-    config: &ServerConfig,
-) -> anyhow::Result<()> {
-    loop {
-        tokio::select! {
-            request = peer.read_message() => {
-                let request = request.context("read peer request")?;
-                let response = process_mcp_request(&request, config);
-                let response = serde_json::to_string(&response).unwrap();
-                peer.write_message(&response).await.context("write peer request")?;
-            }
-            _ = shutdown_signal.0.notified() => {
-                return Ok(());
-            }
-        }
-    }
-}
-
-/// Process MCP JSON-RPC request.
-fn process_mcp_request(request: &str, config: &ServerConfig) -> serde_json::Value {
-    let request = match serde_json::Value::from_str(request) {
-        Ok(request) => request,
-        Err(error) => {
-            return create_error_response(
-                None,
-                McpError::INVALID_REQUEST,
-                &format!("invalid JSON-RPC format: {error:#}"),
-            );
-        }
-    };
-
-    // Extract method from request.
-    let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("unknown");
-
-    let id = request.get("id");
-
-    // Check for configured HTTP errors.
-    if let Some(error) = config.error_responses.get(method) {
-        return create_error_response(id, error.status_code as i32, &error.body);
-    }
-
-    // Handle standard MCP methods.
-    match method {
-        "initialize" => handle_initialize(config, id),
-        "tools/list" => handle_tools_list(config, id),
-        "tools/call" => handle_tools_call(&request, config, id),
-        "resources/list" => handle_resources_list(config, id),
-        "prompts/list" => handle_prompts_list(config, id),
-        _ => create_error_response(id, McpError::METHOD_NOT_FOUND, &format!("Method '{method}' not found")),
-    }
-}
-
-/// Handle initialize request.
-fn handle_initialize(config: &ServerConfig, id: Option<&serde_json::Value>) -> serde_json::Value {
-    let result = serde_json::json!({
-        "protocolVersion": config.protocol_version,
-        "capabilities": {
-            "resources": config.capabilities.resources.as_ref().map(|r| serde_json::json!({
-                "subscribe": r.subscribe,
-                "listChanged": r.list_changed
-            })),
-            "tools": config.capabilities.tools.as_ref().map(|t| serde_json::json!({
-                "listChanged": t.list_changed
-            })),
-            "prompts": config.capabilities.prompts.as_ref().map(|p| serde_json::json!({
-                "listChanged": p.list_changed
-            })),
-            "logging": config.capabilities.logging.as_ref().map(|_| serde_json::json!({}))
-        },
-        "serverInfo": {
-            "name": config.server_info.name,
-            "version": config.server_info.version
-        }
-    });
-
-    create_success_response(id, result)
-}
-
-/// Handle tools/list request.
-fn handle_tools_list(config: &ServerConfig, id: Option<&serde_json::Value>) -> serde_json::Value {
-    let tools: Vec<serde_json::Value> = config
-        .tools
-        .iter()
-        .map(|tool| {
-            serde_json::json!({
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema
-            })
-        })
-        .collect();
-
-    let result = serde_json::json!({
-        "tools": tools
-    });
-
-    create_success_response(id, result)
-}
-
-/// Handle tools/call request
-fn handle_tools_call(
-    request: &serde_json::Value,
-    config: &ServerConfig,
-    id: Option<&serde_json::Value>,
-) -> serde_json::Value {
-    let params = request.get("params");
-    let tool_name = params
-        .and_then(|p| p.get("name"))
-        .and_then(|n| n.as_str())
-        .unwrap_or("");
-
-    // Find the tool
-    if let Some(tool) = config.tools.iter().find(|t| t.name == tool_name) {
-        // Execute tool based on its name (simple implementations for testing)
-        let result = match tool.name.as_str() {
-            "echo" => {
-                let message = params
-                    .and_then(|p| p.get("arguments"))
-                    .and_then(|a| a.get("message"))
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("no message");
-
-                serde_json::json!({
-                    "content": [{
-                        "type": "text",
-                        "text": message
-                    }],
-                    "isError": false
-                })
-            }
-            "calculator" => {
-                let args = params.and_then(|p| p.get("arguments"));
-                let operation = args
-                    .and_then(|a| a.get("operation"))
-                    .and_then(|o| o.as_str())
-                    .unwrap_or("");
-                let a = args.and_then(|a| a.get("a")).and_then(|n| n.as_f64()).unwrap_or(0.0);
-                let b = args.and_then(|a| a.get("b")).and_then(|n| n.as_f64()).unwrap_or(0.0);
-
-                let result = match operation {
-                    "add" => a + b,
-                    "subtract" => a - b,
-                    "multiply" => a * b,
-                    "divide" => {
-                        if b != 0.0 {
-                            a / b
-                        } else {
-                            f64::NAN
-                        }
-                    }
-                    _ => f64::NAN,
-                };
-
-                serde_json::json!({
-                    "content": [{
-                        "type": "text",
-                        "text": result.to_string()
-                    }],
-                    "isError": false
-                })
-            }
-            _ => {
-                serde_json::json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Tool '{tool_name}' executed successfully")
-                    }],
-                    "isError": false
-                })
-            }
-        };
-
-        create_success_response(id, result)
-    } else {
-        create_error_response(
-            id,
-            McpError::METHOD_NOT_FOUND,
-            &format!("Tool '{}' not found", tool_name),
-        )
-    }
-}
-
-/// Handle resources/list request
-fn handle_resources_list(config: &ServerConfig, id: Option<&serde_json::Value>) -> serde_json::Value {
-    let resources: Vec<serde_json::Value> = config
-        .resources
-        .iter()
-        .map(|resource| {
-            serde_json::json!({
-                "uri": resource.uri,
-                "name": resource.name,
-                "description": resource.description,
-                "mimeType": resource.mime_type
-            })
-        })
-        .collect();
-
-    let result = serde_json::json!({
-        "resources": resources
-    });
-
-    create_success_response(id, result)
-}
-
-/// Handle prompts/list request
-fn handle_prompts_list(config: &ServerConfig, id: Option<&serde_json::Value>) -> serde_json::Value {
-    let prompts: Vec<serde_json::Value> = config
-        .prompts
-        .iter()
-        .map(|prompt| {
-            serde_json::json!({
-                "name": prompt.name,
-                "description": prompt.description,
-                "arguments": prompt.arguments.as_ref().map(|args| {
-                    args.iter().map(|arg| serde_json::json!({
-                        "name": arg.name,
-                        "description": arg.description,
-                        "required": arg.required
-                    })).collect::<Vec<_>>()
-                })
-            })
-        })
-        .collect();
-
-    let result = serde_json::json!({
-        "prompts": prompts
-    });
-
-    create_success_response(id, result)
-}
-
-/// Create success response
-fn create_success_response(id: Option<&serde_json::Value>, result: serde_json::Value) -> serde_json::Value {
-    let mut response = serde_json::json!({
-        "jsonrpc": "2.0",
-        "result": result
-    });
-
-    if let Some(id_val) = id {
-        response["id"] = id_val.clone();
-    }
-
-    response
-}
-
-/// Create error response
-fn create_error_response(id: Option<&serde_json::Value>, code: i32, message: &str) -> serde_json::Value {
-    let mut response = serde_json::json!({
-        "jsonrpc": "2.0",
-        "error": {
-            "code": code,
-            "message": message
-        }
-    });
-
-    if let Some(id_val) = id {
-        response["id"] = id_val.clone();
-    }
-
-    response
-}
-
-impl McpError {
-    /// Standard JSON-RPC error codes
-    pub const PARSE_ERROR: i32 = -32700;
-    pub const INVALID_REQUEST: i32 = -32600;
-    pub const METHOD_NOT_FOUND: i32 = -32601;
-    pub const INVALID_PARAMS: i32 = -32602;
-    pub const INTERNAL_ERROR: i32 = -32603;
-
-    /// Create a method not found error
-    pub fn method_not_found(method: &str) -> Self {
-        Self {
-            code: Self::METHOD_NOT_FOUND,
-            message: format!("Method '{}' not found", method),
-            data: None,
-        }
-    }
-
-    /// Create an invalid params error
-    pub fn invalid_params(message: &str) -> Self {
-        Self {
-            code: Self::INVALID_PARAMS,
-            message: message.to_string(),
-            data: None,
-        }
-    }
-}
-
-// Convenience builders for common scenarios
-
-impl Tool {
-    /// Create a simple echo tool that returns its input
-    pub fn echo() -> Self {
-        Self {
-            name: "echo".to_string(),
-            description: Some("Echo back the input".to_string()),
+    fn descriptor(&self) -> ToolDescriptor {
+        ToolDescriptor {
+            description: Some("Echo back the input"),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -769,11 +579,30 @@ impl Tool {
         }
     }
 
-    /// Create a simple math calculator tool
-    pub fn calculator() -> Self {
-        Self {
-            name: "calculator".to_string(),
-            description: Some("Perform basic math operations".to_string()),
+    fn call(&self, params: serde_json::Value) -> ToolResult {
+        let message = params
+            .get("arguments")
+            .and_then(|a| a.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("");
+
+        ToolResult {
+            content: vec![ToolContent::Text(message.to_owned())],
+            is_error: false,
+        }
+    }
+}
+
+pub struct CalculatorTool;
+
+impl McpTool for CalculatorTool {
+    fn name(&self) -> &'static str {
+        "calculator"
+    }
+
+    fn descriptor(&self) -> ToolDescriptor {
+        ToolDescriptor {
+            description: Some("Perform basic math operations"),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -785,31 +614,33 @@ impl Tool {
             }),
         }
     }
-}
 
-impl Resource {
-    /// Create a simple text resource
-    pub fn text(uri: &str, name: &str, _content: &str) -> Self {
-        Self {
-            uri: uri.to_string(),
-            name: name.to_string(),
-            description: Some(format!("Text resource: {}", name)),
-            mime_type: Some("text/plain".to_string()),
-        }
-    }
-}
+    fn call(&self, params: serde_json::Value) -> ToolResult {
+        let args = params.get("arguments");
+        let operation = args
+            .and_then(|a| a.get("operation"))
+            .and_then(|o| o.as_str())
+            .unwrap_or("");
+        let a = args.and_then(|a| a.get("a")).and_then(|n| n.as_f64()).unwrap_or(0.0);
+        let b = args.and_then(|a| a.get("b")).and_then(|n| n.as_f64()).unwrap_or(0.0);
 
-impl Prompt {
-    /// Create a simple greeting prompt
-    pub fn greeting() -> Self {
-        Self {
-            name: "greeting".to_string(),
-            description: Some("Generate a greeting message".to_string()),
-            arguments: Some(vec![PromptArgument {
-                name: "name".to_string(),
-                description: Some("Name to greet".to_string()),
-                required: true,
-            }]),
+        let result = match operation {
+            "add" => a + b,
+            "subtract" => a - b,
+            "multiply" => a * b,
+            "divide" => {
+                if b != 0.0 {
+                    a / b
+                } else {
+                    f64::NAN
+                }
+            }
+            _ => f64::NAN,
+        };
+
+        ToolResult {
+            content: vec![ToolContent::Text(result.to_string())],
+            is_error: false,
         }
     }
 }
