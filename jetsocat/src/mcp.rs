@@ -20,30 +20,14 @@ pub(crate) async fn run_mcp_proxy(pipe: Pipe, mut mcp_client: mcp_proxy::McpProx
             return Ok(());
         }
 
-        let line = line.trim();
-
-        if line.is_empty() {
-            continue;
-        }
-
-        trace!(request = %line, "Received request");
-
-        match mcp_client.handle_jsonrpc_request_str(line).await {
-            Ok(Some(resp)) => {
-                let mut response = resp.to_string()?;
-                trace!(%response, "Sending response");
-                response.push('\n'); // Push a newline to delemitate the message.
-
-                writer
-                    .write_all(response.as_bytes())
-                    .await
-                    .context("failed to write response")?;
+        match mcp_client.forward_request(&line).await {
+            Some(response) => {
+                // For all the supported client pipe transports, messages are required to be delimited by newlines.
+                let payload = response.as_newline_terminated_raw().as_bytes();
+                writer.write_all(payload).await.context("failed to write response")?;
                 writer.flush().await.context("failed to flush writer")?;
             }
-            Ok(None) => {} // Notification; no response.
-            Err(e) => {
-                error!(error = format!("{e:#}"), "failed to handle request");
-            }
+            None => {} // Notification; no response.
         }
     }
 }

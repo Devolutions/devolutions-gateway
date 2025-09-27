@@ -16,16 +16,23 @@ path = "tests/main.rs"
 harness = true
 
 [dependencies]
+anyhow = "1.0"
 assert_cmd = "2.0"
+dynosaur = "0.3"
 escargot = "0.5"
 expect-test = "1.5"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "process"] }
 
 [dev-dependencies]
-sysevent.path = "../crates/sysevent"
-test-utils.path = "../crates/test-utils"
-tempfile = "3"
-serde_json = "1"
+mcp-proxy.path = "../crates/mcp-proxy"
 rstest = "0.25"
+serde_json = "1"
+sysevent.path = "../crates/sysevent"
+tempfile = "3"
+test-utils.path = "../crates/test-utils"
 
 [target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"
