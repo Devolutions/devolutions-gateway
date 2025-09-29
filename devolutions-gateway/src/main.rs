@@ -129,16 +129,13 @@ fn run() -> anyhow::Result<()> {
             cfg_if! { if #[cfg(target_os = "linux")] {
                 controller.config = Some(r#"
                         [Unit]
-                        After=
                         After=network-online.target
 
                         [Service]
-                        ExecStart=
                         ExecStart=/usr/bin/devolutions-gateway --service
                         Restart=on-failure
 
                         [Install]
-                        WantedBy=
                         WantedBy=multi-user.target
                     "#.to_owned());
             }}
