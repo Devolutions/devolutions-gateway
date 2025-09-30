@@ -65,7 +65,7 @@ impl Message {
     /// The raw message is also normalized.
     pub fn normalize(mut raw_message: String) -> Self {
         // Ensure there is exactly one, single newline (\n) character at the end.
-        while raw_message.ends_with('\n') {
+        while raw_message.ends_with('\n') || raw_message.ends_with('\r') {
             raw_message.pop();
         }
         raw_message.reserve_exact(1);

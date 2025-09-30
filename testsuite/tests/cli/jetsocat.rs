@@ -50,7 +50,7 @@ fn all_subcommands() {
 #[case::env_force_color_1(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let output = jetsocat_assert_cmd()
-        .timeout(Duration::from_millis(100))
+        .timeout(COMMAND_TIMEOUT)
         .args(&["forward", "-", "-", "--log-term"])
         .args(args)
         .envs(envs.iter().cloned())
@@ -83,7 +83,7 @@ fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
     let log_file_path = tempdir.path().join("jetsocat.log");
 
     jetsocat_assert_cmd()
-        .timeout(Duration::from_millis(100))
+        .timeout(COMMAND_TIMEOUT)
         .args(&["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
         .args(args)
         .envs(envs.iter().cloned())
