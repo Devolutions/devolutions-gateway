@@ -1,12 +1,9 @@
 [Unit]
- After=
- After=network-online.target
+After=network-online.target
 
 [Service]
- ExecStart=
- ExecStart=/usr/bin/devolutions-gateway --service
- Restart=on-failure
+ExecStart=/usr/bin/devolutions-gateway --service
+Restart=on-failure
  
- [Install]
- WantedBy=
- WantedBy=multi-user.target
+[Install]
+WantedBy=multi-user.target
