@@ -76,9 +76,7 @@ impl GatewayService {
             }
             Some(false) => {
                 warn!("TlsVerifyStrict option is explicitly set to false. This may hide latent issues.");
-                let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_verify_strict_disabled(
-                    "TlsVerifyStrict option is explicitly set to false",
-                ));
+                let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_verify_strict_disabled("explicit"));
             }
             Some(true) => {}
         }
