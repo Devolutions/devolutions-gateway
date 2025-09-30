@@ -46,7 +46,12 @@ impl GatewayListener {
     pub fn init_and_bind(url: impl ToInternalUrl, state: DgwState) -> anyhow::Result<Self> {
         let url = url.to_internal_url();
 
-        info!(%url, "Initiating listener...");
+        let kind = match url.scheme() {
+            "tcp" => ListenerKind::Tcp,
+            "http" => ListenerKind::Http,
+            "https" => ListenerKind::Https,
+            unsupported => anyhow::bail!("unsupported listener scheme: {}", unsupported),
+        };
 
         let url = TargetAddr::try_from(url).context("invalid internal url")?;
         let socket_addr = url
@@ -66,14 +71,7 @@ impl GatewayListener {
             .listen(64)
             .context("failed to listen with the binded TCP socket")?;
 
-        let kind = match url.scheme() {
-            "tcp" => ListenerKind::Tcp,
-            "http" => ListenerKind::Http,
-            "https" => ListenerKind::Https,
-            unsupported => anyhow::bail!("unsupported listener scheme: {}", unsupported),
-        };
-
-        info!(?kind, addr = %socket_addr, "Listener started successfully");
+        info!("Listening on {scheme}://{socket_addr}", scheme = url.scheme());
 
         Ok(Self {
             addr: socket_addr,
