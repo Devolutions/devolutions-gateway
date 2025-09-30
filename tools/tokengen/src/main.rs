@@ -111,7 +111,15 @@ fn sign(
             jet_aid,
             jet_rec,
         },
-        SignSubCommand::Jrec { jet_rop, jet_aid } => SubCommandArgs::Jrec { jet_rop, jet_aid },
+        SignSubCommand::Jrec {
+            jet_rop,
+            jet_aid,
+            jet_reuse,
+        } => SubCommandArgs::Jrec {
+            jet_rop,
+            jet_aid,
+            jet_reuse,
+        },
         SignSubCommand::Kdc { krb_realm, krb_kdc } => SubCommandArgs::Kdc { krb_realm, krb_kdc },
         SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
@@ -238,6 +246,8 @@ enum SignSubCommand {
         jet_rop: RecordingOperation,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_reuse: Option<u32>,
     },
     Kdc {
         #[clap(long)]

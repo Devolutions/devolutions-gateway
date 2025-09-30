@@ -526,6 +526,12 @@ pub struct JmuxTokenClaims {
 
 // ----- jrec claims ----- //
 
+fn jrec_default_reuse() -> ReconnectionPolicy {
+    ReconnectionPolicy::Allowed {
+        window_in_seconds: NonZeroU32::new(10).expect("hardcoded value"),
+    }
+}
+
 #[derive(Deserialize, Clone)]
 pub struct JrecTokenClaims {
     /// Association ID (= Session ID)
@@ -533,6 +539,12 @@ pub struct JrecTokenClaims {
 
     /// Recording operation
     pub jet_rop: RecordingOperation,
+
+    /// Window during which a token can be reused since last disconnection
+    ///
+    /// Once this window is over, the token is removed from the cache and can’t be reused anymore.
+    #[serde(default = "jrec_default_reuse")]
+    pub jet_reuse: ReconnectionPolicy,
 
     /// JWT expiration time claim.
     ///

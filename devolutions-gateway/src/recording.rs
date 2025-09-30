@@ -4,6 +4,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
 use std::pin::pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
@@ -23,8 +24,7 @@ use crate::job_queue::JobQueueHandle;
 use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
-const DISCONNECTED_TTL_SECS: i64 = 10;
-const DISCONNECTED_TTL_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
+const DISCONNECTED_TTL_EXTRA_LEEWAY: Duration = Duration::from_secs(10);
 const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +86,14 @@ where
             anyhow::bail!("inconsistent session ID (ID in token: {})", claims.jet_aid);
         }
 
-        let recording_file = match recordings.connect(session_id, file_type).await {
+        let disconnected_ttl = match claims.jet_reuse {
+            crate::token::ReconnectionPolicy::Disallowed => Duration::ZERO,
+            crate::token::ReconnectionPolicy::Allowed { window_in_seconds } => {
+                Duration::from_secs(u64::from(window_in_seconds.get())) + DISCONNECTED_TTL_EXTRA_LEEWAY
+            }
+        };
+
+        let recording_file = match recordings.connect(session_id, file_type, disconnected_ttl).await {
             Ok(recording_file) => recording_file,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
@@ -204,12 +211,14 @@ struct OnGoingRecording {
     manifest: JrecManifest,
     manifest_path: Utf8PathBuf,
     session_must_be_recorded: bool,
+    disconnected_ttl: Duration,
 }
 
 enum RecordingManagerMessage {
     Connect {
         id: Uuid,
         file_type: RecordingFileType,
+        disconnected_ttl: Duration,
         channel: oneshot::Sender<Utf8PathBuf>,
     },
     Disconnect {
@@ -242,11 +251,13 @@ impl fmt::Debug for RecordingManagerMessage {
             RecordingManagerMessage::Connect {
                 id,
                 file_type,
+                disconnected_ttl,
                 channel: _,
             } => f
                 .debug_struct("Connect")
                 .field("id", id)
                 .field("file_type", file_type)
+                .field("disconnected_ttl", disconnected_ttl)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
@@ -279,12 +290,18 @@ pub struct RecordingMessageSender {
 }
 
 impl RecordingMessageSender {
-    async fn connect(&self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<Utf8PathBuf> {
+    async fn connect(
+        &self,
+        id: Uuid,
+        file_type: RecordingFileType,
+        disconnected_ttl: Duration,
+    ) -> anyhow::Result<Utf8PathBuf> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
                 id,
                 file_type,
+                disconnected_ttl,
                 channel: tx,
             })
             .await
@@ -456,7 +473,12 @@ impl RecordingManagerTask {
         }
     }
 
-    async fn handle_connect(&mut self, id: Uuid, file_type: RecordingFileType) -> anyhow::Result<Utf8PathBuf> {
+    async fn handle_connect(
+        &mut self,
+        id: Uuid,
+        file_type: RecordingFileType,
+        disconnected_ttl: Duration,
+    ) -> anyhow::Result<Utf8PathBuf> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
@@ -544,6 +566,7 @@ impl RecordingManagerTask {
                 manifest,
                 manifest_path,
                 session_must_be_recorded,
+                disconnected_ttl,
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -561,76 +584,77 @@ impl RecordingManagerTask {
     }
 
     async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
-        if let Some(ongoing) = self.ongoing_recordings.get_mut(&id) {
-            if !matches!(ongoing.state, OnGoingRecordingState::Connected) {
-                anyhow::bail!("a recording not connected can’t be disconnected (there is probably a bug)");
-            }
+        let Some(ongoing) = self.ongoing_recordings.get_mut(&id) else {
+            return Err(anyhow::anyhow!("unknown recording for ID {id}"));
+        };
 
-            let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
-
-            ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
-
-            let current_file = ongoing
-                .manifest
-                .files
-                .last_mut()
-                .context("no recording file (this is a bug)")?;
-            current_file.duration = end_time - current_file.start_time;
-
-            ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
-
-            let recording_file_path = ongoing
-                .manifest_path
-                .parent()
-                .expect("a parent")
-                .join(&current_file.file_name);
-
-            debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
-
-            ongoing
-                .manifest
-                .save_to_file(&ongoing.manifest_path)
-                .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
-
-            // Notify all the streamers that recording has ended.
-            if let Some(notify) = self.recording_end_notifier.get(&id) {
-                notify.notify_waiters();
-            }
-
-            info!(%id, "Start video remuxing operation");
-            if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
-                if cadeau::xmf::is_init() {
-                    debug!(%recording_file_path, "Enqueue video remuxing operation");
-
-                    // Schedule 60 seconds to wait for the streamers to release the file.
-                    let _ = self
-                        .job_queue_handle
-                        .schedule(
-                            RemuxJob {
-                                input_path: recording_file_path,
-                            },
-                            time::OffsetDateTime::now_utc() + time::Duration::seconds(60),
-                        )
-                        .await;
-                } else {
-                    debug!("Video remuxing was skipped because XMF native library is not loaded");
-                }
-            }
-
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("unknown recording for ID {id}"))
+        if !matches!(ongoing.state, OnGoingRecordingState::Connected) {
+            anyhow::bail!("a recording not connected can’t be disconnected (there is probably a bug)");
         }
+
+        let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
+
+        ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
+
+        let current_file = ongoing
+            .manifest
+            .files
+            .last_mut()
+            .context("no recording file (this is a bug)")?;
+        current_file.duration = end_time - current_file.start_time;
+
+        ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
+
+        let recording_file_path = ongoing
+            .manifest_path
+            .parent()
+            .expect("a parent")
+            .join(&current_file.file_name);
+
+        debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
+
+        ongoing
+            .manifest
+            .save_to_file(&ongoing.manifest_path)
+            .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
+
+        // Notify all the streamers that recording has ended.
+        if let Some(notify) = self.recording_end_notifier.get(&id) {
+            notify.notify_waiters();
+        }
+
+        info!(%id, "Start video remuxing operation");
+        if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
+            if cadeau::xmf::is_init() {
+                debug!(%recording_file_path, "Enqueue video remuxing operation");
+
+                // Schedule 60 seconds to wait for the streamers to release the file.
+                let _ = self
+                    .job_queue_handle
+                    .schedule(
+                        RemuxJob {
+                            input_path: recording_file_path,
+                        },
+                        time::OffsetDateTime::now_utc() + time::Duration::seconds(60),
+                    )
+                    .await;
+            } else {
+                debug!("Video remuxing was skipped because XMF native library is not loaded");
+            }
+        }
+
+        Ok(())
     }
 
     fn handle_remove(&mut self, id: Uuid) {
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let disconnected_ttl_secs = i64::try_from(ongoing.disconnected_ttl.as_secs()).expect("TTL can’t be so big");
 
             match ongoing.state {
-                // NOTE: Comparing with DISCONNECTED_TTL_SECS - 1 just in case the sleep returns faster than expected.
+                // NOTE: Comparing with disconnected_ttl_secs - 1 just in case the sleep returns faster than expected.
                 // (I don’t know if this can actually happen in practice, but it’s better to be safe than sorry.)
-                OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + DISCONNECTED_TTL_SECS - 1 => {
+                OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + disconnected_ttl_secs - 1 => {
                     debug!(%id, "Mark recording as terminated");
                     self.rx.active_recordings.remove(id);
 
@@ -741,8 +765,8 @@ async fn recording_manager_task(
                 debug!(?msg, "Received message");
 
                 match msg {
-                    RecordingManagerMessage::Connect { id, file_type, channel  } => {
-                        match manager.handle_connect(id, file_type).await {
+                    RecordingManagerMessage::Connect { id, file_type, disconnected_ttl, channel  } => {
+                        match manager.handle_connect(id, file_type, disconnected_ttl).await {
                             Ok(recording_file) => {
                                 let _ = channel.send(recording_file);
                             }
@@ -754,17 +778,19 @@ async fn recording_manager_task(
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
-                        let now = tokio::time::Instant::now();
-                        let deadline = now + DISCONNECTED_TTL_DURATION;
+                        if let Some(ongoing) = manager.ongoing_recordings.get(&id) {
+                            let now = tokio::time::Instant::now();
+                            let deadline = now + ongoing.disconnected_ttl;
 
-                        disconnected.push(DisconnectedTtl {
-                            deadline,
-                            id,
-                        });
+                            disconnected.push(DisconnectedTtl {
+                                deadline,
+                                id,
+                            });
 
-                        // Reset the Sleep instance if the new deadline is sooner or it is already elapsed
-                        if next_remove_sleep.is_elapsed() || deadline < next_remove_sleep.deadline() {
-                            next_remove_sleep.as_mut().reset(deadline);
+                            // Reset the Sleep instance if the new deadline is sooner or it is already elapsed.
+                            if next_remove_sleep.is_elapsed() || deadline < next_remove_sleep.deadline() {
+                                next_remove_sleep.as_mut().reset(deadline);
+                            }
                         }
                     }
                     RecordingManagerMessage::GetState { id, channel } => {
@@ -829,7 +855,7 @@ async fn recording_manager_task(
         // to process after one second of inactivity.
         let msg = match futures::future::select(
             pin!(manager.rx.channel.recv()),
-            pin!(tokio::time::sleep(std::time::Duration::from_secs(1))),
+            pin!(tokio::time::sleep(Duration::from_secs(1))),
         )
         .await
         {

@@ -187,4 +187,14 @@ public class JsonSerializationTests
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
+
+    [Fact]
+    public void RecordingClaimsWithLongerReuse()
+    {
+        const string EXPECTED = """{"jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_rop":"push","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_reuse":300}""";
+
+        var claims = new RecordingClaims(gatewayId, sessionId, RecordingOperation.Push, ReusePolicy.Allowed(300));
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
 }
