@@ -21,6 +21,7 @@ assert_cmd = "2.0"
 dynosaur = "0.3"
 escargot = "0.5"
 expect-test = "1.5"
+fastrand = "2"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"

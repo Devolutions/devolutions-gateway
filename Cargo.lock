@@ -6150,6 +6150,7 @@ dependencies = [
  "dynosaur",
  "escargot",
  "expect-test",
+ "fastrand",
  "mcp-proxy",
  "rstest",
  "serde",

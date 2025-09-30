@@ -160,7 +160,7 @@ async fn stdio_round_trip_json_line() {
     let (_dir_guard, command) = make_stdio_helper_script();
     let mut proxy = McpProxy::init(Config::spawn_process(command)).await.unwrap();
     let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap();
-    assert_eq!(out.as_raw(), r#"{"jsonrpc":"2.0","result":{"ok":true}}"#);
+    assert_eq!(out.as_raw().trim(), r#"{"jsonrpc":"2.0","result":{"ok":true}}"#);
 
     fn make_stdio_helper_script() -> (tempfile::TempDir, String) {
         let dir = tempfile::TempDir::new().unwrap();

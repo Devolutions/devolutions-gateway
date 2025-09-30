@@ -376,7 +376,9 @@ pub struct NamedPipeTransport {
     _tempdir: tempfile::TempDir,
 
     #[cfg(windows)]
-    named_pipe: tokio::net::windows::named_pipe::NamedPipeServer,
+    used: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(windows)]
+    notify_ready: Arc<tokio::sync::Notify>,
 
     name: String,
 }
@@ -403,33 +405,72 @@ impl NamedPipeTransport {
 
         #[cfg(windows)]
         {
-            use tokio::net::windows::named_pipe::ServerOptions;
+            let name = format!("dgw-testsuite-{}", fastrand::u64(..));
+            let used = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let notify_ready = Arc::new(tokio::sync::Notify::new());
 
-            let named_pipe = ServerOptions::new()
-                .first_pipe_instance(true)
-                .create(&name)
-                .context("create named pipe")?;
-
-            named_pipe.connect().await.context("named pipe connect")?;
+            Ok(Self {
+                used,
+                notify_ready,
+                name,
+            })
         }
     }
 }
 
 impl McpTransport for NamedPipeTransport {
     async fn accept_client(&mut self) -> anyhow::Result<Box<DynMcpPeer<'static>>> {
-        let (stream, _) = self.listener.accept().await.context("UNIX transport accept")?;
+        #[cfg(unix)]
+        {
+            let (stream, _) = self.listener.accept().await.context("UNIX transport accept")?;
 
-        Ok(DynMcpPeer::new_box(NamedPipePeer {
-            stream: BufReader::new(stream),
-        }))
+            Ok(DynMcpPeer::new_box(NamedPipePeer {
+                stream: BufReader::new(stream),
+            }))
+        }
+
+        #[cfg(windows)]
+        {
+            use tokio::net::windows::named_pipe::ServerOptions;
+
+            loop {
+                let used = self.used.swap(true, std::sync::atomic::Ordering::SeqCst);
+
+                if used {
+                    self.notify_ready.notified().await;
+                } else {
+                    break;
+                }
+            }
+
+            let addr = format!(r"\\.\pipe\{}", self.name);
+
+            let named_pipe = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&addr)
+                .context("create named pipe")?;
+
+            named_pipe.connect().await.context("named pipe connect")?;
+
+            Ok(DynMcpPeer::new_box(NamedPipePeer {
+                stream: BufReader::new(named_pipe),
+                used: Arc::clone(&self.used),
+                notify_ready: Arc::clone(&self.notify_ready),
+            }))
+        }
     }
 }
 
 struct NamedPipePeer {
     #[cfg(unix)]
     stream: BufReader<tokio::net::UnixStream>,
+
     #[cfg(windows)]
     stream: BufReader<tokio::net::windows::named_pipe::NamedPipeServer>,
+    #[cfg(windows)]
+    used: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(windows)]
+    notify_ready: Arc<tokio::sync::Notify>,
 }
 
 impl McpPeer for NamedPipePeer {
@@ -447,6 +488,14 @@ impl McpPeer for NamedPipePeer {
         self.stream.write_all(b"\n").await?;
         self.stream.flush().await?;
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl Drop for NamedPipePeer {
+    fn drop(&mut self) {
+        self.used.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.notify_ready.notify_one();
     }
 }
 

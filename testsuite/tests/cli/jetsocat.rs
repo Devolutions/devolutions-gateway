@@ -50,7 +50,7 @@ fn all_subcommands() {
 #[case::env_force_color_1(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let output = jetsocat_assert_cmd()
-        .timeout(Duration::from_millis(50))
+        .timeout(Duration::from_millis(100))
         .args(&["forward", "-", "-", "--log-term"])
         .args(args)
         .envs(envs.iter().cloned())
@@ -83,7 +83,7 @@ fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
     let log_file_path = tempdir.path().join("jetsocat.log");
 
     jetsocat_assert_cmd()
-        .timeout(Duration::from_millis(50))
+        .timeout(Duration::from_millis(100))
         .args(&["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
         .args(args)
         .envs(envs.iter().cloned())
@@ -108,7 +108,7 @@ fn forward_hello_world() {
     let mut listener = jetsocat_cmd()
         .env(
             "JETSOCAT_ARGS",
-            format!("forward tcp-listen://127.0.0.1:{port} 'cmd://printf helloworld' --no-proxy"),
+            format!("forward tcp-listen://127.0.0.1:{port} 'cmd://echo hello world' --no-proxy"),
         )
         .spawn()
         .expect("failed to start jetsocat listener");
@@ -118,7 +118,7 @@ fn forward_hello_world() {
 
     // Connect to the listener and read the output using assert_cmd.
     let client_output = jetsocat_assert_cmd()
-        .env("JETSOCAT_ARGS", format!("forward - tcp://127.0.0.1:{}", port))
+        .env("JETSOCAT_ARGS", format!("forward - tcp://127.0.0.1:{port}"))
         .timeout(COMMAND_TIMEOUT)
         .assert();
 
@@ -126,7 +126,10 @@ fn forward_hello_world() {
     let _ = listener.kill();
 
     // Check that we got the expected output.
-    client_output.success().stdout("helloworld");
+    #[cfg(windows)]
+    client_output.success().stdout("hello world\r\n");
+    #[cfg(unix)]
+    client_output.success().stdout("hello world\n");
 }
 
 #[test]
@@ -141,7 +144,7 @@ fn jmux_proxy_read_hello_world() {
     let mut echo_server = jetsocat_cmd()
         .env(
             "JETSOCAT_ARGS",
-            format!("forward tcp-listen://127.0.0.1:{echo_server_port} 'cmd://printf helloworld' --no-proxy"),
+            format!("forward tcp-listen://127.0.0.1:{echo_server_port} 'cmd://echo hello world' --no-proxy"),
         )
         .spawn()
         .expect("failed to start echo server");
@@ -191,7 +194,10 @@ fn jmux_proxy_read_hello_world() {
     let _ = echo_server.kill();
 
     // Check that we got the expected output through the JMUX proxy.
-    client_output.success().stdout("helloworld");
+    #[cfg(windows)]
+    client_output.success().stdout("hello world\r\n");
+    #[cfg(unix)]
+    client_output.success().stdout("hello world\n");
 }
 
 #[test]
@@ -245,7 +251,7 @@ fn jmux_proxy_write_hello_world() {
     jetsocat_assert_cmd()
         .env(
             "JETSOCAT_ARGS",
-            format!("forward tcp://127.0.0.1:{proxy_listen_port} 'cmd://printf helloworld'"),
+            format!("forward tcp://127.0.0.1:{proxy_listen_port} 'cmd://echo hello world'"),
         )
         .timeout(COMMAND_TIMEOUT)
         .assert();
@@ -262,7 +268,7 @@ fn jmux_proxy_write_hello_world() {
         .unwrap()
         .read_to_string(&mut read_server_stdout)
         .unwrap();
-    assert_eq!(read_server_stdout, "helloworld");
+    assert_eq!(read_server_stdout.trim(), "hello world");
 }
 
 #[test]
@@ -460,9 +466,18 @@ fn env_args_double_quoted_arguments() {
 
 #[test]
 fn jetsocat_log_environment_variable() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let outfile = tempdir.path().join("outfile");
+
     let output = jetsocat_assert_cmd()
         .env("JETSOCAT_LOG", "debug")
-        .env("JETSOCAT_ARGS", "forward - cmd://'printf hello' --log-term")
+        .env(
+            "JETSOCAT_ARGS",
+            format!(
+                "forward cmd://'echo hello' 'write-file://{}' --log-term",
+                outfile.display()
+            ),
+        )
         .timeout(COMMAND_TIMEOUT)
         .assert();
 
@@ -474,6 +489,9 @@ fn jetsocat_log_environment_variable() {
     assert!(!stderr.contains("bad"));
     assert!(!stderr.contains("invalid"));
     assert!(!stderr.contains("unknown"));
+
+    let file_contents = std::fs::read_to_string(outfile).unwrap();
+    assert_eq!(file_contents.trim(), "hello");
 }
 
 #[test]
