@@ -69,11 +69,16 @@ impl GatewayService {
             );
         }
 
-        if matches!(conf_file.tls_verify_strict, None | Some(false)) {
-            warn!("TlsVerifyStrict option is absent or set to false. This may hide latent issues.");
-            let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_verify_strict_disabled(
-                "TlsVerifyStrict option is absent or set to false",
-            ));
+        match conf_file.tls_verify_strict {
+            None => {
+                warn!("TlsVerifyStrict option is not set, defaulting to false. This may hide latent issues.");
+                let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_verify_strict_disabled("compat"));
+            }
+            Some(false) => {
+                warn!("TlsVerifyStrict option is explicitly set to false. This may hide latent issues.");
+                let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_verify_strict_disabled("explicit"));
+            }
+            Some(true) => {}
         }
 
         if let Some((cert_subject_name, hostname)) = conf_file
