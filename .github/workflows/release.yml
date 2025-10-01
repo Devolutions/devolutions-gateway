@@ -246,9 +246,6 @@ jobs:
           # For the PowerShell module, only upload the nupkg.
           Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar) -Recurse -ErrorAction Ignore
 
-          # Remove leftover tun2socks.exe files.
-          Get-ChildItem -Recurse -Name "tun2socks.exe" | Remove-Item -ErrorAction Ignore
-
       - name: Create jetsocat ZIP files for winget
         shell: pwsh
         run: |
