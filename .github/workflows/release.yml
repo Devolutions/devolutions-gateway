@@ -236,15 +236,17 @@ jobs:
       - name: Manage artifacts
         shell: pwsh
         run: |
-          # workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
-          # FIXME: I suspect this line is no longer required.
-          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+          # The PowerShell module is already part of the installers, and is published on PsGallery.
+          Remove-Item -Path (Join-Path devolutions-gateway PowerShell) -Recurse
 
           # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
-          Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse -ErrorAction Ignore
+          Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse
+
+          # Do not upload tun2socks.exe by itself.
+          Remove-Item -Path (Join-Path devolutions-agent tun2socks) -Recurse
 
           # For the PowerShell module, only upload the nupkg.
-          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar) -Recurse -ErrorAction Ignore
+          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar) -Recurse
 
       - name: Create jetsocat ZIP files for winget
         shell: pwsh
