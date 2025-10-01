@@ -127,11 +127,6 @@ jobs:
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
           Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
 
-      ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
-      - name: Manage artifacts
-        shell: pwsh
-        run: Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
-
       - name: Prepare artifacts
         id: prepare-artifacts
         shell: pwsh
@@ -236,9 +231,6 @@ jobs:
       - name: Manage artifacts
         shell: pwsh
         run: |
-          # The PowerShell module is already part of the installers, and is published on PsGallery.
-          Remove-Item -Path (Join-Path devolutions-gateway PowerShell) -Recurse
-
           # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
           Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse
 
@@ -246,7 +238,7 @@ jobs:
           Remove-Item -Path (Join-Path devolutions-agent tun2socks) -Recurse
 
           # For the PowerShell module, only upload the nupkg.
-          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar) -Recurse
+          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar)
 
       - name: Create jetsocat ZIP files for winget
         shell: pwsh
