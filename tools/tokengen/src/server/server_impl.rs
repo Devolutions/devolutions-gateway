@@ -193,6 +193,7 @@ pub(crate) async fn jrec_handler(
         SubCommandArgs::Jrec {
             jet_rop: request.jet_rop,
             jet_aid: request.jet_aid,
+            jet_reuse: request.jet_reuse,
         },
     )
     .await
@@ -329,6 +330,7 @@ pub(crate) struct JrecRequest {
     common: CommonRequest,
     jet_rop: RecordingOperation,
     jet_aid: Option<Uuid>,
+    jet_reuse: Option<u32>,
 }
 
 #[derive(Deserialize)]

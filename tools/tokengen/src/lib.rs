@@ -90,6 +90,8 @@ pub struct JrecClaims {
     pub exp: i64,
     pub nbf: i64,
     pub jti: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_reuse: Option<u32>,
 }
 
 #[derive(Clone, Serialize)]
@@ -248,6 +250,7 @@ pub enum SubCommandArgs {
     Jrec {
         jet_rop: RecordingOperation,
         jet_aid: Option<Uuid>,
+        jet_reuse: Option<u32>,
     },
     Kdc {
         krb_realm: String,
@@ -426,13 +429,18 @@ pub fn generate_token(
             };
             ("JMUX", serde_json::to_value(claims)?)
         }
-        SubCommandArgs::Jrec { jet_rop, jet_aid } => {
+        SubCommandArgs::Jrec {
+            jet_rop,
+            jet_aid,
+            jet_reuse,
+        } => {
             let claims = JrecClaims {
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_rop,
                 exp,
                 nbf,
                 jti,
+                jet_reuse,
             };
             ("JREC", serde_json::to_value(claims)?)
         }
