@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::credential::CredentialStoreHandle;
-use devolutions_gateway::listener::GatewayListener;
+use devolutions_gateway::listener::{GatewayListener, ListenerUrls};
 use devolutions_gateway::log::GatewayLog;
 use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
@@ -290,25 +290,18 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         traffic_audit_handle: traffic_audit_task.handle(),
     };
 
-    conf.listeners
-        .iter()
-        .map(|listener| {
-            GatewayListener::init_and_bind(listener, state.clone())
-                .with_context(|| format!("failed to initialize {}", listener.internal_url))
-                .inspect(|_| {
-                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::listener_started(
-                        &listener.internal_url,
-                        listener.internal_url.scheme(),
-                    ));
-                })
-                .inspect_err(|error| {
-                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::listener_bind_failed(&listener.internal_url, error));
-                })
-        })
-        .collect::<anyhow::Result<Vec<GatewayListener>>>()
-        .context("failed to bind listener")?
-        .into_iter()
-        .for_each(|listener| tasks.register(listener));
+    for listener in &conf.listeners {
+        let listener = bind_listener_with_retrial(state.clone(), listener)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to bind listener: {} -> {}",
+                    listener.external_url, listener.internal_url
+                )
+            })?;
+
+        tasks.register(listener);
+    }
 
     if let Some(ngrok_conf) = &conf.ngrok {
         let session = devolutions_gateway::ngrok::NgrokSession::connect(ngrok_conf)
@@ -380,4 +373,52 @@ fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {
     };
 
     Ok(Arc::new(Mutex::new(claims)))
+}
+
+async fn bind_listener_with_retrial(state: DgwState, listener_urls: &ListenerUrls) -> anyhow::Result<GatewayListener> {
+    const MAX_NUM_RETRIES: usize = 10;
+    const SLEEP_DURATION: Duration = Duration::from_secs(10);
+
+    let mut count = 0;
+
+    loop {
+        count += 1;
+
+        match GatewayListener::init_and_bind(listener_urls, state.clone()) {
+            Ok(listener) => {
+                let _ = SYSTEM_LOGGER.emit(sysevent_codes::listener_started(
+                    &listener_urls.internal_url,
+                    listener_urls.internal_url.scheme(),
+                ));
+
+                return Ok(listener);
+            }
+            Err(error) => {
+                let address_already_in_use = error
+                    .source()
+                    .iter()
+                    .flat_map(|source| source.downcast_ref::<std::io::Error>())
+                    .any(|source| source.kind() == std::io::ErrorKind::AddrInUse);
+
+                if !address_already_in_use || count > MAX_NUM_RETRIES {
+                    let _ = SYSTEM_LOGGER.emit(sysevent_codes::listener_bind_failed(
+                        &listener_urls.internal_url,
+                        &error,
+                    ));
+
+                    return Err(error);
+                }
+
+                warn!(
+                    error = format!("{error:#}"),
+                    count,
+                    "Failed to bind {}; retrying in {}s",
+                    listener_urls.internal_url,
+                    SLEEP_DURATION.as_secs()
+                );
+
+                tokio::time::sleep(SLEEP_DURATION).await;
+            }
+        }
+    }
 }
