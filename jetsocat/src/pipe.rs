@@ -117,15 +117,51 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .create(true)
                 .open(&path)
                 .await
-                .with_context(|| format!("Failed to open file at {}", path.display()))?;
+                .with_context(|| format!("open file at {}", path.display()))?;
 
             info!(path = %path.display(), "File opened");
 
-            Ok(Pipe {
+            return Ok(Pipe {
                 name: "write-file",
-                stream: Box::new(file),
+                stream: Box::new(WriteFile(file)),
                 _handle: None,
-            })
+            });
+
+            struct WriteFile(fs::File);
+
+            impl tokio::io::AsyncRead for WriteFile {
+                fn poll_read(
+                    self: std::pin::Pin<&mut Self>,
+                    _: &mut std::task::Context<'_>,
+                    _: &mut tokio::io::ReadBuf<'_>,
+                ) -> std::task::Poll<std::io::Result<()>> {
+                    std::task::Poll::Ready(Ok(()))
+                }
+            }
+
+            impl tokio::io::AsyncWrite for WriteFile {
+                fn poll_write(
+                    self: std::pin::Pin<&mut Self>,
+                    cx: &mut std::task::Context<'_>,
+                    buf: &[u8],
+                ) -> std::task::Poll<std::result::Result<usize, std::io::Error>> {
+                    std::pin::pin!(&mut self.get_mut().0).poll_write(cx, buf)
+                }
+
+                fn poll_flush(
+                    self: std::pin::Pin<&mut Self>,
+                    cx: &mut std::task::Context<'_>,
+                ) -> std::task::Poll<std::result::Result<(), std::io::Error>> {
+                    std::pin::pin!(&mut self.get_mut().0).poll_flush(cx)
+                }
+
+                fn poll_shutdown(
+                    self: std::pin::Pin<&mut Self>,
+                    cx: &mut std::task::Context<'_>,
+                ) -> std::task::Poll<std::result::Result<(), std::io::Error>> {
+                    std::pin::pin!(&mut self.get_mut().0).poll_shutdown(cx)
+                }
+            }
         }
         PipeMode::ReadFile { path } => {
             info!(path = %path.display(), "Opening file");
@@ -136,7 +172,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 .create(false)
                 .open(&path)
                 .await
-                .with_context(|| format!("Failed to open file at {}", path.display()))?;
+                .with_context(|| format!("open file at {}", path.display()))?;
 
             info!(path = %path.display(), "File opened");
 
