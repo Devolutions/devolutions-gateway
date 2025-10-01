@@ -2,6 +2,54 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.3.2 (2025-10-01)
+
+### Features
+
+- _dgw_: support jet_reuse claim in JREC tokens ([#1524](https://github.com/Devolutions/devolutions-gateway/issues/1524)) ([8fbb6ef456](https://github.com/Devolutions/devolutions-gateway/commit/8fbb6ef456d75a50c8614b3bda8612a275c59fb5)) ([DGW-309](https://devolutions.atlassian.net/browse/DGW-309)) 
+
+### Improvements
+
+- _jetsocat_: add coloring control for log output ([#1515](https://github.com/Devolutions/devolutions-gateway/issues/1515)) ([58b1d56945](https://github.com/Devolutions/devolutions-gateway/commit/58b1d56945f1b2b0c41abb20dadacea29ebc65ae)) 
+
+  Add --color flag with support for 'always', 'never', and 'auto' modes.
+  Respects standard environment variables (NO_COLOR, FORCE_COLOR, TERM).
+
+### Bug Fixes
+
+- _jetsocat_: improve optional flag handling and error reporting ([#1512](https://github.com/Devolutions/devolutions-gateway/issues/1512)) ([bf9069d18a](https://github.com/Devolutions/devolutions-gateway/commit/bf9069d18a5691a52825470f4a639f2ee4ad43da)) 
+
+  Improves the handling of optional command-line flags in jetsocat by
+  replacing direct flag access with proper error handling: missing
+  optional flags are handled gracefully while invalid flag values still
+  produce clear error messages.
+
+- _jetsocat_: resolve channel open to start tight race condition ([#1511](https://github.com/Devolutions/devolutions-gateway/issues/1511)) ([7eb873b273](https://github.com/Devolutions/devolutions-gateway/commit/7eb873b273a08f4fe279287b4a5ccd2dc6fdfc41)) ([ARC-323](https://devolutions.atlassian.net/browse/ARC-323)) 
+
+- _webapp_: VNC connect for "None" authentication ([#1518](https://github.com/Devolutions/devolutions-gateway/issues/1518)) ([d720cc4e6b](https://github.com/Devolutions/devolutions-gateway/commit/d720cc4e6b31d0cdc56a4e54b714953a8a30f82d))
+
+- _dgw_: cleaner log message for listener init ([#1521](https://github.com/Devolutions/devolutions-gateway/issues/1521)) ([7e2730cb32](https://github.com/Devolutions/devolutions-gateway/commit/7e2730cb32145807551847883359da5630c73e4d)) 
+
+- _dgw_: split TlsVerifyStrict warning for absent and false ([#1520](https://github.com/Devolutions/devolutions-gateway/issues/1520)) ([a7f3f20f0a](https://github.com/Devolutions/devolutions-gateway/commit/a7f3f20f0a13528ed755c912194431ba20427823)) 
+
+- _jetsocat_: make the MCP proxy non-intrusive ([#1514](https://github.com/Devolutions/devolutions-gateway/issues/1514)) ([3701bd5852](https://github.com/Devolutions/devolutions-gateway/commit/3701bd58523efdf3ac37188b3059eea0e27dc0e2)) ([DGW-308](https://devolutions.atlassian.net/browse/DGW-308)) 
+
+  The MCP proxy was previously handling the initialize request itself and
+  returning a response instead of forwarding it to the target MCP server.
+  It also intercepted `notifications/initialized` and `logging/setLevel`
+  without passing them through.
+
+  Additionally, any unknown methods were being answered with an error
+  response, even though the actual server might support them.
+
+  This change forwards all requests and notifications directly to the
+  server to ensure correct behavior and compatibility.
+
+- _dgw_: retrial logic when binding the listeners ([#1525](https://github.com/Devolutions/devolutions-gateway/issues/1525)) ([aba955264f](https://github.com/Devolutions/devolutions-gateway/commit/aba955264fa17e8a8aecde07cc80efd5f95f75ed)) ([DGW-310](https://devolutions.atlassian.net/browse/DGW-310)) 
+
+  The listener binding will be reattempted a set amount of time when a
+  transient error is hit, such as "address already in use".
+
 ## 2025.3.1 (2025-9-13)
 
 ### Bug Fixes
