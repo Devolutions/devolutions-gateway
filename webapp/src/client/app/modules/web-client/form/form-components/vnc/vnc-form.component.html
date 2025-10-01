@@ -40,20 +40,39 @@
     </div>
 
     <div class="col-12 gateway-form-group">
-      <web-client-enabled-encodings-control [parentForm]="form"
-                                            [inputFormData]="inputFormData"></web-client-enabled-encodings-control>
+      <web-client-enabled-encoding-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+        (controlReady)="subscribeToSelectedEncodingChanges()"></web-client-enabled-encoding-control>
     </div>
 
-    <div class="col-12 gateway-form-group">
-      <web-client-color-format-control [parentForm]="form"
-        [inputFormData]="inputFormData"></web-client-color-format-control>
+    @if (showTightOptions) {
+      <div class="col-12 gateway-form-group">
+        <web-client-tight-png-enabled-control [parentForm]="form"
+                                              [inputFormData]="inputFormData"
+                                              (controlReady)="subscribeToPngEnabledChanges()"></web-client-tight-png-enabled-control>
+      </div>
+
+      <div class="col-12 gateway-form-group">
         <web-client-jpeg-quality-level-control [parentForm]="form"
-                                               [inputFormData]="inputFormData"></web-client-jpeg-quality-level-control>
-    </div>
+                                               [inputFormData]="inputFormData"
+                                               (controlReady)="subscribeToJpegEnabledChanges()"></web-client-jpeg-quality-level-control>
+      </div>
+    }
+
+    @if (showPixelFormatSelector) {
+      <div class="col-12 gateway-form-group">
+        <web-client-color-format-control [parentForm]="form"
+                                         [inputFormData]="inputFormData"
+                                         [disabled]="pixelFormatSelectorDisabled"
+                                         disabledTooltip="Tight JPEG and Tight PNG do not support custom pixel formats."
+        ></web-client-color-format-control>
+      </div>
+    }
 
     <div class="col-12 gateway-form-group">
       <web-client-enable-cursor-control [parentForm]="form"
-                                         [inputFormData]="inputFormData"></web-client-enable-cursor-control>
+                                        [inputFormData]="inputFormData"></web-client-enable-cursor-control>
     </div>
 
     <div *ngIf="showExtendedClipboardCheckbox" class="col-12 gateway-form-group">
