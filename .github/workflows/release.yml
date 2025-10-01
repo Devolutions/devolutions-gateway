@@ -246,6 +246,64 @@ jobs:
           # For the PowerShell module, only upload the nupkg.
           Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar) -Recurse -ErrorAction Ignore
 
+          # Remove leftover tun2socks.exe files.
+          Get-ChildItem -Recurse -Name "tun2socks.exe" | Remove-Item -ErrorAction Ignore
+
+      - name: Create jetsocat ZIP files for winget
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+
+          $Version = "${{ needs.preflight.outputs.version }}"
+          $ZipFolder = "jetsocat-zips"
+          New-Item -ItemType Directory -Path $ZipFolder -Force
+
+          # Define the platforms and architectures.
+          $Platforms = @(
+            @{ OS = "windows"; Arch = "x86_64"; Extension = ".exe" },
+            @{ OS = "windows"; Arch = "arm64"; Extension = ".exe" },
+            @{ OS = "linux"; Arch = "x86_64"; Extension = "" },
+            @{ OS = "linux"; Arch = "arm64"; Extension = "" },
+            @{ OS = "macos"; Arch = "x86_64"; Extension = "" },
+            @{ OS = "macos"; Arch = "arm64"; Extension = "" }
+          )
+
+          foreach ($Platform in $Platforms) {
+            $OS = $Platform.OS
+            $Arch = $Platform.Arch
+            $Ext = $Platform.Extension
+
+            # Find the original binary.
+            $BinaryPattern = "jetsocat_*_${Version}_${Arch}${Ext}"
+            $OriginalBinary = Get-ChildItem -Recurse -Filter $BinaryPattern -File | Select-Object -First 1
+
+            if ($OriginalBinary) {
+              # Create temporary folder for this zip.
+              $TempFolder = Join-Path $ZipFolder "temp-$OS-$Arch"
+              New-Item -ItemType Directory -Path $TempFolder -Force
+
+              # Copy binary with standard name.
+              $TargetName = "jetsocat${Ext}"
+              $TargetPath = Join-Path $TempFolder $TargetName
+              Copy-Item -Path $OriginalBinary.FullName -Destination $TargetPath
+
+              # Create ZIP file.
+              $ZipName = "jetsocat-$OS-$Arch.zip"
+              $ZipPath = Join-Path $ZipFolder $ZipName
+              Compress-Archive -Path $TargetPath -DestinationPath $ZipPath -Force
+
+              Write-Host "Created $ZipName"
+
+              # Clean up temp folder.
+              Remove-Item -Path $TempFolder -Recurse -Force
+
+              # Remove the original binary to avoid uploading it.
+              Remove-Item -Path $OriginalBinary.FullName
+            } else {
+              Write-Warning "Could not find binary for $OS $Arch"
+            }
+          }
+
       - name: Create GitHub release
         shell: pwsh
         env:
