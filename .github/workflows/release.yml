@@ -582,6 +582,14 @@ jobs:
     environment: sbom
 
     steps:
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          ref: v1
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
       - name: Download SBOM artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
