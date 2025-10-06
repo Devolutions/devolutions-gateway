@@ -57,7 +57,7 @@ features = [
 hex = "0.4"
 notify-debouncer-mini = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "system-proxy", "socks"] }
-aws-lc-rs = "1.13"
+aws-lc-rs = "1.14"
 sha2 = "0.10"
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
