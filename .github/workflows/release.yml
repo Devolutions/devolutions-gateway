@@ -590,6 +590,13 @@ jobs:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
+      ## Devolutions Toolbox is required for OneDrive uploading
+
+      - name: Install Devolutions Toolbox
+        uses: ./.github/workflows/toolbox-install
+        with:
+          github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+
       - name: Download SBOM artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
