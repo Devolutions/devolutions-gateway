@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
@@ -9,14 +8,15 @@ use now_proto_pdu::{
     ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
     NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
     NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
-    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmCapabilitiesMsg, NowRdmMessage, NowSessionCapsetFlags,
-    NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags,
-    NowSystemMessage, SetKbdLayoutOption,
+    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmMessage, NowSessionCapsetFlags, NowSessionMessage,
+    NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage,
+    SetKbdLayoutOption,
 };
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{error, info, warn};
 use win_api_wrappers::event::Event;
+use win_api_wrappers::process::Process;
 use win_api_wrappers::security::privilege::ScopedPrivileges;
 use win_api_wrappers::utils::WideString;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -38,6 +38,7 @@ use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_sig
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
+use crate::dvc::rdm::RdmMessageProcessor;
 
 // One minute heartbeat interval by default
 const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
@@ -289,6 +290,7 @@ struct MessageProcessor {
     #[allow(dead_code)] // Not yet used.
     capabilities: NowChannelCapsetMsg,
     sessions: HashMap<u32, WinApiProcess>,
+    rdm_handler: RdmMessageProcessor,
 }
 
 impl MessageProcessor {
@@ -297,11 +299,13 @@ impl MessageProcessor {
         dvc_tx: WinapiSignaledSender<NowMessage<'static>>,
         io_notification_tx: Sender<ServerChannelEvent>,
     ) -> Self {
+        let rdm_handler = RdmMessageProcessor::new(dvc_tx.clone());
         Self {
             dvc_tx,
             io_notification_tx,
             capabilities,
             sessions: HashMap::new(),
+            rdm_handler,
         }
     }
 
@@ -331,20 +335,6 @@ impl MessageProcessor {
         message: NowMessage<'static>,
     ) -> anyhow::Result<ProcessMessageAction> {
         match message {
-            NowMessage::Rdm(NowRdmMessage::Capabilities(_)) => {
-                // Send empty capabilities (as RDM app is not available on the server side).
-
-                let server_timestamp = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .context("Failed to get current timestamp")?
-                    .as_secs();
-
-                let rdm_caps = NowRdmCapabilitiesMsg::new(server_timestamp, String::new())?;
-
-                self.dvc_tx
-                    .send(NowMessage::Rdm(NowRdmMessage::Capabilities(rdm_caps)))
-                    .await?;
-            }
             NowMessage::Channel(NowChannelMessage::Capset(client_caps)) => {
                 return Ok(ProcessMessageAction::Restart(client_caps));
             }
@@ -481,8 +471,8 @@ impl MessageProcessor {
                 }
             }
             NowMessage::System(NowSystemMessage::Shutdown(shutdown_msg)) => {
-                let mut current_process_token = win_api_wrappers::process::Process::current_process()
-                    .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
+                let mut current_process_token =
+                    Process::current_process().token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
                 let mut _priv_tcb = ScopedPrivileges::enter(
                     &mut current_process_token,
                     &[win_api_wrappers::security::privilege::SE_SHUTDOWN_NAME],
@@ -526,6 +516,33 @@ impl MessageProcessor {
 
                 // TODO: Adjust `NowSession` token privileges in NowAgent to make shutdown possible
                 // from this process.
+            }
+            NowMessage::Rdm(NowRdmMessage::Capabilities(rdm_caps_msg)) => {
+                match self.rdm_handler.process_capabilities(rdm_caps_msg).await {
+                    Ok(response_msg) => {
+                        self.dvc_tx.send(response_msg).await?;
+                    }
+                    Err(error) => {
+                        error!(%error, "Failed to process RDM capabilities message");
+                    }
+                }
+            }
+            NowMessage::Rdm(NowRdmMessage::AppStart(rdm_app_start_msg)) => {
+                // Start RDM in background task (non-blocking) - needs capabilities
+                self.rdm_handler
+                    .process_app_start(rdm_app_start_msg, self.capabilities.clone());
+                info!("RDM application start initiated in background");
+            }
+            NowMessage::Rdm(other_rdm_msg) => {
+                // Forward all other RDM messages (including AppAction) to RDM via pipe
+                match self.rdm_handler.forward_message(other_rdm_msg).await {
+                    Ok(()) => {
+                        info!("RDM message forwarded to pipe successfully");
+                    }
+                    Err(error) => {
+                        error!(%error, "Failed to forward RDM message to pipe");
+                    }
+                }
             }
             _ => {
                 warn!("Unsupported message: {:?}", message);

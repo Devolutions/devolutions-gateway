@@ -45,6 +45,7 @@ pub struct PackageInfoError {
 pub fn get_installed_agent_version() -> Result<Option<DateVersion>, PackageInfoError> {
     Ok(windows::registry::get_installed_product_version(
         windows::AGENT_UPDATE_CODE,
+        windows::registry::ProductVersionEncoding::Agent,
     )?)
 }
 
