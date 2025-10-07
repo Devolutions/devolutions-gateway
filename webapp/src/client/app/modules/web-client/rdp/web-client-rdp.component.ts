@@ -26,7 +26,7 @@ import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { Message, MessageService } from 'primeng/api';
-import { debounceTime, EMPTY, from, noop, Observable, of, Subject, Subscription } from 'rxjs';
+import { debounceTime, EMPTY, from, noop, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { ActivatedRoute } from '@angular/router';
@@ -496,6 +496,18 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     const username = rdpFile.getStr('username');
     const password = rdpFile.getStr('ClearTextPassword');
     const kdcProxyUrl = rdpFile.getStr('kdcproxyurl');
+
+    if (host === undefined) {
+      return throwError(() => new Error('Invalid configuration: `host` is not provided'));
+    }
+
+    if (username === undefined) {
+      return throwError(() => new Error('Invalid configuration: `username` is not provided'));
+    }
+
+    if (password === undefined) {
+      return throwError(() => new Error('Invalid configuration: `ClearTextPassword` is not provided'));
+    }
 
     const extractedUsernameDomain: ExtractedUsernameDomain = this.utils.string.extractDomain(username);
 
