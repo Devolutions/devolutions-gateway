@@ -1,0 +1,41 @@
+@font-face {
+  font-family: "VideoJS";
+  src: url("./fonts/VideoJS.woff") format("woff"), url("./fonts/VideoJS.ttf") format("truetype");
+}
+
+.vjs-devolutions-progress-control {
+  cursor: pointer;
+  flex: auto;
+  display: flex;
+  align-items: center;
+  min-width: 4em;
+  touch-action: none;
+}
+
+.video-js .vjs-devolutions-progress-control .vjs-progress-holder {
+  margin-top: 0;
+  margin-left: 3px;
+  margin-right: 0;
+  margin-bottom: 0;
+}
+
+.video-js .vjs-devolutions-progress-control .vjs-progress-holder:hover {
+  height: 10px;
+}
+
+.vjs-devolutions-play-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  background-color: #fff;
+  height: 100%;
+  pointer-events: none;
+}
+
+.vjs-devolutions-load-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  background-color: #f0f0f0;
+  height: 100%;
+}

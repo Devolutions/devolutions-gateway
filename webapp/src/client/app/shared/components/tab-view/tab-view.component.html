@@ -1,9 +1,0 @@
-<div #sessionsContainer class="tabview-container" [ngClass]="{'session-background': addBackgroundClass()}">
-    <p-tabView #tabView class="hidden-tab-headers">
-        <p-tabPanel *ngFor="let tab of webSessionTabs;">
-            <web-client-dynamic-tab [webSessionTab]="tab"
-                                    [sessionsContainerElement]="sessionsContainerRef"
-                                    (componentRefSizeChange)="measureSize()"></web-client-dynamic-tab>
-        </p-tabPanel>
-    </p-tabView>
-</div>

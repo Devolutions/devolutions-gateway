@@ -1,0 +1,9 @@
+p-inputmask.ng-dirty.ng-invalid > .p-inputtext {
+  border-color: #f44336;
+}
+
+.p-inputgroup {
+  p-inputMask {
+    display: flex;
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "recording-player",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:debug": "tsc --sourceMap && vite build --mode development",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2",
+    "vite": "^6.0.1"
+  },
+  "dependencies": {
+    "@devolutions/multi-video-player": "workspace:*",
+    "@devolutions/shadow-player": "workspace:*",
+    "asciinema-player": "^3.8.1",
+    "i18next": "^24.2.1",
+    "vite-plugin-static-copy": "^2.3.0"
+  }
+}

@@ -1,0 +1,339 @@
+@import 'theme-mode-variables';
+
+/* INPUTS */
+@mixin devolutions-dropdown-filter-icon-input() {
+  font-family: 'devolutions-icons';
+  color: $dropdown-filter-icon-color;
+  font-size: 20px;
+
+  &:before {
+    content: 'filter_bold';
+  }
+}
+
+/* BORDER */
+@mixin border-radius($val) {
+  -moz-border-radius: $val;
+  -webkit-border-radius: $val;
+  border-radius: $val;
+}
+
+/* TRANSITIONS */
+@mixin transition($transition...) {
+  -moz-transition: $transition;
+  -o-transition: $transition;
+  -webkit-transition: $transition;
+  transition: $transition;
+}
+
+@mixin btn-color-design() {
+  &.primary {
+    background-color: var(--action-btn-outline-primary-bg-color);
+    border: 1px solid var(--action-btn-outline-primary-bg-color);
+    color: var(--action-btn-outline-primary-color);
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--action-btn-outline-primary-border-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):hover {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-primary-bg-hover-color),
+          var(--action-btn-outline-primary-bg-hover-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-primary-border-hover-color);
+      }
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-primary-bg-pressed-color),
+          var(--action-btn-outline-primary-bg-pressed-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-primary-border-pressed-color);
+      }
+    }
+  }
+
+  &.secondary {
+    background-color: var(--action-btn-outline-secondary-bg-color);
+    border: 1px solid var(--action-btn-outline-secondary-border-color);
+    color: var(--action-btn-outline-secondary-color);
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--action-btn-outline-secondary-border-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):hover {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-secondary-bg-hover-color),
+          var(--action-btn-outline-secondary-border-hover-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-secondary-border-hover-color);
+      }
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-secondary-bg-pressed-color),
+          var(--action-btn-outline-secondary-border-pressed-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-secondary-border-pressed-color);
+      }
+    }
+  }
+
+  &.tertiary {
+    background-color: var(--action-btn-outline-tertiary-bg-color);
+    border: 1px solid var(--action-btn-outline-tertiary-border-color);
+    color: var(--action-btn-outline-tertiary-color);
+
+    &:not(.p-disabled):not([disabled]):hover {
+      background: var(--action-btn-outline-tertiary-bg-hover-color);
+      border-color: var(--action-btn-outline-tertiary-border-hover-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      background: var(--action-btn-outline-tertiary-bg-pressed-color);
+      border-color: var(--action-btn-outline-tertiary-border-pressed-color);
+    }
+  }
+
+  &.danger.primary {
+    background-color: var(--error-btn-outline-primary-bg-color);
+    border: 1px solid var(--error-btn-outline-primary-bg-color);
+    color: var(--error-btn-outline-primary-color);
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--error-btn-outline-primary-border-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):hover {
+      background: var(--error-btn-outline-primary-bg-hover-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      background: var(--error-btn-outline-primary-bg-pressed-color);
+    }
+  }
+
+  &.button-disabled {
+    background-color: var(--btn-outline-disabled-bg-color);
+    border-color: var(--btn-outline-disabled-border-color);
+    color: var(--btn-outline-disabled-color);
+    opacity: 1;
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--btn-outline-disabled-border-color);
+    }
+  }
+}
+
+@mixin btn-double-layer-background-color-effect($background-color, $border-color) {
+  &:before {
+    background: $background-color;
+    border-color: $border-color;
+    content: '';
+    height: 100%;
+    left: 0;
+    mix-blend-mode: multiply;
+    position: absolute;
+    top: 0;
+    width: 100%;
+    z-index: 1;
+  }
+}
+
+@mixin btn-hover-active-transition($hover-background-color, $active-background-color) {
+  -moz-transition: background-color ease-in-out $transitionDuration;
+  -o-transition: background-color ease-in-out $transitionDuration;
+  -webkit-transition: background-color ease-in-out $transitionDuration;
+  transition: background-color ease-in-out $transitionDuration;
+
+  &:hover {
+    background-color: $hover-background-color !important;
+  }
+
+  &:active {
+    background-color: $active-background-color !important;
+  }
+}
+
+// Mixing that styles scrollbar
+// ::-webkit-scrollbar already included globally in base.scss, not included here. Keeping it DRY
+@mixin custom-scrollbar($overlay: false, $track-color: $scrollbar-background-color, $thumb-color: $scrollbar-color) {
+  overflow: auto;
+
+  // Makes scrollbar over content on webkit
+  // ** Use with caution, creates a bug where the scrollbable area is over everything, even if there is popup over it
+  // https://devolutions.atlassian.net/browse/HB-1925
+  @if $overlay {
+    @supports (overflow: overlay) {
+      overflow: overlay;
+    }
+  }
+
+  // Scrollbar options for Firefox
+  // Needs `thin` to be consistent with windows 10/11
+  scrollbar-width: thin;
+  scrollbar-color: $thumb-color $track-color;
+
+  // Output only if different than default color
+  @if $track-color != $scrollbar-background-color {
+    &::-webkit-scrollbar-track {
+      background-color: $track-color !important;
+    }
+  }
+
+  // Output only if different than default color
+  @if $thumb-color != $scrollbar-color {
+    &::-webkit-scrollbar-thumb {
+      background-color: $thumb-color !important;
+    }
+  }
+}
+
+/* TEXT */
+@mixin text-ellipsis($numberOfRow: 1) {
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+
+  @if ($numberOfRow > 1) {
+    @supports (-webkit-line-clamp: $numberOfRow) {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: initial;
+      display: -webkit-box;
+      -webkit-line-clamp: $numberOfRow;
+      -webkit-box-orient: vertical;
+    }
+  }
+}
+
+/* POSITION */
+@mixin sticky($alignment: 'top') {
+  position: sticky !important;
+  position: -webkit-sticky !important; /* Safari */
+  z-index: 100;
+  #{$alignment}: 0;
+}
+
+/* BREAKPOINTS */
+@mixin media-breakpoint-up($name, $breakpoints: $grid-breakpoints) {
+  $min: breakpoint-min($name, $breakpoints);
+  @if $min {
+    @media (min-width: $min) {
+      @content;
+    }
+  } @else {
+    @content;
+  }
+}
+
+@mixin media-breakpoint-down($name, $breakpoints: $grid-breakpoints) {
+  $max: breakpoint-max($name, $breakpoints);
+  @if $max {
+    @media (max-width: $max) {
+      @content;
+    }
+  } @else {
+    @content;
+  }
+}
+
+@mixin media-breakpoint-between($lower, $upper, $breakpoints: $grid-breakpoints) {
+  @include media-breakpoint-up($lower, $breakpoints) {
+    @include media-breakpoint-down($upper, $breakpoints) {
+      @content;
+    }
+  }
+}
+
+@mixin _assert-ascending($map, $map-name) {
+  $prev-key: null;
+  $prev-num: null;
+  @each $key, $num in $map {
+    @if $prev-num == null {
+      /* Do nothing */
+    } @else if not comparable($prev-num, $num) {
+      @warn "Potentially invalid value for #{$map-name}: This map must be in ascending order, but key '#{$key}' has value #{$num} whose unit makes it incomparable to #{$prev-num}, the value of the previous key '#{$prev-key}' !";
+    } @else if $prev-num >= $num {
+      @warn "Invalid value for #{$map-name}: This map must be in ascending order, but key '#{$key}' has value #{$num} which isn't greater than #{$prev-num}, the value of the previous key '#{$prev-key}' !";
+    }
+    $prev-key: $key;
+    $prev-num: $num;
+  }
+}
+
+@mixin _assert-starts-at-zero($map) {
+  $values: map-values($map);
+  $first-value: nth($values, 1);
+  @if $first-value != 0 {
+    @warn "First breakpoint in `$grid-breakpoints` must start at 0, but starts at #{$first-value}.";
+  }
+}
+
+$grid-breakpoints: (
+  xs: 0,
+  sm: 576px,
+  md: 768px,
+  lg: 992px,
+  xl: 1200px,
+) !default;
+@include _assert-ascending($grid-breakpoints, '$grid-breakpoints');
+@include _assert-starts-at-zero($grid-breakpoints);
+
+@function breakpoint-next($name, $breakpoints: $grid-breakpoints, $breakpoint-names: map-keys($breakpoints)) {
+  $n: index($breakpoint-names, $name);
+  @return if($n < length($breakpoint-names), nth($breakpoint-names, $n + 1), null);
+}
+
+@function breakpoint-min($name, $breakpoints: $grid-breakpoints) {
+  $min: map-get($breakpoints, $name);
+  @return if($min != 0, $min, null);
+}
+
+@function breakpoint-max($name, $breakpoints: $grid-breakpoints) {
+  $next: breakpoint-next($name, $breakpoints);
+  @return if($next, breakpoint-min($next, $breakpoints) - 1px, null);
+}
+
+/* Devolutions Font */
+
+@mixin dvl-icon-font() {
+  font-family: 'devolutions-icons', 'Open Sans', serif;
+  font-variant-ligatures: discretionary-ligatures;
+  font-feature-settings: 'liga';
+  font-kerning: auto;
+  font-language-override: normal;
+  font-size: inherit;
+  font-size-adjust: none;
+  font-stretch: normal;
+  font-style: normal;
+  font-synthesis: weight style;
+  font-variant: normal;
+  font-weight: normal;
+  line-height: 1;
+  text-rendering: auto;
+
+  // Better Font Rendering ===========
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@mixin override-font($icon) {
+  @include dvl-icon-font();
+
+  &:before {
+    content: $icon;
+  }
+}

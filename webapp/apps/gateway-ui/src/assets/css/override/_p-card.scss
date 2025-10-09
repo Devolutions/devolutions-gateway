@@ -1,0 +1,56 @@
+p-card {
+  margin: 0 auto;
+  border-radius: 6px;
+
+  .p-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    border-radius: $borderRadius;
+    background-color: $dashboard-card-bg-color;
+    border: 1px solid $dashboard-card-border-color;
+
+    &.secondary-color {
+      background: $dashboard-card-secondary-bg-color;
+    }
+
+    .p-card-title {
+      margin-bottom: 5px;
+    }
+
+    .p-card-body {
+      height: 100%;
+      width: 100%;
+      padding: 1em;
+      color: $default-text-theme-color;
+    }
+
+    .p-card-content {
+      height: 100%;
+      color: $dashboard-card-txt-color;
+    }
+  }
+
+  &.admin-card {
+    min-width: 400px;
+    margin: 0;
+
+    .section {
+      padding: 0;
+
+      &:first-child:not(:only-child) {
+        margin-bottom: 15px;
+      }
+
+      &.column {
+        .admin-section-title {
+          margin: 0 0 15px 0;
+        }
+
+        .admin-section-control {
+          width: 170px;
+        }
+      }
+    }
+  }
+}

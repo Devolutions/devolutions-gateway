@@ -1,0 +1,17 @@
+<div
+  class="layout-wrapper"
+  [ngClass]="{'layout-mobile-active': staticMenuMobileActive}">
+
+  <div class="layout-data">
+    <div class="layout-menu-container dark-theme dark">
+      <app-menu></app-menu>
+    </div>
+
+    <div class="layout-main visible-layout">
+      <div class="layout-main-content">
+        <router-outlet></router-outlet>
+      </div>
+    </div>
+  </div>
+
+</div>

@@ -1,0 +1,27 @@
+<div #sessionArdContainer>
+  <div *ngIf="currentStatus.isDisabled" class="session-form">
+    <web-client-form
+      [webSessionId]="webSessionId"
+      [inputFormData]="formData"
+      [sessionTerminationMessage]="sessionTerminationMessage"
+      [isFormExists]="true"></web-client-form>
+  </div>
+
+  <session-toolbar
+    [sessionContainerParent]="sessionContainerElement"
+    [middleButtons]="middleToolbarButtons"
+    [middleToggleButtons]="middleToolbarToggleButtons"
+    [rightButtons]="rightToolbarButtons"
+    [sliders]="sliders"
+    [clipboardActionButtons]="clipboardActionButtons">
+  </session-toolbar>
+
+  <div class="loading-info-container" *ngIf="loading">
+    <div class="loading-info">
+      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
+    </div>
+  </div>
+
+  <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true" [module]="backendRef"></iron-remote-desktop>
+
+</div>

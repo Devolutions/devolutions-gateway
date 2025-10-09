@@ -1,0 +1,191 @@
+@import "theme-mode-variables";
+
+.p-inline-message,
+.p-message {
+  padding: 10px 15px;
+
+  timescircleicon, infocircleicon, checkicon, exclamationtriangleicon {
+    display: none;
+  }
+}
+
+/* Specific to p-messages and p-message/p-inline-message */
+.p-message {
+  display: flex;
+  align-items: center;
+  min-height: 60px;
+  width: 100%;
+
+  .p-message-wrapper {
+    width: 100%;
+  }
+
+  .p-message-detail {
+    margin-left: .25em;
+  }
+}
+
+/* Specific to p-toast */
+.p-toast {
+  display: flex;
+  flex-direction: column;
+  top: 64px;
+  right: 34px;
+
+  p-toastItem {
+    min-height: 60px;
+    width: 285px !important;
+    margin-left: auto;
+    margin-bottom: 8px;
+  }
+
+  .p-toast-message {
+    border: 0;
+    box-shadow: 0 8px 8px 0 rgba(0, 0, 0, 0.16);
+    padding: 20px 12px 20px 20px;
+  }
+}
+
+.p-toast-message-info,
+.p-messages-info,
+.p-message-info,
+.p-inline-message-info {
+  --status-banner-color-rgb: var(--status-banner-info-color-rgb);
+}
+
+.p-toast-message-success,
+.p-messages-success,
+.p-message-success,
+.p-inline-message-success {
+  --status-banner-color-rgb: var(--status-banner-success-color-rgb);
+}
+
+.p-toast-message-warn,
+.p-messages-warn,
+.p-message-warn,
+.p-inline-message-warn {
+  --status-banner-color-rgb: var(--status-banner-warning-color-rgb);
+}
+
+.p-toast-message-error,
+.p-messages-error,
+.p-message-error,
+.p-inline-message-error {
+  --status-banner-color-rgb: var(--status-banner-error-color-rgb);
+}
+
+/* Shared */
+.p-toast-message,
+.p-message,
+.p-inline-message {
+  --status-banner-color: rgba(var(--status-banner-color-rgb), 1);
+  --status-banner-background-color: rgba(var(--status-banner-color-rgb), var(--status-banner-background-opacity));
+  --status-banner-border-color: rgba(var(--status-banner-color-rgb), var(--status-banner-background-opacity));
+  --status-banner-radius: 6px;
+
+  // We layer 2 colors (status color + white or black) on top of each other so the bg color isn't transparent but we still maintain 1 color by status
+  background-image: linear-gradient(0deg, var(--status-banner-background-color), var(--status-banner-background-color)), linear-gradient(0deg, rgb(var(--base-color-inverted-rgb)), rgb(var(--base-color-inverted-rgb)));
+  border: 1px solid var(--status-banner-border-color);
+  border-radius: var(--status-banner-radius);
+  color: $messageFontColor;
+  margin-bottom: 0;
+  position: relative;
+  text-align: center;
+
+
+  &::before {
+    border-radius: var(--status-banner-radius) 0 0 var(--status-banner-radius);
+    left: -1px;
+    top: -1px;
+    bottom: -1px;
+    position: absolute;
+    width: 5px;
+    background-color: var(--status-banner-color);
+    content: '';
+  }
+
+  .p-inline-message-icon,
+  .p-messages-detail a {
+    color: var(--status-banner-color);
+  }
+
+  .p-toast-message-icon,
+  .p-messages-icon {
+    display: none;
+  }
+
+  .p-message-icon {
+    color: var(--status-banner-color);
+    font-size: 30px;
+    margin-right: 10px;
+  }
+
+  .p-inline-message-icon {
+    font-size: 20px;
+    margin-right: 10px;
+  }
+
+  .p-toast-message-content {
+    padding: 0;
+  }
+
+  .p-toast-summary,
+  .p-message-summary,
+  .p-toast-detail {
+    font-style: normal;
+    font-family: "Segoe UI Semibold", sans-serif;
+    font-weight: 600;
+  }
+
+  .p-toast-detail {
+    text-align: left;
+    max-width: 209px;
+  }
+
+  .p-toast-message-text {
+    margin: auto;
+  }
+
+  .p-messages-close i {
+    display: none;
+  }
+
+  .p-toast-icon-close {
+    color: $messageFontColor;
+
+    .p-toast-icon-close-icon:before {
+      font-family: 'devolutions-icons' !important;
+      font-size: 24px;
+      content: "\e93f" !important;
+      opacity: 0.2;
+    }
+
+    &:hover .p-toast-icon-close-icon:before {
+      opacity: 1;
+    }
+  }
+
+  .p-messages-close {
+    top: -10px;
+    color: $messageFontColor;
+
+    &:before {
+      font-family: 'devolutions-icons' !important;
+      font-size: 24px;
+      content: "\e93f" !important;
+      opacity: 0.2;
+    }
+
+    &:hover:before {
+      opacity: 1;
+    }
+  }
+}
+
+.p-messages.p-component.checkout-request,
+.p-messages.p-component.temp-access {
+  .p-message, p-inline-message {
+    padding-left: 1em;
+  }
+}
+

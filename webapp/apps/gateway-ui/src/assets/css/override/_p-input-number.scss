@@ -1,0 +1,76 @@
+p-inputNumber {
+  display: flex;
+  width: 100%;
+  background: var(--input-txt-bg-color);
+  border: 1px solid $input-default-border-color;
+  border-radius: $borderRadius;
+  @include transition(border-color $transitionDuration);
+
+  input, .p-inputtext {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .p-inputnumber {
+    width: 100%;
+    margin-right: 5px;
+    border-radius: $borderRadius;
+    background: $input-txt-bg-color;
+
+    .p-inputnumber-button-group {
+      flex: 1 0 auto;
+
+      .p-button {
+        background-color: transparent;
+        border: none;
+        color: $dropdown-trigger-color;
+        margin-right: 0;
+        padding: 0;
+        z-index: auto;
+
+        &:not(.p-disabled):hover, &:not(.p-disabled):focus, &:not(.p-disabled):active {
+          color: $default-text-color;
+          background-color: transparent;
+        }
+
+        .p-button-icon {
+          font-size: 16px;
+          font-family: 'devolutions-icons';
+        }
+
+        &:hover {
+          .p-button-icon {
+            color: $default-btn-bg-color;
+          }
+        }
+
+        &.p-inputnumber-button-up {
+          .p-button-icon:before {
+            content: "arrow_up_medium";
+            display: inline-block;
+          }
+        }
+
+        &.p-inputnumber-button-down {
+          .p-button-icon:before {
+            content: "arrow_down_medium";
+            display: inline-block;
+          }
+        }
+      }
+    }
+  }
+
+  &.ng-invalid.ng-touched {
+    border-color: $input-txt-border-error-color;
+  }
+
+  &:not(.p-disabled):hover {
+    border: 1px solid $input-txt-border-hover-color;
+  }
+
+  &:not(.p-disabled).p-inputwrapper-focus {
+    border: 1px solid $input-txt-border-focus-color;
+    box-shadow: 0 3px 6px 0 $input-txt-shadow-color;
+  }
+}

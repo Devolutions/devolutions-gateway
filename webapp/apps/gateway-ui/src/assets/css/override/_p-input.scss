@@ -1,0 +1,48 @@
+body .p-inputtext {
+  padding: 5px 0 5px 8px;
+  line-height: 24px;
+}
+
+.p-inputtext {
+  color: $input-txt-color;
+  font-size: $fontSize;
+  background: var(--input-txt-bg-color);
+  padding: .429em;
+  border: 1px solid $input-txt-border-color;
+  @include transition(box-shadow $transitionDuration, border-color $transitionDuration);
+  @include border-radius($borderRadius);
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+
+  &:enabled:hover:not(.p-state-error) {
+    border-color: $input-txt-border-hover-color;
+  }
+
+  &.read-only {
+    color: var(--input-txt-read-only-color);
+    background-color: var(--input-txt-bg-read-only-color);
+  }
+}
+
+.p-inputgroup {
+
+  input, .p-inputtext {
+    border: none !important;
+    box-shadow: none !important;
+  }
+}
+
+.p-input-icon-left {
+
+  & > i {
+    top: 18%;
+    margin-top: unset;
+    left: 0.75rem;
+    font-size: 16px;
+  }
+
+  & > .p-inputtext {
+    padding-left: 2.5rem;
+  }
+}

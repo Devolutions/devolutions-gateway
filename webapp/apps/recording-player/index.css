@@ -1,0 +1,73 @@
+@import url("./node_modules/@devolutions/multi-video-player/dist/multi-video-player.css");
+
+html,
+body {
+  background-color: black;
+}
+
+#terminal {
+  height: 100%;
+}
+
+.xterm .xterm-screen {
+  position: relative;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+.xterm .xterm-screen canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+/* General styles for the notification overlay */
+#notification {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999; /* Ensure it's above other elements */
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Content styling for the notification box */
+#notification-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  max-width: 90%;
+  width: 400px;
+  text-align: center;
+}
+
+/* Message styling */
+#notification-message {
+  font-size: 16px;
+  margin-bottom: 15px;
+  color: #333;
+}
+
+/* Close button styling */
+#notification-close {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+#notification-close:hover {
+  background-color: #0056b3;
+}

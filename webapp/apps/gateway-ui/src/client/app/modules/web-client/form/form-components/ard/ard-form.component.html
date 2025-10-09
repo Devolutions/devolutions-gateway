@@ -1,0 +1,38 @@
+<div [formGroup]="form">
+    <div class="col-12 gateway-form-group">
+      <web-client-username-control [parentForm]="form"
+                                   [inputFormData]="inputFormData"></web-client-username-control>
+    </div>
+
+    <div class="col-12 gateway-form-group">
+      <web-client-password-control [parentForm]="form"
+                                   [inputFormData]="inputFormData"></web-client-password-control>
+    </div>
+
+    <div class="col-12 gateway-form-group">
+      <a href="#" (click)="toggleMoreSettings($event)">More Settings
+          <span *ngIf="!showMoreSettings" >+</span>
+          <span *ngIf="showMoreSettings">-</span>
+      </a>
+    </div>
+
+    <div [hidden]="!showMoreSettings" class="col-12 gateway-form-group">
+
+      <div class="col-12 gateway-form-group">
+        <web-client-resolution-quality-control [parentForm]="form"
+                                               [inputFormData]="inputFormData"></web-client-resolution-quality-control>
+      </div>
+
+      <div class="col-12 gateway-form-group">
+        <web-client-ard-quality-mode-control [parentForm]="form"
+                                             [inputFormData]="inputFormData"></web-client-ard-quality-mode-control>
+      </div>
+
+      <div *ngIf="showAutoClipboardCheckbox" class="col-12 gateway-form-group">
+        <web-client-auto-clipboard-control [parentForm]="form"
+                                           [inputFormData]="inputFormData"></web-client-auto-clipboard-control>
+      </div>
+
+  </div>
+
+</div>

@@ -1,0 +1,172 @@
+@import '../../../../assets/css/style/mixins';
+@import '../../../../assets/css/style/variables';
+
+:host {
+  --box-background-color: white;
+  --box-text-color: rgb(var(--base-color-rgb));
+}
+
+.login-background {
+  background: url('../../../../assets/images/background-login.jpg') no-repeat;
+  -webkit-background-size: cover;
+  -moz-background-size: cover;
+  -o-background-size: cover;
+  background-size: cover;
+  height: 100%;
+  overflow: auto;
+
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, .4) !important;
+  }
+
+  & > div {
+    position: relative;
+  }
+}
+
+@media screen and (max-width: 992px) {
+  .login-background > div {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.login-box {
+  width: 460px;
+  border-radius: 4px;
+  z-index: 1;
+  background-color: rgba(var(--base-background-color), 1);
+  margin-top: 10vh;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.login-box-header {
+  padding: 40px 40px 10px 40px;
+  text-align: center;
+}
+
+.login-form {
+  background-color: var(--box-background-color);
+  width: 377px;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.centered-login-form {
+  margin: auto; /* for horizontal centering */
+}
+
+.login-form-header {
+  padding-bottom: 24px;
+  text-align: center;
+}
+
+.login-form-title {
+  color: var(--box-text-color);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0em;
+}
+
+.login-form-content {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.login-form-group {
+  padding: 0px 0px 18px 0px;
+}
+
+.login-form-input {
+  display: flex;
+  align-items: center;
+}
+
+.login-form-message {
+  margin-bottom: 10px;
+}
+
+:host ::ng-deep .p-message-summary {
+  display: none !important;
+}
+
+:host ::ng-deep .p-message.p-message-error {
+  timescircleicon {
+    display: inline !important;
+  }
+  border: none;
+  text-align: left;
+
+  &::before {
+    background: rgba(255, 26, 26, 0.1) none;
+    width: 0;
+  }
+}
+
+.password-container {
+  position: relative;
+  width: 100%;
+}
+
+.password-container input[type="password"] {
+  width: 100%;
+  padding-right: 40px;
+  box-sizing: border-box;
+}
+
+.password-container span {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+:host ::ng-deep .p-message-summary {
+  display: none !important;
+}
+
+:host ::ng-deep .p-message {
+  timescircleicon {
+    display: inline !important;
+  }
+}
+
+:host ::ng-deep .p-message-icon {
+  font-size: 20px;
+}
+
+:host ::ng-deep .btn-login {
+  margin-right: 0px;
+}
+
+:host ::ng-deep .btn-login {
+    width: 100%;
+    padding: 10px;
+    background-color: $default-btn-bg-color;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+:host ::ng-deep .btn-login:hover {
+  background-color: $default-btn-bg-hover-color;
+}
+
+.form-helper-text {
+  line-height: 11px;
+  word-wrap: break-word;
+  color: var(--status-error-text-color);
+  font-size: 11px;
+  font-family: Open Sans;
+  font-weight: 400;
+  padding-left: 8px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  display: inline-flex
+}

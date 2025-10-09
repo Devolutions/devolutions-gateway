@@ -1,0 +1,33 @@
+{
+  "/jet/webapp/app-token": {
+    "target": "http://localhost:7171",
+    "secure": false
+  },
+  "/jet/webapp/session-token": {
+    "target": "http://localhost:7171",
+    "secure": false
+  },
+  "/jet/rdp": {
+    "target": "http://localhost:7171",
+    "secure": false,
+    "ws": true
+  },
+  "/jet/fwd/tcp": {
+    "target": "http://localhost:7171",
+    "secure": false,
+    "ws": true
+  },
+  "/jet/KdcProxy": {
+    "target": "http://localhost:7171",
+    "secure": false
+  },
+  "/jet/health": {
+    "target": "http://localhost:7171",
+    "secure": false
+  },
+  "/jet/net/scan": {
+    "target": "http://localhost:7171",
+    "secure": false,
+    "ws": true
+  }
+}

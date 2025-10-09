@@ -1,0 +1,51 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #F9F9F9 url('../../../../../assets/images/session_background.png');
+}
+
+:host ::ng-deep .separator {
+  border: solid 1px var(--border-secondary-color);
+  width: 0;
+  height: 14px;
+  margin: 0 8px;
+}
+
+#web-ssh-terminal-app {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0;
+}
+
+.hide-from-view {
+  visibility: hidden;
+}
+
+.loading-info-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.loading-info {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  width: 100vw;
+}
+
+web-ssh-gui {
+  height: 100vh;
+  width: 100vw;
+}
+
+.session-form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}

@@ -1,0 +1,112 @@
+@import 'mixins';
+@import 'theme-mode-variables';
+
+:host {
+  width: 100%;
+}
+
+::ng-deep .p-sidebar-left.sidebar-account-container {
+  width: 21rem !important;
+}
+
+.layout-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: $layout-wrapper-bg-color;
+}
+
+.layout-menu-container {
+  background-color: var(--bg-primary-color);
+}
+
+:host-context(.dark-theme) {
+  .layout-menu-container.dark {
+    // TODO TO REMOVE, for now the dark is dirty with the "dark-theme". This hack is temporary
+    background-color: #101112;
+  }
+}
+
+.layout-data {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  z-index: 0;
+}
+
+.layout-mask {
+  @include media-breakpoint-down(sm) {
+    display: none;
+
+    .layout-mobile-active & {
+      display: block;
+      position: fixed;
+      background-color: var(--overlay-mask-color);
+      opacity: 0.4;
+      height: 100%;
+      width: 100%;
+      top: 0;
+      left: 0;
+      z-index: 200;
+    }
+  }
+}
+
+.layout-main {
+  background: $layout-container-bg-color;
+  flex-grow: 1;
+  min-width: 0; // Prevent container from going beyond screen
+  display: flex;
+  flex-direction: column;
+
+  .layout-main-content {
+    background-color: var(--bg-secondary-color);
+    flex-grow: 1;
+    overflow: hidden;
+  }
+}
+
+.layout-menu-title {
+  vertical-align: bottom;
+  bottom: 50px;
+  width: 40px;
+  background: transparent;
+  right: 12px;
+  height: 40px;
+  position: absolute;
+  margin: 0 10px 15px 0;
+  border-bottom: none !important;
+}
+
+::ng-deep .sidebar-message-container {
+  background: $side-panel-background-color;
+  width: 90vw !important;
+
+  @media screen and (min-width: 500px) {
+    width: 490px !important;
+  }
+}
+
+::ng-deep .sidebar-notification-container {
+  background: $side-panel-background-color;
+  width: 90vw !important;
+
+  @media screen and (min-width: 500px) {
+    width: 555px !important;
+  }
+}
+
+::ng-deep .overflowY {
+  .p-sidebar-content {
+    overflow-y: hidden;
+  }
+}
+
+.mobile-app-info-text {
+  margin-left: 5px;
+}
+
+.warning-communication-breakdown-text {
+  margin-right: 15px;
+}

@@ -1,0 +1,40 @@
+.p-fieldset {
+  border: 1px solid #dee2e6;
+  background: #ffffff;
+  color: #495057;
+  border-radius: 3px;
+}
+.p-fieldset .p-fieldset-legend {
+  padding: 1rem;
+  border: 1px solid #dee2e6;
+  color: #495057;
+  background: #f8f9fa;
+  font-weight: 600;
+  border-radius: 3px;
+}
+.p-fieldset.p-fieldset-toggleable .p-fieldset-legend {
+  padding: 0;
+  transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.p-fieldset.p-fieldset-toggleable .p-fieldset-legend a {
+  padding: 1rem;
+  color: #495057;
+  border-radius: 3px;
+  transition: box-shadow 0.2s;
+}
+.p-fieldset.p-fieldset-toggleable .p-fieldset-legend a .p-fieldset-toggler {
+  margin-right: 0.5rem;
+}
+.p-fieldset.p-fieldset-toggleable .p-fieldset-legend a:focus {
+  outline: 0 none;
+  outline-offset: 0;
+  box-shadow: 0 0 0 0.2rem #a6d5fa;
+}
+.p-fieldset.p-fieldset-toggleable .p-fieldset-legend:hover {
+  background: #e9ecef;
+  border-color: #dee2e6;
+  color: #495057;
+}
+.p-fieldset .p-fieldset-content {
+  padding: 1rem;
+}
