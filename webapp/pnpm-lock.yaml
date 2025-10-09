@@ -65,6 +65,12 @@ importers:
       '@xterm/addon-clipboard':
         specifier: ^0.1.0
         version: 0.1.0(@xterm/xterm@5.5.0)
+      '@xterm/xterm':
+        specifier: ^5.5.0
+        version: 5.5.0
+      i18next:
+        specifier: ^25.5.3
+        version: 25.5.3(typescript@5.5.4)
       primeflex:
         specifier: 3.3.1
         version: 3.3.1
@@ -144,6 +150,9 @@ importers:
       undici:
         specifier: ^7.16.0
         version: 7.16.0
+      undici-types:
+        specifier: ^6.21.0
+        version: 6.21.0
     optionalDependencies:
       '@biomejs/cli-linux-x64':
         specifier: 2.0.0
