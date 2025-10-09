@@ -333,12 +333,12 @@ jobs:
           path: .
           overwrite: true
 
-  devolutions-gateway-web-ui:
-    name: devolutions-gateway-web-ui
+  devolutions-gateway-webapp:
+    name: Devolutions Gateway Web Apps
     runs-on: ubuntu-latest
     needs: preflight
 
-    # DEVOLUTIONSBOT_TOKEN is a repository secret, and it can’t be used by PRs originating from forks.
+    # DEVOLUTIONSBOT_TOKEN is a repository secret, and it can't be used by PRs originating from forks.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
@@ -355,98 +355,50 @@ jobs:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
-      - name: Get npm cache directory
-        id: npm-cache
-        run: |
-          "dir=$(npm config get cache)" >> $Env:GITHUB_OUTPUT
-        shell: pwsh
-        working-directory: webapp
-
-      - uses: actions/cache@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          key: ${{ runner.os }}-node-${{ hashFiles('webapp/package-lock.json') }}
-          path: ${{ steps.npm-cache.outputs.dir }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'pnpm'
+          cache-dependency-path: webapp/pnpm-lock.yaml
 
       - name: Setup .npmrc config file
         uses: ./.github/workflows/npmrc-setup
         with:
           npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
 
-      - name: Install NPM dependencies
+      - name: Install dependencies
         working-directory: webapp
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
-      - name: Configure runner
-        shell: pwsh
-        run: npm install -g @angular/cli
-
-      - name: Build
-        shell: pwsh
+      - name: Build packages (libraries)
         working-directory: webapp
-        run: npm run build
+        run: pnpm build:libs
 
-      - name: Check webapp
-        shell: pwsh
+      - name: Build applications
         working-directory: webapp
-        run: npm run check
+        run: pnpm build:apps
 
-      - uses: actions/upload-artifact@v4
+      - name: Check code quality
+        working-directory: webapp
+        run: pnpm check
+
+      - name: Upload gateway-ui artifact
+        uses: actions/upload-artifact@v4
         with:
           name: webapp-client
-          path: webapp/client/
+          path: webapp/dist/gateway-ui/
 
-
-  devolutions-gateway-player:
-    name: Recording Player
-    runs-on: ubuntu-latest
-    needs: preflight
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-
-    steps:
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-
-      - name: Checkout Devolutions/actions
-        uses: actions/checkout@v4
-        with:
-          repository: Devolutions/actions
-          ref: v1
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          path: ./.github/workflows
-
-      - name: Setup .npmrc config file
-        uses: ./.github/workflows/npmrc-setup
-        with:
-          npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
-
-      - name: Install NPM dependencies for webapp
-        working-directory: webapp/
-        run: npm install
-
-      - name: Check
-        working-directory: webapp/
-        run: npm run player:check
-
-      - name: Install NPM dependencies for video player
-        working-directory: webapp/video-player
-        run: npm install
-
-      - name: Install NPM dependencies for Recording Player
-        working-directory: webapp/player-project
-        run: npm install
-
-      - name: Build
-        working-directory: webapp/player-project
-        run: npm run build
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload recording-player artifact
+        uses: actions/upload-artifact@v4
         with:
           name: webapp-player
-          path: webapp/player
+          path: webapp/dist/recording-player/
 
   devolutions-gateway-powershell:
     name: devolutions-gateway-powershell
@@ -500,9 +452,8 @@ jobs:
     needs:
       - preflight
       - devolutions-gateway-powershell
-      - devolutions-gateway-web-ui
-      - devolutions-gateway-player
-    if: always() # The webapp can’t be build without secrets that we don’t provide for PRs coming from forks.
+      - devolutions-gateway-webapp
+    if: always() # The webapp can't be build without secrets that we don't provide for PRs coming from forks.
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
@@ -518,14 +469,14 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
           name: webapp-client
-          path: webapp/client
+          path: webapp/dist/gateway-ui
 
-      - name: Download devolutions-gateway-player
+      - name: Download webapp-player
         uses: actions/download-artifact@v4
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
           name: webapp-player
-          path: webapp/player
+          path: webapp/dist/recording-player
 
       - name: Download devolutions-gateway-powershell
         uses: actions/download-artifact@v4
@@ -672,8 +623,8 @@ jobs:
             $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "libxmf.so" | Resolve-Path
           }
 
-          $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
-          $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
+          $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "dist" "gateway-ui" | Resolve-Path
+          $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "dist" "recording-player" | Resolve-Path
 
           ./ci/tlk.ps1 package -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
