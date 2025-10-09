@@ -15,11 +15,10 @@
       "!**/*.js.map",
       "!**/*.min.js",
       "!**/*.min.css",
-      "!**/player/",
-      "!**/player-project/dist/",
-      "!**/player-project/node_modules/",
-      "!**/video-player/dist/",
-      "!**/video-player/node_modules/"
+      "!**/node_modules/",
+      "!**/dist/",
+      "!**/.angular/",
+      "!**/player/"
     ]
   },
   "linter": {
