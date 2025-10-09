@@ -372,6 +372,12 @@ jobs:
         with:
           npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
 
+      - name: Configure additional Artifactory auth
+        working-directory: webapp
+        run: |
+          echo "//devolutions.jfrog.io/artifactory/api/npm/npm/:_auth=${{ secrets.ARTIFACTORY_NPM_TOKEN }}" >> .npmrc
+          echo "//devolutions.jfrog.io/artifactory/api/npm/npm/:always-auth=true" >> .npmrc
+
       - name: Install dependencies
         working-directory: webapp
         run: pnpm install --frozen-lockfile
