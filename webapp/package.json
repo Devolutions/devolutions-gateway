@@ -11,13 +11,13 @@
     "build:apps": "pnpm --filter './apps/**' build",
     "build:gateway": "pnpm --filter gateway-ui build",
     "build:player": "pnpm --filter recording-player build",
-    "check": "pnpm -r run check --if-present",
-    "check:write": "pnpm -r run check:write --if-present",
-    "lint": "pnpm -r run lint --if-present",
-    "lint:write": "pnpm -r run lint:write --if-present",
-    "fmt": "pnpm -r run fmt --if-present",
-    "fmt:write": "pnpm -r run fmt:write --if-present",
-    "test": "pnpm -r test --if-present"
+    "check": "pnpm -r --if-present run check",
+    "check:write": "pnpm -r --if-present run check:write",
+    "lint": "pnpm -r --if-present run lint",
+    "lint:write": "pnpm -r --if-present run lint:write",
+    "fmt": "pnpm -r --if-present run fmt",
+    "fmt:write": "pnpm -r --if-present run fmt:write",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.0"
