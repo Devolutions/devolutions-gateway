@@ -60,8 +60,8 @@ importers:
         specifier: ^0.4.0
         version: 0.4.3(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))
       '@devolutions/web-telnet-gui':
-        specifier: ^0.3.0
-        version: 0.3.0(typescript@5.5.4)
+        specifier: ^0.4.0
+        version: 0.4.0(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))
       '@xterm/addon-clipboard':
         specifier: ^0.1.0
         version: 0.1.0(@xterm/xterm@5.5.0)
@@ -1232,9 +1232,6 @@ packages:
   '@devolutions/iron-remote-desktop@0.10.1':
     resolution: {integrity: sha512-VwY71hnlxnVc/ueZ8IYwV12VPcAvbI5fVa/HpKY1fDcok91QydbUsvMkdg4UPckqe2eDDKRXzeJntwf9db5xaA==}
 
-  '@devolutions/terminal-shared@1.2.0':
-    resolution: {integrity: sha512-d+OuC+fcttnE7IxWittuaec+Nk9TEQX9Rp5UWfVsNDBhTX9cetFqGluXfu0RPV8CGe58R6qznmiR8Qd4KGgrSw==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/terminal-shared/-/@devolutions/terminal-shared-1.2.0.tgz}
-
   '@devolutions/terminal-shared@1.4.0':
     resolution: {integrity: sha512-K+Kxux4vzqjevxvmCt4ChrcwSyvZrDRLKLZ8Gsol/c67oPkpA7l7fTD3VOiUb4KntUDRQdSZxRcNsMHFobhRLw==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/terminal-shared/-/@devolutions/terminal-shared-1.4.0.tgz}
 
@@ -1243,8 +1240,10 @@ packages:
     peerDependencies:
       '@devolutions/terminal-shared': ~1.4.0
 
-  '@devolutions/web-telnet-gui@0.3.0':
-    resolution: {integrity: sha512-OIe95Z9PiYi4TmOolsR3Qmmv/9TznSd4+p5L5ov5Ku0s0mdz5fDuE50t42On4kTfTzEHBak2lX5jWwr9WwyHdw==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/web-telnet-gui/-/@devolutions/web-telnet-gui-0.3.0.tgz}
+  '@devolutions/web-telnet-gui@0.4.0':
+    resolution: {integrity: sha512-zRk8Y1wSmK5HLYT0Hs6TIGcrKrr8gQ4aE+hFH8lDFapHk4IgTtQBvtGF5pTq+gozIADg0ihn6GRks/SdqX/45g==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/web-telnet-gui/-/@devolutions/web-telnet-gui-0.4.0.tgz}
+    peerDependencies:
+      '@devolutions/terminal-shared': ~1.4.0
 
   '@discoveryjs/json-ext@0.6.1':
     resolution: {integrity: sha512-boghen8F0Q8D+0/Q1/1r6DUEieUJ8w2a1gIknExMSHBsJFOr2+0KUfHiVYBvucPwl3+RU5PFBK833FjFCh3BhA==}
@@ -7950,17 +7949,6 @@ snapshots:
 
   '@devolutions/iron-remote-desktop@0.10.1': {}
 
-  '@devolutions/terminal-shared@1.2.0(typescript@5.5.4)':
-    dependencies:
-      '@xterm/addon-clipboard': 0.1.0(@xterm/xterm@5.5.0)
-      '@xterm/addon-fit': 0.10.0(@xterm/xterm@5.5.0)
-      '@xterm/xterm': 5.5.0
-      i18next: 25.5.3(typescript@5.5.4)
-      js-base64: 3.7.8
-      rxjs: 7.8.2
-    transitivePeerDependencies:
-      - typescript
-
   '@devolutions/terminal-shared@1.4.0(typescript@5.5.4)':
     dependencies:
       '@xterm/addon-fit': 0.10.0(@xterm/xterm@5.5.0)
@@ -7979,11 +7967,9 @@ snapshots:
       jquery: 3.7.1
       uuid: 11.1.0
 
-  '@devolutions/web-telnet-gui@0.3.0(typescript@5.5.4)':
+  '@devolutions/web-telnet-gui@0.4.0(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))':
     dependencies:
-      '@devolutions/terminal-shared': 1.2.0(typescript@5.5.4)
-    transitivePeerDependencies:
-      - typescript
+      '@devolutions/terminal-shared': 1.4.0(typescript@5.5.4)
 
   '@discoveryjs/json-ext@0.6.1': {}
 
