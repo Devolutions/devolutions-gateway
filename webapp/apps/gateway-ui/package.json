@@ -34,6 +34,8 @@
     "@devolutions/web-ssh-gui": "^0.4.0",
     "@devolutions/web-telnet-gui": "^0.4.0",
     "@xterm/addon-clipboard": "^0.1.0",
+    "@xterm/xterm": "^5.5.0",
+    "i18next": "^25.5.3",
     "primeflex": "3.3.1",
     "primeicons": "7.0.0",
     "primeng": "17.18.9",
@@ -61,7 +63,8 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "typescript": "~5.5.4",
-    "undici": "^7.16.0"
+    "undici": "^7.16.0",
+    "undici-types": "^6.21.0"
   },
   "optionalDependencies": {
     "@biomejs/cli-linux-x64": "2.0.0",
