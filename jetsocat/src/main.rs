@@ -31,11 +31,13 @@ use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{ProxyConfig, ProxyType, detect_proxy};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
-use std::env;
+use std::cmp::PartialEq;
 use std::error::Error;
 use std::future::Future;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::{env, io};
 use tokio::runtime;
 
 fn main() {
@@ -462,7 +464,7 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("watch-process", FlagType::Int).description("Watch given process and stop piping when it dies"))
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Logging {
     Term,
     File { filepath: PathBuf, clean_old: bool },
@@ -559,41 +561,17 @@ impl CommonArgs {
         let coloring = match opt_string_flag(c, "color")?.as_deref() {
             Some("never") => Coloring::Never,
             Some("always") => Coloring::Always,
-            Some("auto") => Coloring::Auto,
+            Some("auto") | None => Coloring::Auto,
             Some(_) => anyhow::bail!("invalid value for 'color'; expect: `never`, `always` or `auto`"),
-            None => {
-                // Infer using the environment.
-                parse_env_for_coloring()
-            }
         };
 
-        return Ok(Self {
+        Ok(Self {
             logging,
             coloring,
             proxy_cfg,
             pipe_timeout,
             watch_process,
-        });
-
-        fn parse_env_for_coloring() -> Coloring {
-            // https://no-color.org/
-            if env::var("NO_COLOR").is_ok() {
-                return Coloring::Never;
-            }
-
-            match env::var("FORCE_COLOR").as_deref() {
-                Ok("0" | "false" | "no" | "off") => return Coloring::Never,
-                Ok(_) => return Coloring::Always,
-                Err(_) => {}
-            }
-
-            match env::var("TERM").as_deref() {
-                Ok("dumb") => return Coloring::Never,
-                _ => {}
-            }
-
-            Coloring::Auto
-        }
+        })
     }
 }
 
@@ -976,6 +954,39 @@ struct LoggerGuard {
     _worker_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
+fn is_ansi_supported(logging: &Logging, coloring: Coloring) -> bool {
+    match coloring {
+        Coloring::Never => false,
+        Coloring::Always => true,
+        Coloring::Auto => {
+            if env::var("NO_COLOR").is_ok() {
+                return false;
+            }
+
+            match env::var("FORCE_COLOR").as_deref() {
+                Ok("0" | "false" | "no" | "off") => return false,
+                Ok(_) => return true,
+                Err(_) => {}
+            }
+
+            if logging == &Logging::Term {
+                // Check whether stderr refers to a terminal. If it's redirected or piped, ANSI is disabled.
+                return if io::stderr().is_terminal() {
+                    if let Ok("dumb") = env::var("TERM").as_deref() {
+                        return false;
+                    }
+
+                    true
+                } else {
+                    false
+                };
+            }
+
+            false
+        }
+    }
+}
+
 fn setup_logger(logging: &Logging, coloring: Coloring) -> LoggerGuard {
     use std::fs::OpenOptions;
     use std::panic;
@@ -984,26 +995,16 @@ fn setup_logger(logging: &Logging, coloring: Coloring) -> LoggerGuard {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{EnvFilter, fmt};
 
+    let ansi = is_ansi_supported(logging, coloring);
+
     let (layer, guard) = match &logging {
         Logging::Term => {
-            let ansi = match coloring {
-                Coloring::Never => false,
-                Coloring::Always => true,
-                Coloring::Auto => true,
-            };
-
-            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout());
+            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(io::stderr());
             let stdio_layer = fmt::layer().with_writer(non_blocking_stdio).with_ansi(ansi);
 
             (stdio_layer, guard)
         }
         Logging::File { filepath, clean_old: _ } => {
-            let ansi = match coloring {
-                Coloring::Never => false,
-                Coloring::Always => true,
-                Coloring::Auto => false,
-            };
-
             let file = OpenOptions::new()
                 .create(true)
                 .write(true)
