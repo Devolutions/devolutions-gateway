@@ -15,7 +15,11 @@ export function openPlayer(param: OpenPlayerParams | undefined = undefined) {
 }
 
 export async function openStreamingPlayer(uuid: string, language?: string) {
-  const url = await api.getPlayerUrl(uuid, true);
+  const url = await api.getPlayerUrl({
+    uid: uuid,
+    active: true,
+    lang: language || 'en',
+  });
   if (language) {
     url.searchParams.set('lang', language);
   }

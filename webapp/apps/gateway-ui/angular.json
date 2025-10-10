@@ -14,7 +14,7 @@
           "options": {
             "baseHref": "/jet/webapp/client/",
             "outputPath": {
-              "base": "client",
+              "base": "../../dist/gateway-ui",
               "browser": ""
             },
             "preserveSymlinks": true,

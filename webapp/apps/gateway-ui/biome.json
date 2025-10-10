@@ -14,11 +14,7 @@
       "!**/*.json",
       "!**/*.js.map",
       "!**/*.min.js",
-      "!**/*.min.css",
-      "!**/node_modules/",
-      "!**/dist/",
-      "!**/.angular/",
-      "!**/player/"
+      "!**/*.min.css"
     ]
   },
   "linter": {
