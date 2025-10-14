@@ -72,12 +72,12 @@ namespace WixSharpSetup.Dialogs
             this.contextMenuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.copyToolStripMenuItem});
             this.contextMenuStrip1.Name = "contextMenuStrip1";
-            this.contextMenuStrip1.Size = new System.Drawing.Size(144, 42);
+            this.contextMenuStrip1.Size = new System.Drawing.Size(103, 26);
             // 
             // copyToolStripMenuItem
             // 
             this.copyToolStripMenuItem.Name = "copyToolStripMenuItem";
-            this.copyToolStripMenuItem.Size = new System.Drawing.Size(143, 38);
+            this.copyToolStripMenuItem.Size = new System.Drawing.Size(102, 22);
             this.copyToolStripMenuItem.Text = "Copy";
             // 
             // middlePanel
@@ -227,7 +227,7 @@ namespace WixSharpSetup.Dialogs
             this.lnkKeyHint.TabIndex = 16;
             this.lnkKeyHint.TabStop = true;
             this.lnkKeyHint.Text = "Find the public key file for Devolutions Server or Devolutions Hub";
-            this.lnkKeyHint.TextAlign = System.Drawing.ContentAlignment.BottomRight;
+            this.lnkKeyHint.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             this.lnkKeyHint.Visible = false;
             this.lnkKeyHint.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.lnkKeyHint_LinkClicked);
             // 
@@ -273,7 +273,7 @@ namespace WixSharpSetup.Dialogs
             this.label1.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label1.Location = new System.Drawing.Point(11, 8);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(214, 26);
+            this.label1.Size = new System.Drawing.Size(115, 13);
             this.label1.TabIndex = 1;
             this.label1.Text = "[PublicKeyDlgTitle]";
             // 
