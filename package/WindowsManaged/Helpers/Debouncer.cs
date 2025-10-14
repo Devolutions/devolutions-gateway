@@ -1,74 +1,78 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 
 namespace DevolutionsGateway.Helpers
 {
-    public class Debouncer : IDisposable
+    public sealed class Debouncer : IDisposable
     {
-        private readonly TimeSpan ts;
-        private readonly Action<object> action;
-        private readonly object parameter;
-        private readonly HashSet<ManualResetEvent> resets = new();
-        private readonly object mutex = new();
+        private readonly TimeSpan delay;
 
-        public Debouncer(TimeSpan timespan, Action<object> action, object parameter)
+        private readonly Action<object> action;
+
+        private readonly object arg;
+
+        private readonly SynchronizationContext ui;
+
+        private readonly object @lock = new object();
+
+        private Timer timer;
+
+        private bool disposed;
+
+        public Debouncer(TimeSpan delay, Action<object> action, object arg, SynchronizationContext uiContext)
         {
-            this.ts = timespan;
+            this.delay = delay;
             this.action = action;
-            this.parameter = parameter;
+            this.arg = arg;
+            ui = uiContext;
+            timer = new Timer(this.OnTimer, null, Timeout.Infinite, Timeout.Infinite);
         }
 
         public void Invoke()
         {
-            var thisReset = new ManualResetEvent(false);
-
-            lock (mutex)
+            lock (@lock)
             {
-                while (resets.Count > 0)
+                if (disposed)
                 {
-                    var otherReset = resets.First();
-                    resets.Remove(otherReset);
-                    otherReset.Set();
+                    return;
                 }
 
-                resets.Add(thisReset);
+                timer.Change(delay, Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        private void OnTimer(object state)
+        {
+            lock (@lock)
+            {
+                if (disposed)
+                {
+                    return;
+                }
             }
 
-            ThreadPool.QueueUserWorkItem(_ =>
+            try
             {
-                try
-                {
-                    if (!thisReset.WaitOne(ts))
-                    {
-                        this.action(this.parameter);
-                    }
-                }
-                finally
-                {
-                    lock (mutex)
-                    {
-                        using (thisReset)
-                        {
-                            resets.Remove(thisReset);
-                        }
-                    }
-                }
-            });
+                ui.Post(_ => action(this.arg), null);
+            }
+            catch
+            {
+            }
         }
 
         public void Dispose()
         {
-            lock (mutex)
+            lock (@lock)
             {
-                while (resets.Count > 0)
+                if (disposed)
                 {
-                    var reset = resets.First();
-                    resets.Remove(reset);
-                    reset.Set();
-                    reset.Dispose();
+                    return;
                 }
+
+                disposed = true;
+                timer.Change(Timeout.Infinite, Timeout.Infinite);
+                timer.Dispose();
+                timer = null;
             }
         }
     }

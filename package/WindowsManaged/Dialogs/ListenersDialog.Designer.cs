@@ -18,6 +18,7 @@ namespace WixSharpSetup.Dialogs
         {
             this.httpPortDebouncer?.Dispose();
             this.tcpPortDebouncer?.Dispose();
+            this.errorProvider?.Dispose();
 
             if (disposing && (components != null))
             {
@@ -221,7 +222,7 @@ namespace WixSharpSetup.Dialogs
             // 
             // txtHttpPort
             // 
-            this.txtHttpPort.Location = new System.Drawing.Point(406, 45);
+             this.txtHttpPort.Location = new System.Drawing.Point(406, 45);
             this.txtHttpPort.Name = "txtHttpPort";
             this.txtHttpPort.Size = new System.Drawing.Size(40, 20);
             this.txtHttpPort.TabIndex = 2;
