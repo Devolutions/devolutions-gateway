@@ -3,14 +3,13 @@ using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
 
 using System;
-using System.Drawing;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 using System.Windows.Forms;
 using DevolutionsGateway.Resources;
 using WixSharp;
-using Action = System.Action;
 
 namespace WixSharpSetup.Dialogs;
 
@@ -24,14 +23,22 @@ public partial class ListenersDialog : GatewayDialog
 
     private readonly Debouncer tcpPortDebouncer;
 
+    private readonly ErrorProvider errorProvider = new ErrorProvider();
+
     public ListenersDialog()
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
 
-        httpPortDebouncer = new Debouncer(TimeSpan.FromMilliseconds(500), PortCheck, this.txtHttpPort);
-        tcpPortDebouncer = new Debouncer(TimeSpan.FromMilliseconds(500), PortCheck, this.txtTcpPort);
+        httpPortDebouncer = new Debouncer(TimeSpan.FromMilliseconds(500), PortCheck, this.txtHttpPort, SynchronizationContext.Current);
+        tcpPortDebouncer = new Debouncer(TimeSpan.FromMilliseconds(500), PortCheck, this.txtTcpPort, SynchronizationContext.Current);
+
+        this.errorProvider.BlinkStyle = ErrorBlinkStyle.NeverBlink;
+        this.errorProvider.SetIconAlignment(this.txtHttpPort, ErrorIconAlignment.MiddleLeft);
+        this.errorProvider.SetIconPadding(this.txtHttpPort, 6);
+        this.errorProvider.SetIconAlignment(this.txtTcpPort, ErrorIconAlignment.MiddleLeft);
+        this.errorProvider.SetIconPadding(this.txtTcpPort, 6);
     }
 
     public override bool DoValidate()
@@ -153,27 +160,12 @@ public partial class ListenersDialog : GatewayDialog
             return;
         }
         
-        Action result = () => {};
-
-        string portString;
-
-        try
-        {
-            portString = this.Invoke(new Func<string>(() => textBox.Text)).ToString();
-
-        }
-        catch
-        {
-            return;
-        }
+        string portString = textBox.Text;
 
         if (string.IsNullOrEmpty(portString) || !Validation.IsValidPort(portString, out uint port))
         {
-            result = () =>
-            {
-                this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.InvalidPort));
-                textBox.ForeColor = SystemColors.WindowText;
-            };
+            errorProvider.SetError(textBox, I18n(Strings.InvalidPort));
+
         }
         else
         {
@@ -184,48 +176,23 @@ public partial class ListenersDialog : GatewayDialog
                 listener = new TcpListener(Dns.GetHostEntry("localhost").AddressList.First(), (int)port);
                 listener.Start();
 
-                result = () =>
-                {
-                    this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.ChosenPortAvailable));
-                    textBox.ForeColor = Color.Green;
-                };
+                errorProvider.SetError(textBox, string.Empty);
             }
             catch (SocketException se)
             {
-                if (se.SocketErrorCode == SocketError.AddressAlreadyInUse || se.SocketErrorCode == SocketError.AccessDenied)
-                {
-                    this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.ChosenPortNotAvailable));
-                    textBox.ForeColor = Color.Red;
-                }
-                else
-                {
-                    this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.ChosenPortCouldNotBeChecked));
-                    textBox.ForeColor = SystemColors.WindowText;
-                }
+                errorProvider.SetError(textBox,
+                    se.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AccessDenied
+                        ? I18n(Strings.ChosenPortNotAvailable)
+                        : I18n(Strings.ChosenPortCouldNotBeChecked));
             }
             catch
             {
-                result = () =>
-                {
-                    this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.ChosenPortCouldNotBeChecked));
-                    textBox.ForeColor = SystemColors.WindowText;
-                };
+                errorProvider.SetError(textBox, I18n(Strings.ChosenPortCouldNotBeChecked));
             }
             finally
             {
                 listener?.Stop();
             }
         }
-        
-        this.Invoke(() =>
-        {
-            try
-            { 
-                result();
-            }
-            catch
-            {
-            }
-        });
     }
 }
