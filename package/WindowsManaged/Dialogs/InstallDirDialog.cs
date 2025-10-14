@@ -40,7 +40,7 @@ public partial class InstallDirDialog : GatewayDialog
             {
                 RegistryKey localKey = RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, RegistryView.Registry64);
                 RegistryKey gatewayKey = localKey.OpenSubKey($@"Software\{Includes.VENDOR_NAME}\{Includes.SHORT_NAME}");
-                installDirValue = (string)gatewayKey.GetValue("InstallDir");
+                installDirValue = (string)gatewayKey?.GetValue("InstallDir");
             }
             catch
             {
