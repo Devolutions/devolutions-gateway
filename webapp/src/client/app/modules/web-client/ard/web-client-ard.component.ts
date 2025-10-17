@@ -34,7 +34,6 @@ import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
-import { WebClientFormComponent } from '../form/web-client-form.component';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -50,7 +49,7 @@ enum UserIronRdpErrorKind {
   styleUrls: ['web-client-ard.component.scss'],
   providers: [MessageService],
   standalone: true,
-  imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
+  imports: [SessionToolbarComponent, ProgressSpinnerModule],
   schemas: [CUSTOM_ELEMENTS_SCHEMA]
 })
 export class WebClientArdComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {

@@ -2,6 +2,22 @@
 @use 'theme-mode-variables';
 @use 'variables';
 
+// PrimeNG v20 Tabs styles for dialog left tabs
+body .dialog-left-tab.p-tabs.p-tabs .p-tablist .p-tab:not(.p-tab-active):not(.p-disabled):hover,
+body .dialog-left-tab.p-tabs.p-tabs .p-tablist .p-tab.p-tab-active {
+  background-color: transparent;
+}
+
+body .dialog-left-tab.p-tabs.p-tabs .p-tablist .p-tab:not(.p-tab-active):not(.p-disabled):hover .p-tab-header,
+body .dialog-left-tab.p-tabs.p-tabs .p-tablist .p-tab.p-tab-active .p-tab-header {
+  color: theme-mode-variables.$admin-item-bg-active-color;
+}
+
+body .dialog-left-tab.p-tabs.p-tabs .p-tablist .p-tab .p-tab-header {
+  padding: 3px;
+}
+
+// Legacy support for old p-tabview
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li:not(.p-highlight):not(.p-disabled):hover,
 body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li.p-highlight {
   background-color: transparent;
@@ -17,6 +33,30 @@ body .dialog-left-tab.p-tabview.p-tabview .p-tabview-nav li a {
 }
 
 @media screen and (max-width: 640px) {
+  // PrimeNG v20 mobile styles
+  .p-tablist {
+    padding: 0.429em 0.857em;
+    height: 50px;
+    width: 100%;
+    min-height: 40px;
+    display: flex;
+    overflow: auto;
+    z-index: 100;
+    align-items: center;
+    justify-content: space-between;
+    background: theme-mode-variables.$page-header-bg-color;
+    @include mixins.custom-scrollbar()
+  }
+  .p-tabs-left>.p-tabpanels {
+    width: 100%;
+    height: calc(100% - 50px);
+  }
+  body .p-tab-title {
+    white-space: nowrap;
+    padding: 0 12px;
+  }
+
+  // Legacy support
   ul.p-tabview-nav.p-reset.p-helper-clearfix {
     padding: 0.429em 0.857em;
     height: 50px;

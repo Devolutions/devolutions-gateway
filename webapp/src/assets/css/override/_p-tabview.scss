@@ -1,6 +1,77 @@
 @use 'theme-mode-variables';
 @use 'variables';
 
+// PrimeNG v20 Tabs styles
+.p-tabs .p-tablist {
+  background: transparent;
+  border-bottom: 1px solid theme-mode-variables.$grid-item-border-color;
+  position: relative;
+}
+
+.p-tabs .p-tablist .p-tab {
+  margin-right: 0;
+}
+
+.p-tabs .p-tablist .p-tab .p-tab-header {
+  border: 0;
+  background: transparent;
+  color: theme-mode-variables.$input-txt-color;
+  padding: 1rem 1.5rem;
+  font-weight: 600;
+  border-top-right-radius: 4px;
+  border-top-left-radius: 4px;
+  transition: background-color 0.2s;
+  margin: 0;
+  border-radius: 0;
+}
+
+.p-tabs .p-tablist .p-tab .p-tab-header:not(.p-disabled):focus {
+  outline: 0 none;
+  outline-offset: 0;
+  box-shadow: none;
+}
+
+.p-tabs .p-tablist .p-tab:not(.p-tab-active):not(.p-disabled):hover .p-tab-header {
+  background: theme-mode-variables.$tab-view-hover-color;
+  color: theme-mode-variables.$default-text-color;
+  border-color: transparent;
+}
+
+.p-tabs .p-tablist .p-tab.p-tab-active .p-tab-header {
+  background: theme-mode-variables.$tab-view-hover-color;
+  border-color: transparent;
+  color: theme-mode-variables.$tabview-active-txt-color;
+}
+
+.p-tabs .p-tab-left-icon {
+  margin-right: 0.5rem;
+}
+
+.p-tabs .p-tab-right-icon {
+  margin-left: 0.5rem;
+}
+
+.p-tabs .p-tab-close {
+  margin-left: 0.5rem;
+}
+
+.p-tabs .p-tabpanels {
+  height: 100%;
+  width: 100%;
+  padding: 0.429em 0;
+}
+
+.p-tabs .p-tablist .p-tab-ink-bar {
+  z-index: 1;
+  display: block;
+  position: absolute;
+  bottom: 0;
+  height: 2px;
+  background-color: theme-mode-variables.$tabview-active-bg-color;
+  transition: 500ms cubic-bezier(0.35, 0, 0.25, 1);
+}
+
+// Legacy support - keep old class names for backward compatibility
 .p-tabview .p-tabview-nav {
   background: transparent;
   border-bottom: 1px solid theme-mode-variables.$grid-item-border-color;

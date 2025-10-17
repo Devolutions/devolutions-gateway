@@ -18,8 +18,8 @@ import {
 } from '@devolutions/web-telnet-gui';
 import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
 import { DVL_TELNET_ICON, DVL_WARNING_ICON, JET_TELNET_URL } from '@gateway/app.constants';
-import { SessionToolbarComponent } from '@gateway/shared/components/session-toolbar/session-toolbar.component';
-import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { SessionToolbarComponent } from '@shared/components/session-toolbar/session-toolbar.component';
+import { AnalyticService, ProtocolString } from '@shared/services/analytic.service';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
@@ -34,14 +34,13 @@ import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
-import { WebClientFormComponent } from '../form/web-client-form.component';
 
 @Component({
   templateUrl: 'web-client-telnet.component.html',
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],
   standalone: true,
-  imports: [WebClientFormComponent, SessionToolbarComponent, ProgressSpinnerModule],
+  imports: [SessionToolbarComponent, ProgressSpinnerModule],
   schemas: [CUSTOM_ELEMENTS_SCHEMA]
 })
 export class WebClientTelnetComponent extends WebClientBaseComponent implements OnInit, OnDestroy {

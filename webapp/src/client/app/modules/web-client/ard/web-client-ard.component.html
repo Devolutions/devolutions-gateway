@@ -1,8 +1,10 @@
 <div #sessionArdContainer>
   @if (currentStatus.isDisabled) {
   <div class="session-form">
-    <web-client-form [webSessionId]="webSessionId" [inputFormData]="formData" [error]="ardError" [isFormExists]="true">
-    </web-client-form>
+    @defer {
+      <web-client-form [webSessionId]="webSessionId" [inputFormData]="formData" [error]="ardError" [isFormExists]="true">
+      </web-client-form>
+    }
   </div>
   }
 

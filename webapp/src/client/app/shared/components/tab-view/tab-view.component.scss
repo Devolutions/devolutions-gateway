@@ -24,6 +24,10 @@
   padding: 0;
 }
 
+:host ::ng-deep .p-tabs .p-tabpanel {
+  padding: 0;
+}
+
 :host ::ng-deep .p-tabs {
   display: flex;
   height: 100%;

@@ -53,11 +53,17 @@ export class DynamicTabComponent<T extends SessionType> extends BaseComponent im
   }
 
   initializeDynamicComponent(): void {
-    if (!this.webSessionTab?.component) {
+    if (!this.webSessionTab) {
+      console.warn('DynamicTabComponent: webSessionTab is undefined');
       return;
     }
 
-    if (this.webSessionTab?.componentRef) {
+    if (!this.webSessionTab.component) {
+      console.error('DynamicTabComponent: webSessionTab.component is undefined for session:', this.webSessionTab.id);
+      return;
+    }
+
+    if (this.webSessionTab.componentRef) {
       return;
     }
 

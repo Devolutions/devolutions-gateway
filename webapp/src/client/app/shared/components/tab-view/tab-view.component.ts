@@ -75,9 +75,16 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
   }
 
   activeIndex = 0;
+  // activeTabValue: string | undefined = undefined;
   private changeTabIndex(): void {
-    if (!this.tabView) return;
+    if (!this.webSessionTabs.length) return;
     this.activeIndex = this.currentTabIndex;
+
+    // const activeTab = this.webSessionTabs[this.currentTabIndex];
+    // if (activeTab) {
+    //   this.activeTabValue = activeTab.sessionId;
+    //   this.cdr.detectChanges();
+    // }
   }
 
   private loadTabs(): void {
@@ -128,6 +135,13 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
       .pipe(takeUntil(this.destroyed$))
       .subscribe((tabs) => {
         this.webSessionTabs = tabs;
+        // Ensure activeTabValue is set when tabs are updated
+        // if (tabs.length > 0 && this.activeIndex === undefined) {
+        //   const activeTab = tabs[this.currentTabIndex];
+        //   if (activeTab) {
+        //     this.activeTabValue = activeTab.sessionId;
+        //   }
+        // }
         this.cdr.detectChanges();
       });
   }
