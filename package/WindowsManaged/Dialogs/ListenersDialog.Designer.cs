@@ -62,11 +62,11 @@ namespace WixSharpSetup.Dialogs
             this.label1 = new System.Windows.Forms.Label();
             this.banner = new System.Windows.Forms.PictureBox();
             this.bottomPanel = new System.Windows.Forms.Panel();
+            this.border1 = new System.Windows.Forms.Panel();
             this.tableLayoutPanel1 = new System.Windows.Forms.TableLayoutPanel();
             this.back = new System.Windows.Forms.Button();
             this.next = new System.Windows.Forms.Button();
             this.cancel = new System.Windows.Forms.Button();
-            this.border1 = new System.Windows.Forms.Panel();
             this.ttPortCheck = new System.Windows.Forms.ToolTip(this.components);
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
@@ -347,12 +347,22 @@ namespace WixSharpSetup.Dialogs
             this.bottomPanel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.bottomPanel.BackColor = System.Drawing.SystemColors.Control;
-            this.bottomPanel.Controls.Add(this.tableLayoutPanel1);
             this.bottomPanel.Controls.Add(this.border1);
+            this.bottomPanel.Controls.Add(this.tableLayoutPanel1);
             this.bottomPanel.Location = new System.Drawing.Point(0, 312);
             this.bottomPanel.Name = "bottomPanel";
             this.bottomPanel.Size = new System.Drawing.Size(494, 49);
             this.bottomPanel.TabIndex = 9;
+            // 
+            // border1
+            // 
+            this.border1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.border1.Dock = System.Windows.Forms.DockStyle.Top;
+            this.border1.Location = new System.Drawing.Point(0, 0);
+            this.border1.Name = "border1";
+            this.border1.Size = new System.Drawing.Size(494, 1);
+            this.border1.TabIndex = 14;
+            this.border1.Visible = false;
             // 
             // tableLayoutPanel1
             // 
@@ -411,15 +421,6 @@ namespace WixSharpSetup.Dialogs
             this.cancel.Text = "[WixUICancel]";
             this.cancel.UseVisualStyleBackColor = true;
             this.cancel.Click += new System.EventHandler(this.Cancel_Click);
-            // 
-            // border1
-            // 
-            this.border1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.border1.Dock = System.Windows.Forms.DockStyle.Top;
-            this.border1.Location = new System.Drawing.Point(0, 0);
-            this.border1.Name = "border1";
-            this.border1.Size = new System.Drawing.Size(494, 1);
-            this.border1.TabIndex = 14;
             // 
             // ttPortCheck
             // 

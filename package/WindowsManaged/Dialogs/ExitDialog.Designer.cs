@@ -216,6 +216,7 @@ namespace WixSharpSetup.Dialogs
             this.border1.Name = "border1";
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 9;
+            this.border1.Visible = false;
             // 
             // ExitDialog
             // 
