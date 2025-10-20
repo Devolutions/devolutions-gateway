@@ -225,4 +225,18 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="WixRollbackFirewallExceptionsUninstall">Restauration de la configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
+                    <!-- buttons.- -->
+                <String Id="ValidateButton">Validate</String>
+                    <!-- messages.- -->
+                <String Id="YouMustEnterAValidUrl">You must enter a valid URL</String>
+                    <!-- properties.- -->
+                <String Id="Property_DevolutionsServerUrl">Devolutions Server URL</String>
+                    <!-- dialogs.dvls.- -->
+                <String Id="AutomaticConfigurationWithDvls">Automatic configuration with Devolutions Server</String>
+                <String Id="ManualConfiguration">Manual configuration</String>
+                <String Id="ProvideDvlsAddressIfUsing">If you're using Devolutions Server, provide the address. This step is optional.</String>
+                <String Id="PublicKeyServerDlgDescription">Automatic server configuration</String>
+                <String Id="PublicKeyServerDlgTitle">Companion Server</String>
+                <String Id="ThePublicKeyWillBeDownloaded">The public key will be downloaded</String>
+                <String Id="YoullNeedToProvideThePublicKey">You'll need to provide the companion server public key</String>
                     </WixLocalization>

@@ -222,6 +222,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<Statics.CertificateFindType>("CertificateFindType", Statics.CertificateFindType.Thumbprint, isPublic: false, secure: false),
     new PropertyDefinition<string>("CertificateSearchText", "", isPublic: false, hidden: true, secure: false),
     new PropertyDefinition<string>("CertificateThumbprint", "", isPublic: false, hidden: true, secure: false),
+    new PropertyDefinition<string>("DevolutionsServerUrl", "", isPublic: true, hidden: false, secure: true),
 
     new PropertyDefinition<bool>("ConfigureGateway", false, secure: false, comment: "`true` to configure the Gateway interactively"),    
     new PropertyDefinition<bool>("HasPowerShell", false, isPublic: false, secure: false),
@@ -229,6 +230,8 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<string>("HttpListenerHost", "0.0.0.0"),
     new PropertyDefinition<uint>("HttpListenerPort", DefaultHttpPort),
     new PropertyDefinition<string>("HttpListenerScheme", Statics.HttpsProtocol),
+
+    new PropertyDefinition<bool>("DidChooseServerConfig", false, isPublic: false, hidden: false, secure: false, comment: "A helper to manage UI state"),
 
     new PropertyDefinition<string>("PublicKeyFile", ""),
     new PropertyDefinition<string>("PrivateKeyFile", ""),

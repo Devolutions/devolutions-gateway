@@ -26,6 +26,7 @@
                 <String Id="YouMustEnterAPassword">You must enter a password</String>
                 <String Id="YouMustEnterAUsername">You must enter a username</String>
                 <String Id="YouMustEnterAValidPort">You must enter a valid port</String>
+                <String Id="YouMustEnterAValidUrl">You must enter a valid URL</String>
                 <String Id="YouMustProvideAValidCertificateAndPasswordOrKey">You must provide a valid certificate file and either a password or private key file</String>
                 <String Id="YouMustProvideAValidHostname">You must provide a valid hostname</String>
                 <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">You must select a certificate from the system certificate store</String>
@@ -43,6 +44,7 @@
                 <String Id="NgroXForNativeClientAccess">The {0} for native client access</String>
                     <!-- buttons -->
                 <String Id="SearchButton">Search</String>
+                <String Id="ValidateButton">Validate</String>
                 <String Id="ViewButton">View</String>
                 <String Id="ViewErrorsButton">View configuration issues</String>
                 <String Id="ViewLogButton">View Log</String>
@@ -89,6 +91,7 @@
                 <String Id="Property_CertificatePassword">Certificate Password</String>
                 <String Id="Property_CertificatePrivateKeyFile">Certificate Private Key</String>
                 <String Id="Property_CertificateStore">Certificate Store</String>
+                <String Id="Property_DevolutionsServerUrl">Devolutions Server URL</String>
                 <String Id="Property_Directory">Directory</String>
                 <String Id="Property_HttpListener">HTTP Listener</String>
                 <String Id="Property_NewCertificate">A new self-signed certificate will be generated</String>
@@ -195,6 +198,14 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="NgrokListenersDlgTitle">ngrok</String>
                 <String Id="RemoteAddress">Remote Address</String>
                 <String Id="UseNgrokForSimplifiedRemoteAccess">Use ngrok for simplified remote access from the Internet. Gateway listeners allow access from any IP address by default.</String>
+                    <!-- dialogs.dvls -->
+                <String Id="AutomaticConfigurationWithDvls">Automatic configuration with Devolutions Server</String>
+                <String Id="ManualConfiguration">Manual configuration</String>
+                <String Id="ProvideDvlsAddressIfUsing">If you're using Devolutions Server, provide the address. This step is optional.</String>
+                <String Id="PublicKeyServerDlgDescription">Automatic server configuration</String>
+                <String Id="PublicKeyServerDlgTitle">Companion Server</String>
+                <String Id="ThePublicKeyWillBeDownloaded">The public key will be downloaded</String>
+                <String Id="YoullNeedToProvideThePublicKey">You'll need to provide the companion server public key</String>
                     <!-- dialogs.keys -->
                 <String Id="PrivateKeyFile">Private Key File</String>
                 <String Id="ProvideAnEncryptionKeyPairForTokenCreationVerification">Provide an encryption key pair for token generation and verification.</String>

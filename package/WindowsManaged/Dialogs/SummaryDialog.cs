@@ -180,11 +180,19 @@ public partial class SummaryDialog : GatewayDialog
                 },
                 new InstallerProperty(this.MsiRuntime, GatewayProperties.publicKeyFile)
                 {
-                    If = p => !p.GenerateKeyPair
+                    If = p => !p.GenerateKeyPair && string.IsNullOrEmpty(p.DevolutionsServerUrl)
                 },
                 new InstallerProperty(this.MsiRuntime, GatewayProperties.privateKeyFile)
                 {
                     If = p => p.ConfigureWebApp && !p.GenerateKeyPair
+                },
+                new StringProperty(this.MsiRuntime, Strings.ThePublicKeyWillBeDownloaded)
+                {
+                    If = p => !string.IsNullOrEmpty(p.DevolutionsServerUrl)
+                },
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.devolutionsServerUrl)
+                {
+                    If = p => !string.IsNullOrEmpty(p.DevolutionsServerUrl)
                 },
             }
         },
@@ -269,7 +277,7 @@ public partial class SummaryDialog : GatewayDialog
             builder.Append(@$" \ul {I18n($"{group.Name}")}\ul0");
             builder.Append(@" \line \line ");
 
-            foreach (var property in group.Properties)
+            foreach (IProperty property in group.Properties)
             {
                 if (!property.If(properties))
                 {
@@ -284,6 +292,7 @@ public partial class SummaryDialog : GatewayDialog
                 {
                     builder.AppendLine(@$" \tab \b {I18n($"{property.Name}")} \b0 {RtfEscape(property.Value(Runtime.Session))}");
                 }
+
                 builder.Append(@" \line ");
             }
 

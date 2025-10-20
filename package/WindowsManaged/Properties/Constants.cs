@@ -20,6 +20,8 @@
 
         internal const string NewDGatewayProvisionerKeyPairCommand = "New-DGatewayProvisionerKeyPair -Force";
 
+        internal const string DVLSPublicKeyEndpoint = "api/gateway/public-key";
+
         internal const string NgrokUrl = "www.ngrok.com";
 
         internal const string NgrokAuthTokenUrl = "https://dashboard.ngrok.com/get-started/your-authtoken";

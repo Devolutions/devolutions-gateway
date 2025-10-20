@@ -1,8 +1,10 @@
-﻿using DevolutionsGateway.Properties;
+﻿using DevolutionsGateway.Configuration;
+using DevolutionsGateway.Properties;
 using DevolutionsGateway.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -10,17 +12,19 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
-using Newtonsoft.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using WixSharp;
-using File = System.IO.File;
-using DevolutionsGateway.Configuration;
 using static DevolutionsGateway.Actions.WinAPI;
-using System.Security.Principal;
-using System.Security.AccessControl;
+using File = System.IO.File;
 
 namespace DevolutionsGateway.Actions
 {
@@ -332,7 +336,32 @@ namespace DevolutionsGateway.Actions
                 {
                     command = Constants.ImportDGatewayProvisionerKeyCommand;
 
-                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties.publicKeyFile)))
+                    string dvlsUrl = session.Get(GatewayProperties.devolutionsServerUrl);
+                    string publicKeyFile;
+
+                    if (!string.IsNullOrEmpty(dvlsUrl))
+                    {
+                        if (!TryDownloadDvlsPublicKey(session, dvlsUrl, out publicKeyFile, out Exception e))
+                        {
+                            session.Log($"failed to download public key: {e}");
+
+                            using Record record = new(3)
+                            {
+                                FormatString = "Failed to download public key from Devolutions Server: [1]",
+                            };
+
+                            record.SetString(1, e.ToString());
+                            session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+
+                            return ActionResult.Failure;
+                        }
+                    }
+                    else
+                    {
+                        publicKeyFile = session.Get(GatewayProperties.publicKeyFile);
+                    }
+
+                    if (!string.IsNullOrEmpty(publicKeyFile))
                     {
                         command += $" -PublicKeyFile '{session.Get(GatewayProperties.publicKeyFile)}'";
                     }
@@ -1409,6 +1438,111 @@ namespace DevolutionsGateway.Actions
         internal static bool TryReadGatewayConfig(Session session, string path, out Gateway gatewayConfig, out Exception error)
         {
             return TryReadGatewayConfig(LogDelegate.WithSession(session), path, out gatewayConfig, out error);
+        }
+
+        private static bool TryDownloadDvlsPublicKey(Session session, string url, out string path, out Exception error)
+        {
+            path = null;
+            error = null;
+
+            if (!url.EndsWith("/"))
+            {
+                url += "/";
+            }
+
+            url += Constants.DVLSPublicKeyEndpoint;
+
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+            using HttpClient client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+
+            TimeSpan backoff = TimeSpan.FromMilliseconds(500);
+            Random rng = new Random();
+            const int maxAttempts = 3;
+
+            static bool ShouldRetry(HttpStatusCode code) =>
+                code == HttpStatusCode.RequestTimeout || (int)code == 429 || (int)code >= 500;
+
+            TimeSpan Jitter() => backoff + TimeSpan.FromMilliseconds(rng.Next(0, 250));
+
+            TimeSpan ComputeDelay(HttpResponseMessage m)
+            {
+                if ((int)m.StatusCode == 429 && m.Headers.RetryAfter is { Delta: { } d })
+                {
+                    return d;
+                }
+
+                return Jitter();
+            }
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                session.Log($"downloading public key from {url} attempt {attempt}");
+
+                try
+                {
+                    using HttpResponseMessage response = client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+
+                    if (ShouldRetry(response.StatusCode) && attempt < maxAttempts)
+                    {
+                        TimeSpan delay = ComputeDelay(response);
+                        error = new Exception($"server returned {(int)response.StatusCode} {response.ReasonPhrase}, retrying in {delay.TotalMilliseconds}ms");
+                        Thread.Sleep(delay);
+                        backoff = TimeSpan.FromMilliseconds(backoff.TotalMilliseconds * 2);
+                        continue;
+                    }
+
+                    response.EnsureSuccessStatusCode();
+
+                    path = Path.GetTempFileName();
+                    using Stream s = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
+                    using FileStream d = new FileStream(path, FileMode.Create, System.IO.FileAccess.Write, FileShare.None);
+                    s.CopyTo(d);
+
+                    session.Log($"downloaded public key to {path}");
+
+                    try
+                    {
+                        WinAPI.MoveFileEx(path, IntPtr.Zero, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+                    }
+                    catch
+                    {
+                        // Cleanup, don't fail
+                    }
+
+                    return true;
+                }
+                catch (HttpRequestException ex) when (attempt < maxAttempts)
+                {
+                    TimeSpan delay = Jitter();
+                    session.Log($"network error, retrying in {delay.TotalMilliseconds}ms ({ex.Message})");
+                    Thread.Sleep(delay);
+                    backoff = TimeSpan.FromMilliseconds(backoff.TotalMilliseconds * 2);
+                }
+                catch (IOException ex) when (attempt < maxAttempts)
+                {
+                    TimeSpan delay = Jitter();
+                    session.Log($"io error, retrying in {delay.TotalMilliseconds}ms ({ex.Message})");
+                    Thread.Sleep(delay);
+                    backoff = TimeSpan.FromMilliseconds(backoff.TotalMilliseconds * 2);
+                }
+                catch (TaskCanceledException ex) when (attempt < maxAttempts)
+                {
+                    TimeSpan delay = Jitter();
+                    session.Log($"timeout, retrying in {delay.TotalMilliseconds}ms ({ex.Message})");
+                    Thread.Sleep(delay);
+                    backoff = TimeSpan.FromMilliseconds(backoff.TotalMilliseconds * 2);
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                    return false;
+                }
+            }
+
+            error ??= new Exception("all retries failed");
+
+            return false;
         }
     }
 }

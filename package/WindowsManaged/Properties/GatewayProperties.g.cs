@@ -415,6 +415,32 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<String> devolutionsServerUrl = new()
+        {
+            Id = "P.DEVOLUTIONSSERVERURL",
+            Default = "",
+            Name = "DevolutionsServerUrl",
+            Secure = true,
+            Hidden = false,
+            Public = true
+        };
+
+        public String DevolutionsServerUrl
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(devolutionsServerUrl.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(devolutionsServerUrl, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<Boolean> configureGateway = new()
         {
             Id = "P.CONFIGUREGATEWAY",
@@ -542,6 +568,33 @@ namespace DevolutionsGateway.Properties
                 if (this.runtimeSession is not null)
                 {
                     this.runtimeSession.Set(httpListenerScheme, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<Boolean> didChooseServerConfig = new()
+        {
+            Id = "P.DidChooseServerConfig",
+            Default = false,
+            Name = "DidChooseServerConfig",
+            Secure = false,
+            Hidden = false,
+            Public = false
+        };
+
+        /// <summary>A helper to manage UI state</summary>
+        public Boolean DidChooseServerConfig
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(didChooseServerConfig.Id);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(didChooseServerConfig, value); 
                 }
             }
         }
@@ -1282,6 +1335,8 @@ namespace DevolutionsGateway.Properties
  
             certificateThumbprint,
  
+            devolutionsServerUrl,
+ 
             configureGateway,
  
             hasPowerShell,
@@ -1291,6 +1346,8 @@ namespace DevolutionsGateway.Properties
             httpListenerPort,
  
             httpListenerScheme,
+ 
+            didChooseServerConfig,
  
             publicKeyFile,
  

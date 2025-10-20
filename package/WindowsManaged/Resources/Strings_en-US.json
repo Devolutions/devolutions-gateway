@@ -29,6 +29,10 @@
           "text": "You must enter a valid port"
         },
         {
+          "id": "YouMustEnterAValidUrl",
+          "text": "You must enter a valid URL"
+        },
+        {
           "id": "YouMustProvideAValidHostname",
           "text": "You must provide a valid hostname"
         },
@@ -175,6 +179,10 @@
         {
           "id": "ViewErrorsButton",
           "text": "View configuration issues"
+        },
+        {
+          "id": "ValidateButton",
+          "text": "Validate"
         }
       ],
       "propertyGroups": [
@@ -393,6 +401,10 @@
         {
           "id": "Property_NewCertificate",
           "text": "A new self-signed certificate will be generated"
+        },
+        {
+          "id": "Property_DevolutionsServerUrl",
+          "text": "Devolutions Server URL"
         }
       ],
       "static": [
@@ -733,6 +745,36 @@
           {
             "id": "RemoteAddress",
             "text": "Remote Address"
+          }
+        ],
+        "dvls": [
+          {
+            "id": "PublicKeyServerDlgTitle",
+            "text": "Companion Server"
+          },
+          {
+            "id": "PublicKeyServerDlgDescription",
+            "text": "Automatic server configuration"
+          },
+          {
+            "id": "ProvideDvlsAddressIfUsing",
+            "text": "If you're using Devolutions Server, provide the address. This step is optional."
+          },
+          {
+            "id": "AutomaticConfigurationWithDvls",
+            "text": "Automatic configuration with Devolutions Server"
+          },
+          {
+            "id": "ManualConfiguration",
+            "text": "Manual configuration"
+          },
+          {
+            "id": "ThePublicKeyWillBeDownloaded",
+            "text": "The public key will be downloaded"
+          },
+          {
+            "id": "YoullNeedToProvideThePublicKey",
+            "text": "You'll need to provide the companion server public key"
           }
         ],
         "keys": [
