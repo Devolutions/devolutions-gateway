@@ -14,15 +14,22 @@ public partial class VerifyReadyDialog : GatewayDialog
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
-
-#if DEBUG
-        this.generateCli.Visible = true;
-#endif
     }
 
     public override void OnLoad(object sender, EventArgs e)
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
+
+        bool generateCliVisible = false;
+
+#if DEBUG
+        generateCliVisible = true;
+#else
+        GatewayProperties properties = new(Runtime.Session);
+        generateCliVisible = properties.EnableCliGeneration;
+#endif
+
+        this.generateCli.Visible = generateCliVisible;
 
         base.OnLoad(sender, e);
     }
