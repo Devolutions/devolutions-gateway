@@ -1,3 +1,4 @@
+using DevolutionsGateway.Controls;
 using WixSharp;
 using WixSharp.UI.Forms;
 
@@ -36,7 +37,7 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
-            this.change = new System.Windows.Forms.Button();
+            this.change = new FileBrowseButton();
             this.label3 = new System.Windows.Forms.Label();
             this.installDir = new System.Windows.Forms.TextBox();
             this.topBorder = new System.Windows.Forms.Panel();
@@ -301,7 +302,7 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Panel bottomPanel;
         private System.Windows.Forms.Label label3;
-        private System.Windows.Forms.Button change;
+        private FileBrowseButton change;
         private System.Windows.Forms.TextBox installDir;
         private System.Windows.Forms.Panel border1;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel1;
