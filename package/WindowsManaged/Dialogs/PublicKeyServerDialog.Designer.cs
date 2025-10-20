@@ -132,7 +132,7 @@ namespace WixSharpSetup.Dialogs
             this.label3.Margin = new System.Windows.Forms.Padding(3);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(362, 34);
-            this.label3.TabIndex = 26;
+            this.label3.TabIndex = 4;
             this.label3.Text = "[ThePublicKeyWillBeDownloaded]";
             // 
             // lblPublicKeyDescription
@@ -144,7 +144,7 @@ namespace WixSharpSetup.Dialogs
             this.lblPublicKeyDescription.Margin = new System.Windows.Forms.Padding(3);
             this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
             this.lblPublicKeyDescription.Size = new System.Drawing.Size(443, 34);
-            this.lblPublicKeyDescription.TabIndex = 25;
+            this.lblPublicKeyDescription.TabIndex = 7;
             this.lblPublicKeyDescription.Text = "[YoullNeedToProvideThePublicKey]";
             // 
             // lblUrl
@@ -155,7 +155,7 @@ namespace WixSharpSetup.Dialogs
             this.lblUrl.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblUrl.Name = "lblUrl";
             this.lblUrl.Size = new System.Drawing.Size(29, 23);
-            this.lblUrl.TabIndex = 24;
+            this.lblUrl.TabIndex = 2;
             this.lblUrl.Text = "URL";
             this.lblUrl.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
@@ -168,7 +168,7 @@ namespace WixSharpSetup.Dialogs
             this.lblKeysDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblKeysDescription.Name = "lblKeysDescription";
             this.lblKeysDescription.Size = new System.Drawing.Size(443, 35);
-            this.lblKeysDescription.TabIndex = 15;
+            this.lblKeysDescription.TabIndex = 0;
             this.lblKeysDescription.Text = "[ProvideDvlsAddressIfUsing]";
             // 
             // txtUrl
@@ -179,7 +179,7 @@ namespace WixSharpSetup.Dialogs
             this.txtUrl.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtUrl.Name = "txtUrl";
             this.txtUrl.Size = new System.Drawing.Size(408, 20);
-            this.txtUrl.TabIndex = 0;
+            this.txtUrl.TabIndex = 3;
             this.txtUrl.TextChanged += new System.EventHandler(this.txtUrl_TextChanged);
             // 
             // rbAutoConfig
@@ -191,7 +191,7 @@ namespace WixSharpSetup.Dialogs
             this.rbAutoConfig.Location = new System.Drawing.Point(3, 43);
             this.rbAutoConfig.Name = "rbAutoConfig";
             this.rbAutoConfig.Size = new System.Drawing.Size(183, 17);
-            this.rbAutoConfig.TabIndex = 22;
+            this.rbAutoConfig.TabIndex = 1;
             this.rbAutoConfig.TabStop = true;
             this.rbAutoConfig.Text = "[AutomaticConfigurationWithDvls]";
             this.rbAutoConfig.UseVisualStyleBackColor = true;
@@ -204,7 +204,7 @@ namespace WixSharpSetup.Dialogs
             this.rbManualConfig.Location = new System.Drawing.Point(3, 134);
             this.rbManualConfig.Name = "rbManualConfig";
             this.rbManualConfig.Size = new System.Drawing.Size(128, 17);
-            this.rbManualConfig.TabIndex = 23;
+            this.rbManualConfig.TabIndex = 6;
             this.rbManualConfig.TabStop = true;
             this.rbManualConfig.Text = "[ManualConfiguration]";
             this.rbManualConfig.UseVisualStyleBackColor = true;
@@ -215,7 +215,7 @@ namespace WixSharpSetup.Dialogs
             this.butValidate.Location = new System.Drawing.Point(371, 94);
             this.butValidate.Name = "butValidate";
             this.butValidate.Size = new System.Drawing.Size(75, 23);
-            this.butValidate.TabIndex = 27;
+            this.butValidate.TabIndex = 5;
             this.butValidate.Text = "[ValidateButton]";
             this.butValidate.UseVisualStyleBackColor = true;
             this.butValidate.Click += new System.EventHandler(this.butValidate_Click);
@@ -315,7 +315,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 1;
+            this.back.TabIndex = 2;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -341,7 +341,7 @@ namespace WixSharpSetup.Dialogs
             this.cancel.MinimumSize = new System.Drawing.Size(75, 0);
             this.cancel.Name = "cancel";
             this.cancel.Size = new System.Drawing.Size(86, 23);
-            this.cancel.TabIndex = 2;
+            this.cancel.TabIndex = 1;
             this.cancel.Text = "[WixUICancel]";
             this.cancel.UseVisualStyleBackColor = true;
             this.cancel.Click += new System.EventHandler(this.Cancel_Click);
@@ -354,6 +354,7 @@ namespace WixSharpSetup.Dialogs
             this.border1.Name = "border1";
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
+            this.border1.Visible = false;
             // 
             // PublicKeyServerDialog
             // 

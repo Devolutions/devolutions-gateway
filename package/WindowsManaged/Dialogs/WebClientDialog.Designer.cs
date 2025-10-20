@@ -75,12 +75,12 @@ namespace WixSharpSetup.Dialogs
             this.contextMenuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.copyToolStripMenuItem});
             this.contextMenuStrip1.Name = "contextMenuStrip1";
-            this.contextMenuStrip1.Size = new System.Drawing.Size(144, 42);
+            this.contextMenuStrip1.Size = new System.Drawing.Size(103, 26);
             // 
             // copyToolStripMenuItem
             // 
             this.copyToolStripMenuItem.Name = "copyToolStripMenuItem";
-            this.copyToolStripMenuItem.Size = new System.Drawing.Size(143, 38);
+            this.copyToolStripMenuItem.Size = new System.Drawing.Size(102, 22);
             this.copyToolStripMenuItem.Text = "Copy";
             // 
             // middlePanel
@@ -297,7 +297,7 @@ namespace WixSharpSetup.Dialogs
             this.label1.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label1.Location = new System.Drawing.Point(11, 8);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(197, 26);
+            this.label1.Size = new System.Drawing.Size(107, 13);
             this.label1.TabIndex = 1;
             this.label1.Text = "[WebAppDlgTitle]";
             // 
@@ -389,6 +389,7 @@ namespace WixSharpSetup.Dialogs
             this.border1.Name = "border1";
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
+            this.border1.Visible = false;
             // 
             // WebClientDialog
             // 

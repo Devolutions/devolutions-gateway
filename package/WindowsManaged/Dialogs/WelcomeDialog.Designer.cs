@@ -131,6 +131,7 @@ namespace WixSharpSetup.Dialogs
             this.bottomBorder.Name = "bottomBorder";
             this.bottomBorder.Size = new System.Drawing.Size(494, 1);
             this.bottomBorder.TabIndex = 5;
+            this.bottomBorder.Visible = false;
             // 
             // tableLayoutPanel1
             // 

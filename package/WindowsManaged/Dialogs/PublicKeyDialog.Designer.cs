@@ -38,12 +38,12 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
             this.lblKeysDescription = new System.Windows.Forms.Label();
-            this.butBrowsePrivateKeyFile = new FileBrowseButton();
+            this.butBrowsePrivateKeyFile = new DevolutionsGateway.Controls.FileBrowseButton();
             this.txtPrivateKeyFile = new System.Windows.Forms.TextBox();
             this.lblPrivateKeyFile = new System.Windows.Forms.Label();
             this.lblPrivateKeyDescription = new System.Windows.Forms.Label();
             this.lblPublicKeyDescription = new System.Windows.Forms.Label();
-            this.butBrowsePublicKeyFile = new FileBrowseButton();
+            this.butBrowsePublicKeyFile = new DevolutionsGateway.Controls.FileBrowseButton();
             this.lblPublicKeyFile = new System.Windows.Forms.Label();
             this.txtPublicKeyFile = new System.Windows.Forms.TextBox();
             this.lnkKeyHint = new System.Windows.Forms.LinkLabel();
@@ -366,6 +366,7 @@ namespace WixSharpSetup.Dialogs
             this.border1.Name = "border1";
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
+            this.border1.Visible = false;
             // 
             // PublicKeyDialog
             // 

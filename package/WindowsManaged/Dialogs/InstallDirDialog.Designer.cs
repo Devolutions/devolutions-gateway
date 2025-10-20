@@ -37,7 +37,7 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
-            this.change = new FileBrowseButton();
+            this.change = new DevolutionsGateway.Controls.FileBrowseButton();
             this.label3 = new System.Windows.Forms.Label();
             this.installDir = new System.Windows.Forms.TextBox();
             this.topBorder = new System.Windows.Forms.Panel();
@@ -267,6 +267,7 @@ namespace WixSharpSetup.Dialogs
             this.border1.Name = "border1";
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
+            this.border1.Visible = false;
             // 
             // InstallDirDialog
             // 
