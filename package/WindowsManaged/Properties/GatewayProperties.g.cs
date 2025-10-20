@@ -1069,6 +1069,32 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<Boolean> enableCliGeneration = new()
+        {
+            Id = "P.ENABLECLIGENERATION",
+            Default = false,
+            Name = "EnableCliGeneration",
+            Secure = false,
+            Hidden = false,
+            Public = true
+        };
+
+        public Boolean EnableCliGeneration
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(enableCliGeneration.Id);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(enableCliGeneration, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<Boolean> debugPowerShell = new()
         {
             Id = "P.DEBUGPOWERSHELL",
@@ -1384,6 +1410,8 @@ namespace DevolutionsGateway.Properties
             ngrokEnableTcp,
  
             ngrokRemoteAddress,
+ 
+            enableCliGeneration,
  
             debugPowerShell,
  

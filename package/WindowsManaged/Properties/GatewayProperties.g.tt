@@ -256,6 +256,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<bool>("NgrokEnableTcp", false),
     new PropertyDefinition<string>("NgrokRemoteAddress", ""),
 
+    new PropertyDefinition<bool>("EnableCliGeneration", false, isPublic: true, secure: false),
     new PropertyDefinition<bool>("DebugPowerShell", false),
     new PropertyDefinition<Guid>("InstallId", Guid.Empty, isPublic: true, secure: true),
     new PropertyDefinition<string>("UserTempPath", "", isPublic: true, secure: true),
