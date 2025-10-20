@@ -1,3 +1,4 @@
+using DevolutionsGateway.Controls;
 using WixSharp;
 using WixSharp.UI.Forms;
 
@@ -40,14 +41,14 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel = new System.Windows.Forms.Panel();
             this.gbExternal = new System.Windows.Forms.GroupBox();
             this.pnlExternal = new System.Windows.Forms.TableLayoutPanel();
-            this.butBrowsePrivateKeyFile = new System.Windows.Forms.Button();
+            this.butBrowsePrivateKeyFile = new DevolutionsGateway.Controls.FileBrowseButton();
             this.txtPrivateKeyFile = new System.Windows.Forms.TextBox();
             this.txtCertificatePassword = new System.Windows.Forms.TextBox();
             this.lblPrivateKeyFile = new System.Windows.Forms.Label();
             this.lblCertificatePassword = new System.Windows.Forms.Label();
             this.lblCertificateFile = new System.Windows.Forms.Label();
             this.txtCertificateFile = new System.Windows.Forms.TextBox();
-            this.butBrowseCertificateFile = new System.Windows.Forms.Button();
+            this.butBrowseCertificateFile = new DevolutionsGateway.Controls.FileBrowseButton();
             this.lblHint = new System.Windows.Forms.Label();
             this.lblCertificateFormats = new System.Windows.Forms.Label();
             this.gbSystem = new System.Windows.Forms.GroupBox();
@@ -656,7 +657,7 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Button cancel;
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
-        private System.Windows.Forms.Button butBrowseCertificateFile;
+        private FileBrowseButton butBrowseCertificateFile;
         private System.Windows.Forms.Label lblCertificateFile;
         private System.Windows.Forms.TextBox txtCertificateFile;
         private System.Windows.Forms.TableLayoutPanel pnlExternal;
@@ -678,7 +679,7 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.GroupBox gbSystem;
         private System.Windows.Forms.GroupBox gbExternal;
         private System.Windows.Forms.Label lblHint;
-        private System.Windows.Forms.Button butBrowsePrivateKeyFile;
+        private FileBrowseButton butBrowsePrivateKeyFile;
         private System.Windows.Forms.TextBox txtPrivateKeyFile;
         private System.Windows.Forms.TextBox txtCertificatePassword;
         private System.Windows.Forms.Label lblPrivateKeyFile;

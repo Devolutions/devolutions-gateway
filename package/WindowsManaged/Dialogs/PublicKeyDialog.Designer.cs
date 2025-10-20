@@ -1,3 +1,4 @@
+using DevolutionsGateway.Controls;
 using WixSharp;
 using WixSharp.UI.Forms;
 
@@ -37,12 +38,12 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
             this.lblKeysDescription = new System.Windows.Forms.Label();
-            this.butBrowsePrivateKeyFile = new System.Windows.Forms.Button();
+            this.butBrowsePrivateKeyFile = new FileBrowseButton();
             this.txtPrivateKeyFile = new System.Windows.Forms.TextBox();
             this.lblPrivateKeyFile = new System.Windows.Forms.Label();
             this.lblPrivateKeyDescription = new System.Windows.Forms.Label();
             this.lblPublicKeyDescription = new System.Windows.Forms.Label();
-            this.butBrowsePublicKeyFile = new System.Windows.Forms.Button();
+            this.butBrowsePublicKeyFile = new FileBrowseButton();
             this.lblPublicKeyFile = new System.Windows.Forms.Label();
             this.txtPublicKeyFile = new System.Windows.Forms.TextBox();
             this.lnkKeyHint = new System.Windows.Forms.LinkLabel();
@@ -407,9 +408,9 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
         private System.Windows.Forms.TextBox txtPublicKeyFile;
-        private System.Windows.Forms.Button butBrowsePublicKeyFile;
+        private FileBrowseButton butBrowsePublicKeyFile;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
-        private System.Windows.Forms.Button butBrowsePrivateKeyFile;
+        private FileBrowseButton butBrowsePrivateKeyFile;
         private System.Windows.Forms.TextBox txtPrivateKeyFile;
         private System.Windows.Forms.Label lblPrivateKeyFile;
         private System.Windows.Forms.Label lblPrivateKeyDescription;
