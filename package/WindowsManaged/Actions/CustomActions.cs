@@ -363,7 +363,7 @@ namespace DevolutionsGateway.Actions
 
                     if (!string.IsNullOrEmpty(publicKeyFile))
                     {
-                        command += $" -PublicKeyFile '{session.Get(GatewayProperties.publicKeyFile)}'";
+                        command += $" -PublicKeyFile '{publicKeyFile}'";
                     }
 
                     if (!string.IsNullOrEmpty(session.Get(GatewayProperties.privateKeyFile)))
