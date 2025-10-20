@@ -130,6 +130,9 @@ public partial class PublicKeyServerDialog : GatewayDialog
             return;
         }
 
+        // WinForms "feature"; disabling the button on the next line will shift focus to the next tab stop.
+        // If it's a radio button it will get selected. We don't want that.
+        this.label3.Focus();
 
         this.butValidate.Enabled = false;
         this.next.Enabled = false;
