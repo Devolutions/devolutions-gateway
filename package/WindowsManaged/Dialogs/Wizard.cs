@@ -19,6 +19,7 @@ internal static class Wizard
         typeof(ListenersDialog),
         typeof(AccessUriDialog),
         typeof(CertificateDialog),
+        typeof(PublicKeyServerDialog),
         typeof(PublicKeyDialog),
         typeof(WebClientDialog),
         typeof(ServiceDialog),
@@ -90,9 +91,22 @@ internal static class Wizard
             }
         }
 
+        if (dialog == typeof(PublicKeyServerDialog))
+        {
+            if (properties.ConfigureWebApp)
+            {
+                return true;
+            }
+        }
+
         if (dialog == typeof(PublicKeyDialog))
         {
             if (properties.ConfigureWebApp && properties.GenerateKeyPair)
+            {
+                return true;
+            }
+
+            if (!properties.ConfigureWebApp && !string.IsNullOrEmpty(properties.DevolutionsServerUrl))
             {
                 return true;
             }

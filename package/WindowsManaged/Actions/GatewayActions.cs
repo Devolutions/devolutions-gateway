@@ -358,6 +358,7 @@ internal static class GatewayActions
             GatewayProperties.privateKeyFile,
             GatewayProperties.configureWebApp,
             GatewayProperties.generateKeyPair,
+            GatewayProperties.devolutionsServerUrl,
         },
         Enumerable.Empty<Condition>());
 

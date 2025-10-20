@@ -53,5 +53,8 @@
     <Compile Update="Dialogs\WelcomeDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="Dialogs\PublicKeyServerDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
   </ItemGroup>
 </Project>

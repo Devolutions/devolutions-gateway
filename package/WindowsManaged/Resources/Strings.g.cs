@@ -33,6 +33,10 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string YouMustEnterAValidPort = "YouMustEnterAValidPort";		
 		/// <summary>
+		/// You must enter a valid URL
+		/// </summary>
+		public const string YouMustEnterAValidUrl = "YouMustEnterAValidUrl";		
+		/// <summary>
 		/// You must provide a valid hostname
 		/// </summary>
 		public const string YouMustProvideAValidHostname = "YouMustProvideAValidHostname";		
@@ -176,6 +180,10 @@ namespace DevolutionsGateway.Resources
 		/// View configuration issues
 		/// </summary>
 		public const string ViewErrorsButton = "ViewErrorsButton";		
+		/// <summary>
+		/// Validate
+		/// </summary>
+		public const string ValidateButton = "ValidateButton";		
 		/// <summary>
 		/// Install Location
 		/// </summary>
@@ -388,6 +396,10 @@ namespace DevolutionsGateway.Resources
 		/// A new self-signed certificate will be generated
 		/// </summary>
 		public const string Property_NewCertificate = "Property_NewCertificate";		
+		/// <summary>
+		/// Devolutions Server URL
+		/// </summary>
+		public const string Property_DevolutionsServerUrl = "Property_DevolutionsServerUrl";		
 		/// <summary>
 		/// Protocol
 		/// </summary>
@@ -700,6 +712,34 @@ namespace DevolutionsGateway.Resources
 		/// Remote Address
 		/// </summary>
 		public const string RemoteAddress = "RemoteAddress";		
+		/// <summary>
+		/// Companion Server
+		/// </summary>
+		public const string PublicKeyServerDlgTitle = "PublicKeyServerDlgTitle";		
+		/// <summary>
+		/// Automatic server configuration
+		/// </summary>
+		public const string PublicKeyServerDlgDescription = "PublicKeyServerDlgDescription";		
+		/// <summary>
+		/// If you're using Devolutions Server, provide the address. This step is optional.
+		/// </summary>
+		public const string ProvideDvlsAddressIfUsing = "ProvideDvlsAddressIfUsing";		
+		/// <summary>
+		/// Automatic configuration with Devolutions Server
+		/// </summary>
+		public const string AutomaticConfigurationWithDvls = "AutomaticConfigurationWithDvls";		
+		/// <summary>
+		/// Manual configuration
+		/// </summary>
+		public const string ManualConfiguration = "ManualConfiguration";		
+		/// <summary>
+		/// The public key will be downloaded
+		/// </summary>
+		public const string ThePublicKeyWillBeDownloaded = "ThePublicKeyWillBeDownloaded";		
+		/// <summary>
+		/// You'll need to provide the companion server public key
+		/// </summary>
+		public const string YoullNeedToProvideThePublicKey = "YoullNeedToProvideThePublicKey";		
 		/// <summary>
 		/// Encryption Keys
 		/// </summary>
