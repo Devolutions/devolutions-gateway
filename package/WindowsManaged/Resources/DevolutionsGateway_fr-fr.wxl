@@ -19,6 +19,7 @@
                 <String Id="NgroXForNativeClientAccess">Le {0} pour accéder au client natif</String>
                     <!-- buttons -->
                 <String Id="SearchButton">Rechercher</String>
+                <String Id="ValidateButton">Valider</String>
                 <String Id="ViewButton">Afficher</String>
                 <String Id="ViewErrorsButton">Afficher les problèmes de configuration</String>
                 <String Id="ViewLogButton">Afficher le journal</String>
@@ -67,6 +68,7 @@
                 <String Id="YouMustEnterAPassword">Vous devez saisir un mot de passe</String>
                 <String Id="YouMustEnterAUsername">Vous devez saisir un nom d'utilisateur</String>
                 <String Id="YouMustEnterAValidPort">Vous devez entrer un numéro de port valide</String>
+                <String Id="YouMustEnterAValidUrl">Vous devez entrer une URL valide</String>
                 <String Id="YouMustProvideAValidCertificateAndPasswordOrKey">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
                 <String Id="YouMustProvideAValidHostname">Vous devez fournir un nom d'hôte valide</String>
                 <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">Vous devez sélectionner un certificat dans le magasin de certificats du système</String>
@@ -89,6 +91,7 @@
                 <String Id="Property_CertificatePassword">Mot de passe du certificat</String>
                 <String Id="Property_CertificatePrivateKeyFile">Fichier de clée privée</String>
                 <String Id="Property_CertificateStore">Magasin de certificats</String>
+                <String Id="Property_DevolutionsServerUrl">URL du Devolutions Server</String>
                 <String Id="Property_Directory">Répertoire</String>
                 <String Id="Property_HttpListener">Écouteur HTTP</String>
                 <String Id="Property_NewCertificate">Un nouveau certificat autosigné sera généré</String>
@@ -204,6 +207,14 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="ListenersDlgListenersLabel">Écouteurs</String>
                 <String Id="ListenersDlgTCPLabel">Écouteur TCP</String>
                 <String Id="ListenersDlgTitle">Écouteurs</String>
+                    <!-- dialogs.dvls -->
+                <String Id="AutomaticConfigurationWithDvls">Configuration automatique avec Devolutions Server</String>
+                <String Id="ManualConfiguration">Configuration manuelle</String>
+                <String Id="ProvideDvlsAddressIfUsing">Si vous utilisez Devolutions Server, indiquez son adresse. Cette étape est facultative.</String>
+                <String Id="PublicKeyServerDlgDescription">Configuration automatique du serveur</String>
+                <String Id="PublicKeyServerDlgTitle">Serveur Compagnon</String>
+                <String Id="ThePublicKeyWillBeDownloaded">La clé publique sera téléchargée</String>
+                <String Id="YoullNeedToProvideThePublicKey">Vous devrez fournir la clé publique du serveur compagnon</String>
                     <!-- dialogs.keys -->
                 <String Id="PrivateKeyFile">Fichier de clé privée</String>
                 <String Id="ProvideAnEncryptionKeyPairForTokenCreationVerification">Fournir une paire de clés de chiffrement pour la génération et la vérification de jeton.</String>
@@ -225,18 +236,4 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="WixRollbackFirewallExceptionsUninstall">Restauration de la configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
-                    <!-- buttons.- -->
-                <String Id="ValidateButton">Validate</String>
-                    <!-- messages.- -->
-                <String Id="YouMustEnterAValidUrl">You must enter a valid URL</String>
-                    <!-- properties.- -->
-                <String Id="Property_DevolutionsServerUrl">Devolutions Server URL</String>
-                    <!-- dialogs.dvls.- -->
-                <String Id="AutomaticConfigurationWithDvls">Automatic configuration with Devolutions Server</String>
-                <String Id="ManualConfiguration">Manual configuration</String>
-                <String Id="ProvideDvlsAddressIfUsing">If you're using Devolutions Server, provide the address. This step is optional.</String>
-                <String Id="PublicKeyServerDlgDescription">Automatic server configuration</String>
-                <String Id="PublicKeyServerDlgTitle">Companion Server</String>
-                <String Id="ThePublicKeyWillBeDownloaded">The public key will be downloaded</String>
-                <String Id="YoullNeedToProvideThePublicKey">You'll need to provide the companion server public key</String>
                     </WixLocalization>

@@ -81,6 +81,10 @@
         {
           "id": "ViewErrorsButton",
           "text": "Afficher les problèmes de configuration"
+        },
+        {
+          "id": "ValidateButton",
+          "text": "Valider"
         }
       ],
       "enums": [
@@ -270,6 +274,10 @@
         {
           "id": "WindowsPowerShell51IsRequired",
           "text": "Ce produit nécessite Windows PowerShell 5.1"
+        },
+        {
+          "id": "YouMustEnterAValidUrl",
+          "text": "Vous devez entrer une URL valide"
         }
       ],
       "propertyGroups": [
@@ -394,6 +402,10 @@
         {
           "id": "Property_NewCertificate",
           "text": "Un nouveau certificat autosigné sera généré"
+        },
+        {
+          "id": "Property_DevolutionsServerUrl",
+          "text": "URL du Devolutions Server"
         }
       ],
       "filters": [
@@ -478,40 +490,40 @@
           }
         ],
         "webApp": [
-            {
-              "id": "WebAppDlgTitle",
-              "text": "Options de l'application Web"
-            },
-            {
-              "id": "WebAppDlgDescription",
-              "text": "Configuration de l'application Web intégrée."
-            },
-            {
-              "id": "ChooseTheAuthenticationMethod",
-              "text": "Choisir la méthode d'authentification à utiliser pour accéder à l'application Web"
-            },
-            {
-              "id": "Authentication",
-              "text": "Authentification"
-            },
-            {
-              "id": "DefaultUser",
-              "text": "Utilisateur par défaut"
-            },
-            {
-              "id": "Username",
-              "text": "Nom d'utilisateur"
-            },
-            {
-              "id": "Password",
-              "text": "Mot de passe"
-            },
-            {
-              "id": "ConfirmPassword",
-              "text": "Confirmer le mot de passe"
-            }
-          ],
-          "browse": [
+          {
+            "id": "WebAppDlgTitle",
+            "text": "Options de l'application Web"
+          },
+          {
+            "id": "WebAppDlgDescription",
+            "text": "Configuration de l'application Web intégrée."
+          },
+          {
+            "id": "ChooseTheAuthenticationMethod",
+            "text": "Choisir la méthode d'authentification à utiliser pour accéder à l'application Web"
+          },
+          {
+            "id": "Authentication",
+            "text": "Authentification"
+          },
+          {
+            "id": "DefaultUser",
+            "text": "Utilisateur par défaut"
+          },
+          {
+            "id": "Username",
+            "text": "Nom d'utilisateur"
+          },
+          {
+            "id": "Password",
+            "text": "Mot de passe"
+          },
+          {
+            "id": "ConfirmPassword",
+            "text": "Confirmer le mot de passe"
+          }
+        ],
+        "browse": [
           {
             "id": "BrowseDlgTitle",
             "text": "Modifier le dossier de destination"
@@ -768,6 +780,36 @@
           {
             "id": "ChosenPortCouldNotBeChecked",
             "text": "Le port choisi n'a pas pu être vérifié"
+          }
+        ],
+        "dvls": [
+          {
+            "id": "PublicKeyServerDlgTitle",
+            "text": "Serveur Compagnon"
+          },
+          {
+            "id": "PublicKeyServerDlgDescription",
+            "text": "Configuration automatique du serveur"
+          },
+          {
+            "id": "ProvideDvlsAddressIfUsing",
+            "text": "Si vous utilisez Devolutions Server, indiquez son adresse. Cette étape est facultative."
+          },
+          {
+            "id": "AutomaticConfigurationWithDvls",
+            "text": "Configuration automatique avec Devolutions Server"
+          },
+          {
+            "id": "ManualConfiguration",
+            "text": "Configuration manuelle"
+          },
+          {
+            "id": "ThePublicKeyWillBeDownloaded",
+            "text": "La clé publique sera téléchargée"
+          },
+          {
+            "id": "YoullNeedToProvideThePublicKey",
+            "text": "Vous devrez fournir la clé publique du serveur compagnon"
           }
         ],
         "keys": [
