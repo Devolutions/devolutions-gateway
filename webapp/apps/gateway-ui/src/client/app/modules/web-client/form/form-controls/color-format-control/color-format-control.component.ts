@@ -6,6 +6,7 @@ import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.in
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-color-format-control',
   templateUrl: 'color-format-control.component.html',
   styleUrls: ['color-format-control.component.scss'],

@@ -3,6 +3,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { Tooltip } from 'primeng/tooltip';
 
 @Directive({
+  standalone: false,
   selector: '[tooltipEllipsis]',
 })
 export class TooltipEllipsisDirective extends BaseComponent implements AfterViewInit, OnDestroy {

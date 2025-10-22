@@ -1,7 +1,7 @@
 <div [formGroup]="parentForm">
   <label for="colorFormat">Color Format</label>
   <div class="gateway-form-input">
-    <p-dropdown id="colorFormat"
+    <p-select id="colorFormat"
                 class="full-width-dropdown"
                 appendTo="body"
                 formControlName="colorFormat"
@@ -12,6 +12,6 @@
                 {{ item.label }}
             </div>
         </ng-template>
-    </p-dropdown>
+    </p-select>
   </div>
 </div>

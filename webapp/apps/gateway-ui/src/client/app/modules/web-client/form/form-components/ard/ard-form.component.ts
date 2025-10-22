@@ -6,6 +6,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { UAParser } from 'ua-parser-js';
 
 @Component({
+  standalone: false,
   selector: 'ard-form',
   templateUrl: 'ard-form.component.html',
   styleUrls: ['ard-form.component.scss'],

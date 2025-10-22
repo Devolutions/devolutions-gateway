@@ -23,6 +23,7 @@ import { WebSessionService } from '@shared/services/web-session.service';
 import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 
 @Component({
+  standalone: false,
   selector: 'web-client-dynamic-tab',
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss'],

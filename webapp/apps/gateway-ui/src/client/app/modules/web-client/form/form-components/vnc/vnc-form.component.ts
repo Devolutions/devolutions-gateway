@@ -15,6 +15,7 @@ interface FormInputVisibility {
 }
 
 @Component({
+  standalone: false,
   selector: 'vnc-form',
   templateUrl: 'vnc-form.component.html',
   styleUrls: ['vnc-form.component.scss'],

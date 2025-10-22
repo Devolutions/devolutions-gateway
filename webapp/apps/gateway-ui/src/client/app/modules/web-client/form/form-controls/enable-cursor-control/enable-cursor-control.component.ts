@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-enable-cursor-control',
   templateUrl: 'enable-cursor-control.component.html',
   styleUrls: ['enable-cursor-control.component.scss'],

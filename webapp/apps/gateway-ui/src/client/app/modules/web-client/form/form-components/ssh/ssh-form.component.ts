@@ -15,6 +15,7 @@ interface FormInputVisibility {
 
 @Injectable({ providedIn: 'root' })
 @Component({
+  standalone: false,
   selector: 'ssh-form',
   templateUrl: 'ssh-form.component.html',
   styleUrls: ['ssh-form.component.scss'],

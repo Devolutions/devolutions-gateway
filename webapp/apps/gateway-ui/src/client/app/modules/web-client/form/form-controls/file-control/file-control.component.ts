@@ -4,6 +4,7 @@ import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { ValidateFileResult } from '../../../../../shared/services/ssh-key.service';
 
 @Component({
+  standalone: false,
   selector: 'app-file-control',
   templateUrl: './file-control.component.html',
   styleUrls: ['./file-control.component.scss'],

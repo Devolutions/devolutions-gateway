@@ -5,6 +5,7 @@ import { MainMenuService } from '@shared/services/main-menu.service';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
+  standalone: false,
   templateUrl: './main-app.component.html',
   styleUrls: ['./main-app.component.scss'],
 })

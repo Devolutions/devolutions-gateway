@@ -13,17 +13,18 @@ import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-clien
 import { BaseComponent } from '@shared/bases/base.component';
 import { ComponentForSession, SessionDataTypeMap, SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { TabView } from 'primeng/tabview';
+import { Tabs } from 'primeng/tabs';
 import { takeUntil } from 'rxjs/operators';
 import { MainPanelComponent } from '../main-panel/main-panel.component';
 
 @Component({
+  standalone: false,
   selector: 'web-client-tab-view',
   templateUrl: './tab-view.component.html',
   styleUrls: ['./tab-view.component.scss'],
 })
 export class TabViewComponent extends BaseComponent implements OnDestroy, AfterViewInit {
-  @ViewChild('tabView') tabView: TabView;
+  @ViewChild('tabView') tabView: Tabs;
   @ViewChild('sessionsContainer') sessionsContainerRef: ElementRef;
 
   webSessionTabs: WebSession<SessionType>[] = [];
@@ -70,9 +71,17 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
     this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 
+  onTabChange(event: any): void {
+    // PrimeNG 20 Tabs onChange event provides the new value in event.value
+    const newIndex = typeof event.value === 'number' ? event.value : Number.parseInt(event.value, 10);
+    this.webSessionService.setWebSessionCurrentIndex(newIndex);
+  }
+
   private changeTabIndex(): void {
     if (!this.tabView) return;
-    this.tabView.activeIndex = this.currentTabIndex;
+    // PrimeNG 20 Tabs uses 'value' signal instead of 'activeIndex'
+    // The value should be a number matching the tab's [value] attribute
+    this.tabView.value.set(this.currentTabIndex);
   }
 
   private loadTabs(): void {

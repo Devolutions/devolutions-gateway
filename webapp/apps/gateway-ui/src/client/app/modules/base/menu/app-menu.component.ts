@@ -11,6 +11,7 @@ import { MainAppComponent } from '../main-app/main-app.component';
 import { RouterMenuItem } from './model/router-menu-item.model';
 
 @Component({
+  standalone: false,
   selector: 'app-menu',
   templateUrl: './app-menu.component.html',
   styleUrls: ['app-menu.component.scss'],

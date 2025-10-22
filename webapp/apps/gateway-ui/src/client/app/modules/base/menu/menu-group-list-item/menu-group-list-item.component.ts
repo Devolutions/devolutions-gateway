@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChange
 import { BaseComponent } from '@shared/bases/base.component';
 
 @Component({
+  standalone: false,
   selector: 'gateway-menu-group-list-item',
   templateUrl: './menu-group-list-item.component.html',
   styleUrls: ['menu-group-list-item.component.scss'],
