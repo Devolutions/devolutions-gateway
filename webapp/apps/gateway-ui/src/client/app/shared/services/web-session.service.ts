@@ -106,9 +106,10 @@ export class WebSessionService {
 
     if (index !== -1) {
       updatedWebSession.tabIndex = currentSessions[index].tabIndex;
-      currentSessions[index] = updatedWebSession;
+      const updatedSessions = [...currentSessions];
+      updatedSessions[index] = updatedWebSession;
 
-      this.webSessionDataSubject.next(currentSessions);
+      this.webSessionDataSubject.next(updatedSessions);
       this.setWebSessionTabIndexToLastCreated(updatedWebSession.tabIndex);
     } else {
       console.error('Web Session not found.');

@@ -7,6 +7,7 @@ import { BaseComponent } from '../../bases/base.component';
 import { GatewayAlertMessageService } from './gateway-alert-message.service';
 
 @Component({
+  standalone: false,
   selector: 'gateway-alert-message',
   templateUrl: 'gateway-alert-message.component.html',
   styleUrls: ['gateway-alert-message.component.scss'],

@@ -2,6 +2,7 @@ import { AfterViewInit, ChangeDetectorRef, Component } from '@angular/core';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 
 @Component({
+  standalone: false,
   selector: 'app-net-scan',
   templateUrl: './net-scan.component.html',
   styleUrls: ['./net-scan.component.scss'],

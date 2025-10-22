@@ -4,6 +4,7 @@ import { BaseSessionComponent } from '@gateway/shared/models/web-session.model';
 import { WebClientFormComponent } from '../../../modules/web-client/form/web-client-form.component';
 
 @Component({
+  standalone: false,
   selector: 'app-main-panel',
   templateUrl: './main-panel.component.html',
   styleUrls: ['./main-panel.component.scss'],

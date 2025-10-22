@@ -3,6 +3,7 @@ import { WebSession } from '@shared/models/web-session.model';
 import { UtilsService } from '@shared/services/utils.service';
 
 @Component({
+  standalone: false,
   selector: 'session-toolbar',
   templateUrl: 'session-toolbar.component.html',
   styleUrls: ['session-toolbar.component.scss'],
@@ -36,6 +37,7 @@ export class SessionToolbarComponent {
   }[] = [];
 
   @Input() checkboxes: {
+    inputId: string;
     label: string;
     value: boolean;
     onChange: (value: boolean) => void;

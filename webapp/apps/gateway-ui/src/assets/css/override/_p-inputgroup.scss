@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-inputgroup {
   background: var(--input-txt-bg-color);
   border: 1px solid $input-default-border-color;

@@ -1,6 +1,6 @@
-@import '../../../../../assets/css/style/mixins';
-@import "../../../../../assets/css/style/variables";
-@import "../../../../../assets/css/theme/theme-mode-variables";
+@use '../../../../../assets/css/style/mixins' as *;
+@use "../../../../../assets/css/style/variables" as *;
+@use "../../../../../assets/css/theme/theme-mode-variables" as *;
 
 :host {
   --box-background-color: white;
@@ -75,6 +75,15 @@
   width: 447px;
   border-radius: 8px;
   padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin: 3vw;
+  max-height: calc(100vh - 6vw);
+  overflow-y: auto;
+  
+  // Force border-radius to work with flex
+  &.flex {
+    border-radius: 8px;
+  }
 }
 
 .centered-box {

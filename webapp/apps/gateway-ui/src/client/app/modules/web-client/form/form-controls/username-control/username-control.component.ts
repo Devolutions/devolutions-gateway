@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-username-control',
   templateUrl: 'username-control.component.html',
   styleUrls: ['username-control.component.scss'],

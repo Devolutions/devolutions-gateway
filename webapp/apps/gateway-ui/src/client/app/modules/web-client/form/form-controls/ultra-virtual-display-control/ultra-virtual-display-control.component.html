@@ -1,5 +1,10 @@
 <div [formGroup]="parentForm">
   <div class="gateway-form-input">
-      <p-checkbox formControlName="ultraVirtualDisplay" label="Ultra Virtual Display" binary="true"></p-checkbox>
+    <p-checkbox
+      formControlName="ultraVirtualDisplay"
+      inputId="ultraVirtualDisplay"
+      [binary]="true"
+    ></p-checkbox>
+    <label for="ultraVirtualDisplay">Ultra Virtual Display</label>
   </div>
 </div>

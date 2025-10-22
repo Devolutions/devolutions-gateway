@@ -2,70 +2,95 @@
   <div class="col-4 gateway-form-group col-pad-right-lg">
     <label for="authSettings">Authentication</label>
     <div class="gateway-form-input">
-      <p-dropdown id="authSettings"
-                  appendTo="body"
-                  formControlName="authMode"
-                  [options]="authModeOptions">
-      </p-dropdown>
+      <p-select
+        id="authSettings"
+        appendTo="body"
+        formControlName="authMode"
+        [options]="authModeOptions"
+      >
+      </p-select>
     </div>
   </div>
 
   <div class="col-12 gateway-form-group" [hidden]="!showUsernameInput()">
-    <web-client-username-control [parentForm]="form"
-                                 [inputFormData]="inputFormData"
-                                 [isEnabled]="showUsernameInput()"></web-client-username-control>
+    <web-client-username-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+      [isEnabled]="showUsernameInput()"
+    ></web-client-username-control>
   </div>
 
   <div class="col-12 gateway-form-group" [hidden]="!showPasswordInput()">
-    <web-client-password-control [parentForm]="form"
-                                 [inputFormData]="inputFormData"
-                                 [isEnabled]="showPasswordInput()"></web-client-password-control>
+    <web-client-password-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+      [isEnabled]="showPasswordInput()"
+    ></web-client-password-control>
   </div>
 
   <div class="col-12 gateway-form-group">
-    <a href="#" (click)="toggleMoreSettings($event)">More Settings
-        <span *ngIf="!showMoreSettings" >+</span>
-        <span *ngIf="showMoreSettings">-</span>
+    <a href="#" (click)="toggleMoreSettings($event)"
+      >More Settings
+      <span *ngIf="!showMoreSettings">+</span>
+      <span *ngIf="showMoreSettings">-</span>
     </a>
   </div>
 
   <div [hidden]="!showMoreSettings" class="col-12 gateway-form-group">
-
-    <web-client-screen-size-control [parentForm]="form"
-                                    [inputFormData]="inputFormData"></web-client-screen-size-control>
+    <web-client-screen-size-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+    ></web-client-screen-size-control>
 
     <div class="col-12 gateway-form-group">
-      <web-client-ultra-virtual-display-control [parentForm]="form"
-                                                [inputFormData]="inputFormData"></web-client-ultra-virtual-display-control>
+      <web-client-ultra-virtual-display-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-ultra-virtual-display-control>
     </div>
 
     <div class="col-12 gateway-form-group">
-      <web-client-enabled-encodings-control [parentForm]="form"
-                                            [inputFormData]="inputFormData"></web-client-enabled-encodings-control>
+      <web-client-enabled-encodings-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-enabled-encodings-control>
     </div>
 
     <div class="col-12 gateway-form-group">
-      <web-client-color-format-control [parentForm]="form"
-        [inputFormData]="inputFormData"></web-client-color-format-control>
-        <web-client-jpeg-quality-level-control [parentForm]="form"
-                                               [inputFormData]="inputFormData"></web-client-jpeg-quality-level-control>
+      <web-client-color-format-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-color-format-control>
+    </div>
+    <div class="col-12 gateway-form-group">
+      <web-client-jpeg-quality-level-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-jpeg-quality-level-control>
     </div>
 
     <div class="col-12 gateway-form-group">
-      <web-client-enable-cursor-control [parentForm]="form"
-                                         [inputFormData]="inputFormData"></web-client-enable-cursor-control>
+      <web-client-enable-cursor-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-enable-cursor-control>
     </div>
 
-    <div *ngIf="showExtendedClipboardCheckbox" class="col-12 gateway-form-group">
-      <web-client-extended-clipboard-control [parentForm]="form"
-                                             [inputFormData]="inputFormData"></web-client-extended-clipboard-control>
+    <div
+      *ngIf="showExtendedClipboardCheckbox"
+      class="col-12 gateway-form-group"
+    >
+      <web-client-extended-clipboard-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-extended-clipboard-control>
     </div>
 
     <div *ngIf="showAutoClipboardCheckbox" class="col-12 gateway-form-group">
-      <web-client-auto-clipboard-control [parentForm]="form"
-                                         [inputFormData]="inputFormData"></web-client-auto-clipboard-control>
+      <web-client-auto-clipboard-control
+        [parentForm]="form"
+        [inputFormData]="inputFormData"
+      ></web-client-auto-clipboard-control>
     </div>
-
   </div>
-
 </div>

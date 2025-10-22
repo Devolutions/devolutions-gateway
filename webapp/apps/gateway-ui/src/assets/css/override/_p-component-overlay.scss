@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-component-overlay {
   background-color: $overlay-bg-color;
   transition-duration: 0.2s;

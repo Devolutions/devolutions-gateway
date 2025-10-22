@@ -1,9 +1,13 @@
-@import 'theme-mode-variables';
+@use '../theme/theme-mode-variables' as theme;
+@use 'variables' as vars;
+@use 'sass:math';
+@use 'sass:map';
+@use 'sass:list';
 
 /* INPUTS */
 @mixin devolutions-dropdown-filter-icon-input() {
   font-family: 'devolutions-icons';
-  color: $dropdown-filter-icon-color;
+  color: theme.$dropdown-filter-icon-color;
   font-size: 20px;
 
   &:before {
@@ -13,17 +17,21 @@
 
 /* BORDER */
 @mixin border-radius($val) {
-  -moz-border-radius: $val;
-  -webkit-border-radius: $val;
-  border-radius: $val;
+  & {
+    -moz-border-radius: $val;
+    -webkit-border-radius: $val;
+    border-radius: $val;
+  }
 }
 
 /* TRANSITIONS */
 @mixin transition($transition...) {
-  -moz-transition: $transition;
-  -o-transition: $transition;
-  -webkit-transition: $transition;
-  transition: $transition;
+  & {
+    -moz-transition: $transition;
+    -o-transition: $transition;
+    -webkit-transition: $transition;
+    transition: $transition;
+  }
 }
 
 @mixin btn-color-design() {
@@ -153,10 +161,10 @@
 }
 
 @mixin btn-hover-active-transition($hover-background-color, $active-background-color) {
-  -moz-transition: background-color ease-in-out $transitionDuration;
-  -o-transition: background-color ease-in-out $transitionDuration;
-  -webkit-transition: background-color ease-in-out $transitionDuration;
-  transition: background-color ease-in-out $transitionDuration;
+  -moz-transition: background-color ease-in-out vars.$transitionDuration;
+  -o-transition: background-color ease-in-out vars.$transitionDuration;
+  -webkit-transition: background-color ease-in-out vars.$transitionDuration;
+  transition: background-color ease-in-out vars.$transitionDuration;
 
   &:hover {
     background-color: $hover-background-color !important;
@@ -169,7 +177,7 @@
 
 // Mixing that styles scrollbar
 // ::-webkit-scrollbar already included globally in base.scss, not included here. Keeping it DRY
-@mixin custom-scrollbar($overlay: false, $track-color: $scrollbar-background-color, $thumb-color: $scrollbar-color) {
+@mixin custom-scrollbar($overlay: false, $track-color: theme.$scrollbar-background-color, $thumb-color: theme.$scrollbar-color) {
   overflow: auto;
 
   // Makes scrollbar over content on webkit
@@ -187,14 +195,14 @@
   scrollbar-color: $thumb-color $track-color;
 
   // Output only if different than default color
-  @if $track-color != $scrollbar-background-color {
+  @if $track-color != theme.$scrollbar-background-color {
     &::-webkit-scrollbar-track {
       background-color: $track-color !important;
     }
   }
 
   // Output only if different than default color
-  @if $thumb-color != $scrollbar-color {
+  @if $thumb-color != theme.$scrollbar-color {
     &::-webkit-scrollbar-thumb {
       background-color: $thumb-color !important;
     }
@@ -264,7 +272,7 @@
   @each $key, $num in $map {
     @if $prev-num == null {
       /* Do nothing */
-    } @else if not comparable($prev-num, $num) {
+    } @else if not math.compatible($prev-num, $num) {
       @warn "Potentially invalid value for #{$map-name}: This map must be in ascending order, but key '#{$key}' has value #{$num} whose unit makes it incomparable to #{$prev-num}, the value of the previous key '#{$prev-key}' !";
     } @else if $prev-num >= $num {
       @warn "Invalid value for #{$map-name}: This map must be in ascending order, but key '#{$key}' has value #{$num} which isn't greater than #{$prev-num}, the value of the previous key '#{$prev-key}' !";
@@ -275,8 +283,8 @@
 }
 
 @mixin _assert-starts-at-zero($map) {
-  $values: map-values($map);
-  $first-value: nth($values, 1);
+  $values: map.values($map);
+  $first-value: list.nth($values, 1);
   @if $first-value != 0 {
     @warn "First breakpoint in `$grid-breakpoints` must start at 0, but starts at #{$first-value}.";
   }
@@ -292,13 +300,13 @@ $grid-breakpoints: (
 @include _assert-ascending($grid-breakpoints, '$grid-breakpoints');
 @include _assert-starts-at-zero($grid-breakpoints);
 
-@function breakpoint-next($name, $breakpoints: $grid-breakpoints, $breakpoint-names: map-keys($breakpoints)) {
-  $n: index($breakpoint-names, $name);
-  @return if($n < length($breakpoint-names), nth($breakpoint-names, $n + 1), null);
+@function breakpoint-next($name, $breakpoints: $grid-breakpoints, $breakpoint-names: map.keys($breakpoints)) {
+  $n: list.index($breakpoint-names, $name);
+  @return if($n < list.length($breakpoint-names), list.nth($breakpoint-names, $n + 1), null);
 }
 
 @function breakpoint-min($name, $breakpoints: $grid-breakpoints) {
-  $min: map-get($breakpoints, $name);
+  $min: map.get($breakpoints, $name);
   @return if($min != 0, $min, null);
 }
 
@@ -310,24 +318,26 @@ $grid-breakpoints: (
 /* Devolutions Font */
 
 @mixin dvl-icon-font() {
-  font-family: 'devolutions-icons', 'Open Sans', serif;
-  font-variant-ligatures: discretionary-ligatures;
-  font-feature-settings: 'liga';
-  font-kerning: auto;
-  font-language-override: normal;
-  font-size: inherit;
-  font-size-adjust: none;
-  font-stretch: normal;
-  font-style: normal;
-  font-synthesis: weight style;
-  font-variant: normal;
-  font-weight: normal;
-  line-height: 1;
-  text-rendering: auto;
+  & {
+    font-family: 'devolutions-icons', 'Open Sans', serif;
+    font-variant-ligatures: discretionary-ligatures;
+    font-feature-settings: 'liga';
+    font-kerning: auto;
+    font-language-override: normal;
+    font-size: inherit;
+    font-size-adjust: none;
+    font-stretch: normal;
+    font-style: normal;
+    font-synthesis: weight style;
+    font-variant: normal;
+    font-weight: normal;
+    line-height: 1;
+    text-rendering: auto;
 
-  // Better Font Rendering ===========
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    // Better Font Rendering ===========
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 @mixin override-font($icon) {

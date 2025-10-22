@@ -1,9 +1,11 @@
 <div #sessionsContainer class="tabview-container" [ngClass]="{'session-background': addBackgroundClass()}">
-    <p-tabView #tabView class="hidden-tab-headers">
-        <p-tabPanel *ngFor="let tab of webSessionTabs;">
-            <web-client-dynamic-tab [webSessionTab]="tab"
-                                    [sessionsContainerElement]="sessionsContainerRef"
-                                    (componentRefSizeChange)="measureSize()"></web-client-dynamic-tab>
-        </p-tabPanel>
-    </p-tabView>
+    <p-tabs #tabView [value]="currentTabIndex" (onChange)="onTabChange($event)" class="hidden-tab-headers">
+        <p-tabpanels>
+            <p-tabpanel *ngFor="let tab of webSessionTabs; let i = index" [value]="i">
+                <web-client-dynamic-tab [webSessionTab]="tab"
+                                        [sessionsContainerElement]="sessionsContainerRef"
+                                        (componentRefSizeChange)="measureSize()"></web-client-dynamic-tab>
+            </p-tabpanel>
+        </p-tabpanels>
+    </p-tabs>
 </div>

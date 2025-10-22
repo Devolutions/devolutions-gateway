@@ -6,6 +6,7 @@
 // import { WebFormService } from '@shared/services/web-form.service';
 //
 // @Component({
+  standalone: false,
 //   selector: 'web-client-force-firmware-v7-control',
 //   templateUrl: 'force-firmware-v7-control.component.html',
 //   styleUrls: ['force-firmware-v7-control.component.scss'],

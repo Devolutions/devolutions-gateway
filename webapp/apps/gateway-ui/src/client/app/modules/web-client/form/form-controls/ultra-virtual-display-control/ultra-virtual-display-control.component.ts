@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-ultra-virtual-display-control',
   templateUrl: 'ultra-virtual-display-control.component.html',
   styleUrls: ['ultra-virtual-display-control.component.scss'],

@@ -6,6 +6,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
 
 @Component({
+  standalone: false,
   selector: 'web-client-ard-quality-mode-control',
   templateUrl: 'ard-quality-mode-control.component.html',
   styleUrls: ['ard-quality-mode-control.component.scss'],

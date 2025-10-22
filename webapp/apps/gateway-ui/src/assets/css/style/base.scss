@@ -1,9 +1,27 @@
-@import 'variables';
-@import 'theme-mode-variables';
+@use 'variables' as *;
+@use '../theme/theme-mode-variables' as *;
+@use 'mixins' as *;
 
 /********** Fonts **********/
 .p-component, .p-component .p-component, textarea {
   font-family: 'Open Sans', sans-serif;
+}
+
+/* Force PrimeNG 20 components to use custom fonts */
+.p-component,
+.p-component * {
+  font-family: 'Open Sans', sans-serif !important;
+}
+
+.p-inputtext,
+.p-button,
+.p-dropdown,
+.p-select,
+.p-multiselect,
+.p-autocomplete,
+.p-calendar,
+.p-inputnumber {
+  font-family: 'Open Sans', sans-serif !important;
 }
 
 /********** Base **********/
@@ -17,7 +35,7 @@ html, body {
 }
 
 body {
-  font-family: $fontFamily;
+  font-family: $fontFamily !important;
   font-size: $fontSize;
   font-weight: normal;
   color: $default-text-color;
@@ -283,7 +301,7 @@ button {
 
   background-color: transparent;
   color: inherit;
-  font-family: $fontFamily;
+  font-family: $fontFamily !important;
 }
 
 // For "goto" button
@@ -362,9 +380,17 @@ button {
 }
 
 .custom-scroll,
+.custom-scroll .p-tabs-panels,
+.custom-scroll .p-tabs-nav,
+.custom-scroll .p-tabpanels,
+.custom-scroll .p-tablist,
 .custom-scroll .p-tabview-panels,
 .custom-scroll .p-tabview-nav,
-.p-datatable-scrollable .p-datatable-scrollable-body {
+.p-datatable-scrollable .p-datatable-scrollable-body,
+.p-select-overlay .p-select-list-container,
+.p-dropdown-overlay .p-dropdown-list-container,
+.p-multiselect-overlay .p-multiselect-list-container,
+.p-autocomplete-overlay .p-autocomplete-list-container {
   @include custom-scrollbar();
 }
 
@@ -396,6 +422,23 @@ button {
 // Hide weird white square in corner
 ::-webkit-scrollbar-corner {
   background-color: transparent;
+}
+
+/* PrimeNG 20 Overlay Scrollbars */
+.p-overlay,
+.p-component-overlay,
+.p-select-overlay,
+.p-dropdown-overlay,
+.p-multiselect-overlay,
+.p-autocomplete-overlay {
+  @include custom-scrollbar();
+
+  .p-select-list-container,
+  .p-dropdown-list-container,
+  .p-multiselect-list-container,
+  .p-autocomplete-list-container {
+    @include custom-scrollbar();
+  }
 }
 
 body.login-mobile-device {

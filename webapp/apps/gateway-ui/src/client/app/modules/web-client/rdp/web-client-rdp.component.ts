@@ -25,7 +25,8 @@ import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Message, MessageService } from 'primeng/api';
+import { MessageService } from 'primeng/api';
+import type { ToastMessageOptions } from 'primeng/api';
 import { debounceTime, EMPTY, from, noop, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
@@ -47,6 +48,7 @@ enum UserIronRdpErrorKind {
 }
 
 @Component({
+  standalone: false,
   templateUrl: 'web-client-rdp.component.html',
   styleUrls: ['web-client-rdp.component.scss'],
   providers: [MessageService],
@@ -63,7 +65,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   backendRef = Backend;
 
   formData: RdpFormDataInput;
-  sessionTerminationMessage: Message;
+  sessionTerminationMessage: ToastMessageOptions;
   isFullScreenMode = false;
   useUnicodeKeyboard = false;
   cursorOverrideActive = false;
@@ -125,6 +127,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   checkboxes = [
     {
+      inputId: 'unicodeKeyboardMode',
       label: 'Unicode Keyboard Mode',
       value: this.useUnicodeKeyboard,
       onChange: () => {
@@ -134,6 +137,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       enabled: () => true,
     },
     {
+      inputId: 'dynamicResize',
       label: 'Dynamic Resize',
       value: this.dynamicResizeEnabled,
       onChange: () => this.toggleDynamicResize(),

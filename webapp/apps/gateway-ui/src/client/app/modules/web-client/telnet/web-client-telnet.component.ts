@@ -33,6 +33,7 @@ import { AnalyticService, ProtocolString } from '@gateway/shared/services/analyt
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 
 @Component({
+  standalone: false,
   templateUrl: 'web-client-telnet.component.html',
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],

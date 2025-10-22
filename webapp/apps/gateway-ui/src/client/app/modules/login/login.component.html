@@ -28,7 +28,7 @@
       </div>
       <form name="login-form" [formGroup]="loginForm" autocomplete="on">
         <div class="login-form-content grid nomargin nopad">
-          <div class="col-12 gateway-form-group">
+          <div class="col-12 login-form-group">
             <label for="username">Username</label>
             <div class="login-form-input">
               <input pInputText
@@ -46,7 +46,7 @@
             </div>
           </div>
 
-          <div class="col-12 gateway-form-group">
+          <div class="col-12 login-form-group">
               <label for="password">Password</label>
               <div class="login-form-input password-container">
                 <input pPassword
@@ -68,8 +68,8 @@
             </div>
           </div>
 
-          <div class="col-12 gateway-form-group">
-            <p-button   styleClass="btn-login"
+          <div class="col-12 login-form-group">
+            <p-button   class="btn-login"
                         [disabled]="loginForm.invalid"
                         [type]="'submit'"
                         [label]="'Continue'"

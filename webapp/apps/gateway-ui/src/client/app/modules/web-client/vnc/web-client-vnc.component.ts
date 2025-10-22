@@ -23,7 +23,8 @@ import { DesktopSize } from '@shared/models/desktop-size';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Message, MessageService } from 'primeng/api';
+import { MessageService } from 'primeng/api';
+import type { ToastMessageOptions } from 'primeng/api';
 import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
@@ -56,6 +57,7 @@ enum UserIronRdpErrorKind {
 }
 
 @Component({
+  standalone: false,
   templateUrl: 'web-client-vnc.component.html',
   styleUrls: ['web-client-vnc.component.scss'],
   providers: [MessageService],
@@ -72,7 +74,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   backendRef = Backend;
 
   formData: VncFormDataInput;
-  sessionTerminationMessage: Message;
+  sessionTerminationMessage: ToastMessageOptions;
   isFullScreenMode = false;
   cursorOverrideActive = false;
 
@@ -123,6 +125,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   checkboxes = [
     {
+      inputId: 'dynamicResize',
       label: 'Dynamic Resize',
       value: this.dynamicResizeEnabled,
       onChange: () => this.toggleDynamicResize(),

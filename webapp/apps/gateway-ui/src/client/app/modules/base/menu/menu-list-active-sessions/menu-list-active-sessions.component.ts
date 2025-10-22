@@ -5,6 +5,7 @@ import { WebSessionService } from '@shared/services/web-session.service';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
+  standalone: false,
   selector: 'gateway-menu-list-active-sessions',
   templateUrl: './menu-list-active-sessions.component.html',
   styleUrls: ['menu-list-active-sessions.component.scss'],
