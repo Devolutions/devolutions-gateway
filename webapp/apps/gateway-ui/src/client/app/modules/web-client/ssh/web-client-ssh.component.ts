@@ -28,6 +28,7 @@ import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
 @Component({
+  standalone: false,
   selector: 'gateway-web-client-ssh',
   templateUrl: 'web-client-ssh.component.html',
   styleUrls: ['web-client-ssh.component.scss'],

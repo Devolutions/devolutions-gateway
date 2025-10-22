@@ -1,7 +1,15 @@
 <div [formGroup]="parentForm">
   <div class="gateway-form-input">
-    <p-checkbox formControlName="enableCursor" label="Enable Cursor Pseudo-Encoding"
-      pTooltip="When enabled, compatible servers will not blend the mouse cursor into the framebuffer. The cursor is drawn locally, improving perceived performance over slow links and reducing server load."
-      binary="true"></p-checkbox>
+      <p-checkbox
+        formControlName="enableCursor"
+        inputId="enableCursor"
+        [binary]="true"
+      ></p-checkbox>
+      <label
+        for="enableCursor"
+        pTooltip="When enabled, compatible servers will not blend the mouse cursor into the framebuffer. The cursor is drawn locally, improving perceived performance over slow links and reducing server load."
+      >
+        Enable Cursor Pseudo-Encoding
+      </label>
   </div>
 </div>

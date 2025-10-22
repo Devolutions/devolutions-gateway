@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-jpeg-quality-level-control',
   templateUrl: 'jpeg-quality-level-control.component.html',
   styleUrls: ['jpeg-quality-level-control.component.scss'],

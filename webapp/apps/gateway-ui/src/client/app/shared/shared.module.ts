@@ -9,7 +9,7 @@ import { Tooltip } from 'primeng/tooltip';
 @NgModule({
   imports: [CommonModule, ReactiveFormsModule, RouterModule, PrimeNgModules],
   declarations: [TooltipEllipsisDirective],
-  exports: [CommonModule, ReactiveFormsModule, RouterModule, PrimeNgModules, TooltipEllipsisDirective],
+  exports: [CommonModule, ReactiveFormsModule, RouterModule, TooltipEllipsisDirective, PrimeNgModules],
   providers: [Tooltip],
 })
 // biome-ignore lint/complexity/noStaticOnlyClass: Angular need class with only static member

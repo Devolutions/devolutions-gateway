@@ -6,6 +6,7 @@
 // import { WebFormService } from '@shared/services/web-form.service';
 //
 // @Component({
+  standalone: false,
 //   selector: 'web-client-request-shared-session-control',
 //   templateUrl: 'request-shared-session-control.component.html',
 //   styleUrls: ['request-shared-session-control.component.scss'],

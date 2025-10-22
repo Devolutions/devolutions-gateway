@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 body .p-inputtext {
   padding: 5px 0 5px 8px;
   line-height: 24px;
@@ -11,9 +15,12 @@ body .p-inputtext {
   border: 1px solid $input-txt-border-color;
   @include transition(box-shadow $transitionDuration, border-color $transitionDuration);
   @include border-radius($borderRadius);
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
+
+  & {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+  }
 
   &:enabled:hover:not(.p-state-error) {
     border-color: $input-txt-border-hover-color;

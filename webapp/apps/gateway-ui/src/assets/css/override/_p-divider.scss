@@ -1,4 +1,7 @@
-@import 'theme-mode-variables';
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 
 .p-divider .p-divider-content {
   background-color: transparent;

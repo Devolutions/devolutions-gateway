@@ -1,6 +1,6 @@
-@import "variables";
-@import "theme-mode-variables";
-@import 'mixins';
+@use "variables" as *;
+@use "theme-mode-variables" as *;
+@use 'mixins' as *;
 
 :host {
   display: flex;
@@ -25,7 +25,7 @@
   transition: all ease-in-out .3s;
 
   @include media-breakpoint-up(md) {
-    width: 13vw;
+    width: 200px;
     position: relative;
     flex-shrink: 0;
   }
@@ -34,7 +34,7 @@
     z-index: 900;
 
     .layout-mobile-active & {
-      width: 250px;
+      width: 200px;
     }
   }
 
@@ -281,4 +281,23 @@
   font-size: 16px;
   margin-left: 5px;
   color: var(--input-hint-color-important);
+}
+
+.resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+  
+  &:hover {
+    background-color: var(--border-secondary-color);
+  }
+  
+  &:active {
+    background-color: var(--text-accent-color);
+  }
 }

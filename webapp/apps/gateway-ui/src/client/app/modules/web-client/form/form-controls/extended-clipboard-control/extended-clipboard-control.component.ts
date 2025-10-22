@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-extended-clipboard-control',
   templateUrl: 'extended-clipboard-control.component.html',
   styleUrls: ['extended-clipboard-control.component.scss'],

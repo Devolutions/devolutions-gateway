@@ -1,10 +1,23 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 :root,
-.light-theme, // will be removed once we wrap our default css prop in :root
+.light-theme {
+  --checkbox-border-color: var(--input-border-color); // $input-checkbox-border-color
+  --checkbox-background-color: var(--input-background-color); // $input-checkbox-bg-color
+  --checkbox-label-color: var(--input-label-color);
+  --checkbox-icon-color: rgb(var(--base-black-rgb));
+  --checkbox-box-shadow: var(--input-box-shadow);
+
+  --checkbox-size: 20px;
+  --checkbox-icon-size: 18px;
+} // will be removed once we wrap our default css prop in :root
 .dark-theme { // will be removed once we wrap our default css prop in :root
   --checkbox-border-color: var(--input-border-color); // $input-checkbox-border-color
   --checkbox-background-color: var(--input-background-color); // $input-checkbox-bg-color
   --checkbox-label-color: var(--input-label-color);
-  --checkbox-icon-color: var(--input-selected-indicator-color);
+  --checkbox-icon-color: rgb(var(--base-black-rgb));
   --checkbox-box-shadow: var(--input-box-shadow);
 
   --checkbox-size: 20px;
@@ -31,39 +44,29 @@
   font-size: var(--checkbox-icon-size);
   display: flex;
   justify-content: center;
+  align-items: center;
 
   p-checkbox:hover &:not(.p-disabled):not(.p-highlight),
   &:hover:not(.p-disabled):not(.p-highlight) {
     --checkbox-border-color: var(--input-accent-color);
   }
+}
 
-  &.p-highlight,
-  &.p-highlight.p-focus,
-  &.p-indeterminate {
-    --checkbox-background-color: var(--input-accent-color);
-    --checkbox-border-color: rgba(var(--base-black-rgb), .3); // replacing color for light & dark, looks better :3
-  }
+/* checked */
+.p-checkbox.p-highlight .p-checkbox-box {
+  --checkbox-background-color: var(--input-accent-color);
+  --checkbox-border-color: rgba(var(--base-black-rgb), .3);
+  --checkbox-icon-color: rgb(var(--base-white-rgb));
+}
 
-  &.p-focus {
-    --checkbox-border-color: var(--input-accent-color);
+/* disabled */
+.p-checkbox.p-disabled .p-checkbox-box {
+  --checkbox-border-color: var(--input-disabled-border-color);
+  --checkbox-icon-color: var(--input-disabled-selected-indicator-color);
+  --checkbox-background-color: var(--input-disabled-background-color);
 
-    box-shadow: var(--checkbox-box-shadow);
-  }
-
-  &.p-disabled {
-    --checkbox-border-color: var(--input-disabled-border-color);
-    --checkbox-icon-color: var(--input-disabled-selected-indicator-color);
-    --checkbox-background-color: var(--input-disabled-background-color);
-
-    // Needed to overwrite .p-disabled !important from base.scss
-    border-color: var(--checkbox-border-color) !important;
-
-    opacity: 1;
-
-    &.p-highlight {
-      --checkbox-background-color: var(--input-disabled-background-color);
-    }
-  }
+  border-color: var(--checkbox-border-color) !important;
+  opacity: 1;
 }
 
 .p-checkbox-label {
@@ -75,18 +78,6 @@
     --checkbox-label-color: var(--input-disabled-label-color);
 
     opacity: 1;
-  }
-}
-
-.p-checkbox-icon {
-  &.pi-check:before {
-    font-family: devolutions-icons, serif;
-    content: "\e93a";
-  }
-
-  &.pi-minus:before {
-    font-family: devolutions-icons, serif;
-    content: "\ea99";
   }
 }
 

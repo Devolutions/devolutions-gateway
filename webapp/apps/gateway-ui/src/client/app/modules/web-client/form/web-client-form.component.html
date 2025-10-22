@@ -15,14 +15,14 @@
           <div class="col-4 gateway-form-group col-pad-right-lg">
             <label for="protocol">Protocol</label>
             <div class="gateway-form-input">
-              <p-dropdown id="protocol" appendTo="body" formControlName="protocol" [options]="protocolOptions"
+              <p-select id="protocol" appendTo="body" formControlName="protocol" [options]="protocolOptions"
                 pTooltip="{{protocolSelectedTooltip}}" required>
                 <ng-template let-item pTemplate="item">
                   <div pTooltip="{{item.tooltipText}}" tooltipPosition="right">
                     {{item.label}}
                   </div>
                 </ng-template>
-              </p-dropdown>
+              </p-select>
             </div>
           </div>
 
@@ -30,7 +30,7 @@
             <label for="protocol">Hostname</label>
             <div class="gateway-form-input">
               <span class="p-fluid">
-                <p-autoComplete formControlName="autoComplete" id="hostname" field="hostname" 
+                <p-autoComplete formControlName="autoComplete" id="hostname" field="hostname" optionLabel="hostname"
                   placeholder="Enter hostname" [suggestions]="filteredHostnames" [dropdown]="isHostnamesExists()" 
                   (completeMethod)="filterHostname($event)" required></p-autoComplete>
               </span>

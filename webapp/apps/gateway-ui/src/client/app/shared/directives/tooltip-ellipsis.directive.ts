@@ -1,22 +1,33 @@
-import { AfterViewInit, Directive, ElementRef, NgZone, OnDestroy } from '@angular/core';
+// src/client/app/shared/directives/tooltip-ellipsis.directive.ts
+import { AfterViewInit, Directive, ElementRef, Injector, NgZone, OnDestroy } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import { Tooltip } from 'primeng/tooltip';
 
 @Directive({
+  standalone: false,
   selector: '[tooltipEllipsis]',
 })
 export class TooltipEllipsisDirective extends BaseComponent implements AfterViewInit, OnDestroy {
-  private resizeObserver: ResizeObserver;
+  private resizeObserver!: ResizeObserver;
+  private tooltipInstance: Tooltip | null = null;
 
   constructor(
     private el: ElementRef,
-    private tooltip: Tooltip,
+    private injector: Injector, // <- use Injector instead of direct Tooltip
     private zone: NgZone,
   ) {
     super();
   }
 
   ngAfterViewInit(): void {
+    // Lazily resolve Tooltip to avoid circular DI during module hydration.
+    // This returns the host Tooltip directive instance if present, or null if not found.
+    try {
+      this.tooltipInstance = this.injector.get(Tooltip, null);
+    } catch {
+      this.tooltipInstance = null;
+    }
+
     this.setupResizeObserver();
   }
 
@@ -45,15 +56,28 @@ export class TooltipEllipsisDirective extends BaseComponent implements AfterView
   }
 
   private updateTooltipVisibility(): void {
+    if (!this.tooltipInstance) {
+      return;
+    }
+
     const shouldBeDisabled = !this.isEllipsisActive();
-    if (shouldBeDisabled !== this.tooltip.disabled) {
+
+    // primeNG Tooltip has setOption; `disabled` may be internal — guard access.
+    const currentDisabled = (this.tooltipInstance as any)?.disabled;
+    if (shouldBeDisabled !== currentDisabled) {
       this.zone.run(() => {
-        this.tooltip.setOption({ disabled: shouldBeDisabled });
+        // use setOption if available; otherwise, try setting `disabled` directly as a fallback
+        if (typeof (this.tooltipInstance as any)?.setOption === 'function') {
+          (this.tooltipInstance as any).setOption({ disabled: shouldBeDisabled });
+        } else {
+          (this.tooltipInstance as any).disabled = shouldBeDisabled;
+        }
       });
     }
   }
 
   private isEllipsisActive(): boolean {
-    return this.el.nativeElement.offsetWidth < this.el.nativeElement.scrollWidth;
+    const el = this.el.nativeElement as HTMLElement;
+    return el.offsetWidth < el.scrollWidth;
   }
 }

@@ -85,7 +85,11 @@ export class WebFormService extends BaseComponent {
 
     if (!formGroup) return;
 
-    const initialValue: string | string[] | number | boolean | null = inputFormData?.[controlName] ?? defaultValue;
+    let initialValue: string | string[] | number | boolean | null = inputFormData?.[controlName] ?? defaultValue;
+
+    if (typeof defaultValue === 'boolean' && typeof initialValue === 'string') {
+      initialValue = initialValue === 'true';
+    }
 
     if (controlName in formGroup.controls) {
       isDisabled ? formGroup.controls[controlName].disable() : formGroup.controls[controlName].enable();

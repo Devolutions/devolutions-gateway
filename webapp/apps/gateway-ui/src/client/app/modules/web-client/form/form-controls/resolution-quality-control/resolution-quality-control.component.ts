@@ -6,6 +6,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
 
 @Component({
+  standalone: false,
   selector: 'web-client-resolution-quality-control',
   templateUrl: 'resolution-quality-control.component.html',
   styleUrls: ['resolution-quality-control.component.scss'],

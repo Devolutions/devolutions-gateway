@@ -1,5 +1,10 @@
 <div [formGroup]="parentForm">
   <div class="gateway-form-input">
-      <p-checkbox formControlName="enableExtendedClipboard" label="Enable Extended Clipboard" binary="true"></p-checkbox>
+    <p-checkbox
+      formControlName="enableExtendedClipboard"
+      inputId="enableExtendedClipboard"
+      [binary]="true"
+    ></p-checkbox>
+    <label for="enableExtendedClipboard">Enable Extended Clipboard</label>
   </div>
 </div>

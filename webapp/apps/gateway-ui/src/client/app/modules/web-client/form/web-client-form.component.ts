@@ -19,11 +19,12 @@ import { StorageService } from '@shared/services/utils/storage.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { WebFormService } from '@shared/services/web-form.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Message } from 'primeng/api';
+import type { ToastMessageOptions } from 'primeng/api';
 import { EMPTY, forkJoin, Observable, of } from 'rxjs';
 import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
 
 @Component({
+  standalone: false,
   selector: 'web-client-form',
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
@@ -32,7 +33,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   @Input() isFormExists = false;
   @Input() webSessionId: string | undefined;
   @Input() inputFormData;
-  @Input() sessionTerminationMessage: Message;
+  @Input() sessionTerminationMessage: ToastMessageOptions;
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -42,7 +43,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   protocolOptions: SelectItemWithTooltip[];
   protocolSelectedTooltip = '';
 
-  messages: Message[] = [];
+  messages: ToastMessageOptions[] = [];
 
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
@@ -239,7 +240,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
-  private addMessages(newMessages: Message[]): void {
+  private addMessages(newMessages: ToastMessageOptions[]): void {
     const areThereNewMessages: boolean = newMessages.some(
       (newMsg) =>
         !this.messages.some(

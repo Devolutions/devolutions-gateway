@@ -1,6 +1,6 @@
-@import '../../../../../../../assets/css/style/mixins';
-@import "../../../../../../../assets/css/style/variables";
-@import "../../../../../../../assets/css/theme/theme-mode-variables";
+@use '../../../../../../../assets/css/style/mixins' as *;
+@use "../../../../../../../assets/css/style/variables" as *;
+@use "../../../../../../../assets/css/theme/theme-mode-variables" as *;
 
 :host ::ng-deep .p-multiselect {
   width: 100%;

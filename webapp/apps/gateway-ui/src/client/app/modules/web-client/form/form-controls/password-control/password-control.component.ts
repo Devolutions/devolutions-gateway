@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-password-control',
   templateUrl: 'password-control.component.html',
   styleUrls: ['password-control.component.scss'],
@@ -24,7 +25,6 @@ export class PasswordControlComponent extends BaseComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    console.log('this is required', this.isRequired);
     this.formService.addControlToForm({
       formGroup: this.parentForm,
       controlName: this.formKey,

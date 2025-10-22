@@ -1,117 +1,109 @@
 import { NgModule } from '@angular/core';
 
-import { AccordionModule } from 'primeng/accordion';
+import { Accordion } from 'primeng/accordion';
 import { ConfirmationService, MessageService } from 'primeng/api';
-import { AutoCompleteModule } from 'primeng/autocomplete';
-import { BadgeModule } from 'primeng/badge';
-import { ButtonModule } from 'primeng/button';
-import { CalendarModule } from 'primeng/calendar';
-import { CardModule } from 'primeng/card';
-import { CarouselModule } from 'primeng/carousel';
+import { AutoComplete } from 'primeng/autocomplete';
+import { Badge } from 'primeng/badge';
+import { Button } from 'primeng/button';
+import { DatePicker } from 'primeng/datepicker';
+import { Card } from 'primeng/card';
+import { Carousel } from 'primeng/carousel';
 import { CheckboxModule } from 'primeng/checkbox';
-import { ChipsModule } from 'primeng/chips';
-import { ConfirmDialogModule } from 'primeng/confirmdialog';
-import { ConfirmPopupModule } from 'primeng/confirmpopup';
-import { ContextMenuModule } from 'primeng/contextmenu';
-import { DataViewModule } from 'primeng/dataview';
-import { DeferModule } from 'primeng/defer';
-import { Dialog, DialogModule } from 'primeng/dialog';
-import { DividerModule } from 'primeng/divider';
+import { ConfirmDialog } from 'primeng/confirmdialog';
+import { ConfirmPopup } from 'primeng/confirmpopup';
+import { ContextMenu } from 'primeng/contextmenu';
+import { DataView } from 'primeng/dataview';
+import { Dialog } from 'primeng/dialog';
+import { Divider } from 'primeng/divider';
 import { DomHandler } from 'primeng/dom';
-import { DropdownModule } from 'primeng/dropdown';
-import { FieldsetModule } from 'primeng/fieldset';
-import { FileUploadModule } from 'primeng/fileupload';
-import { InputMaskModule } from 'primeng/inputmask';
-import { InputNumberModule } from 'primeng/inputnumber';
-import { InputSwitchModule } from 'primeng/inputswitch';
-import { InputTextModule } from 'primeng/inputtext';
-import { InputTextareaModule } from 'primeng/inputtextarea';
-import { ListboxModule } from 'primeng/listbox';
-import { MenuModule } from 'primeng/menu';
-import { MessageModule } from 'primeng/message';
-import { MessagesModule } from 'primeng/messages';
-import { MultiSelectModule } from 'primeng/multiselect';
-import { OrderListModule } from 'primeng/orderlist';
-import { OverlayPanelModule } from 'primeng/overlaypanel';
-import { PanelModule } from 'primeng/panel';
-import { PickListModule } from 'primeng/picklist';
-import { ProgressSpinnerModule } from 'primeng/progressspinner';
-import { RadioButtonModule } from 'primeng/radiobutton';
-import { ScrollPanelModule } from 'primeng/scrollpanel';
-import { SelectButtonModule } from 'primeng/selectbutton';
-import { SidebarModule } from 'primeng/sidebar';
-import { SliderModule } from 'primeng/slider';
-import { SplitButtonModule } from 'primeng/splitbutton';
-import { StepsModule } from 'primeng/steps';
+import { Select } from 'primeng/select';
+import { Fieldset } from 'primeng/fieldset';
+import { FileUpload } from 'primeng/fileupload';
+import { InputMask } from 'primeng/inputmask';
+import { InputNumber } from 'primeng/inputnumber';
+import { ToggleSwitch } from 'primeng/toggleswitch';
+import { InputText } from 'primeng/inputtext';
+import { Textarea } from 'primeng/textarea';
+import { Listbox } from 'primeng/listbox';
+import { Menu } from 'primeng/menu';
+import { Message } from 'primeng/message';
+import { MultiSelect } from 'primeng/multiselect';
+import { OrderList } from 'primeng/orderlist';
+import { Popover } from 'primeng/popover';
+import { Panel } from 'primeng/panel';
+import { PickList } from 'primeng/picklist';
+import { ProgressSpinner } from 'primeng/progressspinner';
+import { RadioButton } from 'primeng/radiobutton';
+import { ScrollPanel } from 'primeng/scrollpanel';
+import { SelectButton } from 'primeng/selectbutton';
+import { Drawer } from 'primeng/drawer';
+import { Slider } from 'primeng/slider';
+import { SplitButton } from 'primeng/splitbutton';
+import { Stepper } from 'primeng/stepper';
 import { TableModule } from 'primeng/table';
-import { TabMenuModule } from 'primeng/tabmenu';
-import { TabViewModule } from 'primeng/tabview';
-import { TieredMenuModule } from 'primeng/tieredmenu';
-import { ToastModule } from 'primeng/toast';
-import { ToggleButtonModule } from 'primeng/togglebutton';
-import { ToolbarModule } from 'primeng/toolbar';
+import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'primeng/tabs';
+import { TieredMenu } from 'primeng/tieredmenu';
+import { Toast } from 'primeng/toast';
+import { ToggleButton } from 'primeng/togglebutton';
+import { Toolbar } from 'primeng/toolbar';
 import { Tooltip, TooltipModule } from 'primeng/tooltip';
-import { TreeModule } from 'primeng/tree';
+import { Tree } from 'primeng/tree';
 import { TreeTableModule } from 'primeng/treetable';
-import { TriStateCheckboxModule } from 'primeng/tristatecheckbox';
-import { VirtualScrollerModule } from 'primeng/virtualscroller';
+import { Scroller } from 'primeng/scroller';
 
 const PRIMENG_MODULES = [
-  DividerModule,
-  AccordionModule,
-  AutoCompleteModule,
-  ButtonModule,
-  CalendarModule,
-  CardModule,
-  CarouselModule,
+  Divider,
+  Accordion,
+  AutoComplete,
+  Button,
+  DatePicker,
+  Card,
+  Carousel,
   CheckboxModule,
-  ChipsModule,
-  ContextMenuModule,
-  DataViewModule,
-  VirtualScrollerModule,
-  DeferModule,
-  DialogModule,
-  DropdownModule,
-  FieldsetModule,
-  ConfirmDialogModule,
-  FieldsetModule,
-  FileUploadModule,
-  InputMaskModule,
-  InputSwitchModule,
-  InputTextareaModule,
-  InputTextModule,
-  ListboxModule,
-  MenuModule,
-  MessagesModule,
-  MessageModule,
-  MultiSelectModule,
-  OrderListModule,
-  OverlayPanelModule,
-  PanelModule,
-  PickListModule,
-  ProgressSpinnerModule,
-  RadioButtonModule,
-  ScrollPanelModule,
-  SelectButtonModule,
-  SidebarModule,
-  SplitButtonModule,
-  InputNumberModule,
-  StepsModule,
+  ContextMenu,
+  DataView,
+  Scroller,
+  Dialog,
+  Select,
+  Fieldset,
+  ConfirmDialog,
+  FileUpload,
+  InputMask,
+  ToggleSwitch,
+  Textarea,
+  InputText,
+  Listbox,
+  Menu,
+  Message,
+  MultiSelect,
+  OrderList,
+  Popover,
+  Panel,
+  PickList,
+  ProgressSpinner,
+  RadioButton,
+  ScrollPanel,
+  SelectButton,
+  Drawer,
+  SplitButton,
+  InputNumber,
+  Stepper,
   TableModule,
-  TabMenuModule,
-  TabViewModule,
-  TieredMenuModule,
-  TriStateCheckboxModule,
-  ToastModule,
-  ToolbarModule,
+  Tabs,
+  TabList,
+  Tab,
+  TabPanels,
+  TabPanel,
+  TieredMenu,
+  Toast,
+  Toolbar,
   TooltipModule,
-  ToggleButtonModule,
-  TreeModule,
+  ToggleButton,
+  Tree,
   TreeTableModule,
-  ListboxModule,
-  BadgeModule,
-  ConfirmPopupModule,
-  SliderModule,
+  Badge,
+  ConfirmPopup,
+  Slider,
 ];
 
 @NgModule({
