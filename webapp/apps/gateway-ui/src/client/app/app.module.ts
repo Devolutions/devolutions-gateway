@@ -20,8 +20,8 @@ import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { SharedModule } from '@shared/shared.module';
 import { AutoComplete } from 'primeng/autocomplete';
-import { Drawer } from 'primeng/drawer';
-import { Tabs } from 'primeng/tabs';
+import { Drawer } from 'primeng/sidebar';
+import { Tabs } from 'primeng/tabview';
 import { Toast } from 'primeng/toast';
 // Components
 import { AppComponent } from './app.component';
@@ -79,7 +79,10 @@ const routerOptions: ExtraOptions = {
         options: {
           prefix: 'p',
           darkModeSelector: 'system',
-          cssLayer: false
+          cssLayer: {
+            name: 'primeng',
+            order: 'primeng, custom'
+          }
         }
       }
     }),

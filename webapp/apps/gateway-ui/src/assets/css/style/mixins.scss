@@ -17,17 +17,21 @@
 
 /* BORDER */
 @mixin border-radius($val) {
-  -moz-border-radius: $val;
-  -webkit-border-radius: $val;
-  border-radius: $val;
+  & {
+    -moz-border-radius: $val;
+    -webkit-border-radius: $val;
+    border-radius: $val;
+  }
 }
 
 /* TRANSITIONS */
 @mixin transition($transition...) {
-  -moz-transition: $transition;
-  -o-transition: $transition;
-  -webkit-transition: $transition;
-  transition: $transition;
+  & {
+    -moz-transition: $transition;
+    -o-transition: $transition;
+    -webkit-transition: $transition;
+    transition: $transition;
+  }
 }
 
 @mixin btn-color-design() {
@@ -314,24 +318,26 @@ $grid-breakpoints: (
 /* Devolutions Font */
 
 @mixin dvl-icon-font() {
-  font-family: 'devolutions-icons', 'Open Sans', serif;
-  font-variant-ligatures: discretionary-ligatures;
-  font-feature-settings: 'liga';
-  font-kerning: auto;
-  font-language-override: normal;
-  font-size: inherit;
-  font-size-adjust: none;
-  font-stretch: normal;
-  font-style: normal;
-  font-synthesis: weight style;
-  font-variant: normal;
-  font-weight: normal;
-  line-height: 1;
-  text-rendering: auto;
+  & {
+    font-family: 'devolutions-icons', 'Open Sans', serif;
+    font-variant-ligatures: discretionary-ligatures;
+    font-feature-settings: 'liga';
+    font-kerning: auto;
+    font-language-override: normal;
+    font-size: inherit;
+    font-size-adjust: none;
+    font-stretch: normal;
+    font-style: normal;
+    font-synthesis: weight style;
+    font-variant: normal;
+    font-weight: normal;
+    line-height: 1;
+    text-rendering: auto;
 
-  // Better Font Rendering ===========
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    // Better Font Rendering ===========
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 @mixin override-font($icon) {

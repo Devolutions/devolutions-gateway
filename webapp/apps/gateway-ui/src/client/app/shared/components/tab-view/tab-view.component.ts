@@ -13,7 +13,7 @@ import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-clien
 import { BaseComponent } from '@shared/bases/base.component';
 import { ComponentForSession, SessionDataTypeMap, SessionType, WebSession } from '@shared/models/web-session.model';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Tabs } from 'primeng/tabs';
+import { Tabs } from 'primeng/tabview';
 import { takeUntil } from 'rxjs/operators';
 import { MainPanelComponent } from '../main-panel/main-panel.component';
 

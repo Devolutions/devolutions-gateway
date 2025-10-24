@@ -10,68 +10,34 @@
 @use 'style/base' as *;
 @use 'style/entry-status' as *;
 
-/********** Overrides **********/
-@use 'override/_p-divider' as *;
-@use 'override/_p-chips' as *;
-@use 'override/_p-button-action-button' as *;
+/********** Overrides - Only Used Components **********/
+/* Core Components */
 @use 'override/_p-button' as *;
-@use 'override/_p-tree' as *;
-@use 'override/_p-dropdown' as *;
-@use 'override/_p-select' as *;
-@use 'override/_p-data-scroller' as *;
-@use 'override/_p-tabview' as *;
-@use 'override/_p-table' as *;
-@use 'override/_p-steps' as *;
-@use 'override/_p-calendar' as *;
-@use 'override/_p-menu' as *;
-@use 'override/_p-input' as *;
-@use 'override/_p-dialog' as *;
-@use 'override/_p-input-number' as *;
-@use 'override/_p-accordion' as *;
-@use 'override/_p-overlaypanel' as *;
-@use 'override/_p-sidebar' as *;
-@use 'override/_p-input-switch' as *;
-@use 'override/_p-toolbar' as *;
-@use 'override/_p-tooltip' as *;
-@use 'override/_p-multiselect' as *;
-@use 'override/_p-tabview-dialog-left-tabs' as *;
-@use 'override/_p-progress-spinner' as *;
-@use 'override/_p-paginator' as *;
-@use 'override/_p-dataview' as *;
-@use 'override/_p-listbox' as *;
-@use 'override/_p-virtual-scroller' as *;
+@use 'override/_p-button-action-button' as *;
 @use 'override/_p-checkbox' as *;
-@use 'override/_p-autocomplete' as *;
-@use 'override/_p-select-button' as *;
-@use 'override/_p-messages_p-toast' as *;
-@use 'override/_p-card' as *;
-@use 'override/_p-badge' as *;
-@use 'override/_p-progressbar' as *;
+@use 'override/_p-input' as *;
+@use 'override/_p-input-switch' as *;
 @use 'override/_p-inputgroup' as *;
-@use 'override/_p-cascadeSelect' as *;
-//@use 'override/_p-colorpicker' as *;
-@use 'override/_p-inputMask' as *;
-//@use 'override/_p-knob' as *;
-//@use 'override/_p-rating' as *;
-@use 'override/_p-slider' as *;
-@use 'override/_p-splitbutton' as *;
-@use 'override/_p-orderlist' as *;
-//@use 'override/_p-organizationChart' as *;
-@use 'override/_p-timeLine' as *;
-@use 'override/_p-picklist' as *;
-@use 'override/_p-fieldset' as *;
-@use 'override/_p-confirm-popup' as *;
-@use 'override/_p-skeleton' as *;
-@use 'override/_p-contextMenu' as *;
-@use 'override/_p-breadcrumb' as *;
-//@use 'override/_p-carousel_p-galleria' as *;
-@use 'override/_p-progressbar' as *;
-@use 'override/_p-blockui' as *;
-@use 'override/_p-radio-button' as *;
-@use 'override/_p-panel' as *;
+
+/* Dropdowns & Selections */
+@use 'override/_p-autocomplete' as *;
+@use 'override/_p-dropdown' as *;
+@use 'override/_p-multiselect' as *;
+@use 'override/_p-select' as *;
+
+/* Navigation & Layout */
+@use 'override/_p-tabview' as *;
+@use 'override/_p-divider' as *;
+
+/* Feedback Components */
+@use 'override/_p-messages_p-toast' as *;
+@use 'override/_p-progress-spinner' as *;
+@use 'override/_p-tooltip' as *;
+
+/* Miscellaneous */
+@use 'override/_p-chips' as *;
 @use 'override/_p-component-overlay' as *;
-@use 'override/_p-tieredMenu' as *;
-@use 'override/_p-timescircleicon' as *;
+@use 'override/_p-slider' as *;
 
 
 /********* Fonts imports ************/

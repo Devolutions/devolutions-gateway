@@ -1,7 +1,0 @@
-@use '../style/mixins' as *;
-@use '../style/variables' as *;
-@use '../theme/theme-mode-variables' as *;
-
-.p-blockui.p-component-overlay {
-  background: rgba(0, 0, 0, 0.4);
-}

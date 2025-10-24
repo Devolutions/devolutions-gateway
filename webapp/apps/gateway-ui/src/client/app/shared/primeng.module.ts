@@ -5,7 +5,7 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { AutoComplete } from 'primeng/autocomplete';
 import { Badge } from 'primeng/badge';
 import { Button } from 'primeng/button';
-import { DatePicker } from 'primeng/datepicker';
+import { DatePicker } from 'primeng/calendar';
 import { Card } from 'primeng/card';
 import { Carousel } from 'primeng/carousel';
 import { Checkbox } from 'primeng/checkbox';
@@ -16,32 +16,32 @@ import { DataView } from 'primeng/dataview';
 import { Dialog } from 'primeng/dialog';
 import { Divider } from 'primeng/divider';
 import { DomHandler } from 'primeng/dom';
-import { Select } from 'primeng/select';
+import { Select } from 'primeng/dropdown';
 import { Fieldset } from 'primeng/fieldset';
 import { FileUpload } from 'primeng/fileupload';
 import { InputMask } from 'primeng/inputmask';
 import { InputNumber } from 'primeng/inputnumber';
-import { ToggleSwitch } from 'primeng/toggleswitch';
+import { ToggleSwitch } from 'primeng/inputswitch';
 import { InputText } from 'primeng/inputtext';
-import { Textarea } from 'primeng/textarea';
+import { Textarea } from 'primeng/inputtextarea';
 import { Listbox } from 'primeng/listbox';
 import { Menu } from 'primeng/menu';
-import { Message } from 'primeng/message';
+import { UIMessage } from 'primeng/message';
 import { MultiSelect } from 'primeng/multiselect';
 import { OrderList } from 'primeng/orderlist';
-import { Popover } from 'primeng/popover';
+import { Popover } from 'primeng/overlaypanel';
 import { Panel } from 'primeng/panel';
 import { PickList } from 'primeng/picklist';
 import { ProgressSpinner } from 'primeng/progressspinner';
 import { RadioButton } from 'primeng/radiobutton';
 import { ScrollPanel } from 'primeng/scrollpanel';
 import { SelectButton } from 'primeng/selectbutton';
-import { Drawer } from 'primeng/drawer';
+import { Drawer } from 'primeng/sidebar';
 import { Slider } from 'primeng/slider';
 import { SplitButton } from 'primeng/splitbutton';
 import { Stepper } from 'primeng/stepper';
 import { TableModule } from 'primeng/table';
-import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'primeng/tabs';
+import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'primeng/tabview';
 import { TieredMenu } from 'primeng/tieredmenu';
 import { Toast } from 'primeng/toast';
 import { ToggleButton } from 'primeng/togglebutton';
@@ -75,7 +75,7 @@ const PRIMENG_MODULES = [
   InputText,
   Listbox,
   Menu,
-  Message,
+  UIMessage,
   MultiSelect,
   OrderList,
   Popover,
