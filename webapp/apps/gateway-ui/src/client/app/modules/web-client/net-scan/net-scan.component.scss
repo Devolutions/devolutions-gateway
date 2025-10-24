@@ -1,5 +1,6 @@
-@import "variables";
-@import 'mixins';
+@use "variables" as *;
+@use 'mixins' as *;
+@use '../../../../../assets/css/theme/theme-mode-variables' as *;
 
 :host {
   --box-background-color: white;

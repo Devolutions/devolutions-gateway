@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-timeline .p-timeline-event-marker {
   border: 2px solid #2196F3;
   border-radius: 50%;

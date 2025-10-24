@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-confirm-popup {
   background-color: var(--overlay-panel-bg-color);
   color: var(--side-panel-text-color);

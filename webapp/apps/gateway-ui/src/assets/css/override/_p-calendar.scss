@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-datepicker {
   background: $dropdown-container-bg-color;
   //margin-top: -1px; /* hack to simulate a thin line */

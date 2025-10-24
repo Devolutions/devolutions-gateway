@@ -1,3 +1,8 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../style/typography' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-select .p-select-trigger .p-select-trigger-icon {
   color: $dropdown-trigger-color;
 }

@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-cascadeselect {
   background: #ffffff;
   border: 1px solid #ced4da;

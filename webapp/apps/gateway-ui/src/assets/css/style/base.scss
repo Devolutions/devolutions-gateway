@@ -1,5 +1,6 @@
-@import 'variables';
-@import 'theme-mode-variables';
+@use 'variables' as *;
+@use '../theme/theme-mode-variables' as *;
+@use 'mixins' as *;
 
 /********** Fonts **********/
 .p-component, .p-component .p-component, textarea {

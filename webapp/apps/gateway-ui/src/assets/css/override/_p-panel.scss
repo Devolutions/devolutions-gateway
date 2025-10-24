@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-panel {
   .p-panel-header {
     border-bottom: 3px solid $input-txt-border-color;

@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .overlay-menu-with-switch {
   min-width: 150px;
   max-width: 300px;

@@ -1,5 +1,5 @@
-@import 'mixins';
-@import 'theme-mode-variables';
+@use 'mixins' as *;
+@use 'theme-mode-variables' as *;
 
 :host {
   width: 100%;

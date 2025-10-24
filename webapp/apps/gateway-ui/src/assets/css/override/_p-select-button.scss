@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-selectbutton {
   .p-button {
     background-color: $side-panel-select-btn-inactive-bg-color;

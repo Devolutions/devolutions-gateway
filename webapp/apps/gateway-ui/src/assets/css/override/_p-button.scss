@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .cancel-button .p-button {
   background-color: transparent !important;
   box-shadow: none !important;

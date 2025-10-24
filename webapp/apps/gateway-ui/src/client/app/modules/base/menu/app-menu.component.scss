@@ -1,6 +1,6 @@
-@import "variables";
-@import "theme-mode-variables";
-@import 'mixins';
+@use "variables" as *;
+@use "theme-mode-variables" as *;
+@use 'mixins' as *;
 
 :host {
   display: flex;
