@@ -44,10 +44,11 @@ export interface VncFormDataInput {
   // The extended clipboard control may not be initialized if the browser does not support the clipboard API.
   enableExtendedClipboard?: boolean;
   ultraVirtualDisplay: boolean;
-  enabledEncodings: Encoding[];
+  enabledEncoding: Encoding;
   colorFormat: ColorFormat;
   jpegEnabled: boolean;
   jpegQualityLevel: number;
+  pngEnabled: boolean;
   wheelSpeedFactor: number;
   screenSize: ScreenSize;
   autoClipboard?: boolean;

@@ -453,17 +453,18 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }
 
   private fetchParameters(formData: VncFormDataInput): Observable<IronVNCConnectionParameters> {
-    const {
+    let {
       hostname,
       username,
       password,
       enableCursor,
       enableExtendedClipboard,
-      enabledEncodings,
+      enabledEncoding,
       colorFormat,
-      ultraVirtualDisplay,
       jpegEnabled,
       jpegQualityLevel,
+      pngEnabled,
+      ultraVirtualDisplay,
       wheelSpeedFactor = 1,
     } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultVncPort);
@@ -475,6 +476,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     const desktopScreenSize: DesktopSize =
       this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
 
+    if (enabledEncoding === Encoding.Tight && pngEnabled) {
+      enabledEncoding = Encoding.TightPng;
+    }
+
     const connectionParameters: IronVNCConnectionParameters = {
       username,
       password,
@@ -483,7 +488,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       gatewayAddress,
       screenSize: desktopScreenSize,
       sessionId,
-      enabledEncodings: enabledEncodings.join(','),
+      enabledEncoding,
       colorFormat,
       jpegQualityLevel: jpegEnabled ? jpegQualityLevel : undefined,
       enableCursor,
@@ -532,10 +537,12 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       configBuilder.withDesktopSize(connectionParameters.screenSize);
     }
 
-    if (connectionParameters.enabledEncodings !== '') {
-      configBuilder.withExtension(enabledEncodings(connectionParameters.enabledEncodings));
-    } else {
+    if (connectionParameters.enabledEncoding === Encoding.Default) {
+      // When the Default option is selected, we enable all encodings and use server's pixel format.
       configBuilder.withExtension(enabledEncodings(Encoding.getAllEncodings().join(',')));
+      configBuilder.withExtension(jpegQualityLevel(9));
+    } else {
+      configBuilder.withExtension(enabledEncodings(connectionParameters.enabledEncoding));
     }
 
     if (connectionParameters.colorFormat) {
