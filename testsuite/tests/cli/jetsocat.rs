@@ -37,15 +37,15 @@ fn all_subcommands() {
 }
 
 #[rstest]
-#[case::default(&[], &[], true)]
+#[case::default(&[], &[], false)] // is_terminal = false
 #[case::cli_always(&["--color=always"], &[], true)]
 #[case::cli_never(&["--color=never"], &[], false)]
-#[case::cli_auto(&["--color=auto"], &[], true)]
+#[case::cli_auto(&["--color=auto"], &[], false)] // is_terminal = false
 #[case::cli_always_and_env(&["--color=always"], &[("NO_COLOR", "")], true)]
-#[case::cli_auto_and_env(&["--color=auto"], &[("NO_COLOR", "")], true)]
+#[case::cli_auto_and_env(&["--color=auto"], &[("NO_COLOR", "")], false)] // is_terminal = false
 #[case::env_no_color(&[], &[("NO_COLOR", ""), ("FORCE_COLOR", "1")], false)]
 #[case::env_term_dumb(&[], &[("TERM", "dumb")], false)]
-#[case::env_term_other(&[], &[("TERM", "other")], true)]
+#[case::env_term_other(&[], &[("TERM", "other")], false)] // is_terminal = false
 #[case::env_force_color_0(&[], &[("FORCE_COLOR", "0")], false)]
 #[case::env_force_color_1(&[], &[("FORCE_COLOR", "1"), ("TERM", "dumb")], true)]
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
@@ -57,12 +57,12 @@ fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
         .assert()
         .success();
 
-    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
 
     if expect_ansi {
-        assert!(stdout.contains(" [32m INFO[0m [2mjetsocat[0m"), "{stdout}");
+        assert!(stderr.contains(" [32m INFO[0m [2mjetsocat[0m"), "{stderr}");
     } else {
-        assert!(stdout.contains("  INFO jetsocat"), "{stdout}");
+        assert!(stderr.contains("  INFO jetsocat"), "{stderr}");
     }
 }
 
@@ -72,7 +72,7 @@ fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
 #[case::cli_never(&["--color", "never"], &[], false)]
 #[case::cli_auto(&["--color", "auto"], &[], false)]
 #[case::cli_always_and_env(&["--color", "always"], &[("NO_COLOR", "1")], true)]
-#[case::cli_auto_and_env(&["--color", "auto"], &[("FORCE_COLOR", "1")], false)]
+#[case::cli_auto_and_env(&["--color", "auto"], &[("FORCE_COLOR", "1")], true)]
 #[case::env_no_color(&[], &[("NO_COLOR", "1"), ("FORCE_COLOR", "1")], false)]
 #[case::env_term_dumb(&[], &[("TERM", "dumb")], false)]
 #[case::env_term_other(&[], &[("TERM", "other")], false)]
@@ -481,11 +481,9 @@ fn jetsocat_log_environment_variable() {
         .timeout(COMMAND_TIMEOUT)
         .assert();
 
-    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
-    assert!(stdout.contains("DEBUG"));
-    assert!(stdout.contains("hello"));
-
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
+    assert!(stderr.contains("DEBUG"));
+    assert!(stderr.contains("hello"));
     assert!(!stderr.contains("bad"));
     assert!(!stderr.contains("invalid"));
     assert!(!stderr.contains("unknown"));
@@ -874,7 +872,7 @@ async fn execute_mcp_request(request: &str) -> String {
     let mut jetsocat_process = jetsocat_tokio_cmd()
         .args(&["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
         .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("start jetsocat mcp-proxy");
@@ -894,23 +892,23 @@ async fn execute_mcp_request(request: &str) -> String {
     jetsocat_process.start_kill().unwrap();
 
     let output = jetsocat_process.wait_with_output().await.unwrap();
-    String::from_utf8(output.stdout).unwrap()
+    String::from_utf8(output.stderr).unwrap()
 }
 
 #[tokio::test]
 async fn mcp_proxy_malformed_request_with_id() {
-    let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
-    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
-    assert!(stdout.contains("Unexpected EOF"), "{stdout}");
-    assert!(stdout.contains("id=1"), "{stdout}");
+    let stderr = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
+    assert!(stderr.contains("Malformed JSON-RPC request from client"), "{stderr}");
+    assert!(stderr.contains("Unexpected EOF"), "{stderr}");
+    assert!(stderr.contains("id=1"), "{stderr}");
 }
 
 #[tokio::test]
 async fn mcp_proxy_malformed_request_no_id() {
-    let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
-    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
-    assert!(stdout.contains("Invalid character"), "{stdout}");
-    assert!(!stdout.contains("id=1"), "{stdout}");
+    let stderr = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
+    assert!(stderr.contains("Malformed JSON-RPC request from client"), "{stderr}");
+    assert!(stderr.contains("Invalid character"), "{stderr}");
+    assert!(!stderr.contains("id=1"), "{stderr}");
 }
 
 #[tokio::test]
