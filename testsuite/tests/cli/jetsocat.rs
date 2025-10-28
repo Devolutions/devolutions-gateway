@@ -961,6 +961,15 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, McpServer, NamedPipeTransport};
 
+    #[cfg(windows)]
+    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
+        "JSON-RPC error -32099: MCP server connection broken: The pipe is being closed. (os error 232)"
+    "#]];
+    #[cfg(not(windows))]
+    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
+        "JSON-RPC error -32099: MCP server connection broken: Broken pipe (os error 32)"
+    "#]];
+
     // Configure MCP server transport (named pipe only).
     let np_transport = NamedPipeTransport::bind().unwrap();
     let name = np_transport.name().to_owned();
@@ -1004,10 +1013,7 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
 
     // The proxy should detect the pipe as broken, and returns an error.
     let error = result.unwrap_err();
-    expect![[r#"
-        "JSON-RPC error -32099: MCP server connection broken: Broken pipe (os error 32)"
-    "#]]
-    .assert_debug_eq(&error);
+    BROKEN_PIPE_EXPECTED_ERROR.assert_debug_eq(&error);
 
     // The jetsocat process should exit gracefully after detecting broken pipe.
     let exit_status = tokio::time::timeout(Duration::from_secs(2), jetsocat_process.wait()).await;
