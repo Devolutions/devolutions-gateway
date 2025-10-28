@@ -1,5 +1,5 @@
-import '../../../shadow-player/src/streamer';
-import { ShadowPlayer } from '../../../shadow-player/src/streamer';
+import '@devolutions/shadow-player/src/streamer';
+import { ShadowPlayer } from '@devolutions/shadow-player/src/streamer';
 import { GatewayAccessApi } from '../gateway';
 import { t } from '../i18n';
 import { showNotification } from '../notification';

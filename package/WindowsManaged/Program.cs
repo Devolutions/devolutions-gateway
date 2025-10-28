@@ -85,7 +85,7 @@ internal class Program
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
             {
 #if DEBUG
-                path = "..\\..\\webapp\\client";
+                path = "..\\..\\webapp\\dist\\gateway-ui";
 #else
                 throw new Exception("The environment variable DGATEWAY_WEBCLIENT_PATH is not specified or the directory does not exist");
 #endif
@@ -109,7 +109,7 @@ internal class Program
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
             {
 #if DEBUG
-                path = "..\\..\\webapp\\player";
+                path = "..\\..\\webapp\\dist\\recording-player";
 #else
                 throw new Exception("The environment variable DGATEWAY_WEBPLAYER_PATH is not specified or the directory does not exist");
 #endif

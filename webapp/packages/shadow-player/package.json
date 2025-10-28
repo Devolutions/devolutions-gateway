@@ -1,11 +1,14 @@
 {
-  "name": "shadow-player",
+  "name": "@devolutions/shadow-player",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "files": [
     "dist"
   ],
+  "main": "./dist/shadow-player.js",
+  "module": "./dist/shadow-player.js",
+  "types": "./dist/shadow-player.d.ts",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

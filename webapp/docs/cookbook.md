@@ -40,22 +40,39 @@ It outlines the architecture of web forms and provides detailed examples of how 
 
 ### Project Structure
 ```
-webapp/
-└── src/
-    └── client/
-        └── app/
-            └── modules/
-                └── web-client/
-                    ├── form/
-                    │   ├── web-client-form.component.html  // Main Web Form
-                    │   ├── web-client-form.component.scss
-                    │   ├── web-client-form.component.ts
-                    │   └── form-components/  // Protocol-specific form components
-                    │       ├── ard/
-                    │       ├── rdp/
-                    │       ├── ssh/
-                    │       └── vnc/
-                    └── form-controls/  // Reusable form controls
+webapp/                              # pnpm workspace root
+├── pnpm-workspace.yaml             # Workspace configuration
+├── package.json                    # Root package with shared scripts
+│
+├── packages/                       # Reusable libraries
+│   ├── multi-video-player/        # @devolutions/multi-video-player
+│   └── shadow-player/              # @devolutions/shadow-player
+│
+├── apps/                           # Standalone applications
+│   ├── gateway-ui/                 # Main Angular admin interface
+│   │   └── src/
+│   │       └── client/
+│   │           └── app/
+│   │               └── modules/
+│   │                   └── web-client/
+│   │                       ├── form/
+│   │                       │   ├── web-client-form.component.html  // Main Web Form
+│   │                       │   ├── web-client-form.component.scss
+│   │                       │   ├── web-client-form.component.ts
+│   │                       │   └── form-components/  // Protocol-specific form components
+│   │                       │       ├── ard/
+│   │                       │       ├── rdp/
+│   │                       │       ├── ssh/
+│   │                       │       └── vnc/
+│   │                       └── form-controls/  // Reusable form controls
+│   └── recording-player/           # Recording player application
+│
+├── tools/                          # Development tools
+│   └── recording-player-tester/
+│
+└── dist/                           # Centralized build outputs
+    ├── gateway-ui/
+    └── recording-player/
 ```
 
 ### Web Client Form Components

@@ -29,7 +29,8 @@
       "dom",
       "es2020",
       "es2017.TypedArrays",
-      "ES2021.String"
+      "ES2021.String",
+      "ESNext.Disposable"
     ],
     "paths": {
       "@gateway/*": [
