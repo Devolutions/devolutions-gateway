@@ -87,6 +87,14 @@ pub struct McpProxy {
     transport: InnerTransport,
 }
 
+/// Fatal error indicating the MCP proxy can no longer forward requests
+#[derive(Debug)]
+pub struct FatalError {
+    /// Optional error message to send back to the client
+    /// None if the original request was a notification
+    pub response: Option<Message>,
+}
+
 enum InnerTransport {
     Http { url: String, agent: ureq::Agent },
     Process(ProcessMcpClient),
@@ -111,7 +119,7 @@ impl McpProxy {
         Ok(McpProxy { transport })
     }
 
-    pub async fn forward_request(&mut self, request: &str) -> Option<Message> {
+    pub async fn forward_request(&mut self, request: &str) -> Result<Option<Message>, FatalError> {
         const FORWARD_FAILURE_CODE: f64 = -32099.0;
 
         trace!(request, "Request from client");
@@ -120,7 +128,7 @@ impl McpProxy {
 
         if request.is_empty() {
             debug!("Empty request from client");
-            return None;
+            return Ok(None);
         }
 
         let request_id = match JsonRpcRequest::parse(request) {
@@ -157,26 +165,93 @@ impl McpProxy {
 
         let is_notification = request_id.is_none();
 
-        let result = match &mut self.transport {
-            InnerTransport::Http { url, agent } => send_mcp_request_http(url, agent, request, is_notification).await,
-            InnerTransport::Process(stdio_mcp_client) => stdio_mcp_client.send_request(request, is_notification).await,
-            InnerTransport::NamedPipe(named_pipe_mcp_client) => {
-                named_pipe_mcp_client.send_request(request, is_notification).await
+        let ret = match &mut self.transport {
+            InnerTransport::Http { url, agent } => {
+                match send_mcp_request_http(url, agent, request, is_notification).await {
+                    Ok(response) => Ok(response.inspect(|response| trace!(%response, "Response from server"))),
+                    Err(e) => {
+                        error!(error = format!("{e:#}"), "Couldn't forward request");
+
+                        // Because it’s not connection-based, HTTP errors are (currently) never fatal.
+                        if let Some(id) = request_id {
+                            let json_rpc_error_response = format!(
+                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {e:#}"}}}}"#
+                            );
+                            Ok(Some(Message::normalize(json_rpc_error_response)))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                }
             }
-        };
+            InnerTransport::Process(stdio_mcp_client) => {
+                match stdio_mcp_client.send_request(request, is_notification).await {
+                    Ok(response) => Ok(response.inspect(|response| trace!(%response, "Response from server"))),
+                    Err(io_error) => {
+                        // Classify the error.
+                        if is_fatal_io_error(&io_error) {
+                            // Fatal error - connection is broken.
+                            error!(error = %io_error, "MCP server connection broken");
 
-        let ret = match result {
-            Ok(response) => response.inspect(|response| trace!(%response, "Response from server")),
-            Err(e) => {
-                error!(error = format!("{e:#}"), "Couldn't forward request");
+                            let response = if let Some(id) = request_id {
+                                let json_rpc_error_response = format!(
+                                    r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"MCP server connection broken: {io_error}"}}}}"#
+                                );
+                                Some(Message::normalize(json_rpc_error_response))
+                            } else {
+                                None
+                            };
 
-                if let Some(id) = request_id {
-                    let json_rpc_error_response = format!(
-                        r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {e:#}"}}}}"#
-                    );
-                    Some(Message::normalize(json_rpc_error_response))
-                } else {
-                    None
+                            Err(FatalError { response })
+                        } else {
+                            // Recoverable error - return error response.
+                            error!(error = %io_error, "Couldn't forward request");
+
+                            if let Some(id) = request_id {
+                                let json_rpc_error_response = format!(
+                                    r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {io_error}"}}}}"#
+                                );
+                                Ok(Some(Message::normalize(json_rpc_error_response)))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                    }
+                }
+            }
+            InnerTransport::NamedPipe(named_pipe_mcp_client) => {
+                match named_pipe_mcp_client.send_request(request, is_notification).await {
+                    Ok(response) => Ok(response.inspect(|response| trace!(%response, "Response from server"))),
+                    Err(io_error) => {
+                        // Classify the error.
+                        if is_fatal_io_error(&io_error) {
+                            // Fatal error - connection is broken.
+                            error!(error = %io_error, "MCP server connection broken");
+
+                            let response = if let Some(id) = request_id {
+                                let json_rpc_error_response = format!(
+                                    r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"MCP server connection broken: {io_error}"}}}}"#
+                                );
+                                Some(Message::normalize(json_rpc_error_response))
+                            } else {
+                                None
+                            };
+
+                            Err(FatalError { response })
+                        } else {
+                            // Recoverable error - return error response.
+                            error!(error = %io_error, "Couldn't forward request");
+
+                            if let Some(id) = request_id {
+                                let json_rpc_error_response = format!(
+                                    r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {io_error}"}}}}"#
+                                );
+                                Ok(Some(Message::normalize(json_rpc_error_response)))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                    }
                 }
             }
         };
@@ -281,7 +356,7 @@ impl ProcessMcpClient {
         })
     }
 
-    async fn send_request(&mut self, request: &str, is_notification: bool) -> anyhow::Result<Option<Message>> {
+    async fn send_request(&mut self, request: &str, is_notification: bool) -> std::io::Result<Option<Message>> {
         self.stdin.write_all(request.as_bytes()).await?;
         self.stdin.write_all(b"\n").await?;
         self.stdin.flush().await?;
@@ -338,7 +413,7 @@ impl NamedPipeMcpClient {
         }
     }
 
-    async fn send_request(&mut self, request: &str, is_notification: bool) -> anyhow::Result<Option<Message>> {
+    async fn send_request(&mut self, request: &str, is_notification: bool) -> std::io::Result<Option<Message>> {
         #[cfg(any(unix, windows))]
         {
             self.stream.write_all(request.as_bytes()).await?;
@@ -355,7 +430,9 @@ impl NamedPipeMcpClient {
 
         #[cfg(not(any(unix, windows)))]
         {
-            anyhow::bail!("named pipe transport is not supported on this platform")
+            Err(std::io::Error::other(
+                "named pipe transport is not supported on this platform",
+            ))
         }
     }
 }
@@ -420,4 +497,12 @@ async fn send_mcp_request_http(
 /// Extract the first `data: ...` JSON line from an SSE body (if present).
 fn extract_sse_json_line(body: &str) -> Option<&str> {
     body.lines().find_map(|l| l.strip_prefix("data: ").map(|s| s.trim()))
+}
+
+/// Check if an I/O error is fatal (connection broken)
+fn is_fatal_io_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+    )
 }
