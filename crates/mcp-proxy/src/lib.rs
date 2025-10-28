@@ -90,8 +90,9 @@ pub struct McpProxy {
 /// Fatal error indicating the MCP proxy can no longer forward requests
 #[derive(Debug)]
 pub struct FatalError {
-    /// Optional error message to send back to the client
-    /// None if the original request was a notification
+    /// Optional error message to send back to the client.
+    ///
+    /// `None` if the original request was a notification.
     pub response: Option<Message>,
 }
 
