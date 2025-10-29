@@ -89,8 +89,16 @@ jobs:
           delete-merged: true
 
   npm-build:
-    name: NPM package build
+    name: NPM package build [${{matrix.library}}]
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        library: [ ts-angular-client ]
+        include:
+          - library: ts-angular-client
+            libpath: ./devolutions-gateway/openapi/ts-angular-client
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -101,7 +109,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Path = './devolutions-gateway/openapi/ts-angular-client'
+          $Path = '${{matrix.libpath}}'
           & "$Path/build.ps1"
 
           New-Item -ItemType "directory" -Path . -Name "npm-packages"
@@ -110,8 +118,21 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: npm
+          name: npm-${{matrix.library}}
           path: npm-packages/*.tgz
+
+  npm-merge:
+    name: NuGet merge artifacts
+    runs-on: ubuntu-latest
+    needs: npm-build
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: npm
+          pattern: npm-*
+          delete-merged: true
 
   nuget-publish:
     name: Publish NuGet packages
@@ -161,7 +182,7 @@ jobs:
     if: needs.preflight.outputs.dry-run == 'false'
     needs:
       - preflight
-      - npm-build
+      - npm-merge
 
     steps:
       - name: Check out ${{ github.repository }}
