@@ -923,7 +923,7 @@ async fn mcp_proxy_http_error() {
         "initialize",
         HttpError {
             status_code: 418,
-            body: "I’m a tea pot".to_owned(),
+            body: "I'm a tea pot".to_owned(),
         },
     );
     let server_url = transport.url();
@@ -954,4 +954,72 @@ async fn mcp_proxy_http_error() {
     let error_string = error.to_string();
     assert!(error_string.contains("-32099"), "{error}");
     assert!(error_string.contains("status code 418"), "{error}");
+}
+
+#[tokio::test]
+async fn mcp_proxy_terminated_on_broken_pipe() {
+    use testsuite::mcp_client::McpClient;
+    use testsuite::mcp_server::{DynMcpTransport, McpServer, NamedPipeTransport};
+
+    #[cfg(windows)]
+    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
+        "JSON-RPC error -32099: MCP server connection broken: The pipe is being closed. (os error 232)"
+    "#]];
+    #[cfg(not(windows))]
+    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
+        "JSON-RPC error -32099: MCP server connection broken: Broken pipe (os error 32)"
+    "#]];
+
+    // Configure MCP server transport (named pipe only).
+    let np_transport = NamedPipeTransport::bind().unwrap();
+    let name = np_transport.name().to_owned();
+    let pipe = format!("np://{name}");
+
+    // Start MCP server.
+    let server = McpServer::new(DynMcpTransport::new_box(np_transport));
+    let server_handle = server.start().expect("start MCP server");
+
+    // Give the server time to start.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Start jetsocat mcp-proxy with stdio pipe.
+    let mut jetsocat_process = jetsocat_tokio_cmd()
+        .args(&["mcp-proxy", "stdio", &pipe])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start jetsocat mcp-proxy");
+
+    // Get stdin/stdout handles for MCP client.
+    let stdin = jetsocat_process.stdin.take().expect("get stdin");
+    let stdout = jetsocat_process.stdout.take().expect("get stdout");
+
+    // Initialize MCP client with jetsocat's stdin/stdout.
+    let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
+
+    // Connect to MCP server through jetsocat proxy.
+    mcp_client.connect().await.expect("connect to MCP server");
+
+    // Stop the MCP server.
+    server_handle.shutdown();
+
+    // Wait for server to shut down.
+    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+
+    // Try to send a request - this should fail with a broken pipe error.
+    // The proxy will detect this and send an error response, then close.
+    let result = mcp_client.list_tools().await;
+
+    // The proxy should detect the pipe as broken, and returns an error.
+    let error = result.unwrap_err();
+    BROKEN_PIPE_EXPECTED_ERROR.assert_debug_eq(&error);
+
+    // The jetsocat process should exit gracefully after detecting broken pipe.
+    let exit_status = tokio::time::timeout(Duration::from_secs(2), jetsocat_process.wait()).await;
+    assert!(exit_status.is_ok(), "Proxy should exit after detecting broken pipe");
+
+    // Verify it exited with success (graceful shutdown, not a crash).
+    let status = exit_status.unwrap().unwrap();
+    assert!(status.success(), "Proxy should exit successfully, not crash");
 }

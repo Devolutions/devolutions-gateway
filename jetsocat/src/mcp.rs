@@ -21,13 +21,22 @@ pub(crate) async fn run_mcp_proxy(pipe: Pipe, mut mcp_client: mcp_proxy::McpProx
         }
 
         match mcp_client.forward_request(&line).await {
-            Some(response) => {
+            Ok(Some(response)) => {
                 // For all the supported client pipe transports, messages are required to be delimited by newlines.
                 let payload = response.as_newline_terminated_raw().as_bytes();
                 writer.write_all(payload).await.context("failed to write response")?;
                 writer.flush().await.context("failed to flush writer")?;
             }
-            None => {} // Notification; no response.
+            Ok(None) => {} // Notification; no response.
+            Err(fatal_error) => {
+                // MCP server connection is broken, send error response if available and stop
+                if let Some(response) = fatal_error.response {
+                    let payload = response.as_newline_terminated_raw().as_bytes();
+                    let _ = writer.write_all(payload).await;
+                    let _ = writer.flush().await;
+                }
+                return Ok(());
+            }
         }
     }
 }

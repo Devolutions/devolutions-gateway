@@ -91,6 +91,7 @@ async fn http_plain_json_ok() {
     let out = proxy
         .forward_request(r#"{"jsonrpc": "2.0", "id": 1, "method": "tools/call"}"#)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(out.as_raw(), server_response);
 }
@@ -105,7 +106,7 @@ async fn http_sse_with_data() {
         .await
         .unwrap();
 
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap();
+    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
     assert_eq!(out.as_raw(), server_response);
 }
 
@@ -117,8 +118,11 @@ async fn http_sse_no_data_found_error() {
         .await
         .unwrap();
 
-    let option = proxy.forward_request(r#"{"jsonrpc": "2.0", "method": "x"}"#).await;
-    assert!(option.is_none());
+    let result = proxy
+        .forward_request(r#"{"jsonrpc": "2.0", "method": "x"}"#)
+        .await
+        .unwrap();
+    assert!(result.is_none());
 }
 
 #[tokio::test]
@@ -130,7 +134,7 @@ async fn http_notification() {
         .await
         .unwrap();
 
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap();
+    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
     assert!(out.as_raw().contains("no data found in SSE response"));
 }
 
@@ -149,7 +153,7 @@ async fn http_timeout_triggers() {
         .await
         .unwrap();
 
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap();
+    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
 
     // HTTP client (ureq…) error text varies; assert on our added context.
     assert!(out.as_raw().contains("failed to send request to MCP server"));
@@ -159,7 +163,7 @@ async fn http_timeout_triggers() {
 async fn stdio_round_trip_json_line() {
     let (_dir_guard, command) = make_stdio_helper_script();
     let mut proxy = McpProxy::init(Config::spawn_process(command)).await.unwrap();
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap();
+    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
     assert_eq!(out.as_raw(), r#"{"jsonrpc":"2.0","result":{"ok":true}}"#);
 
     fn make_stdio_helper_script() -> (tempfile::TempDir, String) {
