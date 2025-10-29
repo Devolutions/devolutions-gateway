@@ -156,12 +156,12 @@ jobs:
           Set-PSDebug -Trace 1
 
           $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
-    
+
           foreach ($File in $Files) {
             $PushCmd = @(
-              'dotnet', 
-              'nuget', 
-              'push', 
+              'dotnet',
+              'nuget',
+              'push',
               "$File",
               '--api-key',
               '${{ secrets.NUGET_API_KEY }}',
@@ -179,10 +179,11 @@ jobs:
     name: Publish NPM packages
     runs-on: ubuntu-latest
     environment: publish-prod
-    if: needs.preflight.outputs.dry-run == 'false'
-    needs:
-      - preflight
-      - npm-merge
+    if: ${{ needs.preflight.outputs.dry-run == 'false' }}
+    needs: [preflight, npm-merge, npm-build]
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -193,10 +194,6 @@ jobs:
         with:
           name: npm
           path: npm-packages
-      
-      - name: Configure NPM
-        shell: pwsh
-        run: npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
 
       - name: Publish
         shell: pwsh
@@ -218,10 +215,8 @@ jobs:
   remove-labels:
     name: Remove publish-required labels
     runs-on: ubuntu-latest
-    if: needs.preflight.outputs.dry-run == 'false'
-    needs:
-      - nuget-build
-      - npm-publish
+    if: ${{ needs.preflight.outputs.dry-run == 'false' }}
+    needs: [preflight, nuget-build, npm-publish]
 
     steps:
       - name: Check out ${{ github.repository }}
