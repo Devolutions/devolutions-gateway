@@ -2462,6 +2462,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced-x86"
+version = "1.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c447cff8c7f384a7d4f741cfcff32f75f3ad02b406432e8d6c878d56b1edf6b"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3409,16 +3418,6 @@ dependencies = [
  "tracing",
  "uuid",
  "zerocopy 0.7.35",
-]
-
-[[package]]
-name = "libudis86-sys"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "139bbf9ddb1bfc90c1ac64dd2923d9c957cd433cee7315c018125d72ab08a6b0"
-dependencies = [
- "cc",
- "libc",
 ]
 
 [[package]]
@@ -5170,14 +5169,14 @@ dependencies = [
 
 [[package]]
 name = "retour"
-version = "0.3.1"
+version = "0.4.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9af44d40e2400b44d491bfaf8eae111b09f23ac4de6e92728e79d93e699c527"
+checksum = "ead4bc8e12d553ff70769c5f5c21f5f4f0e73c0018068a6bb5a3d7d3b9e57ec7"
 dependencies = [
  "cfg-if",
  "generic-array",
+ "iced-x86",
  "libc",
- "libudis86-sys",
  "mmap-fixed-fixed",
  "once_cell",
  "region",
