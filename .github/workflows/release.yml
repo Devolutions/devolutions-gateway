@@ -4,22 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       run:
-        description: 'The Package workflow run to release'
+        description: The Package workflow run to release
         required: true
       dry-run:
-        description: 'If true, the workflow only indicates which artifacts would be uploaded'
+        description: If true, the workflow only indicates which artifacts would be uploaded
         required: true
         type: boolean
         default: true
   workflow_call:
     inputs:
       dispatch:
-        description: "Marker to indicate that the workflow was dispatched via workflow_call"
+        description: Marker to indicate that the workflow was dispatched via workflow_call
         type: string
         required: false
-        default: "workflow_call"
+        default: workflow_call
       dry-run:
-        description: 'If true, the workflow only indicates which artifacts would be uploaded'
+        description: If true, the workflow only indicates which artifacts would be uploaded
         required: true
         type: boolean
         default: true
@@ -40,17 +40,16 @@ jobs:
       ## workflow_call:     The run_id is the current run_id
       - name: Get run
         id: get-run
-        shell: pwsh
         run: |
           if ('${{ github.event.inputs.run }}') {
             echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
           } else {
             echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
           }
+        shell: pwsh
 
       - name: Get dry run
         id: get-dry-run
-        shell: pwsh
         run: |
           $DryRun = "false"
           if ('${{ inputs.dry-run }}') {
@@ -62,27 +61,25 @@ jobs:
           } else {
             echo "::warning::This is not a dry run, release will be published!"
           }
+        shell: pwsh
 
       - name: Download version
+        run: gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
 
       - name: Get version
         id: get-version
-        shell: pwsh
         run: |
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
           echo "::notice::Releasing artifacts for version $Version from run ${{ steps.get-run.outputs.run }}"
+        shell: pwsh
 
       ## If we already released this version to GitHub, publishing will be skipped
       - name: Check GitHub releases
         id: check-release
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           Set-PSDebug -Trace 1
 
@@ -100,19 +97,22 @@ jobs:
             $SkipPublishing = 'true'
           }
           echo "skip-publishing=$SkipPublishing" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   container:
     name: Container [${{ matrix.os }} ${{ matrix.base-image }}]
-    runs-on: ${{ matrix.runner }}
     environment: publish-prod
-    needs: preflight
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [ x86_64 ]
-        os: [ linux ]
-        base-image: [ bookworm-slim ]
+        arch: [x86_64]
+        os: [linux]
+        base-image: [bookworm-slim]
 
         include:
           - os: linux
@@ -120,16 +120,15 @@ jobs:
 
     steps:
       - name: Download artifacts
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
           Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare artifacts
         id: prepare-artifacts
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -171,27 +170,26 @@ jobs:
           $psModuleArchiveHash = (Get-FileHash -Path "$PowerShellArchive").Hash
           Write-Host "PS module archive hash: $psModuleArchiveHash"
           tar -xvf "$PowerShellArchive" -C "$PkgDir"
+        shell: pwsh
 
       - name: Build container
         id: build-container
-        shell: pwsh
-        working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
           Set-PSDebug -Trace 1
 
-          $Version = "${{ needs.preflight.outputs.version }}"          
+          $Version = "${{ needs.preflight.outputs.version }}"
           $ImageName = "devolutions/devolutions-gateway:$Version"
           $LatestImageName = "devolutions/devolutions-gateway:latest"
-          
+
           docker build -t "$ImageName" -t "$LatestImageName" .
           echo "image-name=$ImageName" >> $Env:GITHUB_OUTPUT
           echo "latest-image-name=$LatestImageName" >> $Env:GITHUB_OUTPUT
 
           Get-ChildItem -Recurse
-
-      - name: Push container
         shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
+
+      - name: Push container
         run: |
           Set-PSDebug -Trace 1
 
@@ -206,30 +204,31 @@ jobs:
             Invoke-Expression $DockerPushCmd
             Invoke-Expression $DockerPushLatestCmd
           }
+        shell: pwsh
+        working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
 
   github-release:
     name: GitHub release
-    runs-on: ubuntu-latest
     environment: publish-prod
-    needs: preflight
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Configure runner
         run: cargo install parse-changelog
 
       - name: Download artifacts
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-signed -n devolutions-gateway-signed -n devolutions-agent-signed -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
           Move-Item -Path jetsocat-signed -Destination jetsocat
           Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
           Move-Item -Path devolutions-agent-signed -Destination devolutions-agent
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Manage artifacts
-        shell: pwsh
         run: |
           # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
           Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse
@@ -239,9 +238,9 @@ jobs:
 
           # For the PowerShell module, only upload the nupkg.
           Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar)
+        shell: pwsh
 
       - name: Create jetsocat ZIP files for winget
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -294,11 +293,9 @@ jobs:
               Write-Warning "Could not find binary for $OS $Arch"
             }
           }
+        shell: pwsh
 
       - name: Create GitHub release
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           Set-PSDebug -Trace 1
 
@@ -325,33 +322,35 @@ jobs:
           if (-Not $DryRun) {
             Invoke-Expression $GhCmd
           }
-
-  psgallery-release:
-    name: PowerShell release
-    runs-on: ubuntu-latest
-    environment: publish-prod
-    needs: preflight
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
-
-    steps:
-      - name: Download artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  psgallery-release:
+    name: PowerShell release
+    environment: publish-prod
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
         run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed --repo $Env:GITHUB_REPOSITORY
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
-        shell: pwsh
         run: Remove-Item -Path (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+        shell: pwsh
 
       - name: Install PSResourceGet
-        shell: pwsh
         run: |
           Install-PSResource Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -TrustRepository
+        shell: pwsh
 
       - name: Publish PowerShell module
-        shell: pwsh
         run: |
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.tar" -File
           Write-Host "Archive = $Archive"
@@ -378,13 +377,14 @@ jobs:
               exit 1
             }
           }
+        shell: pwsh
 
   onedrive-gateway:
     name: OneDrive (Devolutions Gateway)
-    runs-on: ubuntu-latest
-    needs: preflight
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     environment: onedrive-upload # for OneDrive secrets
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out Devolutions/actions
@@ -403,14 +403,13 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download artifacts
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed --repo $Env:GITHUB_REPOSITORY
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare upload
         id: prepare
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -428,6 +427,7 @@ jobs:
           Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_x86_64.rpm"
+        shell: pwsh
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
@@ -442,10 +442,10 @@ jobs:
 
   onedrive-agent:
     name: OneDrive (Devolutions Agent)
-    runs-on: ubuntu-latest
-    needs: preflight
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     environment: onedrive-upload # for OneDrive secrets
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out Devolutions/actions
@@ -464,14 +464,13 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download artifacts
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed --repo $Env:GITHUB_REPOSITORY
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare upload
         id: prepare
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -489,6 +488,7 @@ jobs:
           Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.symbols.zip"
           Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
           Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-agent_${versionFull}_x86_64.rpm"
+        shell: pwsh
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
@@ -503,20 +503,19 @@ jobs:
 
   jetsocat-publish:
     name: Jetsocat NuGet publish
-    runs-on: ubuntu-latest
     environment: publish-prod
-    needs: preflight
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Download jetsocat-nuget artifact
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-nuget --repo $Env:GITHUB_REPOSITORY
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-nuget --repo $Env:GITHUB_REPOSITORY
 
       - name: Publish Jetsocat NuGet package
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -524,9 +523,9 @@ jobs:
           Write-Host "Package = $Package"
 
           $PushCmd = @(
-            'dotnet', 
-            'nuget', 
-            'push', 
+            'dotnet',
+            'nuget',
+            'push',
             "$($Package.FullName)",
             '--api-key',
             '${{ secrets.NUGET_API_KEY }}',
@@ -551,35 +550,30 @@ jobs:
               }
             }
           }
+        shell: pwsh
 
   remove-labels:
     name: Remove release-required labels
-    runs-on: ubuntu-latest
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
-    needs:
-      - container
-      - github-release
-      - psgallery-release
-      - onedrive-gateway
-      - onedrive-agent
-      - jetsocat-publish
+    needs: [preflight, container, github-release, psgallery-release, onedrive-gateway, onedrive-agent, jetsocat-publish]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out ${{ github.repository }}
         uses: actions/checkout@v4
 
       - name: Remove labels
+        run: ./ci/remove-labels.ps1 -Label 'release-required'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./ci/remove-labels.ps1 -Label 'release-required'
 
   upload-sbom:
     name: Upload SBOM
-    runs-on: ubuntu-latest
-    needs: preflight
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
     environment: sbom
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out Devolutions/actions
@@ -598,9 +592,9 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download SBOM artifact
+        run: gh run download ${{ needs.preflight.outputs.run }} -n sbom --repo $GITHUB_REPOSITORY
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n sbom --repo $GITHUB_REPOSITORY
 
       - name: Upload SBOM to OneDrive Releases
         uses: ./.github/workflows/onedrive-upload

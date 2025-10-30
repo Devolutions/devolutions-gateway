@@ -4,25 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       run:
-        description: 'The CI workflow run to package'
+        description: The CI workflow run to package
         required: true
       validate-dependency:
-        description: 'Validate that the CI workflow ran to completion'
+        description: Validate that the CI workflow ran to completion
         type: boolean
         required: false
         default: true
       jetsocat-nuget-version:
-        description: 'Jetsocat nuget package version'
+        description: Jetsocat nuget package version
         required: false
   workflow_call:
     inputs:
       dispatch:
-        description: "Marker to indicate that the workflow was dispatched via workflow_call"
+        description: Marker to indicate that the workflow was dispatched via workflow_call
         type: string
         required: false
-        default: "workflow_call"
+        default: workflow_call
       ref:
-        description: "The commit SHA to build"
+        description: The commit SHA to build
         required: false
         type: string
 
@@ -39,7 +39,6 @@ jobs:
     steps:
       - name: Package information
         id: info
-        shell: pwsh
         run: |
           $ref = '${{ github.ref_name }}'
           $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
@@ -50,18 +49,19 @@ jobs:
             "publish-prod" # "publish-test"
           }
           echo "package-env=$PackageEnv" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
 
       ## workflow_dispatch: The run_id is read from the inputs
       ## workflow_call:     The run_id is the current run_id
       - name: Get run
         id: get-run
-        shell: pwsh
         run: |
           if ('${{ github.event.inputs.run }}') {
             echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
           } else {
             echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
           }
+        shell: pwsh
 
       ## To consistently repackage the CI artifacts, we must use the same commit that produced the artifacts
       ##
@@ -69,10 +69,6 @@ jobs:
       ## workflow_call:     Use the input SHA; otherwise lookup the SHA from the current run_id
       - name: Get commit
         id: get-commit
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_RUN: ${{ steps.get-run.outputs.run }}
         run: |
           Set-PSDebug -Trace 1
 
@@ -100,6 +96,10 @@ jobs:
 
           echo "commit=$Ref" >> $Env:GITHUB_OUTPUT
           echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_RUN: ${{ steps.get-run.outputs.run }}
 
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v4
@@ -130,16 +130,16 @@ jobs:
 
       - name: Get version
         id: get-version
-        shell: pwsh
         run: |
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
 
       - name: Download Cadeau
-        shell: pwsh
         run: |
           ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
           ./ci/download-cadeau.ps1 -Platform 'linux' -Architecture 'x64'
+        shell: pwsh
 
       - name: Upload native libs
         uses: actions/upload-artifact@v4
@@ -149,9 +149,9 @@ jobs:
 
   codesign:
     name: Codesign
-    runs-on: ${{ matrix.runner }}
-    needs: preflight
     environment: ${{ needs.preflight.outputs.package-env }}
+    needs: [preflight]
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         project: [ jetsocat, devolutions-gateway, devolutions-agent ]
@@ -176,32 +176,29 @@ jobs:
           ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Download artifacts
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       ## Delete the files that we won't operate on to prevent them being re-uploaded
       ## This ensures consistency of the artifact since we are operating in a matrix
       - name: Manage artifacts
-        shell: pwsh
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           $Exclusions = @('${{ matrix.os }}', 'Powershell')
           Get-ChildItem "$Destination" -Exclude $Exclusions | Remove-Item -Recurse
+        shell: pwsh
 
       - name: Install AzureSignTool
-        if: matrix.os == 'windows'
+        if: ${{ matrix.os == 'windows' }}
         run: |
           dotnet tool install --global AzureSignTool
 
       - name: Configure certificates (macOS)
-        if: matrix.os == 'macos'
-        env:
-          DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
-          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
+        if: ${{ matrix.os == 'macos' }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=Price2011
@@ -215,9 +212,13 @@ jobs:
 
           security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
+        shell: bash
+        env:
+          DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
 
       - name: Configure runner (Windows)
-        if: matrix.os == 'windows'
+        if: ${{ matrix.os == 'windows' }}
         run: |
           echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
@@ -225,19 +226,19 @@ jobs:
           choco uninstall wixtoolset
           choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
 
       - name: Delete PowerShell module archive
-        if: matrix.os != 'windows' && matrix.project == 'devolutions-gateway'
-        shell: pwsh
+        if: ${{ matrix.os != 'windows' && matrix.project == 'devolutions-gateway' }}
         run: |
           $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
           $PSModuleTarFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
           Write-Host "Remove PS module archive at $PSModuleTarFilePath"
           Remove-Item -Path $PSModuleTarFilePath
+        shell: pwsh
 
       - name: Sign PowerShell module contents
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
-        shell: pwsh
+        if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-gateway' }}
         run: |
           Set-PSDebug -Trace 1
 
@@ -270,12 +271,12 @@ jobs:
           # Verify the archive.
           Write-Host "Verify archive at $PSModuleTarFilePath"
           tar -tvf "$PSModuleTarFilePath" | Out-Null
-          if ($LASTEXITCODE -ne 0) { 
-            throw "tar verify failed: $PSModuleTarFilePath is invalid." 
+          if ($LASTEXITCODE -ne 0) {
+            throw "tar verify failed: $PSModuleTarFilePath is invalid."
           }
           & 7z t "$PSModuleTarFilePath"
-          if ($LASTEXITCODE -ne 0) { 
-            throw "7z verify failed: $PSModuleTarFilePath is invalid." 
+          if ($LASTEXITCODE -ne 0) {
+            throw "7z verify failed: $PSModuleTarFilePath is invalid."
           }
 
           $psModuleArchiveHash = (Get-FileHash -Path "$PSModuleTarFilePath").Hash
@@ -283,10 +284,10 @@ jobs:
 
           Set-PSDebug -Off # Too many traces are logged when running New-ModulePackage.
           New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
+        shell: pwsh
 
       - name: Sign executables
-        if: matrix.os == 'windows' || matrix.os == 'macos'
-        shell: pwsh
+        if: ${{ matrix.os == 'windows' || matrix.os == 'macos' }}
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
@@ -341,48 +342,48 @@ jobs:
               echo "::debug::nothing to do for ${{ matrix.os }}"
             }
           }
+        shell: pwsh
 
       - name: Download web client artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-gateway' }}
         run: |
           $Destination = Join-Path "webapp" "client"
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
-
-      - name: Download web player artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download web player artifacts
+        if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-gateway' }}
         run: |
           $Destination = Join-Path "webapp" "player"
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-player -D "$Destination"
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add msbuild to PATH
-        if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
+        if: ${{ matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') }}
         uses: microsoft/setup-msbuild@v2
 
       - name: Download native-libs
+        if: ${{ matrix.project == 'devolutions-gateway' && matrix.os == 'windows' }}
         uses: actions/download-artifact@v4
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
         with:
           name: native-libs
           path: native-libs
 
       - name: Zip debug symbol files
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
+        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
           Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Compress-Archive -DestinationPath "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
           Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Remove-Item | Out-Null
+        shell: pwsh
 
       - name: Regenerate Gateway MSI
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        shell: pwsh
+        if: ${{ matrix.project == 'devolutions-gateway' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
@@ -399,20 +400,20 @@ jobs:
           Write-Host "DGATEWAY_LIB_XMF_PATH = ${Env:DGATEWAY_LIB_XMF_PATH}"
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption generate
+        shell: pwsh
 
       - name: Download pedm desktop artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-agent' }}
         run: |
           $Destination = "devolutions-pedm-desktop"
           gh run download ${{ needs.preflight.outputs.run }} -n devolutions-pedm-desktop -D "$Destination"
           Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") -Recurse | Where-Object { $_.Extension -notin '.exe', '.dll' } | Remove-Item -Recurse -Force
-          
-      - name: Sign pedm desktop executables
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign pedm desktop executables
+        if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-agent' }}
         run: |
           $IncludePattern = '*Devolutions*'
           Get-ChildItem -Path $(Resolve-Path "devolutions-pedm-desktop") | Where-Object { (Get-AuthenticodeSignature $_).Status -ne 'Valid'} | % {
@@ -428,19 +429,19 @@ jobs:
               echo "::debug::signing $_.FullName"
               AzureSignTool @Params $_.FullName
           }
+        shell: pwsh
 
       - name: Download tun2socks artifacts
-        if: matrix.os == 'windows' && matrix.project == 'devolutions-agent'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-agent' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           gh run download ${{ needs.preflight.outputs.run }} -n tun2socks-windows-x86_64 -D "$PackageRoot\tun2socks"
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Regenerate Agent MSI
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
+        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
@@ -461,28 +462,27 @@ jobs:
           Write-Host "DAGENT_WINTUN_DLL = ${Env:DAGENT_WINTUN_DLL}"
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
+        shell: pwsh
 
       - name: Sign Gateway MSI runtime
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
+        if: ${{ matrix.project == 'devolutions-gateway' && matrix.os == 'windows' }}
+        run: |
+          Get-ChildItem -Path .\* -Include "*.exe" | % {
+            $Params = @('sign',
+              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+              '-v')
+            AzureSignTool @Params $_.FullName
+          }
         shell: pwsh
         working-directory: package/WindowsManaged/Release
-        run: |
-          Get-ChildItem -Path .\* -Include "*.exe" | % {
-            $Params = @('sign',
-              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-              '-v')
-            AzureSignTool @Params $_.FullName
-          }
 
       - name: Sign Agent MSI runtime
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
-        working-directory: package/AgentWindowsManaged/Release
+        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
         run: |
           Get-ChildItem -Path .\* -Include "*.exe" | % {
             $Params = @('sign',
@@ -495,10 +495,11 @@ jobs:
               '-v')
             AzureSignTool @Params $_.FullName
           }
+        shell: pwsh
+        working-directory: package/AgentWindowsManaged/Release
 
       - name: Repackage Gateway
-        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        shell: pwsh
+        if: ${{ matrix.project == 'devolutions-gateway' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
           $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
@@ -507,10 +508,10 @@ jobs:
 
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           Remove-Item $Env:DGATEWAY_PSMODULE_PATH -Recurse -ErrorAction SilentlyContinue | Out-Null
+        shell: pwsh
 
       - name: Repackage Agent
-        if: matrix.project == 'devolutions-agent' && matrix.os == 'windows'
-        shell: pwsh
+        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent
           $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Select -First 1
@@ -527,10 +528,10 @@ jobs:
             $Env:DAGENT_SESSION_EXECUTABLE) | ForEach-Object {
             Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
           }
+        shell: pwsh
 
       - name: Sign packages
-        if: (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') && matrix.os == 'windows'
-        shell: pwsh
+        if: ${{ (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent') && matrix.os == 'windows' }}
         run: |
           $ContentDescription = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'Devolutions Gateway' }
@@ -549,10 +550,10 @@ jobs:
               '-v')
             AzureSignTool @Params $_.FullName
           }
+        shell: pwsh
 
       - name: Verification
-        if: (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod'
-        shell: pwsh
+        if: ${{ (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod' }}
         run: |
           $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
           if ('${{ matrix.os }}' -Eq 'windows') {
@@ -572,6 +573,7 @@ jobs:
               }
             }
           }
+        shell: pwsh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -583,8 +585,8 @@ jobs:
 
   devolutions-gateway-merge:
     name: Devolutions Gateway merge artifacts
-    runs-on: ubuntu-latest
     needs: [codesign]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Merge Artifacts
@@ -596,8 +598,8 @@ jobs:
 
   devolutions-agent-merge:
     name: Devolutions Agent merge artifacts
-    runs-on: ubuntu-latest
     needs: [codesign]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Merge Artifacts
@@ -609,8 +611,8 @@ jobs:
 
   jetsocat-merge:
     name: Jetsocat merge artifacts
-    runs-on: ubuntu-latest
     needs: [codesign]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Merge Artifacts
@@ -622,15 +624,15 @@ jobs:
 
   web-app:
     name: Web App
-    runs-on: ubuntu-latest
     needs: [preflight, codesign]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Download artifacts
+        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -R $Env:GITHUB_REPOSITORY -D webapp-client
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -R $Env:GITHUB_REPOSITORY -D webapp-client
 
       - name: Create tarball
         run: tar -czvf devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz webapp-client
@@ -645,8 +647,8 @@ jobs:
 
   nuget:
     name: Nuget
-    runs-on: ubuntu-22.04 # nuget.exe not available on 24.04 and `nuget pack` doesn't work without a csproj
     needs: [preflight, codesign, jetsocat-merge]
+    runs-on: ubuntu-22.04 # nuget.exe not available on 24.04 and `nuget pack` doesn't work without a csproj
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -661,8 +663,6 @@ jobs:
           path: jetsocat/nuget/bin
 
       - name: Rename artifacts
-        shell: pwsh
-        working-directory: jetsocat/nuget/bin
         run: |
           # Backward compatibility with prior nuspec versions
           Get-ChildItem -Directory -Recurse "x86_64" | Rename-Item -NewName "x64"
@@ -671,10 +671,10 @@ jobs:
           Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat"
           cd windows
           Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat.exe"
+        shell: pwsh
+        working-directory: jetsocat/nuget/bin
 
       - name: Set package metadata
-        shell: pwsh
-        working-directory: jetsocat/nuget
         run: |
           Set-PSDebug -Trace 1
 
@@ -688,10 +688,10 @@ jobs:
           Select-Xml -xml $Xml -XPath //package/metadata/version | % { $_.Node.'#text' = "$Version" }
           Select-Xml -xml $Xml -XPath //package/metadata/description | % { $_.Node.'#text' = "Websocket toolkit for jet protocol related operations" }
           $Xml.Save($Nuspec)
-
-      - name: Build package
         shell: pwsh
         working-directory: jetsocat/nuget
+
+      - name: Build package
         run: |
           Set-PSDebug -Trace 1
 
@@ -699,6 +699,8 @@ jobs:
           & 'nuget' 'pack' 'Devolutions.Jetsocat.nuspec'
           $NugetPackage = (Get-Item ".\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
           Set-ZipItUnixFilePermissions $NugetPackage -FilePattern "native/jetsocat$" -FilePermissions "r-xr-xr-x"
+        shell: pwsh
+        working-directory: jetsocat/nuget
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -709,8 +711,8 @@ jobs:
 
   generate-sbom:
     name: Generate SBOM
+    needs: [preflight]
     runs-on: ubuntu-latest
-    needs: preflight
 
     steps:
       - name: Checkout ${{ github.repository }}

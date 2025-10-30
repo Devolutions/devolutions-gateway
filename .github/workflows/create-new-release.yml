@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "The commit SHA to build"
+        description: The commit SHA to build
         required: false
         type: string
       dry-run:
-          description: 'If true, the workflow only indicates which artifacts would be uploaded'
+          description: If true, the workflow only indicates which artifacts would be uploaded
           required: true
           type: boolean
           default: true
@@ -21,17 +21,16 @@ jobs:
       ref: ${{ inputs.ref }}
 
   call-package-workflow:
+    needs: [call-ci-workflow]
     uses: ./.github/workflows/package.yml
     secrets: inherit
-    needs: [ call-ci-workflow ]
     with:
       ref: ${{ inputs.ref }}
 
   call-release-workflow:
-    ## Only builds from master enable LTO
-    if: github.ref == 'refs/heads/master' || ${{ inputs.dry-run == true }}
+    if: ${{ github.ref == 'refs/heads/master' || inputs.dry-run == true }}
+    needs: [call-package-workflow]
     uses: ./.github/workflows/release.yml
     secrets: inherit
-    needs: [ call-package-workflow ]
     with:
       dry-run: ${{ inputs.dry-run }}
