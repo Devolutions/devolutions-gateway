@@ -11,8 +11,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1.0"
-retour = "0.3"
+anyhow = "1"
+retour = "0.4.0-alpha.4"
 win-api-wrappers = { path = "../win-api-wrappers" }
 devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["pedm_client"] }
 tracing = "0.1"
