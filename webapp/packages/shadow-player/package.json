@@ -1,7 +1,7 @@
 {
   "name": "@devolutions/shadow-player",
-  "private": true,
-  "version": "0.0.0",
+  "private": false,
+  "version": "1.0.0",
   "type": "module",
   "files": [
     "dist"
@@ -21,5 +21,8 @@
   "dependencies": {
     "ts-node": "^10.9.2",
     "vite-plugin-dts": "^4.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

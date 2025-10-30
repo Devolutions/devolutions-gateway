@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//e/dev/git/devolutions-gateway/devolutions-gateway/openapi/**)",
+      "Bash(pnpm build:*)",
+      "Bash(cat:*)",
+      "Read(//e/dev/git/devolutions-gateway/.github/workflows/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
