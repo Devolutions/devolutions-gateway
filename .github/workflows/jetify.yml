@@ -4,25 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'release version'
-        default: "latest"
+        description: release version
+        default: latest
         required: true
       detours-git-commit:
-          description: 'Detours git commit'
-          default: '4b8c659'
+          description: Detours git commit
+          default: 4b8c659
           required: true
       sign-nuget:
-        description: 'Sign nuget package'
+        description: Sign nuget package
         required: true
         type: boolean
         default: false
       skip-publish:
-        description: 'Skip publishing'
+        description: Skip publishing
         required: true
         type: boolean
         default: false
       dry-run:
-        description: 'Dry run (simulate)'
+        description: Dry run (simulate)
         required: true
         type: boolean
         default: true
@@ -30,7 +30,6 @@ on:
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-22.04
     outputs:
       package-env: ${{ steps.info.outputs.package-env }}
       package-version: ${{ steps.info.outputs.package-version }}
@@ -38,11 +37,11 @@ jobs:
       sign-nuget: ${{ steps.info.outputs.sign-nuget }}
       skip-publish: ${{ steps.info.outputs.skip-publish }}
       dry-run: ${{ steps.info.outputs.dry-run }}
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Package information
         id: info
-        shell: pwsh
         run: |
           $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
           $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
@@ -91,11 +90,12 @@ jobs:
 
           echo "::notice::Version: $PackageVersion"
           echo "::notice::DryRun: $DryRun"
+        shell: pwsh
 
   build:
     name: Build Jetify
-    runs-on: windows-2022
     needs: [preflight]
+    runs-on: windows-2022
     strategy:
       fail-fast: true
       matrix:
@@ -106,13 +106,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure runner
-        shell: pwsh
         run: |
           Install-Module -Name VsDevShell -Force
           New-Item .\package -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+        shell: pwsh
 
       - name: Update version
-        shell: pwsh
         run: |
           $PackageVersion = '${{ needs.preflight.outputs.package-version }}'
           $nuspecFilePath = "jetify\nuget\Devolutions.Jetify.nuspec"
@@ -120,6 +119,7 @@ jobs:
           $updatedNuspecContent = $nuspecContent -replace '(<version>)(.*?)(</version>)', "`$1$PackageVersion`$3"
           $updatedNuspecContent | Set-Content -Path $nuspecFilePath
           Set-Content -Path .\VERSION -Value $PackageVersion
+        shell: pwsh
 
       - name: Restore Detours Cache (${{matrix.arch}})
         id: cache-detours
@@ -129,23 +129,21 @@ jobs:
           key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
 
       - name: Build Detours (${{matrix.arch}})
-        if: steps.cache-detours.outputs.cache-hit != 'true'
-        shell: pwsh
+        if: ${{ steps.cache-detours.outputs.cache-hit != 'true' }}
         run: |
           Enter-VsDevShell ${{matrix.arch}}
           $GitCommit = '${{ needs.preflight.outputs.detours-git-commit }}'
           .\jetify\detours.ps1 -GitCommit $GitCommit
+        shell: pwsh
 
       - name: Save Detours Cache (${{matrix.arch}})
-        if: steps.cache-detours.outputs.cache-hit != 'true'
+        if: ${{ steps.cache-detours.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: dependencies/detours
           key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
 
       - name: Build Jetify (${{matrix.arch}})
-        shell: pwsh
-        working-directory: jetify
         run: |
           $Arch = "${{matrix.arch}}"
           $BuildDir = "build-$Arch"
@@ -159,6 +157,8 @@ jobs:
           }
           mkdir package
           Compress-Archive "dependencies\Jetify\$Arch\*" ".\package\Jetify-$PackageVersion-$Arch.zip" -CompressionLevel Optimal
+        shell: pwsh
+        working-directory: jetify
 
       - name: Upload Jetify (${{matrix.arch}})
         uses: actions/upload-artifact@v4
@@ -168,19 +168,19 @@ jobs:
 
   package:
     name: Package Jetify
-    runs-on: windows-2022
-    needs: [preflight, build]
     environment: ${{ needs.preflight.outputs.package-env }}
+    needs: [preflight, build]
+    runs-on: windows-2022
 
     steps:
       - name: Check out ${{ github.repository }}
         uses: actions/checkout@v4
 
       - name: Configure runner
-        shell: pwsh
         run: |
           New-Item .\package -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
           New-Item ".\dependencies\Jetify" -ItemType Directory | Out-Null
+        shell: pwsh
 
       - name: Install code signing tools
         run: |
@@ -200,7 +200,6 @@ jobs:
           path: package
 
       - name: Create nuget package
-        shell: pwsh
         run: |
             Get-Item .\package\*.zip | ForEach-Object {
                 ($Name, $Version, $Arch) = $_.BaseName -Split '-'
@@ -209,9 +208,9 @@ jobs:
                 Expand-Archive $_ $NativePath -Force
             }
             nuget pack jetify/nuget -OutputDirectory package
+        shell: pwsh
 
       - name: Code sign nuget contents
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
           $NugetBaseName = $(Get-Item ./package/*.nupkg).BaseName
@@ -232,11 +231,10 @@ jobs:
           }
           Remove-Item $PackedFile -ErrorAction SilentlyContinue | Out-Null
           Compress-Archive -Path "$UnpackedDir\*" -Destination $PackedFile -CompressionLevel Optimal
+        shell: pwsh
 
       - name: Code sign nuget package
         if: ${{ fromJSON(needs.preflight.outputs.sign-nuget) == true }}
-        shell: pwsh
-        working-directory: jetify
         run: |
           $NugetPackage = (Get-Item ".\package\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
           $Params = @('sign', $NugetPackage,
@@ -248,6 +246,8 @@ jobs:
             '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
             '-v')
           & NuGetKeyVaultSignTool @Params
+        shell: pwsh
+        working-directory: jetify
 
       - name: Upload nuget package
         uses: actions/upload-artifact@v4
@@ -257,10 +257,10 @@ jobs:
 
   publish:
     name: Publish packages
-    runs-on: ubuntu-22.04
-    needs: [preflight, build, package]
     environment: ${{ needs.preflight.outputs.package-env }}
     if: ${{ fromJSON(needs.preflight.outputs.skip-publish) == false }}
+    needs: [preflight, build, package]
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Download nuget package
@@ -270,7 +270,6 @@ jobs:
           path: package
 
       - name: Publish to nuget.org
-        shell: pwsh
         run: |
           $DryRun = [System.Boolean]::Parse('${{ needs.preflight.outputs.dry-run }}')
           $NugetPackage = (Get-Item ./package/*.nupkg) | Resolve-Path -Relative
@@ -287,6 +286,7 @@ jobs:
           } else {
             & 'dotnet' $PushArgs
           }
+        shell: pwsh
 
       - name: Check out repository
         uses: actions/checkout@v4

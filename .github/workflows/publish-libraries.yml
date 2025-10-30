@@ -3,8 +3,8 @@ name: Publish libraries
 on:
   workflow_dispatch:
     inputs:
-      dry-run:
-        description: 'Dry run'
+      dry_run:
+        description: Dry run
         required: true
         type: boolean
         default: true
@@ -16,22 +16,22 @@ jobs:
     name: Preflight
     runs-on: ubuntu-latest
     outputs:
-      dry-run: ${{ steps.get-dry-run.outputs.dry-run }}
+      dry_run: ${{ steps.get-dry-run.outputs.dry_run }}
 
     steps:
       - name: Get dry run
         id: get-dry-run
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
-          $IsDryRun = '${{ github.event.inputs.dry-run }}' -Eq 'true' -Or '${{ github.event_name }}' -Eq 'schedule'
+          $IsDryRun = '${{ github.event.inputs.dry_run }}' -Eq 'true' -Or '${{ github.event_name }}' -Eq 'schedule'
 
           if ($IsDryRun) {
-            echo "dry-run=true" >> $Env:GITHUB_OUTPUT
+            echo "dry_run=true" >> $Env:GITHUB_OUTPUT
           } else {
-            echo "dry-run=false" >> $Env:GITHUB_OUTPUT
+            echo "dry_run=false" >> $Env:GITHUB_OUTPUT
           }
+        shell: pwsh
 
   nuget-build:
     name: NuGet package build [${{matrix.library}}]
@@ -56,7 +56,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -66,6 +65,7 @@ jobs:
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
           Get-ChildItem -Path $Path -Recurse -Include '*.nupkg' | ForEach { Copy-Item $_ "./nuget-packages" }
           Get-ChildItem -Path $Path -Recurse -Include '*.snupkg' | ForEach { Copy-Item $_ "./nuget-packages" }
+        shell: pwsh
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
@@ -77,8 +77,8 @@ jobs:
 
   nuget-merge:
     name: NuGet merge artifacts
+    needs: [nuget-build]
     runs-on: ubuntu-latest
-    needs: nuget-build
 
     steps:
       - name: Merge Artifacts
@@ -105,7 +105,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -114,6 +113,7 @@ jobs:
 
           New-Item -ItemType "directory" -Path . -Name "npm-packages"
           Get-ChildItem -Path $Path -Recurse *.tgz | ForEach { Copy-Item $_ "./npm-packages" }
+        shell: pwsh
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
@@ -122,9 +122,9 @@ jobs:
           path: npm-packages/*.tgz
 
   npm-merge:
-    name: NuGet merge artifacts
+    name: NPM merge artifacts
     runs-on: ubuntu-latest
-    needs: npm-build
+    needs: [npm-build]
 
     steps:
       - name: Merge Artifacts
@@ -136,12 +136,10 @@ jobs:
 
   nuget-publish:
     name: Publish NuGet packages
-    runs-on: ubuntu-latest
     environment: publish-prod
-    if: needs.preflight.outputs.dry-run == 'false'
-    needs:
-      - preflight
-      - nuget-merge
+    if: ${{ needs.preflight.outputs.dry_run == 'false' }}
+    needs: [preflight, nuget-merge]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Download NuGet packages artifact
@@ -151,17 +149,16 @@ jobs:
           path: nuget-packages
 
       - name: Publish to nuget.org
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
           $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
-    
+
           foreach ($File in $Files) {
             $PushCmd = @(
-              'dotnet', 
-              'nuget', 
-              'push', 
+              'dotnet',
+              'nuget',
+              'push',
               "$File",
               '--api-key',
               '${{ secrets.NUGET_API_KEY }}',
@@ -174,15 +171,17 @@ jobs:
             $PushCmd = $PushCmd -Join ' '
             Invoke-Expression $PushCmd
           }
+        shell: pwsh
 
   npm-publish:
     name: Publish NPM packages
-    runs-on: ubuntu-latest
     environment: publish-prod
-    if: needs.preflight.outputs.dry-run == 'false'
-    needs:
-      - preflight
-      - npm-merge
+    if: ${{ needs.preflight.outputs.dry_run == 'false' }}
+    needs: [preflight, npm-merge, npm-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -193,13 +192,8 @@ jobs:
         with:
           name: npm
           path: npm-packages
-      
-      - name: Configure NPM
-        shell: pwsh
-        run: npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
 
       - name: Publish
-        shell: pwsh
         run: |
           Set-PSDebug -Trace 1
 
@@ -209,6 +203,7 @@ jobs:
             Write-Host "Publishing $($File.Name)..."
             ./ci/npm-publish.ps1 -Tarball "$File" -Access 'public'
           }
+        shell: pwsh
 
       - name: Update Artifactory Cache
         run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="gateway-client"
@@ -217,32 +212,29 @@ jobs:
 
   remove-labels:
     name: Remove publish-required labels
+    if: ${{ needs.preflight.outputs.dry_run == 'false' }}
+    needs: [preflight, nuget-build, npm-publish]
     runs-on: ubuntu-latest
-    if: needs.preflight.outputs.dry-run == 'false'
-    needs:
-      - nuget-build
-      - npm-publish
 
     steps:
       - name: Check out ${{ github.repository }}
         uses: actions/checkout@v4
 
       - name: Remove labels
+        run: ./ci/remove-labels.ps1 -Label 'publish-required'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./ci/remove-labels.ps1 -Label 'publish-required'
 
   notify:
     name: Notify failure
-    runs-on: ubuntu-latest
     if: ${{ always() && contains(needs.*.result, 'failure') && github.event_name == 'schedule' }}
-    needs:
-      - npm-build
-      - nuget-merge
+    needs: [npm-build, nuget-merge]
+    runs-on: ubuntu-latest
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ARCHITECTURE }}
       SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
     steps:
       - name: Send slack notification
         id: slack
