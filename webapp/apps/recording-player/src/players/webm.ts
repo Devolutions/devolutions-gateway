@@ -1,5 +1,5 @@
 import '@devolutions/multi-video-player';
-import '@devolutions/multi-video-player/dist/multi-video-player.css';
+import '@devolutions/multi-video-player/index.css';
 import { MultiVideoPlayer } from '@devolutions/multi-video-player';
 import type { GatewayAccessApi } from '../gateway';
 

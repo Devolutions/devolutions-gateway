@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { UserConfig, defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 // Simple deep merge function
 function deepMerge<T extends object>(target: Partial<T>, source: T): T {
@@ -18,8 +19,8 @@ const DefaultConfig: UserConfig = {
   build: {
     lib: {
       entry: path.resolve(__dirname, 'src/main.ts'),
-      name: 'WebmStreamPlayer',
-      fileName: () => 'webm-stream-player.js',
+      name: 'ShadowPlayer',
+      fileName: 'index',
       formats: ['es'],
     },
     rollupOptions: {
@@ -37,16 +38,28 @@ const OutDir = {
   release: 'dist',
 };
 
+const staticCopyPlugin = viteStaticCopy({
+  targets: [
+    {
+      src: './package.dist.json',
+      dest: './',
+      rename: 'package.json',
+    },
+  ],
+});
+
 const Plugins = {
   debug: [
     dts({
       insertTypesEntry: true,
     }),
+    staticCopyPlugin,
   ],
   release: [
     dts({
       insertTypesEntry: true,
     }),
+    staticCopyPlugin,
   ],
 };
 

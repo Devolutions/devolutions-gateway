@@ -7,12 +7,17 @@ export default defineConfig(({ mode }) => {
     dts({
       rollupTypes: true,
     }),
-    // Copy video.js fonts to output directory
+    // Copy video.js fonts to output directory and package.json for publishing
     viteStaticCopy({
       targets: [
         {
           src: './node_modules/video.js/dist/font/**/*',
           dest: './fonts',
+        },
+        {
+          src: './package.dist.json',
+          dest: './',
+          rename: 'package.json',
         },
       ],
     }),
@@ -36,8 +41,11 @@ export default defineConfig(({ mode }) => {
       lib: {
         entry: 'src/index.ts',
         name: 'MultiVideoPlayer',
-        fileName: 'multi-video-player',
+        fileName: 'index',
         formats: ['es' as const],
+      },
+      rollupOptions: {
+        external: ['video.js', '@devolutions/shadow-player'],
       },
     },
     plugins,
