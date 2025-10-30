@@ -1,7 +1,7 @@
 {
   "name": "@devolutions/multi-video-player",
-  "private": true,
-  "version": "0.0.0",
+  "private": false,
+  "version": "1.0.0",
   "type": "module",
   "files": [
     "./dist"
@@ -30,6 +30,7 @@
     "@types/jquery": "^3.5.32"
   },
   "dependencies": {
+    "@devolutions/shadow-player": "workspace:*",
     "vite-plugin-dts": "^4.5.3",
     "vite-plugin-static-copy": "^2.3.0"
   },
@@ -38,6 +39,6 @@
     "testEnvironment": "jsdom"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   }
 }
