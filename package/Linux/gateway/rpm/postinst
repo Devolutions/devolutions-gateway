@@ -10,5 +10,5 @@ if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload
 	/usr/bin/devolutions-gateway --config-init-only >/dev/null
 	systemctl enable --now devolutions-gateway >/dev/null 2>&1
-   systemctl restart devolutions-gateway >/dev/null 2>&1
+	systemctl restart devolutions-gateway >/dev/null 2>&1
 fi

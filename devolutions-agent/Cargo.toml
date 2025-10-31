@@ -15,7 +15,7 @@ workspace = true
 anyhow = "1"
 async-trait = "0.1"
 camino = { version = "1.1", features = ["serde1"] }
-ceviche = "0.6"
+ceviche = "0.7"
 ctrlc = "3.4"
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
