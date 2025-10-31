@@ -6,7 +6,7 @@ if [ ! -d /etc/devolutions-gateway ]; then
 fi
 
 if [ -d /run/systemd/system ]; then
-    # Generate /etc/devolutions-gateway/gateway.json
+	# Generate /etc/devolutions-gateway/gateway.json
 	/usr/bin/devolutions-gateway --config-init-only >/dev/null
 fi
 

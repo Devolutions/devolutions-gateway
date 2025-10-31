@@ -784,9 +784,9 @@ dependencies = [
 
 [[package]]
 name = "ceviche"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42c08bc4ee8dce2878185fe1e6dc9b550a36ac3b4fa8c8e8546c4d8792d0176d"
+checksum = "df5dea6d0064e3517b6f7ccf7d46713d9221547c74451d529f009b09cd2f9247"
 dependencies = [
  "cfg-if",
  "chrono",

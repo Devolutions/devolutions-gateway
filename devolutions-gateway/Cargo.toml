@@ -40,7 +40,7 @@ ironrdp-rdcleanpath = "0.1"
 ironrdp-tokio = "0.5"
 ironrdp-connector = { version = "0.5" }
 ironrdp-acceptor = { version = "0.5" }
-ceviche = "0.6.1"
+ceviche = "0.7"
 picky-krb = "0.11"
 
 # Serialization
