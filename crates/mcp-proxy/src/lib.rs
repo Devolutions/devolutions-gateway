@@ -22,6 +22,7 @@ enum TransportMode {
 }
 
 const HTTP_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const FORWARD_FAILURE_CODE: f64 = -32099.0;
 
 impl Config {
     pub fn http(url: impl Into<String>, timeout: Option<Duration>) -> Self {
@@ -87,19 +88,38 @@ pub struct McpProxy {
     transport: InnerTransport,
 }
 
-/// Fatal error indicating the MCP proxy can no longer forward requests
+/// Error that can occur when sending a message.
 #[derive(Debug)]
-pub struct FatalError {
-    /// Optional error message to send back to the client.
-    ///
-    /// `None` if the original request was a notification.
-    pub response: Option<Message>,
+pub enum SendError {
+    /// Fatal error - the proxy must stop as the connection is broken.
+    Fatal {
+        /// Optional error message to send back when a request ID is detected.
+        message: Option<Message>,
+        /// The underlying error for logging/debugging.
+        source: anyhow::Error,
+    },
+    /// Transient error - the proxy can continue operating.
+    Transient {
+        /// Optional error message to send back when a request ID is detected.
+        message: Option<Message>,
+        /// The underlying error for logging/debugging.
+        source: anyhow::Error,
+    },
+}
+
+/// Error that can occur when reading a message.
+#[derive(Debug)]
+pub enum ReadError {
+    /// Fatal error - the proxy must stop as the connection is broken.
+    Fatal(anyhow::Error),
+    /// Transient error - the proxy can continue operating.
+    Transient(anyhow::Error),
 }
 
 enum InnerTransport {
     Http { url: String, agent: ureq::Agent },
-    Process(ProcessMcpClient),
-    NamedPipe(NamedPipeMcpClient),
+    Process(ProcessMcpTransport),
+    NamedPipe(NamedPipeMcpTransport),
 }
 
 impl McpProxy {
@@ -110,89 +130,107 @@ impl McpProxy {
                 InnerTransport::Http { url, agent }
             }
             TransportMode::SpawnProcess { command } => {
-                InnerTransport::Process(ProcessMcpClient::spawn(&command).await?)
+                InnerTransport::Process(ProcessMcpTransport::spawn(&command).await?)
             }
             TransportMode::NamedPipe { pipe_path } => {
-                InnerTransport::NamedPipe(NamedPipeMcpClient::connect(&pipe_path).await?)
+                InnerTransport::NamedPipe(NamedPipeMcpTransport::connect(&pipe_path).await?)
             }
         };
 
         Ok(McpProxy { transport })
     }
 
-    pub async fn forward_request(&mut self, request: &str) -> Result<Option<Message>, FatalError> {
-        const FORWARD_FAILURE_CODE: f64 = -32099.0;
+    /// Send a message to the peer.
+    ///
+    /// For Process and NamedPipe transports, this method only writes the request.
+    /// Use `read_message()` to read responses and server-initiated messages.
+    ///
+    /// For HTTP transport, this method writes the request and immediately returns the response
+    /// (since HTTP doesn't support concurrent reads and is strictly request/response oriented).
+    // TODO(DGW-316): support for HTTP SSE (long polling) mode.
+    pub async fn send_message(&mut self, message: &str) -> Result<Option<Message>, SendError> {
+        trace!(message, "Outbound message");
 
-        trace!(request, "Request from client");
+        let message = message.trim();
 
-        let request = request.trim();
-
-        if request.is_empty() {
-            debug!("Empty request from client");
+        if message.is_empty() {
+            debug!("Empty outbound message");
             return Ok(None);
         }
 
-        let request_id = match JsonRpcRequest::parse(request) {
+        // Try to parse as request first, then as response.
+        let request_id = match JsonRpcMessage::parse(message) {
             Ok(request) => {
-                if let Some(id) = request.id {
-                    debug!(
-                        jsonrpc = request.jsonrpc,
-                        method = request.method,
-                        id,
-                        "Request from client"
-                    );
-                } else {
-                    debug!(
-                        jsonrpc = request.jsonrpc,
-                        method = request.method,
-                        "Notification from client"
-                    );
-                }
+                match (request.id, request.method) {
+                    (None, None) => {
+                        warn!(
+                            jsonrpc = request.jsonrpc,
+                            "Sending a malformed JSON-RPC message (missing both `id` and `method`)"
+                        )
+                    }
+                    (None, Some(method)) => {
+                        debug!(jsonrpc = request.jsonrpc, method, "Sending a notification")
+                    }
+                    (Some(id), None) => debug!(jsonrpc = request.jsonrpc, id, "Sending a response"),
+                    (Some(id), Some(method)) => debug!(jsonrpc = request.jsonrpc, method, id, "Sending a request"),
+                };
 
                 request.id
             }
-            Err(e) => {
-                let id = extract_id_best_effort(request);
+            Err(error) => {
+                // Not a JSON-RPC message, try best-effort ID extraction.
+                let id = extract_id_best_effort(message);
 
                 if let Some(id) = id {
-                    warn!(error = format!("{e:#}"), id, "Malformed JSON-RPC request from client");
+                    warn!(error = format!("{error:#}"), id, "Sending a malformed JSON-RPC message");
                 } else {
-                    warn!(error = format!("{e:#}"), "Malformed JSON-RPC request from client");
+                    warn!(error = format!("{error:#}"), "Sending a malformed JSON-RPC message");
                 }
 
                 id
             }
         };
 
-        let is_notification = request_id.is_none();
-
         let ret = match &mut self.transport {
             InnerTransport::Http { url, agent } => {
-                match send_mcp_request_http(url, agent, request, is_notification).await {
-                    Ok(response) => Ok(response.inspect(|response| trace!(%response, "Response from server"))),
-                    Err(e) => {
-                        error!(error = format!("{e:#}"), "Couldn't forward request");
+                // HTTP is request/response only - read the response immediately.
 
-                        // Because it’s not connection-based, HTTP errors are (currently) never fatal.
-                        if let Some(id) = request_id {
+                // TODO(DGW-316): The HTTP transport actually support two modes.
+                //   In one of them, we need to read the response immediately,
+                //   and in the other we need to maintain a long-polling session,
+                //   and we can likely rely on read_message() (needs investigation).
+
+                let response_is_expected = request_id.is_some();
+
+                match send_mcp_request_http(url, agent, message, response_is_expected).await {
+                    Ok(response) => Ok(response.inspect(|msg| trace!(%msg, "Response from HTTP server"))),
+                    Err(error) => {
+                        // Because HTTP transport is not connection-based, HTTP errors are (currently) never fatal.
+                        // We always "connect from scratch" for each message to forward.
+
+                        error!(error = format!("{error:#}"), "Couldn't forward request");
+
+                        let message = if let Some(id) = request_id {
                             let json_rpc_error_response = format!(
-                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {e:#}"}}}}"#
+                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {error:#}"}}}}"#
                             );
-                            Ok(Some(Message::normalize(json_rpc_error_response)))
+                            Some(Message::normalize(json_rpc_error_response))
                         } else {
-                            Ok(None)
-                        }
+                            None
+                        };
+
+                        Err(SendError::Transient { message, source: error })
                     }
                 }
             }
-            InnerTransport::Process(stdio_mcp_client) => handle_io_result(
-                stdio_mcp_client.send_request(request, is_notification).await,
-                request_id,
-            ),
-            InnerTransport::NamedPipe(named_pipe_mcp_client) => handle_io_result(
-                named_pipe_mcp_client.send_request(request, is_notification).await,
-                request_id,
-            ),
+            InnerTransport::Process(stdio_mcp_transport) => {
+                // Process transport: write only, read via read_message().
+                handle_write_result(stdio_mcp_transport.write_request(message).await, request_id).map(|()| None)
+            }
+            InnerTransport::NamedPipe(named_pipe_mcp_transport) => {
+                // NamedPipe transport: write only, read via read_message().
+                handle_write_result(named_pipe_mcp_transport.write_request(message).await, request_id).map(|()| None)
+            }
         };
 
         return ret;
@@ -221,19 +259,16 @@ impl McpProxy {
             acc.parse().ok()
         }
 
-        fn handle_io_result(
-            result: std::io::Result<Option<Message>>,
-            request_id: Option<i32>,
-        ) -> Result<Option<Message>, FatalError> {
+        fn handle_write_result(result: std::io::Result<()>, request_id: Option<i32>) -> Result<(), SendError> {
             match result {
-                Ok(response) => Ok(response.inspect(|response| trace!(%response, "Response from server"))),
+                Ok(()) => Ok(()),
                 Err(io_error) => {
                     // Classify the error.
                     if is_fatal_io_error(&io_error) {
                         // Fatal error - connection is broken.
                         error!(error = %io_error, "MCP server connection broken");
 
-                        let response = if let Some(id) = request_id {
+                        let message = if let Some(id) = request_id {
                             let json_rpc_error_response = format!(
                                 r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"MCP server connection broken: {io_error}"}}}}"#
                             );
@@ -242,33 +277,76 @@ impl McpProxy {
                             None
                         };
 
-                        Err(FatalError { response })
+                        Err(SendError::Fatal {
+                            message,
+                            source: io_error.into(),
+                        })
                     } else {
                         // Recoverable error - return error response.
                         error!(error = %io_error, "Couldn't forward request");
 
-                        if let Some(id) = request_id {
+                        let message = if let Some(id) = request_id {
                             let json_rpc_error_response = format!(
                                 r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {io_error}"}}}}"#
                             );
-                            Ok(Some(Message::normalize(json_rpc_error_response)))
+                            Some(Message::normalize(json_rpc_error_response))
                         } else {
-                            Ok(None)
-                        }
+                            None
+                        };
+
+                        Err(SendError::Transient {
+                            message,
+                            source: io_error.into(),
+                        })
                     }
+                }
+            }
+        }
+    }
+
+    /// Read a message from the peer.
+    ///
+    /// This method blocks until a message is received from the server.
+    /// For HTTP transport, this method will never return (pending forever) as HTTP is request/response only.
+    pub async fn read_message(&mut self) -> Result<Message, ReadError> {
+        let result = match &mut self.transport {
+            InnerTransport::Http { .. } => {
+                // HTTP transport doesn't support server-initiated messages.
+                // This will never resolve, making it work correctly with tokio::select!.
+                std::future::pending().await
+            }
+            InnerTransport::Process(stdio_mcp_transport) => stdio_mcp_transport.read_message().await,
+            InnerTransport::NamedPipe(named_pipe_mcp_transport) => named_pipe_mcp_transport.read_message().await,
+        };
+
+        match result {
+            Ok(message) => {
+                trace!(%message, "Message from server");
+                Ok(message)
+            }
+            Err(io_error) => {
+                if is_fatal_io_error(&io_error) {
+                    error!(error = %io_error, "MCP server connection broken while reading");
+                    Err(ReadError::Fatal(anyhow::Error::new(io_error)))
+                } else {
+                    error!(error = %io_error, "Error reading from MCP server");
+                    Err(ReadError::Transient(anyhow::Error::new(io_error)))
                 }
             }
         }
     }
 }
 
-struct JsonRpcRequest {
-    jsonrpc: String,
-    id: Option<i32>,
-    method: String,
+/// Partial definition for a JSON-RPC message.
+///
+/// Could be a request, response or a notification, we do not need to distinguish that much in this module.
+struct JsonRpcMessage {
+    jsonrpc: String,        // Every JSON-RPC message have the jsonrpc field.
+    id: Option<i32>,        // Requests and responses have an ID.
+    method: Option<String>, // Requests and notifications have a method.
 }
 
-impl JsonRpcRequest {
+impl JsonRpcMessage {
     fn parse(json_str: &str) -> anyhow::Result<Self> {
         let json: tinyjson::JsonValue = json_str.parse().context("failed to parse JSON")?;
 
@@ -284,17 +362,13 @@ impl JsonRpcRequest {
 
         let id = obj.get("id").and_then(|v| v.get::<f64>()).map(|f| *f as i32);
 
-        let method = obj
-            .get("method")
-            .and_then(|v| v.get::<String>())
-            .ok_or_else(|| anyhow::anyhow!("JSON-RPC request missing 'method' field"))?
-            .clone();
+        let method = obj.get("method").and_then(|v| v.get::<String>()).cloned();
 
-        Ok(JsonRpcRequest { jsonrpc, id, method })
+        Ok(JsonRpcMessage { jsonrpc, id, method })
     }
 }
 
-struct ProcessMcpClient {
+struct ProcessMcpTransport {
     stdin: tokio::process::ChildStdin,
     stdout: BufReader<tokio::process::ChildStdout>,
 
@@ -302,7 +376,7 @@ struct ProcessMcpClient {
     _process: Child,
 }
 
-impl ProcessMcpClient {
+impl ProcessMcpTransport {
     async fn spawn(command: &str) -> anyhow::Result<Self> {
         use tokio::process::Command;
 
@@ -327,36 +401,35 @@ impl ProcessMcpClient {
         let stdout = process.stdout.take().context("failed to get stdout")?;
         let stdout = BufReader::new(stdout);
 
-        Ok(ProcessMcpClient {
+        Ok(ProcessMcpTransport {
             _process: process,
             stdin,
             stdout,
         })
     }
 
-    async fn send_request(&mut self, request: &str, is_notification: bool) -> std::io::Result<Option<Message>> {
+    async fn write_request(&mut self, request: &str) -> std::io::Result<()> {
         self.stdin.write_all(request.as_bytes()).await?;
         self.stdin.write_all(b"\n").await?;
         self.stdin.flush().await?;
+        Ok(())
+    }
 
-        if is_notification {
-            Ok(None)
-        } else {
-            let mut response = String::new();
-            self.stdout.read_line(&mut response).await?;
-            Ok(Some(Message::normalize(response)))
-        }
+    async fn read_message(&mut self) -> std::io::Result<Message> {
+        let mut response = String::new();
+        self.stdout.read_line(&mut response).await?;
+        Ok(Message::normalize(response))
     }
 }
 
-struct NamedPipeMcpClient {
+struct NamedPipeMcpTransport {
     #[cfg(unix)]
     stream: BufReader<tokio::net::UnixStream>,
     #[cfg(windows)]
     stream: BufReader<tokio::net::windows::named_pipe::NamedPipeClient>,
 }
 
-impl NamedPipeMcpClient {
+impl NamedPipeMcpTransport {
     async fn connect(pipe_path: &str) -> anyhow::Result<Self> {
         #[cfg(unix)]
         {
@@ -391,19 +464,28 @@ impl NamedPipeMcpClient {
         }
     }
 
-    async fn send_request(&mut self, request: &str, is_notification: bool) -> std::io::Result<Option<Message>> {
+    async fn write_request(&mut self, request: &str) -> std::io::Result<()> {
         #[cfg(any(unix, windows))]
         {
             self.stream.write_all(request.as_bytes()).await?;
             self.stream.write_all(b"\n").await?;
+            Ok(())
+        }
 
-            if is_notification {
-                Ok(None)
-            } else {
-                let mut response = String::new();
-                self.stream.read_line(&mut response).await?;
-                Ok(Some(Message::normalize(response)))
-            }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(std::io::Error::other(
+                "named pipe transport is not supported on this platform",
+            ))
+        }
+    }
+
+    async fn read_message(&mut self) -> std::io::Result<Message> {
+        #[cfg(any(unix, windows))]
+        {
+            let mut response = String::new();
+            self.stream.read_line(&mut response).await?;
+            Ok(Message::normalize(response))
         }
 
         #[cfg(not(any(unix, windows)))]
@@ -419,7 +501,7 @@ async fn send_mcp_request_http(
     base_url: &str,
     agent: &ureq::Agent,
     request: &str,
-    is_notification: bool,
+    response_is_expected: bool,
 ) -> anyhow::Result<Option<Message>> {
     let url = base_url.trim_end_matches('/').to_owned();
 
@@ -447,7 +529,7 @@ async fn send_mcp_request_http(
     .await
     .context("HTTP request task failed")??;
 
-    if is_notification {
+    if !response_is_expected {
         return Ok(None);
     }
 
