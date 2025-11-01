@@ -167,7 +167,10 @@ async fn handle_fwd(
 
     if let Err(error) = result {
         span.in_scope(|| {
-            error!(error = format!("{error:#}"), "WebSocket forwarding failure");
+            error!(
+                error = format!("{:#}", anyhow::Error::new(error)),
+                "WebSocket forwarding failure"
+            );
         });
     }
 }
@@ -183,19 +186,12 @@ struct Forward<S> {
     with_tls: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ForwardError {
-    BadGateway(anyhow::Error),
-    Internal(anyhow::Error),
-}
-
-impl std::fmt::Display for ForwardError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadGateway(error) => write!(f, "bad gateway: {error}"),
-            Self::Internal(error) => write!(f, "{error}"),
-        }
-    }
+    #[error("bad gateway")]
+    BadGateway(#[source] anyhow::Error),
+    #[error("internal error")]
+    Internal(#[source] anyhow::Error),
 }
 
 impl<S> Forward<S>
