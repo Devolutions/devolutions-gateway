@@ -188,17 +188,10 @@ struct Forward<S> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ForwardError {
+    #[error("bad gateway")]
     BadGateway(#[source] anyhow::Error),
+    #[error("internal error")]
     Internal(#[source] anyhow::Error),
-}
-
-impl std::fmt::Display for ForwardError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadGateway(_) => write!(f, "bad gateway"),
-            Self::Internal(_) => write!(f, "internal error"),
-        }
-    }
 }
 
 impl<S> Forward<S>
