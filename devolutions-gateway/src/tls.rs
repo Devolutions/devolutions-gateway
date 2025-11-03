@@ -86,7 +86,7 @@ pub fn build_server_config(
                     CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
                 )
             {
-                // Variable names issuer/issues are similar but accurately represent certificate fields
+                // Variable names issuer/issues are similar but accurately represent certificate fields.
                 let serial_number = report.serial_number;
                 let subject = report.subject;
                 let issuer = report.issuer;
