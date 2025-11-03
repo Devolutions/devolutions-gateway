@@ -79,7 +79,7 @@ pub fn build_server_config(
         } => {
             let first_certificate = certificates.first().context("empty certificate list")?;
 
-            #[allow(clippy::similar_names)]
+            #[expect(clippy::similar_names)]
             if strict_checks
                 && let Ok(report) = check_certificate_now(first_certificate)
                 && report.issues.intersects(
