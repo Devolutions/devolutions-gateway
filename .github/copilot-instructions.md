@@ -24,7 +24,7 @@ Devolutions Gateway is a blazing fast relay server adaptable to different protoc
 
 ### Primary Stack
 - **Rust 1.90.0** (see `rust-toolchain.toml`)
-- **TypeScript/Angular 18.2** (see `webapp/`)
+- **TypeScript/Angular 18.2.1** (see `webapp/`)
 - **C#/.NET** (see `dotnet/`)
 - **PowerShell** (see `powershell/`)
 
@@ -126,7 +126,8 @@ pnpm fmt:write       # Format only
 **Development:**
 ```bash
 cd webapp
-pnpm dev:gateway     # Run gateway UI dev server (http://localhost:4200/jet/webapp/client/)
+pnpm dev:gateway     # Run gateway UI dev server
+                     # Access at: http://localhost:4200/jet/webapp/client/
 pnpm dev:player      # Run recording player dev server
 ```
 
@@ -158,7 +159,10 @@ cd powershell
 
 ### Configuration
 - Gateway configuration uses JSON format in `gateway.json`
-- Location: `%ProgramData%\Devolutions\Gateway\` (Windows), `/etc/devolutions-gateway/` (Linux)
+- Default locations by platform:
+  - Windows: `%ProgramData%\Devolutions\Gateway\`
+  - Linux: `/etc/devolutions-gateway/`
+  - macOS: `/Library/Application Support/devolutions-gateway/`
 - Can be overridden with `DGATEWAY_CONFIG_PATH` environment variable
 
 ## CI/CD
