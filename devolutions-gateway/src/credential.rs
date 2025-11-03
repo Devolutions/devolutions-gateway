@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use serde::{de, ser};
 use uuid::Uuid;
 
@@ -27,7 +27,7 @@ pub struct AppCredentialMapping {
 }
 
 #[derive(Debug, Clone)]
-pub struct CredentialStoreHandle(Arc<Mutex<CredentialStore>>);
+pub struct CredentialStoreHandle(Arc<RwLock<CredentialStore>>);
 
 impl Default for CredentialStoreHandle {
     fn default() -> Self {
@@ -37,7 +37,7 @@ impl Default for CredentialStoreHandle {
 
 impl CredentialStoreHandle {
     pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(CredentialStore::new())))
+        Self(Arc::new(RwLock::new(CredentialStore::new())))
     }
 
     pub fn insert(
@@ -46,11 +46,11 @@ impl CredentialStoreHandle {
         mapping: Option<AppCredentialMapping>,
         time_to_live: time::Duration,
     ) -> anyhow::Result<Option<ArcCredentialEntry>> {
-        self.0.lock().insert(token, mapping, time_to_live)
+        self.0.write().insert(token, mapping, time_to_live)
     }
 
     pub fn get(&self, token_id: Uuid) -> Option<ArcCredentialEntry> {
-        self.0.lock().get(token_id)
+        self.0.read().get(token_id)
     }
 }
 
@@ -205,7 +205,7 @@ async fn cleanup_task(handle: CredentialStoreHandle, mut shutdown_signal: Shutdo
 
         let now = time::OffsetDateTime::now_utc();
 
-        handle.0.lock().entries.retain(|_, src| now < src.expires_at);
+        handle.0.write().entries.retain(|_, src| now < src.expires_at);
     }
 
     debug!("Task terminated");
