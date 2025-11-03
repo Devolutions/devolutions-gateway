@@ -148,7 +148,7 @@ pub async fn ping(runtime: Arc<Socket2Runtime>, ip: impl Into<IpAddr>, duration:
 
 async fn try_ping(addr: socket2::SockAddr, mut socket: AsyncRawSocket) -> anyhow::Result<()> {
     // skip verification, we are not interested in the response
-    let (packet, _) = create_v4_echo_request()?;
+    let (_packet, _) = create_v4_echo_request()?;
 
     let packet_bytes = match addr.domain() {
         socket2::Domain::IPV4 => create_v4_echo_request()?.0.to_bytes(true),

@@ -44,6 +44,10 @@ pub async fn handler(
     Ok(response)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Function needs access to multiple independent system components; grouping would be artificial"
+)]
 async fn handle_socket(
     ws: WebSocket,
     shutdown_signal: ShutdownSignal,

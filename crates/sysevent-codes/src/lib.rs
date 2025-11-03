@@ -268,6 +268,7 @@ pub fn jwt_rejected(
         .field("reason", reason)
 }
 
+#[expect(clippy::similar_names, reason = "kid (key ID) and kind (type) are standard JWT terms")]
 pub fn jwt_anomaly(
     issuer: impl ToString,
     audience: impl ToString,

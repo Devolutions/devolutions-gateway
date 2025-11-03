@@ -69,8 +69,8 @@ impl JetConnectReq {
             // Host has to be specified
             let host_opt = request.get_header_value("host");
 
-            if let (Some(version), Some(host)) = (version_opt, host_opt) {
-                if let Some(path) = request.path {
+            if let (Some(version), Some(host)) = (version_opt, host_opt)
+                && let Some(path) = request.path {
                     if path.starts_with("/jet/connect") {
                         if let (Some(association_id), Some(candidate_id)) =
                             (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3))
@@ -82,11 +82,11 @@ impl JetConnectReq {
                                 candidate: candidate_id,
                             });
                         }
-                    } else if path.eq("/") {
-                        if let Some(jet_method) = request.get_header_value("jet-method") {
-                            if jet_method.to_lowercase().eq("connect") {
-                                if let Some(jet_association) = request.get_header_value("jet-association") {
-                                    if let Ok(association) = Uuid::from_str(jet_association) {
+                    } else if path.eq("/")
+                        && let Some(jet_method) = request.get_header_value("jet-method")
+                            && jet_method.to_lowercase().eq("connect")
+                                && let Some(jet_association) = request.get_header_value("jet-association")
+                                    && let Ok(association) = Uuid::from_str(jet_association) {
                                         return Ok(JetConnectReq {
                                             version,
                                             host: host.to_owned(),
@@ -94,12 +94,7 @@ impl JetConnectReq {
                                             candidate: Uuid::nil(),
                                         });
                                     }
-                                }
-                            }
-                        }
-                    }
                 }
-            }
         }
         Err(format!("Invalid connect request: {request:?}").into())
     }

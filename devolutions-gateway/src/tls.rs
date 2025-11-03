@@ -85,6 +85,7 @@ pub fn build_server_config(
                     CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
                 )
             {
+                #[expect(clippy::similar_names, reason = "issuer and issues are standard cert terms")]
                 let serial_number = report.serial_number;
                 let subject = report.subject;
                 let issuer = report.issuer;
@@ -430,16 +431,18 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
 
-    let mut issues = CertIssues::empty();
+    #[expect(clippy::similar_names, reason = "issuer and issues are standard cert terms")]
+    {
+        let mut issues = CertIssues::empty();
 
-    let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
-        let _ = write!(acc, "{byte:X?}");
-        acc
-    });
-    let subject = cert.subject_name();
-    let issuer = cert.issuer_name();
-    let not_before = cert.valid_not_before();
-    let not_after = cert.valid_not_after();
+        let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
+            let _ = write!(acc, "{byte:X?}");
+            acc
+        });
+        let subject = cert.subject_name();
+        let issuer = cert.issuer_name();
+        let not_before = cert.valid_not_before();
+        let not_after = cert.valid_not_after();
 
     if at < not_before {
         issues.insert(CertIssues::NOT_YET_VALID);
@@ -478,6 +481,7 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
         not_after,
         issues,
     })
+    }
 }
 
 pub mod sanity {

@@ -99,7 +99,7 @@ impl Database for PgPool {
         unimplemented!()
     }
 
-    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
+    async fn insert_jit_elevation_result(&self, _result: &ElevationResult) -> Result<(), DbError> {
         unimplemented!()
     }
 
@@ -109,7 +109,7 @@ impl Database for PgPool {
 
     async fn get_jit_elevation_logs(
         &self,
-        query_options: JitElevationLogQueryOptions,
+        _query_options: JitElevationLogQueryOptions,
     ) -> Result<JitElevationLogPage, DbError> {
         unimplemented!()
     }

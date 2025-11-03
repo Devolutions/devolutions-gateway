@@ -1,3 +1,6 @@
+#![expect(clippy::print_stderr, reason = "Test infrastructure intentionally uses eprintln for debug output")]
+#![expect(clippy::unwrap_used, reason = "Test infrastructure can panic on errors")]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,6 +50,12 @@ where
 
 #[derive(Clone)]
 pub struct McpShutdownSignal(Arc<tokio::sync::Notify>);
+
+impl Default for McpShutdownSignal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl McpShutdownSignal {
     pub fn new() -> Self {
@@ -102,26 +111,31 @@ impl ServerConfig {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: &'static str) -> Self {
         self.server_info.name = name;
         self
     }
 
+    #[must_use]
     pub fn with_version(mut self, version: &'static str) -> Self {
         self.server_info.version = version;
         self
     }
 
+    #[must_use]
     pub fn with_tool(mut self, tool: impl McpTool + 'static) -> Self {
         self.tools.push(Box::new(tool));
         self
     }
 
+    #[must_use]
     pub fn with_response_delay(mut self, delay: Duration) -> Self {
         self.response_delay = Some(delay);
         self
     }
 
+    #[must_use]
     pub fn with_notification_handler(mut self, handler: impl McpNotificationHandler + 'static) -> Self {
         self.notification_handler = Some(Box::new(handler));
         self
@@ -162,6 +176,7 @@ impl McpServer {
         }
     }
 
+    #[must_use]
     pub fn with_config(mut self, config: ServerConfig) -> Self {
         self.config = Arc::new(config);
         self
@@ -522,6 +537,7 @@ impl HttpTransport {
         })
     }
 
+    #[must_use]
     pub fn with_error_response(mut self, substring: impl Into<String>, http_error: HttpError) -> Self {
         self.error_responses.push((substring.into(), http_error));
         self
@@ -585,7 +601,7 @@ impl McpPeer for HttpPeer {
             if let Some(value) = header_line.strip_prefix("Content-Length: ") {
                 content_length = value.trim().parse::<usize>().unwrap_or(0);
             } else if let Some(value) = header_line.strip_prefix("Content-Type: ") {
-                content_type = value.trim().to_string();
+                content_type = value.trim().to_owned();
             }
         }
 
@@ -633,13 +649,11 @@ impl McpPeer for HttpPeer {
 
     // We need to send a response for the HTTP transport, even if empty.
     async fn no_response(&mut self) -> anyhow::Result<()> {
-        let http_response = format!(
-            "HTTP/1.1 200 OK\r\n\
+        let http_response = "HTTP/1.1 200 OK\r\n\
              Content-Type: application/json\r\n\
              Content-Length: 0\r\n\
              Connection: close\r\n\
-             \r\n\""
-        );
+             \r\n\"";
 
         self.stream.write_all(http_response.as_bytes()).await?;
 

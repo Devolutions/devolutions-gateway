@@ -6,7 +6,6 @@ extern crate tracing;
 use std::mem::MaybeUninit;
 use std::net::IpAddr;
 
-use anyhow::Context;
 use network_interface::Addr;
 use network_scanner_proto::icmp_v4;
 

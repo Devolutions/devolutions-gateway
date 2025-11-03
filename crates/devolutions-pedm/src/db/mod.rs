@@ -265,9 +265,7 @@ impl DbHandle {
                 }
             },
             Err(error) => {
-                let DbRequest::InsertJitElevationResult { result, .. } = error.0 else {
-                    unreachable!()
-                };
+                let DbRequest::InsertJitElevationResult { result, .. } = error.0;
 
                 Err(DbHandleError {
                     db_error: None,

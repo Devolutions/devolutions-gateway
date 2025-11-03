@@ -159,7 +159,7 @@ impl NgrokSession {
 
                 NgrokTunnel {
                     name: name.to_owned(),
-                    inner: NgrokTunnelInner::Http(builder),
+                    inner: NgrokTunnelInner::Http(Box::new(builder)),
                 }
             }
         }
@@ -174,7 +174,7 @@ pub struct NgrokTunnel {
 
 enum NgrokTunnelInner {
     Tcp(TcpTunnelBuilder),
-    Http(HttpTunnelBuilder),
+    Http(Box<HttpTunnelBuilder>),
 }
 
 impl NgrokTunnel {
@@ -198,7 +198,7 @@ impl NgrokTunnel {
             }
             NgrokTunnelInner::Http(builder) => {
                 // Start tunnel with an HTTP edge
-                let tunnel = builder
+                let tunnel = (*builder)
                     .forwards_to(hostname)
                     .listen()
                     .await

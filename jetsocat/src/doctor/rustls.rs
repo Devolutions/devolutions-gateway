@@ -15,14 +15,13 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
 
     if let Some(chain_path) = &args.chain_path {
         diagnostic!(callback, rustls_read_chain(&chain_path, &mut server_certificates));
-    } else if let Some(subject_name) = args.subject_name.as_deref() {
-        if args.allow_network {
+    } else if let Some(subject_name) = args.subject_name.as_deref()
+        && args.allow_network {
             diagnostic!(
                 callback,
                 rustls_fetch_chain(subject_name, args.server_port, &mut server_certificates)
             );
         }
-    }
 
     if !server_certificates.is_empty() {
         diagnostic!(

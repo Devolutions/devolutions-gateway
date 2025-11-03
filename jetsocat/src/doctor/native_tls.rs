@@ -135,14 +135,13 @@ mod openssl {
 
         if let Some(chain_path) = &args.chain_path {
             diagnostic!(callback, openssl_read_chain(&chain_path, &mut server_certificates));
-        } else if let Some(subject_name) = args.subject_name.as_deref() {
-            if args.allow_network {
+        } else if let Some(subject_name) = args.subject_name.as_deref()
+            && args.allow_network {
                 diagnostic!(
                     callback,
                     openssl_fetch_chain(subject_name, args.server_port, &mut server_certificates)
                 );
             }
-        }
 
         if !server_certificates.is_empty() {
             if let Some(subject_name) = args.subject_name.as_deref() {
@@ -236,11 +235,10 @@ mod openssl {
         let certificate_subject_name = certificate.subject_name();
 
         for entry in certificate_subject_name.entries() {
-            if entry.object().nid() == openssl::nid::Nid::COMMONNAME {
-                if let Ok(data) = entry.data().as_utf8() {
+            if entry.object().nid() == openssl::nid::Nid::COMMONNAME
+                && let Ok(data) = entry.data().as_utf8() {
                     certificate_names.push(data.to_owned());
                 }
-            }
         }
 
         if let Some(alt_names) = certificate.subject_alt_names() {
@@ -251,11 +249,10 @@ mod openssl {
 
                 if let Some(directory_name) = name.directory_name() {
                     for entry in directory_name.entries() {
-                        if entry.object().nid() == openssl::nid::Nid::COMMONNAME {
-                            if let Ok(data) = entry.data().as_utf8() {
+                        if entry.object().nid() == openssl::nid::Nid::COMMONNAME
+                            && let Ok(data) = entry.data().as_utf8() {
                                 certificate_names.push(data.to_owned());
                             }
-                        }
                     }
                 }
             }

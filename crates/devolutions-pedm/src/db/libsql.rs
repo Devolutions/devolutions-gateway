@@ -222,7 +222,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_profiles(&self) -> Result<Vec<Profile>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare(
                 "
             SELECT 
@@ -247,7 +247,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_profiles_for_user(&self, user: &User) -> Result<Vec<Profile>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare(
                 "
                 SELECT DISTINCT
@@ -592,7 +592,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_users(&self) -> Result<Vec<User>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare("SELECT id, account_name, domain_name, account_sid, domain_sid FROM user")
             .await?;
 
@@ -626,7 +626,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare(
                 "SELECT
                     j.id,
@@ -765,7 +765,7 @@ impl Database for LibsqlConn {
         params.push(limit.into());
         params.push(offset.into());
 
-        let mut stmt = self.prepare(&select_sql).await?;
+        let stmt = self.prepare(&select_sql).await?;
         let mut rows = stmt.query(libsql::params_from_iter(params)).await?;
 
         let mut results = Vec::new();

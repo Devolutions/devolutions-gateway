@@ -41,6 +41,7 @@ tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "4209
 # Declare the custom cfgs.
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(build_profile, values("dev","release","production"))',
+  'cfg(tokio_unstable)',
 ]}
 
 # == Safer unsafe == #
@@ -58,7 +59,8 @@ keyword_idents = "warn"
 noop_method_call = "warn"
 
 # == Compile-time / optimization == #
-unused_crate_dependencies = "warn"
+# TODO: re-enable after cleanup
+# unused_crate_dependencies = "warn"
 unused_macro_rules = "warn"
 
 [workspace.dependencies]

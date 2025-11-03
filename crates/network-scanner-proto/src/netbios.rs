@@ -53,11 +53,10 @@ impl<'a> NetBiosPacket<'a> {
     }
 
     pub fn group_and_name(&self) -> String {
-        if let Some(group) = self.group() {
-            if !group.is_empty() {
+        if let Some(group) = self.group()
+            && !group.is_empty() {
                 return format!("{}\\{}", group, self.name());
             }
-        }
         self.name()
     }
 

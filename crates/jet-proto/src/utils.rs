@@ -7,11 +7,10 @@ pub(crate) trait RequestHelper {
 
 impl RequestHelper for httparse::Request<'_, '_> {
     fn is_get_method(&self) -> bool {
-        if let Some(method) = self.method {
-            if method.to_lowercase() == "get" {
+        if let Some(method) = self.method
+            && method.to_lowercase() == "get" {
                 return true;
             }
-        }
         false
     }
 

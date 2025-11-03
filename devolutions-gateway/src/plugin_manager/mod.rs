@@ -31,12 +31,11 @@ impl PluginManager {
     pub fn get_recording_plugin(&self) -> Option<Recorder> {
         for plugin in &self.libs {
             let info = Arc::clone(&plugin.info);
-            if info.get_capabilities().contains(&PluginCapabilities::Recording) {
-                if let Ok(plugin) = Recorder::new(Arc::clone(&plugin.lib)) {
+            if info.get_capabilities().contains(&PluginCapabilities::Recording)
+                && let Ok(plugin) = Recorder::new(Arc::clone(&plugin.lib)) {
                     debug!("recording plugin found");
                     return Some(plugin);
                 }
-            }
         }
         None
     }
@@ -44,12 +43,11 @@ impl PluginManager {
     pub fn get_parsing_packets_plugin(&self) -> Option<PacketsParser> {
         for plugin in &self.libs {
             let info = Arc::clone(&plugin.info);
-            if info.get_capabilities().contains(&PluginCapabilities::PacketsParsing) {
-                if let Ok(plugin) = PacketsParser::new(Arc::clone(&plugin.lib)) {
+            if info.get_capabilities().contains(&PluginCapabilities::PacketsParsing)
+                && let Ok(plugin) = PacketsParser::new(Arc::clone(&plugin.lib)) {
                     debug!("parsing plugin found");
                     return Some(plugin);
                 }
-            }
         }
 
         None
