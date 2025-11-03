@@ -30,7 +30,7 @@ fn all_subcommands() {
     ];
 
     for (subcommand, help_substr) in test_cases {
-        let output = jetsocat_assert_cmd().args(&[subcommand, "--help"]).assert().success();
+        let output = jetsocat_assert_cmd().args([subcommand, "--help"]).assert().success();
         let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
         assert!(stdout.contains(help_substr));
     }
@@ -51,9 +51,9 @@ fn all_subcommands() {
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let output = jetsocat_assert_cmd()
         .timeout(COMMAND_TIMEOUT)
-        .args(&["forward", "-", "-", "--log-term"])
+        .args(["forward", "-", "-", "--log-term"])
         .args(args)
-        .envs(envs.iter().cloned())
+        .envs(envs.iter().copied())
         .assert()
         .success();
 
@@ -84,9 +84,9 @@ fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
 
     jetsocat_assert_cmd()
         .timeout(COMMAND_TIMEOUT)
-        .args(&["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
+        .args(["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
         .args(args)
-        .envs(envs.iter().cloned())
+        .envs(envs.iter().copied())
         .assert()
         .success();
 
@@ -285,7 +285,7 @@ fn doctor_verify_chain_with_json_output() {
     std::fs::write(&chain_file_path, DEVOLUTIONS_NET_CHAIN).unwrap();
 
     let output = jetsocat_assert_cmd()
-        .args(&[
+        .args([
             "doctor",
             "--chain",
             chain_file_path.to_str().unwrap(),
@@ -426,7 +426,7 @@ CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=
 #[test]
 fn doctor_invalid_server_port() {
     let output = jetsocat_assert_cmd()
-        .args(&[
+        .args([
             "doctor",
             "--subject-name",
             "devolutions.net",
@@ -508,7 +508,7 @@ fn forward_missing_args() {
 #[test]
 fn forward_missing_second_arg() {
     let output = jetsocat_assert_cmd()
-        .args(&["forward", "stdio"])
+        .args(["forward", "stdio"])
         .assert()
         .failure()
         .code(1);
@@ -543,7 +543,7 @@ fn forward_valid_pipe_formats() {
 
     for (pipe_a, pipe_b) in test_cases {
         let output = jetsocat_assert_cmd()
-            .args(&["forward", pipe_a, pipe_b])
+            .args(["forward", pipe_a, pipe_b])
             .timeout(Duration::from_millis(50))
             .assert();
 
@@ -567,7 +567,7 @@ fn forward_valid_pipe_formats() {
 #[test]
 fn forward_negative_repeat_count() {
     let output = jetsocat_assert_cmd()
-        .args(&["forward", "stdio", "-", "--repeat-count", "-1"])
+        .args(["forward", "stdio", "-", "--repeat-count", "-1"])
         .assert()
         .failure()
         .code(1);
@@ -609,7 +609,7 @@ async fn mcp_proxy_smoke_test(#[values(true, false)] http_transport: bool) {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -681,7 +681,7 @@ async fn mcp_proxy_with_tools(#[values(true, false)] http_transport: bool) {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -824,7 +824,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -854,7 +854,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Check the probe.
-    assert_eq!(probe.load(std::sync::atomic::Ordering::SeqCst), true);
+    assert!(probe.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 async fn execute_mcp_request(request: &str) -> String {
@@ -872,7 +872,7 @@ async fn execute_mcp_request(request: &str) -> String {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
+        .args(["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -935,7 +935,7 @@ async fn mcp_proxy_http_error() {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &server_url])
+        .args(["mcp-proxy", "stdio", &server_url])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -984,7 +984,7 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
 
     // Start jetsocat mcp-proxy with stdio pipe.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)

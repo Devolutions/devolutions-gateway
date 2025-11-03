@@ -32,10 +32,11 @@ impl PluginManager {
         for plugin in &self.libs {
             let info = Arc::clone(&plugin.info);
             if info.get_capabilities().contains(&PluginCapabilities::Recording)
-                && let Ok(plugin) = Recorder::new(Arc::clone(&plugin.lib)) {
-                    debug!("recording plugin found");
-                    return Some(plugin);
-                }
+                && let Ok(plugin) = Recorder::new(Arc::clone(&plugin.lib))
+            {
+                debug!("recording plugin found");
+                return Some(plugin);
+            }
         }
         None
     }
@@ -44,10 +45,11 @@ impl PluginManager {
         for plugin in &self.libs {
             let info = Arc::clone(&plugin.info);
             if info.get_capabilities().contains(&PluginCapabilities::PacketsParsing)
-                && let Ok(plugin) = PacketsParser::new(Arc::clone(&plugin.lib)) {
-                    debug!("parsing plugin found");
-                    return Some(plugin);
-                }
+                && let Ok(plugin) = PacketsParser::new(Arc::clone(&plugin.lib))
+            {
+                debug!("parsing plugin found");
+                return Some(plugin);
+            }
         }
 
         None

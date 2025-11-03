@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "Test code can panic on errors")]
+
 use bytes::{Bytes, BytesMut};
 use jmux_proto::*;
 

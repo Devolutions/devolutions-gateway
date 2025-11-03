@@ -1,4 +1,7 @@
-#![expect(clippy::print_stderr, reason = "Test infrastructure intentionally uses eprintln for debug output")]
+#![expect(
+    clippy::print_stderr,
+    reason = "Test infrastructure intentionally uses eprintln for debug output"
+)]
 #![expect(clippy::unwrap_used, reason = "Test infrastructure can panic on errors")]
 
 use std::net::SocketAddr;

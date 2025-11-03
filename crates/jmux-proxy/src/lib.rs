@@ -342,12 +342,16 @@ type InternalMessageSender = mpsc::Sender<InternalMessage>;
 
 #[derive(Debug)]
 enum InternalMessage {
-    Eof { id: LocalChannelId },
+    Eof {
+        id: LocalChannelId,
+    },
     StreamResolved {
         channel: Box<JmuxChannelCtx>,
         stream: TcpStream,
     },
-    AbnormalTermination { id: LocalChannelId },
+    AbnormalTermination {
+        id: LocalChannelId,
+    },
 }
 
 // === internal tasks === //

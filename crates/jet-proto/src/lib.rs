@@ -77,22 +77,24 @@ impl JetMessage {
         let mut req = httparse::Request::new(&mut headers);
 
         if req.parse(payload.as_bytes()).is_ok()
-            && let Some(path) = req.path.map(|path| path.to_lowercase()) {
-                if path.starts_with("/jet/accept") {
+            && let Some(path) = req.path.map(|path| path.to_lowercase())
+        {
+            if path.starts_with("/jet/accept") {
+                return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
+            } else if path.starts_with("/jet/connect") {
+                return Ok(JetMessage::JetConnectReq(JetConnectReq::from_request(&req)?));
+            } else if path.starts_with("/jet/test") {
+                return Ok(JetMessage::JetTestReq(JetTestReq::from_request(&req)?));
+            } else if path.eq("/")
+                && let Some(jet_method) = req.get_header_value("jet-method")
+            {
+                if jet_method.to_lowercase().eq("accept") {
                     return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
-                } else if path.starts_with("/jet/connect") {
+                } else {
                     return Ok(JetMessage::JetConnectReq(JetConnectReq::from_request(&req)?));
-                } else if path.starts_with("/jet/test") {
-                    return Ok(JetMessage::JetTestReq(JetTestReq::from_request(&req)?));
-                } else if path.eq("/")
-                    && let Some(jet_method) = req.get_header_value("jet-method") {
-                        if jet_method.to_lowercase().eq("accept") {
-                            return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
-                        } else {
-                            return Ok(JetMessage::JetConnectReq(JetConnectReq::from_request(&req)?));
-                        }
-                    }
+                }
             }
+        }
 
         Err(format!("Invalid message received: Payload={payload}").into())
     }

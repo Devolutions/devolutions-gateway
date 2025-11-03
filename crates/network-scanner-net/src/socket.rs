@@ -265,12 +265,12 @@ impl Future for ConnectFuture<'_> {
             && let Err(e) = self
                 .runtime
                 .register_events(&self.socket, &events_interested, cx.waker().clone())
-            {
-                warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
-                return std::task::Poll::Ready(Err(std::io::Error::other(format!(
-                    "failed to register socket to poller: {e}"
-                ))));
-            }
+        {
+            warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
+            return std::task::Poll::Ready(Err(std::io::Error::other(format!(
+                "failed to register socket to poller: {e}"
+            ))));
+        }
         std::task::Poll::Pending
     }
 }

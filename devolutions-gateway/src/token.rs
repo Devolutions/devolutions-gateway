@@ -974,9 +974,10 @@ fn validate_token_impl(
 
     for (key, revoked_values) in &revocation_list.lock().jrl {
         if let Some(value) = claims.get(key)
-            && revoked_values.contains(value) {
-                return Err(TokenError::Revoked);
-            }
+            && revoked_values.contains(value)
+        {
+            return Err(TokenError::Revoked);
+        }
     }
 
     // === Convert json value into an instance of the correct claims type === //

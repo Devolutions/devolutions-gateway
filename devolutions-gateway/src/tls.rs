@@ -66,6 +66,7 @@ pub enum CertificateSource {
     },
 }
 
+#[expect(clippy::similar_names, reason = "issuer and issues are standard cert terms")]
 pub fn build_server_config(
     cert_source: CertificateSource,
     strict_checks: bool,
@@ -85,7 +86,6 @@ pub fn build_server_config(
                     CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
                 )
             {
-                #[expect(clippy::similar_names, reason = "issuer and issues are standard cert terms")]
                 let serial_number = report.serial_number;
                 let subject = report.subject;
                 let issuer = report.issuer;
@@ -424,6 +424,7 @@ pub fn check_certificate_now(cert: &[u8]) -> anyhow::Result<CertReport> {
     check_certificate(cert, time::OffsetDateTime::now_utc())
 }
 
+#[expect(clippy::similar_names, reason = "issuer and issues are standard cert terms")]
 pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Result<CertReport> {
     use anyhow::Context as _;
     use core::fmt::Write as _;
@@ -431,7 +432,6 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
 
-    #[expect(clippy::similar_names, reason = "issuer and issues are standard cert terms")]
     {
         let mut issues = CertIssues::empty();
 
@@ -444,43 +444,43 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
         let not_before = cert.valid_not_before();
         let not_after = cert.valid_not_after();
 
-    if at < not_before {
-        issues.insert(CertIssues::NOT_YET_VALID);
-    } else if not_after < at {
-        issues.insert(CertIssues::EXPIRED);
-    }
-
-    let mut has_server_auth_key_purpose = false;
-    let mut has_san = false;
-
-    for ext in cert.extensions() {
-        match ext.extn_value() {
-            picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku)
-                if eku.contains(picky::oids::kp_server_auth()) =>
-            {
-                has_server_auth_key_purpose = true;
-            }
-            picky::x509::extension::ExtensionView::SubjectAltName(_) => has_san = true,
-            _ => {}
+        if at < not_before {
+            issues.insert(CertIssues::NOT_YET_VALID);
+        } else if not_after < at {
+            issues.insert(CertIssues::EXPIRED);
         }
-    }
 
-    if !has_server_auth_key_purpose {
-        issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
-    }
+        let mut has_server_auth_key_purpose = false;
+        let mut has_san = false;
 
-    if !has_san {
-        issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
-    }
+        for ext in cert.extensions() {
+            match ext.extn_value() {
+                picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku)
+                    if eku.contains(picky::oids::kp_server_auth()) =>
+                {
+                    has_server_auth_key_purpose = true;
+                }
+                picky::x509::extension::ExtensionView::SubjectAltName(_) => has_san = true,
+                _ => {}
+            }
+        }
 
-    Ok(CertReport {
-        serial_number,
-        subject,
-        issuer,
-        not_before,
-        not_after,
-        issues,
-    })
+        if !has_server_auth_key_purpose {
+            issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
+        }
+
+        if !has_san {
+            issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
+        }
+
+        Ok(CertReport {
+            serial_number,
+            subject,
+            issuer,
+            not_before,
+            not_after,
+            issues,
+        })
     }
 }
 
