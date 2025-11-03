@@ -56,6 +56,7 @@ pub(super) async fn trigger_update_check(
 
     let update_json = UpdateJson {
         gateway: Some(ProductUpdateInfo { target_version }),
+        hub_service: None,
     };
 
     let update_json = serde_json::to_string(&update_json).map_err(
