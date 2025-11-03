@@ -137,7 +137,7 @@ impl ProductUpdateActions for ServiceUpdateActions {
     fn get_msiexec_install_params(&self) -> Vec<String> {
         // When performing update, we want to make sure the service startup mode is restored to the
         // previous state. (Installer sets Manual by default).
-        
+
         // For products with a single primary service, check if it should be automatic
         if self.service_states.len() == 1 && self.service_states[0].startup_was_automatic {
             info!("Adjusting MSIEXEC parameters for {} service startup mode", self.product);
@@ -147,11 +147,7 @@ impl ProductUpdateActions for ServiceUpdateActions {
         // For Hub Service with multiple services, check if any PAM service should be automatic
         // (The MSI installer controls the main PAM service startup via P.SERVICESTART)
         if self.product == Product::HubService {
-            if let Some(pam_state) = self
-                .service_states
-                .iter()
-                .find(|s| s.exists && s.name.contains("PAM"))
-            {
+            if let Some(pam_state) = self.service_states.iter().find(|s| s.exists && s.name.contains("PAM")) {
                 if pam_state.startup_was_automatic {
                     info!("Adjusting MSIEXEC parameters for Hub PAM service startup mode");
                     return vec!["P.SERVICESTART=Automatic".to_owned()];
