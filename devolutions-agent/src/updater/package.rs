@@ -22,7 +22,7 @@ pub(crate) async fn install_package(
     log_path: &Utf8Path,
 ) -> Result<(), UpdaterError> {
     match ctx.product {
-        Product::Gateway => install_msi(ctx, path, log_path).await,
+        Product::Gateway | Product::HubService => install_msi(ctx, path, log_path).await,
     }
 }
 
@@ -32,7 +32,7 @@ pub(crate) async fn uninstall_package(
     log_path: &Utf8Path,
 ) -> Result<(), UpdaterError> {
     match ctx.product {
-        Product::Gateway => uninstall_msi(ctx, product_code, log_path).await,
+        Product::Gateway | Product::HubService => uninstall_msi(ctx, product_code, log_path).await,
     }
 }
 
@@ -159,7 +159,7 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
 
 pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
     match ctx.product {
-        Product::Gateway => validate_msi(ctx, path),
+        Product::Gateway | Product::HubService => validate_msi(ctx, path),
     }
 }
 

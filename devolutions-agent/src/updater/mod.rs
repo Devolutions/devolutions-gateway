@@ -35,7 +35,7 @@ pub(crate) use self::product::Product;
 const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
 
 // List of updateable products could be extended in future
-const PRODUCTS: &[Product] = &[Product::Gateway];
+const PRODUCTS: &[Product] = &[Product::Gateway, Product::HubService];
 
 /// Context for updater task
 struct UpdaterCtx {
