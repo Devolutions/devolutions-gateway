@@ -87,13 +87,13 @@ pub fn build_server_config(
             {
                 let serial_number = report.serial_number;
                 let subject = report.subject;
-                let issuer = report.issuer;
+                let cert_issuer = report.issuer;
                 let not_before = report.not_before;
                 let not_after = report.not_after;
-                let issues = report.issues;
+                let cert_issues = report.issues;
 
                 anyhow::bail!(
-                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues} (you can set `TlsVerifyStrict` to `false` in the gateway.json configuration file if that's intended)"
+                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {cert_issuer}, not_before = {not_before}, not_after = {not_after}, issues = {cert_issues} (you can set `TlsVerifyStrict` to `false` in the gateway.json configuration file if that's intended)"
                 );
             }
 
@@ -430,21 +430,21 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
 
-    let mut issues = CertIssues::empty();
+    let mut cert_issues = CertIssues::empty();
 
     let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
         let _ = write!(acc, "{byte:X?}");
         acc
     });
     let subject = cert.subject_name();
-    let issuer = cert.issuer_name();
+    let cert_issuer = cert.issuer_name();
     let not_before = cert.valid_not_before();
     let not_after = cert.valid_not_after();
 
     if at < not_before {
-        issues.insert(CertIssues::NOT_YET_VALID);
+        cert_issues.insert(CertIssues::NOT_YET_VALID);
     } else if not_after < at {
-        issues.insert(CertIssues::EXPIRED);
+        cert_issues.insert(CertIssues::EXPIRED);
     }
 
     let mut has_server_auth_key_purpose = false;
@@ -463,20 +463,20 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     }
 
     if !has_server_auth_key_purpose {
-        issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
+        cert_issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
     }
 
     if !has_san {
-        issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
+        cert_issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
     }
 
     Ok(CertReport {
         serial_number,
         subject,
-        issuer,
+        issuer: cert_issuer,
         not_before,
         not_after,
-        issues,
+        issues: cert_issues,
     })
 }
 
