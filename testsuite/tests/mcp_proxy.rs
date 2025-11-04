@@ -162,6 +162,7 @@ async fn http_timeout_triggers() {
         Err(mcp_proxy::SendError::Transient { message, source }) => {
             let msg = message.expect("should have error message");
             // HTTP client (ureq…) error text varies; assert on our added context.
+            assert!(msg.as_raw().contains("\"code\":-32099"));
             assert!(msg.as_raw().contains("failed to send request to MCP server"));
             // Also verify the source error contains timeout info.
             assert!(format!("{source:#}").contains("failed to send request to MCP server"));

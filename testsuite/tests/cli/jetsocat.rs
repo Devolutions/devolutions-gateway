@@ -1010,7 +1010,9 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     // The proxy will detect this and send an error response, then close.
     let result = mcp_client.list_tools().await;
 
-    // The proxy should detect the pipe as broken, and returns an error.
+    // The proxy should detect the pipe as broken, and terminates with no response.
+    // Ideally, the proxy should fail when writing the request, but merely
+    // writing is typically not enough to detect a broken pipe with named pipes.
     let error = result.unwrap_err();
     expect![[r#"
         "empty response"

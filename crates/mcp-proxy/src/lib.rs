@@ -62,7 +62,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use std::collections::HashMap;
-use tokio::io::{AsyncReadExt, AsyncWriteExt as _};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::process::Child;
 use tracing::{debug, error, trace, warn};
 
@@ -359,8 +359,8 @@ impl McpProxy {
 
     /// Read a message from the peer.
     ///
-    /// This method blocks until a message is received from the peer.
-    /// For HTTP transport, this method will never return (pending forever) as HTTP is request/response only.
+    /// Returned future resolves when a message is received from the peer.
+    /// For HTTP transport, the future will be pending forever as HTTP is request/response only.
     ///
     /// ## Cancel Safety
     ///
@@ -474,10 +474,10 @@ impl ProcessMcpTransport {
         let stdout = process.stdout.take().context("failed to get stdout")?;
 
         Ok(ProcessMcpTransport {
-            _process: process,
             stdin,
             stdout,
             read_buffer: Vec::new(),
+            _process: process,
         })
     }
 
@@ -521,6 +521,7 @@ struct NamedPipeMcpTransport {
     stream: tokio::net::UnixStream,
     #[cfg(windows)]
     stream: tokio::net::windows::named_pipe::NamedPipeClient,
+
     /// Internal buffer for cancel-safe line reading.
     /// Persists across `read_message()` calls to ensure data is not lost if the future is cancelled.
     read_buffer: Vec<u8>,
