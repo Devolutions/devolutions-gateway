@@ -1,4 +1,5 @@
 #![allow(unused_crate_dependencies)]
+#![expect(clippy::clone_on_ref_ptr, reason = "example code clarity over performance")]
 
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4};

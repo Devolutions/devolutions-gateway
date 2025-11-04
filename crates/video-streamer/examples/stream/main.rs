@@ -1,5 +1,6 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::unwrap_used)]
+#![expect(clippy::clone_on_ref_ptr, reason = "example code clarity over performance")]
 
 use std::env;
 use std::path::Path;

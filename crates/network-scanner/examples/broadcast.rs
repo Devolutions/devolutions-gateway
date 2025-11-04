@@ -1,4 +1,5 @@
 #![allow(unused_crate_dependencies)]
+#![expect(clippy::clone_on_ref_ptr, reason = "example code clarity over performance")]
 
 use network_scanner::broadcast::asynchronous::broadcast;
 use network_scanner::ip_utils::get_subnets;
