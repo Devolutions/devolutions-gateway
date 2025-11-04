@@ -908,7 +908,7 @@ async fn execute_mcp_request(request: &str) -> String {
 #[tokio::test]
 async fn mcp_proxy_malformed_request_with_id() {
     let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
-    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
+    assert!(stdout.contains("malformed JSON-RPC message"), "{stdout}");
     assert!(stdout.contains("Unexpected EOF"), "{stdout}");
     assert!(stdout.contains("id=1"), "{stdout}");
 }
@@ -916,7 +916,7 @@ async fn mcp_proxy_malformed_request_with_id() {
 #[tokio::test]
 async fn mcp_proxy_malformed_request_no_id() {
     let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
-    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
+    assert!(stdout.contains("malformed JSON-RPC message"), "{stdout}");
     assert!(stdout.contains("Invalid character"), "{stdout}");
     assert!(!stdout.contains("id=1"), "{stdout}");
 }
@@ -969,15 +969,6 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, McpServer, NamedPipeTransport};
 
-    #[cfg(windows)]
-    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
-        "JSON-RPC error -32099: MCP server connection broken: The pipe is being closed. (os error 232)"
-    "#]];
-    #[cfg(not(windows))]
-    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
-        "JSON-RPC error -32099: MCP server connection broken: Broken pipe (os error 32)"
-    "#]];
-
     // Configure MCP server transport (named pipe only).
     let np_transport = NamedPipeTransport::bind().unwrap();
     let name = np_transport.name().to_owned();
@@ -1021,7 +1012,14 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
 
     // The proxy should detect the pipe as broken, and returns an error.
     let error = result.unwrap_err();
-    BROKEN_PIPE_EXPECTED_ERROR.assert_debug_eq(&error);
+    expect![[r#"
+        "empty response"
+    "#]]
+    .assert_debug_eq(&error);
+
+    // FIXME: Jetsocat needs to be modified to print the logs into stderr.
+    //  Once we have that, we can retrieve stderr and search for this string:
+    // Fatal error reading from peer, stopping proxy error="connection closed"
 
     // The jetsocat process should exit gracefully after detecting broken pipe.
     let exit_status = tokio::time::timeout(Duration::from_secs(2), jetsocat_process.wait()).await;

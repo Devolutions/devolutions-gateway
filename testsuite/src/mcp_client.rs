@@ -4,6 +4,8 @@ use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
+// TODO(DGW-315): Support for concurrent write/read with request ID tracking.
+
 /// A MCP client for testing purposes that can communicate over
 /// any AsyncRead/AsyncWrite stream (stdin/stdout, TCP, pipes, etc.).
 pub struct McpClient {
