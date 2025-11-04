@@ -229,8 +229,8 @@ async fn expect_single_event(
 
     // Verify no additional events (brief timeout is expected to fail).
     match timeout(Duration::from_millis(100), rx.recv()).await {
-        Ok(Some(_)) => Err("Received more than one stream event".to_string()),
-        Ok(None) => Err("Channel closed unexpectedly".to_string()),
+        Ok(Some(_)) => Err("received more than one stream event".to_owned()),
+        Ok(None) => Err("channel closed unexpectedly".to_owned()),
         Err(_) => Ok(event), // Timeout is expected - no additional events
     }
 }
@@ -244,8 +244,8 @@ async fn expect_single_event(
 /// Returns Ok(()) if no events received, or an error describing what was received.
 async fn expect_no_events(rx: &mut mpsc::Receiver<TrafficEvent>, wait_duration: Duration) -> Result<(), String> {
     match timeout(wait_duration, rx.recv()).await {
-        Ok(Some(event)) => Err(format!("Unexpected stream event received: {:?}", event)),
-        Ok(None) => Err("Channel closed unexpectedly".to_string()),
+        Ok(Some(event)) => Err(format!("unexpected stream event received: {:?}", event)),
+        Ok(None) => Err("channel closed unexpectedly".to_owned()),
         Err(_) => Ok(()), // Timeout is expected - no events
     }
 }

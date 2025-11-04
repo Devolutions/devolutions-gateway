@@ -359,7 +359,7 @@ async fn unicode_ipv6_roundtrip() -> anyhow::Result<()> {
         session_id: Uuid::new_v4(),
         outcome: EventOutcome::NormalTermination,
         protocol: TransportProtocol::Tcp,
-        target_host: "测试主机.example.com".to_string(),
+        target_host: "测试主机.example.com".to_owned(),
         target_ip: IpAddr::V6("2001:db8::1".parse().unwrap()),
         target_port: 443,
         connect_at_ms: now_ms - 1000,

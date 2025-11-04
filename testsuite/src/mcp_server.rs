@@ -1,9 +1,3 @@
-#![expect(
-    clippy::print_stderr,
-    reason = "test infrastructure intentionally uses eprintln for debug output"
-)]
-#![expect(clippy::unwrap_used, reason = "test infrastructure can panic on errors")]
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -656,7 +650,7 @@ impl McpPeer for HttpPeer {
              Content-Type: application/json\r\n\
              Content-Length: 0\r\n\
              Connection: close\r\n\
-             \r\n\"";
+             \r\n";
 
         self.stream.write_all(http_response.as_bytes()).await?;
 
