@@ -336,7 +336,7 @@ impl Database for LibsqlConn {
                     params![
                         profile.name.as_str(),
                         match &profile.description {
-                            Some(description) => Value::Text(description.to_string()),
+                            Some(description) => Value::Text(description.clone()),
                             None => Value::Null,
                         },
                         elevation_method,
@@ -361,7 +361,7 @@ impl Database for LibsqlConn {
                         profile.id,
                         profile.name.as_str(),
                         match &profile.description {
-                            Some(description) => Value::Text(description.to_string()),
+                            Some(description) => Value::Text(description.clone()),
                             None => Value::Null,
                         },
                         elevation_method,

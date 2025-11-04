@@ -1,6 +1,7 @@
 use std::mem;
 use std::sync::LazyLock;
 
+use tracing::error;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Security;
 use windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;

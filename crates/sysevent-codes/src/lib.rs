@@ -268,15 +268,11 @@ pub fn jwt_rejected(
         .field("reason", reason)
 }
 
-#[expect(
-    clippy::similar_names,
-    reason = "kid (key ID) and kind (type) are standard JWT terms"
-)]
 pub fn jwt_anomaly(
     issuer: impl ToString,
     audience: impl ToString,
     kid: impl ToString,
-    kind: impl ToString, // "near_expiry_grace","oversized_token","alg_unexpected","clock_skew"
+    anomaly_kind: impl ToString, // "near_expiry_grace","oversized_token","alg_unexpected","clock_skew"
     detail: impl ToString,
 ) -> Entry {
     Entry::new("JWT anomaly")
@@ -285,7 +281,7 @@ pub fn jwt_anomaly(
         .field("issuer", issuer)
         .field("audience", audience)
         .field("kid", kid)
-        .field("kind", kind)
+        .field("kind", anomaly_kind)
         .field("detail", detail)
 }
 

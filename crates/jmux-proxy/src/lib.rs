@@ -489,9 +489,10 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         // Send leftover bytes if any.
                         if let Some(leftover) = leftover
-                            && let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await {
-                                error!(%error, "Couldn't send leftover bytes");
-                            }
+                            && let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await
+                        {
+                            error!(%error, "Couldn't send leftover bytes");
+                        }
 
                         let (reader, writer) = stream.into_split();
 

@@ -159,7 +159,7 @@ impl NgrokSession {
 
                 NgrokTunnel {
                     name: name.to_owned(),
-                    inner: NgrokTunnelInner::Http(Box::new(builder)),
+                    inner: NgrokTunnelInner::Http(builder),
                 }
             }
         }
@@ -172,9 +172,13 @@ pub struct NgrokTunnel {
     inner: NgrokTunnelInner,
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "not in any way a hot code path, any micro optimization at this level is meaningless"
+)]
 enum NgrokTunnelInner {
     Tcp(TcpTunnelBuilder),
-    Http(Box<HttpTunnelBuilder>),
+    Http(HttpTunnelBuilder),
 }
 
 impl NgrokTunnel {
@@ -198,7 +202,7 @@ impl NgrokTunnel {
             }
             NgrokTunnelInner::Http(builder) => {
                 // Start tunnel with an HTTP edge
-                let tunnel = (*builder)
+                let tunnel = builder
                     .forwards_to(hostname)
                     .listen()
                     .await

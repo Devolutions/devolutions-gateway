@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::{ptr, slice};
 
 use anyhow::{Context, Result, bail};
+use tracing::{error, warn};
 use windows::Win32::Foundation::{
     E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM, MAX_PATH,
     WAIT_EVENT, WAIT_FAILED, WPARAM,

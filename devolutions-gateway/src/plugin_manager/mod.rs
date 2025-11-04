@@ -34,7 +34,7 @@ impl PluginManager {
             if info.get_capabilities().contains(&PluginCapabilities::Recording)
                 && let Ok(plugin) = Recorder::new(Arc::clone(&plugin.lib))
             {
-                debug!("recording plugin found");
+                debug!("Recording plugin found");
                 return Some(plugin);
             }
         }
@@ -47,7 +47,7 @@ impl PluginManager {
             if info.get_capabilities().contains(&PluginCapabilities::PacketsParsing)
                 && let Ok(plugin) = PacketsParser::new(Arc::clone(&plugin.lib))
             {
-                debug!("parsing plugin found");
+                debug!("Parsing plugin found");
                 return Some(plugin);
             }
         }
@@ -75,7 +75,7 @@ pub fn load_plugins(conf: &Conf) -> anyhow::Result<()> {
         for plugin in plugins {
             manager
                 .load_plugin(plugin)
-                .with_context(|| format!("Failed to load plugin {plugin}"))?;
+                .with_context(|| format!("failed to load plugin {plugin}"))?;
         }
     }
 

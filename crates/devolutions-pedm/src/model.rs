@@ -1,3 +1,11 @@
+#![cfg_attr(
+    unix,
+    expect(
+        dead_code,
+        reason = "only used in the windows implementation, nothing is planned for linux yet"
+    )
+)]
+
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

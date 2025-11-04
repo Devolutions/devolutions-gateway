@@ -1,3 +1,11 @@
+#![cfg_attr(
+    unix,
+    expect(
+        dead_code,
+        reason = "only used in the windows implementation, nothing is planned for linux yet"
+    )
+)]
+
 use devolutions_pedm_shared::policy::{ElevationResult, Hash, Signature, User};
 
 use schemars::JsonSchema;

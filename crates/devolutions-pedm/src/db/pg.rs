@@ -97,21 +97,21 @@ impl Database for PgPool {
         unimplemented!()
     }
 
-    async fn get_user_id(&self, _user: &User) -> Result<Option<i64>, DbError> {
+    async fn get_user_id(&self, user: &User) -> Result<Option<i64>, DbError> {
         unimplemented!()
     }
 
-    async fn insert_jit_elevation_result(&self, _result: &ElevationResult) -> Result<(), DbError> {
+    async fn insert_jit_elevation_result(&self, result: &ElevationResult) -> Result<(), DbError> {
         unimplemented!()
     }
 
-    async fn get_jit_elevation_log(&self, _id: i64) -> Result<Option<JitElevationLogRow>, DbError> {
+    async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError> {
         unimplemented!()
     }
 
     async fn get_jit_elevation_logs(
         &self,
-        _query_options: JitElevationLogQueryOptions,
+        query_options: JitElevationLogQueryOptions,
     ) -> Result<JitElevationLogPage, DbError> {
         unimplemented!()
     }
@@ -120,19 +120,19 @@ impl Database for PgPool {
         unimplemented!()
     }
 
-    async fn get_profiles_for_user(&self, _user: &User) -> Result<Vec<Profile>, DbError> {
+    async fn get_profiles_for_user(&self, user: &User) -> Result<Vec<Profile>, DbError> {
         unimplemented!()
     }
 
-    async fn get_profile(&self, _id: i64) -> Result<Option<Profile>, DbError> {
+    async fn get_profile(&self, id: i64) -> Result<Option<Profile>, DbError> {
         unimplemented!()
     }
 
-    async fn insert_profile(&self, _profile: &Profile) -> Result<(), DbError> {
+    async fn insert_profile(&self, profile: &Profile) -> Result<(), DbError> {
         unimplemented!()
     }
 
-    async fn delete_profile(&self, _id: i64) -> Result<(), DbError> {
+    async fn delete_profile(&self, id: i64) -> Result<(), DbError> {
         unimplemented!()
     }
 
@@ -140,19 +140,19 @@ impl Database for PgPool {
         unimplemented!()
     }
 
-    async fn get_assignment(&self, _profile: &Profile) -> Result<Assignment, DbError> {
+    async fn get_assignment(&self, profile: &Profile) -> Result<Assignment, DbError> {
         unimplemented!()
     }
 
-    async fn set_assignments(&self, _profile_id: i64, _users: Vec<User>) -> Result<(), DbError> {
+    async fn set_assignments(&self, profile_id: i64, users: Vec<User>) -> Result<(), DbError> {
         unimplemented!()
     }
 
-    async fn set_user_profile(&self, _user: &User, _profile_id: i64) -> Result<(), DbError> {
+    async fn set_user_profile(&self, user: &User, profile_id: i64) -> Result<(), DbError> {
         unimplemented!()
     }
 
-    async fn get_user_profile(&self, _user: &User) -> Result<Option<Profile>, DbError> {
+    async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError> {
         unimplemented!()
     }
 }
