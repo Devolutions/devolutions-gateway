@@ -180,7 +180,7 @@ async fn stdio_round_trip_json_line() {
     let response = proxy.send_message(DUMMY_REQUEST).await.unwrap();
     assert!(
         response.is_none(),
-        "process transport dot not return the response immediately"
+        "process transport does not return the response immediately"
     );
 
     let out = proxy.read_message().await.unwrap();

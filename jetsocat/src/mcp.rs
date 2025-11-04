@@ -105,7 +105,7 @@ async fn read_line_cancel_safe<R: AsyncReadExt + Unpin>(
             return Ok(line);
         }
 
-        // Need more data - read_buf from stdout (cancel-safe operation).
+        // Need more data - read_buf from reader (cancel-safe operation).
         let n = reader.read_buf(buffer).await?;
 
         if n == 0 {

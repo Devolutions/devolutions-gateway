@@ -15,7 +15,7 @@
 //! We need to be careful about operations like `BufReader::read_line()` (NOT cancel-safe) because they buffer data
 //! internally - if cancelled mid-read, that buffered data is lost.
 //!
-//! ### Implementated Approach: Internal Buffering
+//! ### Implemented Approach: Internal Buffering
 //!
 //! We use manual line-framing with persistent buffers:
 //! - Each transport has a `read_buffer: Vec<u8>` field
@@ -596,7 +596,7 @@ impl NamedPipeMcpTransport {
                     return Ok(Message::normalize(line));
                 }
 
-                // Need more data - read_buf from stdout (cancel-safe operation).
+                // Need more data - read_buf from stream (cancel-safe operation).
                 let n = self.stream.read_buf(&mut self.read_buffer).await?;
 
                 if n == 0 {
