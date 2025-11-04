@@ -124,6 +124,7 @@ fn forward_hello_world() {
 
     // Kill the listener.
     let _ = listener.kill();
+    let _ = listener.wait();
 
     // Check that we got the expected output.
     #[cfg(windows)]
@@ -190,8 +191,11 @@ fn jmux_proxy_read_hello_world() {
 
     // Kill all processes.
     let _ = jmux_client.kill();
+    let _ = jmux_client.wait();
     let _ = jmux_server.kill();
+    let _ = jmux_server.wait();
     let _ = echo_server.kill();
+    let _ = echo_server.wait();
 
     // Check that we got the expected output through the JMUX proxy.
     #[cfg(windows)]
@@ -258,8 +262,11 @@ fn jmux_proxy_write_hello_world() {
 
     // Kill all processes.
     let _ = jmux_client.kill();
+    let _ = jmux_client.wait();
     let _ = jmux_server.kill();
+    let _ = jmux_server.wait();
     let _ = read_server.kill();
+    let _ = read_server.wait();
 
     // Check that the read server received the payload.
     let mut read_server_stdout = String::new();
@@ -809,7 +816,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
 
     // Start MCP server.
     let notification_handler = {
-        let probe = probe.clone();
+        let probe = Arc::clone(&probe);
         move |method: &str, _: serde_json::Value| {
             assert_eq!(method, "notifications/it-works");
             probe.store(true, std::sync::atomic::Ordering::SeqCst);

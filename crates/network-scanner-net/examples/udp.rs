@@ -1,8 +1,8 @@
 #![allow(unused_crate_dependencies)]
-#![expect(clippy::clone_on_ref_ptr, reason = "example code clarity over performance")]
 
 use std::mem::MaybeUninit;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use network_scanner_net::assume_init;
 use socket2::SockAddr;
@@ -15,7 +15,7 @@ pub async fn main() -> anyhow::Result<()> {
         .init();
 
     let async_runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
-    let clone = async_runtime.clone();
+    let clone = Arc::clone(&async_runtime);
     tokio::task::spawn(async move {
         let mut socket = clone
             .new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)

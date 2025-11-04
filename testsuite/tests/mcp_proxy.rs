@@ -22,7 +22,6 @@ async fn spawn_http_server(
         if let Ok((mut stream, _)) = listener.accept().await {
             // Read the HTTP request headers properly.
             let mut reader = BufReader::new(&mut stream);
-            let mut request_lines = Vec::new();
             let mut content_length = 0;
 
             // Read HTTP headers.
@@ -34,7 +33,6 @@ async fn spawn_http_server(
                 if line.starts_with("Content-Length:") {
                     content_length = line.trim().split(':').nth(1).unwrap().trim().parse().unwrap_or(0);
                 }
-                request_lines.push(line.clone());
                 if line.trim().is_empty() {
                     break;
                 }

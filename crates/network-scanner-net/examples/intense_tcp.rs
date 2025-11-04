@@ -1,5 +1,4 @@
 #![allow(unused_crate_dependencies)]
-#![expect(clippy::clone_on_ref_ptr, reason = "example code clarity over performance")]
 
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -102,7 +101,7 @@ async fn tcp_server(addr: &str) -> anyhow::Result<()> {
     loop {
         let (mut socket, _) = listener.accept().await?;
         let _now = Instant::now();
-        let count = count.clone();
+        let count = std::sync::Arc::clone(&count);
         tokio::spawn(async move {
             let mut buf = vec![0; 1024];
             loop {

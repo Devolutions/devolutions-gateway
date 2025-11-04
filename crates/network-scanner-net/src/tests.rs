@@ -2,7 +2,6 @@
     clippy::undocumented_unsafe_blocks,
     reason = "test code with known safety properties"
 )]
-#![expect(clippy::clone_on_ref_ptr, reason = "test code clarity over performance")]
 
 use std::io::ErrorKind;
 use std::mem::MaybeUninit;
@@ -60,7 +59,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_connectivity() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
-    let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
+    let (addr, handle) = local_tcp_server(Arc::clone(&kill_server)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await; // wait for the other socket to start
 
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
@@ -78,7 +77,7 @@ async fn test_connectivity() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
-    let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
+    let (addr, handle) = local_tcp_server(Arc::clone(&kill_server)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await; // wait for the other socket to start
 
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
@@ -123,7 +122,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
-    let (addr, tcp_handle) = local_tcp_server(kill_server.clone()).await?;
+    let (addr, tcp_handle) = local_tcp_server(Arc::clone(&kill_server)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await; // wait for the other socket to start
 
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
@@ -273,7 +272,7 @@ async fn local_tcp_server(
                     continue;
                 }
             }?;
-            let awake = awake.clone();
+            let awake = Arc::clone(&awake);
             tokio::task::spawn(async move {
                 if let Err(error) = handle_client(stream, awake).await {
                     error!(%error, "An error occurred while handling the client");
