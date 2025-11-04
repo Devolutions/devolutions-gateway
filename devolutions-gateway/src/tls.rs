@@ -35,11 +35,56 @@ pub async fn connect<IO>(dns_name: String, stream: IO) -> io::Result<TlsStream<I
 where
     IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
+    connect_with_thumbprint(
+        dns_name.clone(),
+        stream,
+        None,
+        dns_name,
+        uuid::Uuid::nil(),
+    )
+    .await
+}
+
+/// Connect to a TLS server with optional certificate thumbprint anchoring.
+/// 
+/// If `cert_thumb256` is provided and TLS verification fails, the connection will be accepted
+/// if the server's leaf certificate thumbprint matches the provided value.
+pub async fn connect_with_thumbprint<IO>(
+    dns_name: String,
+    stream: IO,
+    cert_thumb256: Option<String>,
+    target: String,
+    assoc_id: uuid::Uuid,
+) -> io::Result<TlsStream<IO>>
+where
+    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     use tokio::io::AsyncWriteExt as _;
 
-    let dns_name = pki_types::ServerName::try_from(dns_name).map_err(io::Error::other)?;
+    let server_name = pki_types::ServerName::try_from(dns_name.clone()).map_err(io::Error::other)?;
 
-    let mut tls_stream = TLS_CONNECTOR.connect(dns_name, stream).await?;
+    // Create a TLS connector with thumbprint-anchored verification if a thumbprint is provided
+    let connector = if cert_thumb256.is_some() {
+        // Use thumbprint-anchored verifier
+        let verifier = Arc::new(danger::ThumbprintAnchoredVerifier::new(
+            cert_thumb256,
+            target,
+            assoc_id,
+        ));
+        
+        let mut config = rustls::client::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth();
+        
+        config.resumption = rustls::client::Resumption::disabled();
+        tokio_rustls::TlsConnector::from(Arc::new(config))
+    } else {
+        // Use existing no-verification connector for backward compatibility
+        TLS_CONNECTOR.clone()
+    };
+
+    let mut tls_stream = connector.connect(server_name, stream).await?;
 
     // > To keep it simple and correct, [TlsStream] will behave like `BufWriter`.
     // > For `TlsStream<TcpStream>`, this means that data written by `poll_write`
@@ -530,6 +575,7 @@ pub mod sanity {
 }
 
 pub mod danger {
+    use std::sync::Arc;
     use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use tokio_rustls::rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
 
@@ -583,5 +629,201 @@ pub mod danger {
                 SignatureScheme::ED448,
             ]
         }
+    }
+
+    /// Certificate verifier that supports thumbprint anchoring.
+    /// 
+    /// This verifier attempts normal TLS verification using system roots.
+    /// If verification fails and a thumbprint is provided that matches the leaf certificate,
+    /// the connection is accepted and details are logged.
+    #[derive(Debug)]
+    pub struct ThumbprintAnchoredVerifier {
+        /// Expected SHA-256 thumbprint (normalized lowercase hex, no separators)
+        expected_thumbprint: Option<String>,
+        /// Target host and port for logging
+        target: String,
+        /// Association ID for logging
+        assoc_id: uuid::Uuid,
+        /// Standard verifier using system roots
+        standard_verifier: Arc<dyn ServerCertVerifier>,
+    }
+
+    impl ThumbprintAnchoredVerifier {
+        pub fn new(
+            expected_thumbprint: Option<String>,
+            target: String,
+            assoc_id: uuid::Uuid,
+        ) -> Self {
+            // Create a standard verifier using system root certificates
+            let root_store = tokio_rustls::rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+            };
+            
+            let standard_verifier = tokio_rustls::rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store))
+                .build()
+                .expect("failed to build standard verifier");
+
+            Self {
+                expected_thumbprint: expected_thumbprint.map(normalize_thumbprint),
+                target,
+                assoc_id,
+                standard_verifier,
+            }
+        }
+
+        fn check_thumbprint_and_log(
+            &self,
+            end_entity: &pki_types::CertificateDer<'_>,
+            verification_error: &Error,
+        ) -> Result<ServerCertVerified, Error> {
+            let Some(expected_thumb) = &self.expected_thumbprint else {
+                // No thumbprint provided, fail with original error
+                return Err(verification_error.clone());
+            };
+
+            // Compute SHA-256 thumbprint of the certificate
+            let actual_thumb = compute_sha256_thumbprint(end_entity.as_ref());
+
+            if actual_thumb != *expected_thumb {
+                // Thumbprint mismatch, fail with original error
+                warn!(
+                    expected_thumb = %expected_thumb,
+                    actual_thumb = %actual_thumb,
+                    "Certificate thumbprint mismatch"
+                );
+                return Err(verification_error.clone());
+            }
+
+            // Thumbprint matches! Extract certificate details and log
+            let cert_info = extract_cert_info(end_entity.as_ref());
+            
+            info!(
+                event = "TLS_ANCHOR_ACCEPT",
+                assoc_id = %self.assoc_id,
+                target = %self.target,
+                cert_subject = %cert_info.subject,
+                cert_issuer = %cert_info.issuer,
+                not_before = %cert_info.not_before,
+                not_after = %cert_info.not_after,
+                san = ?cert_info.sans,
+                reason = %format_verification_error(verification_error),
+                sha256_thumb = %actual_thumb,
+                hint = "PASTE_THIS_THUMBPRINT_IN_RDM_CONNECTION",
+                "Accepting TLS connection via certificate thumbprint anchor despite verification failure"
+            );
+
+            Ok(ServerCertVerified::assertion())
+        }
+    }
+
+    impl ServerCertVerifier for ThumbprintAnchoredVerifier {
+        fn verify_server_cert(
+            &self,
+            end_entity: &pki_types::CertificateDer<'_>,
+            intermediates: &[pki_types::CertificateDer<'_>],
+            server_name: &pki_types::ServerName<'_>,
+            ocsp_response: &[u8],
+            now: pki_types::UnixTime,
+        ) -> Result<ServerCertVerified, Error> {
+            // Try standard verification first
+            match self.standard_verifier.verify_server_cert(
+                end_entity,
+                intermediates,
+                server_name,
+                ocsp_response,
+                now,
+            ) {
+                Ok(verified) => Ok(verified),
+                Err(err) => {
+                    // Standard verification failed, try thumbprint anchoring
+                    self.check_thumbprint_and_log(end_entity, &err)
+                }
+            }
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &pki_types::CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            self.standard_verifier.verify_tls12_signature(message, cert, dss)
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &pki_types::CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            self.standard_verifier.verify_tls13_signature(message, cert, dss)
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            self.standard_verifier.supported_verify_schemes()
+        }
+    }
+
+    /// Normalize thumbprint to lowercase hex with no separators
+    fn normalize_thumbprint(thumb: String) -> String {
+        thumb
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect::<String>()
+            .to_lowercase()
+    }
+
+    /// Compute SHA-256 thumbprint of certificate DER bytes
+    fn compute_sha256_thumbprint(cert_der: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(cert_der);
+        hex::encode(hash)
+    }
+
+    struct CertInfo {
+        subject: String,
+        issuer: String,
+        not_before: String,
+        not_after: String,
+        sans: Vec<String>,
+    }
+
+    fn extract_cert_info(cert_der: &[u8]) -> CertInfo {
+        match picky::x509::Cert::from_der(cert_der) {
+            Ok(cert) => {
+                let subject = cert.subject_name().to_string();
+                let issuer = cert.issuer_name().to_string();
+                let not_before = cert.valid_not_before().to_string();
+                let not_after = cert.valid_not_after().to_string();
+                
+                let mut sans = Vec::new();
+                for ext in cert.extensions() {
+                    if let picky::x509::extension::ExtensionView::SubjectAltName(san) = ext.extn_value() {
+                        for name in san.0.iter() {
+                            sans.push(format!("{:?}", name));
+                        }
+                    }
+                }
+
+                CertInfo {
+                    subject,
+                    issuer,
+                    not_before,
+                    not_after,
+                    sans,
+                }
+            }
+            Err(_) => CertInfo {
+                subject: "<parse error>".to_string(),
+                issuer: "<parse error>".to_string(),
+                not_before: "<parse error>".to_string(),
+                not_after: "<parse error>".to_string(),
+                sans: vec![],
+            },
+        }
+    }
+
+    fn format_verification_error(err: &Error) -> String {
+        format!("{:?}", err)
     }
 }

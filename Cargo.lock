@@ -1245,6 +1245,7 @@ dependencies = [
  "etherparse",
  "expect-test",
  "futures",
+ "hex",
  "hostname 0.4.1",
  "http-body-util",
  "hyper 1.6.0",
@@ -1277,6 +1278,7 @@ dependencies = [
  "serde-querystring",
  "serde_json",
  "serde_urlencoded",
+ "sha2",
  "smol_str",
  "sysevent",
  "sysevent-codes",
@@ -1305,6 +1307,7 @@ dependencies = [
  "utoipa",
  "uuid",
  "video-streamer",
+ "webpki-roots 0.26.11",
  "x509-cert",
  "zeroize",
 ]
