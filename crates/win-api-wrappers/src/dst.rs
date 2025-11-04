@@ -201,7 +201,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    #![expect(clippy::undocumented_unsafe_blocks, reason = "test code with known safety properties")]
+    #![expect(
+        clippy::undocumented_unsafe_blocks,
+        reason = "test code with known safety properties"
+    )]
     #![expect(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 
     //! Ideally, these tests should be run under Miri to check for UBs and memory leaks.
