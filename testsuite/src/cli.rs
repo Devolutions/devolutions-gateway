@@ -1,4 +1,4 @@
-#![expect(clippy::unwrap_used, reason = "test infrastructure can panic on errors")]
+#![allow(clippy::unwrap_used, reason = "test infrastructure can panic on errors")]
 
 use std::sync::LazyLock;
 

@@ -1,6 +1,6 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
-#![expect(clippy::cast_possible_truncation, reason = "test code with known safe ranges")]
+#![allow(clippy::cast_possible_truncation, reason = "test code with known safe ranges")]
 
 //! Integration tests for the **traffic audit** HTTP endpoints.
 //!

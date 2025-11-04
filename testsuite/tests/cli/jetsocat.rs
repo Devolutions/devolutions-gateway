@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::sync::Arc;
 use std::time::Duration;
 
 use expect_test::expect;
@@ -191,10 +192,10 @@ fn jmux_proxy_read_hello_world() {
 
     // Kill all processes.
     let _ = jmux_client.kill();
-    let _ = jmux_client.wait();
     let _ = jmux_server.kill();
-    let _ = jmux_server.wait();
     let _ = echo_server.kill();
+    let _ = jmux_client.wait();
+    let _ = jmux_server.wait();
     let _ = echo_server.wait();
 
     // Check that we got the expected output through the JMUX proxy.
@@ -262,10 +263,10 @@ fn jmux_proxy_write_hello_world() {
 
     // Kill all processes.
     let _ = jmux_client.kill();
-    let _ = jmux_client.wait();
     let _ = jmux_server.kill();
-    let _ = jmux_server.wait();
     let _ = read_server.kill();
+    let _ = jmux_client.wait();
+    let _ = jmux_server.wait();
     let _ = read_server.wait();
 
     // Check that the read server received the payload.
@@ -801,7 +802,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer, NamedPipeTransport, ServerConfig};
 
-    let probe = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let probe = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Configure MCP server transport.
     let (transport, pipe) = if http_transport {

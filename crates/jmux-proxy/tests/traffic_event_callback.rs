@@ -1,6 +1,6 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
-#![expect(clippy::print_stdout, reason = "test code uses print for diagnostics")]
+#![allow(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 
 //! Integration tests for JMUX traffic event callbacks.
 //!
@@ -265,12 +265,10 @@ async fn create_client_stream_with_data(payload: Option<&[u8]>) -> TcpStream {
         if let Ok((mut stream, _)) = temp_listener.accept().await {
             if let Some(data) = payload_copy {
                 // Send the data through the connection.
-                if (stream.write_all(&data).await).is_err() {
+                if stream.write_all(&data).await.is_err() {
                     return;
                 }
-                if (stream.flush().await).is_err() {
-                    return;
-                }
+                let _ = stream.flush().await;
 
                 // Read response (for echo scenarios).
                 let mut buffer = vec![0u8; data.len()];

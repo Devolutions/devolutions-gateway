@@ -1,8 +1,8 @@
 #![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
+#![allow(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 #![expect(clippy::cast_lossless, reason = "test code with intentional simple casts")]
 #![expect(clippy::cast_possible_truncation, reason = "test code with known safe value ranges")]
-#![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
-#![expect(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 
 //! Integration tests for traffic-audit-libsql implementation.
 //!

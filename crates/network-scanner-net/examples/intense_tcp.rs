@@ -2,6 +2,7 @@
 
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4};
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::time::Instant;
 
@@ -97,11 +98,11 @@ async fn tcp_client() -> anyhow::Result<()> {
 async fn tcp_server(addr: &str) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("Listening on: {addr}");
-    let count = std::sync::Arc::new(AtomicU32::new(0));
+    let count = Arc::new(AtomicU32::new(0));
     loop {
         let (mut socket, _) = listener.accept().await?;
         let _now = Instant::now();
-        let count = std::sync::Arc::clone(&count);
+        let count = Arc::clone(&count);
         tokio::spawn(async move {
             let mut buf = vec![0; 1024];
             loop {
