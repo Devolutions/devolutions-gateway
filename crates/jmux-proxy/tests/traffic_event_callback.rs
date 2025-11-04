@@ -1,5 +1,6 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
+#![expect(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 
 //! Integration tests for JMUX traffic event callbacks.
 //!
@@ -264,10 +265,10 @@ async fn create_client_stream_with_data(payload: Option<&[u8]>) -> TcpStream {
         if let Ok((mut stream, _)) = temp_listener.accept().await {
             if let Some(data) = payload_copy {
                 // Send the data through the connection.
-                if let Err(_) = stream.write_all(&data).await {
+                if (stream.write_all(&data).await).is_err() {
                     return;
                 }
-                if let Err(_) = stream.flush().await {
+                if (stream.flush().await).is_err() {
                     return;
                 }
 
@@ -891,7 +892,7 @@ async fn callback_observer_panic_does_not_affect_jmux() {
         .expect("should successfully open and start channel");
 
     // Should still receive callback invocation (before panic).
-    let _ = timeout(TEST_TIMEOUT, rx.recv())
+    timeout(TEST_TIMEOUT, rx.recv())
         .await
         .expect("should receive callback invocation")
         .expect("channel should not be closed");
@@ -946,8 +947,7 @@ mod test_helpers {
 
         assert_eq!(
             result
-                .err()
-                .expect("port should be refused after helper closes it")
+                .expect_err("port should be refused after helper closes it")
                 .kind(),
             io::ErrorKind::ConnectionRefused,
         );

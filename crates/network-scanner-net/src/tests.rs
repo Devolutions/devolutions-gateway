@@ -1,3 +1,6 @@
+#![expect(clippy::undocumented_unsafe_blocks, reason = "test code with known safety properties")]
+#![expect(clippy::clone_on_ref_ptr, reason = "test code clarity over performance")]
+
 use std::io::ErrorKind;
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, UdpSocket};

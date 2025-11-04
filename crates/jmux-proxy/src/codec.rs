@@ -55,6 +55,8 @@ impl Encoder<Message> for JmuxCodec {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use super::*;
     use bytes::Bytes;
     use futures_util::StreamExt;

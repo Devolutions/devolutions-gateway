@@ -29,6 +29,8 @@ impl<T> LogQueue<T> {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use super::*;
 
     #[test]
@@ -55,6 +57,6 @@ mod tests {
 
         // Then
         let result = log.drain();
-        assert!(result.len() == 0);
+        assert!(result.is_empty());
     }
 }
