@@ -1,30 +1,32 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM, CloseHandle};
+use windows::Win32::Foundation::WAIT_OBJECT_0;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Shutdown::{
     EWX_FORCE, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, ExitWindowsEx, InitiateSystemShutdownW, LockWorkStation,
     SHUTDOWN_REASON,
 };
-use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId, CreateProcessW, WaitForSingleObject, PROCESS_INFORMATION, STARTUPINFOW, CREATE_UNICODE_ENVIRONMENT, INFINITE, PROCESS_QUERY_INFORMATION, TerminateProcess};
-use windows::Win32::Foundation::WAIT_OBJECT_0;
+use windows::Win32::System::Threading::{
+    AttachThreadInput, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentThreadId, PROCESS_INFORMATION,
+    PROCESS_QUERY_INFORMATION, STARTUPINFOW,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT, MESSAGEBOX_STYLE,
-    MessageBoxW, PostMessageW, SW_RESTORE, SW_MAXIMIZE, SW_MINIMIZE, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
-    ShowWindow, WM_INPUTLANGCHANGEREQUEST, WM_CLOSE, EnumWindows,
+    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, HKL_NEXT, HKL_PREV, MESSAGEBOX_RESULT,
+    MESSAGEBOX_STYLE, MessageBoxW, PostMessageW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
+    ShowWindow, WM_CLOSE, WM_INPUTLANGCHANGEREQUEST,
 };
 use windows::core::{PCWSTR, PWSTR};
-
 
 use devolutions_gateway_task::Task;
 use now_proto_pdu::ironrdp_core::IntoOwned;
@@ -32,22 +34,21 @@ use now_proto_pdu::{
     ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
     NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
     NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
-    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmAppActionMsg, NowRdmAppAction, NowRdmAppNotifyMsg, NowRdmAppStartMsg, NowRdmCapabilitiesMsg, NowRdmMessage, NowRdmAppState, NowRdmReason, NowSessionCapsetFlags, NowSessionMessage,
-    NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage,
-    SetKbdLayoutOption,
+    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmAppAction, NowRdmAppActionMsg, NowRdmAppNotifyMsg,
+    NowRdmAppStartMsg, NowRdmAppState, NowRdmCapabilitiesMsg, NowRdmMessage, NowRdmReason, NowSessionCapsetFlags,
+    NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags,
+    NowSystemMessage, SetKbdLayoutOption,
 };
 use win_api_wrappers::event::Event;
+use win_api_wrappers::handle::Handle;
+use win_api_wrappers::process::{Process, ProcessEntry32Iterator};
 use win_api_wrappers::security::privilege::ScopedPrivileges;
 use win_api_wrappers::utils::WideString;
-use win_api_wrappers::process::{Process, ProcessEntry32Iterator};
-use win_api_wrappers::handle::HandleWrapper;
 
-use devolutions_agent_shared::windows::registry::{get_install_location, get_installed_product_version, ProductVersionEncoding};
-use uuid::Uuid;
-
-const RDM_UPDATE_CODE_UUID: &str = "2707F3BF-4D7B-40C2-882F-14B0ED869EE8";
-
-
+use devolutions_agent_shared::windows::RDM_UPDATE_CODE;
+use devolutions_agent_shared::windows::registry::{
+    ProductVersionEncoding, get_install_location, get_installed_product_version,
+};
 
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 
@@ -315,33 +316,6 @@ struct MessageProcessor {
     rdm_process_spawned: Arc<AtomicBool>,
 }
 
-/// RAII wrapper for RDM process handle
-struct RdmProcessHandle {
-    handle: windows::Win32::Foundation::HANDLE,
-}
-
-// SAFETY: HANDLE is just a pointer and can be safely sent between threads
-unsafe impl Send for RdmProcessHandle {}
-unsafe impl Sync for RdmProcessHandle {}
-
-impl RdmProcessHandle {
-    fn new(handle: windows::Win32::Foundation::HANDLE) -> Self {
-        Self { handle }
-    }
-
-    fn handle(&self) -> windows::Win32::Foundation::HANDLE {
-        self.handle
-    }
-}
-
-impl Drop for RdmProcessHandle {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = CloseHandle(self.handle);
-        }
-    }
-}
-
 impl MessageProcessor {
     pub(crate) fn new(
         capabilities: NowChannelCapsetMsg,
@@ -509,8 +483,8 @@ impl MessageProcessor {
                 }
             }
             NowMessage::System(NowSystemMessage::Shutdown(shutdown_msg)) => {
-                let mut current_process_token = Process::current_process()
-                    .token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
+                let mut current_process_token =
+                    Process::current_process().token(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)?;
                 let mut _priv_tcb = ScopedPrivileges::enter(
                     &mut current_process_token,
                     &[win_api_wrappers::security::privilege::SE_SHUTDOWN_NAME],
@@ -787,20 +761,24 @@ impl MessageProcessor {
         self.sessions.clear();
     }
 
-    async fn process_rdm_capabilities(&self, rdm_caps_msg: NowRdmCapabilitiesMsg<'_>) -> anyhow::Result<NowMessage<'static>> {
+    async fn process_rdm_capabilities(
+        &self,
+        rdm_caps_msg: NowRdmCapabilitiesMsg<'_>,
+    ) -> anyhow::Result<NowMessage<'static>> {
         let client_timestamp = rdm_caps_msg.timestamp();
         let server_timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .context("Failed to get current timestamp")?
             .as_secs();
 
-        info!(client_timestamp, server_timestamp, "Processing RDM capabilities message");
+        info!(
+            client_timestamp,
+            server_timestamp, "Processing RDM capabilities message"
+        );
 
         // Check if RDM is available by looking for the installation
         let (is_rdm_available, rdm_version) = {
-            let update_code_uuid = Uuid::parse_str(RDM_UPDATE_CODE_UUID)
-                .context("Failed to parse RDM update code UUID")?;
-            match get_installed_product_version(update_code_uuid, ProductVersionEncoding::Rdm) {
+            match get_installed_product_version(RDM_UPDATE_CODE, ProductVersionEncoding::Rdm) {
                 Ok(Some(date_version)) => {
                     info!(version = %date_version, "RDM installation found via MSI registry");
                     (true, date_version.to_string())
@@ -841,137 +819,127 @@ impl MessageProcessor {
         }
 
         // Get RDM executable path with proper error handling
-        let rdm_exe_path = match get_rdm_exe_path() {
-            Ok(Some(path)) => path,
-            Ok(None) => {
+        let rdm_exe_path = match get_rdm_executable_path() {
+            Some(path) => path,
+            None => {
                 error!("RDM is not installed - cannot start application");
                 send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::FAILED, NowRdmReason::NOT_INSTALLED).await?;
                 bail!("RDM is not installed");
             }
-            Err(error) => {
-                error!("Failed to get RDM executable path: {}", error);
-                send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::FAILED, NowRdmReason::STARTUP_FAILURE).await?;
-                return Err(error);
-            }
         };
 
-        let install_location = rdm_exe_path.parent()
+        let install_location = rdm_exe_path
+            .parent()
             .context("Failed to get RDM installation directory")?
             .to_string_lossy()
             .to_string();
 
-            // Build environment variables for fullscreen and jump mode
-            let mut env_vars = HashMap::new();
+        // Build environment variables for fullscreen and jump mode
+        let mut env_vars = HashMap::new();
 
-            if rdm_app_start_msg.is_fullscreen() {
-                env_vars.insert("RDM_OPT_FULLSCREEN".to_string(), "1".to_string());
-                info!("Starting RDM in fullscreen mode");
-            }
+        if rdm_app_start_msg.is_fullscreen() {
+            env_vars.insert("RDM_OPT_FULLSCREEN".to_string(), "1".to_string());
+            info!("Starting RDM in fullscreen mode");
+        }
 
-            if rdm_app_start_msg.is_jump_mode() {
-                env_vars.insert("RDM_OPT_JUMP".to_string(), "1".to_string());
-                info!("Starting RDM in jump mode");
-            }
+        if rdm_app_start_msg.is_jump_mode() {
+            env_vars.insert("RDM_OPT_JUMP".to_string(), "1".to_string());
+            info!("Starting RDM in jump mode");
+        }
 
-            // Create environment block
-            let env_block = crate::dvc::env::make_environment_block(env_vars)?;
+        // Create environment block
+        let env_block = crate::dvc::env::make_environment_block(env_vars)?;
 
-            // Convert command line to wide string
-            let current_dir = WideString::from(&install_location);
+        // Convert command line to wide string
+        let current_dir = WideString::from(&install_location);
 
-            info!(
-                exe_path = %rdm_exe_path.display(),
-                fullscreen = rdm_app_start_msg.is_fullscreen(),
-                maximized = rdm_app_start_msg.is_maximized(),
-                jump_mode = rdm_app_start_msg.is_jump_mode(),
-                "Starting RDM application with CreateProcess"
-            );
+        info!(
+            exe_path = %rdm_exe_path.display(),
+            fullscreen = rdm_app_start_msg.is_fullscreen(),
+            maximized = rdm_app_start_msg.is_maximized(),
+            jump_mode = rdm_app_start_msg.is_jump_mode(),
+            "Starting RDM application with CreateProcess"
+        );
 
-            // Create process using CreateProcessW in a scoped block
-            let create_process_result = {
-                let startup_info = STARTUPINFOW {
-                    cb: size_of::<STARTUPINFOW>() as u32,
-                    wShowWindow: if rdm_app_start_msg.is_maximized() { SW_MAXIMIZE.0 as u16 } else { SW_RESTORE.0 as u16 },
-                    dwFlags: windows::Win32::System::Threading::STARTF_USESHOWWINDOW,
-                    ..Default::default()
-                };
-
-                let mut process_info = PROCESS_INFORMATION::default();
-
-                // Create a mutable copy of the command line for CreateProcessW
-                let mut command_line_buffer: Vec<u16> = format!("\"{}\"", rdm_exe_path.display())
-                    .encode_utf16()
-                    .chain(std::iter::once(0))
-                    .collect();
-
-                // SAFETY: All pointers are valid and properly initialized
-                let success = unsafe {
-                    CreateProcessW(
-                        None, // lpApplicationName
-                        Some(PWSTR(command_line_buffer.as_mut_ptr())), // lpCommandLine
-                        None, // lpProcessAttributes
-                        None, // lpThreadAttributes
-                        false.into(), // bInheritHandles
-                        CREATE_UNICODE_ENVIRONMENT, // dwCreationFlags
-                        Some(env_block.as_ptr() as *const std::ffi::c_void), // lpEnvironment
-                        PCWSTR(current_dir.as_pcwstr().as_ptr()), // lpCurrentDirectory
-                        &startup_info, // lpStartupInfo
-                        &mut process_info, // lpProcessInformation
-                    )
-                };
-
-                if success.is_err() {
-                    let error = win_api_wrappers::Error::last_error();
-                    let error_msg = format!("Failed to start RDM application: {}", error);
-                    Err(error_msg)
+        // Create process using CreateProcessW in a scoped block
+        let create_process_result = {
+            let startup_info = STARTUPINFOW {
+                cb: size_of::<STARTUPINFOW>() as u32,
+                wShowWindow: if rdm_app_start_msg.is_maximized() {
+                    SW_MAXIMIZE.0 as u16
                 } else {
-                    // Extract the handles and process ID immediately as raw values
-                    Ok((process_info.hProcess.0 as usize, process_info.dwProcessId, process_info.hThread.0 as usize))
-                }
+                    SW_RESTORE.0 as u16
+                },
+                dwFlags: windows::Win32::System::Threading::STARTF_USESHOWWINDOW,
+                ..Default::default()
             };
 
-            let (process_handle_raw, process_id, thread_handle_raw) = match create_process_result {
-                Ok(result) => result,
-                Err(error_msg) => {
-                    error!("{}", error_msg);
-                    send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::FAILED, NowRdmReason::STARTUP_FAILURE).await?;
-                    bail!(error_msg);
-                }
+            let mut process_info = PROCESS_INFORMATION::default();
+
+            // Create a mutable copy of the command line for CreateProcessW
+            let mut command_line_buffer: Vec<u16> = format!("\"{}\"", rdm_exe_path.display())
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            // SAFETY: All pointers are valid and properly initialized
+            let success = unsafe {
+                CreateProcessW(
+                    None,                                                // lpApplicationName
+                    Some(PWSTR(command_line_buffer.as_mut_ptr())),       // lpCommandLine
+                    None,                                                // lpProcessAttributes
+                    None,                                                // lpThreadAttributes
+                    false.into(),                                        // bInheritHandles
+                    CREATE_UNICODE_ENVIRONMENT,                          // dwCreationFlags
+                    Some(env_block.as_ptr() as *const std::ffi::c_void), // lpEnvironment
+                    PCWSTR(current_dir.as_pcwstr().as_ptr()),            // lpCurrentDirectory
+                    &startup_info,                                       // lpStartupInfo
+                    &mut process_info,                                   // lpProcessInformation
+                )
             };
 
-            // Handle any errors from process creation
-            if process_handle_raw == 0 {
-                let error_msg = "Failed to start RDM application: Invalid process handle";
-                error!("{}", error_msg);
-                send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::FAILED, NowRdmReason::STARTUP_FAILURE).await?;
-                bail!(error_msg);
+            if success.is_err() || process_info.hProcess.is_invalid() {
+                Err(win_api_wrappers::Error::last_error())
+            } else {
+                // Close thread handle as we don't need it
+
+                // SAFETY: It is create owned handle wrapper from created process thread handle
+                let _ = unsafe { Handle::new(process_info.hThread, true) };
+
+                // SAFETY: It is safe to create owned handle wrapper from created process handle
+                let rdm_handle: Result<Process, _> =
+                    unsafe { Handle::new(process_info.hProcess, true) }.map(Into::into);
+
+                rdm_handle.map(|rdm_handle| (rdm_handle, process_info.dwProcessId))
             }
+        };
 
-            // Close thread handle as we don't need it
-            let thread_handle = windows::Win32::Foundation::HANDLE(thread_handle_raw as *mut std::ffi::c_void);
-            unsafe { let _ = CloseHandle(thread_handle); };
+        let (rdm_handle, process_id) = match create_process_result {
+            Ok(result) => result,
+            Err(error) => {
+                error!(%error, "Failed to start RDM application");
+                send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::FAILED, NowRdmReason::STARTUP_FAILURE).await?;
+                return Err(error.into());
+            }
+        };
 
-            // Create RAII wrapper for process handle
-            let process_handle = windows::Win32::Foundation::HANDLE(process_handle_raw as *mut std::ffi::c_void);
-            let rdm_handle = RdmProcessHandle::new(process_handle);
+        // Set process spawned status
+        self.rdm_process_spawned.store(true, Ordering::Release);
 
-            // Set process spawned status
-            self.rdm_process_spawned.store(true, Ordering::Release);
+        info!("RDM application started successfully with PID: {}", process_id);
 
-            info!("RDM application started successfully with PID: {}", process_id);
+        // Send ready notification
+        send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::READY, NowRdmReason::NOT_SPECIFIED).await?;
 
-            // Send ready notification
-            send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::READY, NowRdmReason::NOT_SPECIFIED).await?;
+        // Spawn task to monitor the process
+        let dvc_tx = self.dvc_tx.clone();
+        let spawned_status = self.rdm_process_spawned.clone();
 
-            // Spawn task to monitor the process
-            let dvc_tx = self.dvc_tx.clone();
-            let spawned_status = self.rdm_process_spawned.clone();
+        tokio::task::spawn_blocking(move || {
+            monitor_rdm_process(dvc_tx, rdm_handle, process_id, spawned_status);
+        });
 
-            tokio::task::spawn_blocking(move || {
-                monitor_rdm_process(dvc_tx, rdm_handle, process_id, spawned_status);
-            });
-
-            Ok(())
+        Ok(())
     }
 
     async fn process_rdm_app_action(&mut self, rdm_app_action_msg: NowRdmAppActionMsg<'_>) -> anyhow::Result<()> {
@@ -993,44 +961,22 @@ impl MessageProcessor {
                 info!(process_id, "Closing RDM application");
 
                 // Send WM_CLOSE message to all RDM windows
-                let window_count = send_message_to_all_windows(process_id, WM_CLOSE, WPARAM(0), LPARAM(0));
+                send_message_to_all_windows(process_id, WM_CLOSE, WPARAM(0), LPARAM(0));
 
-                if window_count == 0 {
-                    // If no windows found, try process termination
-                    if let Ok(process) = Process::get_by_pid(process_id, PROCESS_QUERY_INFORMATION) {
-                        let handle = process.handle();
-                        unsafe {
-                            let _ = TerminateProcess(handle.raw(), 0);
-                        }
-                        info!("Terminated RDM process");
-                    }
-                }
-
+                // TODO: task to monitor if RDM is running
                 send_rdm_app_notify(&self.dvc_tx, NowRdmAppState::CLOSED, NowRdmReason::NOT_SPECIFIED).await?;
             }
             NowRdmAppAction::MINIMIZE => {
                 info!(process_id, "Minimizing RDM application");
-                let window_count = exec_window_command(process_id, WindowCommand::Minimize);
-
-                if window_count == 0 {
-                    warn!("No windows found for minimize action");
-                }
+                exec_window_command(process_id, WindowCommand::Minimize)
             }
             NowRdmAppAction::MAXIMIZE => {
                 info!(process_id, "Maximizing RDM application");
-                let window_count = exec_window_command(process_id, WindowCommand::Maximize);
-
-                if window_count == 0 {
-                    warn!("No windows found for maximize action");
-                }
+                exec_window_command(process_id, WindowCommand::Maximize);
             }
             NowRdmAppAction::RESTORE => {
                 info!(process_id, "Restoring RDM application");
-                let window_count = exec_window_command(process_id, WindowCommand::Restore);
-
-                if window_count == 0 {
-                    warn!("No windows found for restore action");
-                }
+                exec_window_command(process_id, WindowCommand::Restore);
             }
             NowRdmAppAction::FULLSCREEN => {
                 info!(process_id, "Toggling RDM fullscreen mode");
@@ -1331,8 +1277,6 @@ fn get_focused_window() -> anyhow::Result<HWND> {
     Ok(focused_window)
 }
 
-
-
 /// Check if RDM process is already running by comparing executable paths
 fn is_rdm_running() -> bool {
     // Get RDM installation path internally
@@ -1344,39 +1288,43 @@ fn is_rdm_running() -> bool {
         }
     };
 
-    match ProcessEntry32Iterator::new() {
-        Ok(process_iter) => {
-            for process_entry in process_iter {
-                let pid = process_entry.process_id();
-                if let Ok(process) = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION) {
-                    if let Ok(exe_path) = process.exe_path() {
-                        // Compare the full paths case-insensitively
-                        if exe_path.to_string_lossy().to_lowercase()
-                            == rdm_exe_path.to_string_lossy().to_lowercase() {
-                            info!(
-                                rdm_path = %rdm_exe_path.display(),
-                                found_path = %exe_path.display(),
-                                "Found already running RDM process"
-                            );
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        }
+    let process_iterator = match ProcessEntry32Iterator::new() {
+        Ok(iter) => iter,
         Err(error) => {
-            warn!(%error, "Failed to enumerate processes for RDM detection");
-            false
+            warn!(%error, "Failed to create process iterator for RDM detection");
+            return false;
+        }
+    };
+
+    for process_entry in process_iterator {
+        let pid = process_entry.process_id();
+
+        let process = match Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION) {
+            Ok(proc) => proc,
+            Err(_) => continue,
+        };
+
+        let exe_path = match process.exe_path() {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+
+        // Compare the full paths case-insensitively
+        if exe_path == rdm_exe_path {
+            info!(
+                rdm_path = %rdm_exe_path.display(),
+                found_path = %exe_path.display(),
+                "Found already running RDM process"
+            );
+            return true;
         }
     }
+    false
 }
 
 /// Get the RDM executable path from installation location
 fn get_rdm_executable_path() -> Option<std::path::PathBuf> {
-    let update_code_uuid = Uuid::parse_str(RDM_UPDATE_CODE_UUID).ok()?;
-
-    match get_install_location(update_code_uuid) {
+    match get_install_location(RDM_UPDATE_CODE) {
         Ok(Some(install_location)) => {
             let rdm_exe_path = std::path::Path::new(&install_location).join("RemoteDesktopManager.exe");
             Some(rdm_exe_path)
@@ -1386,29 +1334,7 @@ fn get_rdm_executable_path() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Get RDM executable path with proper error handling for startup scenarios
-fn get_rdm_exe_path() -> anyhow::Result<Option<std::path::PathBuf>> {
-    let update_code_uuid = Uuid::parse_str(RDM_UPDATE_CODE_UUID)
-        .context("Failed to parse RDM update code UUID")?;
-
-    let install_location = match get_install_location(update_code_uuid) {
-        Ok(Some(location)) => location,
-        Ok(None) => {
-            return Ok(None); // RDM is not installed
-        }
-        Err(error) => {
-            bail!("Failed to get RDM installation location: {}", error);
-        }
-    };
-
-    let rdm_exe_path = std::path::Path::new(&install_location).join("RemoteDesktopManager.exe");
-
-    if !rdm_exe_path.exists() {
-        bail!("RDM executable not found at: {}", rdm_exe_path.display());
-    }
-
-    Ok(Some(rdm_exe_path))
-}/// Send RDM app notification message
+/// Send RDM app notification message
 async fn send_rdm_app_notify(
     dvc_tx: &WinapiSignaledSender<NowMessage<'static>>,
     state: NowRdmAppState,
@@ -1421,199 +1347,193 @@ async fn send_rdm_app_notify(
     Ok(())
 }
 
+/// Send RDM app notification message
+fn send_rdm_app_notify_blocking(
+    dvc_tx: &WinapiSignaledSender<NowMessage<'static>>,
+    state: NowRdmAppState,
+    reason: NowRdmReason,
+) -> anyhow::Result<()> {
+    info!(?state, ?reason, "Sending RDM app state notification");
+
+    let message = NowRdmAppNotifyMsg::new(state, reason);
+    dvc_tx.blocking_send(NowMessage::Rdm(NowRdmMessage::AppNotify(message)))?;
+    Ok(())
+}
+
 /// Monitor RDM process and send notifications when state changes
 fn monitor_rdm_process(
     dvc_tx: WinapiSignaledSender<NowMessage<'static>>,
-    rdm_handle: RdmProcessHandle,
-    process_id: u32,
+    process: Process,
+    pid: u32,
     spawned_status: Arc<AtomicBool>,
 ) {
-    info!(process_id, "Starting RDM process monitor");
-
-    // Wait for process to exit
-    let wait_result = unsafe { WaitForSingleObject(rdm_handle.handle(), INFINITE) };
-
-    // Check if the wait was successful (process exited)
-    if wait_result == WAIT_OBJECT_0 {
-        info!(process_id, "RDM process has exited");
-        // Send closed notification - we need to block on this since we're in sync context
-        let rt = tokio::runtime::Handle::current();
-        if let Err(error) = rt.block_on(send_rdm_app_notify(&dvc_tx, NowRdmAppState::CLOSED, NowRdmReason::NOT_SPECIFIED)) {
-            error!(%error, "Failed to send RDM app closed notification");
+    trace!(pid, "Starting RDM process monitor");
+    match process.wait(None) {
+        Ok(wait_result) if wait_result == WAIT_OBJECT_0 => {
+            info!(pid, "RDM process has exited");
+            let _ = send_rdm_app_notify_blocking(&dvc_tx, NowRdmAppState::CLOSED, NowRdmReason::NOT_SPECIFIED);
         }
-    } else {
-        error!(process_id, wait_event = ?wait_result, "Failed to wait for RDM process");
+        Ok(wait_result) => {
+            error!(pid, "Unexpected wait result for RDM process: {}", wait_result.0);
+        }
+        Err(error) => {
+            error!(%error, pid, "Failed to wait for RDM process");
+        }
     }
 
     // Clear the spawned status since our spawned process has exited
     spawned_status.store(false, Ordering::Release);
-
-    // The rdm_handle will be automatically closed when it goes out of scope
 }
-
-
 
 /// Find running RDM process and return its process ID
 fn find_rdm_pid() -> Option<u32> {
     // Get RDM installation path internally
     let rdm_exe_path = get_rdm_executable_path()?;
 
-    match ProcessEntry32Iterator::new() {
-        Ok(process_iter) => {
-            for process_entry in process_iter {
-                let pid = process_entry.process_id();
-                if let Ok(process) = Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION) {
-                    if let Ok(exe_path) = process.exe_path() {
-                        // Compare the full paths case-insensitively
-                        if exe_path.to_string_lossy().to_lowercase()
-                            == rdm_exe_path.to_string_lossy().to_lowercase() {
-
-                            info!(
-                                rdm_path = %rdm_exe_path.display(),
-                                found_path = %exe_path.display(),
-                                process_id = pid,
-                                "Found running RDM process"
-                            );
-
-                            return Some(pid);
-                        }
-                    }
-                }
-            }
-            None
-        }
+    let process_iterator = match ProcessEntry32Iterator::new() {
+        Ok(iter) => iter,
         Err(error) => {
-            warn!(%error, "Failed to enumerate processes for RDM detection");
-            None
+            warn!(%error, "Failed to create process iterator for RDM detection");
+            return None;
+        }
+    };
+
+    for process_entry in process_iterator {
+        let pid = process_entry.process_id();
+
+        let process = match Process::get_by_pid(pid, PROCESS_QUERY_INFORMATION) {
+            Ok(proc) => proc,
+            Err(_) => continue,
+        };
+
+        let exe_path = match process.exe_path() {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+
+        if exe_path == rdm_exe_path {
+            info!(
+                rdm_path = %rdm_exe_path.display(),
+                found_path = %exe_path.display(),
+                process_id = pid,
+                "Found running RDM process"
+            );
+
+            return Some(pid);
         }
     }
+    None
+}
+
+// Context for window enumeration callback
+struct SendMessageEnumContext {
+    process_id: u32,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
 }
 
 /// Send a message to all windows belonging to a specific process
-fn send_message_to_all_windows(process_id: u32, message: u32, wparam: WPARAM, lparam: LPARAM) -> u32 {
-    // Context for window enumeration callback
-    struct MessageSendContext {
-        target_process_id: u32,
-        message: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-        window_count: u32,
-    }
-
-    unsafe extern "system" fn enum_windows_proc(
-        hwnd: HWND,
-        lparam: LPARAM
-    ) -> windows::core::BOOL {
-        unsafe {
-            let context = &mut *(lparam.0 as *mut MessageSendContext);
-
-            // Get the process ID of this window
-            let mut window_process_id = 0u32;
-            let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_process_id));
-
-            // Check if this window belongs to our target process
-            if window_process_id == context.target_process_id {
-                // Send message directly to this window
-                let _ = PostMessageW(Some(hwnd), context.message, context.wparam, context.lparam);
-                context.window_count += 1;
-                info!(
-                    process_id = context.target_process_id,
-                    window_handle = hwnd.0 as isize,
-                    message = context.message,
-                    "Sent message to RDM window"
-                );
-            }
-
-            windows::core::BOOL(1) // Continue enumeration to find all windows
-        }
-    }
-
-    let mut context = MessageSendContext {
-        target_process_id: process_id,
+fn send_message_to_all_windows(process_id: u32, message: u32, wparam: WPARAM, lparam: LPARAM) {
+    let context = Box::new(SendMessageEnumContext {
+        process_id,
         message,
         wparam,
         lparam,
-        window_count: 0,
-    };
+    });
 
+    // SAFETY: Context is a valid pointer to heap memory, threfore call is safe.
     unsafe {
-        let _ = EnumWindows(
-            Some(enum_windows_proc),
-            LPARAM(&mut context as *mut _ as isize),
+        let _ = EnumWindows(Some(enum_windows_send_message), LPARAM(Box::into_raw(context) as isize));
+    }
+}
+
+extern "system" fn enum_windows_send_message(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+    // SAFETY: lparam is a valid pointer to MessageSendContext
+    let context = unsafe { Box::from_raw(lparam.0 as *mut SendMessageEnumContext) };
+
+    // Get the process ID of this window
+    let mut window_process_id = 0u32;
+    // SAFETY: hwnd is a valid window handle, lpdwprocessid is valid throughout
+    // GetWindowThreadProcessId call as it points to valid stack memory.
+    let get_pid_result = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut window_process_id)) };
+    if get_pid_result == 0 {
+        warn!(window_handle = hwnd.0 as isize, "Failed to get process ID for window");
+        // Continue enumeration
+        return true.into();
+    }
+
+    // Continue enumeration if process IDs do not match
+    if window_process_id != context.process_id {
+        return true.into();
+    }
+
+    // SAFETY: hwnd is a valid window handle, posting message is safe operation.
+    let _ = unsafe { PostMessageW(Some(hwnd), context.message, context.wparam, context.lparam) };
+
+    info!(
+        process_id = context.process_id,
+        window_handle = hwnd.0 as isize,
+        message = context.message,
+        "Sent message to RDM window"
+    );
+
+    // Continue enumeration
+    true.into()
+}
+
+// Context for window enumeration callback
+struct WindowCommandEnumContext {
+    process_id: u32,
+    command: WindowCommand,
+}
+
+unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+    // SAFETY: lparam is a valid pointer to WindowCommandEnumContext
+    let context = unsafe { Box::from_raw(lparam.0 as *mut WindowCommandEnumContext) };
+
+    // Get the process ID of this window
+    let mut window_process_id = 0u32;
+    // SAFETY: hwnd is a valid window handle, lpdwprocessid is valid throughout
+    // GetWindowThreadProcessId call as it points to valid stack memory.
+    let get_pid_result = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut window_process_id)) };
+    if get_pid_result == 0 {
+        warn!(window_handle = hwnd.0 as isize, "Failed to get process ID for window");
+        // Continue enumeration
+        return true.into();
+    }
+
+    // Check if this window belongs to our target process
+    if window_process_id == context.process_id {
+        // Apply ShowWindow command directly to this window
+        let show_command = match context.command {
+            WindowCommand::Minimize => SW_MINIMIZE,
+            WindowCommand::Maximize => SW_SHOWMAXIMIZED,
+            WindowCommand::Restore => SW_SHOWNORMAL,
+        };
+        // SAFETY: FFI call with no outstanding preconditions.
+        let _ = unsafe { ShowWindow(hwnd, show_command) };
+
+        info!(
+            process_id = context.process_id,
+            window_handle = hwnd.0 as isize,
+            command = ?context.command,
+            "Applied window command to RDM window"
         );
     }
 
-    if context.window_count > 0 {
-        info!(process_id, window_count = context.window_count, "Sent message to RDM windows");
-    } else {
-        warn!(process_id, "Could not find any windows for RDM process");
-    }
-
-    context.window_count
+    // Continue enumeration
+    true.into()
 }
 
 /// Execute a window command on all windows belonging to a specific process
-fn exec_window_command(process_id: u32, command: WindowCommand) -> u32 {
-    // Context for window enumeration callback
-    struct WindowCommandContext {
-        target_process_id: u32,
-        command: WindowCommand,
-        window_count: u32,
-    }
+fn exec_window_command(process_id: u32, command: WindowCommand) {
+    let context = Box::new(WindowCommandEnumContext { process_id, command });
 
-    unsafe extern "system" fn enum_windows_proc(
-        hwnd: HWND,
-        lparam: LPARAM
-    ) -> windows::core::BOOL {
-        unsafe {
-            let context = &mut *(lparam.0 as *mut WindowCommandContext);
-
-            // Get the process ID of this window
-            let mut window_process_id = 0u32;
-            let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_process_id));
-
-            // Check if this window belongs to our target process
-            if window_process_id == context.target_process_id {
-                // Apply ShowWindow command directly to this window
-                let show_command = match context.command {
-                    WindowCommand::Minimize => SW_MINIMIZE,
-                    WindowCommand::Maximize => SW_SHOWMAXIMIZED,
-                    WindowCommand::Restore => SW_SHOWNORMAL,
-                };
-                let _ = ShowWindow(hwnd, show_command);
-                context.window_count += 1;
-                info!(
-                    process_id = context.target_process_id,
-                    window_handle = hwnd.0 as isize,
-                    command = ?context.command,
-                    "Applied window command to RDM window"
-                );
-            }
-
-            windows::core::BOOL(1) // Continue enumeration to find all windows
-        }
-    }
-
-    let mut context = WindowCommandContext {
-        target_process_id: process_id,
-        command,
-        window_count: 0,
-    };
-
+    // SAFETY: Context is a valid pointer to heap memory, threfore call is safe.
     unsafe {
-        let _ = EnumWindows(
-            Some(enum_windows_proc),
-            LPARAM(&mut context as *mut _ as isize),
-        );
+        let _ = EnumWindows(Some(enum_windows_proc), LPARAM(Box::into_raw(context) as isize));
     }
-
-    if context.window_count > 0 {
-        info!(process_id, window_count = context.window_count, command = ?command, "Applied window command to RDM windows");
-    } else {
-        warn!(process_id, "Could not find any windows for RDM process");
-    }
-
-    context.window_count
 }
 
 #[link(name = "user32", kind = "dylib")]

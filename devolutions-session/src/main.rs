@@ -8,7 +8,10 @@ use ::{
 };
 
 #[cfg(all(windows, feature = "dvc"))]
-use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _, windows as _, uuid as _, devolutions_agent_shared as _};
+use ::{
+    async_trait as _, devolutions_agent_shared as _, now_proto_pdu as _, tempfile as _, thiserror as _,
+    win_api_wrappers as _, windows as _,
+};
 
 #[macro_use]
 extern crate tracing;

@@ -16,3 +16,7 @@ pub const GATEWAY_UPDATE_CODE: Uuid = uuid!("{db3903d6-c451-4393-bd80-eb9f45b902
 ///
 /// See [`GATEWAY_UPDATE_CODE`] for more information on update codes.
 pub const AGENT_UPDATE_CODE: Uuid = uuid!("{82318d3c-811f-4d5d-9a82-b7c31b076755}");
+/// MSI upgrade code for the Remote Desktop Manager.
+///
+/// See [`GATEWAY_UPDATE_CODE`] for more information on update codes.
+pub const RDM_UPDATE_CODE: Uuid = uuid!("{2707F3BF-4D7B-40C2-882F-14B0ED869EE8}");

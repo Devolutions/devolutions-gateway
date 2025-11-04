@@ -55,7 +55,10 @@ pub enum ProductVersionEncoding {
 
 /// Get the installed version of a product using Windows registry. Returns `None` if the product
 /// is not installed.
-pub fn get_installed_product_version(update_code: Uuid, version_encoding: ProductVersionEncoding) -> Result<Option<DateVersion>, RegistryError> {
+pub fn get_installed_product_version(
+    update_code: Uuid,
+    version_encoding: ProductVersionEncoding,
+) -> Result<Option<DateVersion>, RegistryError> {
     let product_code_uuid = match get_product_code(update_code)? {
         Some(uuid) => uuid,
         None => return Ok(None),

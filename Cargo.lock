@@ -1450,7 +1450,6 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio 1.46.1",
  "tracing",
- "uuid",
  "win-api-wrappers",
  "windows 0.61.3",
 ]
