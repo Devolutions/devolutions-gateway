@@ -850,9 +850,10 @@ async fn server_password_authentication(
     Ok(())
 }
 
-#[expect(clippy::unwrap_used, reason = "test code can panic on errors")]
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use super::*;
 
     // NOTE: for more comprehensive tests, see `proxy-tester`.

@@ -165,9 +165,10 @@ async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<Socket
     Ok(SocketAddrV4::new(Ipv4Addr::from(ip), port))
 }
 
-#[expect(clippy::unwrap_used, reason = "test code can panic on errors")]
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use super::*;
 
     async fn assert_encoding(addr: DestAddr, userid: &str, encoded: &[u8]) {

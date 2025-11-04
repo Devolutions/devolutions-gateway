@@ -687,9 +687,10 @@ fn find_frame_length(buf: &[u8]) -> Option<usize> {
     find(buf, b"\r\n\r\n").map(|len| len + 4)
 }
 
-#[expect(clippy::unwrap_used, reason = "test code can panic on errors")]
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use super::*;
     use proptest::prelude::*;
     use proxy_generators as generators;
