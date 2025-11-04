@@ -44,8 +44,12 @@ win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
 [dependencies.now-proto-pdu]
 optional = true
-version = "0.3.2"
+version = "0.4.0"
 features = ["std"]
+
+[target.'cfg(windows)'.dependencies]
+uuid = { version = "1.0", features = ["v4", "serde"] }
+devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0"
