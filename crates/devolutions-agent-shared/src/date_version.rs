@@ -79,7 +79,7 @@ impl fmt::Display for DateVersion {
 
 #[cfg(test)]
 mod tests {
-    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+    #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
 
     use super::*;
 

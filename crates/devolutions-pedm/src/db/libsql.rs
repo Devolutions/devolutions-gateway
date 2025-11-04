@@ -807,7 +807,7 @@ fn parse_micros(micros: i64) -> Result<DateTime<Utc>, ParseTimestampError> {
 
 #[cfg(test)]
 mod tests {
-    #![expect(clippy::unwrap_used, reason = "test code can panic on errors")]
+    #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
 
     use chrono::{TimeZone, Utc};
 

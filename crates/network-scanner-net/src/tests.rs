@@ -1,7 +1,7 @@
 #![expect(
     clippy::undocumented_unsafe_blocks,
     reason = "test code with known safety properties"
-)]
+)] // FIXME: Verify this, and maybe actually document the blocks.
 
 use std::io::ErrorKind;
 use std::mem::MaybeUninit;
