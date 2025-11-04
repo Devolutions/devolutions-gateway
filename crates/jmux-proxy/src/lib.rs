@@ -346,6 +346,8 @@ enum InternalMessage {
         id: LocalChannelId,
     },
     StreamResolved {
+        // Boxing reduces enum size from 224 bytes to ~16 bytes
+        // (clippy::large_enum_variant)
         channel: Box<JmuxChannelCtx>,
         stream: TcpStream,
     },

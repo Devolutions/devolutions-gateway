@@ -432,56 +432,54 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
 
-    {
-        let mut issues = CertIssues::empty();
+    let mut issues = CertIssues::empty();
 
-        let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
-            let _ = write!(acc, "{byte:X?}");
-            acc
-        });
-        let subject = cert.subject_name();
-        let issuer = cert.issuer_name();
-        let not_before = cert.valid_not_before();
-        let not_after = cert.valid_not_after();
+    let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
+        let _ = write!(acc, "{byte:X?}");
+        acc
+    });
+    let subject = cert.subject_name();
+    let issuer = cert.issuer_name();
+    let not_before = cert.valid_not_before();
+    let not_after = cert.valid_not_after();
 
-        if at < not_before {
-            issues.insert(CertIssues::NOT_YET_VALID);
-        } else if not_after < at {
-            issues.insert(CertIssues::EXPIRED);
-        }
-
-        let mut has_server_auth_key_purpose = false;
-        let mut has_san = false;
-
-        for ext in cert.extensions() {
-            match ext.extn_value() {
-                picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku)
-                    if eku.contains(picky::oids::kp_server_auth()) =>
-                {
-                    has_server_auth_key_purpose = true;
-                }
-                picky::x509::extension::ExtensionView::SubjectAltName(_) => has_san = true,
-                _ => {}
-            }
-        }
-
-        if !has_server_auth_key_purpose {
-            issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
-        }
-
-        if !has_san {
-            issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
-        }
-
-        Ok(CertReport {
-            serial_number,
-            subject,
-            issuer,
-            not_before,
-            not_after,
-            issues,
-        })
+    if at < not_before {
+        issues.insert(CertIssues::NOT_YET_VALID);
+    } else if not_after < at {
+        issues.insert(CertIssues::EXPIRED);
     }
+
+    let mut has_server_auth_key_purpose = false;
+    let mut has_san = false;
+
+    for ext in cert.extensions() {
+        match ext.extn_value() {
+            picky::x509::extension::ExtensionView::ExtendedKeyUsage(eku)
+                if eku.contains(picky::oids::kp_server_auth()) =>
+            {
+                has_server_auth_key_purpose = true;
+            }
+            picky::x509::extension::ExtensionView::SubjectAltName(_) => has_san = true,
+            _ => {}
+        }
+    }
+
+    if !has_server_auth_key_purpose {
+        issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
+    }
+
+    if !has_san {
+        issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
+    }
+
+    Ok(CertReport {
+        serial_number,
+        subject,
+        issuer,
+        not_before,
+        not_after,
+        issues,
+    })
 }
 
 pub mod sanity {

@@ -1,3 +1,5 @@
+#![expect(unused_variables, reason = "work in progress")]
+
 use std::ops::Deref;
 
 use async_trait::async_trait;
