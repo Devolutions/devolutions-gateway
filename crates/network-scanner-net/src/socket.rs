@@ -261,16 +261,15 @@ impl Future for ConnectFuture<'_> {
         let in_progress = err.kind() == std::io::ErrorKind::WouldBlock;
 
         let events_interested = [Event::readable(self.id), Event::writable(self.id), Event::all(self.id)];
-        if in_progress {
-            if let Err(e) = self
+        if in_progress
+            && let Err(e) = self
                 .runtime
                 .register_events(&self.socket, &events_interested, cx.waker().clone())
-            {
-                warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
-                return std::task::Poll::Ready(Err(std::io::Error::other(format!(
-                    "failed to register socket to poller: {e}"
-                ))));
-            }
+        {
+            warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
+            return std::task::Poll::Ready(Err(std::io::Error::other(format!(
+                "failed to register socket to poller: {e}"
+            ))));
         }
         std::task::Poll::Pending
     }

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use mcp_proxy::{Config, McpProxy};
 
-const DUMMY_REQUEST: &'static str = r#"{"jsonrpc": "2.0", "id": 1, "method": "x"}"#;
+const DUMMY_REQUEST: &str = r#"{"jsonrpc": "2.0", "id": 1, "method": "x"}"#;
 const MCP_PROXY_SHORTISH_TIMEOUT: Duration = Duration::from_millis(200);
 
 async fn spawn_http_server(
@@ -22,7 +22,6 @@ async fn spawn_http_server(
         if let Ok((mut stream, _)) = listener.accept().await {
             // Read the HTTP request headers properly.
             let mut reader = BufReader::new(&mut stream);
-            let mut request_lines = Vec::new();
             let mut content_length = 0;
 
             // Read HTTP headers.
@@ -34,7 +33,6 @@ async fn spawn_http_server(
                 if line.starts_with("Content-Length:") {
                     content_length = line.trim().split(':').nth(1).unwrap().trim().parse().unwrap_or(0);
                 }
-                request_lines.push(line.clone());
                 if line.trim().is_empty() {
                     break;
                 }

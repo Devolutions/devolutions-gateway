@@ -973,10 +973,10 @@ fn validate_token_impl(
     // === Check for revoked values in JWT Revocation List === //
 
     for (key, revoked_values) in &revocation_list.lock().jrl {
-        if let Some(value) = claims.get(key) {
-            if revoked_values.contains(value) {
-                return Err(TokenError::Revoked);
-            }
+        if let Some(value) = claims.get(key)
+            && revoked_values.contains(value)
+        {
+            return Err(TokenError::Revoked);
         }
     }
 

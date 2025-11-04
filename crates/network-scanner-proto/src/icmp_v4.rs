@@ -399,7 +399,7 @@ fn sum_big_endian_words(bs: &[u8]) -> u32 {
         data = &data[2..];
     }
 
-    if (len % 2) != 0 {
+    if !len.is_multiple_of(2) {
         // If odd then checksum the last byte
         sum += u32::from(data[0]) << 8;
     }

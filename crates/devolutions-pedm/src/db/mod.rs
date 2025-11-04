@@ -1,3 +1,11 @@
+#![cfg_attr(
+    unix,
+    expect(
+        dead_code,
+        reason = "only used in the windows implementation, nothing is planned for linux yet"
+    )
+)]
+
 use core::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -247,6 +255,7 @@ pub(crate) struct DbHandle {
 }
 
 impl DbHandle {
+    #[expect(clippy::result_large_err, reason = "suppressing for now")] // FIXME: Re-evaluate this suppression.
     pub(crate) fn insert_jit_elevation_result(
         &self,
         result: ElevationResult,
@@ -265,9 +274,7 @@ impl DbHandle {
                 }
             },
             Err(error) => {
-                let DbRequest::InsertJitElevationResult { result, .. } = error.0 else {
-                    unreachable!()
-                };
+                let DbRequest::InsertJitElevationResult { result, .. } = error.0;
 
                 Err(DbHandleError {
                     db_error: None,

@@ -27,11 +27,13 @@ impl ClientConfig {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: &'static str) -> Self {
         self.client_info.name = name;
         self
     }
 
+    #[must_use]
     pub fn with_version(mut self, version: &'static str) -> Self {
         self.client_info.version = version;
         self
@@ -45,7 +47,7 @@ impl Default for ClientConfig {
                 name: "testsuite-mcp-client",
                 version: "1.0.0",
             },
-            protocol_version: "2025-06-18".to_string(),
+            protocol_version: "2025-06-18".to_owned(),
         }
     }
 }
@@ -111,7 +113,7 @@ impl ToolCallParams {
     /// Create tool call parameters for echo tool
     pub fn echo(message: &str) -> Self {
         Self {
-            name: "echo".to_string(),
+            name: "echo".to_owned(),
             arguments: serde_json::json!({"message": message}),
         }
     }
@@ -119,7 +121,7 @@ impl ToolCallParams {
     /// Create tool call parameters for calculator tool
     pub fn calculate(operation: &str, a: f64, b: f64) -> Self {
         Self {
-            name: "calculator".to_string(),
+            name: "calculator".to_owned(),
             arguments: serde_json::json!({
                 "operation": operation,
                 "a": a,
@@ -149,6 +151,7 @@ impl McpClient {
     }
 
     /// Configure the client with custom settings.
+    #[must_use]
     pub fn with_config(mut self, config: ClientConfig) -> Self {
         self.config = config;
         self
@@ -186,9 +189,9 @@ impl McpClient {
     /// Internal helper to send an initialize request.
     async fn initialize(&mut self) -> Result<InitializeResult> {
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".to_owned(),
             id: Some(self.next_id()),
-            method: "initialize".to_string(),
+            method: "initialize".to_owned(),
             params: Some(serde_json::json!({
                 "protocol_version": self.config.protocol_version.clone(),
                 "client_info": self.config.client_info.clone(),
@@ -207,9 +210,9 @@ impl McpClient {
     /// List available tools.
     pub async fn list_tools(&mut self) -> Result<ToolsListResult> {
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".to_owned(),
             id: Some(self.next_id()),
-            method: "tools/list".to_string(),
+            method: "tools/list".to_owned(),
             params: None,
         };
 
@@ -227,9 +230,9 @@ impl McpClient {
     /// Call a tool.
     pub async fn call_tool(&mut self, params: ToolCallParams) -> Result<ToolCallResult> {
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".to_owned(),
             id: Some(self.next_id()),
-            method: "tools/call".to_string(),
+            method: "tools/call".to_owned(),
             params: Some(serde_json::to_value(params)?),
         };
 
@@ -251,7 +254,7 @@ impl McpClient {
         params: Option<serde_json::Value>,
     ) -> Result<()> {
         let request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: "2.0".to_owned(),
             id: None, // Notifications have no ID.
             method: method.into(),
             params,

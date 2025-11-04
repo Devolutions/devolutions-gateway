@@ -43,8 +43,8 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::config::dto::Subscriber,
         crate::api::diagnostics::ConfigDiagnostic,
         crate::api::diagnostics::ClockDiagnostic,
-        crate::api::config::SubProvisionerKey,
-        crate::api::config::ConfigPatch,
+        SubProvisionerKey,
+        ConfigPatch,
         crate::api::jrl::JrlInfo,
         crate::api::jrec::DeleteManyResult,
         crate::token::AccessScope,
@@ -315,6 +315,30 @@ impl Modify for SubscriberSecurityAddon {
     security(("subscriber_token" = [])),
 )]
 fn post_subscriber_message() {}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "PascalCase")]
+struct ConfigPatch {
+    /// This Gateway's unique ID
+    id: Option<Uuid>,
+    /// The sub provisioner public key (may only be used to verify tokens when establishing a session)
+    sub_provisioner_public_key: Option<SubProvisionerKey>,
+    /// Subscriber configuration
+    subscriber: Option<crate::config::dto::Subscriber>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "PascalCase")]
+pub(crate) struct SubProvisionerKey {
+    /// The key ID for this subkey
+    id: String,
+    /// The binary-to-text-encoded key data
+    value: String,
+    /// The format used for the key data
+    format: Option<crate::config::dto::PubKeyFormat>,
+    /// The binary-to-text encoding used for the key data
+    encoding: Option<crate::config::dto::DataEncoding>,
+}
 
 #[allow(unused)]
 #[derive(Deserialize, utoipa::ToSchema)]

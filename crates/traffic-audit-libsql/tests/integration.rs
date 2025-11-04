@@ -1,4 +1,8 @@
 #![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
+#![allow(clippy::print_stdout, reason = "test code uses print for diagnostics")]
+#![expect(clippy::cast_lossless, reason = "test code with intentional simple casts")]
+#![expect(clippy::cast_possible_truncation, reason = "test code with known safe value ranges")]
 
 //! Integration tests for traffic-audit-libsql implementation.
 //!
@@ -44,17 +48,17 @@ fn make_event(i: u32) -> TrafficEvent {
             1 => EventOutcome::NormalTermination,
             _ => EventOutcome::AbnormalTermination,
         },
-        protocol: if i % 4 == 0 {
+        protocol: if i.is_multiple_of(4) {
             TransportProtocol::Udp
         } else {
             TransportProtocol::Tcp
         },
-        target_host: if i % 7 == 0 {
+        target_host: if i.is_multiple_of(7) {
             format!("tést-{}.不適切.invalid", i) // Unicode test
         } else {
             format!("host-{}.example.com", i)
         },
-        target_ip: if i % 5 == 0 {
+        target_ip: if i.is_multiple_of(5) {
             IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, i as u16))
         } else {
             IpAddr::V4(Ipv4Addr::new(192, 168, (i / 256) as u8, (i % 256) as u8))
@@ -282,7 +286,7 @@ async fn unicode_and_ipv6_roundtrip() {
     let repo = open_repo(":memory:").await;
 
     let mut event = make_event(0);
-    event.target_host = "tést-{}.不適切.invalid".to_string(); // Unicode characters
+    event.target_host = "tést-{}.不適切.invalid".to_owned(); // Unicode characters
     event.target_ip = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0x85a3, 0, 0, 0x8a2e, 0x370, 0x7334));
 
     repo.push(event.clone()).await.expect("push unicode event");

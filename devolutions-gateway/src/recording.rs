@@ -481,10 +481,10 @@ impl RecordingManagerTask {
     ) -> anyhow::Result<Utf8PathBuf> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
-        if let Some(ongoing) = self.ongoing_recordings.get(&id) {
-            if matches!(ongoing.state, OnGoingRecordingState::Connected) {
-                anyhow::bail!("concurrent recording for the same session is not supported");
-            }
+        if let Some(ongoing) = self.ongoing_recordings.get(&id)
+            && matches!(ongoing.state, OnGoingRecordingState::Connected)
+        {
+            anyhow::bail!("concurrent recording for the same session is not supported");
         }
 
         let recording_path = self.recordings_path.join(id.to_string());

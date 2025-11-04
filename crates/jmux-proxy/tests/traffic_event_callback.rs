@@ -1,5 +1,6 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 
 //! Integration tests for JMUX traffic event callbacks.
 //!
@@ -229,8 +230,8 @@ async fn expect_single_event(
 
     // Verify no additional events (brief timeout is expected to fail).
     match timeout(Duration::from_millis(100), rx.recv()).await {
-        Ok(Some(_)) => Err("Received more than one stream event".to_string()),
-        Ok(None) => Err("Channel closed unexpectedly".to_string()),
+        Ok(Some(_)) => Err("received more than one stream event".to_owned()),
+        Ok(None) => Err("channel closed unexpectedly".to_owned()),
         Err(_) => Ok(event), // Timeout is expected - no additional events
     }
 }
@@ -244,8 +245,8 @@ async fn expect_single_event(
 /// Returns Ok(()) if no events received, or an error describing what was received.
 async fn expect_no_events(rx: &mut mpsc::Receiver<TrafficEvent>, wait_duration: Duration) -> Result<(), String> {
     match timeout(wait_duration, rx.recv()).await {
-        Ok(Some(event)) => Err(format!("Unexpected stream event received: {:?}", event)),
-        Ok(None) => Err("Channel closed unexpectedly".to_string()),
+        Ok(Some(event)) => Err(format!("unexpected stream event received: {:?}", event)),
+        Ok(None) => Err("channel closed unexpectedly".to_owned()),
         Err(_) => Ok(()), // Timeout is expected - no events
     }
 }
@@ -264,12 +265,10 @@ async fn create_client_stream_with_data(payload: Option<&[u8]>) -> TcpStream {
         if let Ok((mut stream, _)) = temp_listener.accept().await {
             if let Some(data) = payload_copy {
                 // Send the data through the connection.
-                if let Err(_) = stream.write_all(&data).await {
+                if stream.write_all(&data).await.is_err() {
                     return;
                 }
-                if let Err(_) = stream.flush().await {
-                    return;
-                }
+                let _ = stream.flush().await;
 
                 // Read response (for echo scenarios).
                 let mut buffer = vec![0u8; data.len()];
@@ -891,7 +890,7 @@ async fn callback_observer_panic_does_not_affect_jmux() {
         .expect("should successfully open and start channel");
 
     // Should still receive callback invocation (before panic).
-    let _ = timeout(TEST_TIMEOUT, rx.recv())
+    timeout(TEST_TIMEOUT, rx.recv())
         .await
         .expect("should receive callback invocation")
         .expect("channel should not be closed");
@@ -946,8 +945,7 @@ mod test_helpers {
 
         assert_eq!(
             result
-                .err()
-                .expect("port should be refused after helper closes it")
+                .expect_err("port should be refused after helper closes it")
                 .kind(),
             io::ErrorKind::ConnectionRefused,
         );

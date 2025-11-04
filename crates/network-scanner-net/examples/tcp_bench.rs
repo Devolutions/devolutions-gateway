@@ -1,6 +1,7 @@
 #![allow(unused_crate_dependencies)]
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 use network_scanner_net::runtime::Socket2Runtime;
 use socket2::{Domain, SockAddr, Type};
@@ -14,7 +15,7 @@ fn main() -> anyhow::Result<()> {
         let mut futures = vec![];
         for ip in 0..255 {
             let ip: IpAddr = format!("10.10.0.{ip}").parse().unwrap();
-            let runtime = runtime.clone();
+            let runtime = Arc::clone(&runtime);
             let ports = vec![22, 23, 80, 443, 3389];
             for port in ports {
                 let socket = runtime.new_socket(Domain::IPV4, Type::STREAM, None)?;

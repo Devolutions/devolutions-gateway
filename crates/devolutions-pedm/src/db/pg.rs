@@ -1,13 +1,15 @@
+#![expect(unused_variables, reason = "work in progress")]
+
 use std::ops::Deref;
 
 use async_trait::async_trait;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use chrono::{DateTime, Utc};
-use devolutions_pedm_shared::policy::ElevationResult;
+use devolutions_pedm_shared::policy::{Assignment, ElevationResult, Profile, User};
 use tokio_postgres::NoTls;
 
-use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions};
+use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
 use super::{Database, DbError};
 
@@ -111,6 +113,46 @@ impl Database for PgPool {
         &self,
         query_options: JitElevationLogQueryOptions,
     ) -> Result<JitElevationLogPage, DbError> {
+        unimplemented!()
+    }
+
+    async fn get_profiles(&self) -> Result<Vec<Profile>, DbError> {
+        unimplemented!()
+    }
+
+    async fn get_profiles_for_user(&self, user: &User) -> Result<Vec<Profile>, DbError> {
+        unimplemented!()
+    }
+
+    async fn get_profile(&self, id: i64) -> Result<Option<Profile>, DbError> {
+        unimplemented!()
+    }
+
+    async fn insert_profile(&self, profile: &Profile) -> Result<(), DbError> {
+        unimplemented!()
+    }
+
+    async fn delete_profile(&self, id: i64) -> Result<(), DbError> {
+        unimplemented!()
+    }
+
+    async fn get_assignments(&self) -> Result<Vec<Assignment>, DbError> {
+        unimplemented!()
+    }
+
+    async fn get_assignment(&self, profile: &Profile) -> Result<Assignment, DbError> {
+        unimplemented!()
+    }
+
+    async fn set_assignments(&self, profile_id: i64, users: Vec<User>) -> Result<(), DbError> {
+        unimplemented!()
+    }
+
+    async fn set_user_profile(&self, user: &User, profile_id: i64) -> Result<(), DbError> {
+        unimplemented!()
+    }
+
+    async fn get_user_profile(&self, user: &User) -> Result<Option<Profile>, DbError> {
         unimplemented!()
     }
 }

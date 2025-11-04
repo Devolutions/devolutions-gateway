@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
 
     let input_path = Path::new(args.input_path);
     let (file_written_sender, file_written_receiver) = tokio::sync::broadcast::channel(1);
-    let intermediate_file = get_slowly_written_file(input_path, notify.clone(), file_written_sender).await?;
+    let intermediate_file = get_slowly_written_file(input_path, Arc::clone(&notify), file_written_sender).await?;
 
     let (client, server) = create_local_websocket().await;
     let output_file = tokio::fs::OpenOptions::new()

@@ -342,9 +342,18 @@ type InternalMessageSender = mpsc::Sender<InternalMessage>;
 
 #[derive(Debug)]
 enum InternalMessage {
-    Eof { id: LocalChannelId },
-    StreamResolved { channel: JmuxChannelCtx, stream: TcpStream },
-    AbnormalTermination { id: LocalChannelId },
+    Eof {
+        id: LocalChannelId,
+    },
+    StreamResolved {
+        // Boxing reduces enum size from 224 bytes to ~16 bytes
+        // (clippy::large_enum_variant)
+        channel: Box<JmuxChannelCtx>,
+        stream: TcpStream,
+    },
+    AbnormalTermination {
+        id: LocalChannelId,
+    },
 }
 
 // === internal tasks === //
@@ -479,10 +488,10 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let data_tx = data_tx.get();
 
                         // Send leftover bytes if any.
-                        if let Some(leftover) = leftover {
-                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await {
-                                error!(%error, "Couldn't send leftover bytes");
-                            }
+                        if let Some(leftover) = leftover
+                            && let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover)).await
+                        {
+                            error!(%error, "Couldn't send leftover bytes");
                         }
 
                         let (reader, writer) = stream.into_split();
@@ -582,6 +591,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     InternalMessage::StreamResolved {
                         channel, stream
                     } => {
+                        let channel = *channel; // Unbox
                         let local_id = channel.local_id;
                         let distant_id = channel.distant_id;
                         let initial_window_size = channel.initial_window_size;
@@ -1184,7 +1194,10 @@ impl StreamResolverTask {
                             channel.connect_at = SystemTime::now();
 
                             internal_msg_tx
-                                .send(InternalMessage::StreamResolved { channel, stream })
+                                .send(InternalMessage::StreamResolved {
+                                    channel: Box::new(channel),
+                                    stream,
+                                })
                                 .await
                                 .context("couldn't send back resolved stream through internal mpsc channel")?;
 

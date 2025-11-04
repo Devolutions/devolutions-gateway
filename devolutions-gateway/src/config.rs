@@ -287,13 +287,13 @@ impl Conf {
         )
         .context("delegation private key")?;
 
-        if let Some(web_app_conf) = &conf_file.web_app {
-            if web_app_conf.enabled {
-                anyhow::ensure!(
-                    provisioner_private_key.is_some(),
-                    "provisioner private key must be specified when the standalone web application is enabled",
-                );
-            }
+        if let Some(web_app_conf) = &conf_file.web_app
+            && web_app_conf.enabled
+        {
+            anyhow::ensure!(
+                provisioner_private_key.is_some(),
+                "provisioner private key must be specified when the standalone web application is enabled",
+            );
         }
 
         Ok(Conf {
