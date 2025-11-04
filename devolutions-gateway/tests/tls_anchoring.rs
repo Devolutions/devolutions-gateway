@@ -21,46 +21,28 @@
 use sha2::{Digest, Sha256};
 
 #[test]
-fn test_thumbprint_normalization() {
-    // Test various thumbprint formats are normalized correctly
-    let test_cases = vec![
-        // (input, expected_normalized)
-        ("abcdef0123456789", "abcdef0123456789"),
-        ("ABCDEF0123456789", "abcdef0123456789"),
-        ("AB:CD:EF:01:23:45", "abcdef012345"),
-        ("AB CD EF 01", "abcdef01"),
-        ("ab-cd-ef-01", "abcdef01"),
-    ];
-
-    for (input, expected) in test_cases {
-        let normalized = normalize_thumbprint_for_test(input);
-        assert_eq!(
-            normalized, expected,
-            "Failed to normalize '{}' to '{}'",
-            input, expected
-        );
-    }
-}
-
-#[test]
 fn test_compute_thumbprint() {
     // Test SHA-256 computation
     let test_data = b"Hello, World!";
     let hash = Sha256::digest(test_data);
     let thumbprint = hex::encode(hash);
-
+    
     // Expected SHA-256 of "Hello, World!"
     let expected = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f";
     assert_eq!(thumbprint, expected);
 }
 
-// Helper function that mirrors the normalization logic
-fn normalize_thumbprint_for_test(thumb: &str) -> String {
-    thumb
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect::<String>()
-        .to_lowercase()
+#[test]
+fn test_thumbprint_format() {
+    // Verify that thumbprints are 64 hex characters (32 bytes)
+    let test_data = b"test certificate";
+    let hash = Sha256::digest(test_data);
+    let thumbprint = hex::encode(hash);
+    
+    // Should be lowercase hex
+    assert!(thumbprint.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+    // Should be 64 characters (SHA-256 = 32 bytes = 64 hex chars)
+    assert_eq!(thumbprint.len(), 64);
 }
 
 // Note: Full integration tests that actually connect to TLS servers with

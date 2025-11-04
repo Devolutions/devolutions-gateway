@@ -646,7 +646,7 @@ pub mod danger {
 
             let standard_verifier = tokio_rustls::rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store))
                 .build()
-                .expect("failed to build standard verifier");
+                .expect("failed to build WebPkiServerVerifier with system root certificates; this should not fail with valid system roots");
 
             Self {
                 expected_thumbprint: expected_thumbprint.map(normalize_thumbprint),
@@ -846,7 +846,7 @@ pub mod danger {
             let input =
                 "3A:7F:B2:C4:5E:8D:9F:1A:2B:3C:4D:5E:6F:7A:8B:9C:AD:BE:CF:D0:E1:F2:03:14:25:36:47:58:69:7A:8B:9C";
             let expected = "3a7fb2c45e8d9f1a2b3c4d5e6f7a8b9cadbecfd0e1f20314253647586 97a8b9c";
-            assert_eq!(normalize_thumbprint(input.to_owned()), expected.replace(" ", ""));
+            assert_eq!(normalize_thumbprint(input.to_owned()), expected.replace(' ', ""));
         }
 
         #[test]
