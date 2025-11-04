@@ -87,7 +87,7 @@ where
     // -- Perform the TLS upgrading for both the client and the server, effectively acting as a man-in-the-middle -- //
 
     let client_tls_upgrade_fut = tls_conf.acceptor.accept(client_stream);
-    let server_tls_upgrade_fut = crate::tls::connect(server_dns_name.clone(), server_stream);
+    let server_tls_upgrade_fut = crate::tls::dangerous_connect(server_dns_name.clone(), server_stream);
 
     let (client_stream, server_stream) = tokio::join!(client_tls_upgrade_fut, server_tls_upgrade_fut);
 
@@ -510,7 +510,7 @@ async fn get_cached_gateway_public_key(
 async fn retrieve_gateway_public_key(hostname: String, acceptor: tokio_rustls::TlsAcceptor) -> anyhow::Result<Vec<u8>> {
     let (client_side, server_side) = tokio::io::duplex(4096);
 
-    let connect_fut = crate::tls::connect(hostname, client_side);
+    let connect_fut = crate::tls::dangerous_connect(hostname, client_side);
     let accept_fut = acceptor.accept(server_side);
 
     let (connect_res, _) = tokio::join!(connect_fut, accept_fut);

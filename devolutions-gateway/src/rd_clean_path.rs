@@ -256,7 +256,7 @@ async fn process_cleanpath(
 
     // Establish TLS connection with server
 
-    let server_stream = crate::tls::connect(selected_target.host().to_owned(), server_stream)
+    let server_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
             source,

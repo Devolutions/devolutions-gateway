@@ -339,6 +339,7 @@ pub(crate) async fn sign_session_token(
                 jet_reuse: ReconnectionPolicy::Disallowed,
                 exp,
                 jti,
+                cert_thumb256: None,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

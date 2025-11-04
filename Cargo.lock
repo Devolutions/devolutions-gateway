@@ -1245,6 +1245,7 @@ dependencies = [
  "etherparse",
  "expect-test",
  "futures",
+ "hex",
  "hostname 0.4.1",
  "http-body-util",
  "hyper 1.6.0",
@@ -1273,10 +1274,12 @@ dependencies = [
  "reqwest",
  "rstest",
  "rustls-cng",
+ "rustls-native-certs",
  "serde",
  "serde-querystring",
  "serde_json",
  "serde_urlencoded",
+ "sha2",
  "smol_str",
  "sysevent",
  "sysevent-codes",
@@ -6215,6 +6218,8 @@ dependencies = [
  "tempfile",
  "test-utils",
  "tokio 1.46.1",
+ "tokio-tungstenite 0.26.2",
+ "typed-builder",
 ]
 
 [[package]]

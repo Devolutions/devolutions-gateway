@@ -420,6 +420,10 @@ pub struct AssociationTokenClaims {
 
     /// Unique ID for this token
     pub jti: Uuid,
+
+    /// Optional SHA-256 thumbprint of target server certificate (for anchored TLS validation)
+    /// Format: lowercase hex string with no separators (e.g., "3a7f...")
+    pub cert_thumb256: Option<SmolStr>,
 }
 
 // ----- scope claims ----- //
@@ -1304,6 +1308,8 @@ mod serde_impl {
         jet_reuse: ReconnectionPolicy,
         exp: i64,
         jti: Uuid,
+        #[serde(default)]
+        cert_thumb256: Option<SmolStr>,
     }
 
     #[derive(Deserialize)]
@@ -1411,6 +1417,7 @@ mod serde_impl {
                 jet_reuse: self.jet_reuse,
                 exp: self.exp,
                 jti: self.jti,
+                cert_thumb256: self.cert_thumb256.clone(),
             }
             .serialize(serializer)
         }
@@ -1454,6 +1461,7 @@ mod serde_impl {
                 jet_reuse: claims.jet_reuse,
                 exp: claims.exp,
                 jti: claims.jti,
+                cert_thumb256: claims.cert_thumb256,
             })
         }
     }
