@@ -687,7 +687,7 @@ fn find_frame_length(buf: &[u8]) -> Option<usize> {
     find(buf, b"\r\n\r\n").map(|len| len + 4)
 }
 
-#[expect(clippy::unwrap_used, reason = "Test code can panic on errors")]
+#[expect(clippy::unwrap_used, reason = "test code can panic on errors")]
 #[cfg(test)]
 mod tests {
     use super::*;

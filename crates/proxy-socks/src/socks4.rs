@@ -165,7 +165,7 @@ async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<Socket
     Ok(SocketAddrV4::new(Ipv4Addr::from(ip), port))
 }
 
-#[expect(clippy::unwrap_used, reason = "Test code can panic on errors")]
+#[expect(clippy::unwrap_used, reason = "test code can panic on errors")]
 #[cfg(test)]
 mod tests {
     use super::*;
