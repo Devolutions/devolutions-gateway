@@ -35,18 +35,11 @@ pub async fn connect<IO>(dns_name: String, stream: IO) -> io::Result<TlsStream<I
 where
     IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    connect_with_thumbprint(
-        dns_name.clone(),
-        stream,
-        None,
-        dns_name,
-        uuid::Uuid::nil(),
-    )
-    .await
+    connect_with_thumbprint(dns_name.clone(), stream, None, dns_name, uuid::Uuid::nil()).await
 }
 
 /// Connect to a TLS server with optional certificate thumbprint anchoring.
-/// 
+///
 /// If `cert_thumb256` is provided and TLS verification fails, the connection will be accepted
 /// if the server's leaf certificate thumbprint matches the provided value.
 pub async fn connect_with_thumbprint<IO>(
@@ -66,17 +59,13 @@ where
     // Create a TLS connector with thumbprint-anchored verification if a thumbprint is provided
     let connector = if cert_thumb256.is_some() {
         // Use thumbprint-anchored verifier
-        let verifier = Arc::new(danger::ThumbprintAnchoredVerifier::new(
-            cert_thumb256,
-            target,
-            assoc_id,
-        ));
-        
+        let verifier = Arc::new(danger::ThumbprintAnchoredVerifier::new(cert_thumb256, target, assoc_id));
+
         let mut config = rustls::client::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(verifier)
             .with_no_client_auth();
-        
+
         config.resumption = rustls::client::Resumption::disabled();
         tokio_rustls::TlsConnector::from(Arc::new(config))
     } else {
@@ -632,7 +621,7 @@ pub mod danger {
     }
 
     /// Certificate verifier that supports thumbprint anchoring.
-    /// 
+    ///
     /// This verifier attempts normal TLS verification using system roots.
     /// If verification fails and a thumbprint is provided that matches the leaf certificate,
     /// the connection is accepted and details are logged.
@@ -649,16 +638,12 @@ pub mod danger {
     }
 
     impl ThumbprintAnchoredVerifier {
-        pub fn new(
-            expected_thumbprint: Option<String>,
-            target: String,
-            assoc_id: uuid::Uuid,
-        ) -> Self {
+        pub fn new(expected_thumbprint: Option<String>, target: String, assoc_id: uuid::Uuid) -> Self {
             // Create a standard verifier using system root certificates
             let root_store = tokio_rustls::rustls::RootCertStore {
                 roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
             };
-            
+
             let standard_verifier = tokio_rustls::rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store))
                 .build()
                 .expect("failed to build standard verifier");
@@ -696,7 +681,7 @@ pub mod danger {
 
             // Thumbprint matches! Extract certificate details and log
             let cert_info = extract_cert_info(end_entity.as_ref());
-            
+
             info!(
                 event = "TLS_ANCHOR_ACCEPT",
                 assoc_id = %self.assoc_id,
@@ -726,13 +711,10 @@ pub mod danger {
             now: pki_types::UnixTime,
         ) -> Result<ServerCertVerified, Error> {
             // Try standard verification first
-            match self.standard_verifier.verify_server_cert(
-                end_entity,
-                intermediates,
-                server_name,
-                ocsp_response,
-                now,
-            ) {
+            match self
+                .standard_verifier
+                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+            {
                 Ok(verified) => Ok(verified),
                 Err(err) => {
                     // Standard verification failed, try thumbprint anchoring
@@ -795,7 +777,7 @@ pub mod danger {
                 let issuer = cert.issuer_name().to_string();
                 let not_before = cert.valid_not_before().to_string();
                 let not_after = cert.valid_not_after().to_string();
-                
+
                 let mut sans = Vec::new();
                 for ext in cert.extensions() {
                     if let picky::x509::extension::ExtensionView::SubjectAltName(san) = ext.extn_value() {
@@ -825,5 +807,70 @@ pub mod danger {
 
     fn format_verification_error(err: &Error) -> String {
         format!("{:?}", err)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_normalize_thumbprint() {
+            // Test lowercase hex remains unchanged
+            assert_eq!(normalize_thumbprint("abcdef0123456789".to_owned()), "abcdef0123456789");
+
+            // Test uppercase is converted to lowercase
+            assert_eq!(normalize_thumbprint("ABCDEF0123456789".to_owned()), "abcdef0123456789");
+
+            // Test mixed case
+            assert_eq!(normalize_thumbprint("AbCdEf0123456789".to_owned()), "abcdef0123456789");
+
+            // Test with colons (common format)
+            assert_eq!(
+                normalize_thumbprint("AB:CD:EF:01:23:45:67:89".to_owned()),
+                "abcdef0123456789"
+            );
+
+            // Test with spaces
+            assert_eq!(
+                normalize_thumbprint("AB CD EF 01 23 45 67 89".to_owned()),
+                "abcdef0123456789"
+            );
+
+            // Test with mixed separators
+            assert_eq!(
+                normalize_thumbprint("AB:CD-EF 01.23_45-67:89".to_owned()),
+                "abcdef0123456789"
+            );
+
+            // Test full SHA-256 thumbprint with colons
+            let input =
+                "3A:7F:B2:C4:5E:8D:9F:1A:2B:3C:4D:5E:6F:7A:8B:9C:AD:BE:CF:D0:E1:F2:03:14:25:36:47:58:69:7A:8B:9C";
+            let expected = "3a7fb2c45e8d9f1a2b3c4d5e6f7a8b9cadbecfd0e1f20314253647586 97a8b9c";
+            assert_eq!(normalize_thumbprint(input.to_owned()), expected.replace(" ", ""));
+        }
+
+        #[test]
+        fn test_compute_sha256_thumbprint() {
+            // Test with known input
+            let test_data = b"Hello, World!";
+            let thumbprint = compute_sha256_thumbprint(test_data);
+
+            // Expected SHA-256 of "Hello, World!"
+            let expected = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f";
+            assert_eq!(thumbprint, expected);
+
+            // Test output format (lowercase hex, no separators)
+            assert!(thumbprint.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+            assert_eq!(thumbprint.len(), 64); // SHA-256 is 32 bytes = 64 hex chars
+        }
+
+        #[test]
+        fn test_compute_sha256_thumbprint_deterministic() {
+            // Same input should always produce same thumbprint
+            let test_data = b"test certificate data";
+            let thumbprint1 = compute_sha256_thumbprint(test_data);
+            let thumbprint2 = compute_sha256_thumbprint(test_data);
+            assert_eq!(thumbprint1, thumbprint2);
+        }
     }
 }
