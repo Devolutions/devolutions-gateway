@@ -67,14 +67,46 @@ async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> 
         }
     }
 
-    if msi_install_result.is_err() {
-        return Err(UpdaterError::MsiInstall {
-            product: ctx.product,
-            msi_path: path.to_owned(),
-        });
-    }
+    match msi_install_result {
+        Ok(status) => {
+            let exit_code = status.code().unwrap_or(-1);
 
-    Ok(())
+            // MSI exit codes:
+            // 0 = Success
+            // 3010 = Success but reboot required (unexpected - our installers shouldn't require reboot)
+            // 1641 = Success and reboot initiated
+            // Other codes = Error
+            match exit_code {
+                0 => {
+                    info!("MSI installation completed successfully");
+                    Ok(())
+                }
+                3010 | 1641 => {
+                    // Our installers should not require a reboot, but if they do, log as warning
+                    // and continue since the installation technically succeeded
+                    warn!(
+                        %exit_code,
+                        "MSI installation completed but unexpectedly requires system reboot"
+                    );
+                    Ok(())
+                }
+                _ => {
+                    error!(%exit_code, "MSI installation failed with exit code");
+                    Err(UpdaterError::MsiInstall {
+                        product: ctx.product,
+                        msi_path: path.to_owned(),
+                    })
+                }
+            }
+        }
+        Err(_) => {
+            error!("Failed to execute msiexec command");
+            Err(UpdaterError::MsiInstall {
+                product: ctx.product,
+                msi_path: path.to_owned(),
+            })
+        }
+    }
 }
 
 async fn uninstall_msi(ctx: &UpdaterCtx, product_code: Uuid, log_path: &Utf8Path) -> Result<(), UpdaterError> {
@@ -101,14 +133,47 @@ async fn uninstall_msi(ctx: &UpdaterCtx, product_code: Uuid, log_path: &Utf8Path
         }
     }
 
-    if msi_uninstall_result.is_err() {
-        return Err(UpdaterError::MsiUninstall {
-            product: ctx.product,
-            product_code,
-        });
-    }
+    match msi_uninstall_result {
+        Ok(status) => {
+            let exit_code = status.code().unwrap_or(-1);
 
-    Ok(())
+            // MSI exit codes:
+            // 0 = Success
+            // 3010 = Success but reboot required (unexpected - our installers shouldn't require reboot)
+            // 1641 = Success and reboot initiated
+            // Other codes = Error
+            match exit_code {
+                0 => {
+                    info!(%product_code, "MSI uninstallation completed successfully");
+                    Ok(())
+                }
+                3010 | 1641 => {
+                    // Our installers should not require a reboot, but if they do, log as warning
+                    // and continue since the uninstallation technically succeeded
+                    warn!(
+                        %exit_code,
+                        %product_code,
+                        "MSI uninstallation completed but unexpectedly requires system reboot"
+                    );
+                    Ok(())
+                }
+                _ => {
+                    error!(%exit_code, %product_code, "MSI uninstallation failed with exit code");
+                    Err(UpdaterError::MsiUninstall {
+                        product: ctx.product,
+                        product_code,
+                    })
+                }
+            }
+        }
+        Err(_) => {
+            error!(%product_code, "Failed to execute msiexec command");
+            Err(UpdaterError::MsiUninstall {
+                product: ctx.product,
+                product_code,
+            })
+        }
+    }
 }
 
 fn ensure_enough_rights() -> Result<(), UpdaterError> {

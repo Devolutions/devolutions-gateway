@@ -210,8 +210,16 @@ async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJ
     let update_json_data = fs::read(update_file_path)
         .await
         .context("failed to read update.json file")?;
+
+    // Strip UTF-8 BOM if present (some editors add it)
+    let data_without_bom = if update_json_data.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &update_json_data[3..]
+    } else {
+        &update_json_data
+    };
+
     let update_json: UpdateJson =
-        serde_json::from_slice(&update_json_data).context("failed to parse update.json file")?;
+        serde_json::from_slice(data_without_bom).context("failed to parse update.json file")?;
 
     Ok(update_json)
 }

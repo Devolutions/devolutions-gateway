@@ -5,6 +5,10 @@ use crate::updater::{Product, UpdaterError};
 const GATEWAY_SERVICE_NAME: &str = "DevolutionsGateway";
 
 // Hub Service installs up to 3 separate Windows services (depending on selected features)
+// Service Name -> MSI Feature mapping for ADDLOCAL parameter:
+//   "Devolutions Hub PAM Service" -> "PAM"
+//   "Devolutions Hub Encryption Service" -> "Encryption"
+//   "Devolutions Hub Reporting Service" -> "Reporting"
 const HUB_SERVICE_NAMES: &[&str] = &[
     "Devolutions Hub PAM Service",
     "Devolutions Hub Encryption Service",
@@ -99,25 +103,31 @@ impl ServiceUpdateActions {
                 continue;
             }
 
-            // Start service if it was running prior to the update, but service startup
-            // was set to manual.
-            if !state.startup_was_automatic && state.was_running {
-                info!("Starting '{}' service after update", state.name);
+            match service_manager.open_service_all_access(state.name) {
+                Ok(service) => {
+                    // Start service if it was running prior to the update
+                    // For Gateway: only if startup was manual (automatic services will auto-start)
+                    // For Hub Service: always start if it was running, since we can't control
+                    //                  startup mode via P.SERVICESTART parameter
+                    let should_start = match self.product {
+                        Product::Gateway => !state.startup_was_automatic && state.was_running,
+                        Product::HubService => state.was_running,
+                    };
 
-                match service_manager.open_service_all_access(state.name) {
-                    Ok(service) => {
+                    if should_start {
+                        info!("Starting '{}' service after update", state.name);
                         service.start()?;
                         info!("Service '{}' started", state.name);
-                    }
-                    Err(e) => {
-                        warn!("Failed to start service '{}' after update: {}", state.name, e);
+                    } else {
+                        debug!(
+                            "Service '{}' doesn't need manual restart (automatic_startup: {}, was_running: {})",
+                            state.name, state.startup_was_automatic, state.was_running
+                        );
                     }
                 }
-            } else {
-                debug!(
-                    "Service '{}' doesn't need manual restart (automatic_startup: {}, was_running: {})",
-                    state.name, state.startup_was_automatic, state.was_running
-                );
+                Err(e) => {
+                    warn!("Failed to access service '{}' after update: {}", state.name, e);
+                }
             }
         }
 
@@ -138,19 +148,41 @@ impl ProductUpdateActions for ServiceUpdateActions {
         // When performing update, we want to make sure the service startup mode is restored to the
         // previous state. (Installer sets Manual by default).
 
-        // For products with a single primary service, check if it should be automatic
-        if self.service_states.len() == 1 && self.service_states[0].startup_was_automatic {
-            info!("Adjusting MSIEXEC parameters for {} service startup mode", self.product);
-            return vec!["P.SERVICESTART=Automatic".to_owned()];
-        }
-
-        // For Hub Service with multiple services, check if any PAM service should be automatic
-        // (The MSI installer controls the main PAM service startup via P.SERVICESTART)
-        if self.product == Product::HubService {
-            if let Some(pam_state) = self.service_states.iter().find(|s| s.exists && s.name.contains("PAM")) {
-                if pam_state.startup_was_automatic {
-                    info!("Adjusting MSIEXEC parameters for Hub PAM service startup mode");
+        match self.product {
+            Product::Gateway => {
+                // Gateway installer supports P.SERVICESTART property
+                if self.service_states.len() == 1 && self.service_states[0].startup_was_automatic {
+                    info!("Adjusting MSIEXEC parameters for Gateway service startup mode");
                     return vec!["P.SERVICESTART=Automatic".to_owned()];
+                }
+            }
+            Product::HubService => {
+                // Hub Service installer requires ADDLOCAL parameter to specify which services to install.
+                // Build the list based on currently installed services.
+                let mut features = Vec::new();
+
+                for state in &self.service_states {
+                    if state.exists {
+                        // Map service name to MSI feature name
+                        let feature = match state.name {
+                            "Devolutions Hub PAM Service" => "PAM",
+                            "Devolutions Hub Encryption Service" => "Encryption",
+                            "Devolutions Hub Reporting Service" => "Reporting",
+                            _ => {
+                                warn!("Unknown Hub Service: {}", state.name);
+                                continue;
+                            }
+                        };
+                        features.push(feature);
+                    }
+                }
+
+                if !features.is_empty() {
+                    let addlocal = format!("ADDLOCAL={}", features.join(","));
+                    info!("Adjusting MSIEXEC parameters for Hub Service features: {}", addlocal);
+                    return vec![addlocal];
+                } else {
+                    warn!("No Hub Service features detected, installer may use defaults");
                 }
             }
         }
