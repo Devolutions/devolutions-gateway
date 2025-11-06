@@ -1142,7 +1142,7 @@ pub mod dto {
     pub struct DomainUser {
         /// Username in FQDN format (e.g. "pw13@example.com").
         pub username: String,
-        // User password.
+        /// User password.
         pub password: String,
         /// Salt for generating the user's key.
         ///
@@ -1172,7 +1172,7 @@ pub mod dto {
         /// Ticket decryption key
         ///
         /// This key is used to decrypt the TGS ticket sent by the client. If you do not plan
-        /// to use Kerberos U2U authentication, then the `ticket_decryption_key' is required.
+        /// to use Kerberos U2U authentication, then the `ticket_decryption_key` is required.
         pub ticket_decryption_key: Option<Vec<u8>>,
         /// The domain user credentials for the Kerberos U2U authentication
         ///
