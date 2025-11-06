@@ -2,8 +2,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::dto::{DomainUser, KerberosServer};
 use crate::config::Conf;
+use crate::config::dto::{DomainUser, KerberosServer};
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
@@ -117,6 +117,9 @@ where
 
     let krb_server_config = if conf.debug.enable_unstable {
         if let Some(KerberosServer {
+            realm: _,
+            users: _,
+            krbtgt_key: _,
             max_time_skew,
             ticket_decryption_key,
             service_user,
@@ -125,10 +128,13 @@ where
             let user = service_user.as_ref().map(|user| {
                 let DomainUser {
                     username,
-                    domain,
                     password,
+                    salt: _,
                 } = user;
-                CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(username, domain, password))
+                CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(
+                    username, // The username is in the FQDN format. Thus, the domain field can be empty.
+                    "", password,
+                ))
             });
 
             Some(KerberosServerConfig {
@@ -383,23 +389,18 @@ where
 {
     use ironrdp_tokio::FramedWrite as _;
 
-    let (credentials, domain) = match credentials {
-        crate::credential::AppCredential::UsernamePassword {
-            username,
-            domain,
-            password,
-        } => (
+    let credentials = match credentials {
+        crate::credential::AppCredential::UsernamePassword { username, password } => {
             ironrdp_connector::Credentials::UsernamePassword {
                 username: username.clone(),
                 password: password.expose_secret().to_owned(),
-            },
-            domain.as_deref(),
-        ),
+            }
+        }
     };
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,
-        domain,
+        None,
         security_protocol,
         ironrdp_connector::ServerName::new(server_name),
         server_public_key,
@@ -484,9 +485,9 @@ async fn resolve_client_generator(
             GeneratorState::Completed(client_state) => {
                 break client_state.map_err(|e| {
                     ironrdp_connector::ConnectorError::new("CredSSP", ironrdp_connector::ConnectorErrorKind::Credssp(e))
-                })
+                });
             }
-        }
+        };
     }
 }
 
@@ -552,13 +553,9 @@ where
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
     {
-        let crate::credential::AppCredential::UsernamePassword {
-            username,
-            domain,
-            password,
-        } = credentials;
+        let crate::credential::AppCredential::UsernamePassword { username, password } = credentials;
 
-        let username = sspi::Username::new(username, domain.as_deref()).context("invalid username")?;
+        let username = sspi::Username::new(username, None).context("invalid username")?;
 
         let identity = sspi::AuthIdentity {
             username,
