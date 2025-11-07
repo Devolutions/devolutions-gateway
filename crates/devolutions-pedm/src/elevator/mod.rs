@@ -117,7 +117,7 @@ fn validate_elevation(
     validation
 }
 
-#[expect(clippy::too_many_arguments, reason = "Refactoring into a struct would be too invasive")]
+#[expect(clippy::too_many_arguments, reason = "refactoring into a struct would be too invasive")]
 pub(crate) fn try_start_elevated(
     db_handle: &DbHandle,
     policy: &Policy,
