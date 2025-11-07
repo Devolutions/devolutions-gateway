@@ -258,22 +258,19 @@ impl CommandLine {
                             if chars.peek().is_some() {
                                 backslashes += 1
                             } else {
-                                std::iter::repeat_n('\\', backslashes * 2)
-                                    .for_each(|x| command_line.push(x));
+                                std::iter::repeat_n('\\', backslashes * 2).for_each(|x| command_line.push(x));
 
                                 backslashes = 0;
                             }
                         }
                         '"' => {
-                            std::iter::repeat_n('\\', backslashes * 2 + 1)
-                                .for_each(|x| command_line.push(x));
+                            std::iter::repeat_n('\\', backslashes * 2 + 1).for_each(|x| command_line.push(x));
 
                             command_line.push('"');
                             backslashes = 0;
                         }
                         x => {
-                            std::iter::repeat_n('\\', backslashes)
-                                .for_each(|x| command_line.push(x));
+                            std::iter::repeat_n('\\', backslashes).for_each(|x| command_line.push(x));
 
                             command_line.push(x);
                             backslashes = 0;
