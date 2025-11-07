@@ -12,7 +12,7 @@ use tokio_postgres::error::SqlState;
 
 /// Error type for DB operations.
 #[derive(Debug)]
-pub(crate) enum DbError {
+pub enum DbError {
     #[cfg(feature = "libsql")]
     Libsql(libsql::Error),
     /// This is to handle some type conversions.

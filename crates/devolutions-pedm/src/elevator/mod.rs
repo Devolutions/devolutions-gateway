@@ -24,7 +24,7 @@ use virtual_account_elevator::VirtualAccountElevator;
 use crate::db::DbHandle;
 use crate::log;
 use crate::policy::{self, Policy, application_from_path};
-use crate::utils::{AccountExt, start_process};
+use crate::utils::start_process;
 
 static LOCAL_ADMIN_ELEVATOR: LazyLock<LocalAdminElevator> = LazyLock::new(|| {
     LocalAdminElevator::new(
@@ -53,11 +53,10 @@ fn elevator(method: ElevationMethod) -> &'static dyn Elevator {
 fn elevate_token(policy: &Policy, token: &Token) -> Result<Token> {
     match token.elevation_type()? {
         TokenElevationType::Default => {
-            let policy = policy;
             let elevation_method = policy
                 .profile
                 .as_ref()
-                .ok_or(Error::from_win32(ERROR_ACCESS_DISABLED_BY_POLICY))?
+                .ok_or_else(|| Error::from_win32(ERROR_ACCESS_DISABLED_BY_POLICY))?
                 .elevation_method;
             elevator(elevation_method).elevate_token(token)
         }
@@ -118,6 +117,7 @@ fn validate_elevation(
     validation
 }
 
+#[expect(clippy::too_many_arguments, reason = "Refactoring into a struct would be too invasive")]
 pub(crate) fn try_start_elevated(
     db_handle: &DbHandle,
     policy: &Policy,

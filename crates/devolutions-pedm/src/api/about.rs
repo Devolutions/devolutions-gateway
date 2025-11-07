@@ -24,7 +24,7 @@ pub(crate) async fn about(
         last_request_time: db
             .get_last_request_time()
             .await?
-            .or_else(|| Some(Utc.timestamp_opt(0, 0).single().unwrap())),
+            .or_else(|| Utc.timestamp_opt(0, 0).single()),
         version: win_api_wrappers::utils::get_exe_version()?,
     }))
 }

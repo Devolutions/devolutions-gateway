@@ -135,7 +135,7 @@ impl Db {
 }
 
 #[derive(Debug)]
-pub(crate) enum InitSchemaError {
+pub enum InitSchemaError {
     VersionMismatch { expected: i16, actual: i16 },
     Db(DbError),
 }
