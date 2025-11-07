@@ -220,11 +220,11 @@ pub mod windows {
 
             let now = time::OffsetDateTime::now_utc();
 
-            if let Some(cache) = cache_guard.as_ref() {
-                if now < cache.expires_at {
-                    trace!("Used certified key from cache");
-                    return Ok(Arc::clone(&cache.key));
-                }
+            if let Some(cache) = cache_guard.as_ref()
+                && now < cache.expires_at
+            {
+                trace!("Used certified key from cache");
+                return Ok(Arc::clone(&cache.key));
             }
 
             let store = CertStore::open(self.store_type, &self.store_name).context("open Windows certificate store")?;
@@ -365,7 +365,7 @@ pub mod windows {
             });
 
             *cache_guard = Some(KeyCache {
-                key: key.clone(),
+                key: Arc::clone(&key),
                 expires_at: now + CACHE_DURATION,
             });
             trace!("Cached certified key");

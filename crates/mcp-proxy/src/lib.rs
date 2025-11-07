@@ -96,6 +96,10 @@ pub struct FatalError {
     pub response: Option<Message>,
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "on Windows, ProcessMcpClient is large; however that’s fine, it’s not used in a hot loop"
+)]
 enum InnerTransport {
     Http { url: String, agent: ureq::Agent },
     Process(ProcessMcpClient),
