@@ -5,6 +5,8 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt as _, AsyncWriteExt, BufReader};
 
+// TODO(DGW-315): Add support for sending unsolicited messages.
+
 const ERROR_CODE_INVALID_REQUEST: i32 = -32600;
 const ERROR_CODE_METHOD_NOT_FOUND: i32 = -32601;
 const ERROR_CODE_INVALID_PARAMS: i32 = -32602;
