@@ -335,7 +335,7 @@ fn doctor_verify_chain_with_json_output() {
         }
 
         if entry["name"].as_str().unwrap() == CHAIN_CHECK_NAME {
-            // Since the chain is a failure, this check should fail.
+            // Since the leaf certificate is expired, this check should fail.
             assert!(!entry["success"].as_bool().unwrap());
         } else {
             // All the other checks should succeed.
