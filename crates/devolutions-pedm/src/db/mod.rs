@@ -134,8 +134,9 @@ impl Db {
     }
 }
 
+#[allow(private_interfaces, reason = "used in public ServeError but not intended for public API")]
 #[derive(Debug)]
-pub enum InitSchemaError {
+pub(crate) enum InitSchemaError {
     VersionMismatch { expected: i16, actual: i16 },
     Db(DbError),
 }
