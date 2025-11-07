@@ -8,20 +8,20 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 #[derive(Clone)]
 pub(crate) enum Elevation {
     Temporary(Instant),
     Session,
 }
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 fn elevations() -> &'static RwLock<HashMap<User, Elevation>> {
     static ELEVATIONS: OnceLock<RwLock<HashMap<User, Elevation>>> = OnceLock::new();
     ELEVATIONS.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) fn elevation_time_left_secs(user: &User) -> Option<u64> {
     elevations().read().get(user).and_then(|x| {
         if let Elevation::Temporary(i) = x {
@@ -32,7 +32,7 @@ pub(crate) fn elevation_time_left_secs(user: &User) -> Option<u64> {
     })
 }
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) fn is_elevated(user: &User) -> bool {
     elevations().read().get(user).is_some_and(|elev| match elev {
         Elevation::Temporary(i) => Instant::now() < *i,
@@ -40,19 +40,19 @@ pub(crate) fn is_elevated(user: &User) -> bool {
     })
 }
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) fn elevate_session(user: User) {
     elevations().write().insert(user, Elevation::Session);
 }
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) fn elevate_temporary(user: User, duration: &Duration) {
     elevations()
         .write()
         .insert(user, Elevation::Temporary(Instant::now() + *duration));
 }
 
-#[allow(dead_code, reason = "work in progress feature")]
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) fn revoke(user: &User) {
     elevations().write().remove(user);
 }

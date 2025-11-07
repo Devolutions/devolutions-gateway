@@ -16,7 +16,7 @@ impl HandlerError {
     ///
     /// The input message should start with a lowercase letter.
     /// It will be capitalized in the response.
-    #[allow(dead_code, reason = "reserved for future use")]
+    #[expect(dead_code, reason = "reserved for future use")]
     pub(crate) fn new(status_code: StatusCode, msg: Option<&str>) -> Self {
         Self(
             status_code,

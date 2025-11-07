@@ -11,9 +11,8 @@ use chrono::{DateTime, Utc};
 use tokio_postgres::error::SqlState;
 
 /// Error type for DB operations.
-#[allow(private_interfaces, reason = "used in public ServeError but not intended for public API")]
 #[derive(Debug)]
-pub(crate) enum DbError {
+pub enum DbError {
     #[cfg(feature = "libsql")]
     Libsql(libsql::Error),
     /// This is to handle some type conversions.
