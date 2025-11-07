@@ -101,6 +101,11 @@ pub fn get_local_group_members(group_name: &U16CStr) -> anyhow::Result<Vec<Sid>>
     // - `NetLocalGroupGetMembers` sets `group_members` to a valid pointer on success.
     // - `group_members` must be freed by `NetApiBufferFree`.
     // - For level = 0, bufptr will be set to a pointer to a LOCALGROUP_MEMBERS_INFO_0.
+    // - NetLocalGroupGetMembers returns a properly aligned pointer for LOCALGROUP_MEMBERS_INFO_0.
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "NetLocalGroupGetMembers guarantees proper alignment"
+    )]
     let group_members = unsafe { NetmgmtMemory::from_raw(group_members.cast::<LOCALGROUP_MEMBERS_INFO_0>()) };
 
     // SAFETY:

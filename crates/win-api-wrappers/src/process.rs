@@ -671,10 +671,10 @@ impl Drop for ProcessEnvironment {
             // SAFETY: `ProcessEnvironment` is a private enum, and we ensured that `block` will only
             // ever hold pointers returned by `CreateEnvironmentBlock` in the current module.
             unsafe {
-                if !block.is_null() {
-                    if let Err(error) = DestroyEnvironmentBlock(*block) {
-                        warn!(%error, "Failed to destroy environment block");
-                    }
+                if !block.is_null()
+                    && let Err(error) = DestroyEnvironmentBlock(*block)
+                {
+                    warn!(%error, "Failed to destroy environment block");
                 }
             };
         }
