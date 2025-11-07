@@ -288,9 +288,14 @@ fn doctor_no_args_is_valid() {
 #[test]
 #[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_verify_chain_with_json_output() {
+    #[cfg(unix)]
+    const CHAIN_CHECK_NAME: &str = "rustls_check_chain";
+    #[cfg(windows)]
+    const CHAIN_CHECK_NAME: &str = "schannel_check_chain";
+
     let tempdir = tempfile::tempdir().unwrap();
-    let chain_file_path = tempdir.path().join("devolutions-net-chain.pem");
-    std::fs::write(&chain_file_path, DEVOLUTIONS_NET_CHAIN).unwrap();
+    let chain_file_path = tempdir.path().join("expired-devolutions-net-chain.pem");
+    std::fs::write(&chain_file_path, EXPIRED_DEVOLUTIONS_NET_CHAIN).unwrap();
 
     let output = jetsocat_assert_cmd()
         .args([
@@ -303,7 +308,7 @@ fn doctor_verify_chain_with_json_output() {
             "json",
         ])
         .assert()
-        .success();
+        .failure();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
 
@@ -328,9 +333,17 @@ fn doctor_verify_chain_with_json_output() {
                 _ => panic!("unexpected key: {key}"),
             }
         }
+
+        if entry["name"].as_str().unwrap() == CHAIN_CHECK_NAME {
+            // Since the leaf certificate is expired, this check should fail.
+            assert!(!entry["success"].as_bool().unwrap());
+        } else {
+            // All the other checks should succeed.
+            assert!(entry["success"].as_bool().unwrap());
+        }
     }
 
-    const DEVOLUTIONS_NET_CHAIN: &str = "
+    const EXPIRED_DEVOLUTIONS_NET_CHAIN: &str = "
 -----BEGIN CERTIFICATE-----
 MIIHjDCCBXSgAwIBAgIQA+YDg5H+4+jZc0rMWYNN1zANBgkqhkiG9w0BAQsFADBc
 MQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xNDAyBgNVBAMT
