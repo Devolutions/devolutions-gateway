@@ -288,6 +288,11 @@ fn doctor_no_args_is_valid() {
 #[test]
 #[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_verify_chain_with_json_output() {
+    #[cfg(unix)]
+    const CHAIN_CHECK_NAME: &str = "rustls_check_chain";
+    #[cfg(windows)]
+    const CHAIN_CHECK_NAME: &str = "schannel_check_chain";
+
     let tempdir = tempfile::tempdir().unwrap();
     let chain_file_path = tempdir.path().join("expired-devolutions-net-chain.pem");
     std::fs::write(&chain_file_path, EXPIRED_DEVOLUTIONS_NET_CHAIN).unwrap();
@@ -330,18 +335,13 @@ fn doctor_verify_chain_with_json_output() {
         }
 
         if entry["name"].as_str().unwrap() == CHAIN_CHECK_NAME {
-            // Since the chain is a failure, this check should be failed.
+            // Since the chain is a failure, this check should fail.
             assert!(!entry["success"].as_bool().unwrap());
         } else {
-            // All the other checks should be succeeded.
+            // All the other checks should succeed.
             assert!(entry["success"].as_bool().unwrap());
         }
     }
-
-    #[cfg(unix)]
-    const CHAIN_CHECK_NAME: &str = "rustls_check_chain";
-    #[cfg(windows)]
-    const CHAIN_CHECK_NAME: &str = "schannel_check_chain";
 
     const EXPIRED_DEVOLUTIONS_NET_CHAIN: &str = "
 -----BEGIN CERTIFICATE-----
