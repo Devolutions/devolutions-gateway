@@ -134,6 +134,14 @@ impl Db {
     }
 }
 
+// FIXME: This is used in public ServeError but flagged as unreachable on Linux. Investigate if it should be re-exported or kept internal.
+#[cfg_attr(
+    not(windows),
+    expect(
+        unreachable_pub,
+        reason = "used in public ServeError but flagged as unreachable on Linux"
+    )
+)]
 #[derive(Debug)]
 pub enum InitSchemaError {
     VersionMismatch { expected: i16, actual: i16 },
