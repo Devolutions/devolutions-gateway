@@ -38,9 +38,7 @@ impl Policy {
             None => bail!(Error::AccessDenied),
         };
 
-        if profile.target_must_be_signed
-            && request.target.signature.status != AuthenticodeSignatureStatus::Valid
-        {
+        if profile.target_must_be_signed && request.target.signature.status != AuthenticodeSignatureStatus::Valid {
             bail!(Error::AccessDenied)
         }
 

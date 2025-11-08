@@ -29,9 +29,7 @@ async fn get_jit_elevation_logs(
     NoApi(Db(db)): NoApi<Db>,
     Json(query_options): Json<JitElevationLogQueryOptions>,
 ) -> Result<Json<JitElevationLogPage>, Error> {
-    if query_options.user.as_ref() != Some(&named_pipe_info.user)
-        && !named_pipe_info.token.is_elevated()?
-    {
+    if query_options.user.as_ref() != Some(&named_pipe_info.user) && !named_pipe_info.token.is_elevated()? {
         return Err(Error::AccessDenied);
     }
 
