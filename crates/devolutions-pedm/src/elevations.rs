@@ -8,14 +8,14 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-#[expect(dead_code, reason = "work in progress feature")]
+#[cfg_attr(not(windows), expect(dead_code, reason = "work in progress feature"))]
 #[derive(Clone)]
 pub(crate) enum Elevation {
     Temporary(Instant),
     Session,
 }
 
-#[expect(dead_code, reason = "work in progress feature")]
+#[cfg_attr(not(windows), expect(dead_code, reason = "work in progress feature"))]
 fn elevations() -> &'static RwLock<HashMap<User, Elevation>> {
     static ELEVATIONS: OnceLock<RwLock<HashMap<User, Elevation>>> = OnceLock::new();
     ELEVATIONS.get_or_init(|| RwLock::new(HashMap::new()))

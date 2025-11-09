@@ -129,8 +129,15 @@ impl DbError {
 
 /// A custom error type equivalent for `chrono::LocalResult`.
 #[cfg(feature = "libsql")]
+#[cfg_attr(
+    not(windows),
+    expect(
+        unreachable_pub,
+        reason = "used in public DbError but flagged as unreachable on Linux"
+    )
+)]
 #[derive(Debug)]
-pub(crate) enum ParseTimestampError {
+pub enum ParseTimestampError {
     None,
     /// This should be unreachable when using UTC.
     Ambiguous(DateTime<Utc>, DateTime<Utc>),
@@ -154,8 +161,15 @@ impl fmt::Display for ParseTimestampError {
 }
 
 #[cfg(feature = "libsql")]
+#[cfg_attr(
+    not(windows),
+    expect(
+        unreachable_pub,
+        reason = "used in public DbError but flagged as unreachable on Linux"
+    )
+)]
 #[derive(Debug)]
-pub(crate) struct InvalidEnumError {
+pub struct InvalidEnumError {
     pub value: i64,
     pub enum_name: &'static str,
 }
@@ -170,8 +184,15 @@ impl fmt::Display for InvalidEnumError {
 impl Error for InvalidEnumError {}
 
 #[cfg(feature = "libsql")]
+#[cfg_attr(
+    not(windows),
+    expect(
+        unreachable_pub,
+        reason = "used in public DbError but flagged as unreachable on Linux"
+    )
+)]
 #[derive(Debug)]
-pub(crate) struct DataIntegrityError {
+pub struct DataIntegrityError {
     pub message: &'static str,
 }
 
