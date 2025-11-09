@@ -280,7 +280,16 @@ fn start_listener() {
             .build()
             .expect("failed to build Tokio runtime")
             .block_on(async {
-                while let Some(command) = channels().rx.lock().recv().await {
+                loop {
+                    let command = {
+                        let mut rx = channels().rx.lock();
+                        rx.recv().await
+                    };
+
+                    let Some(command) = command else {
+                        break;
+                    };
+
                     match command {
                         ChannelCommand::Exit => break,
                         ChannelCommand::Elevate(path) => {
