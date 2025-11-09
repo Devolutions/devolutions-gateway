@@ -55,7 +55,7 @@ mod lib_win {
                     )
                 };
 
-                interface.set_handlers(hooks)?;
+                interface.set_handlers(&hooks)?;
             }
         }
 
