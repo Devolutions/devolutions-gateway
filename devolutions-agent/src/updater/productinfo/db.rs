@@ -65,51 +65,63 @@ mod tests {
         let input = include_str!("../../../test_assets/test_asset_db");
         let db: ProductInfoDb = input.parse().unwrap();
 
-        assert_eq!(db.get("Gatewaybin").unwrap().version, "2024.2.1.0");
+        assert_eq!(db.get("Gatewaybin").expect("product not found").version, "2024.2.1.0");
         assert_eq!(
-            db.get("Gatewaybin").unwrap().url,
+            db.get("Gatewaybin").expect("product not found").url,
             "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi"
         );
         assert_eq!(
-            db.get("Gatewaybin").unwrap().hash.as_deref(),
+            db.get("Gatewaybin").expect("product not found").hash.as_deref(),
             Some("BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35")
         );
 
-        assert_eq!(db.get("GatewaybinBeta").unwrap().version, "2024.2.1.0");
         assert_eq!(
-            db.get("GatewaybinBeta").unwrap().url,
+            db.get("GatewaybinBeta").expect("product not found").version,
+            "2024.2.1.0"
+        );
+        assert_eq!(
+            db.get("GatewaybinBeta").expect("product not found").url,
             "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi"
         );
         assert_eq!(
-            db.get("GatewaybinBeta").unwrap().hash.as_deref(),
+            db.get("GatewaybinBeta").expect("product not found").hash.as_deref(),
             Some("BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35")
         );
 
-        assert_eq!(db.get("GatewaybinDebX64").unwrap().version, "2024.2.1.0");
         assert_eq!(
-            db.get("GatewaybinDebX64").unwrap().url,
+            db.get("GatewaybinDebX64").expect("product not found").version,
+            "2024.2.1.0"
+        );
+        assert_eq!(
+            db.get("GatewaybinDebX64").expect("product not found").url,
             "https://cdn.devolutions.net/download/devolutions-gateway_2024.2.1.0_amd64.deb"
         );
         assert_eq!(
-            db.get("GatewaybinDebX64").unwrap().hash.as_deref(),
+            db.get("GatewaybinDebX64").expect("product not found").hash.as_deref(),
             Some("72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA")
         );
 
-        assert_eq!(db.get("GatewaybinDebX64Beta").unwrap().version, "2024.2.1.0");
         assert_eq!(
-            db.get("GatewaybinDebX64Beta").unwrap().url,
+            db.get("GatewaybinDebX64Beta").expect("product not found").version,
+            "2024.2.1.0"
+        );
+        assert_eq!(
+            db.get("GatewaybinDebX64Beta").expect("product not found").url,
             "https://cdn.devolutions.net/download/devolutions-gateway_2024.2.1.0_amd64.deb"
         );
         assert_eq!(
-            db.get("GatewaybinDebX64Beta").unwrap().hash.as_deref(),
+            db.get("GatewaybinDebX64Beta")
+                .expect("product not found")
+                .hash
+                .as_deref(),
             Some("72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA")
         );
 
-        assert_eq!(db.get("DevoCLIbin").unwrap().version, "2023.3.0.0");
+        assert_eq!(db.get("DevoCLIbin").expect("product not found").version, "2023.3.0.0");
         assert_eq!(
-            db.get("DevoCLIbin").unwrap().url,
+            db.get("DevoCLIbin").expect("product not found").url,
             "https://cdn.devolutions.net/download/DevoCLI.2023.3.0.0.zip"
         );
-        assert_eq!(db.get("DevoCLIbin").unwrap().hash, None);
+        assert_eq!(db.get("DevoCLIbin").expect("product not found").hash, None);
     }
 }
