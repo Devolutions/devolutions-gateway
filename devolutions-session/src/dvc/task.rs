@@ -520,7 +520,7 @@ impl MessageProcessor {
         let parameters = WideString::from("");
         let operation = WideString::from("open");
         let command: WideString = WideString::from(params.command());
-        let directory = params.directory().map(|dir| WideString::from(dir));
+        let directory = params.directory().map(WideString::from);
 
         info!(session_id, "Executing ShellExecuteW");
 
