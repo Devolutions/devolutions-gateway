@@ -76,7 +76,7 @@ mod lib_win {
             origs.insert(interface.id(), handlers);
 
             if let Some(orig_handlers) = origs.get(&interface.id()) {
-                interface.set_handlers(&orig_handlers)?;
+                interface.set_handlers(orig_handlers)?;
             }
         }
 
