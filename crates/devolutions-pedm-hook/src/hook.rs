@@ -37,21 +37,24 @@ pub unsafe extern "system" fn rai_launch_admin_process(
     process_information: *mut APP_PROCESS_INFORMATION, // out
     elevation_type: *mut u32,                          // out
 ) {
-    let result = rai_launch_admin_process_handler(
-        state,
-        RpcBindingHandle(binding),
-        executable_path.to_path_safe().ok().as_deref(),
-        command_line.to_string().ok().as_deref(),
-        start_flags,
-        PROCESS_CREATION_FLAGS(creation_flags),
-        working_directory.to_path_safe().ok().as_deref(),
-        window_station.to_string().ok().as_deref(),
-        &*startup_info,
-        hwnd,
-        timeout,
-        &mut *process_information,
-        &mut *elevation_type,
-    );
+    // SAFETY: All pointers are assumed valid by the function contract.
+    let result = unsafe {
+        rai_launch_admin_process_handler(
+            state,
+            RpcBindingHandle(binding),
+            executable_path.to_path_safe().ok().as_deref(),
+            command_line.to_string().ok().as_deref(),
+            start_flags,
+            PROCESS_CREATION_FLAGS(creation_flags),
+            working_directory.to_path_safe().ok().as_deref(),
+            window_station.to_string().ok().as_deref(),
+            &*startup_info,
+            hwnd,
+            timeout,
+            &mut *process_information,
+            &mut *elevation_type,
+        )
+    };
 
     let reply: i32 = match result {
         Ok(()) => RPC_S_OK.0,
@@ -72,6 +75,7 @@ pub unsafe extern "system" fn rai_launch_admin_process(
     }
 }
 
+#[expect(clippy::too_many_arguments, reason = "matching Windows API signature")]
 fn rai_launch_admin_process_handler(
     _state: *mut RPC_ASYNC_STATE, // in, out
     binding: RpcBindingHandle,    // in

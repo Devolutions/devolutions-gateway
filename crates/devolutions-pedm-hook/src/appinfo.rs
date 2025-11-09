@@ -45,6 +45,7 @@ pub struct APP_PROCESS_INFORMATION {
 }
 
 /// Built from https://github.com/hfiref0x/UACME/blob/master/Source/Akagi/appinfo/x64/appinfo64.h
+#[expect(dead_code, reason = "type definition for future use")]
 pub type RAiLaunchAdminProcess = extern "C" fn(
     async_handle: *const RPC_ASYNC_STATE,
     binding: *const RPC_SERVER_INTERFACE,
@@ -82,7 +83,7 @@ pub fn rpc_server_register_if_ex_hook() -> &'static GenericDetour<RpcServerRegis
             .expect("failed to find RpcServerRegisterIfEx");
 
         // SAFETY: We assume rpcrt4.dll's RpcServerRegisterIfEx has correct signature.
-        let orig = unsafe { mem::transmute::<_, RpcServerRegisterIfExHook>(orig) };
+        let orig = unsafe { mem::transmute::<*const c_void, RpcServerRegisterIfExHook>(orig) };
 
         unsafe { GenericDetour::new(orig, rpc_server_register_if_ex as _).expect("RpcServerRegisterIfEx hook failed") }
     })
@@ -119,7 +120,8 @@ pub unsafe fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
         unsafe { mem::transmute::<_, FnAiEnableDesktopRpcInterface>(orig) }
     };
 
-    FUN.get_or_init(init)()
+    // SAFETY: Calling the function pointer obtained from appinfo.dll.
+    unsafe { FUN.get_or_init(init)() }
 }
 
 type FnAiDisableDesktopRpcInterface = unsafe extern "system" fn();
@@ -136,7 +138,8 @@ pub unsafe fn ai_disable_desktop_rpc_interface() {
         unsafe { mem::transmute::<_, FnAiDisableDesktopRpcInterface>(orig) }
     };
 
-    FUN.get_or_init(init)()
+    // SAFETY: Calling the function pointer obtained from appinfo.dll.
+    unsafe { FUN.get_or_init(init)() }
 }
 
 pub unsafe fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
@@ -146,14 +149,19 @@ pub unsafe fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
         handles.clear();
     }
 
-    ai_disable_desktop_rpc_interface();
-    if let Err(err) = rpc_server_register_if_ex_hook().enable() {
-        let _ = ai_enable_desktop_rpc_interface();
+    // SAFETY: Function is unsafe by contract.
+    unsafe { ai_disable_desktop_rpc_interface() };
+    // SAFETY: Enabling the hook to intercept RPC calls.
+    if let Err(err) = unsafe { rpc_server_register_if_ex_hook().enable() } {
+        // SAFETY: Function is unsafe by contract.
+        let _ = unsafe { ai_enable_desktop_rpc_interface() };
         bail!(err);
     }
 
-    let _ = ai_enable_desktop_rpc_interface();
-    if let Err(err) = rpc_server_register_if_ex_hook().disable() {
+    // SAFETY: Function is unsafe by contract.
+    let _ = unsafe { ai_enable_desktop_rpc_interface() };
+    // SAFETY: Disabling the hook after capturing interface information.
+    if let Err(err) = unsafe { rpc_server_register_if_ex_hook().disable() } {
         bail!(err);
     }
 
