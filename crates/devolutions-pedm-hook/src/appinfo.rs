@@ -107,7 +107,7 @@ extern "system" fn rpc_server_register_if_ex(
 }
 
 type FnAiEnableDesktopRpcInterface = unsafe extern "system" fn() -> RPC_STATUS;
-pub unsafe fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
+pub fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
     static FUN: OnceLock<FnAiEnableDesktopRpcInterface> = OnceLock::new();
 
     let init = || {
@@ -116,16 +116,16 @@ pub unsafe fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
             .resolve_symbol("AiEnableDesktopRpcInterface")
             .expect("failed to find AiEnableDesktopRpcInterface");
 
-        // SAFETY: We assume appinfo.dll's AiEnableDesktopRpcInterface has decompiled signature.
+        // SAFETY: We assume appinfo.dll's AiEnableDesktopRpcInterface has the correct decompiled signature.
         unsafe { mem::transmute::<_, FnAiEnableDesktopRpcInterface>(orig) }
     };
 
-    // SAFETY: Calling the function pointer obtained from appinfo.dll.
+    // SAFETY: Calling the dynamically loaded AiEnableDesktopRpcInterface function from appinfo.dll.
     unsafe { FUN.get_or_init(init)() }
 }
 
 type FnAiDisableDesktopRpcInterface = unsafe extern "system" fn();
-pub unsafe fn ai_disable_desktop_rpc_interface() {
+pub fn ai_disable_desktop_rpc_interface() {
     static FUN: OnceLock<FnAiDisableDesktopRpcInterface> = OnceLock::new();
 
     let init = || {
@@ -134,11 +134,11 @@ pub unsafe fn ai_disable_desktop_rpc_interface() {
             .resolve_symbol("AiDisableDesktopRpcInterface")
             .expect("failed to find AiDisableDesktopRpcInterface");
 
-        // SAFETY: We assume appinfo.dll's AiDisableDesktopRpcInterface has decompiled signature.
+        // SAFETY: We assume appinfo.dll's AiDisableDesktopRpcInterface has the correct decompiled signature.
         unsafe { mem::transmute::<_, FnAiDisableDesktopRpcInterface>(orig) }
     };
 
-    // SAFETY: Calling the function pointer obtained from appinfo.dll.
+    // SAFETY: Calling the dynamically loaded AiDisableDesktopRpcInterface function from appinfo.dll.
     unsafe { FUN.get_or_init(init)() }
 }
 
@@ -150,16 +150,16 @@ pub fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
     }
 
     // SAFETY: Calling Windows API function to disable RPC interface.
-    unsafe { ai_disable_desktop_rpc_interface() };
+    ai_disable_desktop_rpc_interface();
     // SAFETY: Enabling the hook to intercept RPC calls.
     if let Err(err) = unsafe { rpc_server_register_if_ex_hook().enable() } {
         // SAFETY: Calling Windows API function to enable RPC interface.
-        let _ = unsafe { ai_enable_desktop_rpc_interface() };
+        let _ = ai_enable_desktop_rpc_interface();
         bail!(err);
     }
 
     // SAFETY: Calling Windows API function to enable RPC interface.
-    let _ = unsafe { ai_enable_desktop_rpc_interface() };
+    let _ = ai_enable_desktop_rpc_interface();
     // SAFETY: Disabling the hook after capturing interface information.
     if let Err(err) = unsafe { rpc_server_register_if_ex_hook().disable() } {
         bail!(err);
