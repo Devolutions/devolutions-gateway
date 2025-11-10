@@ -74,7 +74,7 @@ pub(super) fn main() -> anyhow::Result<()> {
             // - This context may not be able to see the same network resources or DC that the interactive user.
             // Causing LookupAccountNameW to fail with a "no mapping" error.
             // Let’s just go ahead with the elevation in this case, assuming LocalSystem is enough for all intents and purposes at this point.
-            #[allow(clippy::cast_possible_wrap)]
+            #[expect(clippy::cast_possible_wrap)]
             if e.code() == HRESULT(0x80070534u32 as i32) {
                 println!("Got the 'no mapping' error; continuing...")
             } else {
