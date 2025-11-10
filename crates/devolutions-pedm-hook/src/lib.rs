@@ -36,7 +36,7 @@ mod lib_win {
             bail!("appinfo.dll not loaded");
         }
 
-        let mut interfaces = unsafe { dump_interfaces() }?;
+        let mut interfaces = dump_interfaces()?;
 
         let mut origs = original_handlers().lock();
         for interface in interfaces.iter_mut() {
@@ -67,7 +67,7 @@ mod lib_win {
             bail!("appinfo.dll not loaded");
         }
 
-        let mut interfaces = unsafe { dump_interfaces() }?;
+        let mut interfaces = dump_interfaces()?;
 
         let mut origs = original_handlers().lock();
         for interface in interfaces.iter_mut() {

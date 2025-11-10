@@ -142,23 +142,23 @@ pub unsafe fn ai_disable_desktop_rpc_interface() {
     unsafe { FUN.get_or_init(init)() }
 }
 
-pub unsafe fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
+pub fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
     // TODO: This is not clean. Add another mutex to guard the actual handles
     {
         let mut handles = INTERFACE_HANDLES.lock();
         handles.clear();
     }
 
-    // SAFETY: Function is unsafe by contract.
+    // SAFETY: Calling Windows API function to disable RPC interface.
     unsafe { ai_disable_desktop_rpc_interface() };
     // SAFETY: Enabling the hook to intercept RPC calls.
     if let Err(err) = unsafe { rpc_server_register_if_ex_hook().enable() } {
-        // SAFETY: Function is unsafe by contract.
+        // SAFETY: Calling Windows API function to enable RPC interface.
         let _ = unsafe { ai_enable_desktop_rpc_interface() };
         bail!(err);
     }
 
-    // SAFETY: Function is unsafe by contract.
+    // SAFETY: Calling Windows API function to enable RPC interface.
     let _ = unsafe { ai_enable_desktop_rpc_interface() };
     // SAFETY: Disabling the hook after capturing interface information.
     if let Err(err) = unsafe { rpc_server_register_if_ex_hook().disable() } {
