@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn test_productinfo_parse() {
         let input = include_str!("../../../test_assets/test_asset_db");
-        let db: ProductInfoDb = input.parse().unwrap();
+        let db: ProductInfoDb = input.parse().expect("failed to parse product info database");
 
         assert_eq!(db.get("Gatewaybin").expect("product not found").version, "2024.2.1.0");
         assert_eq!(
