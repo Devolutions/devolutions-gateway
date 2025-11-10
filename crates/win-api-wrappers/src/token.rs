@@ -938,6 +938,8 @@ impl FromWin32<Security::TOKEN_PRIMARY_GROUP> for TokenPrimaryGroup {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]

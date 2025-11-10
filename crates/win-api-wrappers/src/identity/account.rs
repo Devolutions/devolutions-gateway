@@ -435,6 +435,9 @@ pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::print_stdout)]
+
     use super::*;
 
     use crate::process::Process;

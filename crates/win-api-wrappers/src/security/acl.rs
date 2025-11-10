@@ -262,6 +262,8 @@ pub fn set_named_security_info(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     use crate::token::Token;

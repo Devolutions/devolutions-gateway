@@ -72,19 +72,16 @@ impl VirtualAccountElevator {
 
         groups.push(SidAndAttributes {
             sid: Sid::from_well_known(WinLocalSid, None)?, // S-1-2-0
-            #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
         });
 
         groups.push(SidAndAttributes {
             sid: Sid::from_well_known(WinBuiltinAdministratorsSid, None)?, // S-1-5-32-544
-            #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_OWNER | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0xf
         });
 
         groups.push(SidAndAttributes {
             sid: virtual_account.domain_sid,
-            #[expect(clippy::cast_sign_loss)]
             attributes: (SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as u32, // 0x7
         });
 

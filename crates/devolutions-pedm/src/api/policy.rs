@@ -73,7 +73,7 @@ struct GetProfilesMeResponse {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct PathIdParameter {
+pub(super) struct PathIdParameter {
     pub id: i64,
 }
 
