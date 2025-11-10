@@ -240,6 +240,9 @@ impl Drop for ScopedPrivileges<'_> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::print_stdout)]
+
     use super::*;
 
     #[test]
@@ -282,7 +285,7 @@ mod tests {
 
         // Verify the attribute for the privilege has been adjusted.
         for privilege in privileges.token().privileges().unwrap().as_slice() {
-            found = privileges.token_privileges.iter().any(|luid| privilege.Luid == *luid);
+            found = privileges.token_privileges.contains(&privilege.Luid);
 
             if found {
                 assert_eq!(privilege.Attributes.0, 2);
