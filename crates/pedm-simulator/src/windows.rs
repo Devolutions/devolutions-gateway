@@ -1,3 +1,5 @@
+#![allow(clippy::print_stdout)]
+
 use anyhow::Context as _;
 use win_api_wrappers::identity::account::{enumerate_account_rights, get_username, lookup_account_by_name};
 use win_api_wrappers::identity::sid::{Sid, SidAndAttributes};
@@ -59,8 +61,7 @@ pub(super) fn main() -> anyhow::Result<()> {
                     .context("list token privileges")?
                     .as_slice()
                     .iter()
-                    .find(|privilege| privilege.Luid == se_create_token_name_luid)
-                    .is_some();
+                    .any(|privilege| privilege.Luid == se_create_token_name_luid);
 
                 assert!(se_create_token_name_is_enabled);
             }
@@ -73,6 +74,7 @@ pub(super) fn main() -> anyhow::Result<()> {
             // - This context may not be able to see the same network resources or DC that the interactive user.
             // Causing LookupAccountNameW to fail with a "no mapping" error.
             // Let’s just go ahead with the elevation in this case, assuming LocalSystem is enough for all intents and purposes at this point.
+            #[allow(clippy::cast_possible_wrap)]
             if e.code() == HRESULT(0x80070534u32 as i32) {
                 println!("Got the 'no mapping' error; continuing...")
             } else {
@@ -95,7 +97,6 @@ pub(super) fn main() -> anyhow::Result<()> {
 
     groups.push(SidAndAttributes {
         sid: Sid::from_well_known(Security::WinLocalAccountAndAdministratorSid, None)?,
-        #[expect(clippy::cast_sign_loss)]
         attributes: (SystemServices::SE_GROUP_ENABLED
             | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
             | SystemServices::SE_GROUP_MANDATORY) as u32,
@@ -103,7 +104,6 @@ pub(super) fn main() -> anyhow::Result<()> {
 
     groups.push(SidAndAttributes {
         sid: owner_sid.clone(),
-        #[expect(clippy::cast_sign_loss)]
         attributes: (SystemServices::SE_GROUP_ENABLED
             | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
             | SystemServices::SE_GROUP_MANDATORY
@@ -112,7 +112,6 @@ pub(super) fn main() -> anyhow::Result<()> {
 
     groups.push(SidAndAttributes {
         sid: Sid::from_well_known(Security::WinHighLabelSid, None)?,
-        #[expect(clippy::cast_sign_loss)]
         attributes: (SystemServices::SE_GROUP_ENABLED
             | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
             | SystemServices::SE_GROUP_MANDATORY) as u32,
