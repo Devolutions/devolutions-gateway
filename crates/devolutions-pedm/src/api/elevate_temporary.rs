@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::err::HandlerError;
 
+#[expect(dead_code, reason = "work in progress feature")]
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct ElevateTemporaryPayload {
@@ -13,6 +14,7 @@ pub(crate) struct ElevateTemporaryPayload {
 }
 
 /// Temporarily elevates the user's session.
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) async fn elevate_temporary() -> Result<(), HandlerError> {
     unimplemented!()
 }

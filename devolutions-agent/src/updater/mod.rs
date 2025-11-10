@@ -397,7 +397,8 @@ mod tests {
             revision: 0,
         };
 
-        let new_url = try_modify_product_url_version(url, original_version, target_version).unwrap();
+        let new_url = try_modify_product_url_version(url, original_version, target_version)
+            .expect("failed to modify product URL version");
         assert_eq!(
             new_url,
             "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.4.0.0.msi"

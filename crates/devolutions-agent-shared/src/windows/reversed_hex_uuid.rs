@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn convert_reversed_hex_to_uuid() {
         assert_eq!(
-            reversed_hex_to_uuid("C3D81328F118D5D4A9287B3CB1707655").unwrap(),
+            reversed_hex_to_uuid("C3D81328F118D5D4A9287B3CB1707655").expect("failed to convert reversed hex to UUID"),
             uuid::uuid!("{82318D3C-811F-4D5D-9A82-B7C31B076755}")
         );
     }

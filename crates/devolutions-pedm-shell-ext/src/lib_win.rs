@@ -10,7 +10,8 @@ use std::{ptr, thread};
 use devolutions_pedm_shared::client::models::{LaunchPayload, StartupInfoDto};
 use devolutions_pedm_shared::client::{self};
 use devolutions_pedm_shared::desktop;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::fs::get_system32_path;
 use win_api_wrappers::process::{Module, Process};
@@ -280,7 +281,7 @@ fn start_listener() {
             .build()
             .expect("failed to build Tokio runtime")
             .block_on(async {
-                while let Some(command) = channels().rx.lock().recv().await {
+                while let Some(command) = channels().rx.lock().await.recv().await {
                     match command {
                         ChannelCommand::Exit => break,
                         ChannelCommand::Elevate(path) => {

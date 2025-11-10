@@ -2,6 +2,7 @@ use axum::Json;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(not(windows), expect(dead_code, reason = "work in progress feature"))]
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct TemporaryElevationStatus {
@@ -10,12 +11,14 @@ pub(crate) struct TemporaryElevationStatus {
     pub(crate) time_left: u64,
 }
 
+#[cfg_attr(not(windows), expect(dead_code, reason = "work in progress feature"))]
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct SessionElevationStatus {
     pub(crate) enabled: bool,
 }
 
+#[cfg_attr(not(windows), expect(dead_code, reason = "work in progress feature"))]
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct StatusResponse {
@@ -24,6 +27,7 @@ pub(crate) struct StatusResponse {
     pub(crate) session: SessionElevationStatus,
 }
 
+#[expect(dead_code, reason = "work in progress feature")]
 pub(crate) async fn get_status() -> Json<StatusResponse> {
     unimplemented!()
 }
