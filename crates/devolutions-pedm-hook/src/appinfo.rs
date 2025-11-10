@@ -149,16 +149,13 @@ pub fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
         handles.clear();
     }
 
-    // SAFETY: Calling Windows API function to disable RPC interface.
     ai_disable_desktop_rpc_interface();
     // SAFETY: Enabling the hook to intercept RPC calls.
     if let Err(err) = unsafe { rpc_server_register_if_ex_hook().enable() } {
-        // SAFETY: Calling Windows API function to enable RPC interface.
         let _ = ai_enable_desktop_rpc_interface();
         bail!(err);
     }
 
-    // SAFETY: Calling Windows API function to enable RPC interface.
     let _ = ai_enable_desktop_rpc_interface();
     // SAFETY: Disabling the hook after capturing interface information.
     if let Err(err) = unsafe { rpc_server_register_if_ex_hook().disable() } {
