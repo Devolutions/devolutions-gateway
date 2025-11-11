@@ -316,6 +316,16 @@ impl MessageProcessor {
         Ok(())
     }
 
+    async fn send_detached_process_success(&self, session_id: u32) -> Result<(), ExecError> {
+        self.io_notification_tx
+            .send(ServerChannelEvent::SessionExited {
+                session_id,
+                exit_code: 0,
+            })
+            .await?;
+        Ok(())
+    }
+
     pub(crate) async fn process_message(
         &mut self,
         message: NowMessage<'static>,
@@ -567,6 +577,13 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
+        if exec_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_process.run_detached(exec_msg.session_id())?;
+            self.send_detached_process_success(exec_msg.session_id()).await?;
+            return Ok(());
+        }
+
         let process = run_process
             .with_io_redirection(exec_msg.is_with_io_redirection())
             .run(exec_msg.session_id(), self.io_notification_tx.clone())?;
@@ -592,6 +609,13 @@ impl MessageProcessor {
 
         if let Some(directory) = batch_msg.directory() {
             run_batch = run_batch.with_current_directory(directory);
+        }
+
+        if batch_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_batch.run_detached(batch_msg.session_id())?;
+            self.send_detached_process_success(batch_msg.session_id()).await?;
+            return Ok(());
         }
 
         let process = run_batch
@@ -638,6 +662,13 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
+        if winps_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_process.run_detached(winps_msg.session_id())?;
+            self.send_detached_process_success(winps_msg.session_id()).await?;
+            return Ok(());
+        }
+
         let process = run_process
             .with_io_redirection(winps_msg.is_with_io_redirection())
             .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
@@ -682,6 +713,13 @@ impl MessageProcessor {
 
         if let Some(directory) = winps_msg.directory() {
             run_process = run_process.with_current_directory(directory);
+        }
+
+        if winps_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_process.run_detached(winps_msg.session_id())?;
+            self.send_detached_process_success(winps_msg.session_id()).await?;
+            return Ok(());
         }
 
         let process = run_process
