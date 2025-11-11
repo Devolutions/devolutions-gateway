@@ -316,6 +316,16 @@ impl MessageProcessor {
         Ok(())
     }
 
+    async fn send_detached_process_success(&self, session_id: u32) -> Result<(), ExecError> {
+        self.io_notification_tx
+            .send(ServerChannelEvent::SessionExited {
+                session_id,
+                exit_code: 0,
+            })
+            .await?;
+        Ok(())
+    }
+
     pub(crate) async fn process_message(
         &mut self,
         message: NowMessage<'static>,
@@ -570,15 +580,7 @@ impl MessageProcessor {
         if exec_msg.is_detached() {
             // Detached mode: fire-and-forget, no IO redirection
             run_process.run_detached(exec_msg.session_id())?;
-
-            // Send success immediately for detached processes
-            self.io_notification_tx
-                .send(ServerChannelEvent::SessionExited {
-                    session_id: exec_msg.session_id(),
-                    exit_code: 0,
-                })
-                .await?;
-
+            self.send_detached_process_success(exec_msg.session_id()).await?;
             return Ok(());
         }
 
@@ -612,15 +614,7 @@ impl MessageProcessor {
         if batch_msg.is_detached() {
             // Detached mode: fire-and-forget, no IO redirection
             run_batch.run_detached(batch_msg.session_id())?;
-
-            // Send success immediately for detached processes
-            self.io_notification_tx
-                .send(ServerChannelEvent::SessionExited {
-                    session_id: batch_msg.session_id(),
-                    exit_code: 0,
-                })
-                .await?;
-
+            self.send_detached_process_success(batch_msg.session_id()).await?;
             return Ok(());
         }
 
@@ -671,15 +665,7 @@ impl MessageProcessor {
         if winps_msg.is_detached() {
             // Detached mode: fire-and-forget, no IO redirection
             run_process.run_detached(winps_msg.session_id())?;
-
-            // Send success immediately for detached processes
-            self.io_notification_tx
-                .send(ServerChannelEvent::SessionExited {
-                    session_id: winps_msg.session_id(),
-                    exit_code: 0,
-                })
-                .await?;
-
+            self.send_detached_process_success(winps_msg.session_id()).await?;
             return Ok(());
         }
 
@@ -732,15 +718,7 @@ impl MessageProcessor {
         if winps_msg.is_detached() {
             // Detached mode: fire-and-forget, no IO redirection
             run_process.run_detached(winps_msg.session_id())?;
-
-            // Send success immediately for detached processes
-            self.io_notification_tx
-                .send(ServerChannelEvent::SessionExited {
-                    session_id: winps_msg.session_id(),
-                    exit_code: 0,
-                })
-                .await?;
-
+            self.send_detached_process_success(winps_msg.session_id()).await?;
             return Ok(());
         }
 
