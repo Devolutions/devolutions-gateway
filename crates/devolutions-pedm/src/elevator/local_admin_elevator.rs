@@ -49,7 +49,6 @@ impl Elevator for LocalAdminElevator {
 
         groups.push(SidAndAttributes {
             sid: Sid::from_well_known(Security::WinLocalAccountAndAdministratorSid, None)?,
-            #[expect(clippy::cast_sign_loss)]
             attributes: (SystemServices::SE_GROUP_ENABLED
                 | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
                 | SystemServices::SE_GROUP_MANDATORY) as u32,
@@ -57,7 +56,6 @@ impl Elevator for LocalAdminElevator {
 
         groups.push(SidAndAttributes {
             sid: owner_sid.clone(),
-            #[expect(clippy::cast_sign_loss)]
             attributes: (SystemServices::SE_GROUP_ENABLED
                 | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
                 | SystemServices::SE_GROUP_MANDATORY
@@ -66,7 +64,6 @@ impl Elevator for LocalAdminElevator {
 
         groups.push(SidAndAttributes {
             sid: Sid::from_well_known(Security::WinHighLabelSid, None)?,
-            #[expect(clippy::cast_sign_loss)]
             attributes: (SystemServices::SE_GROUP_ENABLED
                 | SystemServices::SE_GROUP_ENABLED_BY_DEFAULT
                 | SystemServices::SE_GROUP_MANDATORY) as u32,

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::{ptr, slice};
 
 use anyhow::{Context, Result, bail};
+use tracing::{error, warn};
 use windows::Win32::Foundation::{
     E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM, MAX_PATH,
     WAIT_EVENT, WAIT_FAILED, WPARAM,
@@ -670,10 +671,10 @@ impl Drop for ProcessEnvironment {
             // SAFETY: `ProcessEnvironment` is a private enum, and we ensured that `block` will only
             // ever hold pointers returned by `CreateEnvironmentBlock` in the current module.
             unsafe {
-                if !block.is_null() {
-                    if let Err(error) = DestroyEnvironmentBlock(*block) {
-                        warn!(%error, "Failed to destroy environment block");
-                    }
+                if !block.is_null()
+                    && let Err(error) = DestroyEnvironmentBlock(*block)
+                {
+                    warn!(%error, "Failed to destroy environment block");
                 }
             };
         }

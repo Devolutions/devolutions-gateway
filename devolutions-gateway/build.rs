@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, reason = "panics are build script errors")]
+
 fn main() {
     #[cfg(target_os = "windows")]
     win::embed_version_rc();
@@ -27,7 +29,7 @@ mod win {
         let company_name = "Devolutions Inc.";
         let legal_copyright = format!("Copyright 2020-2023 {}", company_name);
 
-        let version_number = env::var("CARGO_PKG_VERSION").unwrap() + ".0";
+        let version_number = format!("{}.0", env::var("CARGO_PKG_VERSION").unwrap());
         let version_commas = version_number.replace('.', ",");
         let file_description = output_name;
         let file_version = version_number.clone();

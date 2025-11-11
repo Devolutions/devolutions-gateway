@@ -94,6 +94,10 @@ pub(crate) fn file_hash(path: &Path) -> anyhow::Result<Hash> {
     Ok(hasher.finalize())
 }
 
+#[expect(
+    dead_code,
+    reason = "reserved for future use, underlying behaviour of security primitives must be corrected before this can work"
+)]
 pub(crate) fn ensure_protected_directory(dir: &Path, _readers: Vec<Sid>) -> anyhow::Result<()> {
     // FIXME: Underlying behaviour of security primitives must be corrected before this can work
 

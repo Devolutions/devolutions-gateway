@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use tracing::error;
+
 /// Guard for created temporary file. Associated file is deleted on drop.
 pub struct TmpFileGuard(PathBuf);
 

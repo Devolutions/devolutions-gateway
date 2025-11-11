@@ -1,5 +1,7 @@
 #![allow(unused_crate_dependencies)]
 
+use std::sync::Arc;
+
 use network_scanner::broadcast::asynchronous::broadcast;
 use network_scanner::ip_utils::get_subnets;
 use network_scanner::task_utils::TaskManager;
@@ -18,7 +20,7 @@ pub async fn main() -> anyhow::Result<()> {
     let mut handles = vec![];
     for subnet in subnets {
         tracing::info!("Broadcast: {:?}", subnet.broadcast);
-        let runtime = runtime.clone();
+        let runtime = Arc::clone(&runtime);
         let handle = tokio::spawn(async move {
             let mut receiver = broadcast(subnet.broadcast, Duration::from_secs(3), runtime, TaskManager::new())
                 .await

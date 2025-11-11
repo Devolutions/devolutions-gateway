@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use tracing::error;
 use windows::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_NO_TOKEN, HANDLE};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::RemoteDesktop::{
@@ -216,9 +217,9 @@ pub fn send_message_to_session(
             Some(WTS_CURRENT_SERVER_HANDLE),
             session_id,
             title.as_pcwstr(),
-            (title.0.unwrap().len() * size_of_val(&0u16)).try_into()?,
+            (title.0.expect("title buffer is always Some").len() * size_of_val(&0u16)).try_into()?,
             message.as_pcwstr(),
-            (message.0.unwrap().len() * size_of_val(&0u16)).try_into()?,
+            (message.0.expect("message buffer is always Some").len() * size_of_val(&0u16)).try_into()?,
             windows::Win32::UI::WindowsAndMessaging::MB_SYSTEMMODAL
                 | windows::Win32::UI::WindowsAndMessaging::MB_SETFOREGROUND,
             timeout_in_seconds,

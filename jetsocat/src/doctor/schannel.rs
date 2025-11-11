@@ -26,13 +26,13 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
 
     if let Some(chain_path) = &args.chain_path {
         diagnostic!(callback, schannel_read_chain(&chain_path, &mut chain_ctx));
-    } else if let Some(subject_name) = args.subject_name.as_deref() {
-        if args.allow_network {
-            diagnostic!(
-                callback,
-                schannel_fetch_chain(&mut chain_ctx, subject_name, args.server_port)
-            );
-        }
+    } else if let Some(subject_name) = args.subject_name.as_deref()
+        && args.allow_network
+    {
+        diagnostic!(
+            callback,
+            schannel_fetch_chain(&mut chain_ctx, subject_name, args.server_port)
+        );
     }
 
     if let Some(subject_name) = args.subject_name.as_deref() {

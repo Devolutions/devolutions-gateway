@@ -167,6 +167,8 @@ async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<Socket
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use super::*;
 
     async fn assert_encoding(addr: DestAddr, userid: &str, encoded: &[u8]) {

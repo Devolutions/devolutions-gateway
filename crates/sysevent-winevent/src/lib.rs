@@ -20,7 +20,7 @@ impl WinEvent {
     /// The source name should match a registered event source in the Windows Registry
     /// for proper message formatting and categorization.
     pub fn new(source_name: &str) -> Result<Self, SysEventError> {
-        let source_name_utf16 = to_null_terminated_utf16(source_name.as_ref());
+        let source_name_utf16 = to_null_terminated_utf16(source_name);
 
         // SAFETY: Proper UTF-16, null-terminated string.
         let handle = unsafe { EventLog::RegisterEventSourceW(std::ptr::null(), source_name_utf16.as_ptr()) };
@@ -70,6 +70,10 @@ impl WinEvent {
 
         // Prepare strings for structured logging.
         let mut string_ptrs = Vec::new(); // Will be actually used as the parameter of the FFI function.
+        #[expect(
+            clippy::collection_is_never_read,
+            reason = "string_ptrs hold pointers to the string we store inside this Vec"
+        )]
         let mut utf16_strings = Vec::new(); // Keep the UTF-16 strings alive.
 
         // Add the English message as the first parameter for debugging context.

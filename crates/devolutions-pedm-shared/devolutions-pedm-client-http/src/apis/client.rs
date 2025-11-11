@@ -8,9 +8,9 @@ pub struct APIClient {
 }
 
 impl APIClient {
-    pub fn new<C: hyper::client::connect::Connect>(configuration: Configuration<C>) -> APIClient
+    pub fn new<C>(configuration: Configuration<C>) -> APIClient
     where
-        C: Clone + std::marker::Send + Sync + 'static,
+        C: hyper::client::connect::Connect + Clone + std::marker::Send + Sync + 'static,
     {
         let rc = Rc::new(configuration);
 

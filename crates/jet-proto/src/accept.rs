@@ -51,31 +51,30 @@ impl JetAcceptReq {
                 .and_then(|version| version.parse::<u32>().ok());
             let host_opt = request.get_header_value(JET_HEADER_HOST);
 
-            if let (Some(version), Some(host)) = (version_opt, host_opt) {
-                if let Some(path) = request.path {
-                    if path.starts_with("/jet/accept") {
-                        if let (Some(association_id), Some(candidate_id)) =
-                            (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3))
-                        {
-                            return Ok(JetAcceptReq {
-                                version,
-                                host: host.to_owned(),
-                                association: association_id,
-                                candidate: candidate_id,
-                            });
-                        }
-                    } else if path.eq("/") {
-                        if let Some(jet_method) = request.get_header_value(JET_HEADER_METHOD) {
-                            if jet_method.to_lowercase().eq("accept") {
-                                return Ok(JetAcceptReq {
-                                    version,
-                                    host: host.to_owned(),
-                                    association: Uuid::nil(),
-                                    candidate: Uuid::nil(),
-                                });
-                            }
-                        }
+            if let (Some(version), Some(host)) = (version_opt, host_opt)
+                && let Some(path) = request.path
+            {
+                if path.starts_with("/jet/accept") {
+                    if let (Some(association_id), Some(candidate_id)) =
+                        (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3))
+                    {
+                        return Ok(JetAcceptReq {
+                            version,
+                            host: host.to_owned(),
+                            association: association_id,
+                            candidate: candidate_id,
+                        });
                     }
+                } else if path.eq("/")
+                    && let Some(jet_method) = request.get_header_value(JET_HEADER_METHOD)
+                    && jet_method.to_lowercase().eq("accept")
+                {
+                    return Ok(JetAcceptReq {
+                        version,
+                        host: host.to_owned(),
+                        association: Uuid::nil(),
+                        candidate: Uuid::nil(),
+                    });
                 }
             }
         }

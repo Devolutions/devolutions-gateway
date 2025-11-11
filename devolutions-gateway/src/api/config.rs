@@ -1,44 +1,14 @@
-use crate::DgwState;
-use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
-use crate::extract::ConfigWriteScope;
-use crate::http::HttpError;
 use axum::extract::State;
 use axum::routing::patch;
 use axum::{Json, Router};
 use tap::prelude::*;
-use uuid::Uuid;
+
+use crate::DgwState;
+use crate::extract::ConfigWriteScope;
+use crate::http::HttpError;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new().route("/", patch(patch_config)).with_state(state)
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub(crate) struct ConfigPatch {
-    /// This Gateway's unique ID
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<Uuid>,
-    /// The sub provisioner public key (may only be used to verify tokens when establishing a session)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sub_provisioner_public_key: Option<SubProvisionerKey>,
-    /// Subscriber configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    subscriber: Option<Subscriber>,
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub(crate) struct SubProvisionerKey {
-    /// The key ID for this subkey
-    id: String,
-    /// The binary-to-text-encoded key data
-    value: String,
-    /// The format used for the key data
-    format: Option<PubKeyFormat>,
-    /// The binary-to-text encoding used for the key data
-    encoding: Option<DataEncoding>,
 }
 
 const KEY_ALLOWLIST: &[&str] = &["Id", "SubProvisionerPublicKey", "Subscriber"];

@@ -15,10 +15,10 @@ mod win {
 
         embed_resource::compile(&version_rc_file, embed_resource::NONE)
             .manifest_required()
-            .unwrap();
+            .expect("BUG: failed to embed version.rc");
         embed_resource::compile("resources.rc", embed_resource::NONE)
             .manifest_required()
-            .unwrap();
+            .expect("BUG: failed to embed resources.rc");
     }
 
     fn generate_version_rc() -> String {

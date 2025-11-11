@@ -139,6 +139,34 @@ jobs:
           name: version
           path: VERSION
 
+  lints:
+    name: lints [${{ matrix.os }}]
+    needs: [preflight]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        os: [windows, linux]
+        include:
+          - os: windows
+            runner: windows-2022
+          - os: linux
+            runner: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Check clippy
+        shell: pwsh
+        run: |
+          cargo clippy --workspace --tests -- -D warnings
+          if ($LASTEXITCODE -ne 0) {
+              Write-Output "::error::Clippy warnings detected, please run 'cargo clippy --workspace --tests' and fix all warnings"
+              exit 1
+          }
+
   tests:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
@@ -1058,7 +1086,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator]
+    needs: [tests, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator]
     runs-on: ubuntu-latest
 
     steps:

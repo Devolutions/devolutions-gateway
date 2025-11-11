@@ -376,6 +376,7 @@ pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
 
     if open_policy_status.is_err() {
         // Convert NTSTATUS to a Win32 error code and return as an error
+        // SAFETY: LsaNtStatusToWinError is always safe to call with any NTSTATUS value.
         let error_code = unsafe { Identity::LsaNtStatusToWinError(open_policy_status) };
         let error_code = WIN32_ERROR(error_code);
 
@@ -387,12 +388,14 @@ pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
     let mut rights = ScopeGuard::new(ptr::null_mut::<Identity::LSA_UNICODE_STRING>(), |ptr| {
         if !ptr.is_null() {
             // FIXME: maybe we should log the error here.
+            // SAFETY: ptr is a valid pointer returned by LsaEnumerateAccountRights.
             let _ = unsafe { Identity::LsaFreeMemory(Some(ptr as *const std::ffi::c_void)) };
         }
     });
 
     let mut rights_count: u32 = 0;
 
+    // SAFETY: We pass valid pointers and policy_handle was obtained from LsaOpenPolicy.
     let enum_status = unsafe {
         Identity::LsaEnumerateAccountRights(
             *policy_handle.as_ref(),
@@ -407,6 +410,7 @@ pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
         Vec::new()
     } else if enum_status.is_err() {
         // Convert NTSTATUS to a Win32 error code and return as an error
+        // SAFETY: LsaNtStatusToWinError is always safe to call with any NTSTATUS value.
         let error_code = unsafe { Identity::LsaNtStatusToWinError(enum_status) };
         let error_code = WIN32_ERROR(error_code);
 
@@ -431,6 +435,9 @@ pub fn enumerate_account_rights(sid: &Sid) -> anyhow::Result<Vec<U16CString>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::print_stdout)]
+
     use super::*;
 
     use crate::process::Process;

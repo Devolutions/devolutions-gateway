@@ -33,21 +33,18 @@ impl JetTestReq {
                 .and_then(|version| version.parse::<u32>().ok());
             let host_opt = request.get_header_value(JET_HEADER_HOST);
 
-            if let (Some(version), Some(host)) = (version_opt, host_opt) {
-                if let Some(path) = request.path {
-                    if path.starts_with("/jet/test") {
-                        if let (Some(association_id), Some(candidate_id)) =
-                            (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3))
-                        {
-                            return Ok(JetTestReq {
-                                version,
-                                host: host.to_owned(),
-                                association: association_id,
-                                candidate: candidate_id,
-                            });
-                        }
-                    }
-                }
+            if let (Some(version), Some(host)) = (version_opt, host_opt)
+                && let Some(path) = request.path
+                && path.starts_with("/jet/test")
+                && let (Some(association_id), Some(candidate_id)) =
+                    (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3))
+            {
+                return Ok(JetTestReq {
+                    version,
+                    host: host.to_owned(),
+                    association: association_id,
+                    candidate: candidate_id,
+                });
             }
         }
         Err(format!("Invalid test request: {request:?}").into())

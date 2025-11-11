@@ -393,9 +393,7 @@ impl From<std::io::ErrorKind> for ReasonCode {
         match kind {
             std::io::ErrorKind::ConnectionRefused => ReasonCode::CONNECTION_REFUSED,
             std::io::ErrorKind::TimedOut => ReasonCode::TTL_EXPIRED,
-            #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
             std::io::ErrorKind::HostUnreachable => ReasonCode::HOST_UNREACHABLE,
-            #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
             std::io::ErrorKind::NetworkUnreachable => ReasonCode::NETWORK_UNREACHABLE,
             _ => ReasonCode::GENERAL_FAILURE,
         }

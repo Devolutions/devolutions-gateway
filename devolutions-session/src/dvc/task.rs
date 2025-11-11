@@ -4,6 +4,7 @@ use anyhow::{Context, bail};
 use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tracing::{error, info, warn};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Shutdown::{
@@ -519,7 +520,7 @@ impl MessageProcessor {
         let parameters = WideString::from("");
         let operation = WideString::from("open");
         let command: WideString = WideString::from(params.command());
-        let directory = params.directory().map(|dir| WideString::from(dir));
+        let directory = params.directory().map(WideString::from);
 
         info!(session_id, "Executing ShellExecuteW");
 

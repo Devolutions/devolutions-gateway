@@ -95,7 +95,7 @@ impl Token {
         let sqos = SECURITY_QUALITY_OF_SERVICE {
             Length: u32size_of::<SECURITY_QUALITY_OF_SERVICE>(),
             ImpersonationLevel: SecurityImpersonation,
-            ContextTrackingMode: Security::SECURITY_DYNAMIC_TRACKING as u8,
+            ContextTrackingMode: u8::from(Security::SECURITY_DYNAMIC_TRACKING),
             EffectiveOnly: false,
         };
 
@@ -938,6 +938,8 @@ impl FromWin32<Security::TOKEN_PRIMARY_GROUP> for TokenPrimaryGroup {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]

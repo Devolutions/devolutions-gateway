@@ -1,6 +1,7 @@
 use std::mem;
 use std::sync::LazyLock;
 
+use tracing::error;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Security;
 use windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPPROCESS;
@@ -239,6 +240,9 @@ impl Drop for ScopedPrivileges<'_> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::print_stdout)]
+
     use super::*;
 
     #[test]
@@ -281,7 +285,7 @@ mod tests {
 
         // Verify the attribute for the privilege has been adjusted.
         for privilege in privileges.token().privileges().unwrap().as_slice() {
-            found = privileges.token_privileges.iter().any(|luid| privilege.Luid == *luid);
+            found = privileges.token_privileges.contains(&privilege.Luid);
 
             if found {
                 assert_eq!(privilege.Attributes.0, 2);

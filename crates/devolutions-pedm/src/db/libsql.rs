@@ -222,7 +222,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_profiles(&self) -> Result<Vec<Profile>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare(
                 "
             SELECT 
@@ -247,7 +247,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_profiles_for_user(&self, user: &User) -> Result<Vec<Profile>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare(
                 "
                 SELECT DISTINCT
@@ -336,7 +336,7 @@ impl Database for LibsqlConn {
                     params![
                         profile.name.as_str(),
                         match &profile.description {
-                            Some(description) => Value::Text(description.to_string()),
+                            Some(description) => Value::Text(description.clone()),
                             None => Value::Null,
                         },
                         elevation_method,
@@ -361,7 +361,7 @@ impl Database for LibsqlConn {
                         profile.id,
                         profile.name.as_str(),
                         match &profile.description {
-                            Some(description) => Value::Text(description.to_string()),
+                            Some(description) => Value::Text(description.clone()),
                             None => Value::Null,
                         },
                         elevation_method,
@@ -592,7 +592,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_users(&self) -> Result<Vec<User>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare("SELECT id, account_name, domain_name, account_sid, domain_sid FROM user")
             .await?;
 
@@ -626,7 +626,7 @@ impl Database for LibsqlConn {
     }
 
     async fn get_jit_elevation_log(&self, id: i64) -> Result<Option<JitElevationLogRow>, DbError> {
-        let mut stmt = self
+        let stmt = self
             .prepare(
                 "SELECT
                     j.id,
@@ -765,7 +765,7 @@ impl Database for LibsqlConn {
         params.push(limit.into());
         params.push(offset.into());
 
-        let mut stmt = self.prepare(&select_sql).await?;
+        let stmt = self.prepare(&select_sql).await?;
         let mut rows = stmt.query(libsql::params_from_iter(params)).await?;
 
         let mut results = Vec::new();
@@ -807,6 +807,8 @@ fn parse_micros(micros: i64) -> Result<DateTime<Utc>, ParseTimestampError> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
+
     use chrono::{TimeZone, Utc};
 
     use super::parse_micros;

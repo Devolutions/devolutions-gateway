@@ -475,6 +475,9 @@ pub enum FromPsidErr {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::print_stdout)]
+
     use super::*;
     use crate::str::u16cstr;
     use rstest::rstest;

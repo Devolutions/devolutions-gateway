@@ -25,7 +25,12 @@ pub fn get_system32_path() -> anyhow::Result<String> {
     // SAFETY:
     // - `buffer.as_mut_ptr()` gives a valid writable pointer for MAX_PATH u16s.
     // - `GetSystemDirectoryW` expects a valid mutable wide string buffer.
-    let len = unsafe { GetSystemDirectoryW(Some(std::slice::from_raw_parts_mut(buffer.as_mut_ptr(), buffer.len()))) };
+    let len = {
+        // SAFETY: We construct a valid slice from the buffer.
+        let slice = unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr(), buffer.len()) };
+        // SAFETY: slice is a valid mutable wide string buffer.
+        unsafe { GetSystemDirectoryW(Some(slice)) }
+    };
 
     if len == 0 {
         anyhow::bail!("GetSystemDirectoryW failed");

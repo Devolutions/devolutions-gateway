@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
+
 use anyhow::Context as _;
 use futures_util::FutureExt;
 use proptest::prelude::*;

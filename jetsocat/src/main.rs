@@ -587,9 +587,8 @@ impl CommonArgs {
                 Err(_) => {}
             }
 
-            match env::var("TERM").as_deref() {
-                Ok("dumb") => return Coloring::Never,
-                _ => {}
+            if matches!(env::var("TERM").as_deref(), Ok("dumb")) {
+                return Coloring::Never;
             }
 
             Coloring::Auto

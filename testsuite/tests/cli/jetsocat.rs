@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::sync::Arc;
 use std::time::Duration;
 
 use expect_test::expect;
@@ -30,7 +31,7 @@ fn all_subcommands() {
     ];
 
     for (subcommand, help_substr) in test_cases {
-        let output = jetsocat_assert_cmd().args(&[subcommand, "--help"]).assert().success();
+        let output = jetsocat_assert_cmd().args([subcommand, "--help"]).assert().success();
         let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
         assert!(stdout.contains(help_substr));
     }
@@ -51,9 +52,9 @@ fn all_subcommands() {
 fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[case] expect_ansi: bool) {
     let output = jetsocat_assert_cmd()
         .timeout(COMMAND_TIMEOUT)
-        .args(&["forward", "-", "-", "--log-term"])
+        .args(["forward", "-", "-", "--log-term"])
         .args(args)
-        .envs(envs.iter().cloned())
+        .envs(envs.iter().copied())
         .assert()
         .success();
 
@@ -84,9 +85,9 @@ fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
 
     jetsocat_assert_cmd()
         .timeout(COMMAND_TIMEOUT)
-        .args(&["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
+        .args(["forward", "-", "-", "--log-file", log_file_path.to_str().unwrap()])
         .args(args)
-        .envs(envs.iter().cloned())
+        .envs(envs.iter().copied())
         .assert()
         .success();
 
@@ -124,6 +125,7 @@ fn forward_hello_world() {
 
     // Kill the listener.
     let _ = listener.kill();
+    let _ = listener.wait();
 
     // Check that we got the expected output.
     #[cfg(windows)]
@@ -192,6 +194,9 @@ fn jmux_proxy_read_hello_world() {
     let _ = jmux_client.kill();
     let _ = jmux_server.kill();
     let _ = echo_server.kill();
+    let _ = jmux_client.wait();
+    let _ = jmux_server.wait();
+    let _ = echo_server.wait();
 
     // Check that we got the expected output through the JMUX proxy.
     #[cfg(windows)]
@@ -260,6 +265,9 @@ fn jmux_proxy_write_hello_world() {
     let _ = jmux_client.kill();
     let _ = jmux_server.kill();
     let _ = read_server.kill();
+    let _ = jmux_client.wait();
+    let _ = jmux_server.wait();
+    let _ = read_server.wait();
 
     // Check that the read server received the payload.
     let mut read_server_stdout = String::new();
@@ -280,12 +288,17 @@ fn doctor_no_args_is_valid() {
 #[test]
 #[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_verify_chain_with_json_output() {
+    #[cfg(unix)]
+    const CHAIN_CHECK_NAME: &str = "rustls_check_chain";
+    #[cfg(windows)]
+    const CHAIN_CHECK_NAME: &str = "schannel_check_chain";
+
     let tempdir = tempfile::tempdir().unwrap();
-    let chain_file_path = tempdir.path().join("devolutions-net-chain.pem");
-    std::fs::write(&chain_file_path, DEVOLUTIONS_NET_CHAIN).unwrap();
+    let chain_file_path = tempdir.path().join("expired-devolutions-net-chain.pem");
+    std::fs::write(&chain_file_path, EXPIRED_DEVOLUTIONS_NET_CHAIN).unwrap();
 
     let output = jetsocat_assert_cmd()
-        .args(&[
+        .args([
             "doctor",
             "--chain",
             chain_file_path.to_str().unwrap(),
@@ -295,7 +308,7 @@ fn doctor_verify_chain_with_json_output() {
             "json",
         ])
         .assert()
-        .success();
+        .failure();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
 
@@ -320,9 +333,17 @@ fn doctor_verify_chain_with_json_output() {
                 _ => panic!("unexpected key: {key}"),
             }
         }
+
+        if entry["name"].as_str().unwrap() == CHAIN_CHECK_NAME {
+            // Since the leaf certificate is expired, this check should fail.
+            assert!(!entry["success"].as_bool().unwrap());
+        } else {
+            // All the other checks should succeed.
+            assert!(entry["success"].as_bool().unwrap());
+        }
     }
 
-    const DEVOLUTIONS_NET_CHAIN: &str = "
+    const EXPIRED_DEVOLUTIONS_NET_CHAIN: &str = "
 -----BEGIN CERTIFICATE-----
 MIIHjDCCBXSgAwIBAgIQA+YDg5H+4+jZc0rMWYNN1zANBgkqhkiG9w0BAQsFADBc
 MQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xNDAyBgNVBAMT
@@ -426,7 +447,7 @@ CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=
 #[test]
 fn doctor_invalid_server_port() {
     let output = jetsocat_assert_cmd()
-        .args(&[
+        .args([
             "doctor",
             "--subject-name",
             "devolutions.net",
@@ -508,7 +529,7 @@ fn forward_missing_args() {
 #[test]
 fn forward_missing_second_arg() {
     let output = jetsocat_assert_cmd()
-        .args(&["forward", "stdio"])
+        .args(["forward", "stdio"])
         .assert()
         .failure()
         .code(1);
@@ -543,7 +564,7 @@ fn forward_valid_pipe_formats() {
 
     for (pipe_a, pipe_b) in test_cases {
         let output = jetsocat_assert_cmd()
-            .args(&["forward", pipe_a, pipe_b])
+            .args(["forward", pipe_a, pipe_b])
             .timeout(Duration::from_millis(50))
             .assert();
 
@@ -567,7 +588,7 @@ fn forward_valid_pipe_formats() {
 #[test]
 fn forward_negative_repeat_count() {
     let output = jetsocat_assert_cmd()
-        .args(&["forward", "stdio", "-", "--repeat-count", "-1"])
+        .args(["forward", "stdio", "-", "--repeat-count", "-1"])
         .assert()
         .failure()
         .code(1);
@@ -609,7 +630,7 @@ async fn mcp_proxy_smoke_test(#[values(true, false)] http_transport: bool) {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -681,7 +702,7 @@ async fn mcp_proxy_with_tools(#[values(true, false)] http_transport: bool) {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -794,7 +815,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer, NamedPipeTransport, ServerConfig};
 
-    let probe = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let probe = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Configure MCP server transport.
     let (transport, pipe) = if http_transport {
@@ -809,7 +830,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
 
     // Start MCP server.
     let notification_handler = {
-        let probe = probe.clone();
+        let probe = Arc::clone(&probe);
         move |method: &str, _: serde_json::Value| {
             assert_eq!(method, "notifications/it-works");
             probe.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -824,7 +845,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -854,7 +875,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Check the probe.
-    assert_eq!(probe.load(std::sync::atomic::Ordering::SeqCst), true);
+    assert!(probe.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 async fn execute_mcp_request(request: &str) -> String {
@@ -872,7 +893,7 @@ async fn execute_mcp_request(request: &str) -> String {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
+        .args(["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -900,7 +921,7 @@ async fn execute_mcp_request(request: &str) -> String {
 #[tokio::test]
 async fn mcp_proxy_malformed_request_with_id() {
     let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
-    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
+    assert!(stdout.contains("malformed JSON-RPC message"), "{stdout}");
     assert!(stdout.contains("Unexpected EOF"), "{stdout}");
     assert!(stdout.contains("id=1"), "{stdout}");
 }
@@ -908,7 +929,7 @@ async fn mcp_proxy_malformed_request_with_id() {
 #[tokio::test]
 async fn mcp_proxy_malformed_request_no_id() {
     let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
-    assert!(stdout.contains("Malformed JSON-RPC request from client"), "{stdout}");
+    assert!(stdout.contains("malformed JSON-RPC message"), "{stdout}");
     assert!(stdout.contains("Invalid character"), "{stdout}");
     assert!(!stdout.contains("id=1"), "{stdout}");
 }
@@ -935,7 +956,7 @@ async fn mcp_proxy_http_error() {
 
     // Start jetsocat mcp-proxy with stdio pipe and HTTP transport.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &server_url])
+        .args(["mcp-proxy", "stdio", &server_url])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -961,15 +982,6 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, McpServer, NamedPipeTransport};
 
-    #[cfg(windows)]
-    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
-        "JSON-RPC error -32099: MCP server connection broken: The pipe is being closed. (os error 232)"
-    "#]];
-    #[cfg(not(windows))]
-    const BROKEN_PIPE_EXPECTED_ERROR: expect_test::Expect = expect![[r#"
-        "JSON-RPC error -32099: MCP server connection broken: Broken pipe (os error 32)"
-    "#]];
-
     // Configure MCP server transport (named pipe only).
     let np_transport = NamedPipeTransport::bind().unwrap();
     let name = np_transport.name().to_owned();
@@ -984,7 +996,7 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
 
     // Start jetsocat mcp-proxy with stdio pipe.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(&["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -1011,9 +1023,18 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     // The proxy will detect this and send an error response, then close.
     let result = mcp_client.list_tools().await;
 
-    // The proxy should detect the pipe as broken, and returns an error.
+    // The proxy should detect the pipe as broken, and terminates with no response.
+    // Ideally, the proxy should fail when writing the request, but merely
+    // writing is typically not enough to detect a broken pipe with named pipes.
     let error = result.unwrap_err();
-    BROKEN_PIPE_EXPECTED_ERROR.assert_debug_eq(&error);
+    expect![[r#"
+        "empty response"
+    "#]]
+    .assert_debug_eq(&error);
+
+    // FIXME: Jetsocat needs to be modified to print the logs into stderr.
+    //  Once we have that, we can retrieve stderr and search for this string:
+    // Fatal error reading from peer, stopping proxy error="connection closed"
 
     // The jetsocat process should exit gracefully after detecting broken pipe.
     let exit_status = tokio::time::timeout(Duration::from_secs(2), jetsocat_process.wait()).await;

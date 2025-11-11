@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, reason = "test infrastructure can panic on errors")]
+
 use std::sync::LazyLock;
 
 static JETSOCAT_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {

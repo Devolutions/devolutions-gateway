@@ -172,6 +172,10 @@ pub struct NgrokTunnel {
     inner: NgrokTunnelInner,
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "not in any way a hot code path, any micro optimization at this level is meaningless"
+)]
 enum NgrokTunnelInner {
     Tcp(TcpTunnelBuilder),
     Http(HttpTunnelBuilder),

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use mcp_proxy::{Config, McpProxy};
 
-const DUMMY_REQUEST: &'static str = r#"{"jsonrpc": "2.0", "id": 1, "method": "x"}"#;
+const DUMMY_REQUEST: &str = r#"{"jsonrpc": "2.0", "id": 1, "method": "x"}"#;
 const MCP_PROXY_SHORTISH_TIMEOUT: Duration = Duration::from_millis(200);
 
 async fn spawn_http_server(
@@ -22,7 +22,6 @@ async fn spawn_http_server(
         if let Ok((mut stream, _)) = listener.accept().await {
             // Read the HTTP request headers properly.
             let mut reader = BufReader::new(&mut stream);
-            let mut request_lines = Vec::new();
             let mut content_length = 0;
 
             // Read HTTP headers.
@@ -34,7 +33,6 @@ async fn spawn_http_server(
                 if line.starts_with("Content-Length:") {
                     content_length = line.trim().split(':').nth(1).unwrap().trim().parse().unwrap_or(0);
                 }
-                request_lines.push(line.clone());
                 if line.trim().is_empty() {
                     break;
                 }
@@ -89,7 +87,7 @@ async fn http_plain_json_ok() {
         .unwrap();
 
     let out = proxy
-        .forward_request(r#"{"jsonrpc": "2.0", "id": 1, "method": "tools/call"}"#)
+        .send_message(r#"{"jsonrpc": "2.0", "id": 1, "method": "tools/call"}"#)
         .await
         .unwrap()
         .unwrap();
@@ -106,7 +104,7 @@ async fn http_sse_with_data() {
         .await
         .unwrap();
 
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
+    let out = proxy.send_message(DUMMY_REQUEST).await.unwrap().unwrap();
     assert_eq!(out.as_raw(), server_response);
 }
 
@@ -119,7 +117,7 @@ async fn http_sse_no_data_found_error() {
         .unwrap();
 
     let result = proxy
-        .forward_request(r#"{"jsonrpc": "2.0", "method": "x"}"#)
+        .send_message(r#"{"jsonrpc": "2.0", "method": "x"}"#)
         .await
         .unwrap();
     assert!(result.is_none());
@@ -134,8 +132,14 @@ async fn http_notification() {
         .await
         .unwrap();
 
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
-    assert!(out.as_raw().contains("no data found in SSE response"));
+    // HTTP errors are now returned as Err(ForwardError::Transient { message, .. }).
+    match proxy.send_message(DUMMY_REQUEST).await {
+        Err(mcp_proxy::SendError::Transient { message, .. }) => {
+            let msg = message.expect("should have error message");
+            assert!(msg.as_raw().contains("no data found in SSE response"));
+        }
+        other => panic!("expected transient error with message, got: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -153,17 +157,33 @@ async fn http_timeout_triggers() {
         .await
         .unwrap();
 
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
-
-    // HTTP client (ureq…) error text varies; assert on our added context.
-    assert!(out.as_raw().contains("failed to send request to MCP server"));
+    // HTTP errors are now returned as Err(ForwardError::Transient { message, .. }).
+    match proxy.send_message(DUMMY_REQUEST).await {
+        Err(mcp_proxy::SendError::Transient { message, source }) => {
+            let msg = message.expect("should have error message");
+            // HTTP client (ureq…) error text varies; assert on our added context.
+            assert!(msg.as_raw().contains("\"code\":-32099"));
+            assert!(msg.as_raw().contains("failed to send request to MCP server"));
+            // Also verify the source error contains timeout info.
+            assert!(format!("{source:#}").contains("failed to send request to MCP server"));
+        }
+        other => panic!("expected transient error with message, got: {other:?}"),
+    }
 }
 
 #[tokio::test]
 async fn stdio_round_trip_json_line() {
     let (_dir_guard, command) = make_stdio_helper_script();
     let mut proxy = McpProxy::init(Config::spawn_process(command)).await.unwrap();
-    let out = proxy.forward_request(DUMMY_REQUEST).await.unwrap().unwrap();
+
+    // For Process transport: forward_request() writes, read_message() reads
+    let response = proxy.send_message(DUMMY_REQUEST).await.unwrap();
+    assert!(
+        response.is_none(),
+        "process transport does not return the response immediately"
+    );
+
+    let out = proxy.read_message().await.unwrap();
     assert_eq!(out.as_raw(), r#"{"jsonrpc":"2.0","result":{"ok":true}}"#);
 
     fn make_stdio_helper_script() -> (tempfile::TempDir, String) {

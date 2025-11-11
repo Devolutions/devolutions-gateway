@@ -44,7 +44,7 @@ pub mod ws;
 
 use std::sync::Arc;
 
-pub const SYSTEM_LOGGER: std::sync::LazyLock<Arc<dyn sysevent::SystemEventSink>> =
+pub static SYSTEM_LOGGER: std::sync::LazyLock<Arc<dyn sysevent::SystemEventSink>> =
     std::sync::LazyLock::new(init_system_logger);
 
 #[derive(Clone)]

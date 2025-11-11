@@ -36,7 +36,7 @@ mod lib_win {
             bail!("appinfo.dll not loaded");
         }
 
-        let mut interfaces = unsafe { dump_interfaces() }?;
+        let mut interfaces = dump_interfaces()?;
 
         let mut origs = original_handlers().lock();
         for interface in interfaces.iter_mut() {
@@ -49,7 +49,11 @@ mod lib_win {
                     .get(&interface.id())
                     .expect("interface hooks not found")
                     .to_owned();
-                hooks[0] = unsafe { mem::transmute(rai_launch_admin_process as *const ()) };
+                hooks[0] = unsafe {
+                    mem::transmute::<*const (), Option<unsafe extern "system" fn() -> i32>>(
+                        rai_launch_admin_process as *const (),
+                    )
+                };
 
                 interface.set_handlers(&hooks)?;
             }
@@ -63,7 +67,7 @@ mod lib_win {
             bail!("appinfo.dll not loaded");
         }
 
-        let mut interfaces = unsafe { dump_interfaces() }?;
+        let mut interfaces = dump_interfaces()?;
 
         let mut origs = original_handlers().lock();
         for interface in interfaces.iter_mut() {
@@ -72,7 +76,7 @@ mod lib_win {
             origs.insert(interface.id(), handlers);
 
             if let Some(orig_handlers) = origs.get(&interface.id()) {
-                interface.set_handlers(&orig_handlers)?;
+                interface.set_handlers(orig_handlers)?;
             }
         }
 
@@ -81,7 +85,7 @@ mod lib_win {
 
     #[unsafe(no_mangle)]
     extern "system" fn DllMain(_dll_module: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
-        let status = match call_reason {
+        match call_reason {
             DLL_PROCESS_ATTACH => {
                 thread::spawn(|| match hook() {
                     Ok(()) => {}
@@ -91,9 +95,7 @@ mod lib_win {
             }
             DLL_PROCESS_DETACH => unhook().is_ok(),
             _ => true,
-        };
-
-        status
+        }
     }
 }
 

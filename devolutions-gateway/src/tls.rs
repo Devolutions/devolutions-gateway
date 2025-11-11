@@ -81,7 +81,7 @@ pub fn build_server_config(
 
             if strict_checks
                 && let Ok(report) = check_certificate_now(first_certificate)
-                && report.issues.intersects(
+                && report.cert_issues.intersects(
                     CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE | CertIssues::MISSING_SUBJECT_ALT_NAME,
                 )
             {
@@ -90,10 +90,10 @@ pub fn build_server_config(
                 let issuer = report.issuer;
                 let not_before = report.not_before;
                 let not_after = report.not_after;
-                let issues = report.issues;
+                let cert_issues = report.cert_issues;
 
                 anyhow::bail!(
-                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {issues} (you can set `TlsVerifyStrict` to `false` in the gateway.json configuration file if that's intended)"
+                    "found significant issues with the certificate: serial_number = {serial_number}, subject = {subject}, issuer = {issuer}, not_before = {not_before}, not_after = {not_after}, issues = {cert_issues} (you can set `TlsVerifyStrict` to `false` in the gateway.json configuration file if that's intended)"
                 );
             }
 
@@ -220,11 +220,11 @@ pub mod windows {
 
             let now = time::OffsetDateTime::now_utc();
 
-            if let Some(cache) = cache_guard.as_ref() {
-                if now < cache.expires_at {
-                    trace!("Used certified key from cache");
-                    return Ok(Arc::clone(&cache.key));
-                }
+            if let Some(cache) = cache_guard.as_ref()
+                && now < cache.expires_at
+            {
+                trace!("Used certified key from cache");
+                return Ok(Arc::clone(&cache.key));
             }
 
             let store = CertStore::open(self.store_type, &self.store_name).context("open Windows certificate store")?;
@@ -262,12 +262,12 @@ pub mod windows {
                                 issuer = %report.issuer,
                                 not_before = %report.not_before,
                                 not_after = %report.not_after,
-                                issues = %report.issues,
+                                issues = %report.cert_issues,
                                 "Parsed store certificate"
                             );
 
                             // Accumulate the issues found.
-                            cert_issues |= report.issues;
+                            cert_issues |= report.cert_issues;
 
                             // Skip the certificate if any of the following is true:
                             // - the certificate is not yet valid,
@@ -281,19 +281,19 @@ pub mod windows {
                                 CertIssues::NOT_YET_VALID
                             };
 
-                            let skip = report.issues.intersects(issues_to_check);
+                            let skip = report.cert_issues.intersects(issues_to_check);
 
                             if skip {
                                 debug!(
                                     %idx,
                                     serial_number = %report.serial_number,
-                                    issues = %report.issues,
+                                    issues = %report.cert_issues,
                                     "Filtered out certificate because it has significant issues"
                                 );
                                 let _ = SYSTEM_LOGGER.emit(
                                     sysevent_codes::tls_certificate_rejected(
                                         report.subject,
-                                        report.issues.iter_names().next().expect("at least one issue").0,
+                                        report.cert_issues.iter_names().next().expect("at least one issue").0,
                                     )
                                     .severity(sysevent::Severity::Notice),
                                 );
@@ -365,7 +365,7 @@ pub mod windows {
             });
 
             *cache_guard = Some(KeyCache {
-                key: key.clone(),
+                key: Arc::clone(&key),
                 expires_at: now + CACHE_DURATION,
             });
             trace!("Cached certified key");
@@ -400,7 +400,7 @@ pub struct CertReport {
     pub issuer: picky::x509::name::DirectoryName,
     pub not_before: picky::x509::date::UtcDate,
     pub not_after: picky::x509::date::UtcDate,
-    pub issues: CertIssues,
+    pub cert_issues: CertIssues,
 }
 
 bitflags::bitflags! {
@@ -430,7 +430,7 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
 
-    let mut issues = CertIssues::empty();
+    let mut cert_issues = CertIssues::empty();
 
     let serial_number = cert.serial_number().0.iter().fold(String::new(), |mut acc, byte| {
         let _ = write!(acc, "{byte:X?}");
@@ -442,9 +442,9 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     let not_after = cert.valid_not_after();
 
     if at < not_before {
-        issues.insert(CertIssues::NOT_YET_VALID);
+        cert_issues.insert(CertIssues::NOT_YET_VALID);
     } else if not_after < at {
-        issues.insert(CertIssues::EXPIRED);
+        cert_issues.insert(CertIssues::EXPIRED);
     }
 
     let mut has_server_auth_key_purpose = false;
@@ -463,11 +463,11 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     }
 
     if !has_server_auth_key_purpose {
-        issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
+        cert_issues.insert(CertIssues::MISSING_SERVER_AUTH_EXTENDED_KEY_USAGE);
     }
 
     if !has_san {
-        issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
+        cert_issues.insert(CertIssues::MISSING_SUBJECT_ALT_NAME);
     }
 
     Ok(CertReport {
@@ -476,7 +476,7 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
         issuer,
         not_before,
         not_after,
-        issues,
+        cert_issues,
     })
 }
 

@@ -1,3 +1,11 @@
+#![cfg_attr(
+    unix,
+    expect(
+        dead_code,
+        reason = "only used in the windows implementation, nothing is planned for linux yet"
+    )
+)]
+
 use core::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -126,8 +134,16 @@ impl Db {
     }
 }
 
+// FIXME: This is used in public ServeError but flagged as unreachable on Linux. Investigate if it should be re-exported or kept internal.
+#[cfg_attr(
+    not(windows),
+    expect(
+        unreachable_pub,
+        reason = "used in public ServeError but flagged as unreachable on Linux"
+    )
+)]
 #[derive(Debug)]
-pub(crate) enum InitSchemaError {
+pub enum InitSchemaError {
     VersionMismatch { expected: i16, actual: i16 },
     Db(DbError),
 }
@@ -247,6 +263,7 @@ pub(crate) struct DbHandle {
 }
 
 impl DbHandle {
+    #[expect(clippy::result_large_err, reason = "suppressing for now")] // FIXME: Re-evaluate this suppression.
     pub(crate) fn insert_jit_elevation_result(
         &self,
         result: ElevationResult,
@@ -265,9 +282,7 @@ impl DbHandle {
                 }
             },
             Err(error) => {
-                let DbRequest::InsertJitElevationResult { result, .. } = error.0 else {
-                    unreachable!()
-                };
+                let DbRequest::InsertJitElevationResult { result, .. } = error.0;
 
                 Err(DbHandleError {
                     db_error: None,
