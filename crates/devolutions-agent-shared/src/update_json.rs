@@ -45,6 +45,10 @@ impl fmt::Display for VersionSpecification {
 pub struct ProductUpdateInfo {
     /// The version of the product to update to.
     pub target_version: VersionSpecification,
+    /// Optional local path to an MSI file. If specified, the updater will use this file
+    /// instead of downloading from CDN, and will skip checksum verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_package_path: Option<String>,
 }
 
 #[cfg(test)]

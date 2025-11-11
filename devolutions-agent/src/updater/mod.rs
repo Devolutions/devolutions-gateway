@@ -52,8 +52,12 @@ struct DowngradeInfo {
 struct UpdateOrder {
     target_version: DateVersion,
     downgrade: Option<DowngradeInfo>,
-    package_url: String,
-    hash: Option<String>,
+    package_source: PackageSource,
+}
+
+enum PackageSource {
+    Remote { url: String, hash: Option<String> },
+    Local { path: String },
 }
 
 pub struct UpdaterTask {
@@ -154,15 +158,6 @@ impl Task for UpdaterTask {
 
 async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) -> anyhow::Result<()> {
     let target_version = order.target_version;
-    let hash = order.hash;
-
-    let package_data = download_binary(&order.package_url)
-        .await
-        .with_context(|| format!("failed to download package file for `{product}`"))?;
-
-    let package_path = save_to_temp_file(&package_data, Some(product.get_package_extension())).await?;
-
-    info!(%product, %target_version, %package_path, "Downloaded product Installer");
 
     let mut ctx = UpdaterCtx {
         product,
@@ -170,9 +165,36 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         conf,
     };
 
-    if let Some(hash) = hash {
-        validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
-    }
+    let package_path = match order.package_source {
+        PackageSource::Remote { url, hash } => {
+            info!(%product, %target_version, "Downloading package from remote URL");
+
+            let package_data = download_binary(&url)
+                .await
+                .with_context(|| format!("failed to download package file for `{product}`"))?;
+
+            let package_path = save_to_temp_file(&package_data, Some(product.get_package_extension())).await?;
+
+            info!(%product, %target_version, %package_path, "Downloaded product installer");
+
+            if let Some(hash) = hash {
+                validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+            }
+
+            package_path
+        }
+        PackageSource::Local { path } => {
+            info!(%product, %target_version, %path, "Using local package file (skipping download and checksum verification)");
+
+            // Convert to Utf8PathBuf and verify the file exists
+            let local_path = Utf8PathBuf::from(&path);
+            if !local_path.exists() {
+                return Err(anyhow!("Local package file does not exist: {}", path));
+            }
+
+            local_path
+        }
+    };
 
     validate_package(&ctx, &package_path).context("failed to validate package contents")?;
 
@@ -225,13 +247,16 @@ async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJ
 }
 
 async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow::Result<Option<UpdateOrder>> {
-    let target_version = match product.get_update_info(update_json).map(|info| info.target_version) {
-        Some(version) => version,
+    let update_info = match product.get_update_info(update_json) {
+        Some(info) => info,
         None => {
             trace!(%product, "No target version specified in update.json, skipping update check");
             return Ok(None);
         }
     };
+
+    let target_version = update_info.target_version;
+    let local_package_path = update_info.local_package_path;
 
     let detected_version = match detect::get_installed_product_version(product) {
         Ok(Some(version)) => version,
@@ -245,6 +270,39 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
     };
 
     trace!(%product, %detected_version, "Detected installed product version");
+
+    // If a local package path is provided, use it directly
+    if let Some(local_path) = local_package_path {
+        info!(%product, %local_path, "Using local package file, skipping remote checks");
+
+        let target_version = match target_version {
+            VersionSpecification::Specific(version) => version,
+            VersionSpecification::Latest => {
+                // For local packages with "latest", we can't determine the actual version
+                // from the file without unpacking it, so we'll assume it's newer and proceed
+                warn!(%product, "Using local package with 'latest' version specification - cannot verify version without installation");
+                // Use a dummy future version to ensure update proceeds
+                DateVersion { year: 9999, month: 12, day: 31, revision: 0 }
+            }
+        };
+
+        // For local packages, we still check if downgrade is needed
+        let downgrade = if target_version < detected_version {
+            let product_code = get_product_code(product)?.ok_or(UpdaterError::MissingRegistryValue)?;
+            Some(DowngradeInfo {
+                installed_version: detected_version,
+                product_code,
+            })
+        } else {
+            None
+        };
+
+        return Ok(Some(UpdateOrder {
+            target_version,
+            downgrade,
+            package_source: PackageSource::Local { path: local_path },
+        }));
+    }
 
     match target_version {
         VersionSpecification::Specific(target) if target == detected_version => {
@@ -279,8 +337,10 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
             Ok(Some(UpdateOrder {
                 target_version: remote_version,
                 downgrade: None,
-                package_url: product_info.url.clone(),
-                hash: product_info.hash.clone(),
+                package_source: PackageSource::Remote {
+                    url: product_info.url.clone(),
+                    hash: product_info.hash.clone(),
+                },
             }))
         }
         VersionSpecification::Specific(version) => {
@@ -326,8 +386,10 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
             Ok(Some(UpdateOrder {
                 target_version: version,
                 downgrade,
-                package_url,
-                hash: None,
+                package_source: PackageSource::Remote {
+                    url: package_url,
+                    hash: None,
+                },
             }))
         }
     }
