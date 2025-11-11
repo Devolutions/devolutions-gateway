@@ -178,7 +178,8 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
             info!(%product, %target_version, %package_path, "Downloaded product installer");
 
             if let Some(hash) = hash {
-                validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+                validate_artifact_hash(&ctx, &package_data, &hash)
+                    .context("failed to validate package file integrity")?;
             }
 
             package_path
@@ -282,7 +283,12 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
                 // from the file without unpacking it, so we'll assume it's newer and proceed
                 warn!(%product, "Using local package with 'latest' version specification - cannot verify version without installation");
                 // Use a dummy future version to ensure update proceeds
-                DateVersion { year: 9999, month: 12, day: 31, revision: 0 }
+                DateVersion {
+                    year: 9999,
+                    month: 12,
+                    day: 31,
+                    revision: 0,
+                }
             }
         };
 
