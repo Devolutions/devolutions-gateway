@@ -98,8 +98,6 @@ pub enum ServerChannelEvent {
 pub struct WinApiProcessCtx {
     session_id: u32,
 
-    io_notification_tx: Sender<ServerChannelEvent>,
-
     stdout_read_pipe: Option<Pipe>,
     stderr_read_pipe: Option<Pipe>,
     stdin_write_pipe: Option<Pipe>,
@@ -123,7 +121,10 @@ impl WinApiProcessCtx {
         Ok(())
     }
 
-    pub fn process_cancel(&mut self) -> Result<(), ExecError> {
+    pub fn process_cancel(
+        &mut self,
+        io_notification_tx: &Sender<ServerChannelEvent>,
+    ) -> Result<(), ExecError> {
         info!(
             session_id = self.session_id,
             "Cancelling process execution by user request"
@@ -135,7 +136,7 @@ impl WinApiProcessCtx {
 
         // Acknowledge client that cancel request has been processed
         // successfully.
-        self.io_notification_tx
+        io_notification_tx
             .blocking_send(ServerChannelEvent::SessionCancelSuccess {
                 session_id: self.session_id,
             })?;
@@ -143,7 +144,11 @@ impl WinApiProcessCtx {
         Ok(())
     }
 
-    pub fn wait(mut self, mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>) -> Result<u32, ExecError> {
+    pub fn wait(
+        mut self,
+        mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
+        io_notification_tx: Sender<ServerChannelEvent>,
+    ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
         info!(session_id, "Waiting for process to exit");
@@ -153,7 +158,7 @@ impl WinApiProcessCtx {
         const WAIT_OBJECT_INPUT_MESSAGE: WAIT_EVENT = WAIT_OBJECT_0;
         const WAIT_OBJECT_PROCESS_EXIT: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);
 
-        self.io_notification_tx
+        io_notification_tx
             .blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
 
         loop {
@@ -179,7 +184,7 @@ impl WinApiProcessCtx {
                             return Err(ExecError::Aborted);
                         }
                         ProcessIoInputEvent::CancelExecution => {
-                            self.process_cancel()?;
+                            self.process_cancel(&io_notification_tx)?;
 
                             // wait for process to exit
                             continue;
@@ -209,6 +214,7 @@ impl WinApiProcessCtx {
     pub fn wait_with_io_redirection(
         mut self,
         mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
+        io_notification_tx: Sender<ServerChannelEvent>,
     ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
@@ -277,7 +283,7 @@ impl WinApiProcessCtx {
 
         // Signal client side about started execution
 
-        self.io_notification_tx
+        io_notification_tx
             .blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
 
         info!(session_id, "Process IO is ready for async loop execution");
@@ -304,7 +310,7 @@ impl WinApiProcessCtx {
                             return Err(ExecError::Aborted);
                         }
                         ProcessIoInputEvent::CancelExecution => {
-                            self.process_cancel()?;
+                            self.process_cancel(&io_notification_tx)?;
 
                             // wait for process to exit
                             continue;
@@ -369,7 +375,7 @@ impl WinApiProcessCtx {
                                 // EOF on stdout pipe, close it and send EOF message to message_tx
                                 self.stdout_read_pipe = None;
 
-                                self.io_notification_tx
+                                io_notification_tx
                                     .blocking_send(ServerChannelEvent::SessionDataOut {
                                         session_id,
                                         stream: NowExecDataStreamKind::Stdout,
@@ -382,7 +388,7 @@ impl WinApiProcessCtx {
                         continue;
                     }
 
-                    self.io_notification_tx
+                    io_notification_tx
                         .blocking_send(ServerChannelEvent::SessionDataOut {
                             session_id,
                             stream: NowExecDataStreamKind::Stdout,
@@ -432,7 +438,7 @@ impl WinApiProcessCtx {
                             ERROR_HANDLE_EOF | ERROR_BROKEN_PIPE => {
                                 // EOF on stderr pipe, close it and send EOF message to message_tx
                                 self.stderr_read_pipe = None;
-                                self.io_notification_tx
+                                io_notification_tx
                                     .blocking_send(ServerChannelEvent::SessionDataOut {
                                         session_id,
                                         stream: NowExecDataStreamKind::Stderr,
@@ -445,7 +451,7 @@ impl WinApiProcessCtx {
                         continue;
                     }
 
-                    self.io_notification_tx
+                    io_notification_tx
                         .blocking_send(ServerChannelEvent::SessionDataOut {
                             session_id,
                             stream: NowExecDataStreamKind::Stderr,
@@ -527,12 +533,13 @@ impl WinApiProcessBuilder {
         self
     }
 
-    /// Starts process execution and spawns IO thread to redirect stdio to/from dvc.
-    pub fn run(
+    /// Internal implementation for process execution.
+    fn run_impl(
         mut self,
         session_id: u32,
-        io_notification_tx: Sender<ServerChannelEvent>,
-    ) -> Result<WinApiProcess, ExecError> {
+        io_notification_tx: Option<Sender<ServerChannelEvent>>,
+        detached: bool,
+    ) -> Result<Option<WinApiProcess>, ExecError> {
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
             .trim_end()
             .to_owned();
@@ -557,31 +564,41 @@ impl WinApiProcessBuilder {
         let io_redirection = self.enable_io_redirection;
 
         let process_ctx = if io_redirection {
-            prepare_process_with_io_redirection(
-                session_id,
-                command_line,
-                current_directory,
-                self.env,
-                io_notification_tx.clone(),
-            )?
+            prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env)?
         } else {
-            prepare_process(
-                session_id,
-                command_line,
-                current_directory,
-                self.env,
-                io_notification_tx.clone(),
-            )?
+            prepare_process(session_id, command_line, current_directory, self.env)?
         };
+
+        if detached {
+            // For detached mode, spawn a thread that waits for process exit and keeps temp files alive
+            std::thread::spawn(move || {
+                let _temp_files = temp_files; // Keep temp files alive
+
+                // Wait for process to exit (indefinitely)
+                if let Err(error) = process_ctx.process.wait(None) {
+                    error!(%error, session_id, "Failed to wait for detached process");
+                    return;
+                }
+
+                info!(session_id, "Detached process exited");
+
+                // Temp files will be cleaned up when this thread exits
+            });
+
+            info!(session_id, "Detached process started successfully");
+            return Ok(None);
+        }
 
         // Create channel for `task` -> `Process IO thread` communication
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
 
+        let io_notification_tx = io_notification_tx.expect("BUG: io_notification_tx must be Some for non-detached mode");
+
         let join_handle = std::thread::spawn(move || {
             let run_result = if io_redirection {
-                process_ctx.wait_with_io_redirection(input_event_rx)
+                process_ctx.wait_with_io_redirection(input_event_rx, io_notification_tx.clone())
             } else {
-                process_ctx.wait(input_event_rx)
+                process_ctx.wait(input_event_rx, io_notification_tx.clone())
             };
 
             let notification = match run_result {
@@ -594,11 +611,29 @@ impl WinApiProcessBuilder {
             }
         });
 
-        Ok(WinApiProcess {
+        Ok(Some(WinApiProcess {
             input_event_tx,
             join_handle,
             _temp_files: temp_files,
-        })
+        }))
+    }
+
+    /// Starts process execution and spawns IO thread to redirect stdio to/from dvc.
+    pub fn run(
+        self,
+        session_id: u32,
+        io_notification_tx: Sender<ServerChannelEvent>,
+    ) -> Result<WinApiProcess, ExecError> {
+        Ok(self
+            .run_impl(session_id, Some(io_notification_tx), false)?
+            .expect("BUG: run_impl should return Some when detached=false"))
+    }
+
+    /// Starts process in detached mode (fire-and-forget).
+    /// No IO redirection, no waiting for process exit. Returns immediately after spawning.
+    pub fn run_detached(self, session_id: u32) -> Result<(), ExecError> {
+        self.run_impl(session_id, None, true)?;
+        Ok(())
     }
 }
 
@@ -607,11 +642,10 @@ fn prepare_process(
     mut command_line: WideString,
     current_directory: WideString,
     env: HashMap<String, String>,
-    io_notification_tx: Sender<ServerChannelEvent>,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
 
-    let startup_info = STARTUPINFOW {
+    let mut startup_info = STARTUPINFOW {
         cb: u32::try_from(size_of::<STARTUPINFOW>()).expect("BUG: STARTUPINFOW should always fit into u32"),
         dwFlags: Default::default(),
         ..Default::default()
@@ -619,7 +653,14 @@ fn prepare_process(
 
     let environment_block = (!env.is_empty()).then(|| make_environment_block(env)).transpose()?;
 
+    // Control console window visibility:
+    // - CREATE_NEW_CONSOLE creates a new console window
+    // - SW_HIDE hides the console window
     let mut creation_flags = NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE;
+
+    startup_info.dwFlags |= STARTF_USESHOWWINDOW;
+    startup_info.wShowWindow = u16::try_from(SW_HIDE.0).expect("SHOW_WINDOW_CMD fits into u16");
+
     if environment_block.is_some() {
         creation_flags |= CREATE_UNICODE_ENVIRONMENT;
     }
@@ -657,7 +698,6 @@ fn prepare_process(
 
     Ok(WinApiProcessCtx {
         session_id,
-        io_notification_tx,
         stdout_read_pipe: None,
         stderr_read_pipe: None,
         stdin_write_pipe: None,
@@ -671,7 +711,6 @@ fn prepare_process_with_io_redirection(
     mut command_line: WideString,
     current_directory: WideString,
     env: HashMap<String, String>,
-    io_notification_tx: Sender<ServerChannelEvent>,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
 
@@ -741,7 +780,6 @@ fn prepare_process_with_io_redirection(
 
     let process_ctx = WinApiProcessCtx {
         session_id,
-        io_notification_tx,
         stdout_read_pipe: Some(stdout_read_pipe),
         stderr_read_pipe: Some(stderr_read_pipe),
         stdin_write_pipe: Some(stdin_write_pipe),

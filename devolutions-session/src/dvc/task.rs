@@ -520,7 +520,7 @@ impl MessageProcessor {
         let parameters = WideString::from("");
         let operation = WideString::from("open");
         let command: WideString = WideString::from(params.command());
-        let directory = params.directory().map(|dir| WideString::from(dir));
+        let directory = params.directory().map(WideString::from);
 
         info!(session_id, "Executing ShellExecuteW");
 
@@ -567,6 +567,21 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
+        if exec_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_process.run_detached(exec_msg.session_id())?;
+
+            // Send success immediately for detached processes
+            self.io_notification_tx
+                .send(ServerChannelEvent::SessionExited {
+                    session_id: exec_msg.session_id(),
+                    exit_code: 0,
+                })
+                .await?;
+
+            return Ok(());
+        }
+
         let process = run_process
             .with_io_redirection(exec_msg.is_with_io_redirection())
             .run(exec_msg.session_id(), self.io_notification_tx.clone())?;
@@ -592,6 +607,21 @@ impl MessageProcessor {
 
         if let Some(directory) = batch_msg.directory() {
             run_batch = run_batch.with_current_directory(directory);
+        }
+
+        if batch_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_batch.run_detached(batch_msg.session_id())?;
+
+            // Send success immediately for detached processes
+            self.io_notification_tx
+                .send(ServerChannelEvent::SessionExited {
+                    session_id: batch_msg.session_id(),
+                    exit_code: 0,
+                })
+                .await?;
+
+            return Ok(());
         }
 
         let process = run_batch
@@ -638,6 +668,21 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
+        if winps_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_process.run_detached(winps_msg.session_id())?;
+
+            // Send success immediately for detached processes
+            self.io_notification_tx
+                .send(ServerChannelEvent::SessionExited {
+                    session_id: winps_msg.session_id(),
+                    exit_code: 0,
+                })
+                .await?;
+
+            return Ok(());
+        }
+
         let process = run_process
             .with_io_redirection(winps_msg.is_with_io_redirection())
             .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
@@ -682,6 +727,21 @@ impl MessageProcessor {
 
         if let Some(directory) = winps_msg.directory() {
             run_process = run_process.with_current_directory(directory);
+        }
+
+        if winps_msg.is_detached() {
+            // Detached mode: fire-and-forget, no IO redirection
+            run_process.run_detached(winps_msg.session_id())?;
+
+            // Send success immediately for detached processes
+            self.io_notification_tx
+                .send(ServerChannelEvent::SessionExited {
+                    session_id: winps_msg.session_id(),
+                    exit_code: 0,
+                })
+                .await?;
+
+            return Ok(());
         }
 
         let process = run_process
