@@ -1163,7 +1163,7 @@ pub mod dto {
         pub users: Vec<DomainUser>,
         /// The maximum allowed time difference between client and proxy clocks
         ///
-        /// The value must be in seconds.
+        /// The value is expressed in seconds.
         pub max_time_skew: u64,
         /// krbtgt service key.
         ///

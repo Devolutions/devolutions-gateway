@@ -117,8 +117,8 @@ where
     let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
-    let (krb_server_config, network_client) = if conf.debug.enable_unstable {
-        if let Some(KerberosServer {
+    let (krb_server_config, network_client) = if conf.debug.enable_unstable
+        && let Some(KerberosServer {
             realm: _,
             users: _,
             krbtgt_key: _,
@@ -127,35 +127,33 @@ where
             service_user,
             kdc_url: _,
         }) = conf.debug.kerberos_server.as_ref()
-        {
-            let user = service_user.as_ref().map(|user| {
-                let DomainUser {
-                    username,
-                    password,
-                    salt: _,
-                } = user;
-                // The username is in the FQDN format. Thus, the domain field can be empty.
-                CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(username, "", password))
-            });
+    {
+        let user = service_user.as_ref().map(|user| {
+            let DomainUser {
+                username,
+                password,
+                salt: _,
+            } = user;
+            // The username is in the FQDN format. Thus, the domain field can be empty.
+            CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(username, "", password))
+        });
 
-            (
-                Some(KerberosServerConfig {
-                    kerberos_config: SspiKerberosConfig {
-                        kdc_url: None,
-                        client_computer_name: Some(client_addr.to_string()),
-                    },
-                    server_properties: ServerProperties::new(
-                        &["TERMSRV", &gateway_hostname],
-                        user,
-                        Duration::from_secs(*max_time_skew),
-                        ticket_decryption_key.clone(),
-                    )?,
-                }),
-                Some(NetworkClient::new()),
-            )
-        } else {
-            (None, None)
-        }
+        (
+            Some(KerberosServerConfig {
+                kerberos_config: SspiKerberosConfig {
+                    // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
+                    kdc_url: None,
+                    client_computer_name: Some(client_addr.to_string()),
+                },
+                server_properties: ServerProperties::new(
+                    &["TERMSRV", &gateway_hostname],
+                    user,
+                    Duration::from_secs(*max_time_skew),
+                    ticket_decryption_key.clone(),
+                )?,
+            }),
+            Some(NetworkClient::new()),
+        )
     } else {
         (None, None)
     };
@@ -170,8 +168,8 @@ where
         krb_server_config,
     );
 
-    let (krb_client_config, network_client) = if conf.debug.enable_unstable {
-        if let Some(KerberosServer {
+    let (krb_client_config, network_client) = if conf.debug.enable_unstable
+        && let Some(KerberosServer {
             realm: _,
             users: _,
             krbtgt_key: _,
@@ -180,17 +178,14 @@ where
             service_user: _,
             kdc_url,
         }) = conf.debug.kerberos_server.as_ref()
-        {
-            (
-                Some(KerberosConfig {
-                    kdc_proxy_url: kdc_url.clone(),
-                    hostname: None,
-                }),
-                Some(NetworkClient::new()),
-            )
-        } else {
-            (None, None)
-        }
+    {
+        (
+            Some(KerberosConfig {
+                kdc_proxy_url: kdc_url.clone(),
+                hostname: None,
+            }),
+            Some(NetworkClient::new()),
+        )
     } else {
         (None, None)
     };
