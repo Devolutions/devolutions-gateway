@@ -66,7 +66,7 @@ pub fn init<C: StaticLogConfig>(
     let (file_non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
 
-    let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(io::stdout());
+    let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(io::stdout()); // FIXME: Should be to stderr.
     let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
 
     let env_filter = EnvFilter::try_new(log_filter).context("invalid built-in filtering directives (this is a bug)")?;
