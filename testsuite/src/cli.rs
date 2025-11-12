@@ -32,6 +32,36 @@ pub fn jetsocat_tokio_cmd() -> tokio::process::Command {
     cmd
 }
 
+static DGW_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../devolutions-gateway/Cargo.toml")
+        .bin("devolutions-gateway")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build Devolutions Gateway")
+        .path()
+        .to_path_buf()
+});
+
+pub fn dgw_assert_cmd() -> assert_cmd::Command {
+    let mut cmd = assert_cmd::Command::new(&*DGW_BIN_PATH);
+    cmd.env("RUST_BACKTRACE", "0");
+    cmd
+}
+
+pub fn dgw_cmd() -> std::process::Command {
+    let mut cmd = std::process::Command::new(&*DGW_BIN_PATH);
+    cmd.env("RUST_BACKTRACE", "0");
+    cmd
+}
+
+pub fn dgw_tokio_cmd() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(&*DGW_BIN_PATH);
+    cmd.env("RUST_BACKTRACE", "0");
+    cmd
+}
+
 pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_test::Expect) {
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);

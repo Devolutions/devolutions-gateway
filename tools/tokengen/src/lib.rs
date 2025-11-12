@@ -29,7 +29,10 @@ pub struct AssociationClaims<'a> {
     pub jet_gw_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jet_reuse: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dst_hst: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cert_thumb256: Option<&'a str>,
     #[serde(flatten)]
     pub creds: Option<CredsClaims<'a>>,
 }
@@ -215,6 +218,7 @@ pub enum SubCommandArgs {
         jet_aid: Option<Uuid>,
         jet_rec: bool,
         jet_reuse: Option<u32>,
+        cert_thumb256: Option<String>,
     },
     Rendezvous {
         jet_ap: Option<ApplicationProtocol>,
@@ -288,6 +292,7 @@ pub fn generate_token(
             jet_aid,
             jet_rec,
             jet_reuse,
+            cert_thumb256,
         } => {
             let claims = AssociationClaims {
                 exp,
@@ -305,6 +310,7 @@ pub fn generate_token(
                 jet_ttl,
                 jet_gw_id,
                 jet_reuse,
+                cert_thumb256: cert_thumb256.as_deref(),
                 creds: None,
             };
             ("ASSOCIATION", serde_json::to_value(claims)?)
@@ -329,6 +335,7 @@ pub fn generate_token(
                 jet_ttl: None,
                 jet_gw_id,
                 jet_reuse: None,
+                cert_thumb256: None,
                 creds: Some(CredsClaims {
                     prx_usr: &prx_usr,
                     prx_pwd: &prx_pwd,
@@ -359,6 +366,7 @@ pub fn generate_token(
                 jet_ttl: None,
                 jet_gw_id,
                 jet_reuse: None,
+                cert_thumb256: None,
                 creds: None,
             };
             ("ASSOCIATION", serde_json::to_value(claims)?)

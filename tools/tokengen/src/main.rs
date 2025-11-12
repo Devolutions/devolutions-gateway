@@ -50,6 +50,7 @@ fn sign(
             jet_aid,
             jet_rec,
             jet_reuse,
+            cert_thumb256,
         } => SubCommandArgs::Forward {
             dst_hst,
             jet_ap,
@@ -57,6 +58,7 @@ fn sign(
             jet_aid,
             jet_rec,
             jet_reuse,
+            cert_thumb256,
         },
         SignSubCommand::Rendezvous {
             jet_ap,
@@ -189,6 +191,8 @@ enum SignSubCommand {
         jet_rec: bool,
         #[clap(long)]
         jet_reuse: Option<u32>,
+        #[clap(long)]
+        cert_thumb256: Option<String>,
     },
     Rendezvous {
         #[clap(long)]

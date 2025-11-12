@@ -75,6 +75,9 @@ zeroize = { version = "1.8", features = ["derive"] }
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+hex = "0.4"
+rustls-native-certs = "0.8"
 
 # Logging
 tracing = "0.1"
