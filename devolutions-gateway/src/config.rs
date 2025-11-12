@@ -1179,6 +1179,11 @@ pub mod dto {
         /// This field is needed only for Kerberos User-to-User authentication. If you do not plan
         /// to use Kerberos U2U, do not specify it.
         pub service_user: Option<DomainUser>,
+        /// KDC server url.
+        ///
+        /// **Only TCP and UDP schemas are supported.**
+        /// If the DNS is configured, you can omit it.
+        pub kdc_url: Option<Url>,
     }
 
     /// Unsafe debug options that should only ever be used at development stage
