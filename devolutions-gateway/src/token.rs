@@ -1417,7 +1417,7 @@ mod serde_impl {
                 jet_reuse: self.jet_reuse,
                 exp: self.exp,
                 jti: self.jti,
-                cert_thumb256: self.cert_thumb256.clone().map(|thumb| SmolStr::new(thumb.as_str())),
+                cert_thumb256: self.cert_thumb256.as_ref().map(|thumb| SmolStr::new(thumb.as_str())),
             }
             .serialize(serializer)
         }
