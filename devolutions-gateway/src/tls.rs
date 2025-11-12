@@ -77,8 +77,13 @@ where
 
 /// Connect to a TLS server with optional certificate thumbprint anchoring.
 ///
-/// If `cert_thumb256` is provided and TLS verification fails, the connection will be accepted
-/// if the server's leaf certificate thumbprint matches the provided value.
+/// # Thumbprint Anchoring Behavior
+///
+/// When `cert_thumb256` is provided:
+/// - If thumbprint matches: Accept immediately, bypassing ALL certificate checks (expiration, key usage, trust chain)
+/// - If thumbprint doesn't match: Fall back to standard TLS verification
+///
+/// This is an escape hatch for certificate issues, NOT for long-term use.
 pub async fn safe_connect<IO>(
     dns_name: String,
     stream: IO,
@@ -673,8 +678,19 @@ impl Default for NativeRootsVerifier {
 
 /// Certificate verifier that supports thumbprint anchoring.
 ///
-/// This verifier accept the certificate if the provided thumbprint matches the leaf certificate,
+/// This verifier accepts the certificate if the provided thumbprint matches the leaf certificate,
 /// otherwise normal TLS verification using system roots is performed.
+///
+/// ## Security Warning
+///
+/// When thumbprint matches, this bypasses ALL standard TLS verification:
+/// - Certificate expiration dates are NOT checked
+/// - Key usage extensions are NOT validated
+/// - Certificate chain trust is NOT verified
+/// - Hostname matching is NOT performed
+///
+/// This is an **escape hatch** for users with certificate issues, NOT a long-term solution.
+/// Users should resolve certificate problems and remove thumbprint configuration ASAP.
 #[derive(Debug)]
 pub struct ThumbprintAnchoredVerifier {
     expected_thumbprint: thumbprint::Sha256Thumbprint,
@@ -695,14 +711,16 @@ impl rustls::client::danger::ServerCertVerifier for ThumbprintAnchoredVerifier {
         ocsp_response: &[u8],
         now: pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        // Compute SHA-256 thumbprint of the certificate
+        // Compute SHA-256 thumbprint of the certificate.
         let actual_thumbprint = thumbprint::compute_sha256_thumbprint(end_entity);
 
         // Thumbprint matches, accept immediately.
+        // SECURITY: This bypasses ALL certificate validation checks when thumbprint matches.
+        // No validation of: expiration, key usage, hostname, or trust chain.
         if actual_thumbprint == self.expected_thumbprint {
             info!(
                 sha256_thumb = %actual_thumbprint,
-                "Accepting TLS connection via certificate thumbprint anchor"
+                "Accepting TLS connection via certificate thumbprint anchor (bypassing standard validation)"
             );
 
             return Ok(rustls::client::danger::ServerCertVerified::assertion());
