@@ -991,7 +991,7 @@ fn setup_logger(logging: &Logging, coloring: Coloring) -> LoggerGuard {
                 Coloring::Auto => true,
             };
 
-            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout());
+            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout()); // FIXME: Should be to stderr.
             let stdio_layer = fmt::layer().with_writer(non_blocking_stdio).with_ansi(ansi);
 
             (stdio_layer, guard)
