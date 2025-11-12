@@ -11,7 +11,7 @@ async fn start_gateway() -> anyhow::Result<(DgwConfigHandle, Child)> {
         .init()
         .context("init config")?;
 
-    // Start Devolutions Gateway server that will accept JMUX connections.
+    // Start a Devolutions Gateway instance.
     let process = dgw_tokio_cmd()
         .env("DGATEWAY_CONFIG_PATH", config_handle.config_dir())
         .kill_on_drop(true)
