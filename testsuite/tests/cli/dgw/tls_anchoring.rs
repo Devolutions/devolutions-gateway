@@ -78,10 +78,7 @@ async fn read_until_tls_done(mut logs: impl tokio::io::AsyncRead + Unpin) -> any
 #[case::self_signed_no_thumb(token::SELF_SIGNED_NO_THUMB, TlsOutcome::Failed)]
 #[case::valid_cert_no_thumb(token::VALID_CERT_NO_THUMB, TlsOutcome::Succeeded)]
 #[tokio::test]
-async fn test_tls_no_thumbprint_valid_cert(
-    #[case] token: &str,
-    #[case] expected_outcome: TlsOutcome,
-) -> anyhow::Result<()> {
+async fn test(#[case] token: &str, #[case] expected_outcome: TlsOutcome) -> anyhow::Result<()> {
     let (config_handle, mut process) = start_gateway().await?;
 
     let stdout = process.stdout.take().unwrap();

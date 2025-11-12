@@ -244,14 +244,11 @@ where
             trace!("Establishing TLS connection with server");
 
             // Establish TLS connection with server.
-            let server_stream = crate::tls::safe_connect(
-                selected_target.host().to_owned(),
-                server_stream,
-                claims.cert_thumb256.as_deref(),
-            )
-            .await
-            .context("TLS connect")
-            .map_err(ForwardError::BadGateway)?;
+            let server_stream =
+                crate::tls::safe_connect(selected_target.host().to_owned(), server_stream, claims.cert_thumb256)
+                    .await
+                    .context("TLS connect")
+                    .map_err(ForwardError::BadGateway)?;
 
             info!("WebSocket-TLS forwarding");
 

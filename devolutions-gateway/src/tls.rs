@@ -1,41 +1,64 @@
+use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context as _;
+use parking_lot::Mutex;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::{self, pki_types};
+use x509_cert::der::Decode as _;
 
 static DEFAULT_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
+
+// rustls doc says:
+//
+// > Making one of these can be expensive, and should be once per process rather than once per connection.
+//
+// source: https://docs.rs/rustls/0.21.1/rustls/client/struct.ClientConfig.html
+//
+// We’ll reuse the same TLS client config for all proxy-based TLS connections.
+// (TlsConnector is just a wrapper around the config providing the `connect` method.)
+static DANGEROUS_TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
+    let mut config = rustls::client::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
+        .with_no_client_auth();
+
+    // Disable TLS resumption because it’s not supported by some services such as CredSSP.
+    //
+    // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
+    //
+    // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
+    config.resumption = rustls::client::Resumption::disabled();
+
+    tokio_rustls::TlsConnector::from(Arc::new(config))
+});
+
+static NATIVE_ROOTS_VERIFIER: LazyLock<Arc<NativeRootsVerifier>> =
+    LazyLock::new(|| Arc::new(NativeRootsVerifier::new()));
+
+static SAFE_TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
+    let mut config = rustls::client::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(NATIVE_ROOTS_VERIFIER.clone())
+        .with_no_client_auth();
+
+    config.resumption = rustls::client::Resumption::disabled();
+
+    tokio_rustls::TlsConnector::from(Arc::new(config))
+});
+
+// Cache for thumbprint-anchored TLS connectors to avoid recreating them for each connection.
+// The rustls documentation recommends creating ClientConfig once per process rather than per connection.
+static THUMBPRINT_ANCHORED_CONNECTORS: LazyLock<
+    Mutex<HashMap<thumbprint::Sha256Thumbprint, tokio_rustls::TlsConnector>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub async fn dangerous_connect<IO>(dns_name: String, stream: IO) -> io::Result<TlsStream<IO>>
 where
     IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     use tokio::io::AsyncWriteExt as _;
-
-    // rustls doc says:
-    //
-    // > Making one of these can be expensive, and should be once per process rather than once per connection.
-    //
-    // source: https://docs.rs/rustls/0.21.1/rustls/client/struct.ClientConfig.html
-    //
-    // We’ll reuse the same TLS client config for all proxy-based TLS connections.
-    // (TlsConnector is just a wrapper around the config providing the `connect` method.)
-    static DANGEROUS_TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
-        let mut config = rustls::client::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
-            .with_no_client_auth();
-
-        // Disable TLS resumption because it’s not supported by some services such as CredSSP.
-        //
-        // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
-        //
-        // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
-        config.resumption = rustls::client::Resumption::disabled();
-
-        tokio_rustls::TlsConnector::from(Arc::new(config))
-    });
 
     let dns_name = pki_types::ServerName::try_from(dns_name).map_err(io::Error::other)?;
 
@@ -56,40 +79,41 @@ where
 ///
 /// If `cert_thumb256` is provided and TLS verification fails, the connection will be accepted
 /// if the server's leaf certificate thumbprint matches the provided value.
-pub async fn safe_connect<IO>(dns_name: String, stream: IO, cert_thumb256: Option<&str>) -> io::Result<TlsStream<IO>>
+pub async fn safe_connect<IO>(
+    dns_name: String,
+    stream: IO,
+    cert_thumb256: Option<thumbprint::Sha256Thumbprint>,
+) -> io::Result<TlsStream<IO>>
 where
     IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     use tokio::io::AsyncWriteExt as _;
 
-    static SAFE_TLS_CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = LazyLock::new(|| {
-        // Use thumbprint-anchored verifier, without anchor (fully safe).
-        let verifier = Arc::new(danger::ThumbprintAnchoredVerifier::new(None));
-
-        let mut config = rustls::client::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(verifier)
-            .with_no_client_auth();
-
-        config.resumption = rustls::client::Resumption::disabled();
-
-        tokio_rustls::TlsConnector::from(Arc::new(config))
-    });
-
     let server_name = pki_types::ServerName::try_from(dns_name.clone()).map_err(io::Error::other)?;
 
-    // If the anchor is specified, build a special verifier dedicated to that anchor.
-    let connector = if cert_thumb256.is_some() {
-        let verifier = Arc::new(danger::ThumbprintAnchoredVerifier::new(cert_thumb256));
+    // Get the appropriate connector, using cache for thumbprint-anchored ones.
+    let connector = if let Some(thumbprint) = cert_thumb256 {
+        // Check the cache first.
+        let mut cache = THUMBPRINT_ANCHORED_CONNECTORS.lock();
 
-        let mut config = rustls::client::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(verifier)
-            .with_no_client_auth();
+        // Clone existing connector or create and cache a new one.
+        cache
+            .entry(thumbprint.clone())
+            .or_insert_with(|| {
+                debug!(%thumbprint, "Creating new thumbprint-anchored TLS connector");
 
-        config.resumption = rustls::client::Resumption::disabled();
+                let verifier = Arc::new(ThumbprintAnchoredVerifier::new(thumbprint));
 
-        tokio_rustls::TlsConnector::from(Arc::new(config))
+                let mut config = rustls::client::ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(verifier)
+                    .with_no_client_auth();
+
+                config.resumption = rustls::client::Resumption::disabled();
+
+                tokio_rustls::TlsConnector::from(Arc::new(config))
+            })
+            .clone()
     } else {
         SAFE_TLS_CONNECTOR.clone()
     };
@@ -535,6 +559,271 @@ pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Resul
     })
 }
 
+/// Standard certificate verifier using native roots based on the [`WebPkiServerVerifier`].
+///
+/// This verifier attempts normal TLS verification using system roots.
+/// If verification fails, certificate details are logged.
+#[derive(Debug)]
+pub struct NativeRootsVerifier {
+    inner: rustls::client::WebPkiServerVerifier,
+}
+
+impl NativeRootsVerifier {
+    pub fn new() -> Self {
+        // Create a standard verifier using platform native certificate store.
+        let mut root_store = rustls::RootCertStore::empty();
+
+        // Load certificates from the platform native certificate store.
+        let result = rustls_native_certs::load_native_certs();
+
+        for error in result.errors {
+            warn!(error = %error, "Error when loading native certificate");
+        }
+
+        let mut added_count = 0;
+
+        for cert in result.certs {
+            if root_store.add(cert).is_ok() {
+                added_count += 1;
+            }
+        }
+
+        if added_count == 0 {
+            warn!("No valid certificates found in platform native certificate store");
+        } else {
+            debug!(count = added_count, "Loaded native certificates");
+        }
+
+        let webpki_server_verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store))
+            .build()
+            .expect("failed to build WebPkiServerVerifier; this should not fail");
+
+        Self {
+            inner: Arc::into_inner(webpki_server_verifier).expect("exactly one strong reference at this point"),
+        }
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for NativeRootsVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &pki_types::CertificateDer<'_>,
+        intermediates: &[pki_types::CertificateDer<'_>],
+        server_name: &pki_types::ServerName<'_>,
+        ocsp_response: &[u8],
+        now: pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        match self
+            .inner
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+        {
+            Ok(verified) => Ok(verified),
+            Err(verification_error) => {
+                // Compute SHA-256 thumbprint of the certificate.
+                let thumbprint = thumbprint::compute_sha256_thumbprint(end_entity);
+
+                // Extract certificate details.
+                let cert_info = extract_cert_info(end_entity);
+
+                error!(
+                    cert_subject = %cert_info.subject,
+                    cert_issuer = %cert_info.issuer,
+                    not_before = %cert_info.not_before,
+                    not_after = %cert_info.not_after,
+                    san = %cert_info.sans,
+                    reason = %verification_error,
+                    sha256_thumb = %thumbprint,
+                    hint = "PASTE_THIS_THUMBPRINT_IN_RDM_CONNECTION",
+                    "Invalid peer certificate"
+                );
+
+                Err(verification_error)
+            }
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+impl Default for NativeRootsVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Certificate verifier that supports thumbprint anchoring.
+///
+/// This verifier accept the certificate if the provided thumbprint matches the leaf certificate,
+/// otherwise normal TLS verification using system roots is performed.
+#[derive(Debug)]
+pub struct ThumbprintAnchoredVerifier {
+    expected_thumbprint: thumbprint::Sha256Thumbprint,
+}
+
+impl ThumbprintAnchoredVerifier {
+    pub fn new(expected_thumbprint: thumbprint::Sha256Thumbprint) -> Self {
+        Self { expected_thumbprint }
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for ThumbprintAnchoredVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &pki_types::CertificateDer<'_>,
+        intermediates: &[pki_types::CertificateDer<'_>],
+        server_name: &pki_types::ServerName<'_>,
+        ocsp_response: &[u8],
+        now: pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        // Compute SHA-256 thumbprint of the certificate
+        let actual_thumbprint = thumbprint::compute_sha256_thumbprint(end_entity);
+
+        // Thumbprint matches, accept immediately.
+        if actual_thumbprint == self.expected_thumbprint {
+            info!(
+                sha256_thumb = %actual_thumbprint,
+                "Accepting TLS connection via certificate thumbprint anchor"
+            );
+
+            return Ok(rustls::client::danger::ServerCertVerified::assertion());
+        }
+
+        // Otherwise, try the normal verification.
+        NATIVE_ROOTS_VERIFIER.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        NATIVE_ROOTS_VERIFIER.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        NATIVE_ROOTS_VERIFIER.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        NATIVE_ROOTS_VERIFIER.supported_verify_schemes()
+    }
+}
+
+struct CertInfo {
+    subject: String,
+    issuer: String,
+    not_before: x509_cert::time::Time,
+    not_after: x509_cert::time::Time,
+    sans: String,
+}
+
+fn extract_cert_info(cert_der: &[u8]) -> CertInfo {
+    use bytes::Buf as _;
+    use std::fmt::Write as _;
+
+    match x509_cert::Certificate::from_der(cert_der) {
+        Ok(cert) => {
+            let subject = cert.tbs_certificate.subject.to_string();
+            let issuer = cert.tbs_certificate.issuer.to_string();
+            let not_before = cert.tbs_certificate.validity.not_before;
+            let not_after = cert.tbs_certificate.validity.not_after;
+
+            let mut sans = String::new();
+            let mut first = true;
+
+            if let Some(extensions) = cert.tbs_certificate.extensions {
+                for ext in extensions {
+                    if let Ok(san) = x509_cert::ext::pkix::SubjectAltName::from_der(ext.extn_value.as_bytes()) {
+                        for name in san.0 {
+                            if first {
+                                first = false;
+                            } else {
+                                let _ = write!(sans, ",");
+                            }
+
+                            match name {
+                                x509_cert::ext::pkix::name::GeneralName::OtherName(other_name) => {
+                                    let _ = write!(sans, "{}", other_name.type_id);
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::Rfc822Name(name) => {
+                                    let _ = write!(sans, "{}", name.as_str());
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::DnsName(name) => {
+                                    let _ = write!(sans, "{}", name.as_str());
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::DirectoryName(rdn_sequence) => {
+                                    let _ = write!(sans, "{rdn_sequence}");
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::EdiPartyName(_) => {
+                                    let _ = write!(sans, "<EDI Party Name>");
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::UniformResourceIdentifier(uri) => {
+                                    let _ = write!(sans, "{}", uri.as_str());
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::IpAddress(octet_string) => {
+                                    if let Ok(ip) = octet_string.as_bytes().try_get_u128() {
+                                        let ip = std::net::Ipv6Addr::from_bits(ip);
+                                        let _ = write!(sans, "{ip}");
+                                    } else if let Ok(ip) = octet_string.as_bytes().try_get_u32() {
+                                        let ip = std::net::Ipv4Addr::from_bits(ip);
+                                        let _ = write!(sans, "{ip}");
+                                    } else {
+                                        let _ = write!(sans, "<IP Address>");
+                                    }
+                                }
+                                x509_cert::ext::pkix::name::GeneralName::RegisteredId(object_identifier) => {
+                                    let _ = write!(sans, "{object_identifier}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            CertInfo {
+                subject,
+                issuer,
+                not_before,
+                not_after,
+                sans,
+            }
+        }
+        Err(_) => CertInfo {
+            subject: "<parse error>".to_owned(),
+            issuer: "<parse error>".to_owned(),
+            not_before: x509_cert::time::Time::INFINITY,
+            not_after: x509_cert::time::Time::INFINITY,
+            sans: "<parse error>".to_owned(),
+        },
+    }
+}
+
 pub mod sanity {
     use tokio_rustls::rustls;
 
@@ -585,10 +874,8 @@ pub mod sanity {
 }
 
 pub mod danger {
-    use std::sync::Arc;
     use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use tokio_rustls::rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
-    use x509_cert::der::Decode as _;
 
     #[derive(Debug)]
     pub struct NoCertificateVerification;
@@ -641,320 +928,116 @@ pub mod danger {
             ]
         }
     }
+}
 
-    /// Certificate verifier that supports thumbprint anchoring.
-    ///
-    /// This verifier attempts normal TLS verification using system roots.
-    /// If verification fails and a thumbprint is provided that matches the leaf certificate,
-    /// the connection is accepted and details are logged.
-    #[derive(Debug)]
-    pub struct ThumbprintAnchoredVerifier {
-        /// Expected SHA-256 thumbprint (normalized lowercase hex, no separators).
-        expected_thumbprint: Option<String>,
-        /// Standard verifier using system roots.
-        standard_verifier: Arc<dyn ServerCertVerifier>,
-    }
+pub mod thumbprint {
+    use core::fmt;
 
-    impl ThumbprintAnchoredVerifier {
-        pub fn new(expected_thumbprint: Option<&str>) -> Self {
-            // Create a standard verifier using platform native certificate store.
-            let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+    // SHA-256 thumbprint should be exactly 64 hex characters (32 bytes).
+    const EXPECTED_SHA256_LENGTH: usize = 64;
 
-            // Load certificates from the platform native certificate store.
-            let result = rustls_native_certs::load_native_certs();
+    /// Normalized SHA-256 Thumbprint.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct Sha256Thumbprint(
+        /// INVARIANT: 64-character, lowercased hex with no separator.
+        String,
+    );
 
-            for error in result.errors {
-                warn!(error = %error, "Error when loading native certificate");
-            }
-
-            let mut added_count = 0;
-
-            for cert in result.certs {
-                if root_store.add(cert).is_ok() {
-                    added_count += 1;
-                }
-            }
-
-            if added_count == 0 {
-                warn!("No valid certificates found in platform native certificate store");
-            } else {
-                debug!(count = added_count, "Loaded native certificates");
-            }
-
-            let standard_verifier = tokio_rustls::rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store))
-                .build()
-                .expect("failed to build WebPkiServerVerifier; this should not fail");
-
-            Self {
-                expected_thumbprint: expected_thumbprint.map(normalize_thumbprint),
-                standard_verifier,
-            }
-        }
-
-        fn check_thumbprint_and_log(
-            &self,
-            end_entity: &pki_types::CertificateDer<'_>,
-            verification_error: Error,
-        ) -> Result<ServerCertVerified, Error> {
-            // Compute SHA-256 thumbprint of the certificate
-            let actual_thumb = compute_sha256_thumbprint(end_entity);
-
-            // Thumbprint matches! Extract certificate details and log.
-            let cert_info = extract_cert_info(end_entity);
-
-            let Some(expected_thumb) = &self.expected_thumbprint else {
-                error!(
-                    cert_subject = %cert_info.subject,
-                    cert_issuer = %cert_info.issuer,
-                    not_before = %cert_info.not_before,
-                    not_after = %cert_info.not_after,
-                    san = %cert_info.sans,
-                    reason = %verification_error,
-                    sha256_thumb = %actual_thumb,
-                    hint = "PASTE_THIS_THUMBPRINT_IN_RDM_CONNECTION",
-                    "Invalid peer certificate"
-                );
-
-                // No thumbprint provided, fail with original error.
-                return Err(verification_error);
-            };
-
-            // Thumbprint mismatch, fail with original error.
-            if actual_thumb != *expected_thumb {
-                error!(
-                    cert_subject = %cert_info.subject,
-                    cert_issuer = %cert_info.issuer,
-                    not_before = %cert_info.not_before,
-                    not_after = %cert_info.not_after,
-                    san = %cert_info.sans,
-                    reason = %verification_error,
-                    sha256_thumb = %actual_thumb,
-                    hint = "PASTE_THIS_THUMBPRINT_IN_RDM_CONNECTION",
-                    "Invalid peer certificate and anchor mismatch"
-                );
-
-                return Err(verification_error);
-            }
-
-            info!(
-                cert_subject = %cert_info.subject,
-                cert_issuer = %cert_info.issuer,
-                not_before = %cert_info.not_before,
-                not_after = %cert_info.not_after,
-                san = %cert_info.sans,
-                reason = %verification_error,
-                sha256_thumb = %actual_thumb,
-                "Accepting TLS connection via certificate thumbprint anchor despite verification failure"
-            );
-
-            Ok(ServerCertVerified::assertion())
+    impl fmt::Display for Sha256Thumbprint {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.0.fmt(f)
         }
     }
 
-    impl ServerCertVerifier for ThumbprintAnchoredVerifier {
-        fn verify_server_cert(
-            &self,
-            end_entity: &pki_types::CertificateDer<'_>,
-            intermediates: &[pki_types::CertificateDer<'_>],
-            server_name: &pki_types::ServerName<'_>,
-            ocsp_response: &[u8],
-            now: pki_types::UnixTime,
-        ) -> Result<ServerCertVerified, Error> {
-            // Try standard verification first.
-            match self
-                .standard_verifier
-                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
-            {
-                Ok(verified) => Ok(verified),
-                Err(err) => {
-                    // Standard verification failed, try thumbprint anchoring.
-                    self.check_thumbprint_and_log(end_entity, err)
-                }
-            }
+    impl Sha256Thumbprint {
+        pub fn as_str(&self) -> &str {
+            &self.0
         }
+    }
 
-        fn verify_tls12_signature(
-            &self,
-            message: &[u8],
-            cert: &pki_types::CertificateDer<'_>,
-            dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, Error> {
-            self.standard_verifier.verify_tls12_signature(message, cert, dss)
-        }
-
-        fn verify_tls13_signature(
-            &self,
-            message: &[u8],
-            cert: &pki_types::CertificateDer<'_>,
-            dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, Error> {
-            self.standard_verifier.verify_tls13_signature(message, cert, dss)
-        }
-
-        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-            self.standard_verifier.supported_verify_schemes()
-        }
+    #[derive(Debug, thiserror::Error)]
+    #[error(
+        "certificate thumbprint has unexpected length: expected {EXPECTED_SHA256_LENGTH} hex characters (SHA-256), got {actual_length}; \
+         this may indicate a SHA-1 thumbprint (40 chars) or incorrect format"
+    )]
+    pub struct ThumbprintLengthError {
+        actual_length: usize,
     }
 
     /// Normalize thumbprint to lowercase hex with no separators.
-    fn normalize_thumbprint(thumb: &str) -> String {
-        thumb
+    ///
+    /// Validates that the resulting thumbprint has the expected length for SHA-256 (64 hex chars).
+    pub fn normalize_sha256_thumbprint(thumb: &str) -> Result<Sha256Thumbprint, ThumbprintLengthError> {
+        let normalized = thumb
             .chars()
             .filter(|c| c.is_ascii_hexdigit())
             .map(|mut c| {
                 c.make_ascii_lowercase();
                 c
             })
-            .collect::<String>()
+            .collect::<String>();
+
+        if normalized.len() != EXPECTED_SHA256_LENGTH {
+            return Err(ThumbprintLengthError {
+                actual_length: normalized.len(),
+            });
+        }
+
+        Ok(Sha256Thumbprint(normalized))
     }
 
     /// Compute SHA-256 thumbprint of certificate DER bytes.
-    fn compute_sha256_thumbprint(cert_der: &[u8]) -> String {
+    pub fn compute_sha256_thumbprint(cert_der: &[u8]) -> Sha256Thumbprint {
         use sha2::{Digest, Sha256};
         let hash = Sha256::digest(cert_der);
-        hex::encode(hash)
-    }
-
-    struct CertInfo {
-        subject: String,
-        issuer: String,
-        not_before: x509_cert::time::Time,
-        not_after: x509_cert::time::Time,
-        sans: String,
-    }
-
-    fn extract_cert_info(cert_der: &[u8]) -> CertInfo {
-        use bytes::Buf as _;
-        use std::fmt::Write as _;
-
-        match x509_cert::Certificate::from_der(cert_der) {
-            Ok(cert) => {
-                let subject = cert.tbs_certificate.subject.to_string();
-                let issuer = cert.tbs_certificate.issuer.to_string();
-                let not_before = cert.tbs_certificate.validity.not_before;
-                let not_after = cert.tbs_certificate.validity.not_after;
-
-                let mut sans = String::new();
-                let mut first = true;
-
-                if let Some(extensions) = cert.tbs_certificate.extensions {
-                    for ext in extensions {
-                        if let Ok(san) = x509_cert::ext::pkix::SubjectAltName::from_der(ext.extn_value.as_bytes()) {
-                            if first {
-                                first = false;
-                            } else {
-                                let _ = write!(sans, ",");
-                            }
-
-                            for name in san.0 {
-                                match name {
-                                    x509_cert::ext::pkix::name::GeneralName::OtherName(other_name) => {
-                                        let _ = write!(sans, "{}", other_name.type_id);
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::Rfc822Name(name) => {
-                                        let _ = write!(sans, "{}", name.as_str());
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::DnsName(name) => {
-                                        let _ = write!(sans, "{}", name.as_str());
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::DirectoryName(rdn_sequence) => {
-                                        let _ = write!(sans, "{rdn_sequence}");
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::EdiPartyName(_) => {
-                                        let _ = write!(sans, "<EDI Party Name>");
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::UniformResourceIdentifier(uri) => {
-                                        let _ = write!(sans, "{}", uri.as_str());
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::IpAddress(octet_string) => {
-                                        if let Ok(ip) = octet_string.as_bytes().try_get_u128_le() {
-                                            let ip = std::net::Ipv6Addr::from_bits(ip);
-                                            let _ = write!(sans, "{ip}");
-                                        } else if let Ok(ip) = octet_string.as_bytes().try_get_u32_le() {
-                                            let ip = std::net::Ipv4Addr::from_bits(ip);
-                                            let _ = write!(sans, "{ip}");
-                                        } else {
-                                            let _ = write!(sans, "<IP Address>");
-                                        }
-                                    }
-                                    x509_cert::ext::pkix::name::GeneralName::RegisteredId(object_identifier) => {
-                                        let _ = write!(sans, "{object_identifier}");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                CertInfo {
-                    subject,
-                    issuer,
-                    not_before,
-                    not_after,
-                    sans,
-                }
-            }
-            Err(_) => CertInfo {
-                subject: "<parse error>".to_owned(),
-                issuer: "<parse error>".to_owned(),
-                not_before: x509_cert::time::Time::INFINITY,
-                not_after: x509_cert::time::Time::INFINITY,
-                sans: "<parse error>".to_owned(),
-            },
-        }
+        Sha256Thumbprint(hex::encode(hash))
     }
 
     #[cfg(test)]
     mod tests {
+        #![allow(clippy::unwrap_used, reason = "allowed in tests")]
+
+        use rstest::rstest;
+
         use super::*;
 
-        #[test]
-        fn test_normalize_thumbprint() {
-            // Test lowercase hex remains unchanged.
-            assert_eq!(normalize_thumbprint("abcdef0123456789"), "abcdef0123456789");
-
-            // Test uppercase is converted to lowercase.
-            assert_eq!(normalize_thumbprint("ABCDEF0123456789"), "abcdef0123456789");
-
-            // Test mixed case.
-            assert_eq!(normalize_thumbprint("AbCdEf0123456789"), "abcdef0123456789");
-
-            // Test with colons (common format).
-            assert_eq!(normalize_thumbprint("AB:CD:EF:01:23:45:67:89"), "abcdef0123456789");
-
-            // Test with spaces.
-            assert_eq!(normalize_thumbprint("AB CD EF 01 23 45 67 89"), "abcdef0123456789");
-
-            // Test with mixed separators.
-            assert_eq!(normalize_thumbprint("AB:CD-EF 01.23_45-67:89"), "abcdef0123456789");
-
-            // Test full SHA-256 thumbprint with colons.
+        #[rstest]
+        #[case("3a7fb2c45e8d9f1a2b3c4d5e6f7a8b9cadbecfd0e1f2031425364758697a8b9c")]
+        #[case("3A7FB2C45E8D9F1A2B3C4D5E6F7A8B9CADBECFD0E1F2031425364758697A8B9C")]
+        #[case("3a7Fb2C45E8d9f1a2b3c4D5E6f7a8b9CAdbecfd0E1f2031425364758697A8b9c")]
+        #[case("3A 7F B2 C4 5E 8D 9F 1A 2B 3C 4D 5E 6F 7A 8B 9C AD BE CF D0 E1 F2 03 14 25 36 47 58 69 7A 8B 9C")]
+        #[case("3A:7F:B2:C4:5E:8D:9F:1A:2B:3C:4D:5E:6F:7A:8B:9C:AD:BE:CF:D0:E1:F2:03:14:25:36:47:58:69:7A:8B:9C")]
+        #[case("3a:7F-B2.C4_5E:8d:9f_1a-2b:3c-4d.5e:6f:7a:8b:9c.ad:be:cf:d0.e1:f2:03:14:25-36-47-58_69-7A:8B:9C")]
+        fn test_normalize_thumbprint(#[case] input: &str) {
             assert_eq!(
-                normalize_thumbprint(
-                    "3A:7F:B2:C4:5E:8D:9F:1A:2B:3C:4D:5E:6F:7A:8B:9C:AD:BE:CF:D0:E1:F2:03:14:25:36:47:58:69:7A:8B:9C"
-                ),
+                normalize_sha256_thumbprint(input).unwrap().as_str(),
                 "3a7fb2c45e8d9f1a2b3c4d5e6f7a8b9cadbecfd0e1f2031425364758697a8b9c"
             );
         }
 
         #[test]
         fn test_compute_sha256_thumbprint() {
-            // Test with known input
+            // Test with known input.
             let test_data = b"Hello, World!";
             let thumbprint = compute_sha256_thumbprint(test_data);
 
-            // Expected SHA-256 of "Hello, World!"
+            // Expected SHA-256 of "Hello, World!".
             let expected = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f";
-            assert_eq!(thumbprint, expected);
+            assert_eq!(thumbprint.as_str(), expected);
 
-            // Test output format (lowercase hex, no separators)
-            assert!(thumbprint.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
-            assert_eq!(thumbprint.len(), 64); // SHA-256 is 32 bytes = 64 hex chars
+            // Test output format (lowercase hex, no separators).
+            assert!(
+                thumbprint
+                    .as_str()
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
+            );
+            assert_eq!(thumbprint.as_str().len(), 64); // SHA-256 is 32 bytes = 64 hex chars.
         }
 
         #[test]
         fn test_compute_sha256_thumbprint_deterministic() {
-            // Same input should always produce same thumbprint
+            // Same input should always produce same thumbprint.
             let test_data = b"test certificate data";
             let thumbprint1 = compute_sha256_thumbprint(test_data);
             let thumbprint2 = compute_sha256_thumbprint(test_data);

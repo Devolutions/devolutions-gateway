@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::recording::ActiveRecordings;
 use crate::session::DisconnectedInfo;
 use crate::target_addr::TargetAddr;
+use crate::tls::thumbprint::Sha256Thumbprint;
 
 pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 
@@ -422,8 +423,7 @@ pub struct AssociationTokenClaims {
     pub jti: Uuid,
 
     /// Optional SHA-256 thumbprint of target server certificate (for anchored TLS validation)
-    /// Format: lowercase hex string with no separators (e.g., "3a7f...")
-    pub cert_thumb256: Option<SmolStr>,
+    pub cert_thumb256: Option<Sha256Thumbprint>,
 }
 
 // ----- scope claims ----- //
@@ -1417,7 +1417,7 @@ mod serde_impl {
                 jet_reuse: self.jet_reuse,
                 exp: self.exp,
                 jti: self.jti,
-                cert_thumb256: self.cert_thumb256.clone(),
+                cert_thumb256: self.cert_thumb256.clone().map(|thumb| SmolStr::new(thumb.as_str())),
             }
             .serialize(serializer)
         }
@@ -1461,7 +1461,12 @@ mod serde_impl {
                 jet_reuse: claims.jet_reuse,
                 exp: claims.exp,
                 jti: claims.jti,
-                cert_thumb256: claims.cert_thumb256,
+                cert_thumb256: claims
+                    .cert_thumb256
+                    .as_deref()
+                    .map(crate::tls::thumbprint::normalize_sha256_thumbprint)
+                    .transpose()
+                    .map_err(de::Error::custom)?,
             })
         }
     }
