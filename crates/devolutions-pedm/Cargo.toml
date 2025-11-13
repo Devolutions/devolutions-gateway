@@ -18,7 +18,7 @@ chrono = { version = "0.4", features = ["serde"] }
 digest = "0.10"
 hyper = { version = "1.6", features = ["server"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
-schemars = { version = "0.8", features = ["chrono"] }
+schemars = { version = "1", features = ["chrono04"] }
 serde = "1.0"
 serde_json = "1.0"
 sha1 = "0.10"
@@ -32,7 +32,7 @@ devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 camino = { version = "1", features = ["serde1"] }
 async-trait = "0.1"
 tracing = "0.1"
-aide = { version = "0.14", features = ["axum", "axum-extra", "axum-json", "axum-tokio"] }
+aide = { version = "0.15", features = ["axum", "axum-extra", "axum-json", "axum-tokio"] }
 tower-http = { version = "0.5", features = ["timeout"] }
 parking_lot = "0.12"
 cfg-if = "1.0"
