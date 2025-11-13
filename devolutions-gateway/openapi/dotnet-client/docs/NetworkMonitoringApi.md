@@ -32,6 +32,9 @@ namespace Example
         {
             Configuration config = new Configuration();
             config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
             // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
@@ -82,7 +85,7 @@ This endpoint does not need any parameter.
 
 ### Authorization
 
-No authorization required
+[scope_token](../README.md#scope_token)
 
 ### HTTP request headers
 
@@ -103,11 +106,11 @@ No authorization required
 
 <a id="setmonitoringconfig"></a>
 # **SetMonitoringConfig**
-> void SetMonitoringConfig (MonitorsConfig monitorsConfig)
+> SetConfigResponse SetMonitoringConfig (MonitorsConfig monitorsConfig)
 
 Replace the current monitoring configuration with the configuration in the request body.
 
-Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  Note: The configuration is not persisted across process restarts.
+Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  A 200 status code is returned even if some or all of the probes in the configuration are not understood. The response body will in this case contain a list of probes that were unsupported or invalid.  Note: The configuration is not persisted across process restarts.
 
 ### Example
 ```csharp
@@ -126,6 +129,9 @@ namespace Example
         {
             Configuration config = new Configuration();
             config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
             // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
@@ -135,7 +141,8 @@ namespace Example
             try
             {
                 // Replace the current monitoring configuration with the configuration in the request body.
-                apiInstance.SetMonitoringConfig(monitorsConfig);
+                SetConfigResponse result = apiInstance.SetMonitoringConfig(monitorsConfig);
+                Debug.WriteLine(result);
             }
             catch (ApiException  e)
             {
@@ -155,7 +162,10 @@ This returns an ApiResponse object which contains the response data, status code
 try
 {
     // Replace the current monitoring configuration with the configuration in the request body.
-    apiInstance.SetMonitoringConfigWithHttpInfo(monitorsConfig);
+    ApiResponse<SetConfigResponse> response = apiInstance.SetMonitoringConfigWithHttpInfo(monitorsConfig);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
 }
 catch (ApiException e)
 {
@@ -173,22 +183,22 @@ catch (ApiException e)
 
 ### Return type
 
-void (empty response body)
+[**SetConfigResponse**](SetConfigResponse.md)
 
 ### Authorization
 
-No authorization required
+[scope_token](../README.md#scope_token)
 
 ### HTTP request headers
 
  - **Content-Type**: application/json
- - **Accept**: Not defined
+ - **Accept**: application/json
 
 
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | New configuration was accepted |  -  |
+| **200** | New configuration was accepted, but not necessarily fully understood. |  -  |
 | **400** | Bad request |  -  |
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |

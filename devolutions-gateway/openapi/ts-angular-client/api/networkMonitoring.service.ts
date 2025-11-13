@@ -20,6 +20,8 @@ import { Observable }                                        from 'rxjs';
 import { MonitoringLogResponse } from '../model/monitoringLogResponse';
 // @ts-ignore
 import { MonitorsConfig } from '../model/monitorsConfig';
+// @ts-ignore
+import { SetConfigResponse } from '../model/setConfigResponse';
 
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS }                     from '../variables';
@@ -105,6 +107,13 @@ export class NetworkMonitoringService {
 
         let localVarHeaders = this.defaultHeaders;
 
+        let localVarCredential: string | undefined;
+        // authentication (scope_token) required
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
+
         let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
@@ -155,25 +164,33 @@ export class NetworkMonitoringService {
 
     /**
      * Replace the current monitoring configuration with the configuration in the request body.
-     * Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  Note: The configuration is not persisted across process restarts.
+     * Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  A 200 status code is returned even if some or all of the probes in the configuration are not understood. The response body will in this case contain a list of probes that were unsupported or invalid.  Note: The configuration is not persisted across process restarts.
      * @param monitorsConfig JSON object containing a list of monitors
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any>;
-    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<any>>;
-    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<any>>;
-    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<SetConfigResponse>;
+    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<SetConfigResponse>>;
+    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<SetConfigResponse>>;
+    public setMonitoringConfig(monitorsConfig: MonitorsConfig, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (monitorsConfig === null || monitorsConfig === undefined) {
             throw new Error('Required parameter monitorsConfig was null or undefined when calling setMonitoringConfig.');
         }
 
         let localVarHeaders = this.defaultHeaders;
 
+        let localVarCredential: string | undefined;
+        // authentication (scope_token) required
+        localVarCredential = this.configuration.lookupCredential('scope_token');
+        if (localVarCredential) {
+            localVarHeaders = localVarHeaders.set('Authorization', 'Bearer ' + localVarCredential);
+        }
+
         let localVarHttpHeaderAcceptSelected: string | undefined = options && options.httpHeaderAccept;
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
+                'application/json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -213,7 +230,7 @@ export class NetworkMonitoringService {
         }
 
         let localVarPath = `/jet/net/monitor/config`;
-        return this.httpClient.request<any>('post', `${this.configuration.basePath}${localVarPath}`,
+        return this.httpClient.request<SetConfigResponse>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 body: monitorsConfig,
