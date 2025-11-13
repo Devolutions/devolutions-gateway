@@ -22,6 +22,9 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 /// - Starts any monitors newly defined in the payload.
 /// - Stops any currently running monitors that are omitted from the payload.
 ///
+/// A 200 status code is returned even if some or all of the probes in the configuration are not understood.
+/// The response body will in this case contain a list of probes that were unsupported or invalid.
+///
 /// Note: The configuration is not persisted across process restarts.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -30,12 +33,13 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     path = "/jet/net/monitor/config",
     request_body(content = MonitorsConfig, description = "JSON object containing a list of monitors", content_type = "application/json"),
     responses(
-        (status = 200, description = "New configuration was accepted"),
+        (status = 200, description = "New configuration was accepted, but not necessarily fully understood.", body = SetConfigResponse),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 500, description = "Unexpected server error while starting monitors"),
     ),
+    security(("scope_token" = ["gateway.net.monitor.config"])),
 ))]
 async fn handle_set_monitoring_config(
     _scope: NetMonitorConfigScope,
@@ -68,6 +72,7 @@ async fn handle_set_monitoring_config(
         (status = 403, description = "Insufficient permissions"),
         (status = 500, description = "Unexpected server error"),
     ),
+    security(("scope_token" = ["gateway.net.monitor.drain"])),
 ))]
 async fn handle_drain_log(
     _scope: NetMonitorDrainScope,

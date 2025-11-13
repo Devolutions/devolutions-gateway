@@ -28,40 +28,26 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// ClockDiagnostic
+    /// This body is returned when the config is successfully set, even if one or all probes were not understood.
     /// </summary>
-    [DataContract(Name = "ClockDiagnostic")]
-    public partial class ClockDiagnostic : IValidatableObject
+    [DataContract(Name = "SetConfigResponse")]
+    public partial class SetConfigResponse : IValidatableObject
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="ClockDiagnostic" /> class.
+        /// Initializes a new instance of the <see cref="SetConfigResponse" /> class.
         /// </summary>
-        [JsonConstructorAttribute]
-        protected ClockDiagnostic() { }
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ClockDiagnostic" /> class.
-        /// </summary>
-        /// <param name="timestampMillis">Current time in milliseconds (required).</param>
-        /// <param name="timestampSecs">Current time in seconds (required).</param>
-        public ClockDiagnostic(long timestampMillis = default(long), long timestampSecs = default(long))
+        /// <param name="probeTypeErrors">An optional list of probes that this server could not parse..</param>
+        public SetConfigResponse(List<MonitorDefinitionProbeTypeError> probeTypeErrors = default(List<MonitorDefinitionProbeTypeError>))
         {
-            this.TimestampMillis = timestampMillis;
-            this.TimestampSecs = timestampSecs;
+            this.ProbeTypeErrors = probeTypeErrors;
         }
 
         /// <summary>
-        /// Current time in milliseconds
+        /// An optional list of probes that this server could not parse.
         /// </summary>
-        /// <value>Current time in milliseconds</value>
-        [DataMember(Name = "timestamp_millis", IsRequired = true, EmitDefaultValue = true)]
-        public long TimestampMillis { get; set; }
-
-        /// <summary>
-        /// Current time in seconds
-        /// </summary>
-        /// <value>Current time in seconds</value>
-        [DataMember(Name = "timestamp_secs", IsRequired = true, EmitDefaultValue = true)]
-        public long TimestampSecs { get; set; }
+        /// <value>An optional list of probes that this server could not parse.</value>
+        [DataMember(Name = "probeTypeErrors", EmitDefaultValue = true)]
+        public List<MonitorDefinitionProbeTypeError> ProbeTypeErrors { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
@@ -70,9 +56,8 @@ namespace Devolutions.Gateway.Client.Model
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("class ClockDiagnostic {\n");
-            sb.Append("  TimestampMillis: ").Append(TimestampMillis).Append("\n");
-            sb.Append("  TimestampSecs: ").Append(TimestampSecs).Append("\n");
+            sb.Append("class SetConfigResponse {\n");
+            sb.Append("  ProbeTypeErrors: ").Append(ProbeTypeErrors).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }

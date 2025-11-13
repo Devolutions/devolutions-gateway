@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2025.2.3
+2025.3.2
 :toc: left
 :numbered:
 :toclevels: 4
@@ -1210,7 +1210,14 @@ Once the log is downloaded, gateway purges it from memory.
 
 ===== Security
 
--
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
 
 
 ===== Return Type
@@ -1275,7 +1282,7 @@ Replace the current monitoring configuration with the configuration in the reque
 
 ===== Description
 
-Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  Note: The configuration is not persisted across process restarts.
+Changes take effect immediately: - Starts any monitors newly defined in the payload. - Stops any currently running monitors that are omitted from the payload.  A 200 status code is returned even if some or all of the probes in the configuration are not understood. The response body will in this case contain a list of probes that were unsupported or invalid.  Note: The configuration is not persisted across process restarts.
 
 
 // markup not found, no include::{specDir}jet/net/monitor/config/POST/spec.adoc[opts=optional]
@@ -1284,7 +1291,14 @@ Changes take effect immediately: - Starts any monitors newly defined in the payl
 
 ===== Security
 
--
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
 
 ===== Parameters
 
@@ -1309,10 +1323,12 @@ Changes take effect immediately: - Starts any monitors newly defined in the payl
 
 ===== Return Type
 
+<<SetConfigResponse>>
 
 
--
+===== Content Type
 
+* application/json
 
 ===== Responses
 
@@ -1323,8 +1339,8 @@ Changes take effect immediately: - Starts any monitors newly defined in the payl
 
 
 | 200
-| New configuration was accepted
-|  <<>>
+| New configuration was accepted, but not necessarily fully understood.
+|  <<SetConfigResponse>>
 
 
 | 400
@@ -2214,6 +2230,8 @@ endif::internal-generation[]
 | gateway.preflight
 | gateway.traffic.claim
 | gateway.traffic.ack
+| gateway.net.monitor.config
+| gateway.net.monitor.drain
 
 |===
 
@@ -3529,6 +3547,28 @@ Information about an ongoing Gateway session
 |   UUID  
 | Unique ID for this session.
 | uuid    
+
+|===
+
+
+
+[#SetConfigResponse]
+=== _SetConfigResponse_ 
+
+This body is returned when the config is successfully set, even if one or all probes were not understood.
+
+
+[.fields-SetConfigResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| probeTypeErrors
+| 
+| X
+|   List   of <<MonitorDefinitionProbeTypeError>>
+| An optional list of probes that this server could not parse.
+|     
 
 |===
 

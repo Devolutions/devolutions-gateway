@@ -67,6 +67,7 @@ use crate::api::preflight::PreflightAlertStatus;
         crate::api::monitoring::MonitorsConfig,
         crate::api::monitoring::MonitorDefinition,
         crate::api::monitoring::MonitoringProbeType,
+        crate::api::monitoring::SetConfigResponse,
         crate::api::monitoring::MonitorDefinitionProbeTypeError,
         crate::api::traffic::ClaimedTrafficEvent,
         crate::api::traffic::AckRequest,

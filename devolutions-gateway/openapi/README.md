@@ -14,8 +14,10 @@ Code is generated using [OpenAPI Generator](https://openapi-generator.tech/) and
   npm install @openapitools/openapi-generator-cli
   ```
 
-3. Bump versions appropriately in `config.json` files
+3. Ensure you have a [JDK](https://adoptium.net/) on your path. (Required by openapi-generator-cli)
 
-4. Run `./generate_clients.ps1` script.
+4. Bump versions appropriately in `config.json` files
 
-Note: script `./generate_all.ps1` will do both 1 and 4 at once.
+5. Run `./generate_clients.ps1` script.
+
+Note: script `./generate_all.ps1` will generate both the OpenAPI documents and the clients at once.

@@ -48,6 +48,7 @@ docs/SessionInfo.md
 docs/SessionTokenContentType.md
 docs/SessionTokenSignRequest.md
 docs/SessionsApi.md
+docs/SetConfigResponse.md
 docs/SubProvisionerKey.md
 docs/Subscriber.md
 docs/TrafficApi.md
@@ -124,6 +125,7 @@ src/Devolutions.Gateway.Client/Model/PubKeyFormat.cs
 src/Devolutions.Gateway.Client/Model/SessionInfo.cs
 src/Devolutions.Gateway.Client/Model/SessionTokenContentType.cs
 src/Devolutions.Gateway.Client/Model/SessionTokenSignRequest.cs
+src/Devolutions.Gateway.Client/Model/SetConfigResponse.cs
 src/Devolutions.Gateway.Client/Model/SubProvisionerKey.cs
 src/Devolutions.Gateway.Client/Model/Subscriber.cs
 src/Devolutions.Gateway.Client/Model/TrafficEventResponse.cs

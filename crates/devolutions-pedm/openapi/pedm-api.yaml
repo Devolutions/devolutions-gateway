@@ -365,7 +365,7 @@ components:
           $ref: '#/components/schemas/Error'
         Win32Error:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
     GetProfilesMeResponse:
       description: |-
@@ -408,11 +408,11 @@ components:
             $ref: '#/components/schemas/JitElevationLogRow'
         TotalPages:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         TotalRecords:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
     JitElevationLogQueryOptions:
       type: object
@@ -429,11 +429,11 @@ components:
           format: int64
         PageNumber:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         PageSize:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         SortColumn:
           type: string
@@ -492,7 +492,7 @@ components:
           nullable: true
         CreationFlags:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         ExecutablePath:
           type: string
@@ -511,11 +511,11 @@ components:
       properties:
         ProcessId:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         ThreadId:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
     PathIdParameter:
       type: object
@@ -588,47 +588,47 @@ components:
           nullable: true
         FillAttribute:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         Flags:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         ParentPid:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
           nullable: true
         ShowWindow:
           type: integer
-          format: int32
+          format: uint16
           minimum: 0.0
         Title:
           type: string
           nullable: true
         X:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         XCountChars:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         XSize:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         Y:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         YCountChars:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
         YSize:
           type: integer
-          format: int32
+          format: uint32
           minimum: 0.0
     User:
       type: object

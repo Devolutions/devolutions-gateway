@@ -35,6 +35,7 @@ export * from './pubKeyFormat';
 export * from './sessionInfo';
 export * from './sessionTokenContentType';
 export * from './sessionTokenSignRequest';
+export * from './setConfigResponse';
 export * from './subProvisionerKey';
 export * from './subscriber';
 export * from './trafficEventResponse';

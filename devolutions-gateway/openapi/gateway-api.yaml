@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2025.2.3
+  version: 2025.3.2
 paths:
   /jet/config:
     patch:
@@ -376,6 +376,9 @@ paths:
         - Starts any monitors newly defined in the payload.
         - Stops any currently running monitors that are omitted from the payload.
 
+        A 200 status code is returned even if some or all of the probes in the configuration are not understood.
+        The response body will in this case contain a list of probes that were unsupported or invalid.
+
         Note: The configuration is not persisted across process restarts.
       operationId: SetMonitoringConfig
       requestBody:
@@ -387,7 +390,11 @@ paths:
         required: true
       responses:
         '200':
-          description: New configuration was accepted
+          description: New configuration was accepted, but not necessarily fully understood.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetConfigResponse'
         '400':
           description: Bad request
         '401':
@@ -396,6 +403,9 @@ paths:
           description: Insufficient permissions
         '500':
           description: Unexpected server error while starting monitors
+      security:
+      - scope_token:
+        - gateway.net.monitor.config
   /jet/net/monitor/log/drain:
     post:
       tags:
@@ -418,6 +428,9 @@ paths:
           description: Insufficient permissions
         '500':
           description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.net.monitor.drain
   /jet/preflight:
     post:
       tags:
@@ -698,6 +711,8 @@ components:
       - gateway.preflight
       - gateway.traffic.claim
       - gateway.traffic.ack
+      - gateway.net.monitor.config
+      - gateway.net.monitor.drain
     AckRequest:
       type: object
       required:
@@ -1337,6 +1352,16 @@ components:
           type: string
           format: uuid
           description: Unique ID for this session.
+          nullable: true
+    SetConfigResponse:
+      type: object
+      description: This body is returned when the config is successfully set, even if one or all probes were not understood.
+      properties:
+        probeTypeErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitorDefinitionProbeTypeError'
+          description: An optional list of probes that this server could not parse.
           nullable: true
     SubProvisionerKey:
       type: object
