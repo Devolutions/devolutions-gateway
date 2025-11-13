@@ -14,7 +14,7 @@ Code is generated using [OpenAPI Generator](https://openapi-generator.tech/) and
   npm install @openapitools/openapi-generator-cli
   ```
 
-3. Ensure you have a [JDK](https://adoptium.net/) on your path. (Required by openapi-generator-cli)
+3. Ensure you have a [JDK](https://adoptium.net/) on your path (required by openapi-generator-cli).
 
 4. Bump versions appropriately in `config.json` files
 
