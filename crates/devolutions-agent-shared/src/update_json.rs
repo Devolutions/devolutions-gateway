@@ -7,6 +7,9 @@ use std::fmt;
 /// {
 ///     "Gateway": {
 ///         "TargetVersion": "1.2.3.4"
+///     },
+///     "HubService": {
+///         "TargetVersion": "latest"
 ///     }
 /// }
 /// ```
@@ -16,6 +19,8 @@ use std::fmt;
 pub struct UpdateJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gateway: Option<ProductUpdateInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_service: Option<ProductUpdateInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
