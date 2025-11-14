@@ -259,10 +259,10 @@ where
         // > Credential Security Support Provider protocol (CredSSP) (section 5.4.5.2).
         // > If this flag is set, then the PROTOCOL_SSL (0x00000001) flag SHOULD also be set
         // > because Transport Layer Security (TLS) is a subset of CredSSP.
-        // However, crucially, it’s not strictly required (not "MUST").
-        // In fact, we purposefully choose to not set `PROTOCOL_SSL` unless `enable_winlogon` is `true`.
-        // This tells the server that we are not going to accept downgrading NLA to TLS security.
-        protocol: nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX,
+        // Crucially, it’s not strictly required (not "MUST"). However, in practice, we cannot set PROTOCOL_HYBRID without PROTOCOL_SSL.
+        // Otherwise, the `mstsc.exe` will fail right after the CredSSP phase with the "An authentication error has occurred (0x609)" error.
+        // A similar case: https://serverfault.com/a/720161.
+        protocol: nego::SecurityProtocol::SSL | nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX,
     };
     trace!(?connection_request_to_send, "Send Connection Request PDU to server");
     send_pdu(server_framed, &x224::X224(connection_request_to_send))
