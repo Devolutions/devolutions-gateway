@@ -39,6 +39,9 @@ export default defineConfig(({ mode }) => {
         fileName: 'multi-video-player',
         formats: ['es' as const],
       },
+      rollupOptions: {
+        external: ['video.js', '@devolutions/shadow-player'],
+      },
     },
     plugins,
   };

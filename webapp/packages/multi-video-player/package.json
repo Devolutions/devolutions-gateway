@@ -1,7 +1,7 @@
 {
   "name": "@devolutions/multi-video-player",
-  "private": true,
-  "version": "0.0.0",
+  "private": false,
+  "version": "1.0.0",
   "type": "module",
   "files": [
     "./dist"
@@ -26,8 +26,12 @@
     "typescript": "~5.7.2",
     "video.js": "^8.21.0",
     "vite": "^6.2.0",
-    "vite-plugin-bundle-css": "^0.1.1",
-    "@types/jquery": "^3.5.32"
+    "@types/jquery": "^3.5.32",
+    "vite-plugin-bundle-css": "^0.1.1"
+  },
+  "peerDependencies": {
+    "@devolutions/shadow-player": "workspace:*",
+    "video.js": "^8.0.0"
   },
   "dependencies": {
     "vite-plugin-dts": "^4.5.3",
@@ -38,6 +42,6 @@
     "testEnvironment": "jsdom"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   }
 }
