@@ -1,24 +1,45 @@
-import '@devolutions/shadow-player/src/streamer';
-import type { ShadowPlayer } from '@devolutions/shadow-player/src/streamer';
+import '@devolutions/shadow-player';
+import type { ShadowPlayer } from '@devolutions/shadow-player';
 import type { MultiVideoPlayer } from './video-player/player';
 import type { GatewayRecordingApi } from './gateway-api';
 
 export class LiveRecordingStreamer {
   private shadowPlayer: ShadowPlayer | null = null;
   private api: GatewayRecordingApi;
+  private onSessionNotFoundCallback: (() => void) | null = null;
 
   constructor(api: GatewayRecordingApi) {
     this.api = api;
   }
 
+  onSessionNotFound(callback: () => void): void {
+    this.onSessionNotFoundCallback = callback;
+  }
+
   async stream(container: HTMLElement): Promise<ShadowPlayer> {
+    const shadowUrl = this.api.getShadowUrl();
+
     this.shadowPlayer = document.createElement('shadow-player') as ShadowPlayer;
+    this.shadowPlayer.setAttribute('controls', '');
+    this.shadowPlayer.setAttribute('width', '100%');
+    this.shadowPlayer.setAttribute('height', '100%');
+
+    this.shadowPlayer.onError((error) => {
+
+      if (error.type === 'session-not-found') {
+        this.onSessionNotFoundCallback?.();
+      }
+    });
+
+    this.shadowPlayer.onEnd(() => {});
+
+
     container.appendChild(this.shadowPlayer);
 
     await customElements.whenDefined('shadow-player');
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    this.shadowPlayer.srcChange(this.api.getShadowUrl());
+    this.shadowPlayer.srcChange(shadowUrl);
     this.shadowPlayer.play();
 
     return this.shadowPlayer;
@@ -45,8 +66,12 @@ export class LiveRecordingStreamer {
   }
 
   disconnect(): void {
-    if (this.shadowPlayer && this.shadowPlayer.parentElement) {
-      this.shadowPlayer.parentElement.removeChild(this.shadowPlayer);
+    if (this.shadowPlayer) {
+      this.shadowPlayer.disconnect();
+
+      if (this.shadowPlayer.parentElement) {
+        this.shadowPlayer.parentElement.removeChild(this.shadowPlayer);
+      }
     }
     this.shadowPlayer = null;
   }

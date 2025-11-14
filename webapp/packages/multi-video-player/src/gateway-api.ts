@@ -40,6 +40,31 @@ export class GatewayRecordingApi {
     return `${wsUrl}/jet/jrec/shadow/${this.sessionId}?token=${this.token}`;
   }
 
+  async isSessionActive(): Promise<boolean> {
+    try {
+      const url = `${this.gatewayUrl}/jet/sessions`;
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`
+        }
+      });
+
+      if (!response.ok) {
+
+        return false;
+      }
+
+      const sessions = await response.json();
+      const sessionExists = sessions.some((session: any) => session.id === this.sessionId);
+
+      return sessionExists;
+    } catch (error) {
+
+      return false;
+    }
+  }
+
   static fromPullUrl(pullUrl: string): GatewayRecordingApi {
     const url = new URL(pullUrl);
     const pathParts = url.pathname.split('/pull/');
