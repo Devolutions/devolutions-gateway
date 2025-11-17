@@ -70,7 +70,7 @@ dunce = "1.0"
 bitflags = "2.9"
 
 # Security, crypto…
-picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
+picky = { version = "7.0.0-rc.20", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
 zeroize = { version = "1.8", features = ["derive"] }
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
