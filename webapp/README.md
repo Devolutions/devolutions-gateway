@@ -268,6 +268,62 @@ pnpm --filter gateway-ui test
 pnpm --filter @devolutions/multi-video-player test
 ```
 
+### Testing Recording Player with local Devolutions Gateway & DVLS
+
+To test the recording player with your locally running Devolutions Gateway:
+
+#### 1. Build Dependencies
+
+```bash
+# From webapp/ directory
+# Build the required packages first
+pnpm --filter @devolutions/multi-video-player build
+pnpm --filter @devolutions/shadow-player build
+```
+
+#### 2. Build the Recording Player
+
+```bash
+# From webapp/ directory
+pnpm build:player
+```
+
+This creates production-ready files in `webapp/dist/recording-player/`.
+
+#### 3. Copy Files to Gateway
+
+```powershell
+# Windows PowerShell - Copy to your Gateway's release directory
+New-Item -ItemType Directory -Force -Path target\release\webapp\player
+Copy-Item -Recurse -Force webapp\dist\recording-player\* target\release\webapp\player\
+```
+
+```bash
+# Linux/macOS
+mkdir -p target/release/webapp/player
+cp -r webapp/dist/recording-player/* target/release/webapp/player/
+```
+
+#### 4. Run Gateway with Environment Variable
+
+```powershell
+# Windows PowerShell
+$env:DGATEWAY_WEBAPP_PATH = 'E:\path\to\devolutions-gateway\target\release\webapp'
+& "E:\path\to\devolutions-gateway\target\release\devolutions-gateway.exe"
+```
+
+```bash
+# Linux/macOS
+export DGATEWAY_WEBAPP_PATH=/path/to/target/release/webapp
+/path/to/target/release/devolutions-gateway
+```
+
+#### 5. Access the Player
+
+The recording player is now accessible through your localhost DVLS via the local Devolutions Gateway.
+
+**Note:** After making changes to the recording player, rebuild with `pnpm build:player` and restart the Gateway to see the changes.
+
 ## Technologies
 
 - **Angular** 18.2 (gateway-ui)

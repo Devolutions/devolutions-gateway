@@ -4,6 +4,7 @@
 /client/
 /tmp/
 /out-tsc/
+/dist/
 # Only include if you have a build process that generates files here
 # /build/
 
