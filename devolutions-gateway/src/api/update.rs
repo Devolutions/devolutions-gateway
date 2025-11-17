@@ -55,7 +55,10 @@ pub(super) async fn trigger_update_check(
     }
 
     let update_json = UpdateJson {
-        gateway: Some(ProductUpdateInfo { target_version }),
+        gateway: Some(ProductUpdateInfo {
+            target_version,
+            local_package_path: None,
+        }),
         hub_service: None,
     };
 

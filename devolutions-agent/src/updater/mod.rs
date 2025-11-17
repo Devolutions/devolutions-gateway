@@ -165,7 +165,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         conf,
     };
 
-    let package_path = match order.package_source {
+    let (package_path, is_local) = match order.package_source {
         PackageSource::Remote { url, hash } => {
             info!(%product, %target_version, "Downloading package from remote URL");
 
@@ -182,7 +182,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
                     .context("failed to validate package file integrity")?;
             }
 
-            package_path
+            (package_path, false)
         }
         PackageSource::Local { path } => {
             info!(%product, %target_version, %path, "Using local package file (skipping download and checksum verification)");
@@ -193,11 +193,15 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
                 return Err(anyhow!("Local package file does not exist: {}", path));
             }
 
-            local_path
+            (local_path, true)
         }
     };
 
-    //validate_package(&ctx, &package_path).context("failed to validate package contents")?;
+    if !is_local {
+        validate_package(&ctx, &package_path).context("failed to validate package contents")?;
+    } else {
+        info!(%product, %target_version, "Skipping package signature validation for local file");
+    }
 
     if ctx.conf.get_conf().debug.skip_msi_install {
         warn!(%product, "DEBUG MODE: Skipping package installation due to debug configuration");
