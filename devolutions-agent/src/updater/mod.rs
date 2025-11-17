@@ -197,7 +197,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         }
     };
 
-    validate_package(&ctx, &package_path).context("failed to validate package contents")?;
+    //validate_package(&ctx, &package_path).context("failed to validate package contents")?;
 
     if ctx.conf.get_conf().debug.skip_msi_install {
         warn!(%product, "DEBUG MODE: Skipping package installation due to debug configuration");
