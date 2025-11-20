@@ -518,8 +518,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: NuGet login (OIDC)
-        uses: NuGet/login@v1
         id: nuget-login
+        uses: NuGet/login@v1
         with:
           user: ${{ secrets.NUGET_BOT_USERNAME }}
 
