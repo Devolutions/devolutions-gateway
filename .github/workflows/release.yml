@@ -507,6 +507,8 @@ jobs:
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     needs: [preflight]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
 
     steps:
       - name: Download jetsocat-nuget artifact
@@ -514,6 +516,12 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: NuGet login (OIDC)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_BOT_USERNAME }}
 
       - name: Publish Jetsocat NuGet package
         run: |
@@ -528,7 +536,7 @@ jobs:
             'push',
             "$($Package.FullName)",
             '--api-key',
-            '${{ secrets.NUGET_API_KEY }}',
+            '${{ steps.nuget-login.outputs.NUGET_API_KEY }}',
             '--source',
             'https://api.nuget.org/v3/index.json',
             '--skip-duplicate'
