@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <TargetFrameworks>netstandard2.0</TargetFrameworks>
     <RootNamespace>DevolutionsGateway</RootNamespace>
     <IsPowerShell>true</IsPowerShell>

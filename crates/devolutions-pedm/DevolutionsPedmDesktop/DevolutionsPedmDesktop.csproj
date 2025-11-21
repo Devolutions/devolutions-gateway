@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net48</TargetFramework>
 		<LangVersion>10.0</LangVersion>

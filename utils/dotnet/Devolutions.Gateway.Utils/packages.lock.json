@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net6.0": {
+      "Devolutions.Picky": {
+        "type": "Direct",
+        "requested": "[2024.12.12, )",
+        "resolved": "2024.12.12",
+        "contentHash": "r6FxB77HlT/SffiNtNp8G4AxoLvpnMP+ijw4Wg59L1boLmdlKpiZYGEDI7VaP/NFAKmKCFaCWT1eG7nAD0mRfw=="
+      }
+    }
+  }
+}
