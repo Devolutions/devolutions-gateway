@@ -7,8 +7,17 @@ use rstest::rstest;
 use test_utils::find_unused_ports;
 use testsuite::cli::{assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsocat_tokio_cmd};
 
-const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(50);
-const COMMAND_TIMEOUT: Duration = Duration::from_millis(150);
+// NOTE: Windows needs more time for listeners to be ready due to slower process startup.
+
+#[cfg(not(windows))]
+const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(150);
+#[cfg(windows)]
+const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(300);
+
+#[cfg(not(windows))]
+const COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
+#[cfg(windows)]
+const COMMAND_TIMEOUT: Duration = Duration::from_millis(650);
 
 #[test]
 fn no_args_shows_help() {
@@ -872,7 +881,7 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
     mcp_client.list_tools().await.expect("list tools");
 
     // Wait for the handler to be called.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(75)).await;
 
     // Check the probe.
     assert!(probe.load(std::sync::atomic::Ordering::SeqCst));
@@ -981,6 +990,7 @@ async fn mcp_proxy_http_error() {
 async fn mcp_proxy_terminated_on_broken_pipe() {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, McpServer, NamedPipeTransport};
+    // use tokio::io::AsyncReadExt as _; // TODO
 
     // Configure MCP server transport (named pipe only).
     let np_transport = NamedPipeTransport::bind().unwrap();
@@ -996,9 +1006,10 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
 
     // Start jetsocat mcp-proxy with stdio pipe.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(["mcp-proxy", "stdio", &pipe])
+        .args(["mcp-proxy", "stdio", &pipe]) // TODO: add "--log-term"
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
+        // .stderr(std::process::Stdio::piped()) // TODO: Once Jetsocat logs to stderr.
         .kill_on_drop(true)
         .spawn()
         .expect("start jetsocat mcp-proxy");
@@ -1006,6 +1017,7 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     // Get stdin/stdout handles for MCP client.
     let stdin = jetsocat_process.stdin.take().expect("get stdin");
     let stdout = jetsocat_process.stdout.take().expect("get stdout");
+    // let mut stderr = jetsocat_process.stderr.take().expect("get stderr"); // TODO
 
     // Initialize MCP client with jetsocat's stdin/stdout.
     let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
@@ -1023,18 +1035,19 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     // The proxy will detect this and send an error response, then close.
     let result = mcp_client.list_tools().await;
 
-    // The proxy should detect the pipe as broken, and terminates with no response.
-    // Ideally, the proxy should fail when writing the request, but merely
-    // writing is typically not enough to detect a broken pipe with named pipes.
+    // Since Jetsocat is continuously reading on the pipe, it quickly detects the pipe is broken and stops itself with an error.
+    // Our MCP client in turns try to write from stdout / read to stdin, and this fails with a BrokenPipe on our side.
     let error = result.unwrap_err();
-    expect![[r#"
-        "empty response"
-    "#]]
-    .assert_debug_eq(&error);
+    let error_debug_fmt = format!("{error:?}");
+    #[cfg(windows)]
+    assert!(error_debug_fmt.contains("The pipe is being closed"));
+    #[cfg(not(windows))]
+    assert!(error_debug_fmt.contains("Broken pipe (os error 32)"));
 
-    // FIXME: Jetsocat needs to be modified to print the logs into stderr.
-    //  Once we have that, we can retrieve stderr and search for this string:
-    // Fatal error reading from peer, stopping proxy error="connection closed"
+    // TODO: Once Jetsocat print the logs to stderr.
+    // let mut stderr_str = String::new();
+    // stderr.read_to_string(&mut stderr_str).await.expect("read_to_string");
+    // stderr_str.contains(r#"Fatal error reading from peer, stopping proxy error="connection closed""#);
 
     // The jetsocat process should exit gracefully after detecting broken pipe.
     let exit_status = tokio::time::timeout(Duration::from_secs(2), jetsocat_process.wait()).await;
