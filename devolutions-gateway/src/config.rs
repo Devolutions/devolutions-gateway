@@ -27,6 +27,23 @@ const WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS: u64 = 28800; // 8 hours
 const WEB_APP_DEFAULT_LOGIN_LIMIT_RATE: u8 = 10;
 const ENV_VAR_DGATEWAY_WEBAPP_PATH: &str = "DGATEWAY_WEBAPP_PATH";
 const ENV_VAR_DGATEWAY_LIB_XMF_PATH: &str = "DGATEWAY_LIB_XMF_PATH";
+const ENV_VAR_MISTRAL_API_KEY: &str = "MISTRAL_API_KEY";
+const ENV_VAR_MISTRAL_API_ENDPOINT: &str = "MISTRAL_API_ENDPOINT";
+const ENV_VAR_OLLAMA_API_KEY: &str = "OLLAMA_API_KEY";
+const ENV_VAR_OLLAMA_API_ENDPOINT: &str = "OLLAMA_API_ENDPOINT";
+const ENV_VAR_LMSTUDIO_API_KEY: &str = "LMSTUDIO_API_KEY";
+const ENV_VAR_LMSTUDIO_API_ENDPOINT: &str = "LMSTUDIO_API_ENDPOINT";
+const ENV_VAR_ANTHROPIC_API_KEY: &str = "ANTHROPIC_API_KEY";
+const ENV_VAR_ANTHROPIC_API_ENDPOINT: &str = "ANTHROPIC_API_ENDPOINT";
+const ENV_VAR_OPENAI_API_KEY: &str = "OPENAI_API_KEY";
+const ENV_VAR_OPENAI_API_ENDPOINT: &str = "OPENAI_API_ENDPOINT";
+const ENV_VAR_OPENROUTER_API_KEY: &str = "OPENROUTER_API_KEY";
+const ENV_VAR_OPENROUTER_API_ENDPOINT: &str = "OPENROUTER_API_ENDPOINT";
+const ENV_VAR_AZURE_OPENAI_RESOURCE_NAME: &str = "AZURE_OPENAI_RESOURCE_NAME";
+const ENV_VAR_AZURE_OPENAI_DEPLOYMENT_ID: &str = "AZURE_OPENAI_DEPLOYMENT_ID";
+const ENV_VAR_AZURE_OPENAI_API_KEY: &str = "AZURE_OPENAI_API_KEY";
+const ENV_VAR_AZURE_OPENAI_API_VERSION: &str = "AZURE_OPENAI_API_VERSION";
+const AI_GATEWAY_DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 300;
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -89,6 +106,7 @@ pub struct Conf {
     pub ngrok: Option<dto::NgrokConf>,
     pub verbosity_profile: dto::VerbosityProfile,
     pub web_app: WebAppConf,
+    pub ai_gateway: AiGatewayConf,
     pub debug: dto::DebugConf,
 }
 
@@ -112,6 +130,463 @@ pub struct WebAppUser {
     pub name: String,
     /// Hash of the password, in the PHC string format
     pub password_hash: Password,
+}
+
+/// AI Router configuration (experimental)
+#[derive(PartialEq, Debug, Clone)]
+pub struct AiGatewayConf {
+    pub enabled: bool,
+    pub gateway_api_key: Option<String>,
+    pub request_timeout: std::time::Duration,
+    pub mistral: MistralProviderConf,
+    pub ollama: OllamaProviderConf,
+    pub lmstudio: LmStudioProviderConf,
+    pub anthropic: AnthropicProviderConf,
+    pub openai: OpenAiProviderConf,
+    pub openrouter: OpenRouterProviderConf,
+    pub azure_openai: AzureOpenAiProviderConf,
+}
+
+/// Mistral AI provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct MistralProviderConf {
+    pub endpoint: String,
+    pub api_key: Option<String>,
+}
+
+/// Ollama provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct OllamaProviderConf {
+    pub endpoint: String,
+    pub api_key: Option<String>,
+}
+
+/// LM Studio provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct LmStudioProviderConf {
+    pub endpoint: String,
+    pub api_key: Option<String>,
+}
+
+/// Anthropic AI provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct AnthropicProviderConf {
+    pub endpoint: String,
+    pub api_key: Option<String>,
+}
+
+/// OpenAI provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct OpenAiProviderConf {
+    pub endpoint: String,
+    pub api_key: Option<String>,
+}
+
+/// OpenRouter provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct OpenRouterProviderConf {
+    pub endpoint: String,
+    pub api_key: Option<String>,
+}
+
+/// Azure OpenAI provider configuration
+#[derive(PartialEq, Debug, Clone)]
+pub struct AzureOpenAiProviderConf {
+    pub resource_name: String,
+    pub deployment_id: String,
+    pub api_key: Option<String>,
+    pub api_version: String,
+}
+
+impl AiGatewayConf {
+    fn from_dto(value: &dto::AiGatewayConf) -> Self {
+        let mistral = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.mistral.as_ref())
+            .map(MistralProviderConf::from_dto)
+            .unwrap_or_default();
+
+        let ollama = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.ollama.as_ref())
+            .map(OllamaProviderConf::from_dto)
+            .unwrap_or_default();
+
+        let lmstudio = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.lmstudio.as_ref())
+            .map(LmStudioProviderConf::from_dto)
+            .unwrap_or_default();
+
+        let anthropic = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.anthropic.as_ref())
+            .map(AnthropicProviderConf::from_dto)
+            .unwrap_or_default();
+
+        let openai = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.openai.as_ref())
+            .map(OpenAiProviderConf::from_dto)
+            .unwrap_or_default();
+
+        let openrouter = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.openrouter.as_ref())
+            .map(OpenRouterProviderConf::from_dto)
+            .unwrap_or_default();
+
+        let azure_openai = value
+            .providers
+            .as_ref()
+            .and_then(|p| p.azure_openai.as_ref())
+            .map(AzureOpenAiProviderConf::from_dto)
+            .unwrap_or_default();
+
+        Self {
+            enabled: value.enabled,
+            gateway_api_key: value.gateway_api_key.clone(),
+            request_timeout: std::time::Duration::from_secs(
+                value
+                    .request_timeout_secs
+                    .unwrap_or(AI_GATEWAY_DEFAULT_REQUEST_TIMEOUT_SECS),
+            ),
+            mistral,
+            ollama,
+            lmstudio,
+            anthropic,
+            openai,
+            openrouter,
+            azure_openai,
+        }
+    }
+}
+
+impl Default for AiGatewayConf {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gateway_api_key: None,
+            request_timeout: std::time::Duration::from_secs(AI_GATEWAY_DEFAULT_REQUEST_TIMEOUT_SECS),
+            mistral: MistralProviderConf::default(),
+            ollama: OllamaProviderConf::default(),
+            lmstudio: LmStudioProviderConf::default(),
+            anthropic: AnthropicProviderConf::default(),
+            openai: OpenAiProviderConf::default(),
+            openrouter: OpenRouterProviderConf::default(),
+            azure_openai: AzureOpenAiProviderConf::default(),
+        }
+    }
+}
+
+impl MistralProviderConf {
+    const DEFAULT_ENDPOINT: &'static str = "https://api.mistral.ai";
+
+    fn from_dto(value: &dto::MistralProviderConf) -> Self {
+        Self {
+            endpoint: value
+                .endpoint
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_ENDPOINT.to_owned()),
+            api_key: value.api_key.clone(),
+        }
+    }
+
+    /// Returns the Mistral API endpoint, with environment variable override.
+    pub fn get_endpoint(&self) -> String {
+        if let Ok(endpoint) = env::var(ENV_VAR_MISTRAL_API_ENDPOINT) {
+            return endpoint;
+        }
+        self.endpoint.clone()
+    }
+
+    /// Returns the Mistral API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_MISTRAL_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+}
+
+impl Default for MistralProviderConf {
+    fn default() -> Self {
+        Self {
+            endpoint: Self::DEFAULT_ENDPOINT.to_owned(),
+            api_key: None,
+        }
+    }
+}
+
+impl OllamaProviderConf {
+    const DEFAULT_ENDPOINT: &'static str = "http://localhost:11434";
+
+    fn from_dto(value: &dto::OllamaProviderConf) -> Self {
+        Self {
+            endpoint: value
+                .endpoint
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_ENDPOINT.to_owned()),
+            api_key: value.api_key.clone(),
+        }
+    }
+
+    /// Returns the Ollama API endpoint, with environment variable override.
+    pub fn get_endpoint(&self) -> String {
+        if let Ok(endpoint) = env::var(ENV_VAR_OLLAMA_API_ENDPOINT) {
+            return endpoint;
+        }
+        self.endpoint.clone()
+    }
+
+    /// Returns the Ollama API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_OLLAMA_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+}
+
+impl Default for OllamaProviderConf {
+    fn default() -> Self {
+        Self {
+            endpoint: Self::DEFAULT_ENDPOINT.to_owned(),
+            api_key: None,
+        }
+    }
+}
+
+impl LmStudioProviderConf {
+    const DEFAULT_ENDPOINT: &'static str = "http://localhost:1234";
+
+    fn from_dto(value: &dto::LmStudioProviderConf) -> Self {
+        Self {
+            endpoint: value
+                .endpoint
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_ENDPOINT.to_owned()),
+            api_key: value.api_key.clone(),
+        }
+    }
+
+    /// Returns the LM Studio API endpoint, with environment variable override.
+    pub fn get_endpoint(&self) -> String {
+        if let Ok(endpoint) = env::var(ENV_VAR_LMSTUDIO_API_ENDPOINT) {
+            return endpoint;
+        }
+        self.endpoint.clone()
+    }
+
+    /// Returns the LM Studio API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_LMSTUDIO_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+}
+
+impl Default for LmStudioProviderConf {
+    fn default() -> Self {
+        Self {
+            endpoint: Self::DEFAULT_ENDPOINT.to_owned(),
+            api_key: None,
+        }
+    }
+}
+
+impl AnthropicProviderConf {
+    const DEFAULT_ENDPOINT: &'static str = "https://api.anthropic.com";
+
+    fn from_dto(value: &dto::AnthropicProviderConf) -> Self {
+        Self {
+            endpoint: value
+                .endpoint
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_ENDPOINT.to_owned()),
+            api_key: value.api_key.clone(),
+        }
+    }
+
+    /// Returns the Anthropic API endpoint, with environment variable override.
+    pub fn get_endpoint(&self) -> String {
+        if let Ok(endpoint) = env::var(ENV_VAR_ANTHROPIC_API_ENDPOINT) {
+            return endpoint;
+        }
+        self.endpoint.clone()
+    }
+
+    /// Returns the Anthropic API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_ANTHROPIC_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+}
+
+impl Default for AnthropicProviderConf {
+    fn default() -> Self {
+        Self {
+            endpoint: Self::DEFAULT_ENDPOINT.to_owned(),
+            api_key: None,
+        }
+    }
+}
+
+impl OpenAiProviderConf {
+    const DEFAULT_ENDPOINT: &'static str = "https://api.openai.com";
+
+    fn from_dto(value: &dto::OpenAiProviderConf) -> Self {
+        Self {
+            endpoint: value
+                .endpoint
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_ENDPOINT.to_owned()),
+            api_key: value.api_key.clone(),
+        }
+    }
+
+    /// Returns the OpenAI API endpoint, with environment variable override.
+    pub fn get_endpoint(&self) -> String {
+        if let Ok(endpoint) = env::var(ENV_VAR_OPENAI_API_ENDPOINT) {
+            return endpoint;
+        }
+        self.endpoint.clone()
+    }
+
+    /// Returns the OpenAI API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_OPENAI_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+}
+
+impl Default for OpenAiProviderConf {
+    fn default() -> Self {
+        Self {
+            endpoint: Self::DEFAULT_ENDPOINT.to_owned(),
+            api_key: None,
+        }
+    }
+}
+
+impl OpenRouterProviderConf {
+    const DEFAULT_ENDPOINT: &'static str = "https://openrouter.ai/api";
+
+    fn from_dto(value: &dto::OpenRouterProviderConf) -> Self {
+        Self {
+            endpoint: value
+                .endpoint
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_ENDPOINT.to_owned()),
+            api_key: value.api_key.clone(),
+        }
+    }
+
+    /// Returns the OpenRouter API endpoint, with environment variable override.
+    pub fn get_endpoint(&self) -> String {
+        if let Ok(endpoint) = env::var(ENV_VAR_OPENROUTER_API_ENDPOINT) {
+            return endpoint;
+        }
+        self.endpoint.clone()
+    }
+
+    /// Returns the OpenRouter API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_OPENROUTER_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+}
+
+impl Default for OpenRouterProviderConf {
+    fn default() -> Self {
+        Self {
+            endpoint: Self::DEFAULT_ENDPOINT.to_owned(),
+            api_key: None,
+        }
+    }
+}
+
+impl AzureOpenAiProviderConf {
+    const DEFAULT_API_VERSION: &'static str = "2024-02-15-preview";
+
+    fn from_dto(value: &dto::AzureOpenAiProviderConf) -> Self {
+        Self {
+            resource_name: value.resource_name.clone().unwrap_or_default(),
+            deployment_id: value.deployment_id.clone().unwrap_or_default(),
+            api_key: value.api_key.clone(),
+            api_version: value
+                .api_version
+                .clone()
+                .unwrap_or_else(|| Self::DEFAULT_API_VERSION.to_owned()),
+        }
+    }
+
+    /// Returns the Azure OpenAI resource name, with environment variable override.
+    pub fn get_resource_name(&self) -> String {
+        if let Ok(resource_name) = env::var(ENV_VAR_AZURE_OPENAI_RESOURCE_NAME) {
+            return resource_name;
+        }
+        self.resource_name.clone()
+    }
+
+    /// Returns the Azure OpenAI deployment ID, with environment variable override.
+    pub fn get_deployment_id(&self) -> String {
+        if let Ok(deployment_id) = env::var(ENV_VAR_AZURE_OPENAI_DEPLOYMENT_ID) {
+            return deployment_id;
+        }
+        self.deployment_id.clone()
+    }
+
+    /// Returns the Azure OpenAI API key, with environment variable override.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Ok(api_key) = env::var(ENV_VAR_AZURE_OPENAI_API_KEY) {
+            return Some(api_key);
+        }
+        self.api_key.clone()
+    }
+
+    /// Returns the Azure OpenAI API version, with environment variable override.
+    pub fn get_api_version(&self) -> String {
+        if let Ok(api_version) = env::var(ENV_VAR_AZURE_OPENAI_API_VERSION) {
+            return api_version;
+        }
+        self.api_version.clone()
+    }
+
+    /// Builds the full Azure OpenAI endpoint URL for a given operation.
+    pub fn build_endpoint(&self, operation: &str) -> String {
+        format!(
+            "https://{}.openai.azure.com/openai/deployments/{}/{}?api-version={}",
+            self.get_resource_name(),
+            self.get_deployment_id(),
+            operation,
+            self.get_api_version()
+        )
+    }
+}
+
+impl Default for AzureOpenAiProviderConf {
+    fn default() -> Self {
+        Self {
+            resource_name: String::new(),
+            deployment_id: String::new(),
+            api_key: None,
+            api_version: Self::DEFAULT_API_VERSION.to_owned(),
+        }
+    }
 }
 
 impl Conf {
@@ -321,6 +796,11 @@ impl Conf {
                 .map(WebAppConf::from_dto)
                 .unwrap_or_else(WebAppConf::from_env)
                 .context("webapp config")?,
+            ai_gateway: conf_file
+                .ai_gateway
+                .as_ref()
+                .map(AiGatewayConf::from_dto)
+                .unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -1023,6 +1503,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub web_app: Option<WebAppConf>,
 
+        /// (Unstable) AI gateway configuration (experimental)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub ai_gateway: Option<AiGatewayConf>,
+
         /// (Unstable) Folder and prefix for log files
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
@@ -1096,6 +1580,7 @@ pub mod dto {
                 plugins: None,
                 recording_path: None,
                 web_app: None,
+                ai_gateway: None,
                 sogar: None,
                 job_queue_database: None,
                 traffic_audit_database: None,
@@ -1438,5 +1923,139 @@ pub mod dto {
     pub enum WebAppAuth {
         Custom,
         None,
+    }
+
+    /// AI gateway configuration (experimental)
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct AiGatewayConf {
+        /// Whether to enable the AI gateway feature
+        pub enabled: bool,
+        /// API key for authenticating requests to the AI gateway
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub gateway_api_key: Option<String>,
+        /// Request timeout in seconds (default: 300)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub request_timeout_secs: Option<u64>,
+        /// AI providers configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub providers: Option<AiProvidersConf>,
+    }
+
+    /// AI providers configuration
+    #[derive(PartialEq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct AiProvidersConf {
+        /// Mistral AI provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub mistral: Option<MistralProviderConf>,
+        /// Ollama provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub ollama: Option<OllamaProviderConf>,
+        /// LM Studio provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub lmstudio: Option<LmStudioProviderConf>,
+        /// Anthropic AI provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub anthropic: Option<AnthropicProviderConf>,
+        /// OpenAI provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub openai: Option<OpenAiProviderConf>,
+        /// OpenRouter provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub openrouter: Option<OpenRouterProviderConf>,
+        /// Azure OpenAI provider configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub azure_openai: Option<AzureOpenAiProviderConf>,
+    }
+
+    /// Mistral AI provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct MistralProviderConf {
+        /// Custom Mistral API endpoint (default: https://api.mistral.ai)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub endpoint: Option<String>,
+        /// Mistral API key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+    }
+
+    /// Ollama provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct OllamaProviderConf {
+        /// Custom Ollama API endpoint (default: http://localhost:11434)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub endpoint: Option<String>,
+        /// Ollama API key (optional)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+    }
+
+    /// LM Studio provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct LmStudioProviderConf {
+        /// Custom LM Studio API endpoint (default: http://localhost:1234)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub endpoint: Option<String>,
+        /// LM Studio API key (optional)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+    }
+
+    /// Anthropic AI provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct AnthropicProviderConf {
+        /// Custom Anthropic API endpoint (default: https://api.anthropic.com)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub endpoint: Option<String>,
+        /// Anthropic API key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+    }
+
+    /// OpenAI provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct OpenAiProviderConf {
+        /// Custom OpenAI API endpoint (default: https://api.openai.com)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub endpoint: Option<String>,
+        /// OpenAI API key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+    }
+
+    /// OpenRouter provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct OpenRouterProviderConf {
+        /// Custom OpenRouter API endpoint (default: https://openrouter.ai/api)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub endpoint: Option<String>,
+        /// OpenRouter API key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+    }
+
+    /// Azure OpenAI provider configuration
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct AzureOpenAiProviderConf {
+        /// Azure resource name (e.g., "my-resource" for my-resource.openai.azure.com)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub resource_name: Option<String>,
+        /// Azure deployment ID
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub deployment_id: Option<String>,
+        /// Azure OpenAI API key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_key: Option<String>,
+        /// Azure OpenAI API version (default: 2024-02-15-preview)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub api_version: Option<String>,
     }
 }
