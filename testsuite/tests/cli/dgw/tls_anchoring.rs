@@ -7,6 +7,7 @@ use tokio::process::Child;
 async fn start_gateway() -> anyhow::Result<(DgwConfigHandle, Child)> {
     let config_handle = DgwConfig::builder()
         .disable_token_validation(true)
+        .verbosity_profile(testsuite::dgw_config::VerbosityProfile::DEBUG)
         .build()
         .init()
         .context("init config")?;
@@ -65,6 +66,7 @@ async fn read_until_tls_done(mut logs: impl tokio::io::AsyncRead + Unpin) -> any
         let logs = String::from_utf8_lossy(&buf);
 
         if logs.contains("PASTE_THIS_THUMBPRINT_IN_RDM_CONNECTION") {
+            eprintln!("{logs}");
             return Ok(TlsOutcome::Failed);
         } else if logs.contains("WebSocket-TLS forwarding") {
             return Ok(TlsOutcome::Succeeded);
@@ -100,11 +102,13 @@ async fn test(#[case] token: &str, #[case] expected_outcome: TlsOutcome) -> anyh
     Ok(())
 }
 
+// FIXME: Spawn a dummy TLS server using rustls for better reproducibility.
+
 mod token {
     pub(super) const SESSION_ID: &str = "897fd399-540c-4be3-84a1-47c73f68c7a4";
 
     /// Token with correct thumbprint for self-signed.badssl.com
-    pub(super) const SELF_SIGNED_WITH_CORRECT_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJjZXJ0X3RodW1iMjU2IjoiMzkxYTIyOGUyZjQ4NjA2NDQwNTkyNjU1ODEzNTAxNThmNTUyMTNkODc0YzVmYmY1NzFjZThiZTYyYmZlY2Y1NCIsImRzdF9oc3QiOiJzZWxmLXNpZ25lZC5iYWRzc2wuY29tOjQ0MyIsImV4cCI6MTc2MjkzNzI5OCwiamV0X2FpZCI6Ijg5N2ZkMzk5LTU0MGMtNGJlMy04NGExLTQ3YzczZjY4YzdhNCIsImpldF9hcCI6InVua25vd24iLCJqZXRfY20iOiJmd2QiLCJqZXRfcmVjIjoibm9uZSIsImp0aSI6IjgwYTcxN2JmLTZlMzItNGEyMi05Yjk3LTVlYzFkNzk1YjVlMSIsIm5iZiI6MTc2MjkzNjM5OH0.ZHVtbXlfc2lnbmF0dXJl";
+    pub(super) const SELF_SIGNED_WITH_CORRECT_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJjZXJ0X3RodW1iMjU2IjoiYmRjYWYxYzY1ZTg2MTAwOGUwMTFjZmVhNGM2YmM1N2I3YjVkOTAwOGY2YTE4N2JiYzM1Nzk3YWIyNWRiYWFmZSIsImRzdF9oc3QiOiJzZWxmLXNpZ25lZC5iYWRzc2wuY29tOjQ0MyIsImV4cCI6MTc2MjkzNzI5OCwiamV0X2FpZCI6Ijg5N2ZkMzk5LTU0MGMtNGJlMy04NGExLTQ3YzczZjY4YzdhNCIsImpldF9hcCI6InVua25vd24iLCJqZXRfY20iOiJmd2QiLCJqZXRfcmVjIjoibm9uZSIsImp0aSI6IjgwYTcxN2JmLTZlMzItNGEyMi05Yjk3LTVlYzFkNzk1YjVlMSIsIm5iZiI6MTc2MjkzNjM5OH0.ZHVtbXlfc2lnbmF0dXJl";
 
     /// Token with wrong thumbprint for self-signed.badssl.com
     pub(super) const SELF_SIGNED_WITH_WRONG_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJjZXJ0X3RodW1iMjU2IjoiYTkxYTIyODIyZjQ4NjA2NDQwNTkyNjU1ODExMTExNThmNTUyMTNkODc0YzVmYmY1NzFjZThiZTYzYmZlY2Y1NCIsImRzdF9oc3QiOiJzZWxmLXNpZ25lZC5iYWRzc2wuY29tOjQ0MyIsImV4cCI6MTc2MjkzODI5MywiamV0X2FpZCI6Ijg5N2ZkMzk5LTU0MGMtNGJlMy04NGExLTQ3YzczZjY4YzdhNCIsImpldF9hcCI6InVua25vd24iLCJqZXRfY20iOiJmd2QiLCJqZXRfcmVjIjoibm9uZSIsImp0aSI6IjRlMjZhNjM2LTA0MjUtNDNlMy1iMGZmLWYzZDk1ODhjZWY4YSIsIm5iZiI6MTc2MjkzNzM5M30.ZHVtbXlfc2lnbmF0dXJl";
