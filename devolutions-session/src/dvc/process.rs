@@ -92,6 +92,9 @@ pub enum ServerChannelEvent {
         session_id: u32,
         error: ExecError,
     },
+    WindowRecordingEvent {
+        message: now_proto_pdu::OwnedNowSessionWindowRecEventMsg,
+    },
 }
 
 pub struct WinApiProcessCtx {
