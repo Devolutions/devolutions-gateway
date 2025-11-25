@@ -27,8 +27,8 @@ use now_proto_pdu::{
     NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
     NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
     NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage,
-    NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage,
-    SetKbdLayoutOption,
+    NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowSessionWindowRecEventMsg, NowSessionWindowRecStartMsg,
+    NowStatusError, NowSystemCapsetFlags, NowSystemMessage, SetKbdLayoutOption, WindowRecStartFlags,
 };
 use win_api_wrappers::event::Event;
 use win_api_wrappers::security::privilege::ScopedPrivileges;
@@ -38,6 +38,7 @@ use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_sig
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::run_dvc_io;
 use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
+use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
 
 // One minute heartbeat interval by default
 const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
@@ -229,6 +230,11 @@ async fn process_messages(
 
                                 handle_exec_error(&dvc_tx, session_id, error).await;
                             }
+                            ServerChannelEvent::WindowRecordingEvent { message } => {
+                                if let Err(error) = handle_window_recording_event(&dvc_tx, message).await {
+                                    error!(%error, "Failed to handle window recording event");
+                                }
+                            }
                             ServerChannelEvent::CloseChannel => {
                                 info!("Received close channel notification, shutting down...");
 
@@ -265,7 +271,8 @@ fn default_server_caps() -> NowChannelCapsetMsg {
             NowSessionCapsetFlags::LOCK
                 | NowSessionCapsetFlags::LOGOFF
                 | NowSessionCapsetFlags::MSGBOX
-                | NowSessionCapsetFlags::SET_KBD_LAYOUT,
+                | NowSessionCapsetFlags::SET_KBD_LAYOUT
+                | NowSessionCapsetFlags::WINDOW_RECORDING,
         )
         .with_exec_capset(
             NowExecCapsetFlags::STYLE_RUN
@@ -289,6 +296,10 @@ struct MessageProcessor {
     #[allow(dead_code)] // Not yet used.
     capabilities: NowChannelCapsetMsg,
     sessions: HashMap<u32, WinApiProcess>,
+    /// Shutdown signal sender for window monitoring task.
+    window_monitor_shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Handle for the window monitor task.
+    window_monitor_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MessageProcessor {
@@ -302,6 +313,8 @@ impl MessageProcessor {
             io_notification_tx,
             capabilities,
             sessions: HashMap::new(),
+            window_monitor_shutdown_tx: None,
+            window_monitor_handle: None,
         }
     }
 
@@ -465,6 +478,14 @@ impl MessageProcessor {
                 if let Err(error) = set_kbd_layout(message.layout()) {
                     error!(%error, "Failed to set keyboard layout");
                 }
+            }
+            NowMessage::Session(NowSessionMessage::WindowRecStart(start_msg)) => {
+                if let Err(error) = self.start_window_recording(start_msg).await {
+                    error!(%error, "Failed to start window recording");
+                }
+            }
+            NowMessage::Session(NowSessionMessage::WindowRecStop(_stop_msg)) => {
+                self.stop_window_recording().await;
             }
             NowMessage::System(NowSystemMessage::Shutdown(shutdown_msg)) => {
                 let mut current_process_token = win_api_wrappers::process::Process::current_process()
@@ -742,6 +763,56 @@ impl MessageProcessor {
 
         self.sessions.clear();
     }
+
+    async fn start_window_recording(&mut self, start_msg: NowSessionWindowRecStartMsg) -> anyhow::Result<()> {
+        // Stop any existing window recording first.
+        self.stop_window_recording().await;
+
+        info!("Starting window recording");
+
+        let track_title_changes = start_msg.flags.contains(WindowRecStartFlags::TRACK_TITLE_CHANGE);
+
+        // Create shutdown channel for window monitor.
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+        // Store shutdown sender so we can stop monitoring later.
+        self.window_monitor_shutdown_tx = Some(shutdown_tx);
+
+        // Spawn window monitor task.
+        let event_tx = self.io_notification_tx.clone();
+        let poll_interval = start_msg.poll_interval;
+        let window_monitor_handle = tokio::task::spawn(async move {
+            let mut config = WindowMonitorConfig::new(event_tx, track_title_changes, shutdown_rx);
+
+            // Only set custom poll interval if specified (non-zero).
+            if poll_interval > 0 {
+                config = config.with_poll_interval_ms(u64::from(poll_interval));
+            }
+
+            if let Err(error) = run_window_monitor(config).await {
+                error!(%error, "Window monitor failed");
+            }
+        });
+
+        self.window_monitor_handle = Some(window_monitor_handle);
+
+        Ok(())
+    }
+
+    async fn stop_window_recording(&mut self) {
+        if let Some(shutdown_tx) = self.window_monitor_shutdown_tx.take() {
+            info!("Stopping window recording");
+            // Send shutdown signal (ignore errors if receiver was already dropped).
+            let _ = shutdown_tx.send(());
+
+            // Wait for the task to finish.
+            if let Some(handle) = self.window_monitor_handle.take()
+                && let Err(error) = handle.await
+            {
+                error!(%error, "Window monitor task panicked");
+            }
+        }
+    }
 }
 
 fn append_ps_args(args: &mut Vec<String>, msg: &NowExecWinPsMsg<'_>) {
@@ -917,6 +988,15 @@ fn make_generic_error_failsafe(session_id: u32, code: u32, message: String) -> N
             NowExecResultMsg::new_error(session_id, NowStatusError::new_generic(code))
                 .expect("generic error without message always fits into NowMessage frame")
         })
+}
+
+async fn handle_window_recording_event(
+    dvc_tx: &WinapiSignaledSender<NowMessage<'static>>,
+    message: NowSessionWindowRecEventMsg<'static>,
+) -> anyhow::Result<()> {
+    dvc_tx.send(NowMessage::from(message.into_owned())).await?;
+
+    Ok(())
 }
 
 async fn handle_exec_error(dvc_tx: &WinapiSignaledSender<NowMessage<'static>>, session_id: u32, error: ExecError) {
