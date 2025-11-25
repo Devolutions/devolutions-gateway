@@ -39,5 +39,6 @@ pub mod io;
 pub mod now_message_dissector;
 pub mod process;
 pub mod task;
+pub mod window_monitor;
 
 mod env;
