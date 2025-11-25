@@ -1,6 +1,6 @@
 use std::pin::Pin;
 
-use anyhow::{Context as _, Result};
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
@@ -160,23 +160,23 @@ impl McpClient {
     }
 
     /// Connect to the MCP server and perform initialization handshake using the configured settings.
-    pub async fn connect(&mut self) -> Result<InitializeResult> {
+    pub async fn connect(&mut self) -> anyhow::Result<InitializeResult> {
         self.initialize().await
     }
 
     /// Send a raw JSON-RPC request and get response
-    async fn send_request(&mut self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
+    async fn send_request(&mut self, request: JsonRpcRequest) -> anyhow::Result<JsonRpcResponse> {
         // Serialize request to JSON
         let mut request = serde_json::to_string(&request)?;
         request.push('\n');
 
         // Write request as line.
-        self.writer.write_all(request.as_bytes()).await?;
-        self.writer.flush().await?;
+        self.writer.write_all(request.as_bytes()).await.context("write")?;
+        self.writer.flush().await.context("flush")?;
 
         // Read response line.
         let mut response_line = String::new();
-        self.reader.read_line(&mut response_line).await?;
+        self.reader.read_line(&mut response_line).await.context("read")?;
 
         if response_line.trim().is_empty() {
             anyhow::bail!("empty response");
@@ -189,7 +189,7 @@ impl McpClient {
     }
 
     /// Internal helper to send an initialize request.
-    async fn initialize(&mut self) -> Result<InitializeResult> {
+    async fn initialize(&mut self) -> anyhow::Result<InitializeResult> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_owned(),
             id: Some(self.next_id()),
@@ -210,7 +210,7 @@ impl McpClient {
     }
 
     /// List available tools.
-    pub async fn list_tools(&mut self) -> Result<ToolsListResult> {
+    pub async fn list_tools(&mut self) -> anyhow::Result<ToolsListResult> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_owned(),
             id: Some(self.next_id()),
@@ -218,19 +218,17 @@ impl McpClient {
             params: None,
         };
 
-        let response = self.send_request(request).await?;
+        let response = self.send_request(request).await.context("send request")?;
         if let Some(error) = response.error {
             anyhow::bail!("JSON-RPC error {}: {}", error.code, error.message);
         }
 
-        let result = response
-            .result
-            .ok_or_else(|| anyhow::anyhow!("missing result in response"))?;
+        let result = response.result.context("missing result in response")?;
         Ok(serde_json::from_value(result)?)
     }
 
     /// Call a tool.
-    pub async fn call_tool(&mut self, params: ToolCallParams) -> Result<ToolCallResult> {
+    pub async fn call_tool(&mut self, params: ToolCallParams) -> anyhow::Result<ToolCallResult> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_owned(),
             id: Some(self.next_id()),
@@ -238,14 +236,12 @@ impl McpClient {
             params: Some(serde_json::to_value(params)?),
         };
 
-        let response = self.send_request(request).await?;
+        let response = self.send_request(request).await.context("send request")?;
         if let Some(error) = response.error {
             anyhow::bail!("JSON-RPC error {}: {}", error.code, error.message);
         }
 
-        let result = response
-            .result
-            .ok_or_else(|| anyhow::anyhow!("Missing result in response"))?;
+        let result = response.result.context("missing result in response")?;
         Ok(serde_json::from_value(result)?)
     }
 
@@ -254,7 +250,7 @@ impl McpClient {
         &mut self,
         method: impl Into<String>,
         params: Option<serde_json::Value>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_owned(),
             id: None, // Notifications have no ID.
