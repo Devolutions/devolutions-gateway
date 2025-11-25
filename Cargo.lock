@@ -6205,6 +6205,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "base64 0.22.1",
  "dynosaur",
  "escargot",
  "expect-test",
@@ -6219,6 +6220,7 @@ dependencies = [
  "tempfile",
  "test-utils",
  "tokio 1.46.1",
+ "tokio-rustls",
  "tokio-tungstenite 0.26.2",
  "typed-builder",
 ]

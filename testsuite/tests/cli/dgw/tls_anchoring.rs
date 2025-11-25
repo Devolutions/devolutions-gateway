@@ -4,6 +4,39 @@ use testsuite::cli::dgw_tokio_cmd;
 use testsuite::dgw_config::{DgwConfig, DgwConfigHandle};
 use tokio::process::Child;
 
+#[rstest]
+#[case::self_signed_correct_thumb(true, true, TlsOutcome::Succeeded)]
+#[case::self_signed_wrong_thumb(true, false, TlsOutcome::Failed)]
+#[case::self_signed_no_thumb(false, false, TlsOutcome::Failed)]
+#[tokio::test]
+async fn test(
+    #[case] include_thumbprint: bool,
+    #[case] correct_thumbprint: bool,
+    #[case] expected_outcome: TlsOutcome,
+) -> anyhow::Result<()> {
+    let tls_port = start_dummy_tls_server().await?;
+    let (config_handle, mut process) = start_gateway().await?;
+
+    let token = token::build(tls_port, include_thumbprint, correct_thumbprint);
+    let stdout = process.stdout.take().unwrap();
+
+    let connect_fut = websocket_connect(config_handle.http_port(), &token, token::SESSION_ID);
+    let read_fut = read_until_tls_done(stdout);
+
+    tokio::select! {
+        res = connect_fut => {
+            res.context("websocket connect")?;
+            anyhow::bail!("expected read future to terminate before connect future");
+        }
+        res = read_fut => {
+            let outcome = res.context("read")?;
+            assert_eq!(outcome, expected_outcome);
+        }
+    }
+
+    Ok(())
+}
+
 async fn start_gateway() -> anyhow::Result<(DgwConfigHandle, Child)> {
     let config_handle = DgwConfig::builder()
         .disable_token_validation(true)
@@ -26,11 +59,11 @@ async fn start_gateway() -> anyhow::Result<(DgwConfigHandle, Child)> {
     Ok((config_handle, process))
 }
 
-/// Perform a WebSocket connection on the /jet/fwd/tcp endpoint.
+/// Perform a WebSocket connection on the /jet/fwd/tls endpoint.
 async fn websocket_connect(port: u16, token: &str, session_id: &str) -> anyhow::Result<()> {
     let url = format!("ws://127.0.0.1:{port}/jet/fwd/tls/{session_id}?token={token}");
 
-    // Try to connect with a timeout
+    // Try to connect with a timeout.
     let (_ws_stream, response) =
         tokio::time::timeout(std::time::Duration::from_secs(5), tokio_tungstenite::connect_async(url))
             .await
@@ -74,48 +107,153 @@ async fn read_until_tls_done(mut logs: impl tokio::io::AsyncRead + Unpin) -> any
     }
 }
 
-#[rstest]
-#[case::self_signed_correct_thumb(token::SELF_SIGNED_WITH_CORRECT_THUMB, TlsOutcome::Succeeded)]
-#[case::self_signed_wrong_thumb(token::SELF_SIGNED_WITH_WRONG_THUMB, TlsOutcome::Failed)]
-#[case::self_signed_no_thumb(token::SELF_SIGNED_NO_THUMB, TlsOutcome::Failed)]
-#[case::valid_cert_no_thumb(token::VALID_CERT_NO_THUMB, TlsOutcome::Succeeded)]
-#[tokio::test]
-async fn test(#[case] token: &str, #[case] expected_outcome: TlsOutcome) -> anyhow::Result<()> {
-    let (config_handle, mut process) = start_gateway().await?;
+/// Starts a dummy TLS server and returns its port.
+async fn start_dummy_tls_server() -> anyhow::Result<u16> {
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt as _;
+    use tokio::net::TcpListener;
+    use tokio_rustls::TlsAcceptor;
+    use tokio_rustls::rustls::ServerConfig;
+    use tokio_rustls::rustls::crypto::ring::default_provider;
+    use tokio_rustls::rustls::pki_types::pem::PemObject as _;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
-    let stdout = process.stdout.take().unwrap();
+    // Install the ring crypto provider if not already installed.
+    let _ = default_provider().install_default();
 
-    let connect_fut = websocket_connect(config_handle.http_port(), token, token::SESSION_ID);
-    let read_fut = read_until_tls_done(stdout);
+    let cert_pem = tls::CERT_PEM;
+    let key_pem = tls::KEY_PEM;
 
-    tokio::select! {
-        res = connect_fut => {
-            res.context("websocket connect")?;
-            anyhow::bail!("expected read future to terminate before connect future");
+    // Parse certificate.
+    let cert = CertificateDer::from_pem_slice(cert_pem.as_bytes()).context("parse certificate")?;
+
+    // Parse private key.
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context("parse private key DER")?;
+
+    // Build TLS config.
+    let tls_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .context("build TLS config")?;
+
+    let acceptor = TlsAcceptor::from(Arc::new(tls_config));
+
+    // Bind to an ephemeral port.
+    let listener = TcpListener::bind("127.0.0.1:0").await.context("bind")?;
+    let port = listener.local_addr().context("local_addr")?.port();
+
+    // We spawn-and-forget the task; the async runtime is dropped at the end of
+    // the test, including all the spawned futures.
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+
+            let acceptor = acceptor.clone();
+
+            tokio::spawn(async move {
+                if let Ok(mut tls_stream) = acceptor.accept(stream).await {
+                    // Send a simple response and close.
+                    let _ = tls_stream.write_all(b"Hello from dummy TLS server\n").await;
+                    let _ = tls_stream.shutdown().await;
+                }
+            });
         }
-        res = read_fut => {
-            let outcome = res.context("read")?;
-            assert_eq!(outcome, expected_outcome);
-        }
-    }
+    });
 
-    Ok(())
+    Ok(port)
 }
 
-// FIXME: Spawn a dummy TLS server using rustls for better reproducibility.
+mod tls {
+    /// Self-signed certificate for localhost (valid for 100 years).
+    pub(super) const CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+MIIDCzCCAfOgAwIBAgIUPRJa8i280unV3/kW6TE2fSUw8PwwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI1MTEyNTA5NDAzMFoYDzIxMjUx
+MTAxMDk0MDMwWjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEB
+AQUAA4IBDwAwggEKAoIBAQDHpBlyRgUx/V9cQGw/eqDFc6odxB2hvnbudi67LvEj
+cNIWOU79R1e/NswME4oecqT9W05n4UyxkABfm2qjODO0nDf47W0DsgbEA87qE715
+RWg8AtC529CZAazqTV3gqYyRMsCuVKzPVxgWa8rhPc7E6In1uDRak0lWKQPQSBbc
+34nxMOVIusZNlkAEar8/aYPr/YWvdEqkobEvXp+g9WsuMaU913ecacWDjyWDkf80
+pPPtf+uet7WMysKMhzGQtpbgilT8XCo8uTsgUbK+TMWvkF9bcxAQDnJsrZRL7Jfh
+ofsFfQbTIvbvpn+4J4kmHN36BTohlNL8TX1jrU3cPA7dAgMBAAGjUzBRMB0GA1Ud
+DgQWBBTT+m6dyc/c3mXF3JAsZr9OqUwgWTAfBgNVHSMEGDAWgBTT+m6dyc/c3mXF
+3JAsZr9OqUwgWTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBB
+i/yonZY3ztaeGElzD8xkI+rJ+daJ5WzdfKnzudJllg/Ht8m7wO5SdQnMt2T44gbH
+05uekc1zXnXb7fJKqs3R6DacctG0nQ3acuI+IMtTaBbbAcf3PJJlo0Pap0ypVC0R
+IUiUhJGFNi4cCBOvJqsly0d3T5xqOXU1Q5j3mIwRBY68+m9btwwuZWvASRADtCyZ
+RpisBzS4a6jSeHXa4iG/VhskbiZkcnfHNTw7yNJJdv125y2zQkWWF9wlLbYwWr40
+x9Ba6YbssOz6epATKhvt80yclO34AzUyimssvViIUpgFEyaPhZZTw46Q/6X3ixK4
+/v4eYM0cCHN0h+rynSor
+-----END CERTIFICATE-----"#;
+
+    /// Private key for the self-signed certificate.
+    pub(super) const KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDHpBlyRgUx/V9c
+QGw/eqDFc6odxB2hvnbudi67LvEjcNIWOU79R1e/NswME4oecqT9W05n4UyxkABf
+m2qjODO0nDf47W0DsgbEA87qE715RWg8AtC529CZAazqTV3gqYyRMsCuVKzPVxgW
+a8rhPc7E6In1uDRak0lWKQPQSBbc34nxMOVIusZNlkAEar8/aYPr/YWvdEqkobEv
+Xp+g9WsuMaU913ecacWDjyWDkf80pPPtf+uet7WMysKMhzGQtpbgilT8XCo8uTsg
+UbK+TMWvkF9bcxAQDnJsrZRL7JfhofsFfQbTIvbvpn+4J4kmHN36BTohlNL8TX1j
+rU3cPA7dAgMBAAECggEAKh7KK5zwTaq6atlAvWfe8anEk4EkC1MG/qq6k02FHMgZ
+2wx+SNu7fKFQDaA1vNTNUJLqCOq05qWOHp3IsuURq6JmAMP/Aw+Vc9el2ScPC74E
+Dt09MmlZKl77H3fxPYwoFx5RHrbIuvoSH/DgHgOPU2YIbWpOyWlXyLDgmBoNkM3N
+fXYLXJONpStPHeQLhh7LcHO3CZgn6kycJyByEO2NtcchS5zITiJuwL+qR5/QIlvD
+Yo7jdCjelJat38MZ9dE1us8xlIjQtsYF/acZZtcpYho+7ZpDCNcb+xF8KStKei+B
+MMpWISsa+Zh9g7lPYTnG/i1dSMMT100XCEw8o4rBoQKBgQDnptz8acp7DB2wJH4L
+c0xuw8IlrSl3BGUEj8H+RyFlpH3+//i6/fE9MrtF8b4FSYUp5AG4NVFGcRbwJVGW
+jeL13YwIKMdXjmx8fDIylCgBB1tzBS9T/0ws3HS8avxhKvjgoXIZm6D3XDcBslrH
+c9/LojT8YGI1wx7jWI2qKj8yeQKBgQDcn+kQ1QjzgIz6bAVWY3t1jr5uHHyaS+5G
+ihY/mx4Mn3DURgPXZHz/HrN9rZkax0zuq9wuIlqgZ2KI37iCF49M4aZxC788LyDo
+Hp0Cak3wt3g0Tj6J7SJiQe8h/6VBS4R5dRD2vhEc3xPAOf7WIFdlLYBOOvE/LmOt
+N6ChkfgGhQKBgQDSiDqLRPJ7BjXtIh1T9sPeXxeR+mCXBG1yydx7ZtYZdHf2S1kZ
+STX4cqT1GpGiaIEX41sUuZBWPu2j76bI98bvwRxFRhp1nsFGGfHdOf1pgfBBBtNO
+udXXZ7zIiUs6XD24mcIDOAgBB9QOPLR4VP1uKsuRG1/mkKD/6jlGEANDsQKBgQDC
+AoEygxQnBVFz2c/rwvnLS+Zb8AMGsGTtdPrRnjeThBX1JUi1fbGJq1bN2v27Fa2q
+aEjr7NvjGGcG1C1tgQhL5Fa4LEtTwmHenSUW/aJiXwR+gpvuMDC/VRnTvPp2a9En
++XEcedGUoPq+XIGjjLctyxB8Osrw83tF1JgV3MXN/QKBgQC83B54rYDd4QmVH5nL
+WLw834fgr+Z1hA6UqJIaahlD/bDwzbbJEv0pHCBxe01ywQFivqWBdVbuoy9YSeLS
+KKEklzh+L0SorrYoBA5F63qx0zy05bba0ASplgDUEUNZn7oIFi7x5pVsNNaNxZpR
+bQGM8UrNQvWQ+tutRmp7PM6VuQ==
+-----END PRIVATE KEY-----"#;
+
+    /// SHA-256 thumbprint of the certificate.
+    pub(super) const CERT_THUMBPRINT: &str = "bce13f257b9d856404c51b46f2420eff6d01b3a4c99fe3d0e11e4517c2291b70";
+}
 
 mod token {
+    use base64::prelude::*;
+
     pub(super) const SESSION_ID: &str = "897fd399-540c-4be3-84a1-47c73f68c7a4";
 
-    /// Token with correct thumbprint for self-signed.badssl.com
-    pub(super) const SELF_SIGNED_WITH_CORRECT_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJjZXJ0X3RodW1iMjU2IjoiYmRjYWYxYzY1ZTg2MTAwOGUwMTFjZmVhNGM2YmM1N2I3YjVkOTAwOGY2YTE4N2JiYzM1Nzk3YWIyNWRiYWFmZSIsImRzdF9oc3QiOiJzZWxmLXNpZ25lZC5iYWRzc2wuY29tOjQ0MyIsImV4cCI6MTc2MjkzNzI5OCwiamV0X2FpZCI6Ijg5N2ZkMzk5LTU0MGMtNGJlMy04NGExLTQ3YzczZjY4YzdhNCIsImpldF9hcCI6InVua25vd24iLCJqZXRfY20iOiJmd2QiLCJqZXRfcmVjIjoibm9uZSIsImp0aSI6IjgwYTcxN2JmLTZlMzItNGEyMi05Yjk3LTVlYzFkNzk1YjVlMSIsIm5iZiI6MTc2MjkzNjM5OH0.ZHVtbXlfc2lnbmF0dXJl";
+    /// Build a JWT token for TLS anchoring tests.
+    pub(super) fn build(port: u16, include_thumbprint: bool, correct_thumbprint: bool) -> String {
+        /// Static JWT header: {"alg":"RS256","typ":"JWT","cty":"ASSOCIATION"}
+        const HEADER: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0";
 
-    /// Token with wrong thumbprint for self-signed.badssl.com
-    pub(super) const SELF_SIGNED_WITH_WRONG_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJjZXJ0X3RodW1iMjU2IjoiYTkxYTIyODIyZjQ4NjA2NDQwNTkyNjU1ODExMTExNThmNTUyMTNkODc0YzVmYmY1NzFjZThiZTYzYmZlY2Y1NCIsImRzdF9oc3QiOiJzZWxmLXNpZ25lZC5iYWRzc2wuY29tOjQ0MyIsImV4cCI6MTc2MjkzODI5MywiamV0X2FpZCI6Ijg5N2ZkMzk5LTU0MGMtNGJlMy04NGExLTQ3YzczZjY4YzdhNCIsImpldF9hcCI6InVua25vd24iLCJqZXRfY20iOiJmd2QiLCJqZXRfcmVjIjoibm9uZSIsImp0aSI6IjRlMjZhNjM2LTA0MjUtNDNlMy1iMGZmLWYzZDk1ODhjZWY4YSIsIm5iZiI6MTc2MjkzNzM5M30.ZHVtbXlfc2lnbmF0dXJl";
+        /// Static dummy signature.
+        const SIGNATURE: &str = "ZHVtbXlfc2lnbmF0dXJl";
 
-    /// Token without thumbprint for self-signed.badssl.com
-    pub(super) const SELF_SIGNED_NO_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJkc3RfaHN0Ijoic2VsZi1zaWduZWQuYmFkc3NsLmNvbTo0NDMiLCJleHAiOjE3NjI5Mzc0ODAsImpldF9haWQiOiI4OTdmZDM5OS01NDBjLTRiZTMtODRhMS00N2M3M2Y2OGM3YTQiLCJqZXRfYXAiOiJ1bmtub3duIiwiamV0X2NtIjoiZndkIiwiamV0X3JlYyI6Im5vbmUiLCJqdGkiOiI0ODdjZThiNS1lY2ZmLTRlY2QtYWE3ZC0wNTJkNThlM2U2YjEiLCJuYmYiOjE3NjI5MzY1ODB9.ZHVtbXlfc2lnbmF0dXJl";
+        /// A wrong thumbprint for testing.
+        const WRONG_THUMBPRINT: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
-    /// Token without thumbprint for badssl.com (valid cert)
-    pub(super) const VALID_CERT_NO_THUMB: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJkc3RfaHN0IjoiYmFkc3NsLmNvbTo0NDMiLCJleHAiOjE3NjI5Mzc1MjEsImpldF9haWQiOiI4OTdmZDM5OS01NDBjLTRiZTMtODRhMS00N2M3M2Y2OGM3YTQiLCJqZXRfYXAiOiJ1bmtub3duIiwiamV0X2NtIjoiZndkIiwiamV0X3JlYyI6Im5vbmUiLCJqdGkiOiI4YWUzMzkxNS00ZDNlLTQyYmItODBkNi0yYjQzYjIyN2QzYTQiLCJuYmYiOjE3NjI5MzY2MjF9.ZHVtbXlfc2lnbmF0dXJl";
+        let thumbprint_field = if include_thumbprint {
+            let thumb = if correct_thumbprint {
+                super::tls::CERT_THUMBPRINT
+            } else {
+                WRONG_THUMBPRINT
+            };
+            format!(r#""cert_thumb256":"{thumb}","#)
+        } else {
+            String::new()
+        };
+
+        let body_json = format!(
+            r#"{{{thumbprint_field}"dst_hst":"127.0.0.1:{port}","exp":9999999999,"jet_aid":"{SESSION_ID}","jet_ap":"unknown","jet_cm":"fwd","jet_rec":"none","jti":"00000000-0000-0000-0000-000000000000","nbf":0}}"#
+        );
+
+        let body = BASE64_URL_SAFE_NO_PAD.encode(body_json.as_bytes());
+
+        format!("{HEADER}.{body}.{SIGNATURE}")
+    }
 }
