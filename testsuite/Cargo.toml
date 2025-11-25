@@ -30,12 +30,14 @@ typed-builder = "0.21"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 
 [dev-dependencies]
+base64 = "0.22"
 mcp-proxy.path = "../crates/mcp-proxy"
 rstest = "0.25"
 serde_json = "1"
 sysevent.path = "../crates/sysevent"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
+tokio-rustls = { version = "0.26", features = ["ring"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"
