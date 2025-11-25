@@ -3926,13 +3926,14 @@ checksum = "5e0826a989adedc2a244799e823aece04662b66609d96af8dff7ac6df9a8925d"
 
 [[package]]
 name = "now-proto-pdu"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5023d146f7c4e7327e3343ae7ba3c716322ac2ef16e9405d1c6b84e3b66d40b3"
+checksum = "00ac734dd7c77bf952b96f9755ffbc72b888e5d860d35575729f1ee4822887d0"
 dependencies = [
  "bitflags 2.9.4",
  "ironrdp-core",
  "ironrdp-error 0.1.3",
+ "uuid",
 ]
 
 [[package]]
