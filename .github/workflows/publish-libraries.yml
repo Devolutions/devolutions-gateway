@@ -118,6 +118,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
+          cache-dependency-path: 'webapp/pnpm-lock.yaml'
 
       - name: Build
         run: |
