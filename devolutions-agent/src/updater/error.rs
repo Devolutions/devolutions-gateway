@@ -32,7 +32,7 @@ pub(crate) enum UpdaterError {
     AclString { acl: String },
     #[error("failed to set permissions for file: `{file_path}`")]
     SetFilePermissions { file_path: Utf8PathBuf },
-    #[error("invalid productinfo.htm format")]
+    #[error("invalid productinfo.json format")]
     ProductInfo,
     #[error(transparent)]
     WindowsRegistry(#[from] devolutions_agent_shared::windows::registry::RegistryError),
