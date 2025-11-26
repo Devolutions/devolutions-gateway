@@ -1,22 +1,21 @@
-mod network_client;
-
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
 use crate::config::dto::{DomainUser, KerberosServer};
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
-use crate::rdp_proxy::network_client::NetworkClient;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
+use crate::target_addr::TargetAddr;
 
 use anyhow::Context as _;
 use ironrdp_acceptor::credssp::CredsspProcessGenerator as CredsspServerProcessGenerator;
 use ironrdp_connector::credssp::{CredsspProcessGenerator as CredsspClientProcessGenerator, KerberosConfig};
 use ironrdp_connector::sspi::credssp::{ClientState, ServerError, ServerState};
-use ironrdp_connector::sspi::generator::GeneratorState;
+use ironrdp_connector::sspi::generator::{GeneratorState, NetworkRequest};
 use ironrdp_connector::sspi::kerberos::ServerProperties;
 use ironrdp_connector::sspi::{
     self, AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
@@ -577,7 +576,7 @@ where
     {
         let crate::credential::AppCredential::UsernamePassword { username, password } = credentials;
 
-        let username = sspi::Username::new(username, None).context("invalid username")?;
+        let username = sspi::Username::parse(username).context("invalid username")?;
 
         let identity = sspi::AuthIdentity {
             username,
@@ -731,4 +730,20 @@ where
     let payload = ironrdp_core::encode_vec(pdu).context("failed to encode PDU")?;
     framed.write_all(&payload).await.context("failed to write PDU")?;
     Ok(())
+}
+
+struct NetworkClient;
+
+impl NetworkClient {
+    fn new() -> Self {
+        Self {}
+    }
+
+    async fn send(&self, request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
+        let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
+
+        send_krb_message(&target_addr, &request.data)
+            .await
+            .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
+    }
 }
