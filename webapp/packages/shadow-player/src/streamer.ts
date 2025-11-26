@@ -11,6 +11,10 @@ export type ShadowPlayerError =
   | {
       type: 'protocol';
       inner: ErrorMessage;
+    }
+  | {
+      type: 'session-not-found';
+      message: string;
     };
 
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
@@ -25,6 +29,9 @@ export class ShadowPlayer extends HTMLElement {
   debug = false;
   _container: HTMLDivElement | null = null;
   _replayButton: HTMLButtonElement | null = null;
+
+  private websocket: ServerWebSocket | null = null;
+  private isDisconnecting = false;
 
   static get observedAttributes() {
     return ['src', 'autoplay', 'loop', 'muted', 'poster', 'preload', 'style', 'width', 'height'];
@@ -123,33 +130,36 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   public srcChange(value: string) {
+    this.isDisconnecting = false;
     const mediaSource = new MediaSource();
     this._src = value;
     this.videoElement.src = URL.createObjectURL(mediaSource);
-    mediaSource.addEventListener('sourceopen', () => this.handleSourceOpen(mediaSource));
+    mediaSource.addEventListener('sourceopen', () => {
+      this.handleSourceOpen(mediaSource);
+    });
   }
 
   private async handleSourceOpen(mediaSource: MediaSource) {
-    const websocket = new ServerWebSocket(this._src as string);
+    this.websocket = new ServerWebSocket(this._src as string);
     let reactiveSourceBuffer: ReactiveSourceBuffer | null = null;
 
-    websocket.onopen(() => {
-      websocket.send({ type: 'start' });
-      websocket.send({ type: 'pull' });
+    this.websocket.onopen(() => {
+      this.websocket!.send({ type: 'start' });
+      this.websocket!.send({ type: 'pull' });
 
       this._videoElement?.addEventListener('ended', () => {
         this.showReplayButton();
       });
     });
 
-    websocket.onmessage((ev) => {
+    this.websocket.onmessage((ev) => {
       if (mediaSource.readyState === 'closed') {
         return;
       }
       if (ev.type === 'metadata') {
         const codec = ev.codec;
         reactiveSourceBuffer = new ReactiveSourceBuffer(mediaSource, codec, () => {
-          websocket.send({ type: 'pull' });
+          this.websocket?.send({ type: 'pull' });
         });
         this._buffer = reactiveSourceBuffer;
       }
@@ -190,21 +200,40 @@ export class ShadowPlayer extends HTMLElement {
       }
     });
 
-    websocket.onclose(() => {
-      // Now the video is fully loaded, we can show the controls
-      this.videoElement.controls = true;
-      if (reactiveSourceBuffer) {
-        mediaSource.endOfStream();
+    this.websocket.onclose((ev) => {
+      if (this.isDisconnecting) {
+        this.websocket = null;
+        return;
       }
+
+      if (ev.code === 4001) {
+        this.onErrorCallback?.({
+          type: 'session-not-found',
+          message: 'Recording session is no longer active',
+        });
+      }
+
+      this.videoElement.controls = true;
+      if (reactiveSourceBuffer && mediaSource.readyState === 'open') {
+        try {
+          mediaSource.endOfStream();
+        } catch (error) {
+        }
+      }
+      this.websocket = null;
     });
 
-    websocket.onerror((ev) => {
+    this.websocket.onerror((ev) => {
+      if (this.isDisconnecting) {
+        return;
+      }
+
       this.onErrorCallback?.({
         type: 'websocket',
         inner: ev as unknown as ErrorEvent,
       });
 
-      if (mediaSource.readyState === 'open') {
+      if (reactiveSourceBuffer && mediaSource.readyState === 'open') {
         try {
           mediaSource.endOfStream();
         } catch (error) {
@@ -223,6 +252,29 @@ export class ShadowPlayer extends HTMLElement {
   private showReplayButton() {
     if (this._replayButton) {
       this._replayButton.classList.add('visible');
+    }
+  }
+
+  public disconnect(): void {
+    this.isDisconnecting = true;
+
+    if (this.websocket) {
+      try {
+        this.websocket.ws.close(1000, 'Component cleanup');
+      } catch (error) {
+        // Intentionally ignored: WebSocket may already be closed
+      }
+      this.websocket = null;
+    }
+
+    if (this._videoElement) {
+      try {
+        this._videoElement.pause();
+        this._videoElement.src = '';
+        this._videoElement.load();
+      } catch (error) {
+        // Intentionally ignored: Video element may already be in an invalid state
+      }
     }
   }
 }
