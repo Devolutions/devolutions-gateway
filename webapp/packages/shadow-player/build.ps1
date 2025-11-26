@@ -8,7 +8,7 @@ try
 {
 	pnpm install
 
-	pnpm run build
+	pnpm --filter @devolutions/shadow-player... build
 
 	Set-Location -Path ./dist/
 	npm pack
