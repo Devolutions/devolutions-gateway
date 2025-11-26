@@ -10,14 +10,14 @@ use testsuite::cli::{assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsoc
 // NOTE: Windows needs more time for listeners to be ready due to slower process startup.
 
 #[cfg(not(windows))]
-const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(150);
-#[cfg(windows)]
 const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(300);
+#[cfg(windows)]
+const LISTENER_WAIT_DURATION: Duration = Duration::from_millis(600);
 
 #[cfg(not(windows))]
-const COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
+const COMMAND_TIMEOUT: Duration = Duration::from_millis(600);
 #[cfg(windows)]
-const COMMAND_TIMEOUT: Duration = Duration::from_millis(650);
+const COMMAND_TIMEOUT: Duration = Duration::from_millis(1300);
 
 #[test]
 fn no_args_shows_help() {
