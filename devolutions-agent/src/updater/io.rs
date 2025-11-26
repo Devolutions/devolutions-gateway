@@ -9,16 +9,21 @@ use crate::updater::UpdaterError;
 
 /// Download binary file to memory
 pub(crate) async fn download_binary(url: &str) -> Result<Vec<u8>, UpdaterError> {
-    info!(%url, "Downloading file from network...");
+    if let Some(path) = url.strip_prefix("file://") {
+        info!(%url, "Reading file from local filesystem...");
+        tokio::fs::read(path).await.map_err(UpdaterError::Io)
+    } else {
+        info!(%url, "Downloading file from network...");
 
-    let body = reqwest::get(url)
-        .and_then(|response| response.bytes())
-        .map_err(|source| UpdaterError::FileDownload {
-            source,
-            file_path: url.to_owned(),
-        })
-        .await?;
-    Ok(body.to_vec())
+        let body = reqwest::get(url)
+            .and_then(|response| response.bytes())
+            .map_err(|source| UpdaterError::FileDownload {
+                source,
+                file_path: url.to_owned(),
+            })
+            .await?;
+        Ok(body.to_vec())
+    }
 }
 
 /// Download UTF-8 file to memory

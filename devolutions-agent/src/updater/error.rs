@@ -34,6 +34,8 @@ pub(crate) enum UpdaterError {
     SetFilePermissions { file_path: Utf8PathBuf },
     #[error("invalid productinfo.json format")]
     ProductInfo,
+    #[error("download URL for `{product}` is not from official CDN: `{url}`")]
+    UnsafeUrl { product: Product, url: String },
     #[error(transparent)]
     WindowsRegistry(#[from] devolutions_agent_shared::windows::registry::RegistryError),
     #[error("missing registry value")]
