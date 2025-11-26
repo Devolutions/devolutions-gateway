@@ -1,17 +1,40 @@
-Gatewaybin.Version=2024.2.1.0
-Gatewaybin.Url=https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi
-Gatewaybin.hash=BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35
-GatewaybinBeta.Version=2024.2.1.0
-GatewaybinBeta.Url=https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi
-GatewaybinBeta.hash=BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35
-GatewaybinDebX64.Version=2024.2.1.0
-GatewaybinDebX64.Url=https://cdn.devolutions.net/download/devolutions-gateway_2024.2.1.0_amd64.deb
-GatewaybinDebX64.hash=72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA
-GatewaybinDebX64Beta.Version=2024.2.1.0
-GatewaybinDebX64Beta.Url=https://cdn.devolutions.net/download/devolutions-gateway_2024.2.1.0_amd64.deb
-GatewaybinDebX64Beta.hash=72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA
-
-DevoCLIbin.Version=2023.3.0.0
-DevoCLIbin.Url=https://cdn.devolutions.net/download/DevoCLI.2023.3.0.0.zip
-DevoCLIbinBeta.Version=2023.3.0.0
-DevoCLIBeta.Url=https://cdn.devolutions.net/download/DevoCLI.2023.3.0.0.zip
+{
+  "Gateway": {
+    "Current": {
+      "Version": "2024.2.1.0",
+      "Files": [
+        {
+          "Arch": "x64",
+          "Type": "msi",
+          "Url": "https://cdn.devolutions.net/download/DevolutionsGateway-x86_64-2024.2.1.0.msi",
+          "Hash": "BD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35"
+        },
+        {
+          "Arch": "arm64",
+          "Type": "msi",
+          "Url": "https://cdn.devolutions.net/download/DevolutionsGateway-arm64-2024.2.1.0.msi",
+          "Hash": "CD2805075FCD78AC339126F4C4D9E6773DC3127CBE7DF48256D6910FA0C59C35"
+        }
+      ]
+    }
+  },
+  "HubServices": {
+    "Current": {
+      "Version": "2024.2.1.0",
+      "Files": [
+        {
+          "Arch": "x64",
+          "Type": "msi",
+          "Url": "https://cdn.devolutions.net/download/HubServices-x86_64-2024.2.1.0.msi",
+          "Hash": "72D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA"
+        },
+        {
+          "Arch": "arm64",
+          "Type": "msi",
+          "Url": "https://cdn.devolutions.net/download/HubServices-arm64-2024.2.1.0.msi",
+          "Hash": "82D7A836A6AF221D4E7631D27B91A358915CF985AA544CC0F7F5612B85E989AA"
+        }
+      ]
+    }
+  }
+}
