@@ -8,7 +8,7 @@ try
 {
 	pnpm install
 
-	pnpm run build
+	pnpm --filter @devolutions/multi-video-player... build
 
 	Set-Location -Path ./dist/
 	npm pack
