@@ -5,6 +5,7 @@
 //! It handles authentication via a gateway API key and forwards requests to the
 //! configured AI provider endpoints.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::Router;
@@ -50,12 +51,25 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .with_state(state)
 }
 
-/// Default HTTP client with a longer timeout suitable for AI requests.
+/// Cached HTTP client with a longer timeout suitable for AI requests.
+///
+/// The client is created once on first use with the specified timeout and reused for all
+/// subsequent requests. This is safe since the configuration cannot be changed dynamically.
+static AI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Returns a cached HTTP client with the specified timeout.
+///
+/// The client is created once on first use and cloned for subsequent calls (cloning a
+/// reqwest::Client is cheap as it uses Arc internally).
 fn create_client(timeout: Duration) -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .expect("parameters known to be valid only")
+    AI_CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(timeout)
+                .build()
+                .expect("parameters known to be valid only")
+        })
+        .clone()
 }
 
 /// Validates the Authorization header against the gateway API key.
