@@ -5,8 +5,6 @@
 //! It handles authentication via a gateway API key and forwards requests to the
 //! configured AI provider endpoints.
 
-mod provider;
-
 use std::time::Duration;
 
 use axum::Router;
@@ -18,9 +16,8 @@ use axum::routing::{get, post};
 use http_body_util::BodyExt as _; // into_data_stream
 
 use crate::DgwState;
+use crate::ai::{AuthMethod, ProviderConfig, ProviderConfigBuilder};
 use crate::http::HttpError;
-
-pub use provider::{AuthMethod, ProviderConfig, ProviderConfigBuilder};
 
 /// Anthropic API version header value
 const ANTHROPIC_API_VERSION: &str = "2023-06-01";
