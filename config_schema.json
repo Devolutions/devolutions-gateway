@@ -116,7 +116,9 @@
       "description": "Debug configuration."
     }
   },
-  "required": ["Listeners"],
+  "required": [
+    "Listeners"
+  ],
   "additionalProperties": true,
   "definitions": {
     "ConfDataPubKeyFormat": {
@@ -135,7 +137,9 @@
           "description": "The binary-to-text encoding used for the key data."
         }
       },
-      "required": ["Value"],
+      "required": [
+        "Value"
+      ],
       "additionalProperties": false
     },
     "ConfDataPrivKeyFormat": {
@@ -154,24 +158,39 @@
           "description": "The binary-to-text encoding used for the key data."
         }
       },
-      "required": ["Value"],
+      "required": [
+        "Value"
+      ],
       "additionalProperties": false
     },
     "DataEncoding": {
       "type": "string",
-      "enum": ["Multibase", "Base64", "Base64Pad", "Base64Url", "Base64UrlPad"],
+      "enum": [
+        "Multibase",
+        "Base64",
+        "Base64Pad",
+        "Base64Url",
+        "Base64UrlPad"
+      ],
       "default": "Multibase",
       "description": "The binary-to-text encoding used for the key data."
     },
     "PubKeyFormat": {
       "type": "string",
-      "enum": ["Spki", "Pkcs1"],
+      "enum": [
+        "Spki",
+        "Pkcs1"
+      ],
       "default": "Spki",
       "description": "The format used for the key data."
     },
     "PrivKeyFormat": {
       "type": "string",
-      "enum": ["Pkcs8", "Pkcs1", "Ec"],
+      "enum": [
+        "Pkcs8",
+        "Pkcs1",
+        "Ec"
+      ],
       "default": "Pkcs8",
       "description": "The format used for the key data."
     },
@@ -195,18 +214,28 @@
           "description": "The binary-to-text encoding used for the key data."
         }
       },
-      "required": ["Id", "Value"],
+      "required": [
+        "Id",
+        "Value"
+      ],
       "additionalProperties": false
     },
     "CertSource": {
       "type": "string",
-      "enum": ["External", "System"],
+      "enum": [
+        "External",
+        "System"
+      ],
       "default": "External",
       "description": "Source for the TLS certificate."
     },
     "CertStoreLocation": {
       "type": "string",
-      "enum": ["CurrentUser", "CurrentService", "LocalMachine"],
+      "enum": [
+        "CurrentUser",
+        "CurrentService",
+        "LocalMachine"
+      ],
       "default": "CurrentUser",
       "description": "Location of the System Certificate Store to use for TLS."
     },
@@ -224,7 +253,10 @@
           "description": "External URL for this listener."
         }
       },
-      "required": ["InternalUrl", "ExternalUrl"],
+      "required": [
+        "InternalUrl",
+        "ExternalUrl"
+      ],
       "additionalProperties": false
     },
     "Subscriber": {
@@ -240,7 +272,10 @@
           "description": "Bearer token to use when making HTTP requests."
         }
       },
-      "required": ["Url", "Token"],
+      "required": [
+        "Url",
+        "Token"
+      ],
       "additionalProperties": false
     },
     "NgrokConf": {
@@ -274,7 +309,9 @@
           "description": "A map of ngrok tunnels. The key is the name of the tunnel and value is a JSON object whose schema depends on tunnel protocol."
         }
       },
-      "required": ["AuthToken"],
+      "required": [
+        "AuthToken"
+      ],
       "additionalProperties": false
     },
     "NgrokTunnelConf": {
@@ -284,7 +321,9 @@
           "properties": {
             "proto": {
               "type": "string",
-              "enum": ["tcp"],
+              "enum": [
+                "tcp"
+              ],
               "description": "MUST be set to 'tcp'."
             },
             "RemoteAddr": {
@@ -312,7 +351,10 @@
               "description": "Array of CIDRs, rejects connections that match the given CIDRs and allows all other CIDRs."
             }
           },
-          "required": ["proto", "RemoteAddr"],
+          "required": [
+            "proto",
+            "RemoteAddr"
+          ],
           "additionalProperties": false
         },
         {
@@ -320,7 +362,9 @@
           "properties": {
             "proto": {
               "type": "string",
-              "enum": ["http"],
+              "enum": [
+                "http"
+              ],
               "description": "MUST be set to 'http'."
             },
             "Domain": {
@@ -356,14 +400,23 @@
               "description": "Array of CIDRs, rejects connections that match the given CIDRs and allows all other CIDRs."
             }
           },
-          "required": ["proto", "Domain"],
+          "required": [
+            "proto",
+            "Domain"
+          ],
           "additionalProperties": false
         }
       ]
     },
     "VerbosityProfile": {
       "type": "string",
-      "enum": ["Default", "Debug", "Tls", "All", "Quiet"],
+      "enum": [
+        "Default",
+        "Debug",
+        "Tls",
+        "All",
+        "Quiet"
+      ],
       "default": "Default",
       "description": "Logging verbosity profile (pre-defined tracing directives)."
     },
@@ -397,12 +450,18 @@
           "description": "Path to the static files for the standalone web application. This is an advanced option which should typically not be changed."
         }
       },
-      "required": ["Enabled", "Authentication"],
+      "required": [
+        "Enabled",
+        "Authentication"
+      ],
       "additionalProperties": false
     },
     "WebAppAuth": {
       "type": "string",
-      "enum": ["Custom", "None"],
+      "enum": [
+        "Custom",
+        "None"
+      ],
       "description": "The authentication method for accessing the web application."
     },
     "AiGatewayConf": {
@@ -426,7 +485,9 @@
           "description": "AI providers configuration."
         }
       },
-      "required": ["Enabled"],
+      "required": [
+        "Enabled"
+      ],
       "additionalProperties": false
     },
     "AiProvidersConf": {
@@ -569,7 +630,7 @@
       },
       "additionalProperties": false
     },
-    "SogarUser": {
+    "DebugConf": {
       "type": "object",
       "properties": {
         "dump_tokens": {
