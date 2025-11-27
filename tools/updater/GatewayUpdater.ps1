@@ -86,11 +86,10 @@ function Get-DGatewayPackageLocation
     )
 
     $VersionQuad = '';
-    $ProductsUrl = "https://devolutions.net/productinfo.htm"
+    $ProductsUrl = "https://devolutions.net/productinfo.json"
 
-    $ProductsHtm = Invoke-RestMethod -Uri $ProductsUrl -Method 'GET' -ContentType 'text/plain'
-    $VersionMatches = $($ProductsHtm | Select-String -AllMatches -Pattern "Gatewaybin.Version=(\S+)").Matches
-    $LatestVersion = $VersionMatches.Groups[1].Value
+    $ProductsJson = Invoke-RestMethod -Uri $ProductsUrl -Method 'GET' -ContentType 'application/json'
+    $LatestVersion = $ProductsJson.Gateway.Current.Version
 
     if ($RequiredVersion) {
         if ($RequiredVersion -Match "^\d+`.\d+`.\d+$") {
@@ -107,14 +106,13 @@ function Get-DGatewayPackageLocation
     $VersionPatch = $VersionMatches.Groups[3].Value
     $VersionTriple = "${VersionMajor}.${VersionMinor}.${VersionPatch}"
 
-    $GatewayUrlMatches = $($ProductsHtm | Select-String -AllMatches -Pattern "(Gateway\S+).Url=(\S+)").Matches
-    $GatewayHashMatches = $($ProductsHtm | Select-String -AllMatches -Pattern "(Gateway\S+).hash=(\S+)").Matches
-    $GatewayMsiUrl = $GatewayUrlMatches | Where-Object { $_.Groups[1].Value -eq 'Gatewaybin' }
-    $GatewayMsiHash = $GatewayHashMatches | Where-Object { $_.Groups[1].Value -eq 'Gatewaybin' }
+    # Find the MSI file for the current architecture
+    $CurrentArchitecture = if ([Environment]::Is64BitProcess) { "x64" } else { "arm64" }
+    $GatewayMsiFile = $ProductsJson.Gateway.Current.Files | Where-Object { $_.Type -eq 'msi' -and $_.Arch -eq $CurrentArchitecture } | Select-Object -First 1
     
-    if ($GatewayMsiUrl) {
-        $DownloadUrl = $GatewayMsiUrl.Groups[2].Value
-        $DownloadHash = $GatewayMsiHash.Groups[2].Value
+    if ($GatewayMsiFile) {
+        $DownloadUrl = $GatewayMsiFile.Url
+        $DownloadHash = $GatewayMsiFile.Hash
     }
 
     if ($RequiredVersion) {
