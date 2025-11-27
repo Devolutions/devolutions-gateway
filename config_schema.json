@@ -111,10 +111,6 @@
       },
       "description": "Array of plugin paths."
     },
-    "Sogar": {
-      "$ref": "#/definitions/SogarConf",
-      "description": "Sogar configuration."
-    },
     "__debug__": {
       "$ref": "#/definitions/DebugConf",
       "description": "Debug configuration."
@@ -573,91 +569,7 @@
       },
       "additionalProperties": false
     },
-    "SogarConf": {
-      "type": "object",
-      "properties": {
-        "RegistryUrl": {
-          "type": "string",
-          "description": "URL of the registry."
-        },
-        "Username": {
-          "type": "string",
-          "description": "Username for the registry."
-        },
-        "Password": {
-          "type": "string",
-          "description": "Password for the registry."
-        },
-        "ImageName": {
-          "type": "string",
-          "default": "videos",
-          "description": "Name of the image."
-        },
-        "UserList": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/SogarUser"
-          },
-          "default": [],
-          "description": "List of users."
-        },
-        "ServeAsRegistry": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether to serve as a registry."
-        },
-        "RegistryName": {
-          "type": "string",
-          "default": "devolutions_registry",
-          "description": "Name of the registry."
-        },
-        "RegistryImage": {
-          "type": "string",
-          "default": "videos",
-          "description": "Image of the registry."
-        },
-        "PushFiles": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether to push files."
-        },
-        "KeepFiles": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether to keep files."
-        },
-        "KeepTime": {
-          "type": "integer",
-          "description": "Time to keep files."
-        }
-      },
-      "required": ["RegistryUrl", "Username", "Password", "ImageName"],
-      "additionalProperties": false
-    },
     "SogarUser": {
-      "type": "object",
-      "properties": {
-        "Password": {
-          "type": "string",
-          "description": "Password of the user."
-        },
-        "Username": {
-          "type": "string",
-          "description": "Username of the user."
-        },
-        "Permission": {
-          "$ref": "#/definitions/SogarPermission",
-          "description": "Permission of the user."
-        }
-      },
-      "additionalProperties": false
-    },
-    "SogarPermission": {
-      "type": "string",
-      "enum": ["Push", "Pull"],
-      "description": "Permission type."
-    },
-    "DebugConf": {
       "type": "object",
       "properties": {
         "dump_tokens": {

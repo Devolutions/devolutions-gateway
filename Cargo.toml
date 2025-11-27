@@ -16,11 +16,6 @@ default-members = [
     "jetsocat",
 ]
 
-# TODO: clean and fix compilation of the sogar component
-exclude = [
-    "crates/sogar-registry"
-]
-
 [workspace.package]
 version = "2025.3.2"
 

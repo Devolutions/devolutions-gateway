@@ -101,7 +101,6 @@ pub struct Conf {
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<Utf8PathBuf>>,
     pub recording_path: Utf8PathBuf,
-    pub sogar: dto::SogarConf,
     pub jrl_file: Utf8PathBuf,
     pub ngrok: Option<dto::NgrokConf>,
     pub verbosity_profile: dto::VerbosityProfile,
@@ -786,7 +785,6 @@ impl Conf {
             delegation_private_key,
             plugins: conf_file.plugins.clone(),
             recording_path,
-            sogar: conf_file.sogar.clone().unwrap_or_default(),
             jrl_file,
             ngrok: conf_file.ngrok.clone(),
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
@@ -1519,10 +1517,6 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub plugins: Option<Vec<Utf8PathBuf>>,
 
-        /// (Unstable) Sogar (generic OCI registry)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub sogar: Option<SogarConf>,
-
         /// (Unstable) Path to the SQLite database file for the job queue
         #[serde(skip_serializing_if = "Option::is_none")]
         pub job_queue_database: Option<Utf8PathBuf>,
@@ -1581,7 +1575,6 @@ pub mod dto {
                 recording_path: None,
                 web_app: None,
                 ai_gateway: None,
-                sogar: None,
                 job_queue_database: None,
                 traffic_audit_database: None,
                 debug: None,
@@ -1692,58 +1685,6 @@ pub mod dto {
 
     const fn ws_keep_alive_interval_default_value() -> u64 {
         45
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct SogarConf {
-        pub registry_url: String,
-        pub username: String,
-        pub password: String,
-        pub image_name: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub user_list: Vec<SogarUser>,
-        #[serde(default)]
-        pub serve_as_registry: bool,
-        pub registry_name: String,
-        pub registry_image: String,
-        #[serde(default)]
-        pub push_files: bool,
-        #[serde(default)]
-        pub keep_files: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub keep_time: Option<u64>,
-    }
-
-    impl Default for SogarConf {
-        fn default() -> Self {
-            Self {
-                registry_url: String::new(),
-                username: String::new(),
-                password: String::new(),
-                image_name: "videos".to_owned(),
-                user_list: Vec::new(),
-                serve_as_registry: false,
-                registry_name: "devolutions_registry".to_owned(),
-                registry_image: "videos".to_owned(),
-                push_files: false,
-                keep_files: false,
-                keep_time: None,
-            }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
-    pub enum SogarPermission {
-        Push,
-        Pull,
-    }
-
-    #[derive(PartialEq, Eq, Debug, Default, Clone, Serialize, Deserialize)]
-    pub struct SogarUser {
-        pub password: Option<String>,
-        pub username: Option<String>,
-        pub permission: Option<SogarPermission>,
     }
 
     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
