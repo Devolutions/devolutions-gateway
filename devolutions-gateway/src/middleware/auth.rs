@@ -84,6 +84,17 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         path: "/jet/jrec/play",
         exact_match: false,
     },
+    // -- AI Router (uses its own API key authentication) -- //
+    AuthException {
+        method: Method::GET,
+        path: "/jet/ai",
+        exact_match: false,
+    },
+    AuthException {
+        method: Method::POST,
+        path: "/jet/ai",
+        exact_match: false,
+    },
 ];
 
 pub async fn auth_middleware(

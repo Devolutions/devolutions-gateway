@@ -92,6 +92,10 @@
       "$ref": "#/definitions/WebAppConf",
       "description": "JSON object describing the standalone web application configuration."
     },
+    "AiGateway": {
+      "$ref": "#/definitions/AiGatewayConf",
+      "description": "JSON object describing the AI gateway configuration (experimental, requires enable_unstable)."
+    },
     "LogFile": {
       "type": "string",
       "description": "Path to the log file."
@@ -404,6 +408,170 @@
       "type": "string",
       "enum": ["Custom", "None"],
       "description": "The authentication method for accessing the web application."
+    },
+    "AiGatewayConf": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean",
+          "description": "Whether to enable the AI gateway feature."
+        },
+        "GatewayApiKey": {
+          "type": "string",
+          "description": "API key for authenticating requests to the AI gateway."
+        },
+        "RequestTimeoutSecs": {
+          "type": "integer",
+          "default": 300,
+          "description": "Request timeout in seconds (default is 300 for 5 minutes)."
+        },
+        "Providers": {
+          "$ref": "#/definitions/AiProvidersConf",
+          "description": "AI providers configuration."
+        }
+      },
+      "required": ["Enabled"],
+      "additionalProperties": false
+    },
+    "AiProvidersConf": {
+      "type": "object",
+      "properties": {
+        "Mistral": {
+          "$ref": "#/definitions/MistralProviderConf",
+          "description": "Mistral AI provider configuration."
+        },
+        "Ollama": {
+          "$ref": "#/definitions/OllamaProviderConf",
+          "description": "Ollama provider configuration."
+        },
+        "LmStudio": {
+          "$ref": "#/definitions/LmStudioProviderConf",
+          "description": "LM Studio provider configuration."
+        },
+        "Anthropic": {
+          "$ref": "#/definitions/AnthropicProviderConf",
+          "description": "Anthropic AI provider configuration."
+        },
+        "OpenAi": {
+          "$ref": "#/definitions/OpenAiProviderConf",
+          "description": "OpenAI provider configuration."
+        },
+        "OpenRouter": {
+          "$ref": "#/definitions/OpenRouterProviderConf",
+          "description": "OpenRouter provider configuration."
+        },
+        "AzureOpenAi": {
+          "$ref": "#/definitions/AzureOpenAiProviderConf",
+          "description": "Azure OpenAI provider configuration."
+        }
+      },
+      "additionalProperties": false
+    },
+    "MistralProviderConf": {
+      "type": "object",
+      "properties": {
+        "Endpoint": {
+          "type": "string",
+          "description": "Custom Mistral API endpoint (default is https://api.mistral.ai). Can be overridden with MISTRAL_API_ENDPOINT environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "Mistral API key. Can be overridden with MISTRAL_API_KEY environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "OllamaProviderConf": {
+      "type": "object",
+      "properties": {
+        "Endpoint": {
+          "type": "string",
+          "description": "Custom Ollama API endpoint (default is http://localhost:11434). Can be overridden with OLLAMA_API_ENDPOINT environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "Ollama API key (optional). Can be overridden with OLLAMA_API_KEY environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "LmStudioProviderConf": {
+      "type": "object",
+      "properties": {
+        "Endpoint": {
+          "type": "string",
+          "description": "Custom LM Studio API endpoint (default is http://localhost:1234). Can be overridden with LMSTUDIO_API_ENDPOINT environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "LM Studio API key (optional). Can be overridden with LMSTUDIO_API_KEY environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "AnthropicProviderConf": {
+      "type": "object",
+      "properties": {
+        "Endpoint": {
+          "type": "string",
+          "description": "Custom Anthropic API endpoint (default is https://api.anthropic.com). Can be overridden with ANTHROPIC_API_ENDPOINT environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "Anthropic API key. Can be overridden with ANTHROPIC_API_KEY environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "OpenAiProviderConf": {
+      "type": "object",
+      "properties": {
+        "Endpoint": {
+          "type": "string",
+          "description": "Custom OpenAI API endpoint (default is https://api.openai.com). Can be overridden with OPENAI_API_ENDPOINT environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "OpenAI API key. Can be overridden with OPENAI_API_KEY environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "OpenRouterProviderConf": {
+      "type": "object",
+      "properties": {
+        "Endpoint": {
+          "type": "string",
+          "description": "Custom OpenRouter API endpoint (default is https://openrouter.ai/api). Can be overridden with OPENROUTER_API_ENDPOINT environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "OpenRouter API key. Can be overridden with OPENROUTER_API_KEY environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "AzureOpenAiProviderConf": {
+      "type": "object",
+      "properties": {
+        "ResourceName": {
+          "type": "string",
+          "description": "Azure OpenAI resource name (e.g., 'my-resource'). The full URL will be https://{ResourceName}.openai.azure.com. Can be overridden with AZURE_OPENAI_RESOURCE_NAME environment variable."
+        },
+        "DeploymentId": {
+          "type": "string",
+          "description": "Azure OpenAI deployment ID for the model. Can be overridden with AZURE_OPENAI_DEPLOYMENT_ID environment variable."
+        },
+        "ApiKey": {
+          "type": "string",
+          "description": "Azure OpenAI API key. Can be overridden with AZURE_OPENAI_API_KEY environment variable."
+        },
+        "ApiVersion": {
+          "type": "string",
+          "description": "Azure OpenAI API version (default is 2024-02-15-preview). Can be overridden with AZURE_OPENAI_API_VERSION environment variable."
+        }
+      },
+      "additionalProperties": false
     },
     "SogarConf": {
       "type": "object",
