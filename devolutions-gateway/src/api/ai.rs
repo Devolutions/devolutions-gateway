@@ -51,17 +51,13 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .with_state(state)
 }
 
-/// Cached HTTP client with a longer timeout suitable for AI requests.
-///
-/// The client is created once on first use with the specified timeout and reused for all
-/// subsequent requests. This is safe since the configuration cannot be changed dynamically.
-static AI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-
 /// Returns a cached HTTP client with the specified timeout.
 ///
 /// The client is created once on first use and cloned for subsequent calls (cloning a
 /// reqwest::Client is cheap as it uses Arc internally).
 fn create_client(timeout: Duration) -> reqwest::Client {
+    static AI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
     AI_CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
