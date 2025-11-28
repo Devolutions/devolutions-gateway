@@ -3927,8 +3927,7 @@ checksum = "5e0826a989adedc2a244799e823aece04662b66609d96af8dff7ac6df9a8925d"
 [[package]]
 name = "now-proto-pdu"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00ac734dd7c77bf952b96f9755ffbc72b888e5d860d35575729f1ee4822887d0"
+source = "git+https://github.com/Devolutions/now-proto.git?branch=feat%2Fwindow-monitoring#3f50ccd30ae84dce198dac37604f86b63350c3ff"
 dependencies = [
  "bitflags 2.9.4",
  "ironrdp-core",
