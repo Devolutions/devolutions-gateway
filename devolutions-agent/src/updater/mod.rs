@@ -28,6 +28,7 @@ use self::product_actions::{ProductUpdateActions, build_product_actions};
 use self::productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use self::security::set_file_dacl;
 use crate::config::ConfHandle;
+use crate::updater::productinfo::ProductInfoDb;
 
 pub(crate) use self::error::UpdaterError;
 pub(crate) use self::product::Product;
@@ -257,15 +258,30 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     info!(%product, %target_version, "Ready to update the product");
 
-    let product_info_db = download_utf8(DEVOLUTIONS_PRODUCTINFO_URL)
+    let product_info_json = download_utf8(DEVOLUTIONS_PRODUCTINFO_URL)
         .await
         .context("failed to download productinfo database")?;
 
-    let product_info_db: productinfo::ProductInfoDb = product_info_db.parse()?;
+    let parse_result = ProductInfoDb::parse_product_info(&product_info_json);
 
-    let product_info = product_info_db
-        .get(product.get_productinfo_id())
-        .ok_or_else(|| anyhow!("product `{product}` info not found in remote database"))?;
+    let product_info = parse_result
+        .db
+        .lookup_current_msi_for_target_arch(product.get_productinfo_id())
+        .ok_or_else(|| {
+            // At this point, log all parsing errors as warnings so we can investigate.
+            for e in parse_result.errors {
+                warn!(
+                    error = format!("{:#}", anyhow::Error::new(e)),
+                    "productinfo.json parsing error"
+                );
+            }
+
+            UpdaterError::ProductFileNotFound {
+                product: product.get_productinfo_id().to_owned(),
+                arch: productinfo::get_target_arch().to_owned(),
+                file_type: "msi".to_owned(),
+            }
+        })?;
 
     let remote_version = product_info.version.parse::<DateVersion>()?;
 
@@ -280,7 +296,7 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
                 target_version: remote_version,
                 downgrade: None,
                 package_url: product_info.url.clone(),
-                hash: product_info.hash.clone(),
+                hash: Some(product_info.hash.clone()),
             }))
         }
         VersionSpecification::Specific(version) => {

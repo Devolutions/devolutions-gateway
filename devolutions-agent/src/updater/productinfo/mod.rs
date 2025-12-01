@@ -6,4 +6,4 @@ pub(crate) const GATEWAY_PRODUCT_ID: &str = "Gateway";
 
 pub(crate) const HUB_SERVICE_PRODUCT_ID: &str = "HubServices";
 
-pub(crate) use db::ProductInfoDb;
+pub(crate) use db::{ProductInfoDb, get_target_arch};
