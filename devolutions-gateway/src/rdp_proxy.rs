@@ -227,11 +227,8 @@ where
     trace!(message = ?received_connection_request, "Received Connection Request PDU from client");
 
     // Choose the security protocol to use with the client.
-    let client_security_protocol = if received_connection_request
-        .0
-        .protocol
-        .contains(nego::SecurityProtocol::HYBRID_EX)
-    {
+    let received_connection_request_protocol = received_connection_request.0.protocol;
+    let client_security_protocol = if received_connection_request_protocol.contains(nego::SecurityProtocol::HYBRID_EX) {
         nego::SecurityProtocol::HYBRID_EX
     } else if received_connection_request
         .0
@@ -275,7 +272,7 @@ where
         // than trying to "fix" the flags ourselves.
         //
         // See also: https://serverfault.com/a/720161
-        protocol: nego::SecurityProtocol::SSL | nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX,
+        protocol: received_connection_request_protocol,
     };
     trace!(?connection_request_to_send, "Send Connection Request PDU to server");
     send_pdu(server_framed, &x224::X224(connection_request_to_send))
