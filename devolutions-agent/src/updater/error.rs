@@ -44,8 +44,8 @@ pub(crate) enum UpdaterError {
     WindowsRegistry(#[from] devolutions_agent_shared::windows::registry::RegistryError),
     #[error("missing registry value")]
     MissingRegistryValue,
-    #[error("failed to download update at {file_path}")]
-    FileDownload { source: reqwest::Error, file_path: String },
+    #[error("failed to download file at {url}")]
+    FileDownload { source: reqwest::Error, url: String },
     #[error("invalid UTF-8")]
     Utf8,
     #[error("IO error")]
