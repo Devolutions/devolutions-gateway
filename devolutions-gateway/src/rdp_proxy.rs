@@ -254,14 +254,27 @@ where
         },
         flags: received_connection_request.0.flags,
         // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3
-        // The spec is stating that `PROTOCOL_SSL` "SHOULD" also be set when using `PROTOCOL_HYBRID`.
+        //
+        // The spec states that `PROTOCOL_SSL` "SHOULD" also be set when using `PROTOCOL_HYBRID`:
+        //
         // > PROTOCOL_HYBRID (0x00000002)
         // > Credential Security Support Provider protocol (CredSSP) (section 5.4.5.2).
         // > If this flag is set, then the PROTOCOL_SSL (0x00000001) flag SHOULD also be set
         // > because Transport Layer Security (TLS) is a subset of CredSSP.
-        // Crucially, it’s not strictly required (not "MUST"). However, in practice, we cannot set PROTOCOL_HYBRID without PROTOCOL_SSL.
-        // Otherwise, the `mstsc.exe` will fail right after the CredSSP phase with the "An authentication error has occurred (0x609)" error.
-        // A similar case: https://serverfault.com/a/720161.
+        //
+        // However, in practice `mstsc` is picky about these flags: it expects the
+        // SupportedProtocol bits in the ConnectionRequestPDU that reach the target
+        // server to match what the client originally sent. If the proxy modifies
+        // them (for example, forcing HYBRID | HYBRID_EX and/or clearing SSL),
+        // the connection can fail with an authentication error (Code: 0x609).
+        //
+        // We therefore *do not* synthesize a new protocol bitmask here anymore.
+        // Instead, we forward the client's SupportedProtocol flags as-is and
+        // enforce our policy by validating them: if HYBRID / HYBRID_EX are not
+        // present (i.e. NLA is not negotiated), we fail the connection rather
+        // than trying to "fix" the flags ourselves.
+        //
+        // See also: https://serverfault.com/a/720161
         protocol: nego::SecurityProtocol::SSL | nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX,
     };
     trace!(?connection_request_to_send, "Send Connection Request PDU to server");
