@@ -227,11 +227,8 @@ where
     trace!(message = ?received_connection_request, "Received Connection Request PDU from client");
 
     // Choose the security protocol to use with the client.
-    let client_security_protocol = if received_connection_request
-        .0
-        .protocol
-        .contains(nego::SecurityProtocol::HYBRID_EX)
-    {
+    let received_connection_request_protocol = received_connection_request.0.protocol;
+    let client_security_protocol = if received_connection_request_protocol.contains(nego::SecurityProtocol::HYBRID_EX) {
         nego::SecurityProtocol::HYBRID_EX
     } else if received_connection_request
         .0
@@ -254,15 +251,28 @@ where
         },
         flags: received_connection_request.0.flags,
         // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3
-        // The spec is stating that `PROTOCOL_SSL` "SHOULD" also be set when using `PROTOCOL_HYBRID`.
+        //
+        // The spec states that `PROTOCOL_SSL` "SHOULD" also be set when using `PROTOCOL_HYBRID`:
+        //
         // > PROTOCOL_HYBRID (0x00000002)
         // > Credential Security Support Provider protocol (CredSSP) (section 5.4.5.2).
         // > If this flag is set, then the PROTOCOL_SSL (0x00000001) flag SHOULD also be set
         // > because Transport Layer Security (TLS) is a subset of CredSSP.
-        // However, crucially, it’s not strictly required (not "MUST").
-        // In fact, we purposefully choose to not set `PROTOCOL_SSL` unless `enable_winlogon` is `true`.
-        // This tells the server that we are not going to accept downgrading NLA to TLS security.
-        protocol: nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX,
+        //
+        // However, in practice `mstsc` is picky about these flags: it expects the
+        // SupportedProtocol bits in the ConnectionRequestPDU that reach the target
+        // server to match what the client originally sent. If the proxy modifies
+        // them (for example, forcing HYBRID | HYBRID_EX and/or clearing SSL),
+        // the connection can fail with an authentication error (Code: 0x609).
+        //
+        // We therefore *do not* synthesize a new protocol bitmask here anymore.
+        // Instead, we forward the client's SupportedProtocol flags as-is and
+        // enforce our policy by validating them: if HYBRID / HYBRID_EX are not
+        // present (i.e. NLA is not negotiated), we fail the connection rather
+        // than trying to "fix" the flags ourselves.
+        //
+        // See also: https://serverfault.com/a/720161
+        protocol: received_connection_request_protocol,
     };
     trace!(?connection_request_to_send, "Send Connection Request PDU to server");
     send_pdu(server_framed, &x224::X224(connection_request_to_send))
