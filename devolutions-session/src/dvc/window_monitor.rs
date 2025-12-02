@@ -543,19 +543,14 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
                             if is_title_change && !config.track_title_changes {
                                 // Only update process_id and exe_path, keep the previous title
                                 // to avoid missing process/exe_path changes.
-                                if let Some(prev) = last_snapshot.as_ref() {
-                                    last_snapshot = Some(WindowSnapshot {
-                                        process_id: snapshot.process_id,
-                                        exe_path: snapshot.exe_path.clone(),
-                                        title: prev.title.clone(),
-                                    });
-                                } else {
-                                    last_snapshot = Some(WindowSnapshot {
-                                        process_id: snapshot.process_id,
-                                        exe_path: snapshot.exe_path.clone(),
-                                        title: String::new(),
-                                    });
-                                }
+                                let prev_title = last_snapshot
+                                    .as_ref()
+                                    .map_or_else(String::new, |s| s.title.clone());
+                                last_snapshot = Some(WindowSnapshot {
+                                    process_id: snapshot.process_id,
+                                    exe_path: snapshot.exe_path.clone(),
+                                    title: prev_title,
+                                });
                             } else {
                                 let message_result = if is_title_change {
                                     debug!(
