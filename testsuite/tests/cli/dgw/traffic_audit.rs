@@ -5,6 +5,7 @@
 
 use anyhow::Context as _;
 use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
+use testsuite::dgw_config::{DgwConfig, DgwConfigHandle, VerbosityProfile};
 use tokio::process::Child;
 
 /// The old schema with INTEGER PRIMARY KEY (before ULID migration).
@@ -93,42 +94,13 @@ async fn check_schema_is_blob(path: &str) -> anyhow::Result<bool> {
     anyhow::bail!("id column not found in traffic_events table");
 }
 
-/// Starts a gateway instance using the given config directory.
+/// Starts a gateway instance using the given config handle.
 ///
 /// The gateway will use the default `traffic_audit.db` path within the config directory.
-/// Waits for the gateway to become ready by polling the health endpoint.
-async fn start_gateway(config_dir: &std::path::Path) -> anyhow::Result<Child> {
-    let config_path = config_dir.join("gateway.json");
-
-    let tcp_port = find_unused_port();
-    let http_port = find_unused_port();
-
-    let config = format!(
-        r#"{{
-    "ProvisionerPublicKeyData": {{
-        "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HgjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
-    }},
-    "Listeners": [
-        {{
-            "InternalUrl": "tcp://127.0.0.1:{tcp_port}",
-            "ExternalUrl": "tcp://127.0.0.1:{tcp_port}"
-        }},
-        {{
-            "InternalUrl": "http://127.0.0.1:{http_port}",
-            "ExternalUrl": "http://127.0.0.1:{http_port}"
-        }}
-    ],
-    "VerbosityProfile": "Debug",
-    "__debug__": {{
-        "disable_token_validation": true
-    }}
-}}"#
-    );
-
-    std::fs::write(&config_path, config).with_context(|| format!("write config to {}", config_path.display()))?;
-
+/// Waits for the gateway to become ready by polling the HTTP port.
+async fn start_gateway(config_handle: &DgwConfigHandle) -> anyhow::Result<Child> {
     let process = dgw_tokio_cmd()
-        .env("DGATEWAY_CONFIG_PATH", config_dir)
+        .env("DGATEWAY_CONFIG_PATH", config_handle.config_dir())
         .kill_on_drop(true)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -136,17 +108,9 @@ async fn start_gateway(config_dir: &std::path::Path) -> anyhow::Result<Child> {
         .context("failed to start Devolutions Gateway")?;
 
     // Wait until the gateway is accepting connections on the HTTP port.
-    wait_for_tcp_port(http_port).await?;
+    wait_for_tcp_port(config_handle.http_port()).await?;
 
     Ok(process)
-}
-
-fn find_unused_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 /// Test that the gateway migrates from INTEGER id to BLOB (ULID) id.
@@ -158,13 +122,18 @@ fn find_unused_port() -> u16 {
 /// 4. Verifies the database now has the new BLOB id schema
 #[tokio::test]
 async fn old_integer_schema_is_reset_to_blob_schema() -> anyhow::Result<()> {
-    // Create a temporary directory that will serve as the config directory.
-    // The gateway will look for traffic_audit.db in this directory by default.
-    let config_dir = tempfile::tempdir().context("create tempdir")?;
-    let db_path = config_dir.path().join("traffic_audit.db");
+    // Initialize config (creates the temp directory and config file).
+    let config_handle = DgwConfig::builder()
+        .disable_token_validation(true)
+        .verbosity_profile(VerbosityProfile::DEBUG)
+        .build()
+        .init()
+        .context("init config")?;
+
+    let db_path = config_handle.config_dir().join("traffic_audit.db");
     let db_path_str = db_path.to_str().unwrap();
 
-    // 1) Create old schema database with seed data at the default path.
+    // 1) Create old schema database at the default path.
     create_old_schema_database(db_path_str).await?;
 
     // Verify the old schema has INTEGER id.
@@ -172,7 +141,7 @@ async fn old_integer_schema_is_reset_to_blob_schema() -> anyhow::Result<()> {
     assert!(!is_blob_before, "database should have INTEGER id before gateway starts");
 
     // 2) Start the gateway (it will use the default traffic_audit.db path).
-    let mut process = start_gateway(config_dir.path()).await?;
+    let mut process = start_gateway(&config_handle).await?;
 
     // 3) Stop the gateway.
     process.kill().await.context("kill gateway process")?;
