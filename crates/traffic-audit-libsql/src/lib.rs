@@ -16,6 +16,21 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/01_traffic_events.sql"),
 ];
 
+thread_local! {
+    /// Per-thread monotonic ULID generator.
+    ///
+    /// Using a thread-local generator provides several benefits:
+    /// - **Strict monotonicity within a thread**: ULIDs generated in sequence on the same
+    ///   thread are guaranteed to be strictly increasing, even when generated within the
+    ///   same millisecond. This ensures predictable ordering in tests and deterministic
+    ///   FIFO behavior for events pushed from the same thread.
+    /// - **No contention**: Each thread has its own generator instance, eliminating mutex
+    ///   overhead that would occur with a shared generator.
+    /// - **Lock-free push operations**: The `push` method can generate IDs without acquiring
+    ///   any locks beyond the thread-local cell borrow.
+    static MONOTONIC_ULID_GENERATOR: std::cell::RefCell<ulid::Generator> = const { std::cell::RefCell::new(ulid::Generator::new()) };
+}
+
 /// Implementation of [`TrafficAuditRepo`] repository using libSQL as the backend.
 ///
 /// This follows the same patterns as the job-queue-libsql implementation,
@@ -27,7 +42,6 @@ pub struct LibSqlTrafficAuditRepo {
     // connection object, you need to open a separate connection to the same database
     // for concurrent operations.
     conn: Connection,
-    id_generator: std::sync::Mutex<ulid::Generator>,
 }
 
 impl LibSqlTrafficAuditRepo {
@@ -47,7 +61,9 @@ impl LibSqlTrafficAuditRepo {
         let conn = open_connection(path).await?;
 
         // Check for old schema and reset if necessary.
-        if has_old_integer_schema(&conn).await? {
+        if !has_old_integer_schema(&conn).await? {
+            return Ok(Self { conn });
+        } else {
             warn!("Detected old traffic audit schema with INTEGER id; resetting database");
 
             // Drop the connection before deleting files.
@@ -60,16 +76,9 @@ impl LibSqlTrafficAuditRepo {
 
             // Reopen with fresh connection.
             let conn = open_connection(path).await?;
-            return Ok(Self {
-                conn,
-                id_generator: std::sync::Mutex::new(ulid::Generator::new()),
-            });
-        }
 
-        return Ok(Self {
-            conn,
-            id_generator: std::sync::Mutex::new(ulid::Generator::new()),
-        });
+            return Ok(Self { conn });
+        }
 
         async fn open_connection(path: &str) -> anyhow::Result<Connection> {
             libsql::Builder::new_local(path)
@@ -296,12 +305,9 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
     }
 
     async fn push(&self, event: TrafficEvent) -> anyhow::Result<()> {
-        let id = self
-            .id_generator
-            .lock()
-            .expect("non-poisoned")
-            .generate()
-            .context("generate ID")?;
+        let id = MONOTONIC_ULID_GENERATOR
+            .with_borrow_mut(|g| g.generate())
+            .context("ULID generation")?;
 
         // Begin transaction
         self.conn
