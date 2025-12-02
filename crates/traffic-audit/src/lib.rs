@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ulid::Ulid;
 use uuid::Uuid;
 
 /// Transport protocol for the traffic item.
@@ -62,7 +63,7 @@ pub struct TrafficEvent {
 #[derive(Debug, Clone)]
 pub struct ClaimedEvent {
     /// Database row ID for acknowledgment
-    pub id: i64,
+    pub id: Ulid,
     /// The traffic event data
     pub event: TrafficEvent,
 }
@@ -106,13 +107,13 @@ pub trait TrafficAuditRepo: Send + Sync {
     ///
     /// Events are permanently deleted after acknowledgment as we don't retain
     /// audit data after forwarding.
-    async fn ack(&self, ids: &[i64]) -> anyhow::Result<u64>;
+    async fn ack(&self, ids: &[Ulid]) -> anyhow::Result<u64>;
 
     /// Extends the lease on claimed events to prevent timeout.
     ///
     /// Useful for long-running processing operations that might exceed
     /// the original lease duration. Only the owning consumer can extend leases.
-    async fn extend_lease(&self, ids: &[i64], consumer_id: &str, lease_duration_ms: i64) -> anyhow::Result<()>;
+    async fn extend_lease(&self, ids: &[Ulid], consumer_id: &str, lease_duration_ms: i64) -> anyhow::Result<()>;
 
     /// Purges old unclaimed events from the repository.
     ///

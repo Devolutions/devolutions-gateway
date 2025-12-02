@@ -3,6 +3,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use traffic_audit::{EventOutcome, TrafficEvent, TransportProtocol};
+use ulid::Ulid;
 use uuid::Uuid;
 
 use crate::extract::{TrafficAckScope, TrafficClaimScope};
@@ -61,7 +62,7 @@ pub(crate) async fn post_traffic_claim(
         .into_iter()
         .map(|claimed| ClaimedTrafficEvent {
             id: claimed.id,
-            event: claimed.event.into(),
+            event: TrafficEventResponse::from(claimed.event),
         })
         .collect();
 
@@ -112,7 +113,7 @@ pub(crate) async fn post_traffic_ack(
 
     let handle = &state.traffic_audit_handle;
 
-    let deleted_count = handle.ack(req.ids.clone()).await.map_err(HttpError::internal().err())?;
+    let deleted_count = handle.ack(req.ids).await.map_err(HttpError::internal().err())?;
 
     info!(deleted = deleted_count, "traffic ack");
 
@@ -140,8 +141,9 @@ fn default_max() -> usize {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Deserialize)]
 pub(crate) struct AckRequest {
-    /// Array of event IDs to acknowledge (1-10000 items)
-    ids: Vec<i64>,
+    /// Array of event IDs to acknowledge (1-10000 items, ULID format)
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    ids: Vec<Ulid>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -154,8 +156,9 @@ pub(crate) struct AckResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
 pub(crate) struct ClaimedTrafficEvent {
-    /// Database ID of the claimed event (used for acknowledgment)
-    id: i64,
+    /// Database ID of the claimed event (used for acknowledgment, ULID format)
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    id: Ulid,
     /// Traffic event data
     #[serde(flatten)]
     event: TrafficEventResponse,
@@ -234,8 +237,8 @@ impl From<TrafficEvent> for TrafficEventResponse {
     fn from(event: TrafficEvent) -> Self {
         Self {
             session_id: event.session_id,
-            outcome: event.outcome.into(),
-            protocol: event.protocol.into(),
+            outcome: EventOutcomeResponse::from(event.outcome),
+            protocol: TransportProtocolResponse::from(event.protocol),
             target_host: event.target_host,
             target_ip: event.target_ip,
             target_port: event.target_port,

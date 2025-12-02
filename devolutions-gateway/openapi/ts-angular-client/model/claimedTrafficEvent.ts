@@ -51,9 +51,9 @@ export interface ClaimedTrafficEvent {
      */
     target_port: number;
     /**
-     * Database ID of the claimed event (used for acknowledgment)
+     * Database ID of the claimed event (used for acknowledgment, ULID format)
      */
-    id: number;
+    id: string;
 }
 export namespace ClaimedTrafficEvent {
 }

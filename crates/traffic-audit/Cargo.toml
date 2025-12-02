@@ -11,4 +11,5 @@ workspace = true
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+ulid = "1"
 uuid = { version = "1.17", features = ["v4"] }

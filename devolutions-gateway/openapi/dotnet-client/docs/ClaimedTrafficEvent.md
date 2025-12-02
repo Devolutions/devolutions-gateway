@@ -15,7 +15,7 @@ Name | Type | Description | Notes
 **TargetHost** | **string** | Original target host string before DNS resolution | 
 **TargetIp** | **string** | Concrete target IP address after resolution | 
 **TargetPort** | **int** | Target port number for the connection | 
-**Id** | **long** | Database ID of the claimed event (used for acknowledgment) | 
+**Id** | **string** | Database ID of the claimed event (used for acknowledgment, ULID format) | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

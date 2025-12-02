@@ -721,9 +721,8 @@ components:
         ids:
           type: array
           items:
-            type: integer
-            format: int64
-          description: Array of event IDs to acknowledge (1-10000 items)
+            type: string
+          description: Array of event IDs to acknowledge (1-10000 items, ULID format)
     AckResponse:
       type: object
       required:
@@ -797,9 +796,8 @@ components:
         - id
         properties:
           id:
-            type: integer
-            format: int64
-            description: Database ID of the claimed event (used for acknowledgment)
+            type: string
+            description: Database ID of the claimed event (used for acknowledgment, ULID format)
     ClockDiagnostic:
       type: object
       required:

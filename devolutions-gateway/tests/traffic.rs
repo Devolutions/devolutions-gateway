@@ -139,7 +139,7 @@ fn claim_request(lease_ms: Option<u32>, max: Option<usize>) -> anyhow::Result<Re
 }
 
 /// Build a request to ack (delete) events by ids.
-fn ack_request(ids: Vec<i64>) -> anyhow::Result<Request<Body>> {
+fn ack_request(ids: Vec<ulid::Ulid>) -> anyhow::Result<Request<Body>> {
     let payload = json!({ "ids": ids });
     Ok(Request::builder()
         .method("POST")
@@ -188,7 +188,9 @@ async fn ack_shape_ok() -> anyhow::Result<()> {
     let _guard = init_logger();
     let (app, _state, _handles) = make_router().await?;
 
-    let response = app.oneshot(ack_request(vec![1, 2, 3])?).await.unwrap();
+    // Use valid ULID strings (these don't exist in DB, but format is valid)
+    let fake_ids = vec![ulid::Ulid::new(), ulid::Ulid::new(), ulid::Ulid::new()];
+    let response = app.oneshot(ack_request(fake_ids)?).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await?.to_bytes();
@@ -225,8 +227,8 @@ async fn claim_fifo_and_limits() -> anyhow::Result<()> {
     assert_eq!(events.len(), 5);
 
     for i in 1..events.len() {
-        let prev = events[i - 1]["id"].as_i64().unwrap();
-        let curr = events[i]["id"].as_i64().unwrap();
+        let prev = events[i - 1]["id"].as_str().unwrap();
+        let curr = events[i]["id"].as_str().unwrap();
         assert!(prev < curr, "ids are not strictly increasing: {prev} !< {curr}");
     }
 
@@ -322,7 +324,10 @@ async fn ack_deletes() -> anyhow::Result<()> {
     let items = carr.as_array().unwrap();
     assert_eq!(items.len(), 5);
 
-    let ids: Vec<i64> = items.iter().map(|e| e["id"].as_i64().unwrap()).collect();
+    let ids: Vec<ulid::Ulid> = items
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().parse().unwrap())
+        .collect();
 
     let ack = app.clone().oneshot(ack_request(ids.clone())?).await.unwrap();
     assert_eq!(ack.status(), StatusCode::OK);
@@ -509,16 +514,20 @@ async fn ack_ids_length_validation() -> anyhow::Result<()> {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     // Test single id (valid)
-    let response = app.clone().oneshot(ack_request(vec![1])?).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(ack_request(vec![ulid::Ulid::new()])?)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     // Test exactly 10,000 ids (valid, boundary)
-    let ids: Vec<i64> = (1..=10_000).collect();
+    let ids: Vec<ulid::Ulid> = (0..10_000).map(|_| ulid::Ulid::new()).collect();
     let response = app.clone().oneshot(ack_request(ids)?).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     // Test 10,001 ids (invalid, should be rejected)
-    let ids: Vec<i64> = (1..=10_001).collect();
+    let ids: Vec<ulid::Ulid> = (0..10_001).map(|_| ulid::Ulid::new()).collect();
     let response = app.oneshot(ack_request(ids)?).await.unwrap();
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 

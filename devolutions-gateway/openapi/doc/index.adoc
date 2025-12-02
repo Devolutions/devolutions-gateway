@@ -2250,9 +2250,9 @@ endif::internal-generation[]
 | ids
 | X
 | 
-|   List   of <<long>>
-| Array of event IDs to acknowledge (1-10000 items)
-| int64    
+|   List   of <<string>>
+| Array of event IDs to acknowledge (1-10000 items, ULID format)
+|     
 
 |===
 
@@ -2498,9 +2498,9 @@ endif::internal-generation[]
 | id
 | X
 | 
-|   Long  
-| Database ID of the claimed event (used for acknowledgment)
-| int64    
+|   String  
+| Database ID of the claimed event (used for acknowledgment, ULID format)
+|     
 
 |===
 
