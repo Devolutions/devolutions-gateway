@@ -610,7 +610,8 @@ jobs:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
           conflict_behavior: replace
-          destination_path: /Gateway/${{ needs.preflight.outputs.version }}
+          # Append ".0" to match the 4-part version format in OneDrive.
+          destination_path: /Gateway/${{ needs.preflight.outputs.version }}.0
           remote: releases
           source_path: bom.json
 
