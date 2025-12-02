@@ -1183,6 +1183,7 @@ dependencies = [
  "devolutions-log",
  "devolutions-pedm",
  "embed-resource",
+ "expect-test",
  "futures",
  "hex",
  "ironrdp",

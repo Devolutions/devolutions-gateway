@@ -32,14 +32,20 @@ pub(crate) enum UpdaterError {
     AclString { acl: String },
     #[error("failed to set permissions for file: `{file_path}`")]
     SetFilePermissions { file_path: Utf8PathBuf },
-    #[error("invalid productinfo.json format")]
-    ProductInfo,
+    #[error(
+        "could not find required file in productinfo.json for product `{product}` (arch: {arch}, type: {file_type})"
+    )]
+    ProductFileNotFound {
+        product: String,
+        arch: String,
+        file_type: String,
+    },
     #[error(transparent)]
     WindowsRegistry(#[from] devolutions_agent_shared::windows::registry::RegistryError),
     #[error("missing registry value")]
     MissingRegistryValue,
-    #[error("failed to download update")]
-    FileDownload { source: reqwest::Error, file_path: String },
+    #[error("failed to download file at {url}")]
+    FileDownload { source: reqwest::Error, url: String },
     #[error("invalid UTF-8")]
     Utf8,
     #[error("IO error")]
