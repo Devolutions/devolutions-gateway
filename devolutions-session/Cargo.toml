@@ -45,7 +45,7 @@ win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 [dependencies.now-proto-pdu]
 optional = true
 git = "https://github.com/Devolutions/now-proto.git"
-branch = "feat/window-monitoring"
+rev = "3f50ccd30ae84dce198dac37604f86b63350c3ff"
 features = ["std"]
 
 [target.'cfg(windows)'.build-dependencies]

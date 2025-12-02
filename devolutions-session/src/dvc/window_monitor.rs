@@ -5,7 +5,8 @@
 //! and timestamp (UTC).
 //!
 //! Uses Windows Event Hooks (SetWinEventHook) to receive EVENT_SYSTEM_FOREGROUND
-//! notifications whenever the foreground window changes, avoiding the need for polling.
+//! notifications whenever the foreground window changes. Additionally supports optional
+//! polling for detecting title changes within the same window.
 //!
 //! The module provides a callback-based interface for integrating with other systems
 //! (e.g., DVC protocol for transmitting window change events).
@@ -192,6 +193,14 @@ fn capture_foreground_window() -> Result<WindowSnapshot> {
     }
 
     capture_window_snapshot(foreground_window)
+}
+
+/// Gets the current timestamp as seconds since Unix epoch.
+fn get_current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Thread-local context for the event hook callback.
@@ -394,7 +403,7 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
     });
 
     // Wait for hook thread to send its thread ID.
-    let hook_thread_id = thread_id_rx.await.expect("Hook thread should send thread ID");
+    let hook_thread_id = thread_id_rx.await.expect("Failed to receive thread ID from hook thread; the thread may have panicked or exited unexpectedly during initialization");
 
     // Track last known window state to detect changes.
     let mut last_snapshot: Option<WindowSnapshot> = None;
@@ -402,10 +411,7 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
     // Capture and notify about initial foreground window.
     match capture_foreground_window() {
         Ok(snapshot) => {
-            let timestamp = SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            let timestamp = get_current_timestamp();
 
             info!(
                 process_id = snapshot.process_id,
@@ -441,10 +447,7 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
         Err(error) => {
             debug!(%error, "No initial active window");
 
-            let timestamp = SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            let timestamp = get_current_timestamp();
 
             // Send "no active window" event.
             let message = NowSessionWindowRecEventMsg::no_active_window(timestamp);
@@ -486,10 +489,7 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
 
                 // Check if this is actually a change.
                 if last_snapshot.as_ref() != Some(&snapshot) {
-                    let timestamp = SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
+                    let timestamp = get_current_timestamp();
 
                     info!(
                         process_id = snapshot.process_id,
@@ -532,10 +532,7 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
                     Ok(snapshot) => {
                         // Check if title or window changed.
                         if last_snapshot.as_ref() != Some(&snapshot) {
-                            let timestamp = SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
+                            let timestamp = get_current_timestamp();
 
                             // Determine if only the title changed for the same process.
                             let is_title_change = last_snapshot.as_ref()
@@ -544,7 +541,21 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
 
                             // Skip title changes if tracking is disabled.
                             if is_title_change && !config.track_title_changes {
-                                last_snapshot = Some(snapshot);
+                                // Only update process_id and exe_path, keep the previous title
+                                // to avoid missing process/exe_path changes.
+                                if let Some(prev) = last_snapshot.as_ref() {
+                                    last_snapshot = Some(WindowSnapshot {
+                                        process_id: snapshot.process_id,
+                                        exe_path: snapshot.exe_path.clone(),
+                                        title: prev.title.clone(),
+                                    });
+                                } else {
+                                    last_snapshot = Some(WindowSnapshot {
+                                        process_id: snapshot.process_id,
+                                        exe_path: snapshot.exe_path.clone(),
+                                        title: String::new(),
+                                    });
+                                }
                             } else {
                                 let message_result = if is_title_change {
                                     debug!(
@@ -590,10 +601,7 @@ pub async fn run_window_monitor(config: WindowMonitorConfig) {
 
                         // If we previously had an active window, send "no active window" event.
                         if last_snapshot.is_some() {
-                            let timestamp = SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
+                            let timestamp = get_current_timestamp();
 
                             let message = NowSessionWindowRecEventMsg::no_active_window(timestamp);
                             if config.event_tx.send(ServerChannelEvent::WindowRecordingEvent { message }).await.is_err() {

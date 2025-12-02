@@ -74,7 +74,7 @@ impl Task for DvcIoTask {
 
         // Spawning thread is relatively short operation, so it could be executed synchronously.
         let io_thread = std::thread::spawn(move || {
-            let io_thread_result: Result<(), anyhow::Error> = run_dvc_io(write_rx, read_tx, cloned_shutdown_event);
+            let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event);
 
             if let Err(error) = io_thread_result {
                 error!(%error, "DVC IO thread failed");
@@ -298,6 +298,8 @@ struct MessageProcessor {
     sessions: HashMap<u32, WinApiProcess>,
     /// Shutdown signal sender for window monitoring task.
     window_monitor_shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Handle for the window monitor task.
+    window_monitor_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MessageProcessor {
@@ -312,6 +314,7 @@ impl MessageProcessor {
             capabilities,
             sessions: HashMap::new(),
             window_monitor_shutdown_tx: None,
+            window_monitor_handle: None,
         }
     }
 
@@ -482,7 +485,7 @@ impl MessageProcessor {
                 }
             }
             NowMessage::Session(NowSessionMessage::WindowRecStop(_stop_msg)) => {
-                self.stop_window_recording();
+                self.stop_window_recording().await;
             }
             NowMessage::System(NowSystemMessage::Shutdown(shutdown_msg)) => {
                 let mut current_process_token = win_api_wrappers::process::Process::current_process()
@@ -763,7 +766,7 @@ impl MessageProcessor {
 
     async fn start_window_recording(&mut self, start_msg: NowSessionWindowRecStartMsg) -> anyhow::Result<()> {
         // Stop any existing window recording first.
-        self.stop_window_recording();
+        self.stop_window_recording().await;
 
         info!("Starting window recording");
 
@@ -783,21 +786,30 @@ impl MessageProcessor {
 
         // Spawn window monitor task.
         let event_tx = self.io_notification_tx.clone();
-        tokio::task::spawn(async move {
+        let window_monitor_handle = tokio::task::spawn(async move {
             let config = WindowMonitorConfig::new(event_tx, track_title_changes, shutdown_rx)
                 .with_poll_interval_ms(poll_interval_ms);
 
             run_window_monitor(config).await;
         });
 
+        self.window_monitor_handle = Some(window_monitor_handle);
+
         Ok(())
     }
 
-    fn stop_window_recording(&mut self) {
+    async fn stop_window_recording(&mut self) {
         if let Some(shutdown_tx) = self.window_monitor_shutdown_tx.take() {
             info!("Stopping window recording");
             // Send shutdown signal (ignore errors if receiver was already dropped).
             let _ = shutdown_tx.send(());
+
+            // Wait for the task to finish.
+            if let Some(handle) = self.window_monitor_handle.take() {
+                if let Err(error) = handle.await {
+                    error!(%error, "Window monitor task panicked");
+                }
+            }
         }
     }
 }
