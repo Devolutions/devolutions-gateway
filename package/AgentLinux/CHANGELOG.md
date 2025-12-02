@@ -2,7 +2,7 @@
 
 ## 2025.3.3 (2025-12-02)
 
-- Fixes installation issues on RHEL-based distributions where systemd units are located in /usr/lib/systemd/system instead of /lib/systemd/ system.
+- Fixes installation issues on RHEL-based distributions where systemd units are located in /usr/lib/systemd/system instead of /lib/systemd/system.
 
 ## 2025.3.2 (2025-10-01)
 

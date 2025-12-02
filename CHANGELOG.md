@@ -139,8 +139,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
     - `/lib/systemd/system`
   
   This fixes installation issues on RHEL-based distributions where systemd
-  units are located in /usr/lib/systemd/system instead of /lib/systemd/
-  system.
+  units are located in /usr/lib/systemd/system instead of /lib/systemd/system.
 
 ## 2025.3.2 (2025-10-01)
 
