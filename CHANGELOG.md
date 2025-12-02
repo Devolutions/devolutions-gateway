@@ -2,6 +2,145 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.3.3 (2025-12-02)
+
+### Features
+
+- _webapp_: update VNC and RDP clients ([#1533](https://github.com/Devolutions/devolutions-gateway/issues/1533)) ([a09dcf41ea](https://github.com/Devolutions/devolutions-gateway/commit/a09dcf41eab5377dfc3f32723df6dfc5cb76ec70)) 
+
+  * VNC: Prevent a custom pixel format from being set if _Tight JPEG_ or _Tight
+  PNG_ is enabled.
+  * VNC: Fixed an issue where _Zlib_ encoding was always advertised to the
+  server, regardless of the chosen _ARD_ quality.
+  * RDP: Fixed an issue where the clipboard data was not sent to the server
+  right after the connection.
+  * RDP: Fixed the `lastSentClipboardData` being null in the
+  `onForceClipboardCallback`.
+  * RDP: Added human-readable descriptions for `RDCleanPath` errors.
+  * VNC: Update cryptographic libraries for _VNC_.
+
+- _installer_: download public key from DVLS ([44aab79ad1](https://github.com/Devolutions/devolutions-gateway/commit/44aab79ad17d5622747c19368a6aa356d0e4d1f4)) 
+
+- _installer_: allow CLI generation on release builds ([f9665c2759](https://github.com/Devolutions/devolutions-gateway/commit/f9665c27591412150a63f11aa6244fde30b88b2a)) 
+
+- _jetsocat_: add concurrent reads support for MCP proxy ([#1560](https://github.com/Devolutions/devolutions-gateway/issues/1560)) ([acf770f5bc](https://github.com/Devolutions/devolutions-gateway/commit/acf770f5bcfcdbc740c9e4bb724c4351eae3f84b)) ([DGW-314](https://devolutions.atlassian.net/browse/DGW-314)) 
+
+  Refactor MCP proxy to support server-initiated messages (notifications,
+  progress updates, and server -> client requests) by enabling concurrent
+  reads from both client and server.
+
+- _dgw_: TLS thumbprint anchoring ([#1570](https://github.com/Devolutions/devolutions-gateway/issues/1570)) ([b3369646bf](https://github.com/Devolutions/devolutions-gateway/commit/b3369646bf1b0ca93e11994fe4fab42785dc626f)) ([DGW-318](https://devolutions.atlassian.net/browse/DGW-318)) 
+
+  Allow "unsecure" TLS if the client provides a thumbprint and the peer
+  certificate matches it.
+
+- _agent_: implement DVC remote exec detached mode ([#1567](https://github.com/Devolutions/devolutions-gateway/issues/1567)) ([1417db9df6](https://github.com/Devolutions/devolutions-gateway/commit/1417db9df617a32c13cb8e37a77b4ae7c6692246)) ([[ARC-411](https://devolutions.atlassian.net/browse/ARC-411)](https://devolutions.atlassian.net/browse/[ARC-411](https://devolutions.atlassian.net/browse/ARC-411))) 
+
+  Adds fire-and-forget remote execution via the now proto DVC.
+  
+  Previously, all execution types (except Run) waited for the process exit
+  code and tracked the execution session, but this behavior is not always
+  what the user expects. This PR changes that and adds an option to
+  specify if fire and forget mode is needed (return result right after
+  process is spawned.
+
+- _agent,dgw_: add Hub Service auto-updater support ([#1557](https://github.com/Devolutions/devolutions-gateway/issues/1557)) ([330cefef73](https://github.com/Devolutions/devolutions-gateway/commit/330cefef73649efa04aa2d25e479488df9e3b8e9)) 
+
+- _dgw_: add multi-provider AI Gateway ([#1588](https://github.com/Devolutions/devolutions-gateway/issues/1588)) ([b11f050d36](https://github.com/Devolutions/devolutions-gateway/commit/b11f050d36ef2b7d096cb18b96cb0a09e11f9aa0)) 
+
+  Adds an experimental AI Gateway feature that provides a unified proxy
+  for multiple AI provider APIs through Devolutions Gateway. This enables
+  centralized API key management, consistent authentication, and
+  simplified access to various AI services from a single endpoint.
+  
+  Supports seven providers with OpenAI-compatible and
+  provider-specific endpoints, featuring transparent proxying, SSE
+  streaming support, and flexible configuration through both JSON config
+  and environment variables.
+  
+  Supported providers:
+  - Mistral AI (cloud API)
+  - OpenAI (cloud API)
+  - Anthropic Claude (cloud API with custom message format)
+  - OpenRouter (unified multi-provider API)
+  - Azure OpenAI (deployment-based Azure service)
+  - Ollama (local, OpenAI-compatible, optional auth)
+  - LM Studio (local, OpenAI-compatible, optional auth)
+  
+  Requires enable_unstable: true in debug configuration.
+
+- _agent_: migrate from productinfo.htm to productinfo.json format ([#1591](https://github.com/Devolutions/devolutions-gateway/issues/1591)) ([aaf515686f](https://github.com/Devolutions/devolutions-gateway/commit/aaf515686ffc7ff0e8071366ae3458996d29e095)) 
+
+  Replaces the legacy flat key-value productinfo.htm format with a
+  structured JSON format that provides better organization and
+  extensibility. The new format supports multiple release channels
+  (Current, Beta, Update, Stable) and includes explicit architecture and
+  file type metadata.
+
+### Improvements
+
+- _jetsocat_: detect broken pipe and stop MCP proxy gracefully ([#1544](https://github.com/Devolutions/devolutions-gateway/issues/1544)) ([d3222061e1](https://github.com/Devolutions/devolutions-gateway/commit/d3222061e1b6ec503fb4571ab85b99ca3db600a0)) 
+
+  When the MCP server connection breaks (process died, pipe closed), the
+  proxy now detects this and stops forwarding requests instead of
+  continuing to fail on each subsequent request.
+
+- _dgw_: display the full trace for forward errors ([#1550](https://github.com/Devolutions/devolutions-gateway/issues/1550)) ([e74e57f809](https://github.com/Devolutions/devolutions-gateway/commit/e74e57f809ec472a3e0d402825f5f9c950ddd078)) 
+
+- _installer_: improve debouncer robustness, legibility of port check result ([a3f642407c](https://github.com/Devolutions/devolutions-gateway/commit/a3f642407c46b9da2b6380521e52690b24c6cd33)) 
+
+- _installer_: update localization ([eff50da336](https://github.com/Devolutions/devolutions-gateway/commit/eff50da336629903a3b9d38373ddf81d6b1a06c3)) 
+
+- _dgw_: [**breaking**] switch traffic audit IDs from INTEGER to ULID ([#1597](https://github.com/Devolutions/devolutions-gateway/issues/1597)) ([b443f93f44](https://github.com/Devolutions/devolutions-gateway/commit/b443f93f4494896d18b7f79d09fa0120520b6845)) ([DGW-321](https://devolutions.atlassian.net/browse/DGW-321)) 
+
+  Replace INTEGER PRIMARY KEY with 16-byte BLOB (ULID) for traffic audit
+  event IDs to avoid overflow issues with persisted, ever-increasing IDs.
+  
+  - Auto-detect old INTEGER schema via PRAGMA table_info and reset
+  database
+  - Store ULIDs as 16-byte BLOBs (lexicographically sortable)
+
+- _agent_: improve productinfo.json parsing with lenient error handling ([#1595](https://github.com/Devolutions/devolutions-gateway/issues/1595)) ([75a5879b95](https://github.com/Devolutions/devolutions-gateway/commit/75a5879b95bf244ecea882c728c30fa5ed760a74)) 
+
+### Bug Fixes
+
+- _webapp_: fix TS errors on invalid config ([#1532](https://github.com/Devolutions/devolutions-gateway/issues/1532)) ([fde1c0de12](https://github.com/Devolutions/devolutions-gateway/commit/fde1c0de12fcbe723d84fbcf74de7676ec2bd501)) 
+
+- _installer_: fix UI at high scaling factors ([abbdd6ad65](https://github.com/Devolutions/devolutions-gateway/commit/abbdd6ad65d00725ffe9b98b1b4248acf36b8b1e)) 
+
+- _installer_: fix broken hyperlinks ([dfa4608d91](https://github.com/Devolutions/devolutions-gateway/commit/dfa4608d916567cde4dcd3b8f6896f3ba27d43be)) 
+
+- _installer_: fix a (handled) NRE that was nonetheless annoying in debug ([25ed8b2c00](https://github.com/Devolutions/devolutions-gateway/commit/25ed8b2c00b9d28c29a837f572c18d982fee01b1)) 
+
+- _installer_: avoid crashes on server core ([e432ad092e](https://github.com/Devolutions/devolutions-gateway/commit/e432ad092eb56aaac28616ddaaa76ecc3b9e6be1)) 
+
+- _installer_: add missing file to csproj ([51fd11088d](https://github.com/Devolutions/devolutions-gateway/commit/51fd11088dd2afa689be30dac85154d6f8bba664)) 
+
+- _installer_: UI glitch caused by tab stops ([52979494ff](https://github.com/Devolutions/devolutions-gateway/commit/52979494ffb095d9063d2d09804a4c66cf6cf490)) 
+
+- _installer_: public key action pick up downloaded file ([378ffbe915](https://github.com/Devolutions/devolutions-gateway/commit/378ffbe91509fd10c2015df801d99c5bac4ff4b4)) 
+
+- _dgw_: fix a bug preventing mstsc to work with the RDP proxy ([#1576](https://github.com/Devolutions/devolutions-gateway/issues/1576)) ([7a0c1f5437](https://github.com/Devolutions/devolutions-gateway/commit/7a0c1f5437b03746383b0e5a7d97a7a85f94ed11)) 
+
+- _dgw,agent_: improve systemd integration ([#1549](https://github.com/Devolutions/devolutions-gateway/issues/1549)) ([0d5239ba1f](https://github.com/Devolutions/devolutions-gateway/commit/0d5239ba1f5f3da3dfa085b89beaea2b12e453bf)) ([DGW-317](https://devolutions.atlassian.net/browse/DGW-317)) 
+
+  Update ceviche to 0.7.0 which improves systemd integration.
+  
+  Here is the new strategy:
+  
+  - **pkg-config detection**: We query `pkg-config --variable=systemdsystemunitdir systemd`
+  to get the distribution's preferred location. This works on most modern
+  systems that have systemd development packages installed.
+  
+  - **Fallback probing**: If pkg-config is unavailable or doesn't return a
+  result, we probe common directories in order:
+  
+    - `/usr/lib/systemd/system`
+    - `/lib/systemd/system`
+  
+  This fixes installation issues on RHEL-based distributions where systemd
+  units are located in /usr/lib/systemd/system instead of /lib/systemd/system.
+
 ## 2025.3.2 (2025-10-01)
 
 ### Features
