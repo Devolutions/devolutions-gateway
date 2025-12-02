@@ -44,8 +44,7 @@ win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
 [dependencies.now-proto-pdu]
 optional = true
-git = "https://github.com/Devolutions/now-proto.git"
-rev = "3f50ccd30ae84dce198dac37604f86b63350c3ff"
+version = "0.4.2"
 features = ["std"]
 
 [target.'cfg(windows)'.build-dependencies]
