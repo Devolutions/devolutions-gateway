@@ -3,10 +3,8 @@
 //! These tests verify that the gateway correctly migrates the traffic audit
 //! database from the old INTEGER id schema to the new ULID (BLOB) schema.
 
-use std::time::Duration;
-
 use anyhow::Context as _;
-use testsuite::cli::dgw_tokio_cmd;
+use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
 use tokio::process::Child;
 
 /// The old schema with INTEGER PRIMARY KEY (before ULID migration).
@@ -98,6 +96,7 @@ async fn check_schema_is_blob(path: &str) -> anyhow::Result<bool> {
 /// Starts a gateway instance using the given config directory.
 ///
 /// The gateway will use the default `traffic_audit.db` path within the config directory.
+/// Waits for the gateway to become ready by polling the health endpoint.
 async fn start_gateway(config_dir: &std::path::Path) -> anyhow::Result<Child> {
     let config_path = config_dir.join("gateway.json");
 
@@ -136,8 +135,8 @@ async fn start_gateway(config_dir: &std::path::Path) -> anyhow::Result<Child> {
         .spawn()
         .context("failed to start Devolutions Gateway")?;
 
-    // Give the gateway time to initialize and run the migration.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait until the gateway is accepting connections on the HTTP port.
+    wait_for_tcp_port(http_port).await?;
 
     Ok(process)
 }

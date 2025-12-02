@@ -305,9 +305,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
     }
 
     async fn push(&self, event: TrafficEvent) -> anyhow::Result<()> {
-        let id = MONOTONIC_ULID_GENERATOR
-            .with_borrow_mut(|g| g.generate())
-            .context("ULID generation")?;
+        let id = MONOTONIC_ULID_GENERATOR.with_borrow_mut(|g| g.generate())?;
 
         // Begin transaction
         self.conn
@@ -379,7 +377,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
             .await
             .context("failed to begin claim transaction")?;
 
-        // Step 1: Find available events ordered by ID ASC (ULID is lexicographically sortable)
+        // Step 1: Find available events ordered by ID ASC (ULID BLOBs are binary-sortable in their 16-byte big-endian format)
         let find_query = "SELECT id FROM traffic_events
             WHERE (lock_until_ms IS NULL OR lock_until_ms <= ?)
             ORDER BY id ASC
