@@ -3,6 +3,8 @@
 //! These tests verify that the gateway correctly migrates the traffic audit
 //! database from the old INTEGER id schema to the new ULID (BLOB) schema.
 
+use std::path::Path;
+
 use anyhow::Context as _;
 use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
 use testsuite::dgw_config::{DgwConfig, DgwConfigHandle, VerbosityProfile};
@@ -41,7 +43,7 @@ PRAGMA user_version = 1;
 "#;
 
 /// Creates an old-schema database at the given path.
-async fn create_old_schema_database(path: &str) -> anyhow::Result<()> {
+async fn create_old_schema_database(path: &Path) -> anyhow::Result<()> {
     let conn = libsql::Builder::new_local(path)
         .build()
         .await
@@ -59,7 +61,7 @@ async fn create_old_schema_database(path: &str) -> anyhow::Result<()> {
 /// Checks if the database has the new BLOB id schema.
 ///
 /// Returns Ok(true) if the id column is BLOB, Ok(false) if INTEGER, or an error.
-async fn check_schema_is_blob(path: &str) -> anyhow::Result<bool> {
+async fn check_schema_is_blob(path: &Path) -> anyhow::Result<bool> {
     let conn = libsql::Builder::new_local(path)
         .build()
         .await
@@ -131,13 +133,12 @@ async fn old_integer_schema_is_reset_to_blob_schema() -> anyhow::Result<()> {
         .context("init config")?;
 
     let db_path = config_handle.config_dir().join("traffic_audit.db");
-    let db_path_str = db_path.to_str().unwrap();
 
     // 1) Create old schema database at the default path.
-    create_old_schema_database(db_path_str).await?;
+    create_old_schema_database(&db_path).await?;
 
     // Verify the old schema has INTEGER id.
-    let is_blob_before = check_schema_is_blob(db_path_str).await?;
+    let is_blob_before = check_schema_is_blob(&db_path).await?;
     assert!(!is_blob_before, "database should have INTEGER id before gateway starts");
 
     // 2) Start the gateway (it will use the default traffic_audit.db path).
@@ -148,7 +149,7 @@ async fn old_integer_schema_is_reset_to_blob_schema() -> anyhow::Result<()> {
     let _ = process.wait().await;
 
     // 4) Verify the schema was migrated to BLOB.
-    let is_blob_after = check_schema_is_blob(db_path_str).await?;
+    let is_blob_after = check_schema_is_blob(&db_path).await?;
     assert!(is_blob_after, "database should have BLOB id after gateway migration");
 
     Ok(())
