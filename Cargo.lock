@@ -1304,6 +1304,7 @@ dependencies = [
  "transport",
  "tungstenite 0.26.2",
  "typed-builder",
+ "ulid",
  "url",
  "utoipa",
  "uuid",
@@ -6210,6 +6211,7 @@ dependencies = [
  "escargot",
  "expect-test",
  "fastrand",
+ "libsql",
  "mcp-proxy",
  "rstest",
  "serde",
@@ -6969,6 +6971,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "ulid",
  "uuid",
 ]
 
@@ -6983,6 +6986,7 @@ dependencies = [
  "tokio 1.46.1",
  "tracing",
  "traffic-audit",
+ "ulid",
  "uuid",
 ]
 
@@ -7079,6 +7083,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "470dbf6591da1b39d43c14523b2b469c86879a53e8b758c8e090a470fe7b1fbe"
 dependencies = [
  "rand 0.9.1",
+ "serde",
  "uuid",
  "web-time",
 ]

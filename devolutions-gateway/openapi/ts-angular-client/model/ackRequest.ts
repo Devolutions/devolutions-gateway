@@ -11,8 +11,8 @@
 
 export interface AckRequest { 
     /**
-     * Array of event IDs to acknowledge (1-10000 items)
+     * Array of event IDs to acknowledge (1-10000 items, ULID format)
      */
-    ids: Array<number>;
+    ids: Array<string>;
 }
 

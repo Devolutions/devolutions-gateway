@@ -58,6 +58,7 @@ tap = "1.0"
 bytes = "1.10"
 cfg-if = "1.0"
 url = { version = "2.5", features = ["serde"] }
+ulid = { version = "1", features = ["serde"] }
 uuid = { version = "1.17", features = ["v4", "serde"] }
 time = { version = "0.3", default-features = false, features = ["std", "serde", "formatting"] }
 parking_lot = "0.12"

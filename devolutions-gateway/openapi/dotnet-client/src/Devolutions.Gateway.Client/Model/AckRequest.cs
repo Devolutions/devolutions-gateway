@@ -41,8 +41,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AckRequest" /> class.
         /// </summary>
-        /// <param name="ids">Array of event IDs to acknowledge (1-10000 items) (required).</param>
-        public AckRequest(List<long> ids = default(List<long>))
+        /// <param name="ids">Array of event IDs to acknowledge (1-10000 items, ULID format) (required).</param>
+        public AckRequest(List<string> ids = default(List<string>))
         {
             // to ensure "ids" is required (not null)
             if (ids == null)
@@ -53,11 +53,11 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Array of event IDs to acknowledge (1-10000 items)
+        /// Array of event IDs to acknowledge (1-10000 items, ULID format)
         /// </summary>
-        /// <value>Array of event IDs to acknowledge (1-10000 items)</value>
+        /// <value>Array of event IDs to acknowledge (1-10000 items, ULID format)</value>
         [DataMember(Name = "ids", IsRequired = true, EmitDefaultValue = true)]
-        public List<long> Ids { get; set; }
+        public List<string> Ids { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object

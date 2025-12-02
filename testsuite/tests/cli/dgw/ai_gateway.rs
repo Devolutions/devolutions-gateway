@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use testsuite::cli::dgw_tokio_cmd;
+use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
 use testsuite::dgw_config::{AiGatewayConfig, DgwConfig, DgwConfigHandle, VerbosityProfile};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::TcpListener;
@@ -143,8 +143,8 @@ async fn start_gateway_with_ai(
         .spawn()
         .context("failed to start Devolutions Gateway")?;
 
-    // Give the server time to start.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait until the gateway is accepting connections on the HTTP port.
+    wait_for_tcp_port(config_handle.http_port()).await?;
 
     Ok((config_handle, process))
 }

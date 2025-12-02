@@ -4,6 +4,7 @@ use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
+use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -38,9 +39,9 @@ use crate::api::preflight::PreflightAlertStatus;
         SessionInfo,
         ConnectionMode,
         crate::listener::ListenerUrls,
-        crate::config::dto::DataEncoding,
-        crate::config::dto::PubKeyFormat,
-        crate::config::dto::Subscriber,
+        DataEncoding,
+        PubKeyFormat,
+        Subscriber,
         crate::api::diagnostics::ConfigDiagnostic,
         crate::api::diagnostics::ClockDiagnostic,
         SubProvisionerKey,
@@ -325,7 +326,7 @@ struct ConfigPatch {
     /// The sub provisioner public key (may only be used to verify tokens when establishing a session)
     sub_provisioner_public_key: Option<SubProvisionerKey>,
     /// Subscriber configuration
-    subscriber: Option<crate::config::dto::Subscriber>,
+    subscriber: Option<Subscriber>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -336,9 +337,9 @@ pub(crate) struct SubProvisionerKey {
     /// The binary-to-text-encoded key data
     value: String,
     /// The format used for the key data
-    format: Option<crate::config::dto::PubKeyFormat>,
+    format: Option<PubKeyFormat>,
     /// The binary-to-text encoding used for the key data
-    encoding: Option<crate::config::dto::DataEncoding>,
+    encoding: Option<DataEncoding>,
 }
 
 #[allow(unused)]

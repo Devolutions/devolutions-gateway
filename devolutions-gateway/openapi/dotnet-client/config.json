@@ -2,7 +2,7 @@
   "packageAuthors": "Devolutions Inc.",
   "packageName": "Devolutions.Gateway.Client",
   "packageTitle": "Devolutions Gateway REST API Client",
-  "packageVersion": "2025.11.12",
+  "packageVersion": "2025.12.2",
   "packageDescription": "Client for Devolutions Gateway REST API",
   "packageGuid": "EF1E8A60-F71D-4F02-A779-B113740FF5CC",
   "packageCopyright": "© Devolutions Inc. All rights reserved.",

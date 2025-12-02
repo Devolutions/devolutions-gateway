@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use anyhow::Context as _;
 use rstest::rstest;
-use testsuite::cli::dgw_tokio_cmd;
+use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
 use testsuite::dgw_config::{DgwConfig, DgwConfigHandle};
 use tokio::process::Child;
 
@@ -53,8 +55,8 @@ async fn start_gateway() -> anyhow::Result<(DgwConfigHandle, Child)> {
         .spawn()
         .context("failed to start Devolutions Gateway")?;
 
-    // Give the server a moment to start.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // Wait until the gateway is accepting connections on the HTTP port.
+    wait_for_tcp_port(config_handle.http_port()).await?;
 
     Ok((config_handle, process))
 }
@@ -64,16 +66,15 @@ async fn websocket_connect(port: u16, token: &str, session_id: &str) -> anyhow::
     let url = format!("ws://127.0.0.1:{port}/jet/fwd/tls/{session_id}?token={token}");
 
     // Try to connect with a timeout.
-    let (_ws_stream, response) =
-        tokio::time::timeout(std::time::Duration::from_secs(5), tokio_tungstenite::connect_async(url))
-            .await
-            .context("timeout")?
-            .context("websocket connection")?;
+    let (_ws_stream, response) = tokio::time::timeout(Duration::from_secs(5), tokio_tungstenite::connect_async(url))
+        .await
+        .context("timeout")?
+        .context("websocket connection")?;
 
     println!("WebSocket connected successfully: {response:?}");
 
     // Give the server a moment to perform the connection with the remote server.
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
 
     Ok(())
 }

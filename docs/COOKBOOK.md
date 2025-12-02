@@ -403,7 +403,7 @@ curl -X POST "https://gateway.example.com/jet/traffic/claim?lease_ms=60000&max=5
 ```json
 [
   {
-    "id": 123,
+    "id": "01JFQH8V5HCZN8XKZJ3Y6M4W9P",
     "session_id": "550e8400-e29b-41d4-a716-446655440000",
     "outcome": "normal_termination",
     "protocol": "tcp",
@@ -424,10 +424,10 @@ curl -X POST "https://gateway.example.com/jet/traffic/claim?lease_ms=60000&max=5
 Acknowledge processed events to remove them from the queue.
 
 ```bash
-# Acknowledge specific event IDs
+# Acknowledge specific event IDs (ULID format)
 curl -X POST "https://gateway.example.com/jet/traffic/ack" \
   -H "Authorization: Bearer <TOKEN>" \
-  --json '{"ids": [123, 124, 125]}'
+  --json '{"ids": ["01JFQH8V5HCZN8XKZJ3Y6M4W9P", "01JFQH8V5JD2N7XKZJ4Y7M5W0Q", "01JFQH8V5KE3N9XKZJ5Y8M6W1R"]}'
 ```
 
 **Response:**
@@ -439,7 +439,8 @@ curl -X POST "https://gateway.example.com/jet/traffic/ack" \
 
 ### Notes
 
-- Events are returned in ascending ID order
+- Event IDs are ULIDs (Universally Unique Lexicographically Sortable Identifiers)
+- Events are returned in ascending ID order (ULIDs are time-ordered)
 - Claimed events are locked for the specified lease duration
 - If not acknowledged before lease expiry, events become available for reclaiming
 - Events are permanently deleted after acknowledgment (no retention)

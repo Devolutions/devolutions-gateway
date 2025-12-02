@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use traffic_audit::{ClaimedEvent, DynTrafficAuditRepo, TrafficAuditRepo, TrafficEvent};
+use ulid::Ulid;
 
 const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60 * 3); // 3 hours.
 const AUDIT_EVENT_LIFETIME_MS: i64 = 24 * 60 * 60 * 1000; // 24 hours
@@ -29,7 +30,7 @@ pub enum TrafficAuditMessage {
         channel: oneshot::Sender<anyhow::Result<Vec<ClaimedEvent>>>,
     },
     Ack {
-        ids: Vec<i64>,
+        ids: Vec<Ulid>,
         channel: oneshot::Sender<anyhow::Result<u64>>,
     },
 }
@@ -107,7 +108,7 @@ impl TrafficAuditHandle {
     }
 
     /// Acknowledge processing of claimed traffic events
-    pub async fn ack(&self, ids: Vec<i64>) -> anyhow::Result<u64> {
+    pub async fn ack(&self, ids: Vec<Ulid>) -> anyhow::Result<u64> {
         let (tx, rx) = oneshot::channel();
 
         self.0

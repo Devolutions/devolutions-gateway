@@ -2,8 +2,8 @@
 -- This creates the complete audit event schema with efficient indexing for claim/ack operations
 
 CREATE TABLE traffic_events (
-    id INTEGER PRIMARY KEY,
-    session_id BLOB NOT NULL,
+    id BLOB PRIMARY KEY CHECK (length(id) = 16),
+    session_id BLOB NOT NULL CHECK (length(session_id) = 16),
     outcome INTEGER NOT NULL CHECK (outcome IN (0, 1, 2)),
     protocol INTEGER NOT NULL CHECK (protocol IN (0, 1)),
     target_host TEXT NOT NULL,

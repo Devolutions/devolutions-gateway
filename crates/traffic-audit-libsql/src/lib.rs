@@ -5,6 +5,7 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use libsql::Connection;
 use traffic_audit::{ClaimedEvent, TrafficAuditRepo, TrafficEvent};
+use ulid::Ulid;
 use uuid::Uuid;
 
 pub use libsql;
@@ -14,6 +15,21 @@ const MIGRATIONS: &[&str] = &[
     // Migration 0 - Initial schema
     include_str!("../migrations/01_traffic_events.sql"),
 ];
+
+thread_local! {
+    /// Per-thread monotonic ULID generator.
+    ///
+    /// Using a thread-local generator provides several benefits:
+    /// - **Strict monotonicity within a thread**: ULIDs generated in sequence on the same
+    ///   thread are guaranteed to be strictly increasing, even when generated within the
+    ///   same millisecond. This ensures predictable ordering in tests and deterministic
+    ///   FIFO behavior for events pushed from the same thread.
+    /// - **No contention**: Each thread has its own generator instance, eliminating mutex
+    ///   overhead that would occur with a shared generator.
+    /// - **Lock-free push operations**: The `push` method can generate IDs without acquiring
+    ///   any locks beyond the thread-local cell borrow.
+    static MONOTONIC_ULID_GENERATOR: std::cell::RefCell<ulid::Generator> = const { std::cell::RefCell::new(ulid::Generator::new()) };
+}
 
 /// Implementation of [`TrafficAuditRepo`] repository using libSQL as the backend.
 ///
@@ -31,18 +47,125 @@ pub struct LibSqlTrafficAuditRepo {
 impl LibSqlTrafficAuditRepo {
     /// Opens a new LibSQL connection and creates a repository instance.
     ///
-    /// The path_or_url can be:
-    /// - A file path for local SQLite (e.g., "/path/to/audit.db")  
+    /// The path can be:
+    /// - A file path for local SQLite (e.g., "/path/to/audit.db")
     /// - ":memory:" for in-memory database
-    pub async fn open(path_or_url: &str) -> anyhow::Result<Self> {
-        let conn = libsql::Builder::new_local(path_or_url)
-            .build()
-            .await
-            .context("failed to open libSQL connection")?
-            .connect()
-            .context("failed to connect to libSQL")?;
+    ///
+    /// If an old schema (with INTEGER id column) is detected, the database file
+    /// is automatically deleted and recreated with the new ULID-based schema.
+    ///
+    /// TODO(2027): Remove old schema detection and reset logic.
+    /// This migration code can be safely removed after all deployed
+    /// Gateways have been upgraded past this version.
+    pub async fn open(path: &str) -> anyhow::Result<Self> {
+        let conn = open_connection(path).await?;
 
-        Ok(Self { conn })
+        // Check for old schema and reset if necessary.
+        if !has_old_integer_schema(&conn).await? {
+            return Ok(Self { conn });
+        } else {
+            warn!("Detected old traffic audit schema with INTEGER id; resetting database");
+
+            // Drop the connection before deleting files.
+            drop(conn);
+
+            // Delete database files (main file + WAL + SHM).
+            if path != ":memory:" {
+                delete_database_files(path)?;
+            }
+
+            // Reopen with fresh connection.
+            let conn = open_connection(path).await?;
+
+            return Ok(Self { conn });
+        }
+
+        async fn open_connection(path: &str) -> anyhow::Result<Connection> {
+            libsql::Builder::new_local(path)
+                .build()
+                .await
+                .context("failed to open libSQL connection")?
+                .connect()
+                .context("failed to connect to libSQL")
+        }
+
+        /// Checks if the database has the old schema with INTEGER id column.
+        ///
+        /// Returns `true` if the `traffic_events` table exists and has an INTEGER id column,
+        /// indicating the old schema that needs to be reset.
+        ///
+        /// TODO(2027): Remove this method along with the schema reset logic.
+        async fn has_old_integer_schema(conn: &Connection) -> anyhow::Result<bool> {
+            // Check if the traffic_events table exists.
+            let table_exists_query = "SELECT name FROM sqlite_master WHERE type='table' AND name='traffic_events'";
+
+            let mut rows = conn
+                .query(table_exists_query, ())
+                .await
+                .context("failed to check if traffic_events table exists")?;
+
+            if rows
+                .next()
+                .await
+                .context("failed to read table check result")?
+                .is_none()
+            {
+                // Table doesn't exist, so no old schema.
+                return Ok(false);
+            }
+
+            // Table exists, check if id column is INTEGER.
+            let pragma_query = "PRAGMA table_info(traffic_events)";
+
+            let mut rows = conn
+                .query(pragma_query, ())
+                .await
+                .context("failed to query table info")?;
+
+            while let Some(row) = rows.next().await.context("failed to read table info row")? {
+                let col_name: String = row.get(1).context("failed to get column name")?;
+                if col_name == "id" {
+                    let col_type: String = row.get(2).context("failed to get column type")?;
+                    // SQLite stores "INTEGER" for INTEGER PRIMARY KEY columns.
+                    return Ok(col_type.eq_ignore_ascii_case("INTEGER"));
+                }
+            }
+
+            // No id column found (unexpected), treat as no old schema.
+            Ok(false)
+        }
+
+        /// Deletes the database file and associated WAL/SHM files.
+        ///
+        /// TODO(2027): Remove this method along with the schema reset logic.
+        fn delete_database_files(path: &str) -> anyhow::Result<()> {
+            use std::fs;
+            use std::path::Path;
+
+            let db_path = Path::new(path);
+
+            // Delete main database file.
+            if db_path.exists() {
+                fs::remove_file(db_path).with_context(|| format!("failed to delete database file: {path}"))?;
+                info!(%path, "Deleted old traffic audit database file");
+            }
+
+            // Delete WAL file if present.
+            let wal_path = format!("{path}-wal");
+            if Path::new(&wal_path).exists() {
+                fs::remove_file(&wal_path).with_context(|| format!("failed to delete WAL file: {wal_path}"))?;
+                trace!(%wal_path, "Deleted WAL file");
+            }
+
+            // Delete SHM file if present.
+            let shm_path = format!("{path}-shm");
+            if Path::new(&shm_path).exists() {
+                fs::remove_file(&shm_path).with_context(|| format!("failed to delete SHM file: {shm_path}"))?;
+                trace!(%shm_path, "Deleted SHM file");
+            }
+
+            Ok(())
+        }
     }
 
     async fn apply_pragmas(&self) -> anyhow::Result<()> {
@@ -182,23 +305,27 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
     }
 
     async fn push(&self, event: TrafficEvent) -> anyhow::Result<()> {
+        let id = MONOTONIC_ULID_GENERATOR.with_borrow_mut(|g| g.generate())?;
+
         // Begin transaction
         self.conn
             .execute("BEGIN IMMEDIATE", ())
             .await
             .context("failed to begin transaction")?;
 
-        let sql_query = "INSERT INTO traffic_events 
-            (session_id, outcome, protocol, target_host, target_ip_family, target_ip, target_port, 
+        let sql_query = "INSERT INTO traffic_events
+            (id, session_id, outcome, protocol, target_host, target_ip_family, target_ip, target_port,
              connect_at_ms, disconnect_at_ms, active_duration_ms, bytes_tx, bytes_rx)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
+        let id_blob = ulid_to_blob(&id);
         let session_id_blob = uuid_to_blob(&event.session_id);
         let outcome_db = outcome_to_db(&event.outcome);
         let protocol_db = protocol_to_db(&event.protocol);
         let (target_ip_family, target_ip_blob) = ip_to_blob(&event.target_ip);
 
         let params = (
+            id_blob,
             session_id_blob,
             outcome_db,
             protocol_db,
@@ -250,10 +377,10 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
             .await
             .context("failed to begin claim transaction")?;
 
-        // Step 1: Find available events ordered by ID ASC
-        let find_query = "SELECT id FROM traffic_events 
-            WHERE (lock_until_ms IS NULL OR lock_until_ms <= ?) 
-            ORDER BY id ASC 
+        // Step 1: Find available events ordered by ID ASC (ULID BLOBs are binary-sortable in their 16-byte big-endian format)
+        let find_query = "SELECT id FROM traffic_events
+            WHERE (lock_until_ms IS NULL OR lock_until_ms <= ?)
+            ORDER BY id ASC
             LIMIT ?";
 
         let mut rows = match self
@@ -268,8 +395,8 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
             }
         };
 
-        // Collect available IDs.
-        let mut available_ids = Vec::new();
+        // Collect available IDs as BLOBs.
+        let mut available_ids: Vec<Vec<u8>> = Vec::new();
         loop {
             let row = match rows.next().await {
                 Ok(Some(row)) => row,
@@ -280,12 +407,12 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
                 }
             };
 
-            let id: i64 = row.get(0).context("failed to get event ID")?;
-            available_ids.push(id);
+            let id_blob: Vec<u8> = row.get(0).context("failed to get event ID")?;
+            available_ids.push(id_blob);
         }
 
         if available_ids.is_empty() {
-            // No events to claim, commit and return empty
+            // No events to claim, commit and return empty.
             self.conn
                 .execute("COMMIT", ())
                 .await
@@ -296,15 +423,16 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
 
         // Step 2: Lock the available events
         let lock_query = format!(
-            "UPDATE traffic_events 
-             SET locked_by = ?, lock_until_ms = ? 
+            "UPDATE traffic_events
+             SET locked_by = ?, lock_until_ms = ?
              WHERE id IN ({})",
             repeat_qm(available_ids.len())
         );
 
-        let mut lock_params = vec![consumer_id.to_owned(), lock_until.to_string()];
-        for id in &available_ids {
-            lock_params.push(id.to_string());
+        let mut lock_params: Vec<libsql::Value> =
+            vec![libsql::Value::from(consumer_id), libsql::Value::from(lock_until)];
+        for id_blob in &available_ids {
+            lock_params.push(libsql::Value::from(id_blob.clone()));
         }
 
         if let Err(e) = self.conn.execute(&lock_query, lock_params).await {
@@ -314,16 +442,17 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
 
         // Step 3: Retrieve full event data for locked events
         let select_query = format!(
-            "SELECT id, session_id, outcome, protocol, target_host, 
+            "SELECT id, session_id, outcome, protocol, target_host,
                     target_ip_family, target_ip, target_port, connect_at_ms, disconnect_at_ms,
                     active_duration_ms, bytes_tx, bytes_rx
-             FROM traffic_events 
+             FROM traffic_events
              WHERE id IN ({})
              ORDER BY id ASC",
             repeat_qm(available_ids.len())
         );
 
-        let select_params: Vec<String> = available_ids.iter().map(|id| id.to_string()).collect();
+        let select_params: Vec<libsql::Value> =
+            available_ids.iter().map(|id| libsql::Value::from(id.clone())).collect();
 
         let mut rows = match self.conn.query(&select_query, select_params).await {
             Ok(rows) => rows,
@@ -346,7 +475,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
             };
 
             // Parse the row into a ClaimedEvent
-            let id: i64 = row.get(0).context("failed to get event ID")?;
+            let id_blob: Vec<u8> = row.get(0).context("failed to get event ID")?;
             let session_id_blob: Vec<u8> = row.get(1).context("failed to get session_id")?;
             let outcome_db: i64 = row.get(2).context("failed to get outcome")?;
             let protocol_db: i64 = row.get(3).context("failed to get protocol")?;
@@ -361,6 +490,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
             let bytes_rx: i64 = row.get(12).context("failed to get bytes_rx")?;
 
             // Convert database values back to domain types
+            let id = blob_to_ulid(&id_blob)?;
             let session_id = blob_to_uuid(&session_id_blob)?;
             let outcome = db_to_outcome(outcome_db)?;
             let protocol = db_to_protocol(protocol_db)?;
@@ -398,7 +528,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
         Ok(claimed_events)
     }
 
-    async fn ack(&self, ids: &[i64]) -> anyhow::Result<u64> {
+    async fn ack(&self, ids: &[Ulid]) -> anyhow::Result<u64> {
         if ids.is_empty() {
             trace!("No IDs to acknowledge");
             return Ok(0);
@@ -414,7 +544,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
 
         let delete_query = format!("DELETE FROM traffic_events WHERE id IN ({})", repeat_qm(ids.len()));
 
-        let params: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+        let params: Vec<libsql::Value> = ids.iter().map(|id| libsql::Value::from(ulid_to_blob(id))).collect();
 
         match self.conn.execute(&delete_query, params).await {
             Ok(deleted_count) => {
@@ -440,7 +570,7 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
         }
     }
 
-    async fn extend_lease(&self, ids: &[i64], consumer_id: &str, lease_duration_ms: i64) -> anyhow::Result<()> {
+    async fn extend_lease(&self, ids: &[Ulid], consumer_id: &str, lease_duration_ms: i64) -> anyhow::Result<()> {
         if ids.is_empty() {
             trace!("No IDs to extend lease for");
             return Ok(());
@@ -458,11 +588,11 @@ impl TrafficAuditRepo for LibSqlTrafficAuditRepo {
             repeat_qm(ids.len())
         );
 
-        let mut params = vec![new_lock_until.to_string()];
+        let mut params: Vec<libsql::Value> = vec![libsql::Value::from(new_lock_until)];
         for id in ids {
-            params.push(id.to_string());
+            params.push(libsql::Value::from(ulid_to_blob(id)));
         }
-        params.push(consumer_id.to_owned());
+        params.push(libsql::Value::from(consumer_id));
 
         let updated_count = self
             .conn
@@ -565,6 +695,20 @@ fn blob_to_uuid(blob: &[u8]) -> anyhow::Result<Uuid> {
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(blob);
     Ok(Uuid::from_bytes(bytes))
+}
+
+/// Converts ULID to 16-byte binary representation for storage.
+fn ulid_to_blob(ulid: &Ulid) -> Vec<u8> {
+    ulid.to_bytes().to_vec()
+}
+
+/// Converts 16-byte binary representation back to ULID.
+fn blob_to_ulid(blob: &[u8]) -> anyhow::Result<Ulid> {
+    let bytes: [u8; 16] = blob
+        .try_into()
+        .with_context(|| format!("ULID must be exactly 16 bytes, got {}", blob.len()))?;
+
+    Ok(Ulid::from_bytes(bytes))
 }
 
 /// Generates SQL parameter placeholders for IN clauses.

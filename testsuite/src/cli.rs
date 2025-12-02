@@ -66,3 +66,30 @@ pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_te
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);
 }
+
+/// Waits for a TCP port on localhost to become ready (accepting connections).
+///
+/// This is useful for tests that spawn a server process and need to wait for it to be ready
+/// before sending requests. Polls every 50ms until the connection succeeds or 10 seconds elapse.
+///
+/// # Errors
+/// Returns an error if the port is not ready within the timeout.
+pub async fn wait_for_tcp_port(port: u16) -> anyhow::Result<()> {
+    use std::net::Ipv4Addr;
+    use std::time::{Duration, Instant};
+
+    let timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(50);
+    let start = Instant::now();
+
+    loop {
+        if start.elapsed() > timeout {
+            anyhow::bail!("port {port} did not become ready within {timeout:?}");
+        }
+
+        match tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await {
+            Ok(_) => return Ok(()),
+            Err(_) => tokio::time::sleep(poll_interval).await,
+        }
+    }
+}

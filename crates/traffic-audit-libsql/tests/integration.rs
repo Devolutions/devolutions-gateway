@@ -16,6 +16,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use traffic_audit::{EventOutcome, TrafficAuditRepo, TrafficEvent, TransportProtocol};
 use traffic_audit_libsql::LibSqlTrafficAuditRepo;
+use ulid::Ulid;
 use uuid::Uuid;
 
 /// Opens a new repository instance with migrations applied.
@@ -112,7 +113,7 @@ async fn push_then_claim_then_ack_happy_path() {
     }
 
     // Ack all events.
-    let ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
+    let ids: Vec<Ulid> = claimed.iter().map(|e| e.id).collect();
     let n_acked = repo.ack(&ids).await.expect("ack events");
     assert_eq!(ids.len() as u64, n_acked);
 
@@ -151,8 +152,8 @@ async fn concurrent_claimers_get_disjoint_sets() {
     let claimed2 = task2.await.unwrap();
 
     // Collect all IDs.
-    let ids1: HashSet<i64> = claimed1.into_iter().collect();
-    let ids2: HashSet<i64> = claimed2.into_iter().collect();
+    let ids1: HashSet<Ulid> = claimed1.into_iter().collect();
+    let ids2: HashSet<Ulid> = claimed2.into_iter().collect();
 
     // Verify no overlap (disjoint sets).
     assert_eq!(
@@ -174,7 +175,7 @@ async fn claim_all_in_batches(
     consumer_id: &str,
     lease_ms: u32,
     batch_size: usize,
-) -> Vec<i64> {
+) -> Vec<Ulid> {
     let mut all_ids = Vec::new();
 
     loop {
@@ -188,7 +189,7 @@ async fn claim_all_in_batches(
         }
 
         // Extract IDs and ack immediately.
-        let ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
+        let ids: Vec<Ulid> = claimed.iter().map(|e| e.id).collect();
         repo.ack(&ids).await.expect("ack batch");
         all_ids.extend(ids);
 
@@ -227,8 +228,8 @@ async fn lease_expiry_reclaim() {
     assert_eq!(claimed2.len(), 5, "c2 should claim all 5 events after lease expiry");
 
     // Verify same events were reclaimed (not new ones).
-    let ids1: HashSet<i64> = claimed1.iter().map(|e| e.id).collect();
-    let ids2: HashSet<i64> = claimed2.iter().map(|e| e.id).collect();
+    let ids1: HashSet<Ulid> = claimed1.iter().map(|e| e.id).collect();
+    let ids2: HashSet<Ulid> = claimed2.iter().map(|e| e.id).collect();
     assert_eq!(ids1, ids2, "same events should be reclaimed after lease expiry");
 }
 
@@ -248,7 +249,7 @@ async fn ordering_is_monotonic_id_asc() {
         repo.push(make_event(i)).await.expect("push event");
     }
 
-    let mut all_ids = Vec::new();
+    let mut all_ids: Vec<Ulid> = Vec::new();
 
     // Claim in batches of 7.
     loop {
@@ -257,14 +258,14 @@ async fn ordering_is_monotonic_id_asc() {
             break;
         }
 
-        let ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
+        let ids: Vec<Ulid> = claimed.iter().map(|e| e.id).collect();
         repo.ack(&ids).await.expect("ack");
         all_ids.extend(ids);
     }
 
     assert_eq!(all_ids.len(), 20, "should process all 20 events");
 
-    // Verify strict ascending order.
+    // Verify strict ascending order (ULIDs are lexicographically sortable).
     for i in 1..all_ids.len() {
         assert!(
             all_ids[i] > all_ids[i - 1],
@@ -363,7 +364,7 @@ async fn extend_lease_updates_visibility() {
     let claimed1 = repo.claim("c1", 50, 10).await.expect("c1 initial claim");
     assert_eq!(claimed1.len(), 3, "c1 should claim all events");
 
-    let ids: Vec<i64> = claimed1.iter().map(|e| e.id).collect();
+    let ids: Vec<Ulid> = claimed1.iter().map(|e| e.id).collect();
 
     // Wait for original lease to definitely expire
     sleep(Duration::from_millis(60)).await;
@@ -387,7 +388,7 @@ async fn extend_lease_updates_visibility() {
     );
 
     // Ack the events claimed by c2
-    let ids2: Vec<i64> = claimed2.iter().map(|e| e.id).collect();
+    let ids2: Vec<Ulid> = claimed2.iter().map(|e| e.id).collect();
     repo.ack(&ids2).await.expect("ack c2 events");
 
     // Push new events for the rest of the test
@@ -399,7 +400,7 @@ async fn extend_lease_updates_visibility() {
     let claimed3 = repo.claim("c1", 50, 10).await.expect("c1 claim new events");
     assert_eq!(claimed3.len(), 3, "c1 should claim new events");
 
-    let ids3: Vec<i64> = claimed3.iter().map(|e| e.id).collect();
+    let ids3: Vec<Ulid> = claimed3.iter().map(|e| e.id).collect();
 
     // Wait for original lease to expire
     sleep(Duration::from_millis(60)).await;
@@ -516,7 +517,7 @@ async fn throughput_10k_events_sanity_check() {
             break;
         }
 
-        let ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
+        let ids: Vec<Ulid> = claimed.iter().map(|e| e.id).collect();
         repo.ack(&ids).await.expect("ack batch");
         processed += claimed.len();
     }
@@ -674,12 +675,12 @@ async fn ack_only_deletes_correct_events() {
     assert_eq!(claimed.len(), 3, "should claim 3 events");
 
     // Store the claimed IDs and their ports for verification
-    let claimed_ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
+    let claimed_ids: Vec<Ulid> = claimed.iter().map(|e| e.id).collect();
 
     // Try to ack with mix of correct and wrong IDs
     let mut ids_to_ack = claimed_ids.clone();
-    ids_to_ack.push(99999); // Non-existent ID
-    ids_to_ack.push(88888); // Another non-existent ID
+    ids_to_ack.push(Ulid::new()); // Non-existent ID
+    ids_to_ack.push(Ulid::new()); // Another non-existent ID
 
     // Ack should work (be safe with non-existent IDs)
     let n_acked = repo.ack(&ids_to_ack).await.expect("ack with mixed IDs should be safe");

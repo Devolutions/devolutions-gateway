@@ -64,8 +64,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="targetHost">Original target host string before DNS resolution (required).</param>
         /// <param name="targetIp">Concrete target IP address after resolution (required).</param>
         /// <param name="targetPort">Target port number for the connection (required).</param>
-        /// <param name="id">Database ID of the claimed event (used for acknowledgment) (required).</param>
-        public ClaimedTrafficEvent(long activeDurationMs = default(long), long bytesRx = default(long), long bytesTx = default(long), long connectAtMs = default(long), long disconnectAtMs = default(long), EventOutcomeResponse outcome = default(EventOutcomeResponse), TransportProtocolResponse protocol = default(TransportProtocolResponse), Guid sessionId = default(Guid), string targetHost = default(string), string targetIp = default(string), int targetPort = default(int), long id = default(long))
+        /// <param name="id">Database ID of the claimed event (used for acknowledgment, ULID format) (required).</param>
+        public ClaimedTrafficEvent(long activeDurationMs = default(long), long bytesRx = default(long), long bytesTx = default(long), long connectAtMs = default(long), long disconnectAtMs = default(long), EventOutcomeResponse outcome = default(EventOutcomeResponse), TransportProtocolResponse protocol = default(TransportProtocolResponse), Guid sessionId = default(Guid), string targetHost = default(string), string targetIp = default(string), int targetPort = default(int), string id = default(string))
         {
             this.ActiveDurationMs = activeDurationMs;
             this.BytesRx = bytesRx;
@@ -88,6 +88,11 @@ namespace Devolutions.Gateway.Client.Model
             }
             this.TargetIp = targetIp;
             this.TargetPort = targetPort;
+            // to ensure "id" is required (not null)
+            if (id == null)
+            {
+                throw new ArgumentNullException("id is a required property for ClaimedTrafficEvent and cannot be null");
+            }
             this.Id = id;
         }
 
@@ -155,11 +160,11 @@ namespace Devolutions.Gateway.Client.Model
         public int TargetPort { get; set; }
 
         /// <summary>
-        /// Database ID of the claimed event (used for acknowledgment)
+        /// Database ID of the claimed event (used for acknowledgment, ULID format)
         /// </summary>
-        /// <value>Database ID of the claimed event (used for acknowledgment)</value>
+        /// <value>Database ID of the claimed event (used for acknowledgment, ULID format)</value>
         [DataMember(Name = "id", IsRequired = true, EmitDefaultValue = true)]
-        public long Id { get; set; }
+        public string Id { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
