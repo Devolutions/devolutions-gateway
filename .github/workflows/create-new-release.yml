@@ -19,6 +19,7 @@ jobs:
     secrets: inherit
     with:
       ref: ${{ inputs.ref }}
+      sccache: false
 
   call-package-workflow:
     needs: [call-ci-workflow]

@@ -7,12 +7,23 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      sccache:
+        description: Enable sccache for Rust compilation caching
+        required: false
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       ref:
         description: The commit SHA to build
         required: false
         type: string
+      sccache:
+        description: Enable sccache for Rust compilation caching
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   preflight:
@@ -22,6 +33,7 @@ jobs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
+      sccache: ${{ steps.sccache.outputs.enabled }}
       jetsocat-build-matrix: ${{ steps.setup-matrix.outputs.jetsocat-build-matrix }}
       gateway-build-matrix: ${{ steps.setup-matrix.outputs.gateway-build-matrix }}
       agent-build-matrix: ${{ steps.setup-matrix.outputs.agent-build-matrix }}
@@ -132,6 +144,14 @@ jobs:
           echo "rust-profile=$CargoProfile" >> $Env:GITHUB_OUTPUT
         shell: pwsh
 
+      - name: Configure sccache
+        id: sccache
+        run: |
+          # Enable sccache by default; only disable if explicitly set to false
+          # This handles push/pull_request triggers where inputs.sccache is undefined
+          $Enabled = if ("${{ inputs.sccache }}" -eq "false") { "false" } else { "true" }
+          echo "enabled=$Enabled" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
 
       - name: Upload version artifact
         uses: actions/upload-artifact@v4
@@ -157,6 +177,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: |
+          $Platform = @{'Windows'='win'; 'Linux'='linux'; 'macOS'='osx'}['${{ runner.os }}']
+          $Arch = @{'X64'='x64'; 'ARM64'='arm64'}['${{ runner.arch }}']
+          ./ci/install-sccache.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Check clippy
         shell: pwsh
@@ -186,6 +237,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: |
+          $Platform = @{'Windows'='win'; 'Linux'='linux'; 'macOS'='osx'}['${{ runner.os }}']
+          $Arch = @{'X64'='x64'; 'ARM64'='arm64'}['${{ runner.arch }}']
+          ./ci/install-sccache.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Configure Linux runner
         if: ${{ matrix.os == 'linux' }}
@@ -233,6 +315,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: |
+          $Platform = @{'Windows'='win'; 'Linux'='linux'; 'macOS'='osx'}['${{ runner.os }}']
+          $Arch = @{'X64'='x64'; 'ARM64'='arm64'}['${{ runner.arch }}']
+          ./ci/install-sccache.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Setup LLVM
         if: ${{ runner.os == 'Linux' }}
@@ -498,6 +611,37 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: |
+          $Platform = @{'Windows'='win'; 'Linux'='linux'; 'macOS'='osx'}['${{ runner.os }}']
+          $Arch = @{'X64'='x64'; 'ARM64'='arm64'}['${{ runner.arch }}']
+          ./ci/install-sccache.ps1 -Platform $Platform -Architecture $Arch
+
       - name: Download webapp-client
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/download-artifact@v4
@@ -630,7 +774,6 @@ jobs:
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
 
-
       - name: Add msbuild to PATH
         if: ${{ matrix.os == 'windows' }}
         uses: microsoft/setup-msbuild@v2
@@ -723,6 +866,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: |
+          $Platform = @{'Windows'='win'; 'Linux'='linux'; 'macOS'='osx'}['${{ runner.os }}']
+          $Arch = @{'X64'='x64'; 'ARM64'='arm64'}['${{ runner.arch }}']
+          ./ci/install-sccache.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Load dynamic variables
         id: load-variables
@@ -983,6 +1157,34 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: ./ci/install-sccache.ps1 -Platform win -Architecture x64
+
       - name: Prepare runner
         run: |
           $VSInstallationPath = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
@@ -1039,6 +1241,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # cache-targets is disabled because sccache handles compiled artifacts.
+      # This only caches cargo registry and git dependencies, which are
+      # independent of the build profile, so it's safe for production builds.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2.7.3
+        with:
+          cache-targets: false
+
+      # ACTIONS_RESULTS_URL and ACTIONS_RUNTIME_TOKEN are internal GitHub Actions
+      # variables required by sccache's GHA cache backend. These variables are only
+      # accessible via process.env in Node.js, not as shell environment variables.
+      # We use github-script to forward them to subsequent steps.
+      - name: Configure sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
+            core.exportVariable('RUSTC_WRAPPER', 'sccache');
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'on');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL);
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN);
+
+      - name: Install sccache
+        if: ${{ needs.preflight.outputs.sccache == 'true' }}
+        shell: pwsh
+        run: |
+          $Platform = @{'Windows'='win'; 'Linux'='linux'; 'macOS'='osx'}['${{ runner.os }}']
+          $Arch = @{'X64'='x64'; 'ARM64'='arm64'}['${{ runner.arch }}']
+          ./ci/install-sccache.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Prepare runner
         run: |
