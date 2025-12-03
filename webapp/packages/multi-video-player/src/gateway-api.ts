@@ -70,9 +70,8 @@ export class GatewayRecordingApi {
 
   static fromPullUrl(pullUrl: string): GatewayRecordingApi {
     const url = new URL(pullUrl);
-    const pathParts = url.pathname.split('/pull/');
-    const gatewayUrl = `${url.protocol}//${url.host}${pathParts[0]}`;
-    const sessionId = pathParts[1].split('/')[0];
+    const gatewayUrl = `${url.protocol}//${url.host}`;
+    const sessionId = url.pathname.split('/jrec/pull/')[1].split('/')[0];
     const token = url.searchParams.get('token') || '';
 
     return new GatewayRecordingApi(gatewayUrl, sessionId, token);
