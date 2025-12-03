@@ -1,4 +1,4 @@
-#!/bin/env pwsh
+#!/usr/bin/env pwsh
 
 param(
 	[Parameter(Mandatory=$true)]
