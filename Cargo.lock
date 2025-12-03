@@ -1235,6 +1235,7 @@ dependencies = [
  "jmux-proxy",
  "job-queue",
  "job-queue-libsql",
+ "kdc",
  "multibase",
  "network-monitor",
  "network-scanner",
@@ -3099,6 +3100,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdc"
+version = "0.1.0"
+source = "git+https://github.com/Devolutions/sspi-rs.git?rev=e1bb3f9c301f90df9ff30f94816f1f85392eab8a#e1bb3f9c301f90df9ff30f94816f1f85392eab8a"
+dependencies = [
+ "argon2",
+ "picky-asn1 0.10.1",
+ "picky-asn1-der 0.5.2",
+ "picky-asn1-x509 0.15.2",
+ "picky-krb 0.11.0",
+ "serde",
+ "thiserror 2.0.17",
+ "time",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4394,6 +4412,19 @@ dependencies = [
  "serde",
  "widestring 1.2.1",
  "zeroize",
+]
+
+[[package]]
+name = "picky-asn1-x509"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c97cd14d567a17755910fa8718277baf39d08682a980b1b1a4b4da7d0bc61a04"
+dependencies = [
+ "base64 0.22.1",
+ "oid",
+ "picky-asn1 0.10.1",
+ "picky-asn1-der 0.5.2",
+ "serde",
 ]
 
 [[package]]

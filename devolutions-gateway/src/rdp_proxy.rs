@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
-use crate::config::dto::{DomainUser, KerberosServer};
+use crate::config::dto::KerberosConfig as KrbConfig;
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
@@ -21,6 +21,7 @@ use ironrdp_connector::sspi::{
     self, AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
 };
 use ironrdp_pdu::{mcs, nego, x224};
+use kdc::config::{DomainUser, KerberosServer};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -117,15 +118,16 @@ where
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
     let (krb_server_config, network_client) = if conf.debug.enable_unstable
-        && let Some(KerberosServer {
-            realm: _,
-            users: _,
-            krbtgt_key: _,
-            max_time_skew,
-            ticket_decryption_key,
-            service_user,
+        && let Some(KrbConfig {
+            kerberos_server:
+                KerberosServer {
+                    max_time_skew,
+                    ticket_decryption_key,
+                    service_user,
+                    ..
+                },
             kdc_url: _,
-        }) = conf.debug.kerberos_server.as_ref()
+        }) = conf.debug.kerberos.as_ref()
     {
         let user = service_user.as_ref().map(|user| {
             let DomainUser {
@@ -168,15 +170,10 @@ where
     );
 
     let (krb_client_config, network_client) = if conf.debug.enable_unstable
-        && let Some(KerberosServer {
-            realm: _,
-            users: _,
-            krbtgt_key: _,
-            max_time_skew: _,
-            ticket_decryption_key: _,
-            service_user: _,
+        && let Some(KrbConfig {
+            kerberos_server: _,
             kdc_url,
-        }) = conf.debug.kerberos_server.as_ref()
+        }) = conf.debug.kerberos.as_ref()
     {
         (
             Some(KerberosConfig {
