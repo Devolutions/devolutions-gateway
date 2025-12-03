@@ -113,10 +113,40 @@ export class MultiVideoPlayer extends HTMLElement {
     }
   }
 
+  pause() {
+    if (this.player) {
+      try {
+        this.player.pause();
+      } catch (error) {
+        // ignore pause errors
+      }
+    }
+  }
+
   private progressControl(): MultiVideoProgressControl | null {
     return this.player
       ?.getChild('controlBar')
       ?.getChild('MultiVideoProgressControl') as MultiVideoProgressControl | null;
+  }
+
+  async dispose() {
+    if (this.player) {
+      try {
+        // pause the player first to avoid AbortError
+        this.player.pause();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        this.player.dispose();
+      } catch (error) {
+        // ignore errors when disposing
+        console.debug('Error during player disposal:', error);
+      }
+      this.player = null;
+    }
+    this.videoElement = null;
+  }
+
+  disconnectedCallback() {
+    this.dispose();
   }
 }
 
