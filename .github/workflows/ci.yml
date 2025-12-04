@@ -7,12 +7,23 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      sccache:
+        description: Enable sccache for Rust compilation caching
+        required: false
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       ref:
         description: The commit SHA to build
         required: false
         type: string
+      sccache:
+        description: Enable sccache for Rust compilation caching
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   preflight:
@@ -22,6 +33,7 @@ jobs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
+      sccache: ${{ steps.sccache.outputs.enabled }}
       jetsocat-build-matrix: ${{ steps.setup-matrix.outputs.jetsocat-build-matrix }}
       gateway-build-matrix: ${{ steps.setup-matrix.outputs.gateway-build-matrix }}
       agent-build-matrix: ${{ steps.setup-matrix.outputs.agent-build-matrix }}
@@ -132,6 +144,14 @@ jobs:
           echo "rust-profile=$CargoProfile" >> $Env:GITHUB_OUTPUT
         shell: pwsh
 
+      - name: Configure sccache
+        id: sccache
+        run: |
+          # Enable sccache by default; only disable if explicitly set to false
+          # This handles push/pull_request triggers where inputs.sccache is undefined
+          $Enabled = if ("${{ inputs.sccache }}" -eq "false") { "false" } else { "true" }
+          echo "enabled=$Enabled" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
 
       - name: Upload version artifact
         uses: actions/upload-artifact@v4
@@ -158,6 +178,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
       - name: Check clippy
         shell: pwsh
         run: |
@@ -166,6 +191,11 @@ jobs:
               Write-Output "::error::Clippy warnings detected, please run 'cargo clippy --workspace --tests' and fix all warnings"
               exit 1
           }
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
 
   tests:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
@@ -187,6 +217,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
       - name: Configure Linux runner
         if: ${{ matrix.os == 'linux' }}
         run: |
@@ -198,6 +233,11 @@ jobs:
         shell: pwsh
         env:
           AWS_LC_SYS_NO_ASM: true
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
 
   check-dependencies:
     name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
@@ -233,6 +273,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
 
       - name: Setup LLVM
         if: ${{ runner.os == 'Linux' }}
@@ -315,6 +360,11 @@ jobs:
 
           echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
         shell: pwsh
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -498,6 +548,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
       - name: Download webapp-client
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/download-artifact@v4
@@ -630,7 +685,6 @@ jobs:
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
 
-
       - name: Add msbuild to PATH
         if: ${{ matrix.os == 'windows' }}
         uses: microsoft/setup-msbuild@v2
@@ -664,6 +718,11 @@ jobs:
         env:
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -723,6 +782,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
 
       - name: Load dynamic variables
         id: load-variables
@@ -914,6 +978,11 @@ jobs:
           }
         shell: pwsh
 
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -983,6 +1052,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
       - name: Prepare runner
         run: |
           $VSInstallationPath = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
@@ -1013,6 +1087,11 @@ jobs:
           cargo +nightly test --target x86_64-pc-windows-msvc -p win-api-wrappers -p devolutions-pedm
         shell: pwsh
 
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
+
   winapi-miri:
     name: Windows API miri tests [${{ matrix.os }}][${{ matrix.mode }}]
     needs: [preflight]
@@ -1040,6 +1119,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Setup Rust cache
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
       - name: Prepare runner
         run: |
           rustup toolchain install nightly --component miri
@@ -1049,6 +1133,11 @@ jobs:
           $Env:MIRIFLAGS = "${{ matrix.miriflags }}"
           cargo +nightly miri test -p win-api-wrappers
         shell: pwsh
+
+      - name: Show sccache stats
+        if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
+        shell: pwsh
+        run: sccache --show-stats
 
   pedm-simulator:
     name: PEDM simulator
