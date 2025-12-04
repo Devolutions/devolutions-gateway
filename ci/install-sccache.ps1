@@ -15,8 +15,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Arch = @{'x64'='x86_64'; 'arm64'='aarch64'}[$Architecture]
-$tmpFolder = [System.IO.Path]::GetTempPath() + [System.Guid]::NewGuid()
-New-Item -ItemType Directory -Path $tmpFolder | Out-Null
+$downloadFolder = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+New-Item -ItemType Directory -Path $downloadFolder | Out-Null
 
 function Get-ExpectedChecksum {
 	param([string]$ChecksumUrl)
@@ -50,7 +50,7 @@ try
 		$ArchiveFile = "${Archive}.zip"
 		$Url = "https://github.com/mozilla/sccache/releases/download/v${Version}/${ArchiveFile}"
 		$ChecksumUrl = "${Url}.sha256"
-		$DownloadPath = Join-Path $tmpFolder $ArchiveFile
+		$DownloadPath = Join-Path $downloadFolder $ArchiveFile
 
 		Write-Host "Downloading sccache from $Url"
 		Invoke-WebRequest -Uri $Url -OutFile $DownloadPath
@@ -59,15 +59,18 @@ try
 		$expectedHash = Get-ExpectedChecksum -ChecksumUrl $ChecksumUrl
 		Test-FileChecksum -FilePath $DownloadPath -ExpectedHash $expectedHash
 
-		Expand-Archive -Path $DownloadPath -DestinationPath $tmpFolder -Force
-		Write-Output (Join-Path $tmpFolder $Archive) | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
+		# Install to RUNNER_TOOL_CACHE so the binary persists across steps.
+		$installFolder = Join-Path $Env:RUNNER_TOOL_CACHE "sccache" $Version $Arch
+		New-Item -ItemType Directory -Path $installFolder -Force | Out-Null
+		Expand-Archive -Path $DownloadPath -DestinationPath $installFolder -Force
+		Write-Output (Join-Path $installFolder $Archive) | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
 	} else {
 		$Suffix = @{'linux'='unknown-linux-musl'; 'osx'='apple-darwin'}[$Platform]
 		$Archive = "sccache-v${Version}-${Arch}-${Suffix}"
 		$ArchiveFile = "${Archive}.tar.gz"
 		$Url = "https://github.com/mozilla/sccache/releases/download/v${Version}/${ArchiveFile}"
 		$ChecksumUrl = "${Url}.sha256"
-		$DownloadPath = Join-Path $tmpFolder $ArchiveFile
+		$DownloadPath = Join-Path $downloadFolder $ArchiveFile
 
 		Write-Host "Downloading sccache from $Url"
 		Invoke-WebRequest -Uri $Url -OutFile $DownloadPath
@@ -95,5 +98,6 @@ catch
 }
 finally
 {
-	Remove-Item -Path $tmpFolder -Recurse -Force -ErrorAction SilentlyContinue
+	# Clean up the download folder (not the install folder on Windows).
+	Remove-Item -Path $downloadFolder -Recurse -Force -ErrorAction SilentlyContinue
 }
