@@ -77,7 +77,14 @@ try
 		Test-FileChecksum -FilePath $DownloadPath -ExpectedHash $expectedHash
 
 		tar -xzf $DownloadPath -C /usr/local/bin --strip-components=1 "${Archive}/sccache"
+		if ($LASTEXITCODE -ne 0) {
+			throw "tar extraction failed with exit code $LASTEXITCODE"
+		}
+
 		chmod +x /usr/local/bin/sccache
+		if ($LASTEXITCODE -ne 0) {
+			throw "chmod failed with exit code $LASTEXITCODE"
+		}
 	}
 
 	Write-Host "sccache installed successfully"
