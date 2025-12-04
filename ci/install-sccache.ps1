@@ -21,9 +21,15 @@ New-Item -ItemType Directory -Path $tmpFolder | Out-Null
 function Get-ExpectedChecksum {
 	param([string]$ChecksumUrl)
 
-	$checksumContent = Invoke-WebRequest -Uri $ChecksumUrl -UseBasicParsing
+	$response = Invoke-WebRequest -Uri $ChecksumUrl -UseBasicParsing
+	# Convert byte array to string if needed.
+	$checksumText = if ($response.Content -is [byte[]]) {
+		[System.Text.Encoding]::UTF8.GetString($response.Content)
+	} else {
+		$response.Content
+	}
 	# The .sha256 file format is: <hash>  <filename>
-	$expectedHash = ($checksumContent.Content -split '\s+')[0].Trim().ToUpper()
+	$expectedHash = ($checksumText -split '\s+')[0].Trim().ToUpper()
 	return $expectedHash
 }
 
