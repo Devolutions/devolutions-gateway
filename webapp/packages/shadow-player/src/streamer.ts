@@ -49,7 +49,9 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   onEnd(callback: () => void) {
-    this.videoElement.controls = true;
+    if (this._videoElement) {
+      this._videoElement.controls = true;
+    }
     this.onEndCallback = callback;
   }
 
@@ -59,8 +61,8 @@ export class ShadowPlayer extends HTMLElement {
       return;
     }
 
-    if (Object.prototype.hasOwnProperty.call(this.videoElement, name)) {
-      this.videoElement.setAttribute(name, newValue !== null ? newValue : '');
+    if (this._videoElement && Object.prototype.hasOwnProperty.call(this._videoElement, name)) {
+      this._videoElement.setAttribute(name, newValue !== null ? newValue : '');
     }
   }
 
@@ -104,8 +106,8 @@ export class ShadowPlayer extends HTMLElement {
       if (attr === 'src' && value !== null) {
         this.srcChange(value);
       }
-      if (value !== null) {
-        this.videoElement.setAttribute(attr, value);
+      if (value !== null && this._videoElement) {
+        this._videoElement.setAttribute(attr, value);
       }
     }
   }
@@ -119,7 +121,9 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   public play() {
-    this.videoElement.play();
+    if (this._videoElement) {
+      this._videoElement.play();
+    }
   }
 
   private replay() {
@@ -130,10 +134,13 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   public srcChange(value: string) {
+    if (!this._videoElement) {
+      return;
+    }
     this.isDisconnecting = false;
     const mediaSource = new MediaSource();
     this._src = value;
-    this.videoElement.src = URL.createObjectURL(mediaSource);
+    this._videoElement.src = URL.createObjectURL(mediaSource);
     mediaSource.addEventListener('sourceopen', () => {
       this.handleSourceOpen(mediaSource);
     });
