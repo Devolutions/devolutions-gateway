@@ -14,6 +14,7 @@ use crate::updater::{Product, UpdaterCtx, UpdaterError};
 const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
     "3f5202a9432d54293bdfe6f7e46adb0a6f8b3ba6",
     "8db5a43bb8afe4d2ffb92da9007d8997a4cc4e13",
+    "50f753333811ff11f1920274afde3ffd4468b210",
 ];
 
 pub(crate) async fn install_package(
