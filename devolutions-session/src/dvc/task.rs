@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
@@ -26,9 +27,9 @@ use now_proto_pdu::{
     ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
     NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
     NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
-    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowSessionCapsetFlags, NowSessionMessage,
-    NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags, NowSystemMessage,
-    SetKbdLayoutOption,
+    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmCapabilitiesMsg, NowRdmMessage, NowSessionCapsetFlags,
+    NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags,
+    NowSystemMessage, SetKbdLayoutOption,
 };
 use win_api_wrappers::event::Event;
 use win_api_wrappers::security::privilege::ScopedPrivileges;
@@ -331,6 +332,20 @@ impl MessageProcessor {
         message: NowMessage<'static>,
     ) -> anyhow::Result<ProcessMessageAction> {
         match message {
+            NowMessage::Rdm(NowRdmMessage::Capabilities(_)) => {
+                // Send empty capabilities (as RDM app is not available on the server side).
+
+                let server_timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .context("Failed to get current timestamp")?
+                    .as_secs();
+
+                let rdm_caps = NowRdmCapabilitiesMsg::new(server_timestamp, String::new())?;
+
+                self.dvc_tx
+                    .send(NowMessage::Rdm(NowRdmMessage::Capabilities(rdm_caps)))
+                    .await?;
+            }
             NowMessage::Channel(NowChannelMessage::Capset(client_caps)) => {
                 return Ok(ProcessMessageAction::Restart(client_caps));
             }
