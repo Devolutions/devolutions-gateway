@@ -135,10 +135,38 @@ jobs:
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
         shell: pwsh
 
+      # Download Cadeau native libraries for all supported platforms and architectures.
+      # Cadeau provides the libxmf library for XMF (eXtensible Media Format) support.
+      #
+      # Organization strategy:
+      # We organize native libraries by platform and architecture (native-libs/{platform}/{arch}/)
+      # because different architectures require different compiled binaries even on the same OS.
+      # This structure makes it explicit which library is used for each platform+arch combination,
+      # preventing accidental use of wrong-architecture libraries which would cause runtime failures.
+      #
+      # Structure:
+      #   native-libs/windows/x64/xmf.dll       - Windows x64
+      #   native-libs/linux/x64/libxmf.so       - Linux x86_64 (amd64)
+      #   native-libs/linux/arm64/libxmf.so     - Linux ARM64 (aarch64)
       - name: Download Cadeau
         run: |
+          # Download Windows x64
           ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
+          $WinFiles = Get-ChildItem -Path native-libs -File
+          New-Item -ItemType Directory -Path native-libs/windows/x64 -Force | Out-Null
+          $WinFiles | Move-Item -Destination native-libs/windows/x64
+
+          # Download Linux x64
           ./ci/download-cadeau.ps1 -Platform 'linux' -Architecture 'x64'
+          $LinuxX64Files = Get-ChildItem -Path native-libs -File
+          New-Item -ItemType Directory -Path native-libs/linux/x64 -Force | Out-Null
+          $LinuxX64Files | Move-Item -Destination native-libs/linux/x64
+
+          # Download Linux arm64
+          ./ci/download-cadeau.ps1 -Platform 'linux' -Architecture 'arm64'
+          $LinuxArm64Files = Get-ChildItem -Path native-libs -File
+          New-Item -ItemType Directory -Path native-libs/linux/arm64 -Force | Out-Null
+          $LinuxArm64Files | Move-Item -Destination native-libs/linux/arm64
         shell: pwsh
 
       - name: Upload native libs
@@ -391,7 +419,7 @@ jobs:
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
           $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
-          $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
+          $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "windows" "x64" "xmf.dll" | Resolve-Path
 
           Write-Host "DGATEWAY_EXECUTABLE = ${Env:DGATEWAY_EXECUTABLE}"
           Write-Host "DGATEWAY_PSMODULE_PATH = ${Env:DGATEWAY_PSMODULE_PATH}"
