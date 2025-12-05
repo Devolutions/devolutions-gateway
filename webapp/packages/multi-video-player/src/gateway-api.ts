@@ -17,13 +17,13 @@ interface Session {
 
 export class GatewayRecordingApi {
   constructor(
-    public gatewayUrl: string,
+    public jetApiUrl: string,
     public sessionId: string,
     public token: string
   ) {}
 
   async fetchMetadata(): Promise<GatewayRecordingFileConfig> {
-    const url = `${this.gatewayUrl}/jet/jrec/pull/${this.sessionId}/recording.json?token=${this.token}`;
+    const url = `${this.jetApiUrl}/jrec/pull/${this.sessionId}/recording.json?token=${this.token}`;
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -34,19 +34,19 @@ export class GatewayRecordingApi {
   }
 
   getSegmentUrl(fileName: string): string {
-    return `${this.gatewayUrl}/jet/jrec/pull/${this.sessionId}/${fileName}?token=${this.token}`;
+    return `${this.jetApiUrl}/jrec/pull/${this.sessionId}/${fileName}?token=${this.token}`;
   }
 
   getShadowUrl(): string {
-    const wsUrl = this.gatewayUrl
+    const wsUrl = this.jetApiUrl
       .replace('http://', 'ws://')
       .replace('https://', 'wss://');
-    return `${wsUrl}/jet/jrec/shadow/${this.sessionId}?token=${this.token}`;
+    return `${wsUrl}/jrec/shadow/${this.sessionId}?token=${this.token}`;
   }
 
   async isSessionActive(): Promise<boolean> {
     try {
-      const url = `${this.gatewayUrl}/jet/sessions`;
+      const url = `${this.jetApiUrl}/sessions`;
 
       const response = await fetch(url, {
         headers: {
@@ -70,11 +70,11 @@ export class GatewayRecordingApi {
 
   static fromPullUrl(pullUrl: string): GatewayRecordingApi {
     const url = new URL(pullUrl);
-    const pathParts = url.pathname.split('/pull/');
-    const gatewayUrl = `${url.protocol}//${url.host}${pathParts[0]}`;
+    const pathParts = url.pathname.split('/jrec/pull/');
+    const jetApiUrl = `${url.protocol}//${url.host}${pathParts[0]}`;
     const sessionId = pathParts[1].split('/')[0];
     const token = url.searchParams.get('token') || '';
 
-    return new GatewayRecordingApi(gatewayUrl, sessionId, token);
+    return new GatewayRecordingApi(jetApiUrl, sessionId, token);
   }
 }
