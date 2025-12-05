@@ -274,18 +274,29 @@ jobs:
 
           # Build and push amd64 image
           Write-Host "Building amd64 image..."
-          $BuildPushFlag = if (-Not $DryRun) { "--push" } else { "" }
-          docker buildx build --platform linux/amd64 `
-            --tag "${ImageName}:${Version}-amd64" `
-            $BuildPushFlag `
-            $Amd64Context
+          if (-Not $DryRun) {
+            docker buildx build --platform linux/amd64 `
+              --tag "${ImageName}:${Version}-amd64" `
+              --push `
+              $Amd64Context
+          } else {
+            docker buildx build --platform linux/amd64 `
+              --tag "${ImageName}:${Version}-amd64" `
+              $Amd64Context
+          }
 
           # Build and push arm64 image (cross-compiled on x86_64 runner using QEMU)
           Write-Host "Building arm64 image..."
-          docker buildx build --platform linux/arm64 `
-            --tag "${ImageName}:${Version}-arm64" `
-            $BuildPushFlag `
-            $Arm64Context
+          if (-Not $DryRun) {
+            docker buildx build --platform linux/arm64 `
+              --tag "${ImageName}:${Version}-arm64" `
+              --push `
+              $Arm64Context
+          } else {
+            docker buildx build --platform linux/arm64 `
+              --tag "${ImageName}:${Version}-arm64" `
+              $Arm64Context
+          }
 
           if (-Not $DryRun) {
             # Create multi-arch manifests that reference both architecture-specific images.
