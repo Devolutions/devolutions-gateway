@@ -123,7 +123,7 @@ impl Task for UpdaterTask {
                         let update_order = match check_for_updates(*product, &update_json).await {
                             Ok(order) => order,
                             Err(error) => {
-                                error!(%product, %error, "Failed to check for updates for a product.");
+                                error!(%product, error = format!("{error:#}"), "Failed to check for updates for a product");
                                 continue;
                             }
                         };
