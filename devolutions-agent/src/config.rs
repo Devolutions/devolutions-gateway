@@ -373,6 +373,31 @@ pub mod dto {
         /// Enable unstable features which may break at any point
         #[serde(default)]
         pub enable_unstable: bool,
+
+        /// Override productinfo URL (supports https:// and file:// schemes)
+        ///
+        /// Useful for testing with local productinfo.json files without publishing to CDN.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub productinfo_url: Option<String>,
+
+        /// Allow downloads from non-official CDN URLs
+        ///
+        /// By default, package downloads are restricted to cdn.devolutions.net.
+        /// Enable this to allow downloads from arbitrary URLs for local testing.
+        #[serde(default)]
+        pub allow_unsafe_updater_urls: bool,
+
+        /// Skip hash validation for downloaded packages
+        ///
+        /// Useful for testing with modified packages without updating hashes.
+        #[serde(default)]
+        pub skip_updater_hash_validation: bool,
+
+        /// Skip MSI signature validation for packages
+        ///
+        /// Useful for testing with unsigned or test-signed packages.
+        #[serde(default)]
+        pub skip_msi_signature_validation: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -383,6 +408,10 @@ pub mod dto {
                 log_directives: None,
                 skip_msi_install: false,
                 enable_unstable: false,
+                productinfo_url: None,
+                allow_unsafe_updater_urls: false,
+                skip_updater_hash_validation: false,
+                skip_msi_signature_validation: false,
             }
         }
     }

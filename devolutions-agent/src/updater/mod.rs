@@ -38,6 +38,61 @@ const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
 // List of updateable products could be extended in future
 const PRODUCTS: &[Product] = &[Product::Gateway, Product::HubService];
 
+/// Load productinfo source from configured URL or file path
+async fn load_productinfo_source(conf: &ConfHandle) -> Result<String, UpdaterError> {
+    let conf_data = conf.get_conf();
+    let source = conf_data
+        .debug
+        .productinfo_url
+        .as_deref()
+        .unwrap_or(DEVOLUTIONS_PRODUCTINFO_URL);
+
+    if source.starts_with("file://") {
+        info!(%source, "Loading productinfo from file path");
+        // Use download_utf8 which now handles file:// URLs correctly
+        download_utf8(source).await.map_err(|e| {
+            error!(%source, error = ?e, "Failed to load productinfo from file path");
+            e
+        })
+    } else {
+        info!(%source, "Downloading productinfo from URL");
+        download_utf8(source).await.map_err(|e| {
+            error!(%source, error = ?e, "Failed to download productinfo from URL");
+            e
+        })
+    }
+}
+
+/// Validate that download URL is from official CDN unless unsafe URLs are allowed
+fn validate_download_url(ctx: &UpdaterCtx, url: &str) -> Result<(), UpdaterError> {
+    // Allow file:// URLs in debug mode
+    if url.starts_with("file://") {
+        if ctx.conf.get_conf().debug.allow_unsafe_updater_urls {
+            warn!(%url, "DEBUG MODE: Allowing file:// URL");
+            return Ok(());
+        } else {
+            return Err(UpdaterError::UnsafeUrl {
+                product: ctx.product,
+                url: url.to_owned(),
+            });
+        }
+    }
+
+    if ctx.conf.get_conf().debug.allow_unsafe_updater_urls {
+        warn!(%url, "DEBUG MODE: Allowing non-CDN download URL");
+        return Ok(());
+    }
+
+    if !url.starts_with("https://cdn.devolutions.net/") {
+        return Err(UpdaterError::UnsafeUrl {
+            product: ctx.product,
+            url: url.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
 /// Context for updater task
 struct UpdaterCtx {
     product: Product,
@@ -120,7 +175,7 @@ impl Task for UpdaterTask {
                     let mut update_orders = vec![];
 
                     for product in PRODUCTS {
-                        let update_order = match check_for_updates(*product, &update_json).await {
+                        let update_order = match check_for_updates(*product, &update_json, &conf).await {
                             Ok(order) => order,
                             Err(error) => {
                                 error!(%product, error = format!("{error:#}"), "Failed to check for updates for a product");
@@ -157,6 +212,14 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
     let target_version = order.target_version;
     let hash = order.hash;
 
+    let mut ctx = UpdaterCtx {
+        product,
+        actions: build_product_actions(product),
+        conf,
+    };
+
+    validate_download_url(&ctx, &order.package_url)?;
+
     let package_data = download_binary(&order.package_url)
         .await
         .with_context(|| format!("failed to download package file for `{product}`"))?;
@@ -165,14 +228,12 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     info!(%product, %target_version, %package_path, "Downloaded product Installer");
 
-    let mut ctx = UpdaterCtx {
-        product,
-        actions: build_product_actions(product),
-        conf,
-    };
-
     if let Some(hash) = hash {
-        validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+        if ctx.conf.get_conf().debug.skip_updater_hash_validation {
+            warn!(%product, "DEBUG MODE: Skipping hash validation");
+        } else {
+            validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
+        }
     }
 
     validate_package(&ctx, &package_path).context("failed to validate package contents")?;
@@ -225,7 +286,11 @@ async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJ
     Ok(update_json)
 }
 
-async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow::Result<Option<UpdateOrder>> {
+async fn check_for_updates(
+    product: Product,
+    update_json: &UpdateJson,
+    conf: &ConfHandle,
+) -> anyhow::Result<Option<UpdateOrder>> {
     let target_version = match product.get_update_info(update_json).map(|info| info.target_version) {
         Some(version) => version,
         None => {
@@ -258,9 +323,9 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     info!(%product, %target_version, "Ready to update the product");
 
-    let product_info_json = download_utf8(DEVOLUTIONS_PRODUCTINFO_URL)
+    let product_info_json = load_productinfo_source(conf)
         .await
-        .context("failed to download productinfo database")?;
+        .context("failed to load productinfo database")?;
 
     let parse_result = ProductInfoDb::parse_product_info(&product_info_json);
 
@@ -283,7 +348,10 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
             }
         })?;
 
-    let remote_version = product_info.version.parse::<DateVersion>()?;
+    let remote_version = product_info.version.parse::<DateVersion>().map_err(|e| {
+        error!(%product, version = %product_info.version, error = ?e, "Failed to parse remote version");
+        e
+    })?;
 
     match target_version {
         VersionSpecification::Latest => {
