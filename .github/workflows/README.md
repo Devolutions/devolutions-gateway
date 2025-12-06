@@ -69,11 +69,18 @@ The "Release" workflow downloads the artifacts from a [Package](#package) workfl
 
 The following actions are taken:
 
-- Build containers for Devolutions Gateway and publish to Docker
+- Build multi-architecture containers for Devolutions Gateway (AMD64 and ARM64) and publish to Docker
 - Push the Devolutions Gateway PowerShell module to PSGallery
 - Generate a GitHub release
 
 Re-releasing the same version multiple times is not supported. The "Release" workflow checks for an existing GitHub release with the specified version and will not proceed if found.
+
+##### Multi-Architecture Docker Images
+
+Devolutions Gateway Docker images support both AMD64 (x86_64) and ARM64 (aarch64) architectures. The workflow:
+1. Prepares separate build contexts for each architecture with appropriate binaries and native libraries
+2. Uses Docker Buildx and QEMU to build both architectures on x86_64 runners
+3. Creates multi-arch manifest lists so users automatically get the correct image for their platform
 
 ##### Parameters
 
