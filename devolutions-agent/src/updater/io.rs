@@ -7,18 +7,43 @@ use tokio::io::AsyncWriteExt;
 
 use crate::updater::UpdaterError;
 
-/// Download binary file to memory.
-pub(crate) async fn download_binary(url: &str) -> Result<Vec<u8>, UpdaterError> {
-    info!(%url, "Downloading file from network...");
+/// Parse file:// URL according to RFC 8089
+///
+/// Supports:
+/// - file:///C:/path/to/file (Windows absolute path with drive letter)
+/// - file://C:/path/to/file (Windows absolute path, lenient parsing)
+/// - file:///path/to/file (Unix absolute path)
+/// - file://path/to/file (relative path, lenient parsing)
+fn parse_file_url(url: &str) -> Option<&str> {
+    let path = url.strip_prefix("file://")?;
 
-    let body = reqwest::get(url)
-        .and_then(|response| response.bytes())
-        .map_err(|source| UpdaterError::FileDownload {
-            source,
-            url: url.to_owned(),
-        })
-        .await?;
-    Ok(body.to_vec())
+    // RFC 8089: file:///C:/... (three slashes before drive letter)
+    // Also accept file://C:/... (two slashes, lenient parsing)
+    if let Some(rest) = path.strip_prefix('/') {
+        Some(rest)
+    } else {
+        // No leading slash after file:// - use path as-is
+        Some(path)
+    }
+}
+
+/// Download binary file to memory
+pub(crate) async fn download_binary(url: &str) -> Result<Vec<u8>, UpdaterError> {
+    if let Some(path) = parse_file_url(url) {
+        info!(%url, "Reading file from local filesystem...");
+        tokio::fs::read(path).await.map_err(UpdaterError::Io)
+    } else {
+        info!(%url, "Downloading file from network...");
+
+        let body = reqwest::get(url)
+            .and_then(|response| response.bytes())
+            .map_err(|source| UpdaterError::FileDownload {
+                source,
+                url: url.to_owned(),
+            })
+            .await?;
+        Ok(body.to_vec())
+    }
 }
 
 /// Download UTF-8 file to memory
