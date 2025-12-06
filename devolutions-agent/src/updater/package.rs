@@ -230,6 +230,12 @@ pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), 
 }
 
 fn validate_msi(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
+    // Allow skipping signature validation in debug mode
+    if ctx.conf.get_conf().debug.skip_msi_signature_validation {
+        warn!("DEBUG MODE: Skipping MSI signature validation");
+        return Ok(());
+    }
+
     use windows::Win32::Security::Cryptography::{
         CALG_SHA1, CERT_CONTEXT, CertFreeCertificateContext, CryptHashCertificate,
     };
