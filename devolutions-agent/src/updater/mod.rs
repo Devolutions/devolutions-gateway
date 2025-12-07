@@ -58,18 +58,18 @@ async fn load_productinfo_source(conf: &ConfHandle) -> Result<String, UpdaterErr
 
 /// Validate that download URL is from official CDN unless unsafe URLs are allowed
 fn validate_download_url(ctx: &UpdaterCtx, url: &str) -> Result<(), UpdaterError> {
-    // The URL is matching our CDN, we allow
+    // The URL is matching our CDN, we allow.
     if url.starts_with("https://cdn.devolutions.net/") {
         return Ok(());
     }
 
-    // allow_unsafe_updater_urls is set, we allow anything
+    // The allow_unsafe_updater_urls flag is set, we allow anything.
     if ctx.conf.get_conf().debug.allow_unsafe_updater_urls {
         warn!(%url, "DEBUG MODE: Allowing non-CDN download URL");
         return Ok(());
     }
 
-    // or we reject
+    // Otherwise, we reject.
     Err(UpdaterError::UnsafeUrl {
         product: ctx.product,
         url: url.to_owned(),
