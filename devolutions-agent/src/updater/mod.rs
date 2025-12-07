@@ -49,7 +49,7 @@ async fn load_productinfo_source(conf: &ConfHandle) -> Result<String, UpdaterErr
 
     if source.starts_with("file://") {
         info!(%source, "Loading productinfo from file path");
-        // Use download_utf8 which now handles file:// URLs correctly
+        // Use download_utf8 which handles file:// URLs.
         download_utf8(source).await.map_err(|e| {
             error!(%source, error = ?e, "Failed to load productinfo from file path");
             e
