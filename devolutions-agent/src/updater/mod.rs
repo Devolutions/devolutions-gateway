@@ -49,48 +49,31 @@ async fn load_productinfo_source(conf: &ConfHandle) -> Result<String, UpdaterErr
 
     if source.starts_with("file://") {
         info!(%source, "Loading productinfo from file path");
-        // Use download_utf8 which handles file:// URLs.
-        download_utf8(source).await.map_err(|e| {
-            error!(%source, error = ?e, "Failed to load productinfo from file path");
-            e
-        })
+        download_utf8(source).await
     } else {
         info!(%source, "Downloading productinfo from URL");
-        download_utf8(source).await.map_err(|e| {
-            error!(%source, error = ?e, "Failed to download productinfo from URL");
-            e
-        })
+        download_utf8(source).await
     }
 }
 
 /// Validate that download URL is from official CDN unless unsafe URLs are allowed
 fn validate_download_url(ctx: &UpdaterCtx, url: &str) -> Result<(), UpdaterError> {
-    // Allow file:// URLs in debug mode
-    if url.starts_with("file://") {
-        if ctx.conf.get_conf().debug.allow_unsafe_updater_urls {
-            warn!(%url, "DEBUG MODE: Allowing file:// URL");
-            return Ok(());
-        } else {
-            return Err(UpdaterError::UnsafeUrl {
-                product: ctx.product,
-                url: url.to_owned(),
-            });
-        }
+    // The URL is matching our CDN, we allow
+    if url.starts_with("https://cdn.devolutions.net/") {
+        return Ok(());
     }
 
+    // allow_unsafe_updater_urls is set, we allow anything
     if ctx.conf.get_conf().debug.allow_unsafe_updater_urls {
         warn!(%url, "DEBUG MODE: Allowing non-CDN download URL");
         return Ok(());
     }
 
-    if !url.starts_with("https://cdn.devolutions.net/") {
-        return Err(UpdaterError::UnsafeUrl {
-            product: ctx.product,
-            url: url.to_owned(),
-        });
-    }
-
-    Ok(())
+    // or we reject
+    Err(UpdaterError::UnsafeUrl {
+        product: ctx.product,
+        url: url.to_owned(),
+    })
 }
 
 /// Context for updater task
@@ -348,10 +331,7 @@ async fn check_for_updates(
             }
         })?;
 
-    let remote_version = product_info.version.parse::<DateVersion>().map_err(|e| {
-        error!(%product, version = %product_info.version, error = ?e, "Failed to parse remote version");
-        e
-    })?;
+    let remote_version = product_info.version.parse::<DateVersion>()?;
 
     match target_version {
         VersionSpecification::Latest => {
