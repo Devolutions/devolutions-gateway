@@ -27,7 +27,7 @@ const OP_RESOLVE_HOST: &str = "resolve-host";
 const DEFAULT_TTL: Duration = Duration::minutes(15);
 const MAX_TTL: Duration = Duration::hours(2);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct PreflightOperation {
     id: Uuid,
     kind: String,
@@ -198,7 +198,16 @@ pub(super) async fn post_preflight(
     _scope: PreflightScope,
     Json(operations): Json<Vec<PreflightOperation>>,
 ) -> Result<Json<Vec<PreflightOutput>>, HttpError> {
-    debug!(?operations, "Preflight operations");
+    // Log operations with sensitive fields redacted.
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        let mut redacted_operations = operations.clone();
+        for operation in &mut redacted_operations {
+            for value in operation.params.values_mut() {
+                redact_sensitive_fields(value);
+            }
+        }
+        debug!(operations = ?redacted_operations, "Preflight operations");
+    }
 
     let outputs = Outputs::with_capacity(operations.len());
 
@@ -394,4 +403,76 @@ async fn handle_operation(
 
 fn from_params<T: de::DeserializeOwned>(params: serde_json::Map<String, serde_json::Value>) -> serde_json::Result<T> {
     serde_json::from_value(serde_json::Value::Object(params))
+}
+
+/// Redacts sensitive fields in JSON values.
+///
+/// This function recursively traverses a JSON value and replaces any field
+/// with a key name of "password" with the string "***REDACTED***".
+fn redact_sensitive_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map.iter_mut() {
+                if key.eq_ignore_ascii_case("password") {
+                    *val = serde_json::Value::String("***REDACTED***".to_owned());
+                } else {
+                    // Recursively redact nested objects and arrays.
+                    redact_sensitive_fields(val);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                redact_sensitive_fields(item);
+            }
+        }
+        _ => {
+            // Nothing to redact in primitives (String, Number, Bool, Null).
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[rstest::rstest]
+    #[case::simple_password(
+        serde_json::json!({"username": "admin", "password": "secret123"}),
+        serde_json::json!({"username": "admin", "password": "***REDACTED***"})
+    )]
+    #[case::nested_password(
+        serde_json::json!({
+            "credential": {
+                "kind": "username-password",
+                "username": "user",
+                "password": "super-secret"
+            }
+        }),
+        serde_json::json!({
+            "credential": {
+                "kind": "username-password",
+                "username": "user",
+                "password": "***REDACTED***"
+            }
+        })
+    )]
+    #[case::case_insensitive(
+        serde_json::json!({"PASSWORD": "secret", "Password": "secret2"}),
+        serde_json::json!({"PASSWORD": "***REDACTED***", "Password": "***REDACTED***"})
+    )]
+    #[case::array_with_passwords(
+        serde_json::json!([
+            {"username": "user1", "password": "pass1"},
+            {"username": "user2", "password": "pass2"}
+        ]),
+        serde_json::json!([
+            {"username": "user1", "password": "***REDACTED***"},
+            {"username": "user2", "password": "***REDACTED***"}
+        ])
+    )]
+    fn test_redact_sensitive_fields(#[case] mut input: serde_json::Value, #[case] expected: serde_json::Value) {
+        redact_sensitive_fields(&mut input);
+        assert_eq!(input, expected);
+    }
 }
