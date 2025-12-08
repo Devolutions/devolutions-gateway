@@ -206,7 +206,7 @@ pub(super) async fn post_preflight(
                 redact_sensitive_fields(value);
             }
         }
-        debug!(?redacted_operations, "Preflight operations");
+        debug!(operations = ?redacted_operations, "Preflight operations");
     }
 
     let outputs = Outputs::with_capacity(operations.len());
