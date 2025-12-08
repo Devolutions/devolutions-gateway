@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
-use crate::config::dto::KerberosConfig as KrbConfig;
+use crate::config::dto::{DomainUser, KerberosConfig as KrbConfig, KerberosServer};
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
@@ -21,7 +21,6 @@ use ironrdp_connector::sspi::{
     self, AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
 };
 use ironrdp_pdu::{mcs, nego, x224};
-use kdc::config::{DomainUser, KerberosServer};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -131,12 +130,12 @@ where
     {
         let user = service_user.as_ref().map(|user| {
             let DomainUser {
-                username,
+                fqdn,
                 password,
                 salt: _,
             } = user;
             // The username is in the FQDN format. Thus, the domain field can be empty.
-            CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(username, "", password))
+            CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(fqdn, "", password))
         });
 
         (

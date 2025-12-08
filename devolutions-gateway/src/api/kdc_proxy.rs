@@ -5,6 +5,7 @@ use axum::Router;
 use axum::extract::{self, ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::routing::post;
+use kdc::config::KerberosServer;
 use kdc::handle_kdc_proxy_message;
 use picky_krb::messages::KdcProxyMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -88,9 +89,12 @@ async fn kdc_proxy(
     {
         debug!("Proxy-based credential injection with Kerberos. Processing KdcProxy message internally...");
 
-        let kdc_reply_message =
-            handle_kdc_proxy_message(kdc_proxy_message, &krb_config.kerberos_server, &conf.hostname)
-                .map_err(HttpError::internal().err())?;
+        let kdc_reply_message = handle_kdc_proxy_message(
+            kdc_proxy_message,
+            &KerberosServer::from(krb_config.kerberos_server.clone()),
+            &conf.hostname,
+        )
+        .map_err(HttpError::internal().err())?;
 
         return kdc_reply_message.to_vec().map_err(HttpError::internal().err());
     }

@@ -1137,11 +1137,92 @@ pub mod dto {
         }
     }
 
+    /// Domain user credentials.
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    pub struct DomainUser {
+        /// Username in FQDN format (e.g. "pw13@example.com").
+        pub fqdn: String,
+        /// User password.
+        pub password: String,
+        /// Salt for generating the user's key.
+        ///
+        /// Usually, it is equal to `{REALM}{username}` (e.g. "EXAMPLEpw13").
+        pub salt: String,
+    }
+
+    impl From<DomainUser> for kdc::config::DomainUser {
+        fn from(user: DomainUser) -> Self {
+            let DomainUser { fqdn, password, salt } = user;
+
+            Self {
+                username: fqdn,
+                password,
+                salt,
+            }
+        }
+    }
+
+    /// Kerberos server config
+    ///
+    /// This config is used to configure the Kerberos server during RDP proxying.
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    pub struct KerberosServer {
+        /// KDC and Kerberos Application Server realm.
+        ///
+        /// This is a fake realm. For example, `cd9bee03-b0aa-49dd-bad7-568b595c8024.jet`.
+        /// All Kerberos messages that target this realm will be processed internally and
+        /// never by the real KDC.
+        pub realm: String,
+        /// Users credentials inside fake KDC.
+        pub users: Vec<DomainUser>,
+        /// The maximum allowed time difference between client and proxy clocks.
+        ///
+        /// The value must be in seconds. [RFC 4120 8.2.  Recommended KDC Values](https://www.rfc-editor.org/rfc/rfc4120#section-8.2):
+        /// > Acceptable clock skew         5 minutes
+        pub max_time_skew: u64,
+        /// `krbtgt` service key.
+        ///
+        /// This key is used to encrypt/decrypt TGT tickets.
+        pub krbtgt_key: Vec<u8>,
+        /// Ticket decryption key.
+        ///
+        /// This key is used to decrypt the TGS ticket sent by the client. If you do not plan
+        /// to use Kerberos U2U authentication, then the `ticket_decryption_key` is required.
+        pub ticket_decryption_key: Option<Vec<u8>>,
+        /// The domain user credentials for the Kerberos U2U authentication.
+        ///
+        /// This field is needed only for Kerberos User-to-User authentication. If you do not plan
+        /// to use Kerberos U2U, do not specify it.
+        pub service_user: Option<DomainUser>,
+    }
+
+    impl From<KerberosServer> for kdc::config::KerberosServer {
+        fn from(server: KerberosServer) -> Self {
+            let KerberosServer {
+                realm,
+                users,
+                max_time_skew,
+                krbtgt_key,
+                ticket_decryption_key,
+                service_user,
+            } = server;
+
+            Self {
+                realm,
+                users: users.into_iter().map(Into::into).collect(),
+                max_time_skew,
+                krbtgt_key,
+                ticket_decryption_key,
+                service_user: service_user.map(Into::into),
+            }
+        }
+    }
+
     /// The Kerberos credentials-injection configuration.
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     pub struct KerberosConfig {
         /// Kerberos server and KDC configuration.
-        pub kerberos_server: kdc::config::KerberosServer,
+        pub kerberos_server: KerberosServer,
         /// Real KDC address for the Kerberos proxy client.
         pub kdc_url: Option<Url>,
     }
