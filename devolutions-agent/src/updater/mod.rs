@@ -360,8 +360,20 @@ async fn check_for_updates(
             };
 
             // Quick check if the package URL points to existing resource.
-            // Skip this check for file:// URLs since reqwest doesn't support them.
-            if !package_url.starts_with("file://") {
+            if package_url.starts_with("file://") {
+                // For file:// URLs, check if the file exists on disk
+                if let Some(path) = super::io::parse_file_url(&package_url) {
+                    if !std::path::Path::new(path).exists() {
+                        warn!(
+                            %product,
+                            %version,
+                            %package_url,
+                            "File does not exist, skipping update"
+                        );
+                        return Ok(None);
+                    }
+                }
+            } else {
                 let response = reqwest::Client::builder().build()?.head(&package_url).send().await?;
                 if let Err(error) = response.error_for_status() {
                     warn!(
