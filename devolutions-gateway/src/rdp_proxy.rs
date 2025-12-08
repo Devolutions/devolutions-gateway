@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
-use crate::config::dto::{DomainUser, KerberosConfig as KrbConfig, KerberosServer};
+use crate::config::dto::{DomainUser, KerberosServer};
 use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
@@ -117,7 +117,7 @@ where
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
     let (krb_server_config, network_client) = if conf.debug.enable_unstable
-        && let Some(KrbConfig {
+        && let Some(crate::config::dto::KerberosConfig {
             kerberos_server:
                 KerberosServer {
                     max_time_skew,
@@ -169,7 +169,7 @@ where
     );
 
     let (krb_client_config, network_client) = if conf.debug.enable_unstable
-        && let Some(KrbConfig {
+        && let Some(crate::config::dto::KerberosConfig {
             kerberos_server: _,
             kdc_url,
         }) = conf.debug.kerberos.as_ref()
