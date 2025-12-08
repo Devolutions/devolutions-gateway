@@ -97,7 +97,7 @@ pub(crate) fn remove_file_on_reboot_impl(file_path: &Utf8Path) -> Result<(), Upd
 }
 
 #[cfg(not(windows))]
-pub(crate) fn impl_remove_file_on_reboot_impl(_file_path: &Utf8Path) -> Result<(), UpdaterError> {
+pub(crate) fn remove_file_on_reboot_impl(_file_path: &Utf8Path) -> Result<(), UpdaterError> {
     // NOTE: On UNIX-like platforms /tmp folder is used which is cleared by OS automatically.
     Ok(())
 }
