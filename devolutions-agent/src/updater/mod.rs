@@ -362,7 +362,7 @@ async fn check_for_updates(
             // Quick check if the package URL points to existing resource.
             if package_url.starts_with("file://") {
                 // For file:// URLs, check if the file exists on disk
-                if let Some(path) = super::io::parse_file_url(&package_url) {
+                if let Some(path) = io::parse_file_url(&package_url) {
                     if !std::path::Path::new(path).exists() {
                         warn!(
                             %product,
