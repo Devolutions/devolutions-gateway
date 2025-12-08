@@ -360,16 +360,19 @@ async fn check_for_updates(
             };
 
             // Quick check if the package URL points to existing resource.
-            let response = reqwest::Client::builder().build()?.head(&package_url).send().await?;
-            if let Err(error) = response.error_for_status() {
-                warn!(
-                    %error,
-                    %product,
-                    %version,
-                    %package_url,
-                    "Failed to access the product URL, skipping update"
-                );
-                return Ok(None);
+            // Skip this check for file:// URLs since reqwest doesn't support them.
+            if !package_url.starts_with("file://") {
+                let response = reqwest::Client::builder().build()?.head(&package_url).send().await?;
+                if let Err(error) = response.error_for_status() {
+                    warn!(
+                        %error,
+                        %product,
+                        %version,
+                        %package_url,
+                        "Failed to access the product URL, skipping update"
+                    );
+                    return Ok(None);
+                }
             }
             // Target MSI found, proceed with update.
 
