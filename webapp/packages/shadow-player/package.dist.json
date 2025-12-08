@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/shadow-player",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WebM stream player web component for real-time video streaming",
   "type": "module",
   "main": "./index.js",
