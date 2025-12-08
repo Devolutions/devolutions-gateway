@@ -436,45 +436,43 @@ fn redact_sensitive_fields(value: &mut serde_json::Value) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_redact_sensitive_fields() {
-        // Test simple password redaction.
-        let mut value = serde_json::json!({
-            "username": "admin",
-            "password": "secret123"
-        });
-        redact_sensitive_fields(&mut value);
-        assert_eq!(value["password"], "***REDACTED***");
-        assert_eq!(value["username"], "admin");
-
-        // Test nested password redaction.
-        let mut value = serde_json::json!({
+    #[rstest::rstest]
+    #[case::simple_password(
+        serde_json::json!({"username": "admin", "password": "secret123"}),
+        serde_json::json!({"username": "admin", "password": "***REDACTED***"})
+    )]
+    #[case::nested_password(
+        serde_json::json!({
             "credential": {
                 "kind": "username-password",
                 "username": "user",
                 "password": "super-secret"
             }
-        });
-        redact_sensitive_fields(&mut value);
-        assert_eq!(value["credential"]["password"], "***REDACTED***");
-        assert_eq!(value["credential"]["username"], "user");
-
-        // Test case-insensitive matching.
-        let mut value = serde_json::json!({
-            "PASSWORD": "secret",
-            "Password": "secret2"
-        });
-        redact_sensitive_fields(&mut value);
-        assert_eq!(value["PASSWORD"], "***REDACTED***");
-        assert_eq!(value["Password"], "***REDACTED***");
-
-        // Test array with passwords.
-        let mut value = serde_json::json!([
+        }),
+        serde_json::json!({
+            "credential": {
+                "kind": "username-password",
+                "username": "user",
+                "password": "***REDACTED***"
+            }
+        })
+    )]
+    #[case::case_insensitive(
+        serde_json::json!({"PASSWORD": "secret", "Password": "secret2"}),
+        serde_json::json!({"PASSWORD": "***REDACTED***", "Password": "***REDACTED***"})
+    )]
+    #[case::array_with_passwords(
+        serde_json::json!([
             {"username": "user1", "password": "pass1"},
             {"username": "user2", "password": "pass2"}
-        ]);
-        redact_sensitive_fields(&mut value);
-        assert_eq!(value[0]["password"], "***REDACTED***");
-        assert_eq!(value[1]["password"], "***REDACTED***");
+        ]),
+        serde_json::json!([
+            {"username": "user1", "password": "***REDACTED***"},
+            {"username": "user2", "password": "***REDACTED***"}
+        ])
+    )]
+    fn test_redact_sensitive_fields(#[case] mut input: serde_json::Value, #[case] expected: serde_json::Value) {
+        redact_sensitive_fields(&mut input);
+        assert_eq!(input, expected);
     }
 }
