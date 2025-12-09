@@ -14,16 +14,16 @@ use crate::updater::UpdaterError;
 /// - file://C:/path/to/file (Windows absolute path, lenient parsing)
 /// - file:///path/to/file (Unix absolute path)
 /// - file://path/to/file (relative path, lenient parsing)
-pub(crate) fn parse_file_url(url: &str) -> Option<&str> {
+pub(crate) fn parse_file_url(url: &str) -> Option<&Utf8Path> {
     let path = url.strip_prefix("file://")?;
 
     // RFC 8089: file:///C:/... (three slashes before drive letter)
     // Also accept file://C:/... (two slashes, lenient parsing)
     if let Some(rest) = path.strip_prefix('/') {
-        Some(rest)
+        Some(Utf8Path::new(rest))
     } else {
         // No leading slash after file:// - use path as-is
-        Some(path)
+        Some(Utf8Path::new(path))
     }
 }
 
