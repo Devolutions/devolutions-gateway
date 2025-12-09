@@ -288,29 +288,17 @@ async fn handle_with_credential_injection(
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
-    token: String,
     _credential_entry: crate::credential::ArcCredentialEntry,
 ) -> anyhow::Result<()> {
-    // Authorize the token
-    let claims = authorize(client_addr, &token, &conf, token_cache, jrl, active_recordings, None)
-        .map_err(|e| anyhow::anyhow!("authorization failed: {}", e))?;
-
-    let crate::token::ConnectionMode::Fwd { targets: _ } = claims.jet_cm else {
-        anyhow::bail!("unexpected connection mode");
-    };
-
-    let span = tracing::Span::current();
-    span.record("session_id", claims.jet_aid.to_string());
-
     info!("Credential injection: performing CredSSP MITM");
 
-    // Run normal RDCleanPath flow (this will handle server-side TLS and get certs)
+    // Run normal RDCleanPath flow (this will handle authorization, server-side TLS and get certs)
     let CleanPathResult {
+        claims,
         destination,
         server_addr,
         server_stream,
         x224_rsp,
-        ..
     } = process_cleanpath(
         cleanpath_pdu,
         client_addr,
@@ -496,7 +484,6 @@ pub async fn handle(
             subscriber_tx,
             active_recordings,
             cleanpath_pdu,
-            token,
             entry,
         )
         .await;
