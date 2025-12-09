@@ -293,6 +293,7 @@ async fn handle_with_credential_injection(
     info!("Credential injection: performing CredSSP MITM");
 
     // Run normal RDCleanPath flow (this will handle authorization, server-side TLS and get certs)
+    // Note: process_cleanpath handles authorization and returns the claims
     let CleanPathResult {
         claims,
         destination,
@@ -431,10 +432,10 @@ pub async fn handle(
     // Early credential detection: check if we should use RdpProxy instead
     let token = cleanpath_pdu
         .proxy_auth
-        .clone()
+        .as_deref()
         .ok_or_else(|| anyhow::anyhow!("missing token in RDCleanPath PDU"))?;
 
-    if let Some(entry) = crate::token::extract_jti(&token)
+    if let Some(entry) = crate::token::extract_jti(token)
         .ok()
         .and_then(|token_id| credential_store.get(token_id))
         .filter(|entry| entry.mapping.is_some())
