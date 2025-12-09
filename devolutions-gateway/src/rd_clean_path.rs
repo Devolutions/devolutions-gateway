@@ -357,54 +357,22 @@ async fn handle_with_credential_injection(
     let server_public_key =
         crate::rdp_proxy::extract_tls_server_public_key(&server_stream).context("extract server TLS public key")?;
 
-    // Wrap streams in TokioFramed for CredSSP
-    let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
-
     // Use HYBRID_EX for client (web clients typically use this)
     let client_security_protocol = nego::SecurityProtocol::HYBRID_EX;
 
-    // Perform CredSSP MITM (in parallel)
+    // Perform CredSSP MITM
     // Note: Client expects server's public key (since we sent server certs in RDCleanPath response)
-    let client_credssp_fut = crate::rdp_proxy::perform_credssp_with_client(
-        &mut client_framed,
+    let (client_stream, server_stream) = crate::rdp_proxy::perform_credssp_mitm(
+        client_stream,
+        server_stream,
         client_addr.ip(),
-        server_public_key.clone(),
-        client_security_protocol,
-        &credential_mapping.proxy,
-    );
-
-    let server_credssp_fut = crate::rdp_proxy::perform_credssp_with_server(
-        &mut server_framed,
         destination.host().to_owned(),
         server_public_key,
+        client_security_protocol,
         server_security_protocol,
-        &credential_mapping.target,
-    );
-
-    let (client_res, server_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_res.context("CredSSP with client failed")?;
-    server_res.context("CredSSP with server failed")?;
-
-    info!("CredSSP MITM completed successfully");
-
-    // Extract streams and any leftover bytes
-    let (mut client_stream, client_leftover) = client_framed.into_inner();
-    let (mut server_stream, server_leftover) = server_framed.into_inner();
-
-    // Forward any leftover bytes
-    if !server_leftover.is_empty() {
-        client_stream
-            .write_all(&server_leftover)
-            .await
-            .context("write server leftover to client")?;
-    }
-    if !client_leftover.is_empty() {
-        server_stream
-            .write_all(&client_leftover)
-            .await
-            .context("write client leftover to server")?;
-    }
+        credential_mapping,
+    )
+    .await?;
 
     info!("RDP-TLS forwarding (credential injection)");
 
