@@ -279,7 +279,7 @@ async fn process_cleanpath(
 /// Handle RDP connection with credential injection via CredSSP MITM
 #[allow(clippy::too_many_arguments)]
 async fn handle_with_credential_injection(
-    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
     token_cache: &TokenCache,
@@ -455,7 +455,7 @@ async fn handle_with_credential_injection(
 #[allow(clippy::too_many_arguments)]
 #[instrument("fwd", skip_all, fields(session_id = field::Empty, target = field::Empty))]
 pub async fn handle(
-    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
     token_cache: &TokenCache,
