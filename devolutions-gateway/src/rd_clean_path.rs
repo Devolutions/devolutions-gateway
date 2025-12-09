@@ -288,12 +288,11 @@ async fn handle_with_credential_injection(
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
+    token: String,
     _credential_entry: crate::credential::ArcCredentialEntry,
 ) -> anyhow::Result<()> {
-    let token = cleanpath_pdu.proxy_auth.as_ref().context("missing token")?;
-
     // Authorize the token
-    let claims = authorize(client_addr, token, &conf, token_cache, jrl, active_recordings, None)
+    let claims = authorize(client_addr, &token, &conf, token_cache, jrl, active_recordings, None)
         .map_err(|e| anyhow::anyhow!("authorization failed: {}", e))?;
 
     let crate::token::ConnectionMode::Fwd { targets: _ } = claims.jet_cm else {
@@ -476,10 +475,10 @@ pub async fn handle(
     // Early credential detection: check if we should use RdpProxy instead
     let token = cleanpath_pdu
         .proxy_auth
-        .as_deref()
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("missing token in RDCleanPath PDU"))?;
 
-    if let Some(entry) = crate::token::extract_jti(token)
+    if let Some(entry) = crate::token::extract_jti(&token)
         .ok()
         .and_then(|token_id| credential_store.get(token_id))
         .filter(|entry| entry.mapping.is_some())
@@ -497,6 +496,7 @@ pub async fn handle(
             subscriber_tx,
             active_recordings,
             cleanpath_pdu,
+            token,
             entry,
         )
         .await;
