@@ -327,7 +327,7 @@ where
 }
 
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
-pub async fn perform_credssp_with_server<S>(
+pub(crate) async fn perform_credssp_with_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     server_name: String,
     server_public_key: Vec<u8>,
@@ -392,7 +392,7 @@ where
 }
 
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
-pub async fn perform_credssp_with_client<S>(
+pub(crate) async fn perform_credssp_with_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     client_addr: IpAddr,
     gateway_public_key: Vec<u8>,
@@ -483,7 +483,7 @@ where
     }
 }
 
-pub async fn get_cached_gateway_public_key(
+pub(crate) async fn get_cached_gateway_public_key(
     hostname: String,
     acceptor: tokio_rustls::TlsAcceptor,
 ) -> anyhow::Result<Vec<u8>> {
@@ -533,7 +533,7 @@ async fn retrieve_gateway_public_key(hostname: String, acceptor: tokio_rustls::T
     Ok(public_key)
 }
 
-pub fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Result<Vec<u8>> {
     use x509_cert::der::Decode as _;
 
     let cert = tls_stream.get_peer_certificate().context("certificate is missing")?;
@@ -551,7 +551,74 @@ pub fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::R
     Ok(server_public_key)
 }
 
-pub trait GetPeerCert {
+/// Perform CredSSP MITM between client and server, returning the unwrapped streams
+#[allow(clippy::too_many_arguments)]
+#[instrument(name = "credssp_mitm", level = "debug", skip_all)]
+pub(crate) async fn perform_credssp_mitm<C, S>(
+    client_stream: C,
+    server_stream: S,
+    client_addr: IpAddr,
+    server_name: String,
+    server_public_key: Vec<u8>,
+    client_security_protocol: nego::SecurityProtocol,
+    server_security_protocol: nego::SecurityProtocol,
+    credential_mapping: &AppCredentialMapping,
+) -> anyhow::Result<(C, S)>
+where
+    C: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+{
+    use tokio::io::AsyncWriteExt as _;
+
+    // Wrap streams in TokioFramed for CredSSP
+    let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
+    let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
+
+    // Perform CredSSP MITM (in parallel)
+    let client_credssp_fut = perform_credssp_with_client(
+        &mut client_framed,
+        client_addr,
+        server_public_key.clone(),
+        client_security_protocol,
+        &credential_mapping.proxy,
+    );
+
+    let server_credssp_fut = perform_credssp_with_server(
+        &mut server_framed,
+        server_name,
+        server_public_key,
+        server_security_protocol,
+        &credential_mapping.target,
+    );
+
+    let (client_res, server_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
+    client_res.context("CredSSP with client failed")?;
+    server_res.context("CredSSP with server failed")?;
+
+    info!("CredSSP MITM completed successfully");
+
+    // Extract streams and any leftover bytes
+    let (mut client_stream, client_leftover) = client_framed.into_inner();
+    let (mut server_stream, server_leftover) = server_framed.into_inner();
+
+    // Forward any leftover bytes
+    if !server_leftover.is_empty() {
+        client_stream
+            .write_all(&server_leftover)
+            .await
+            .context("write server leftover to client")?;
+    }
+    if !client_leftover.is_empty() {
+        server_stream
+            .write_all(&client_leftover)
+            .await
+            .context("write client leftover to server")?;
+    }
+
+    Ok((client_stream, server_stream))
+}
+
+pub(crate) trait GetPeerCert {
     fn get_peer_certificate(&self) -> Option<&tokio_rustls::rustls::pki_types::CertificateDer<'static>>;
 }
 

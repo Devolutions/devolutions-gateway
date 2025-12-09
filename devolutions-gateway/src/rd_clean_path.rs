@@ -279,7 +279,7 @@ async fn process_cleanpath(
 /// Handle RDP connection with credential injection via CredSSP MITM
 #[allow(clippy::too_many_arguments)]
 async fn handle_with_credential_injection(
-    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
     token_cache: &TokenCache,
@@ -290,28 +290,16 @@ async fn handle_with_credential_injection(
     cleanpath_pdu: RDCleanPathPdu,
     _credential_entry: crate::credential::ArcCredentialEntry,
 ) -> anyhow::Result<()> {
-    let token = cleanpath_pdu.proxy_auth.as_ref().context("missing token")?;
-
-    // Authorize the token
-    let claims = authorize(client_addr, token, &conf, token_cache, jrl, active_recordings, None)
-        .map_err(|e| anyhow::anyhow!("authorization failed: {}", e))?;
-
-    let crate::token::ConnectionMode::Fwd { targets: _ } = claims.jet_cm else {
-        anyhow::bail!("unexpected connection mode");
-    };
-
-    let span = tracing::Span::current();
-    span.record("session_id", claims.jet_aid.to_string());
-
     info!("Credential injection: performing CredSSP MITM");
 
-    // Run normal RDCleanPath flow (this will handle server-side TLS and get certs)
+    // Run normal RDCleanPath flow (this will handle authorization, server-side TLS and get certs)
+    // Note: process_cleanpath handles authorization and returns the claims
     let CleanPathResult {
+        claims,
         destination,
         server_addr,
         server_stream,
         x224_rsp,
-        ..
     } = process_cleanpath(
         cleanpath_pdu,
         client_addr,
@@ -370,54 +358,22 @@ async fn handle_with_credential_injection(
     let server_public_key =
         crate::rdp_proxy::extract_tls_server_public_key(&server_stream).context("extract server TLS public key")?;
 
-    // Wrap streams in TokioFramed for CredSSP
-    let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
-
     // Use HYBRID_EX for client (web clients typically use this)
     let client_security_protocol = nego::SecurityProtocol::HYBRID_EX;
 
-    // Perform CredSSP MITM (in parallel)
+    // Perform CredSSP MITM
     // Note: Client expects server's public key (since we sent server certs in RDCleanPath response)
-    let client_credssp_fut = crate::rdp_proxy::perform_credssp_with_client(
-        &mut client_framed,
+    let (client_stream, server_stream) = crate::rdp_proxy::perform_credssp_mitm(
+        client_stream,
+        server_stream,
         client_addr.ip(),
-        server_public_key.clone(),
-        client_security_protocol,
-        &credential_mapping.proxy,
-    );
-
-    let server_credssp_fut = crate::rdp_proxy::perform_credssp_with_server(
-        &mut server_framed,
         destination.host().to_owned(),
         server_public_key,
+        client_security_protocol,
         server_security_protocol,
-        &credential_mapping.target,
-    );
-
-    let (client_res, server_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_res.context("CredSSP with client failed")?;
-    server_res.context("CredSSP with server failed")?;
-
-    info!("CredSSP MITM completed successfully");
-
-    // Extract streams and any leftover bytes
-    let (mut client_stream, client_leftover) = client_framed.into_inner();
-    let (mut server_stream, server_leftover) = server_framed.into_inner();
-
-    // Forward any leftover bytes
-    if !server_leftover.is_empty() {
-        client_stream
-            .write_all(&server_leftover)
-            .await
-            .context("write server leftover to client")?;
-    }
-    if !client_leftover.is_empty() {
-        server_stream
-            .write_all(&client_leftover)
-            .await
-            .context("write client leftover to server")?;
-    }
+        credential_mapping,
+    )
+    .await?;
 
     info!("RDP-TLS forwarding (credential injection)");
 
@@ -455,7 +411,7 @@ async fn handle_with_credential_injection(
 #[allow(clippy::too_many_arguments)]
 #[instrument("fwd", skip_all, fields(session_id = field::Empty, target = field::Empty))]
 pub async fn handle(
-    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
     token_cache: &TokenCache,
