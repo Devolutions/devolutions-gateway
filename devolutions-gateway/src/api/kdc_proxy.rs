@@ -5,6 +5,8 @@ use axum::Router;
 use axum::extract::{self, ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::routing::post;
+use kdc::config::KerberosServer;
+use kdc::handle_kdc_proxy_message;
 use picky_krb::messages::KdcProxyMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
@@ -81,6 +83,22 @@ async fn kdc_proxy(
         }
     }
 
+    if let Some(krb_config) = &conf.debug.kerberos
+        && realm.eq_ignore_ascii_case(&krb_config.kerberos_server.realm)
+        && conf.debug.enable_unstable
+    {
+        debug!("Proxy-based credential injection with Kerberos. Processing KdcProxy message internally...");
+
+        let kdc_reply_message = handle_kdc_proxy_message(
+            kdc_proxy_message,
+            &KerberosServer::from(krb_config.kerberos_server.clone()),
+            &conf.hostname,
+        )
+        .map_err(HttpError::internal().err())?;
+
+        return kdc_reply_message.to_vec().map_err(HttpError::internal().err());
+    }
+
     let kdc_addr = if let Some(kdc_addr) = &conf.debug.override_kdc {
         warn!("**DEBUG OPTION** KDC address has been overridden with {kdc_addr}");
         kdc_addr
@@ -91,7 +109,7 @@ async fn kdc_proxy(
     let kdc_reply_message = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;
 
     let kdc_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message)
-        .map_err(HttpError::internal().with_msg("couldn’t create KDC proxy reply").err())?;
+        .map_err(HttpError::internal().with_msg("couldn't create KDC proxy reply").err())?;
 
     trace!(?kdc_reply_message, "Sending back KDC reply");
 
