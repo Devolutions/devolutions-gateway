@@ -552,6 +552,7 @@ pub(crate) fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> an
 }
 
 /// Perform CredSSP MITM between client and server, returning the unwrapped streams
+#[allow(clippy::too_many_arguments)]
 #[instrument(name = "credssp_mitm", level = "debug", skip_all)]
 pub(crate) async fn perform_credssp_mitm<C, S>(
     client_stream: C,
