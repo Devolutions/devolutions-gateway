@@ -5,7 +5,6 @@ use axum::Router;
 use axum::extract::{self, ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::routing::post;
-use kdc::config::KerberosServer;
 use kdc::handle_kdc_proxy_message;
 use picky_krb::messages::KdcProxyMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -83,18 +82,18 @@ async fn kdc_proxy(
         }
     }
 
+    let gateway_id = conf
+        .id
+        .ok_or_else(|| HttpError::internal().build("Gateway ID is missing"))?;
     if let Some(krb_config) = &conf.debug.kerberos
-        && realm.eq_ignore_ascii_case(&krb_config.kerberos_server.realm)
+        && realm.eq_ignore_ascii_case(&krb_config.kerberos_server.realm(gateway_id))
         && conf.debug.enable_unstable
     {
         debug!("Proxy-based credential injection with Kerberos. Processing KdcProxy message internally...");
 
-        let kdc_reply_message = handle_kdc_proxy_message(
-            kdc_proxy_message,
-            &KerberosServer::from(krb_config.kerberos_server.clone()),
-            &conf.hostname,
-        )
-        .map_err(HttpError::internal().err())?;
+        let config = krb_config.kerberos_server.clone().into_kdc_kerberos_config(gateway_id);
+        let kdc_reply_message = handle_kdc_proxy_message(kdc_proxy_message, &config, &conf.hostname)
+            .map_err(HttpError::internal().err())?;
 
         return kdc_reply_message.to_vec().map_err(HttpError::internal().err());
     }
