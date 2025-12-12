@@ -41,8 +41,8 @@ ironrdp-tokio = "0.6"
 ironrdp-connector = { version = "0.6" }
 ironrdp-acceptor = { version = "0.6" }
 ceviche = "0.7"
-picky-krb = "0.11"
-kdc = { git = "https://github.com/Devolutions/sspi-rs.git", rev = "e1bb3f9c301f90df9ff30f94816f1f85392eab8a" }
+picky-krb = "0.12"
+kdc = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

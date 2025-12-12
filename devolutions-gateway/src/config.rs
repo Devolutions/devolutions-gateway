@@ -1141,6 +1141,9 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     pub struct DomainUser {
         /// Username in FQDN format (e.g. "pw13@example.com").
+        ///
+        /// **Note**: the user's domain part must match the internal KDC realm.
+        /// The KDC realm is derived from the gateway ID using the [KerberosServer::realm] method.
         pub fqdn: String,
         /// User password.
         pub password: String,
@@ -1167,12 +1170,6 @@ pub mod dto {
     /// This config is used to configure the Kerberos server during RDP proxying.
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     pub struct KerberosServer {
-        /// KDC and Kerberos Application Server realm.
-        ///
-        /// This is a fake realm. For example, `cd9bee03-b0aa-49dd-bad7-568b595c8024.jet`.
-        /// All Kerberos messages that target this realm will be processed internally and
-        /// never by the real KDC.
-        pub realm: String,
         /// Users credentials inside fake KDC.
         pub users: Vec<DomainUser>,
         /// The maximum allowed time difference between client and proxy clocks.
@@ -1196,18 +1193,25 @@ pub mod dto {
         pub service_user: Option<DomainUser>,
     }
 
-    impl From<KerberosServer> for kdc::config::KerberosServer {
-        fn from(server: KerberosServer) -> Self {
+    impl KerberosServer {
+        /// Returns the internal KDC realm for the given gateway ID.
+        pub fn realm(&self, gateway_id: Uuid) -> String {
+            format!("{gateway_id}.jet")
+        }
+
+        /// Converts the [KerberosServer] into a [kdc::config::KerberosServer] for the given gateway ID.
+        pub fn into_kdc_kerberos_config(self, gateway_id: Uuid) -> kdc::config::KerberosServer {
+            let realm = self.realm(gateway_id);
+
             let KerberosServer {
-                realm,
                 users,
                 max_time_skew,
                 krbtgt_key,
                 ticket_decryption_key,
                 service_user,
-            } = server;
+            } = self;
 
-            Self {
+            kdc::config::KerberosServer {
                 realm,
                 users: users.into_iter().map(Into::into).collect(),
                 max_time_skew,
