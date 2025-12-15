@@ -225,15 +225,34 @@ jobs:
 
       - name: Publish
         run: |
-          Set-PSDebug -Trace 1
+          for tarball in npm-packages/*.tgz; do
+            echo "Publishing $(basename $tarball)..."
 
-          $Files = Get-ChildItem -Recurse npm-packages/*.tgz
+            tmp_dir=$(mktemp -d)
+            echo "Temporary directory to extract package tarball: $tmp_dir"
 
-          foreach ($File in $Files) {
-            Write-Host "Publishing $($File.Name)..."
-            ./ci/npm-publish.ps1 -Tarball "$File" -Access 'public'
-          }
-        shell: pwsh
+            tar -xzf "$tarball" -C "$tmp_dir" package/package.json
+
+            name=$(node -p "require('$tmp_dir/package/package.json').name")
+            local_version=$(node -p "require('$tmp_dir/package/package.json').version")
+
+            echo "Found package $name"
+            echo "Local version is $local_version"
+
+            remote_version=$(npm view "$name" version 2>/dev/null || echo "none")
+
+            echo "Latest version on registry is $remote_version"
+
+            if [ "$local_version" = "$remote_version" ]; then
+              echo "Local and distant versions are identical. Skip publishing."
+            else
+              echo "Publishing..."
+              npm publish "$tarball" --access public --provenance
+            fi
+
+            rm -rf "$tmp_dir"
+          done
+        shell: bash
 
       - name: Update Artifactory Cache
         run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="gateway-client"
