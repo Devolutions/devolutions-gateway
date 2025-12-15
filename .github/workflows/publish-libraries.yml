@@ -218,7 +218,7 @@ jobs:
 
       - name: Update npm to latest version
         run: |
-          npm install -g npm@latest
+          npm install npm@latest
           npm -v
 
       - name: Download NPM packages artifact
