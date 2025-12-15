@@ -28,7 +28,7 @@ ipconfig = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = "0.3"
-netlink-packet-route = "0.19"
+netlink-packet-route = "0.26"
 rtnetlink = "0.14"
 
 [dev-dependencies]
