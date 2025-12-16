@@ -211,17 +211,6 @@ jobs:
       - name: Check out ${{ github.repository }}
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Update npm to latest version
-        run: |
-          npm install npm@latest
-          npm -v
-
       - name: Download NPM packages artifact
         uses: actions/download-artifact@v4
         with:
@@ -230,34 +219,15 @@ jobs:
 
       - name: Publish
         run: |
-          for tarball in npm-packages/*.tgz; do
-            echo "Publishing $(basename $tarball)..."
+          Set-PSDebug -Trace 1
 
-            tmp_dir=$(mktemp -d)
-            echo "Temporary directory to extract package tarball: $tmp_dir"
+          $Files = Get-ChildItem -Recurse npm-packages/*.tgz
 
-            tar -xzf "$tarball" -C "$tmp_dir" package/package.json
-
-            name=$(node -p "require('$tmp_dir/package/package.json').name")
-            local_version=$(node -p "require('$tmp_dir/package/package.json').version")
-
-            echo "Found package $name"
-            echo "Local version is $local_version"
-
-            remote_version=$(npm view "$name" version 2>/dev/null || echo "none")
-
-            echo "Latest version on registry is $remote_version"
-
-            if [ "$local_version" = "$remote_version" ]; then
-              echo "Local and distant versions are identical. Skip publishing."
-            else
-              echo "Publishing..."
-              npm publish "$tarball" --access public --provenance
-            fi
-
-            rm -rf "$tmp_dir"
-          done
-        shell: bash
+          foreach ($File in $Files) {
+            Write-Host "Publishing $($File.Name)..."
+            ./ci/npm-publish.ps1 -Tarball "$File" -Access 'public'
+          }
+        shell: pwsh
 
       - name: Update Artifactory Cache
         run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="gateway-client"
