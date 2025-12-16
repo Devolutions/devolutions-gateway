@@ -51,7 +51,7 @@
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Une erreur inattendue est survenue au moment d'accéder au magasin de certificats du système : {0}</String>
                 <String Id="AuthenticationTokenIsRequired">Le jeton d'authentification est requis</String>
                 <String Id="DomainIsRequiredAndMustBeValid">Le domaine est requis et doit être un nom d'hôte valide</String>
-                <String Id="Dotnet462IsRequired">Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
+                <String Id="Dotnet471IsRequired">Le produit nécessite Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
                 <String Id="NewerInstalled">Une version plus récente de ce produit est déjà installée.</String>
                 <String Id="NoMatchingCertificatesFound">Aucun certificat correspondant n'a été trouvé</String>
@@ -213,7 +213,9 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="ProvideDvlsAddressIfUsing">Si vous utilisez Devolutions Server, indiquez son adresse. Cette étape est facultative.</String>
                 <String Id="PublicKeyServerDlgDescription">Configuration automatique du serveur</String>
                 <String Id="PublicKeyServerDlgTitle">Serveur Compagnon</String>
+                <String Id="TheCertificateForXIsNotTrustedDoYouWishToProceed">Le certificat pour {0} n'est pas approuvé. Voulez-vous continuer ?</String>
                 <String Id="ThePublicKeyWillBeDownloaded">La clé publique sera téléchargée</String>
+                <String Id="UntrustedCertificate">Certificat non approuvé</String>
                 <String Id="YoullNeedToProvideThePublicKey">Vous devrez fournir la clé publique du serveur compagnon</String>
                     <!-- dialogs.keys -->
                 <String Id="PrivateKeyFile">Fichier de clé privée</String>

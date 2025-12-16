@@ -1,13 +1,17 @@
 using DevolutionsGateway.Dialogs;
-using System;
-using System.ComponentModel;
-using System.Net;
-using System.Net.Http;
-using System.Net.Sockets;
-using System.Threading;
-using System.Windows.Forms;
+using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
 using DevolutionsGateway.Resources;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Net.Http;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Windows.Forms;
 using WixSharp;
 
 namespace WixSharpSetup.Dialogs;
@@ -18,7 +22,11 @@ public partial class PublicKeyServerDialog : GatewayDialog
 
     private readonly HttpClient httpClient;
 
+    private readonly HttpClientHandler httpClientHandler;
+
     private CancellationTokenSource cts = new CancellationTokenSource();
+
+    private CertificateExceptionStore certificateExceptionStore;
 
     private bool isValidUrl = false;
 
@@ -28,9 +36,14 @@ public partial class PublicKeyServerDialog : GatewayDialog
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
 
-        this.httpClient = new HttpClient();
+        this.httpClientHandler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = this.CertificateValidationCallback,
+            SslProtocols = SslProtocols.Tls | SslProtocols.Tls11 | SslProtocols.Tls12
+        };
+
+        this.httpClient = new HttpClient(this.httpClientHandler, true);
         this.httpClient.Timeout = TimeSpan.FromSeconds(10);
-        ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
 
         this.errorProvider.BlinkStyle = ErrorBlinkStyle.NeverBlink;
         this.errorProvider.SetIconAlignment(this.butValidate, ErrorIconAlignment.MiddleLeft);
@@ -53,6 +66,8 @@ public partial class PublicKeyServerDialog : GatewayDialog
         GatewayProperties properties = new(this.Runtime.Session);
 
         string devolutionsServerUrl = properties.DevolutionsServerUrl;
+        this.certificateExceptionStore = CertificateExceptionStore.Deserialize(properties.DevolutionsServerCertificateExceptions);
+
         this.txtUrl.Text = devolutionsServerUrl;
 
         this.rbAutoConfig.Checked = !string.IsNullOrEmpty(devolutionsServerUrl) || !properties.DidChooseServerConfig;
@@ -66,6 +81,7 @@ public partial class PublicKeyServerDialog : GatewayDialog
         GatewayProperties properties = new(this.Runtime.Session);
 
         properties.DevolutionsServerUrl = this.rbAutoConfig.Checked ? this.txtUrl.Text.Trim() : string.Empty;
+        properties.DevolutionsServerCertificateExceptions = this.certificateExceptionStore.Serialize();
         properties.DidChooseServerConfig = true;
 
         return true;
@@ -95,6 +111,56 @@ public partial class PublicKeyServerDialog : GatewayDialog
         this.cts?.Cancel();
 
         base.Cancel_Click(sender, e);
+    }
+
+    private bool CertificateValidationCallback(HttpRequestMessage request, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        if (certificate is null)
+        {
+            return false;
+        }
+
+        if (sslPolicyErrors == SslPolicyErrors.None)
+        {
+           return true;
+        }
+
+        X509Certificate2 certificate2 = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
+
+        if (this.certificateExceptionStore.IsTrusted(request.RequestUri.Host, request.RequestUri.Port, certificate2.Thumbprint))
+        {
+            return true;
+        }
+
+        bool trust = this.PromptForCertificateTrust(request,
+            certificate2,
+            chain,
+            sslPolicyErrors);
+
+        if (trust)
+        {
+            this.certificateExceptionStore.TryAdd(request.RequestUri.Host, request.RequestUri.Port, certificate2.Thumbprint);
+        }
+
+        return trust;
+    }
+
+    private bool PromptForCertificateTrust(HttpRequestMessage request, X509Certificate2 certificate, X509Chain _, SslPolicyErrors sslPolicyErrors)
+    {
+        bool result = false;
+        
+        this.Invoke(() =>
+        {
+            string message = string.Format(I18n(Strings.TheCertificateForXIsNotTrustedDoYouWishToProceed), request.RequestUri.Host);
+
+            result = MessageBox.Show(this,
+                $"{message}{Environment.NewLine}{Environment.NewLine}{certificate}{Environment.NewLine}{Environment.NewLine}{sslPolicyErrors}",
+                I18n(Strings.UntrustedCertificate),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) == DialogResult.Yes;
+        });
+
+        return result;
     }
 
     private void SetControlStates()
@@ -163,9 +229,9 @@ public partial class PublicKeyServerDialog : GatewayDialog
 
                     if (t.IsFaulted)
                     {
-                        Exception ex = t.Exception!.GetBaseException();
+                        Exception ex = ErrorHelper.GetInnermostException(t.Exception);
 
-                        if (ex is HttpRequestException { InnerException: SocketException se })
+                        if (ex is SocketException se)
                         {
                             this.errorProvider.SetError(this.butValidate, new Win32Exception(se.ErrorCode).Message);
                         }
