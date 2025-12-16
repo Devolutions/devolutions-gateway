@@ -217,7 +217,7 @@ namespace DevolutionsGateway.Actions
                         command = string.Format(
                             Constants.ImportDGatewayCertificateWithPasswordCommandFormat,
                             session.Get(GatewayProperties.certificateFile),
-                            session.Get(GatewayProperties.certificatePassword));
+                            session.Get(GatewayProperties.certificatePassword).Replace("'", "''"));
                     }
                 }
                 else
