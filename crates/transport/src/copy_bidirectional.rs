@@ -5,13 +5,13 @@
 //! It is modified to allow us setting the `CopyBuffer` size instead of hardcoding 8k.
 //! See <https://github.com/tokio-rs/tokio/issues/6454>.
 
-use futures_core::ready;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
 use std::future::Future;
 use std::io::{self};
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use futures_core::ready;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 enum TransferState {
     Running(CopyBuffer),

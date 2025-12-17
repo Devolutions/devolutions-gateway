@@ -18,8 +18,9 @@ pub(crate) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
 }
 
 fn native_tls_connect(ctx: &mut DiagnosticCtx, subject_name: &str, port: Option<u16>) -> anyhow::Result<()> {
-    use native_tls::TlsConnector;
     use std::net::TcpStream;
+
+    use native_tls::TlsConnector;
 
     info!("Connect to {subject_name}");
 
@@ -122,10 +123,11 @@ fn parse_tls_connect_error_string(_ctx: &mut DiagnosticCtx, _error: &native_tls:
 
 #[cfg(not(any(target_os = "windows", target_vendor = "apple")))]
 mod openssl {
-    use anyhow::Context as _;
-    use openssl::x509::X509;
     use std::borrow::Cow;
     use std::path::Path;
+
+    use anyhow::Context as _;
+    use openssl::x509::X509;
 
     use crate::doctor::macros::diagnostic;
     use crate::doctor::{Args, Diagnostic, DiagnosticCtx, InspectCert, help};
@@ -162,8 +164,9 @@ mod openssl {
         port: Option<u16>,
         server_certificates: &mut Vec<X509>,
     ) -> anyhow::Result<()> {
-        use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
         use std::net::TcpStream;
+
+        use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 
         info!("Connect to {subject_name}");
 

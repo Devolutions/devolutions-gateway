@@ -22,9 +22,10 @@ pub(crate) mod reopenable_file;
 pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
+use tokio::io::AsyncWriteExt;
+
 use crate::StreamingConfig;
 use crate::reopenable::Reopenable;
-use tokio::io::AsyncWriteExt;
 
 #[instrument(skip_all)]
 pub fn webm_stream(

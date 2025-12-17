@@ -1,7 +1,8 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
 use proptest::array::{uniform4, uniform8};
 use proptest::prelude::*;
 use proxy_types::*;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 pub fn port() -> impl Strategy<Value = u16> {
     any::<u16>()

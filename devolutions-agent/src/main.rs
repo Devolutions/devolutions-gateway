@@ -7,7 +7,6 @@ use {
     devolutions_log as _, futures as _, ironrdp as _, parking_lot as _, rand as _, rustls_pemfile as _, serde as _,
     serde_json as _, tap as _, tokio as _, tokio_rustls as _,
 };
-
 #[cfg(windows)]
 use {
     devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, thiserror as _, uuid as _,

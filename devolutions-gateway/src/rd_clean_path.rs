@@ -2,6 +2,13 @@ use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use anyhow::Context as _;
+use ironrdp_rdcleanpath::RDCleanPathPdu;
+use tap::prelude::*;
+use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tracing::field;
+
 use crate::config::Conf;
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
@@ -9,13 +16,6 @@ use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
-
-use anyhow::Context as _;
-use ironrdp_rdcleanpath::RDCleanPathPdu;
-use tap::prelude::*;
-use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tracing::field;
 
 #[derive(Debug, Error)]
 enum AuthorizationError {

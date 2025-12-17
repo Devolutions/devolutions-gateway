@@ -1,5 +1,5 @@
 use axum::Extension;
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRequest, FromRequestParts, RawQuery, Request};
 use axum::http::request::Parts;
 
 use crate::http::HttpError;
@@ -7,8 +7,6 @@ use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, JmuxTokenClaims, JrecTokenClaims,
     JrlTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
 };
-
-use axum::extract::{FromRequest, RawQuery, Request};
 
 #[derive(Clone)]
 pub struct AccessToken(pub AccessTokenClaims);

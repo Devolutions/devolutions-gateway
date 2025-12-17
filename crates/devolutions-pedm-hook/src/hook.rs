@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use anyhow::Result;
 use devolutions_pedm_shared::client::models::{LaunchPayload, StartupInfoDto};
 use devolutions_pedm_shared::client::{self};
 use tracing::error;
@@ -13,8 +14,6 @@ use win_api_wrappers::raw::core::{HRESULT, PCWSTR};
 use win_api_wrappers::rpc::{RPC_BINDING_HANDLE, RpcBindingHandle};
 use win_api_wrappers::thread::Thread;
 use win_api_wrappers::utils::SafeWindowsString;
-
-use anyhow::Result;
 
 use crate::appinfo::{APP_PROCESS_INFORMATION, APP_STARTUP_INFO};
 

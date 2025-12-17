@@ -1,18 +1,19 @@
+use std::io;
+use std::net::SocketAddr;
+use std::pin::pin;
+use std::sync::Arc;
+
+use futures::future::Either;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
+use tokio::sync::Notify;
+use typed_builder::TypedBuilder;
+
 use crate::config::Conf;
 use crate::interceptor::pcap::PcapInspector;
 use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
-
-use futures::future::Either;
-use std::io;
-use std::net::SocketAddr;
-use std::pin::pin;
-use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
-use tokio::sync::Notify;
-use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
 pub struct Proxy<A, B> {

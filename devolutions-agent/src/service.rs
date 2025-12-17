@@ -1,5 +1,4 @@
-use tokio::runtime::{self, Runtime};
-use tokio::sync::mpsc;
+use std::time::Duration;
 
 use anyhow::Context;
 use devolutions_agent::AgentServiceEvent;
@@ -14,7 +13,8 @@ use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 #[cfg(windows)]
 use devolutions_pedm::PedmTask;
-use std::time::Duration;
+use tokio::runtime::{self, Runtime};
+use tokio::sync::mpsc;
 
 pub(crate) const SERVICE_NAME: &str = "devolutions-agent";
 pub(crate) const DISPLAY_NAME: &str = "Devolutions Agent";

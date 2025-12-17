@@ -56,12 +56,12 @@
 //! - Extra tasks complicate error handling
 
 use core::fmt;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use std::collections::HashMap;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::process::Child;
 use tracing::{debug, error, trace, warn};

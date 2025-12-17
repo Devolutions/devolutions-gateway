@@ -3,12 +3,10 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use anyhow::Context;
-
 use network_scanner_proto::icmp_v4;
 
-use crate::create_v4_echo_request;
-
 use super::BroadcastResponseEntry;
+use crate::create_v4_echo_request;
 
 pub struct BorcastBlockStream {
     socket: socket2::Socket,

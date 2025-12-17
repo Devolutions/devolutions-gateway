@@ -1,9 +1,11 @@
-use crate::ReadWriteStream;
-use proxy_types::{DestAddr, ToDestAddr};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::pin::Pin;
+
+use proxy_types::{DestAddr, ToDestAddr};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::ReadWriteStream;
 
 /// SOCKS4 CONNECT client.
 #[derive(Debug)]

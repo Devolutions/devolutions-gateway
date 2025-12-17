@@ -1,6 +1,7 @@
 //! Windows-specific UUID format conversion functions.
 
 use std::str::FromStr;
+
 use uuid::Uuid;
 
 const REVERSED_UUID_STR_LENGTH: usize = uuid::fmt::Simple::LENGTH;

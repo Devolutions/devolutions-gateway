@@ -14,15 +14,20 @@ use {
     base64 as _, futures_util as _, jet_proto as _, jmux_proto as _, openssl_probe as _, proxy_http as _,
     proxy_socks as _, proxy_types as _, rustls_pemfile as _, tinyjson as _, tokio_tungstenite as _, transport as _,
 };
-#[cfg(feature = "rustls")]
-use {rustls as _, rustls_native_certs as _};
-
 // Used by tests
 #[cfg(test)]
 use {proptest as _, test_utils as _};
+#[cfg(feature = "rustls")]
+use {rustls as _, rustls_native_certs as _};
 
 #[macro_use]
 extern crate tracing;
+
+use std::env;
+use std::error::Error;
+use std::future::Future;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use jetsocat::DoctorOutputFormat;
@@ -31,11 +36,6 @@ use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{ProxyConfig, ProxyType, detect_proxy};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
-use std::env;
-use std::error::Error;
-use std::future::Future;
-use std::path::PathBuf;
-use std::time::Duration;
 use tokio::runtime;
 
 fn main() {

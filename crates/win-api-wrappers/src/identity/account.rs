@@ -439,7 +439,6 @@ mod tests {
     #![allow(clippy::print_stdout)]
 
     use super::*;
-
     use crate::process::Process;
 
     #[test]

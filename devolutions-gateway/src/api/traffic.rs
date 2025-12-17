@@ -1,7 +1,8 @@
+use std::net::IpAddr;
+
 use axum::extract::{Query, State};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use traffic_audit::{EventOutcome, TrafficEvent, TransportProtocol};
 use ulid::Ulid;
 use uuid::Uuid;

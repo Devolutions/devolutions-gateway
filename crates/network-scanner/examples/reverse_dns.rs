@@ -1,6 +1,7 @@
-use dns_lookup::lookup_addr;
 use std::env;
 use std::net::IpAddr;
+
+use dns_lookup::lookup_addr;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

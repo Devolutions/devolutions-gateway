@@ -4,7 +4,6 @@ use std::ops::DerefMut;
 
 use camino::Utf8Path;
 use uuid::Uuid;
-
 use win_api_wrappers::utils::WideString;
 
 use crate::updater::io::remove_file_on_reboot;

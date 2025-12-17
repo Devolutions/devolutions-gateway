@@ -2,12 +2,12 @@
 //!
 //! [source]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/JMUX-spec.md
 
-use bytes::{Buf as _, BufMut as _};
 use core::fmt;
-use smol_str::SmolStr;
 
+use bytes::{Buf as _, BufMut as _};
 // We re-export these types, because they are used in the public API.
 pub use bytes::{Bytes, BytesMut};
+use smol_str::SmolStr;
 
 /// Distant identifier for a channel
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]

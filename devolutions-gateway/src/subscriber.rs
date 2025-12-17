@@ -1,14 +1,16 @@
-use crate::config::ConfHandle;
-use crate::config::dto::Subscriber;
-use crate::session::SessionMessageSender;
+use std::time::Duration;
+
 use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
-use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
+
+use crate::config::ConfHandle;
+use crate::config::dto::Subscriber;
+use crate::session::SessionMessageSender;
 
 pub type SubscriberSender = mpsc::Sender<Message>;
 pub type SubscriberReceiver = mpsc::Receiver<Message>;
@@ -69,8 +71,9 @@ impl Message {
 
 #[instrument(skip(subscriber))]
 pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow::Result<()> {
-    use backoff::backoff::Backoff as _;
     use std::time::Duration;
+
+    use backoff::backoff::Backoff as _;
 
     const RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(3); // initial retry interval on failure
     const RETRY_MAX_ELAPSED_TIME: Duration = Duration::from_secs(60 * 3); // retry for at most 3 minutes

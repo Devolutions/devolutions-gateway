@@ -535,8 +535,9 @@ pub fn check_certificate_now(cert: &[u8]) -> anyhow::Result<CertReport> {
 }
 
 pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Result<CertReport> {
-    use anyhow::Context as _;
     use core::fmt::Write as _;
+
+    use anyhow::Context as _;
 
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
@@ -789,8 +790,9 @@ struct CertInfo {
 }
 
 fn extract_cert_info(cert_der: &[u8]) -> CertInfo {
-    use bytes::Buf as _;
     use std::fmt::Write as _;
+
+    use bytes::Buf as _;
 
     match x509_cert::Certificate::from_der(cert_der) {
         Ok(cert) => {

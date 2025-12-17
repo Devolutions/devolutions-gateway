@@ -11,11 +11,9 @@ mod lib_win {
     use std::{mem, thread};
 
     use anyhow::{Result, bail};
-
-    use parking_lot::Mutex;
-
     use appinfo::dump_interfaces;
     use hook::rai_launch_admin_process;
+    use parking_lot::Mutex;
     use win_api_wrappers::process::Module;
     use win_api_wrappers::raw::Win32::Foundation::*;
     use win_api_wrappers::raw::Win32::System::Rpc::SERVER_ROUTINE;

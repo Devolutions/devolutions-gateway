@@ -8,8 +8,9 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
+use local_admin_elevator::LocalAdminElevator;
+use virtual_account_elevator::VirtualAccountElevator;
 use win_api_wrappers::Error;
 use win_api_wrappers::process::{ProcessInformation, StartupInfo};
 use win_api_wrappers::raw::Win32::Foundation::{ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_INVALID_PARAMETER, LUID};
@@ -17,9 +18,6 @@ use win_api_wrappers::raw::Win32::System::Threading::PROCESS_CREATION_FLAGS;
 use win_api_wrappers::token::{Token, TokenElevationType, TokenSecurityAttribute, TokenSecurityAttributeValues};
 use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
 use win_api_wrappers::utils::{CommandLine, environment_block};
-
-use local_admin_elevator::LocalAdminElevator;
-use virtual_account_elevator::VirtualAccountElevator;
 
 use crate::db::DbHandle;
 use crate::log;

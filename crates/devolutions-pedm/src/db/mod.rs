@@ -18,10 +18,11 @@ use tracing::{info, warn};
 
 mod err;
 
+pub(crate) use err::DbError;
+
 use crate::Config;
 use crate::config::DbBackend;
 use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
-pub(crate) use err::DbError;
 
 #[cfg(feature = "libsql")]
 mod libsql;
@@ -31,12 +32,11 @@ pub(crate) use libsql::LibsqlConn;
 #[cfg(feature = "postgres")]
 mod pg;
 #[cfg(feature = "postgres")]
-pub(crate) use pg::PgPool;
-
-#[cfg(feature = "postgres")]
 use bb8::Pool;
 #[cfg(feature = "postgres")]
 use bb8_postgres::PostgresConnectionManager;
+#[cfg(feature = "postgres")]
+pub(crate) use pg::PgPool;
 #[cfg(feature = "postgres")]
 use tokio_postgres::NoTls;
 #[cfg(feature = "postgres")]

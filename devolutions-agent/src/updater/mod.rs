@@ -21,17 +21,16 @@ use tokio::fs;
 use uuid::Uuid;
 
 use self::detect::get_product_code;
+pub(crate) use self::error::UpdaterError;
 use self::integrity::validate_artifact_hash;
 use self::io::{download_binary, download_utf8, save_to_temp_file};
 use self::package::{install_package, uninstall_package, validate_package};
+pub(crate) use self::product::Product;
 use self::product_actions::{ProductUpdateActions, build_product_actions};
 use self::productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use self::security::set_file_dacl;
 use crate::config::ConfHandle;
 use crate::updater::productinfo::ProductInfoDb;
-
-pub(crate) use self::error::UpdaterError;
-pub(crate) use self::product::Product;
 
 const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
 

@@ -1,10 +1,12 @@
-use crate::ReadWriteStream;
-use proxy_types::{BoundAddr, DestAddr, ToDestAddr};
 use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::pin::Pin;
+
+use proxy_types::{BoundAddr, DestAddr, ToDestAddr};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::ReadWriteStream;
 
 const SOCKS_VERSION: u8 = 0x05;
 const PASSWORD_NEGOTIATION_VERSION: u8 = 0x01;

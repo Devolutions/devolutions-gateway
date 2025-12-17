@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context as _;
 use parking_lot::RwLock;
 use win_api_wrappers::Error;
 use win_api_wrappers::identity::account::{ProfileInfo, create_virtual_account};
@@ -25,8 +26,6 @@ use win_api_wrappers::token_groups::TokenGroups;
 use win_api_wrappers::undoc::LOGON32_PROVIDER_VIRTUAL;
 
 use super::Elevator;
-
-use anyhow::Context as _;
 
 struct VirtualAccountElevation {
     _base_token: Token,

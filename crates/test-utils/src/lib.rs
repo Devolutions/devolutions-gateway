@@ -1,8 +1,9 @@
+use std::collections::HashSet;
+
 use anyhow::Context as _;
 use futures_util::{Sink, Stream};
 use proptest::collection::size_range;
 use proptest::prelude::*;
-use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite;

@@ -196,10 +196,10 @@ fn format_syslog_message(mut entry: Entry) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use proptest::prelude::*;
     use sysevent::Severity;
+
+    use super::*;
 
     #[test]
     fn syslog_options_builder() {

@@ -1,9 +1,10 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use anyhow::Context;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
 use proxy_http::HttpProxyAcceptor;
 use proxy_socks::Socks5AcceptorConfig;
-use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 use tracing::Instrument as _;

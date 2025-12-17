@@ -2,9 +2,8 @@ use std::ffi::c_void;
 use std::mem;
 use std::sync::OnceLock;
 
-use parking_lot::Mutex;
-
 use anyhow::{Result, bail};
+use parking_lot::Mutex;
 use retour::GenericDetour;
 use win_api_wrappers::process::Module;
 use win_api_wrappers::raw::Win32::Foundation::{HANDLE, HWND};

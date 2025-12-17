@@ -9,9 +9,8 @@ use chrono::{DateTime, Utc};
 use devolutions_pedm_shared::policy::{Assignment, ElevationResult, Profile, User};
 use tokio_postgres::NoTls;
 
-use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
-
 use super::{Database, DbError};
+use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
 pub(crate) struct PgPool(Pool<PostgresConnectionManager<NoTls>>);
 

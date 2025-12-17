@@ -1,10 +1,5 @@
 use std::sync::Arc;
 
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
-use crate::subscriber::SubscriberSender;
-use crate::token::{JmuxTokenClaims, RecordingPolicy};
-use crate::traffic_audit::TrafficAuditHandle;
-
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
 use jmux_proxy::{FilteringRule, JmuxConfig, JmuxProxy};
@@ -12,6 +7,11 @@ use tap::prelude::*;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
 use transport::{ErasedRead, ErasedWrite};
+
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
+use crate::subscriber::SubscriberSender;
+use crate::token::{JmuxTokenClaims, RecordingPolicy};
+use crate::traffic_audit::TrafficAuditHandle;
 
 pub async fn handle(
     stream: impl AsyncRead + AsyncWrite + Send + 'static,

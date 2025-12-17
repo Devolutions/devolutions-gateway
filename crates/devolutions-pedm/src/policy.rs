@@ -13,7 +13,6 @@ use anyhow::bail;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use camino::Utf8PathBuf;
-
 use devolutions_pedm_shared::policy::{
     self, Application, AuthenticodeSignatureStatus, Certificate, ElevationRequest, Profile, Signature, Signer, User,
 };

@@ -1074,11 +1074,12 @@ fn read_pfx_file(
     Vec<pki_types::CertificateDer<'static>>,
     pki_types::PrivateKeyDer<'static>,
 )> {
+    use std::cmp::Ordering;
+
     use picky::pkcs12::{
         Pfx, Pkcs12AttributeKind, Pkcs12CryptoContext, Pkcs12ParsingParams, SafeBagKind, SafeContentsKind,
     };
     use picky::x509::certificate::CertType;
-    use std::cmp::Ordering;
 
     let crypto_context = password
         .map(|pwd| Pkcs12CryptoContext::new_with_password(pwd.expose_secret()))
