@@ -5,6 +5,9 @@
     <Compile Update="Controls\ElevatedButton.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Update="Controls\FileBrowseButton.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Update="Dialogs\AccessUriDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -38,6 +41,9 @@
     <Compile Update="Dialogs\PublicKeyDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="Dialogs\PublicKeyServerDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="Dialogs\ServiceDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -51,9 +57,6 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="Dialogs\WelcomeDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Update="Dialogs\PublicKeyServerDialog.cs">
       <SubType>Form</SubType>
     </Compile>
   </ItemGroup>

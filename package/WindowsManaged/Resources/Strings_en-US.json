@@ -109,8 +109,8 @@
           "text": "Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
         },
         {
-          "id": "Dotnet462IsRequired",
-          "text": "The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+          "id": "Dotnet471IsRequired",
+          "text": "The product requires Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
         },
         {
           "id": "WindowsPowerShell51IsRequired",
@@ -775,6 +775,14 @@
           {
             "id": "YoullNeedToProvideThePublicKey",
             "text": "You'll need to provide the companion server public key"
+          },
+          {
+            "id": "UntrustedCertificate",
+            "text": "Untrusted Certificate"
+          },
+          {
+            "id": "TheCertificateForXIsNotTrustedDoYouWishToProceed",
+            "text": "The certificate for {0} is not trusted. Do you wish to proceed?"
           }
         ],
         "keys": [
