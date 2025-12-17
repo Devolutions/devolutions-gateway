@@ -35,7 +35,7 @@ try
 	else
 	{
 		Write-Host "Publishing..."
-		npm publish "$Tarball" "--access=$Access"
+		NODE_AUTH_TOKEN="" npm publish "$Tarball" "--access=$Access" # NODE_AUTH_TOKEN is a workaround for https://github.com/actions/setup-node/issues/1440
 	}
 }
 finally
