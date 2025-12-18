@@ -11,6 +11,7 @@ use tokio::net::{TcpStream, UdpSocket};
 
 use crate::DgwState;
 use crate::http::{HttpError, HttpErrorBuilder};
+use crate::target_addr::TargetAddr;
 use crate::token::AccessTokenClaims;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -87,69 +88,7 @@ async fn kdc_proxy(
         &claims.krb_kdc
     };
 
-    let protocol = kdc_addr.scheme();
-
-    debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
-
-    let kdc_reply_message = if protocol == "tcp" {
-        #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
-        let mut connection = TcpStream::connect(kdc_addr.as_addr()).await.map_err(|e| {
-            error!(%kdc_addr, "failed to connect to KDC server");
-            unable_to_reach_kdc_server_err(e)
-        })?;
-
-        trace!("Connected! Forwarding KDC message...");
-
-        connection
-            .write_all(&kdc_proxy_message.kerb_message.0.0)
-            .await
-            .map_err(
-                HttpError::bad_gateway()
-                    .with_msg("unable to send the message to the KDC server")
-                    .err(),
-            )?;
-
-        trace!("Reading KDC reply...");
-
-        read_kdc_reply_message(&mut connection).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to read KDC reply message")
-                .err(),
-        )?
-    } else {
-        // We assume that ticket length is not bigger than 2048 bytes.
-        let mut buf = [0; 2048];
-
-        let port = portpicker::pick_unused_port().ok_or_else(|| HttpError::internal().msg("no free ports"))?;
-
-        trace!("Binding UDP listener to 127.0.0.1:{port}...");
-
-        let udp_socket = UdpSocket::bind(("127.0.0.1", port))
-            .await
-            .map_err(HttpError::internal().with_msg("unable to bind UDP socket").err())?;
-
-        trace!("Binded! Forwarding KDC message...");
-
-        // First 4 bytes contains message length. We don't need it for UDP.
-        #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
-        udp_socket
-            .send_to(&kdc_proxy_message.kerb_message.0.0[4..], kdc_addr.as_addr())
-            .await
-            .map_err(|e| unable_to_reach_kdc_server_err(e))?;
-
-        trace!("Reading KDC reply...");
-
-        let n = udp_socket.recv(&mut buf).await.map_err(
-            HttpError::bad_gateway()
-                .with_msg("unable to read reply from the KDC server")
-                .err(),
-        )?;
-
-        let mut reply_buf = Vec::new();
-        reply_buf.extend_from_slice(&u32::try_from(n).expect("n not too big").to_be_bytes());
-        reply_buf.extend_from_slice(&buf[0..n]);
-        reply_buf
-    };
+    let kdc_reply_message = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;
 
     let kdc_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message)
         .map_err(HttpError::internal().with_msg("couldn’t create KDC proxy reply").err())?;
@@ -189,4 +128,69 @@ fn unable_to_reach_kdc_server_err(error: io::Error) -> HttpError {
     };
 
     builder.with_msg("unable to reach KDC server").build(error)
+}
+
+/// Sends the Kerberos message to the specified KDC address.
+pub async fn send_krb_message(kdc_addr: &TargetAddr, message: &[u8]) -> Result<Vec<u8>, HttpError> {
+    let protocol = kdc_addr.scheme();
+
+    debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
+
+    if protocol == "tcp" {
+        #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
+        let mut connection = TcpStream::connect(kdc_addr.as_addr()).await.map_err(|e| {
+            error!(%kdc_addr, "failed to connect to KDC server");
+            unable_to_reach_kdc_server_err(e)
+        })?;
+
+        trace!("Connected! Forwarding KDC message...");
+
+        connection.write_all(message).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to send the message to the KDC server")
+                .err(),
+        )?;
+
+        trace!("Reading KDC reply...");
+
+        Ok(read_kdc_reply_message(&mut connection).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to read KDC reply message")
+                .err(),
+        )?)
+    } else {
+        // We assume that ticket length is not bigger than 2048 bytes.
+        let mut buf = [0; 2048];
+
+        let port = portpicker::pick_unused_port().ok_or_else(|| HttpError::internal().msg("no free ports"))?;
+
+        trace!("Binding UDP listener to 127.0.0.1:{port}...");
+
+        let udp_socket = UdpSocket::bind(("127.0.0.1", port))
+            .await
+            .map_err(HttpError::internal().with_msg("unable to bind UDP socket").err())?;
+
+        trace!("Binded! Forwarding KDC message...");
+
+        // First 4 bytes contains message length. We don't need it for UDP.
+        #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
+        udp_socket
+            .send_to(&message[4..], kdc_addr.as_addr())
+            .await
+            .map_err(|e| unable_to_reach_kdc_server_err(e))?;
+
+        trace!("Reading KDC reply...");
+
+        let n = udp_socket.recv(&mut buf).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to read reply from the KDC server")
+                .err(),
+        )?;
+
+        let mut reply_buf = Vec::new();
+        reply_buf.extend_from_slice(&u32::try_from(n).expect("n not too big").to_be_bytes());
+        reply_buf.extend_from_slice(&buf[0..n]);
+
+        Ok(reply_buf)
+    }
 }
