@@ -9,9 +9,13 @@ mod ws;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
+#[rustfmt::skip]
 pub use self::copy_bidirectional::*;
+#[rustfmt::skip]
 pub use self::pinnable::*;
+#[rustfmt::skip]
 pub use self::shared::*;
+#[rustfmt::skip]
 pub use self::ws::*;
 
 pub type ErasedRead = Box<dyn AsyncRead + Send + Unpin>;

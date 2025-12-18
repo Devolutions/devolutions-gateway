@@ -19,7 +19,6 @@ use std::time::SystemTime;
 
 use anyhow::Context as _;
 use bytes::Bytes;
-pub use jmux_proto::DestinationUrl;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -30,10 +29,15 @@ use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
 
 use self::codec::JmuxCodec;
-pub use self::config::{FilteringRule, JmuxConfig};
 use self::event::TrafficCallback;
-pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 use self::id_allocator::IdAllocator;
+
+#[rustfmt::skip]
+pub use jmux_proto::DestinationUrl;
+#[rustfmt::skip]
+pub use self::config::{FilteringRule, JmuxConfig};
+#[rustfmt::skip]
+pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB

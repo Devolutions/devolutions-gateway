@@ -8,10 +8,7 @@ pub mod str;
 #[cfg(target_os = "windows")]
 #[path = ""]
 mod lib_win {
-    pub use windows as raw;
-
     mod error;
-    pub use error::Error;
 
     pub mod event;
     pub mod fs;
@@ -32,7 +29,13 @@ mod lib_win {
     pub mod user;
     pub mod utils;
     pub mod wts;
+
+    #[rustfmt::skip]
+    pub use windows as raw;
+    #[rustfmt::skip]
+    pub use error::Error;
 }
 
 #[cfg(target_os = "windows")]
+#[rustfmt::skip]
 pub use lib_win::*;

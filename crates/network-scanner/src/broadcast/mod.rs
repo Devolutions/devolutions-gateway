@@ -6,6 +6,7 @@ use anyhow::Context;
 pub mod asynchronous;
 pub mod blocking;
 
+#[rustfmt::skip]
 pub use asynchronous::broadcast;
 
 #[derive(Debug, Clone)]
