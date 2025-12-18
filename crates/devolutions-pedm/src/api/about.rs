@@ -5,11 +5,10 @@ use axum::Json;
 use axum::extract::State;
 use chrono::{TimeZone, Utc};
 
-use crate::db::Db;
-use crate::model::AboutData;
-
 use super::err::HandlerError;
 use super::state::AppState;
+use crate::db::Db;
+use crate::model::AboutData;
 
 /// Gets info about the current state of the application.
 pub(crate) async fn about(

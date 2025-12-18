@@ -1,12 +1,12 @@
 #![allow(unused_crate_dependencies)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use network_scanner::broadcast::asynchronous::broadcast;
 use network_scanner::ip_utils::get_subnets;
 use network_scanner::task_utils::TaskManager;
 use network_scanner_net::runtime;
-use std::time::Duration;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {

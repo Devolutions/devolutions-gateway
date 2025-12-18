@@ -3,12 +3,11 @@ extern crate tracing;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
+pub use libsql;
 use libsql::Connection;
 use traffic_audit::{ClaimedEvent, TrafficAuditRepo, TrafficEvent};
 use ulid::Ulid;
 use uuid::Uuid;
-
-pub use libsql;
 
 // Migration constants - these will be used by the migration system
 const MIGRATIONS: &[&str] = &[

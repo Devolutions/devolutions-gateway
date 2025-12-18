@@ -1,5 +1,6 @@
 use std::{fmt, mem};
 
+pub use Security::WELL_KNOWN_SID_TYPE;
 use thiserror::Error;
 use windows::Win32::Foundation::{HLOCAL, LocalFree};
 use windows::Win32::Security;
@@ -10,8 +11,6 @@ use crate::dst::{Win32Dst, Win32DstDef};
 use crate::identity::account::{Account, AccountWithType};
 use crate::raw_buffer::RawBuffer;
 use crate::str::{U16CStr, U16CStrExt, U16CString, U16CStringExt};
-
-pub use Security::WELL_KNOWN_SID_TYPE;
 
 /// A string-format security identifier (SID), suitable for display, storage, or transmission
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -478,9 +477,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     #![allow(clippy::print_stdout)]
 
+    use rstest::rstest;
+
     use super::*;
     use crate::str::u16cstr;
-    use rstest::rstest;
 
     #[test]
     #[cfg_attr(miri, ignore)]

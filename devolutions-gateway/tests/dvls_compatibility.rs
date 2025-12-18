@@ -126,8 +126,9 @@ mod as_of_v2025_2_6_0 {
 }
 
 mod as_of_v2022_3_0_0 {
-    use super::*;
     use proptest::collection::vec;
+
+    use super::*;
 
     const CTY_JMUX: &str = "JMUX";
     const CTY_ASSOCIATION: &str = "ASSOCIATION";
@@ -503,8 +504,9 @@ mod as_of_v2022_3_0_0 {
 }
 
 mod as_of_v2022_2_0_0 {
-    use super::*;
     use proptest::collection::vec;
+
+    use super::*;
 
     const CTY_JMUX: &str = "JMUX";
     const CTY_ASSOCIATION: &str = "ASSOCIATION";
@@ -665,9 +667,10 @@ mod as_of_v2022_2_0_0 {
 }
 
 mod as_of_v2021_2_13_0 {
-    use super::*;
     use proptest::collection::vec;
     use time::OffsetDateTime;
+
+    use super::*;
 
     const TYPE_ASSOCIATION: &str = "association";
     const JET_CM: &str = "fwd";

@@ -1,8 +1,9 @@
+use std::time::Instant;
+
 use axum::body::Body;
 use axum::http::Request;
 use axum::middleware::Next;
 use axum::response::Response;
-use std::time::Instant;
 use tracing::Instrument as _;
 
 use crate::http::HttpError;

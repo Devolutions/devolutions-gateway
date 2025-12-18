@@ -1,10 +1,9 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
-
-use std::future::Future;
 
 use crate::event_bus::EventBus;
 use crate::ip_utils::{IpAddrRange, Subnet, get_subnets};

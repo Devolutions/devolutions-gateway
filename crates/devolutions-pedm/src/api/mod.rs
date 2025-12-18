@@ -12,6 +12,8 @@ use axum::extract::{ConnectInfo, Request};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::{Json, Router};
+use devolutions_gateway_task::ShutdownSignal;
+use devolutions_pedm_shared::policy::User;
 use futures_util::future::BoxFuture;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
@@ -20,9 +22,6 @@ use tower::Layer;
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
 use tracing::{error, info};
-
-use devolutions_gateway_task::ShutdownSignal;
-use devolutions_pedm_shared::policy::User;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::raw::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};

@@ -1,8 +1,10 @@
+use std::io;
+
+use http::StatusCode;
+use uuid::Uuid;
+
 use crate::utils::{RequestHelper, ResponseHelper};
 use crate::{Error, JET_HEADER_HOST, JET_HEADER_VERSION, get_uuid_in_path};
-use http::StatusCode;
-use std::io;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetTestReq {

@@ -3,7 +3,6 @@ mod socks5;
 
 pub use socks4::Socks4Stream;
 pub use socks5::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode, Socks5Listener, Socks5Stream};
-
 use tokio::io::{AsyncRead, AsyncWrite};
 
 /// We need a super-trait in order to have additional non-auto-trait traits in trait objects.

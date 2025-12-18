@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::sync::LazyLock;
+
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
 use tokio::sync::{Mutex, Notify, mpsc};
 
@@ -131,8 +132,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
 
     #[test]
     fn dummy_to_dummy() {

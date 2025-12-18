@@ -2,11 +2,12 @@
 //!
 //! This includes session elevations that do not expire until the user manually revokes them or temporary based elevations.
 //! Note that temporary elevations will not kill processes launched and will just deny creations after the expiration period.
-use devolutions_pedm_shared::policy::User;
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+use devolutions_pedm_shared::policy::User;
+use parking_lot::RwLock;
 
 #[cfg_attr(not(windows), expect(dead_code, reason = "work in progress feature"))]
 #[derive(Clone)]

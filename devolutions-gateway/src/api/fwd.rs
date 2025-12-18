@@ -320,11 +320,12 @@ async fn fwd_http(
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
     mut request: axum::http::Request<axum::body::Body>,
 ) -> Result<Response, HttpError> {
+    use core::str::FromStr;
+    use std::sync::LazyLock;
+
     use axum::extract::FromRequestParts as _; // from_request_parts
     use axum::http::{Response, header};
-    use core::str::FromStr;
     use http_body_util::BodyExt as _; // into_data_stream
-    use std::sync::LazyLock;
     use tokio_rustls::rustls;
     use tokio_tungstenite::connect_async_tls_with_config;
 

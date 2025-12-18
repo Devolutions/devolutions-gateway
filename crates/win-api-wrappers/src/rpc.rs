@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::ptr::{self, NonNull};
 use std::slice;
 
+use anyhow::{Result, bail};
 use windows::Win32::Foundation::{E_INVALIDARG, ERROR_MORE_DATA};
 use windows::Win32::Security::{SecurityIdentification, TOKEN_ACCESS_MASK, TOKEN_ALL_ACCESS, TokenPrimary};
 use windows::Win32::System::Memory::PAGE_READWRITE;
@@ -16,8 +17,6 @@ use crate::Error;
 use crate::thread::Thread;
 use crate::token::Token;
 use crate::utils::set_memory_protection;
-
-use anyhow::{Result, bail};
 
 #[expect(non_camel_case_types)] // Unless a better name is found…
 pub type RPC_BINDING_HANDLE = *mut c_void;

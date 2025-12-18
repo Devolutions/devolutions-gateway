@@ -16,7 +16,6 @@ use {
     tokio_tungstenite as _, tower as _, tower_http as _, transport as _, tungstenite as _, typed_builder as _,
     url as _, uuid as _, zeroize as _,
 };
-
 // Used by tests.
 #[cfg(test)]
 use {
@@ -29,13 +28,14 @@ extern crate tracing;
 
 mod service;
 
+use std::sync::mpsc;
+
 use anyhow::Context;
 use ceviche::controller::{Controller, ControllerInterface, dispatch};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
 use devolutions_gateway::SYSTEM_LOGGER;
 use devolutions_gateway::config::ConfHandle;
-use std::sync::mpsc;
 use tap::prelude::*;
 
 use crate::service::{DESCRIPTION, DISPLAY_NAME, GatewayService, SERVICE_NAME};

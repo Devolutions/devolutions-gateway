@@ -1,12 +1,13 @@
-use anyhow::Context;
-use dlopen::symbor::{Library, SymBorApi, Symbol};
-use dlopen_derive::SymBorApi;
 use std::convert::TryFrom;
 use std::ffi::CStr;
 use std::mem::transmute;
 use std::os::raw::c_char;
 use std::slice::from_raw_parts;
 use std::sync::Arc;
+
+use anyhow::Context;
+use dlopen::symbor::{Library, SymBorApi, Symbol};
+use dlopen_derive::SymBorApi;
 use tap::TapFallible;
 
 #[derive(Debug, PartialEq, Eq)]

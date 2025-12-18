@@ -1,9 +1,11 @@
-use crate::proxy::ProxyConfig;
-use anyhow::{Context as _, Result};
 use std::any::Any;
 use std::path::PathBuf;
+
+use anyhow::{Context as _, Result};
 use transport::ErasedReadWrite;
 use uuid::Uuid;
+
+use crate::proxy::ProxyConfig;
 
 #[derive(Debug, Clone)]
 pub enum PipeMode {
@@ -66,8 +68,9 @@ pub struct Pipe {
 }
 
 pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result<Pipe> {
-    use anyhow::Context as _;
     use std::process::Stdio;
+
+    use anyhow::Context as _;
     use tokio::fs;
     use tokio::process::Command;
 
@@ -306,9 +309,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
             })
         }
         PipeMode::WebSocketListen { bind_addr } => {
-            use crate::utils::websocket_handle;
             use tokio::net::TcpListener;
             use tokio_tungstenite::accept_async;
+
+            use crate::utils::websocket_handle;
 
             info!(%bind_addr, "Listening for WebSocket");
 
@@ -337,6 +341,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
         #[cfg(windows)]
         PipeMode::NamedPipe { name } => {
             use std::time::Duration;
+
             use tokio::net::windows::named_pipe::ClientOptions;
             use tokio::time;
 

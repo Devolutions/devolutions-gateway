@@ -1,8 +1,7 @@
 use axum::Json;
 use axum::extract::Query;
-use hyper::StatusCode;
-
 use devolutions_agent_shared::{ProductUpdateInfo, UpdateJson, VersionSpecification, get_updater_file_path};
+use hyper::StatusCode;
 
 use crate::extract::UpdateScope;
 use crate::http::{HttpError, HttpErrorBuilder};

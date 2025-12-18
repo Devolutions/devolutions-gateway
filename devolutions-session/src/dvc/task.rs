@@ -3,9 +3,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
+use devolutions_gateway_task::Task;
+use now_proto_pdu::ironrdp_core::IntoOwned;
+use now_proto_pdu::{
+    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
+    NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
+    NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
+    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmCapabilitiesMsg, NowRdmMessage, NowSessionCapsetFlags,
+    NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags,
+    NowSystemMessage, SetKbdLayoutOption,
+};
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{error, info, warn};
+use win_api_wrappers::event::Event;
+use win_api_wrappers::security::privilege::ScopedPrivileges;
+use win_api_wrappers::utils::WideString;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Security::{TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Shutdown::{
@@ -20,20 +33,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, PostMessageW, SW_RESTORE, WM_INPUTLANGCHANGEREQUEST,
 };
 use windows::core::PCWSTR;
-
-use devolutions_gateway_task::Task;
-use now_proto_pdu::ironrdp_core::IntoOwned;
-use now_proto_pdu::{
-    ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
-    NowExecBatchMsg, NowExecCancelRspMsg, NowExecCapsetFlags, NowExecDataMsg, NowExecDataStreamKind, NowExecMessage,
-    NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecRunMsg, NowExecStartedMsg, NowExecWinPsMsg, NowMessage,
-    NowMsgBoxResponse, NowProtoError, NowProtoVersion, NowRdmCapabilitiesMsg, NowRdmMessage, NowSessionCapsetFlags,
-    NowSessionMessage, NowSessionMsgBoxReqMsg, NowSessionMsgBoxRspMsg, NowStatusError, NowSystemCapsetFlags,
-    NowSystemMessage, SetKbdLayoutOption,
-};
-use win_api_wrappers::event::Event;
-use win_api_wrappers::security::privilege::ScopedPrivileges;
-use win_api_wrappers::utils::WideString;
 
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::fs::TmpFileGuard;

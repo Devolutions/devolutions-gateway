@@ -1,9 +1,10 @@
 use core::fmt;
-use serde::{de, ser};
-use smol_str::SmolStr;
 use std::net::IpAddr;
 use std::ops::RangeBounds;
 use std::str::FromStr;
+
+use serde::{de, ser};
+use smol_str::SmolStr;
 use tap::Pipe as _;
 
 #[derive(Debug)]

@@ -1,9 +1,9 @@
 //! Security-related functions for the updater (e.g. file permission settings).
 
 use camino::Utf8Path;
+use win_api_wrappers::utils::WideString;
 
 use crate::updater::UpdaterError;
-use win_api_wrappers::utils::WideString;
 
 /// DACL for the update.json file:
 /// Owner: SYSTEM

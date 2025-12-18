@@ -1,4 +1,5 @@
 use std::path::Path;
+
 use sysevent::{Entry, Severity};
 
 // 1000-1099 **Service/Lifecycle**

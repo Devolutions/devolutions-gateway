@@ -36,8 +36,9 @@ pub(crate) struct ConfigDiagnostic {
 
 impl From<&Conf> for ConfigDiagnostic {
     fn from(conf: &Conf) -> Self {
-        use crate::config::dto::NgrokTunnelConf;
         use url::Url;
+
+        use crate::config::dto::NgrokTunnelConf;
 
         let mut listeners = conf.listeners.clone();
 

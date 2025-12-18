@@ -11,7 +11,6 @@ use std::env;
 
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
-
 pub use date_version::{DateVersion, DateVersionError};
 pub use update_json::{ProductUpdateInfo, UpdateJson, VersionSpecification};
 

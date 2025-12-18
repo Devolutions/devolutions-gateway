@@ -1,3 +1,11 @@
+use std::fmt::Display;
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::Context;
+use typed_builder::TypedBuilder;
+
 use crate::broadcast::asynchronous::broadcast;
 use crate::event_bus::{EventBus, RawIpEvent, TypedReceiver};
 use crate::ip_utils::IpAddrRange;
@@ -7,12 +15,6 @@ use crate::netbios::netbios_query_scan;
 use crate::ping::ping_range;
 use crate::port_discovery::{TcpKnockEvent, scan_ports};
 use crate::task_utils::{TaskExecutionContext, TaskExecutionRunner, TaskManager};
-use anyhow::Context;
-use std::fmt::Display;
-use std::net::IpAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use typed_builder::TypedBuilder;
 
 /// Represents a network scanner for discovering devices and their services over a network.
 #[derive(Clone)]

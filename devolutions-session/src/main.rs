@@ -2,25 +2,20 @@
 // It has no effect on platforms other than Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(all(windows, feature = "dvc"))]
+use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _, windows as _};
 use ::{
     camino as _, cfg_if as _, ctrlc as _, devolutions_log as _, futures as _, parking_lot as _, serde as _,
     serde_json as _, tap as _,
 };
 
-#[cfg(all(windows, feature = "dvc"))]
-use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _, windows as _};
-
 #[macro_use]
 extern crate tracing;
-use devolutions_session::{ConfHandle, get_data_dir, init_log};
-
-use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
-
 use anyhow::Context;
-
+use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 #[cfg(all(windows, feature = "dvc"))]
 use devolutions_session::dvc::task::DvcIoTask;
-
+use devolutions_session::{ConfHandle, get_data_dir, init_log};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 

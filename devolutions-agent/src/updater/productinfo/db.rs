@@ -1,7 +1,8 @@
 //! Devolutions product information (https://devolutions.net/productinfo.json) parser
 
-use serde::Deserialize;
 use std::collections::BTreeMap;
+
+use serde::Deserialize;
 use thiserror::Error;
 
 /// Errors that can occur when parsing the productinfo.json database.

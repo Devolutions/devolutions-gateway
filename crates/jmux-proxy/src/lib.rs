@@ -10,10 +10,6 @@ mod config;
 mod event;
 mod id_allocator;
 
-pub use self::config::{FilteringRule, JmuxConfig};
-pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
-pub use jmux_proto::DestinationUrl;
-
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io;
@@ -23,6 +19,7 @@ use std::time::SystemTime;
 
 use anyhow::Context as _;
 use bytes::Bytes;
+pub use jmux_proto::DestinationUrl;
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -33,7 +30,9 @@ use tokio_util::codec::FramedRead;
 use tracing::{Instrument as _, Span};
 
 use self::codec::JmuxCodec;
+pub use self::config::{FilteringRule, JmuxConfig};
 use self::event::TrafficCallback;
+pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 use self::id_allocator::IdAllocator;
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB

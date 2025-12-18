@@ -6,7 +6,6 @@ use axum::{Extension, Json};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::{Process, StartupInfo};
 use win_api_wrappers::raw::Win32::Security::{TOKEN_QUERY, WinLocalSystemSid};
@@ -17,12 +16,11 @@ use win_api_wrappers::thread::{ThreadAttributeList, ThreadAttributeType};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{CommandLine, WideString, environment_block, expand_environment_path};
 
+use super::NamedPipeConnectInfo;
 use crate::api::state::AppState;
 use crate::elevator;
 use crate::error::Error;
 use crate::policy::Policy;
-
-use super::NamedPipeConnectInfo;
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]

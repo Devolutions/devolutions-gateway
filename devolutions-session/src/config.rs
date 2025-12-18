@@ -1,11 +1,11 @@
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
 use tap::prelude::*;
-
-use std::fs::File;
-use std::io::BufReader;
-use std::sync::Arc;
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {

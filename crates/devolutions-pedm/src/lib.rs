@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
-
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
 mod config;

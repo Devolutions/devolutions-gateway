@@ -1,10 +1,11 @@
+use std::io::Error as IoError;
+use std::sync::{Arc, Mutex};
+
 use axum::Router;
 use axum::extract::ws::{self, WebSocket, WebSocketUpgrade};
 use axum::routing::get;
 use futures::SinkExt;
 use futures::stream::StreamExt;
-use std::io::Error as IoError;
-use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Bytes;
@@ -110,8 +111,9 @@ fn websocket_compat(ws: WebSocket) -> impl AsyncRead + AsyncWrite + Unpin + Send
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_websocket_client_server() {

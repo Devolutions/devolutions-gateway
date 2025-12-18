@@ -11,10 +11,10 @@ pub use self::win_ext::*;
 
 #[cfg(target_os = "windows")]
 mod win_ext {
-    use super::{U16CStr, U16CString};
-
     use windows::Win32::Foundation::UNICODE_STRING;
     use windows::core::{PCWSTR, PWSTR};
+
+    use super::{U16CStr, U16CString};
 
     pub trait U16CStrExt {
         /// # Safety

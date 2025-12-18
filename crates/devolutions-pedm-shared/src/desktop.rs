@@ -1,7 +1,8 @@
-use anyhow::Result;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
+
+use anyhow::Result;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::raw::Win32::Security::TOKEN_QUERY;
 use windows_registry::LOCAL_MACHINE;

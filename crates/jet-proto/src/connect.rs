@@ -1,12 +1,14 @@
+use std::io;
+use std::str::FromStr;
+
+use http::StatusCode;
+use uuid::Uuid;
+
 use crate::utils::{RequestHelper, ResponseHelper};
 use crate::{
     Error, JET_HEADER_ASSOCIATION, JET_HEADER_CONNECTION, JET_HEADER_HOST, JET_HEADER_METHOD, JET_HEADER_VERSION,
     get_uuid_in_path,
 };
-use http::StatusCode;
-use std::io;
-use std::str::FromStr;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetConnectReq {

@@ -1,10 +1,11 @@
 #![allow(clippy::print_stdout)]
 #![allow(clippy::print_stderr)]
 
-use proxy_http::HttpProxyAcceptor;
-use proxy_socks::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode};
 use std::sync::Arc;
 use std::{env, io};
+
+use proxy_http::HttpProxyAcceptor;
+use proxy_socks::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
