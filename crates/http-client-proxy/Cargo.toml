@@ -1,0 +1,21 @@
+[package]
+name = "http-client-proxy"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+proxy_cfg = "0.4"
+reqwest = { version = "0.12", default-features = false }
+anyhow = "1.0"
+url = "2.5"
+tracing = "0.1"
+ipnet = "2.10"
+parking_lot = "0.12"
+
+[dev-dependencies]
+rstest = "0.25"

@@ -69,8 +69,12 @@ impl Message {
     }
 }
 
-#[instrument(skip(subscriber))]
-pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow::Result<()> {
+#[instrument(skip(subscriber, proxy_conf))]
+pub async fn send_message(
+    subscriber: &Subscriber,
+    message: &Message,
+    proxy_conf: &crate::config::dto::ProxyConf,
+) -> anyhow::Result<()> {
     use std::time::Duration;
 
     use backoff::backoff::Backoff as _;
@@ -85,7 +89,11 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
         .with_multiplier(RETRY_MULTIPLIER)
         .build();
 
-    let client = reqwest::Client::new();
+    // Build client with proxy support for the subscriber URL.
+    let proxy_config = proxy_conf.to_proxy_config();
+    let client =
+        http_client_proxy::get_or_create_cached_client(reqwest::Client::builder(), &subscriber.url, &proxy_config)
+            .context("failed to build HTTP client with proxy configuration")?;
 
     let op = || async {
         let response = client
@@ -243,8 +251,9 @@ async fn subscriber_task(
                 if let Some(subscriber) = conf.subscriber.clone() {
                     debug!(?msg, %subscriber.url, "Send message");
 
+                    let proxy_conf = conf.proxy.clone();
                     ChildTask::spawn(async move {
-                        if let Err(error) = send_message(&subscriber, &msg).await {
+                        if let Err(error) = send_message(&subscriber, &msg, &proxy_conf).await {
                             warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
                         }
                     })
@@ -265,7 +274,7 @@ async fn subscriber_task(
         let msg = Message::session_list(Vec::new());
         debug!(?msg, %subscriber.url, "Send message");
 
-        if let Err(error) = send_message(&subscriber, &msg).await {
+        if let Err(error) = send_message(&subscriber, &msg, &conf.proxy).await {
             warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
         }
     }

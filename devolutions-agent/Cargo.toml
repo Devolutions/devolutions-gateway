@@ -21,14 +21,16 @@ devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
 futures = "0.3"
+http-client-proxy = { path = "../crates/http-client-proxy" }
 parking_lot = "0.12"
-rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
-rustls-pemfile = "2.2" # FIXME(@CBenoit): maybe we don’t need this crate
+rand = "0.8" # FIXME(@CBenoit): maybe we don't need this crate
+rustls-pemfile = "2.2" # FIXME(@CBenoit): maybe we don't need this crate
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tap = "1.0"
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"
+url = "2.5"
 
 [dependencies.ironrdp]
 git = "https://github.com/Devolutions/IronRDP"
@@ -54,14 +56,14 @@ features = [
 ]
 
 [target.'cfg(windows)'.dependencies]
+aws-lc-rs = "1.14"
+devolutions-pedm = { path = "../crates/devolutions-pedm" }
 hex = "0.4"
 notify-debouncer-mini = "0.6"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "system-proxy", "socks"] }
-aws-lc-rs = "1.14"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 sha2 = "0.10"
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
-devolutions-pedm = { path = "../crates/devolutions-pedm" }
 win-api-wrappers = { path = "../crates/win-api-wrappers" }
 
 [target.'cfg(windows)'.dependencies.windows]
