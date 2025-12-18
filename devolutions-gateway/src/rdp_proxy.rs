@@ -177,7 +177,7 @@ where
         (
             Some(KerberosConfig {
                 kdc_proxy_url: kdc_url.clone(),
-                hostname: None,
+                hostname: Some(gateway_hostname.clone()),
             }),
             Some(NetworkClient::new()),
         )
