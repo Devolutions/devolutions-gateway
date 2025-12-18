@@ -117,24 +117,25 @@ where
     let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
 
     let (krb_server_config, network_client) = if conf.debug.enable_unstable
-        && let Some(KerberosServer {
-            realm: _,
-            users: _,
-            krbtgt_key: _,
-            max_time_skew,
-            ticket_decryption_key,
-            service_user,
+        && let Some(crate::config::dto::KerberosConfig {
+            kerberos_server:
+                KerberosServer {
+                    max_time_skew,
+                    ticket_decryption_key,
+                    service_user,
+                    ..
+                },
             kdc_url: _,
-        }) = conf.debug.kerberos_server.as_ref()
+        }) = conf.debug.kerberos.as_ref()
     {
         let user = service_user.as_ref().map(|user| {
             let DomainUser {
-                username,
+                fqdn,
                 password,
                 salt: _,
             } = user;
             // The username is in the FQDN format. Thus, the domain field can be empty.
-            CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(username, "", password))
+            CredentialsBuffers::AuthIdentity(AuthIdentityBuffers::from_utf8(fqdn, "", password))
         });
 
         (
@@ -168,15 +169,10 @@ where
     );
 
     let (krb_client_config, network_client) = if conf.debug.enable_unstable
-        && let Some(KerberosServer {
-            realm: _,
-            users: _,
-            krbtgt_key: _,
-            max_time_skew: _,
-            ticket_decryption_key: _,
-            service_user: _,
+        && let Some(crate::config::dto::KerberosConfig {
+            kerberos_server: _,
             kdc_url,
-        }) = conf.debug.kerberos_server.as_ref()
+        }) = conf.debug.kerberos.as_ref()
     {
         (
             Some(KerberosConfig {
