@@ -4,7 +4,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use futures::TryFutureExt as _;
-use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tracing::Instrument as _;
@@ -220,17 +219,39 @@ async fn run_https_listener(listener: TcpListener, state: DgwState) -> anyhow::R
     }
 }
 
+/// Checks if an error represents a benign client disconnect.
+///
+/// Walks the error chain and returns true if any cause is a `std::io::Error`
+/// with kind `BrokenPipe`, `ConnectionReset`, or `UnexpectedEof`.
+fn is_benign_disconnect(err: &anyhow::Error) -> bool {
+    use std::io::ErrorKind::{BrokenPipe, ConnectionReset, UnexpectedEof};
+
+    err.chain().any(|cause| {
+        if let Some(ioe) = cause.downcast_ref::<std::io::Error>() {
+            return matches!(ioe.kind(), BrokenPipe | ConnectionReset | UnexpectedEof);
+        }
+        false
+    })
+}
+
 async fn handle_https_peer(
     stream: TcpStream,
     tls_acceptor: tokio_rustls::TlsAcceptor,
     state: DgwState,
     peer_addr: SocketAddr,
 ) -> anyhow::Result<()> {
-    let tls_stream = tls_acceptor
-        .accept(stream)
-        .await
-        .context("TLS handshake failed")?
-        .pipe(tokio_rustls::TlsStream::Server);
+    let tls_stream = match tls_acceptor.accept(stream).await {
+        Ok(stream) => tokio_rustls::TlsStream::Server(stream),
+        Err(e) => {
+            let e = anyhow::Error::from(e);
+            if is_benign_disconnect(&e) {
+                debug!(error = format!("{e:#}"), %peer_addr, "TLS handshake ended by peer");
+                return Ok(());
+            } else {
+                return Err(e.context("TLS handshake failed"));
+            }
+        }
+    };
 
     handle_http_peer(tls_stream, state, peer_addr).await
 }
@@ -259,13 +280,24 @@ where
 
     match result {
         Ok(()) => Ok(()),
-        Err(e) => match e.downcast_ref::<hyper::Error>() {
-            Some(e) if e.is_canceled() || e.is_incomplete_message() => {
-                debug!(error = %e, "Request was cancelled");
-                Ok(())
+        Err(error) => {
+            // Check for hyper-specific benign cases first.
+            if let Some(hyper_err) = error.downcast_ref::<hyper::Error>()
+                && (hyper_err.is_canceled() || hyper_err.is_incomplete_message())
+            {
+                debug!(error = format!("{:#}", anyhow::anyhow!(error)), %peer_addr, "Request was cancelled/incomplete");
+                return Ok(());
             }
-            _ => Err(anyhow::anyhow!(e).context("HTTP server")),
-        },
+
+            // Then check for underlying io::Error kinds via anyhow chain.
+            let error = anyhow::Error::from_boxed(error);
+            if is_benign_disconnect(&error) {
+                debug!(error = format!("{error:#}"), %peer_addr, "Client disconnected");
+                Ok(())
+            } else {
+                Err(error.context("HTTP server"))
+            }
+        }
     }
 }
 
