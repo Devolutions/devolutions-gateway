@@ -30,7 +30,7 @@
             <label for="protocol">Hostname</label>
             <div class="gateway-form-input">
               <span class="p-fluid">
-                <p-autoComplete formControlName="autoComplete" id="hostname" field="hostname" 
+                <p-autoComplete formControlName="autoComplete" id="hostname" field="hostname" optionLabel="hostname"
                   placeholder="Enter hostname" [suggestions]="filteredHostnames" [dropdown]="isHostnamesExists()" 
                   (completeMethod)="filterHostname($event)" required></p-autoComplete>
               </span>
