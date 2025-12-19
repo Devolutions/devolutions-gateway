@@ -7,6 +7,7 @@ mod db;
 mod log;
 pub mod model;
 
+#[rustfmt::skip]
 pub use config::Config;
 
 cfg_if::cfg_if! {

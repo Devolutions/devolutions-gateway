@@ -2,8 +2,10 @@ mod reversed_hex_uuid;
 
 pub mod registry;
 
-pub use reversed_hex_uuid::InvalidReversedHexUuid;
 use uuid::{Uuid, uuid};
+
+#[rustfmt::skip]
+pub use reversed_hex_uuid::InvalidReversedHexUuid;
 
 /// MSI upgrade code for the Devolutions Gateway.
 ///

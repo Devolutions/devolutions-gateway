@@ -4,11 +4,13 @@ extern crate tracing;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use job_queue::{DynJob, JobCtx, JobQueue, JobReader, RunnerWaker};
-pub use libsql;
 use libsql::Connection;
 use time::OffsetDateTime;
 use ulid::Ulid;
 use uuid::Uuid;
+
+#[rustfmt::skip]
+pub use libsql;
 
 /// Implementation of [`JobQueue`] using libSQL as the backend
 ///

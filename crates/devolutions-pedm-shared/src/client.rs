@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use devolutions_pedm_client_http::apis::client::APIClient;
-pub use devolutions_pedm_client_http::models;
 use hyper::Uri;
 use hyper::body::HttpBody;
 use hyper::client::connect::{Connected, Connection};
@@ -16,6 +15,9 @@ use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tower::Service;
 use win_api_wrappers::raw::Win32::Foundation::ERROR_PIPE_BUSY;
 use win_api_wrappers::raw::Win32::Storage::FileSystem::SECURITY_IMPERSONATION;
+
+#[rustfmt::skip]
+pub use devolutions_pedm_client_http::models;
 
 #[pin_project]
 struct NamedPipeStream(#[pin] NamedPipeClient);

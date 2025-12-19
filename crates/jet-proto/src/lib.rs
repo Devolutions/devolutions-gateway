@@ -4,9 +4,10 @@ pub mod accept;
 pub mod connect;
 pub mod test;
 
-pub use http::StatusCode;
-
 mod utils;
+
+#[rustfmt::skip]
+pub use http::StatusCode;
 
 use std::env;
 use std::io::{self, Read};

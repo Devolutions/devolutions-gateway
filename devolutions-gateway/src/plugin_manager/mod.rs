@@ -7,12 +7,15 @@ use std::sync::{Arc, LazyLock};
 use anyhow::Context as _;
 use camino::Utf8Path;
 use dlopen::symbor::Library;
-pub use packets_parsing::PacketsParser;
 use parking_lot::Mutex;
 use plugin_info::{PluginCapabilities, PluginInformation};
-pub use recording::Recorder;
 
 use crate::config::Conf;
+
+#[rustfmt::skip]
+pub use packets_parsing::PacketsParser;
+#[rustfmt::skip]
+pub use recording::Recorder;
 
 #[derive(Clone)]
 struct Plugin {

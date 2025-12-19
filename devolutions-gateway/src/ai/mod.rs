@@ -4,4 +4,5 @@
 
 mod provider;
 
+#[rustfmt::skip]
 pub use provider::{AuthMethod, ProviderConfig, ProviderConfigBuilder};

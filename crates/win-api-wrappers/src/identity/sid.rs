@@ -1,6 +1,5 @@
 use std::{fmt, mem};
 
-pub use Security::WELL_KNOWN_SID_TYPE;
 use thiserror::Error;
 use windows::Win32::Foundation::{HLOCAL, LocalFree};
 use windows::Win32::Security;
@@ -11,6 +10,9 @@ use crate::dst::{Win32Dst, Win32DstDef};
 use crate::identity::account::{Account, AccountWithType};
 use crate::raw_buffer::RawBuffer;
 use crate::str::{U16CStr, U16CStrExt, U16CString, U16CStringExt};
+
+#[rustfmt::skip]
+pub use Security::WELL_KNOWN_SID_TYPE;
 
 /// A string-format security identifier (SID), suitable for display, storage, or transmission
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

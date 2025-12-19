@@ -5,9 +5,11 @@
 use core::fmt;
 
 use bytes::{Buf as _, BufMut as _};
-// We re-export these types, because they are used in the public API.
-pub use bytes::{Bytes, BytesMut};
 use smol_str::SmolStr;
+
+// We re-export these types, because they are used in the public API.
+#[rustfmt::skip]
+pub use bytes::{Bytes, BytesMut};
 
 /// Distant identifier for a channel
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
