@@ -1,4 +1,4 @@
-<div class="app-menu-container" [class.layout-menu-slim]="isMenuSlim">
+<div class="app-menu-container" [class.layout-menu-slim]="isMenuSlim" [style.width]="isMenuSlim ? null : menuWidth">
   <div class="logo-container">
     <div class="logo">
       <svg width="39" height="39" viewBox="0 0 39 39" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -74,6 +74,10 @@
           <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion()"></i>
         </a>
     </div>
-    
+  
+  <!-- Resize Handle -->
+  <div class="resize-handle" 
+    *ngIf="!isMenuSlim"
+    (mousedown)="onResizeStart($event)"></div>
 
 </div>
