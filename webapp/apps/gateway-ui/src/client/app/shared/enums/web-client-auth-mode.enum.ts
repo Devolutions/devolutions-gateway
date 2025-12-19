@@ -9,6 +9,7 @@ export enum VncAuthMode {
 export enum SshAuthMode {
   Username_and_Password = 0, //default
   Private_Key = 1,
+  Keyboard_Interactive = 2,
 }
 
 namespace WebClientAuthMode {
