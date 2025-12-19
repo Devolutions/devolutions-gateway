@@ -6,7 +6,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { AuthService } from '@shared/services/auth.service';
 import { NavigationService } from '@shared/services/navigation.service';
 import { UtilsService } from '@shared/services/utils.service';
-import type { Message } from 'primeng/api';
+import type { ToastMessageOptions } from 'primeng/api';
 import { Observable, of } from 'rxjs';
 import { catchError, takeUntil } from 'rxjs/operators';
 
@@ -18,7 +18,7 @@ import { catchError, takeUntil } from 'rxjs/operators';
 })
 export class LoginComponent extends BaseComponent implements OnInit {
   loginForm: FormGroup;
-  messages: Message[] = [];
+  messages: ToastMessageOptions[] = [];
   showPassword = false;
   autoLoginAttempted = false;
 
@@ -108,7 +108,7 @@ export class LoginComponent extends BaseComponent implements OnInit {
     console.error('Login Error', error);
   }
 
-  private addMessages(messages: Message[]) {
+  private addMessages(messages: ToastMessageOptions[]) {
     this.messages = [];
     if (messages?.length > 0) {
       for (const message of messages) {
