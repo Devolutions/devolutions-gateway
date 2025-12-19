@@ -46,7 +46,7 @@ import { TieredMenu } from 'primeng/tieredmenu';
 import { Toast } from 'primeng/toast';
 import { ToggleButton } from 'primeng/togglebutton';
 import { Toolbar } from 'primeng/toolbar';
-import { Tooltip } from 'primeng/tooltip';
+import { Tooltip, TooltipModule } from 'primeng/tooltip';
 import { Tree } from 'primeng/tree';
 import { TreeTableModule } from 'primeng/treetable';
 import { Scroller } from 'primeng/scroller';
@@ -97,7 +97,7 @@ const PRIMENG_MODULES = [
   TieredMenu,
   Toast,
   Toolbar,
-  Tooltip,
+  TooltipModule,
   ToggleButton,
   Tree,
   TreeTableModule,
