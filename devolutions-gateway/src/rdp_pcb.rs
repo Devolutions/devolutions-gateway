@@ -65,7 +65,7 @@ fn decode_pcb(buf: &[u8]) -> Result<Option<(PreconnectionBlob, usize)>, io::Erro
 
             Ok(Some((pcb, read_len)))
         }
-        Err(e) if matches!(e.kind, ironrdp_core::DecodeErrorKind::NotEnoughBytes { .. }) => Ok(None),
+        Err(e) if matches!(e.kind(), ironrdp_core::DecodeErrorKind::NotEnoughBytes { .. }) => Ok(None),
         Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
     }
 }

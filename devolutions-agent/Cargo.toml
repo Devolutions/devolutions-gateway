@@ -34,7 +34,7 @@ url = "2.5"
 
 [dependencies.ironrdp]
 git = "https://github.com/Devolutions/IronRDP"
-rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861"
+rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c"
 default-features = false
 features = [
     "server", # FIXME(@CBenoit): this is enabling AWS LC unconditionally.
