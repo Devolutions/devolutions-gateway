@@ -269,14 +269,8 @@ where
         ironrdp_core::decode(&received_connect_initial.0.data).context("decode Connect Initial PDU")?;
     trace!(message = ?received_connect_initial, "Received Connect Initial PDU from client");
 
-    let mut gcc_blocks = received_connect_initial
-        .conference_create_request
-        .gcc_blocks()
-        .clone();
-    gcc_blocks
-        .core
-        .optional_data
-        .server_selected_protocol = Some(server_security_protocol);
+    let mut gcc_blocks = received_connect_initial.conference_create_request.gcc_blocks().clone();
+    gcc_blocks.core.optional_data.server_selected_protocol = Some(server_security_protocol);
     // Update the conference request with modified gcc_blocks
     received_connect_initial.conference_create_request = ironrdp_pdu::gcc::ConferenceCreateRequest::new(gcc_blocks)?;
     trace!(message = ?received_connect_initial, "Send Connection Request PDU to server");
