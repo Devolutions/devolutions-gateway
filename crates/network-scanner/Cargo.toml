@@ -29,7 +29,7 @@ ipconfig = "0.3"
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = "0.3"
 netlink-packet-route = "0.26"
-rtnetlink = "0.14"
+rtnetlink = "0.19"
 
 [dev-dependencies]
 tokio = { version = "1.45", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }
