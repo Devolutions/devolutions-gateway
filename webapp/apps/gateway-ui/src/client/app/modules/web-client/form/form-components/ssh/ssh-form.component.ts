@@ -113,6 +113,8 @@ export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy
         visibility.showPasswordInput = authModeAsNumber === SshAuthMode.Username_and_Password;
 
         visibility.showPrivateKeyInput = authModeAsNumber === SshAuthMode.Private_Key;
+
+        // Keyboard_Interactive only requires username - the SSH library handles the rest
       }),
       map(() => {
         return authMode;
