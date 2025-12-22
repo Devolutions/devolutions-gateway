@@ -8,6 +8,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_agent_shared::get_data_dir;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
+use url::Url;
 
 const DEFAULT_RDP_PORT: u16 = 3389;
 
@@ -19,6 +20,7 @@ pub struct Conf {
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
+    pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
 
@@ -46,6 +48,7 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
+            proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -301,6 +304,10 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub session: Option<SessionConf>,
 
+        /// HTTP/SOCKS proxy configuration for outbound requests
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy: Option<ProxyConf>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -320,6 +327,7 @@ pub mod dto {
                 updater: Some(UpdaterConf { enabled: true }),
                 remote_desktop: None,
                 pedm: None,
+                proxy: None,
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
                 rest: serde_json::Map::new(),
@@ -419,6 +427,73 @@ pub mod dto {
     impl DebugConf {
         pub fn is_default(&self) -> bool {
             Self::default().eq(self)
+        }
+    }
+
+    /// Proxy mode for HTTP client configuration.
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Default, Serialize, Deserialize)]
+    pub enum ProxyMode {
+        /// Never use a proxy, ignore environment variables.
+        Off,
+        /// Use environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) or WinHTTP configuration.
+        #[default]
+        System,
+        /// Use manually configured proxy URLs from the configuration file.
+        Manual,
+    }
+
+    /// HTTP/SOCKS proxy configuration for outbound requests.
+    ///
+    /// This configuration supports three modes:
+    /// - Off: Never use a proxy
+    /// - System: Auto-detect proxy from environment variables or system settings
+    /// - Manual: Use explicitly configured proxy URLs
+    ///
+    /// Manual configuration supports protocol-specific proxy URLs:
+    /// - Http: HTTP proxy (e.g., `http://proxy.corp:8080`)
+    /// - Https: HTTPS proxy (e.g., `http://proxy.corp:8080`)
+    /// - All: Fallback proxy for all protocols (e.g., `socks5://proxy.corp:1080`)
+    ///
+    /// The Exclude list supports NO_PROXY semantics:
+    /// - "*" matches everything (bypass proxy for all targets)
+    /// - Exact hostname: "localhost", "example.com"
+    /// - Domain suffix: ".corp.local" matches "foo.corp.local"
+    /// - IP address: "127.0.0.1"
+    /// - CIDR range: "10.0.0.0/8", "192.168.0.0/16"
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct ProxyConf {
+        /// Proxy mode (Off, System, Manual).
+        #[serde(default)]
+        pub mode: ProxyMode,
+        /// HTTP proxy URL (e.g., `http://proxy.corp:8080`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub http: Option<Url>,
+        /// HTTPS proxy URL (e.g., `http://proxy.corp:8080`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub https: Option<Url>,
+        /// Fallback proxy URL for all protocols (e.g., `socks5://proxy.corp:1080`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub all: Option<Url>,
+        /// Bypass list (same semantics as NO_PROXY).
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub exclude: Vec<String>,
+    }
+
+    impl ProxyConf {
+        /// Convert this DTO to the http-client-proxy library's ProxyConfig enum.
+        pub fn to_proxy_config(&self) -> http_client_proxy::ProxyConfig {
+            match self.mode {
+                ProxyMode::Off => http_client_proxy::ProxyConfig::Off,
+                ProxyMode::System => http_client_proxy::ProxyConfig::System,
+                ProxyMode::Manual => http_client_proxy::ProxyConfig::Manual(http_client_proxy::ManualProxyConfig {
+                    http: self.http.clone(),
+                    https: self.https.clone(),
+                    all: self.all.clone(),
+                    exclude: self.exclude.clone(),
+                }),
+            }
         }
     }
 }

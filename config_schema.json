@@ -96,6 +96,10 @@
       "$ref": "#/definitions/AiGatewayConf",
       "description": "JSON object describing the AI gateway configuration (experimental, requires enable_unstable)."
     },
+    "Proxy": {
+      "$ref": "#/definitions/ProxyConf",
+      "description": "HTTP/SOCKS proxy configuration for outbound requests."
+    },
     "LogFile": {
       "type": "string",
       "description": "Path to the log file."
@@ -626,6 +630,38 @@
         "ApiVersion": {
           "type": "string",
           "description": "Azure OpenAI API version (default is 2024-02-15-preview). Can be overridden with AZURE_OPENAI_API_VERSION environment variable."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProxyConf": {
+      "type": "object",
+      "description": "HTTP/SOCKS proxy configuration for outbound requests. Supports three modes: Off (never use proxy), System (auto-detect from environment/system settings), Manual (use explicitly configured URLs).",
+      "properties": {
+        "Mode": {
+          "type": "string",
+          "enum": ["Off", "System", "Manual"],
+          "default": "System",
+          "description": "Proxy mode: Off (never use proxy), System (auto-detect from environment variables or WinHTTP), Manual (use configured URLs)"
+        },
+        "Http": {
+          "type": "string",
+          "description": "HTTP proxy URL for http:// requests (e.g., http://proxy.corp:8080). Only used when Mode is Manual."
+        },
+        "Https": {
+          "type": "string",
+          "description": "HTTPS proxy URL for https:// requests (e.g., http://proxy.corp:8080). Only used when Mode is Manual."
+        },
+        "All": {
+          "type": "string",
+          "description": "Fallback proxy URL for all protocols (e.g., socks5://proxy.corp:1080). Only used when Mode is Manual."
+        },
+        "Exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Bypass list with NO_PROXY semantics. Supports: wildcard '*', exact hostname 'example.com', domain suffix '.corp.local', IP address '127.0.0.1', CIDR range '10.0.0.0/8'. Only used when Mode is Manual."
         }
       },
       "additionalProperties": false

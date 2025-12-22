@@ -46,12 +46,14 @@ async fn load_productinfo_source(conf: &ConfHandle) -> Result<String, UpdaterErr
         .as_deref()
         .unwrap_or(DEVOLUTIONS_PRODUCTINFO_URL);
 
+    let proxy_conf = &conf_data.proxy;
+
     if source.starts_with("file://") {
         info!(%source, "Loading productinfo from file path");
-        download_utf8(source).await
+        download_utf8(source, proxy_conf).await
     } else {
         info!(%source, "Downloading productinfo from URL");
-        download_utf8(source).await
+        download_utf8(source, proxy_conf).await
     }
 }
 
@@ -202,7 +204,9 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     validate_download_url(&ctx, &order.package_url)?;
 
-    let package_data = download_binary(&order.package_url)
+    let proxy_conf = &ctx.conf.get_conf().proxy;
+
+    let package_data = download_binary(&order.package_url, proxy_conf)
         .await
         .with_context(|| format!("failed to download package file for `{product}`"))?;
 
@@ -371,7 +375,18 @@ async fn check_for_updates(
                     return Ok(None);
                 }
             } else {
-                let response = reqwest::Client::builder().build()?.head(&package_url).send().await?;
+                let proxy_conf = &conf.get_conf().proxy;
+
+                let target_url = url::Url::parse(&package_url)?;
+                let proxy_config = proxy_conf.to_proxy_config();
+
+                let client = http_client_proxy::get_or_create_cached_client(
+                    reqwest::Client::builder(),
+                    &target_url,
+                    &proxy_config,
+                )?;
+
+                let response = client.head(&package_url).send().await?;
                 if let Err(error) = response.error_for_status() {
                     warn!(
                         %error,

@@ -5,7 +5,6 @@
 //! It handles authentication via a gateway API key and forwards requests to the
 //! configured AI provider endpoints.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::Router;
@@ -51,21 +50,28 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .with_state(state)
 }
 
-/// Returns a cached HTTP client with the specified timeout.
+/// Creates or retrieves a cached HTTP client with the specified timeout and proxy configuration.
 ///
-/// The client is created once on first use and cloned for subsequent calls (cloning a
-/// reqwest::Client is cheap as it uses Arc internally).
-fn create_client(timeout: Duration) -> reqwest::Client {
-    static AI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// Clients are cached per (scheme, host, port, proxy_config) combination to avoid repeated
+/// client creation. The cache uses FIFO eviction with a capacity of 50 entries.
+fn get_or_create_client(
+    timeout: Duration,
+    target_url: &str,
+    proxy_conf: &crate::config::dto::ProxyConf,
+) -> Result<reqwest::Client, HttpError> {
+    // Parse the target URL.
+    let target_url = url::Url::parse(target_url).map_err(HttpError::internal().with_msg("invalid target URL").err())?;
 
-    AI_CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .timeout(timeout)
-                .build()
-                .expect("parameters known to be valid only")
-        })
-        .clone()
+    // Convert proxy configuration to http-client-proxy format.
+    let proxy_config = proxy_conf.to_proxy_config();
+
+    // Get or create a cached client with the configured timeout and proxy support.
+    http_client_proxy::get_or_create_cached_client(
+        reqwest::Client::builder().timeout(timeout),
+        &target_url,
+        &proxy_config,
+    )
+    .map_err(HttpError::internal().with_msg("failed to create HTTP client").err())
 }
 
 /// Validates the Authorization header against the gateway API key.
@@ -122,8 +128,8 @@ async fn proxy_to_provider(
 
     debug!(%url, provider = %provider_config.name, "Proxying request to AI provider");
 
-    // Create a client with the configured timeout.
-    let client = create_client(ai_conf.request_timeout);
+    // Get or create a cached client with the configured timeout and proxy support.
+    let client = get_or_create_client(ai_conf.request_timeout, &url, &conf.proxy)?;
 
     // Build the request.
     let mut request_builder = client.request(method, &url);
