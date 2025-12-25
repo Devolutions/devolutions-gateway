@@ -9,7 +9,7 @@ use win_api_wrappers::wts::WtsVirtualChannel;
 use windows::Win32::Foundation::{ERROR_IO_PENDING, GetLastError, WAIT_EVENT, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
-use windows::Win32::System::RemoteDesktop::{CHANNEL_CHUNK_LENGTH, CHANNEL_PDU_HEADER};
+use windows::Win32::System::RemoteDesktop::CHANNEL_PDU_HEADER;
 use windows::Win32::System::Threading::{INFINITE, WaitForMultipleObjects};
 
 use crate::dvc::channel::WinapiSignaledReceiver;
@@ -31,7 +31,9 @@ pub fn run_dvc_io(
 
     trace!("DVC channel opened");
 
-    let mut pdu_chunk_buffer = [0u8; CHANNEL_CHUNK_LENGTH as usize];
+    // All DVC messages should be under CHANNEL_CHUNK_LENGTH size, but sometimes RDP stack
+    // sends a few messages together; 128Kb buffer should be enough to hold a few dozen messages.
+    let mut pdu_chunk_buffer = [0u8; 128 * 1024];
     let mut overlapped = OVERLAPPED::default();
     let mut bytes_read: u32 = 0;
 
@@ -111,7 +113,6 @@ pub fn run_dvc_io(
                         }
                     }
                 }
-
                 // Prepare async read file operation one more time.
                 // SAFETY: No preconditions.
                 let result =

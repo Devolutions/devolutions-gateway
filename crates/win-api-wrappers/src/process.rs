@@ -24,10 +24,10 @@ use windows::Win32::System::LibraryLoader::{
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
-    GetCurrentProcess, GetExitCodeProcess, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess,
-    OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS,
-    PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW,
-    STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST,
+    LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION,
+    PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE, QueryFullProcessImageNameW,
+    STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -902,11 +902,19 @@ fn terminate_process_by_name_impl(process_name: &str, session_id: Option<u32>) -
     Ok(false)
 }
 
-fn process_id_to_session(pid: u32) -> Result<u32> {
+/// Get the Windows session ID for a given process ID.
+pub fn process_id_to_session(pid: u32) -> Result<u32> {
     let mut session_id = 0;
     // SAFETY: `session_id` is always pointing to a valid memory location.
     unsafe { ProcessIdToSessionId(pid, &mut session_id as *mut _) }?;
     Ok(session_id)
+}
+
+/// Get the current Windows session ID.
+pub fn get_current_session_id() -> Result<u32> {
+    // SAFETY: FFI call with no outstanding preconditions.
+    let process_id = unsafe { GetCurrentProcessId() };
+    process_id_to_session(process_id)
 }
 
 struct EnumWindowsContext {
