@@ -484,8 +484,14 @@ impl RdmMessageProcessor {
         self.rdm_tx = Some(rdm_tx);
 
         tokio::spawn(async move {
-            if let Err(error) =
-                process_app_start_impl(rdm_app_start_msg, agent_caps, dvc_tx, connection_state.clone(), rdm_rx).await
+            if let Err(error) = process_app_start_impl(
+                rdm_app_start_msg,
+                agent_caps,
+                dvc_tx,
+                Arc::clone(&connection_state),
+                rdm_rx,
+            )
+            .await
             {
                 error!(%error, "RDM app start failed");
                 // Ensure connection_state is reset so future app_start attempts are possible
