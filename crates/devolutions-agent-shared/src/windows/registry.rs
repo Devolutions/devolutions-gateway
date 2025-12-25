@@ -87,6 +87,10 @@ pub fn get_installed_product_version(
         })?;
 
     // Convert encoded MSI version number to human-readable date.
+    // The high byte encodes the year as an offset:
+    // - Agent builds use a base year of 2000 (year = high_byte + 2000).
+    // - RDM MSI packages use 0x700 (1792) as base, found empirically.
+    //   This offset must be preserved to correctly decode existing RDM installations.
     let short_year = match version_encoding {
         ProductVersionEncoding::Agent => (product_version >> 24) + 2000,
         ProductVersionEncoding::Rdm => (product_version >> 24) + 0x700,

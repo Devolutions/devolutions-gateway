@@ -32,7 +32,7 @@ pub fn run_dvc_io(
     trace!("DVC channel opened");
 
     // All DVC messages should be under CHANNEL_CHUNK_LENGTH size, but sometimes RDP stack
-    // a few messages together; 128Kb buffer should be enough to hold a few dozen messages.
+    // sends a few messages together; 128Kb buffer should be enough to hold a few dozen messages.
     let mut pdu_chunk_buffer = [0u8; 128 * 1024];
     let mut overlapped = OVERLAPPED::default();
     let mut bytes_read: u32 = 0;
