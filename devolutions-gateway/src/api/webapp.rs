@@ -175,9 +175,10 @@ pub(crate) async fn sign_app_token(
         key: &PrivateKey,
         req: AppTokenSignRequest,
     ) -> Result<String, HttpError> {
-        use crate::token::WebAppTokenClaims;
         use picky::jose::jws::JwsAlg;
         use picky::jose::jwt::CheckedJwtSig;
+
+        use crate::token::WebAppTokenClaims;
 
         let lifetime = req
             .lifetime
@@ -290,12 +291,12 @@ pub(crate) async fn sign_session_token(
     WebAppToken(web_app_token): WebAppToken,
     Json(req): Json<SessionTokenSignRequest>,
 ) -> Result<Response, HttpError> {
+    use picky::jose::jws::JwsAlg;
+    use picky::jose::jwt::CheckedJwtSig;
+
     use crate::token::{
         AssociationTokenClaims, ConnectionMode, ContentType, JmuxTokenClaims, KdcTokenClaims, NetScanClaims,
     };
-
-    use picky::jose::jws::JwsAlg;
-    use picky::jose::jwt::CheckedJwtSig;
 
     const MAXIMUM_LIFETIME_SECS: u64 = 60 * 60 * 2; // 2 hours
 
@@ -505,10 +506,9 @@ mod login_rate_limit {
     use std::collections::HashMap;
     use std::net::IpAddr;
     use std::sync::LazyLock;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use parking_lot::Mutex;
-    use std::time::Instant;
 
     type LoginAttempts = Mutex<HashMap<(String, IpAddr), u8>>;
 

@@ -4,10 +4,9 @@ use webm_iterable::errors::TagWriterError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 use webm_iterable::{WebmWriter, WriteOptions};
 
+use super::block_tag::VideoBlock;
 use crate::StreamingConfig;
 use crate::debug::mastroka_spec_name;
-
-use super::block_tag::VideoBlock;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
 

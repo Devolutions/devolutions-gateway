@@ -1,6 +1,7 @@
-use anyhow::Context as _;
 use std::fmt;
 use std::net::SocketAddr;
+
+use anyhow::Context as _;
 use tokio::net::{TcpStream, lookup_host};
 use url::Url;
 

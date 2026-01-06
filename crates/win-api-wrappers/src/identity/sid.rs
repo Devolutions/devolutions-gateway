@@ -11,6 +11,7 @@ use crate::identity::account::{Account, AccountWithType};
 use crate::raw_buffer::RawBuffer;
 use crate::str::{U16CStr, U16CStrExt, U16CString, U16CStringExt};
 
+#[rustfmt::skip]
 pub use Security::WELL_KNOWN_SID_TYPE;
 
 /// A string-format security identifier (SID), suitable for display, storage, or transmission
@@ -478,9 +479,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     #![allow(clippy::print_stdout)]
 
+    use rstest::rstest;
+
     use super::*;
     use crate::str::u16cstr;
-    use rstest::rstest;
 
     #[test]
     #[cfg_attr(miri, ignore)]

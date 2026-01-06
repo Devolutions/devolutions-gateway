@@ -492,9 +492,9 @@ internal class Program
             e.Result = ActionResult.UserExit;
         }
         
-        if (!CustomActions.TryGetInstalledNetFx45Version(out uint netfx45Version) || netfx45Version < 394802)
+        if (!CustomActions.TryGetInstalledNetFx45Version(out uint netfx45Version) || netfx45Version < 461308)
         {
-            if (MessageBox.Show(I18n(Strings.Dotnet462IsRequired), I18n(Strings.GatewayDlg_Title),
+            if (MessageBox.Show(I18n(Strings.Dotnet471IsRequired), I18n(Strings.GatewayDlg_Title),
                     MessageBoxButtons.YesNo) == DialogResult.Yes)
             {
                 Process.Start("https://go.microsoft.com/fwlink/?LinkId=2085155");

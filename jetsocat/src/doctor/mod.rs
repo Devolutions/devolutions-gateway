@@ -61,6 +61,7 @@ pub fn run(args: Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
 impl Diagnostic {
     pub fn into_json(self) -> JsonValue {
         use std::collections::HashMap;
+
         use tinyjson::JsonValue;
 
         let mut object = HashMap::new();
@@ -163,6 +164,7 @@ impl Diagnostic {
 impl Link {
     pub fn into_json(self) -> JsonValue {
         use std::collections::HashMap;
+
         use tinyjson::JsonValue;
 
         let mut object = HashMap::new();
@@ -196,9 +198,10 @@ impl DiagnosticCtx {
 }
 
 fn cert_to_pem(cert_der: &[u8]) -> Result<String, std::fmt::Error> {
+    use std::fmt::Write as _;
+
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
-    use std::fmt::Write as _;
 
     let body = STANDARD.encode(cert_der);
 

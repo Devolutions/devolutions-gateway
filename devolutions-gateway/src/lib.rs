@@ -1,6 +1,5 @@
 // Used by devolutions-gateway binary.
 use ceviche as _;
-
 // Used by tests.
 #[cfg(test)]
 use {devolutions_gateway_generators as _, http_body_util as _, proptest as _, tokio_test as _, tracing_cov_mark as _};
@@ -124,8 +123,9 @@ impl DgwState {
 }
 
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {
-    use axum::error_handling::HandleErrorLayer;
     use std::time::Duration;
+
+    use axum::error_handling::HandleErrorLayer;
     use tower::ServiceBuilder;
     use tower::timeout::TimeoutLayer;
 

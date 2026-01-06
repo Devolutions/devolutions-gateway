@@ -7,12 +7,16 @@ mod pinnable;
 mod shared;
 mod ws;
 
-pub use self::copy_bidirectional::*;
-pub use self::pinnable::*;
-pub use self::shared::*;
-pub use self::ws::*;
-
 use tokio::io::{AsyncRead, AsyncWrite};
+
+#[rustfmt::skip]
+pub use self::copy_bidirectional::*;
+#[rustfmt::skip]
+pub use self::pinnable::*;
+#[rustfmt::skip]
+pub use self::shared::*;
+#[rustfmt::skip]
+pub use self::ws::*;
 
 pub type ErasedRead = Box<dyn AsyncRead + Send + Unpin>;
 pub type ErasedWrite = Box<dyn AsyncWrite + Send + Unpin>;

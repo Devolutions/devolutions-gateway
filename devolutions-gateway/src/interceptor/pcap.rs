@@ -1,14 +1,15 @@
-use crate::interceptor::{Dissector, Inspector, PeerSide};
+use std::fs::File;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::path::Path;
 
 use anyhow::Context as _;
 use bytes::BytesMut;
 use devolutions_gateway_task::ChildTask;
 use etherparse::PacketBuilder;
 use pcap_file::pcap::{PcapPacket, PcapWriter};
-use std::fs::File;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::Path;
 use tokio::sync::mpsc;
+
+use crate::interceptor::{Dissector, Inspector, PeerSide};
 
 pub struct PcapInspector {
     side: PeerSide,

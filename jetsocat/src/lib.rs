@@ -1,6 +1,5 @@
 // Used by the jetsocat binary.
 use {dirs_next as _, humantime as _, seahorse as _, tracing_appender as _, tracing_subscriber as _};
-
 // Used by tests
 #[cfg(test)]
 use {proptest as _, test_utils as _};
@@ -18,8 +17,9 @@ mod mcp;
 mod process_watcher;
 mod utils;
 
-use anyhow::Context as _;
 use core::time::Duration;
+
+use anyhow::Context as _;
 use jmux_proxy::JmuxConfig;
 use tracing::Instrument as _;
 
@@ -82,10 +82,11 @@ pub struct JmuxProxyCfg {
 
 #[instrument("jmux", skip_all)]
 pub async fn jmux_proxy(cfg: JmuxProxyCfg) -> anyhow::Result<()> {
-    use self::listener::{ListenerMode, http_listener_task, socks5_listener_task, tcp_listener_task};
     use jmux_proxy::JmuxProxy;
     use pipe::open_pipe;
     use tokio::sync::mpsc;
+
+    use self::listener::{ListenerMode, http_listener_task, socks5_listener_task, tcp_listener_task};
 
     info!("Start JMUX proxy");
     debug!(?cfg);

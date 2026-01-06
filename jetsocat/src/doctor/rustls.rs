@@ -1,8 +1,9 @@
+use std::borrow::Cow;
+use std::path::Path;
+
 use anyhow::Context as _;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
-use std::borrow::Cow;
-use std::path::Path;
 
 use crate::doctor::macros::diagnostic;
 use crate::doctor::{Args, Diagnostic, DiagnosticCtx, InspectCert, cert_to_pem, help};

@@ -1,10 +1,10 @@
-use anyhow::{Result, bail};
 use std::future::Future;
 use std::pin::{Pin, pin};
 use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
+use anyhow::{Result, bail};
 use devolutions_pedm_client_http::apis::client::APIClient;
 use hyper::Uri;
 use hyper::body::HttpBody;
@@ -16,6 +16,7 @@ use tower::Service;
 use win_api_wrappers::raw::Win32::Foundation::ERROR_PIPE_BUSY;
 use win_api_wrappers::raw::Win32::Storage::FileSystem::SECURITY_IMPERSONATION;
 
+#[rustfmt::skip]
 pub use devolutions_pedm_client_http::models;
 
 #[pin_project]

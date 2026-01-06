@@ -10,11 +10,12 @@
 
 // TODO: support for Proxy-Authorization: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Proxy-Authorization
 
-use bytes::{BufMut as _, Bytes, BytesMut};
 use core::fmt;
+use std::io;
+
+use bytes::{BufMut as _, Bytes, BytesMut};
 use pin_project_lite::pin_project;
 use proxy_types::{DestAddr, ToDestAddr};
-use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 #[derive(Debug, Copy, Clone)]
@@ -691,9 +692,10 @@ fn find_frame_length(buf: &[u8]) -> Option<usize> {
 mod tests {
     #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
 
-    use super::*;
     use proptest::prelude::*;
     use proxy_generators as generators;
+
+    use super::*;
 
     fn status_code() -> impl Strategy<Value = StatusCode> {
         prop_oneof![

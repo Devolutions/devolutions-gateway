@@ -69,10 +69,11 @@ END"#,
 
 #[cfg(target_os = "windows")]
 fn main() -> Result<(), Box<dyn core::error::Error>> {
-    use devolutions_pedm_shared::build::target_dir;
-    use fs_extra::dir::CopyOptions;
     use std::path::PathBuf;
     use std::{env, fs};
+
+    use devolutions_pedm_shared::build::target_dir;
+    use fs_extra::dir::CopyOptions;
 
     let target = target_dir()?;
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());

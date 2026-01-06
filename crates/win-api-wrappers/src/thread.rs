@@ -2,11 +2,6 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 
 use anyhow::{Result, bail};
-
-use crate::Error;
-use crate::handle::{Handle, HandleWrapper};
-use crate::process::Process;
-use crate::token::Token;
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::System::Threading::{
@@ -15,6 +10,11 @@ use windows::Win32::System::Threading::{
     PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, ResumeThread, SuspendThread, THREAD_ACCESS_RIGHTS, UpdateProcThreadAttribute,
     WaitForSingleObject,
 };
+
+use crate::Error;
+use crate::handle::{Handle, HandleWrapper};
+use crate::process::Process;
+use crate::token::Token;
 
 #[derive(Debug)]
 pub struct Thread {

@@ -8,6 +8,7 @@ use traffic_audit::{ClaimedEvent, TrafficAuditRepo, TrafficEvent};
 use ulid::Ulid;
 use uuid::Uuid;
 
+#[rustfmt::skip]
 pub use libsql;
 
 // Migration constants - these will be used by the migration system

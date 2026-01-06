@@ -7,7 +7,6 @@
 )]
 
 use devolutions_pedm_shared::policy::{ElevationResult, Hash, Signature, User};
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::error;

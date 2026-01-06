@@ -57,8 +57,8 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0(typescript@5.5.4)
       '@devolutions/web-ssh-gui':
-        specifier: ^0.4.0
-        version: 0.4.3(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))
+        specifier: ^0.6.2
+        version: 0.6.2(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))
       '@devolutions/web-telnet-gui':
         specifier: ^0.4.0
         version: 0.4.0(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))
@@ -1238,24 +1238,24 @@ packages:
         optional: true
 
   '@devolutions/iron-remote-desktop-rdp@0.6.1':
-    resolution: {integrity: sha512-f5QgznYioXqEeGSZXoTdmGHH9VVIzGRjFuL745B5VRCyGolrromxmQeHO9Gxy5zDAvl9z4/FL26SqDrm/f47aw==}
+    resolution: {integrity: sha512-f5QgznYioXqEeGSZXoTdmGHH9VVIzGRjFuL745B5VRCyGolrromxmQeHO9Gxy5zDAvl9z4/FL26SqDrm/f47aw==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/iron-remote-desktop-rdp/-/iron-remote-desktop-rdp-0.6.1.tgz}
 
   '@devolutions/iron-remote-desktop-vnc@0.7.0':
-    resolution: {integrity: sha512-fdxwJuBytLTdxrm6GrJ4po5ZI0bWP+yKNo4TZhKNRqkbRsUNOoqEK+9U1VwPYRlrTkrDryR57xeHRpxg/tDbOQ==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/iron-remote-desktop-vnc/-/@devolutions/iron-remote-desktop-vnc-0.7.0.tgz}
+    resolution: {integrity: sha512-fdxwJuBytLTdxrm6GrJ4po5ZI0bWP+yKNo4TZhKNRqkbRsUNOoqEK+9U1VwPYRlrTkrDryR57xeHRpxg/tDbOQ==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/iron-remote-desktop-vnc/-/@devolutions/iron-remote-desktop-vnc-0.7.0.tgz}
 
   '@devolutions/iron-remote-desktop@0.10.1':
-    resolution: {integrity: sha512-VwY71hnlxnVc/ueZ8IYwV12VPcAvbI5fVa/HpKY1fDcok91QydbUsvMkdg4UPckqe2eDDKRXzeJntwf9db5xaA==}
+    resolution: {integrity: sha512-VwY71hnlxnVc/ueZ8IYwV12VPcAvbI5fVa/HpKY1fDcok91QydbUsvMkdg4UPckqe2eDDKRXzeJntwf9db5xaA==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/iron-remote-desktop/-/iron-remote-desktop-0.10.1.tgz}
 
   '@devolutions/terminal-shared@1.4.0':
-    resolution: {integrity: sha512-K+Kxux4vzqjevxvmCt4ChrcwSyvZrDRLKLZ8Gsol/c67oPkpA7l7fTD3VOiUb4KntUDRQdSZxRcNsMHFobhRLw==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/terminal-shared/-/@devolutions/terminal-shared-1.4.0.tgz}
+    resolution: {integrity: sha512-K+Kxux4vzqjevxvmCt4ChrcwSyvZrDRLKLZ8Gsol/c67oPkpA7l7fTD3VOiUb4KntUDRQdSZxRcNsMHFobhRLw==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/terminal-shared/-/@devolutions/terminal-shared-1.4.0.tgz}
 
-  '@devolutions/web-ssh-gui@0.4.3':
-    resolution: {integrity: sha512-S2+dygS9LtUzNV5PDU98kyhtQMaVzSKBjqy+MYTvkAm1YDR81wq0i4lKeRhf0NanGhKKl1cCnb2L7XdVtLESDQ==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/web-ssh-gui/-/@devolutions/web-ssh-gui-0.4.3.tgz}
+  '@devolutions/web-ssh-gui@0.6.2':
+    resolution: {integrity: sha512-XozKoGTYwxEksJhWrQuVc+LmGh6NUVm/RGi+GegSPeMQk8nU+9UgkOq3gv5gEYdho8H8dkWWEo7JLdF0Ee3rjw==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/web-ssh-gui/-/@devolutions/web-ssh-gui-0.6.2.tgz}
     peerDependencies:
       '@devolutions/terminal-shared': ~1.4.0
 
   '@devolutions/web-telnet-gui@0.4.0':
-    resolution: {integrity: sha512-zRk8Y1wSmK5HLYT0Hs6TIGcrKrr8gQ4aE+hFH8lDFapHk4IgTtQBvtGF5pTq+gozIADg0ihn6GRks/SdqX/45g==, tarball: https://devolutions.jfrog.io/artifactory/api/npm/npm/@devolutions/web-telnet-gui/-/@devolutions/web-telnet-gui-0.4.0.tgz}
+    resolution: {integrity: sha512-zRk8Y1wSmK5HLYT0Hs6TIGcrKrr8gQ4aE+hFH8lDFapHk4IgTtQBvtGF5pTq+gozIADg0ihn6GRks/SdqX/45g==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/web-telnet-gui/-/@devolutions/web-telnet-gui-0.4.0.tgz}
     peerDependencies:
       '@devolutions/terminal-shared': ~1.4.0
 
@@ -7972,7 +7972,7 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@devolutions/web-ssh-gui@0.4.3(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))':
+  '@devolutions/web-ssh-gui@0.6.2(@devolutions/terminal-shared@1.4.0(typescript@5.5.4))':
     dependencies:
       '@devolutions/terminal-shared': 1.4.0(typescript@5.5.4)
       '@types/jquery': 3.5.33

@@ -1,14 +1,16 @@
-use crate::interceptor::{Inspector, PeerSide};
-use crate::plugin_manager::{PLUGIN_MANAGER, PacketsParser, Recorder};
-use anyhow::Context as _;
-use devolutions_gateway_task::ChildTask;
-use parking_lot::{Condvar, Mutex};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use anyhow::Context as _;
+use devolutions_gateway_task::ChildTask;
+use parking_lot::{Condvar, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+use crate::interceptor::{Inspector, PeerSide};
+use crate::plugin_manager::{PLUGIN_MANAGER, PacketsParser, Recorder};
 
 #[derive(Debug)]
 enum RecordingState {

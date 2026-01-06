@@ -441,6 +441,32 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<String> devolutionsServerCertificateExceptions = new()
+        {
+            Id = "P.DEVOLUTIONSSERVERCERTIFICATEEXCEPTIONS",
+            Default = "",
+            Name = "DevolutionsServerCertificateExceptions",
+            Secure = true,
+            Hidden = false,
+            Public = true
+        };
+
+        public String DevolutionsServerCertificateExceptions
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(devolutionsServerCertificateExceptions.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(devolutionsServerCertificateExceptions, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<Boolean> configureGateway = new()
         {
             Id = "P.CONFIGUREGATEWAY",
@@ -1362,6 +1388,8 @@ namespace DevolutionsGateway.Properties
             certificateThumbprint,
  
             devolutionsServerUrl,
+ 
+            devolutionsServerCertificateExceptions,
  
             configureGateway,
  

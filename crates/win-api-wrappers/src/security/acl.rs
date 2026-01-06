@@ -264,13 +264,12 @@ pub fn set_named_security_info(
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use super::*;
-
-    use crate::token::Token;
-
     use windows::Win32::Foundation::{GENERIC_ALL, GENERIC_READ, GENERIC_WRITE};
     use windows::Win32::Security::Authorization::GRANT_ACCESS;
     use windows::Win32::Security::NO_INHERITANCE;
+
+    use super::*;
+    use crate::token::Token;
 
     #[test]
     #[cfg_attr(miri, ignore)]

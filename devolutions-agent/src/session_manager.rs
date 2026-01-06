@@ -1,15 +1,13 @@
 //! Module for starting and managing the Devolutions Session process in user sessions.
 
-use tokio::sync::{RwLock, mpsc};
-
-use crate::AgentServiceEvent;
-use async_trait::async_trait;
-use ceviche::controller::Session;
-use devolutions_gateway_task::{ShutdownSignal, Task};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use async_trait::async_trait;
 use camino::Utf8PathBuf;
+use ceviche::controller::Session;
+use devolutions_gateway_task::{ShutdownSignal, Task};
+use tokio::sync::{RwLock, mpsc};
 use win_api_wrappers::process::{
     StartupInfo, create_process_in_session, is_process_running_in_session, terminate_process_by_name_in_session,
 };
@@ -19,6 +17,8 @@ use windows::Win32::System::Threading::{
     CREATE_NEW_CONSOLE, CREATE_UNICODE_ENVIRONMENT, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+
+use crate::AgentServiceEvent;
 
 const SESSION_BINARY: &str = "DevolutionsSession.exe";
 

@@ -276,6 +276,8 @@ pub mod windows {
         }
 
         fn resolve(&self, client_hello: ClientHello<'_>) -> anyhow::Result<Arc<CertifiedKey>> {
+            use std::fmt::Write as _;
+
             trace!(server_name = ?client_hello.server_name(), "Received ClientHello");
 
             let request_server_name = client_hello
@@ -413,21 +415,46 @@ pub mod windows {
             }
 
             // Attempt to acquire a private key and construct CngSigningKey.
+            // We accumulate errors encountered during key acquisition to provide detailed diagnostics.
+            let mut key_acquisition_errors = Vec::new();
+
             let (context, key) = contexts
                 .into_iter()
                 .find_map(|ctx| {
                     let key = ctx
                         .handle
                         .acquire_key()
-                        .inspect_err(|error| debug!(idx = %ctx.idx, %error, "Failed to acquire key for certificate"))
+                        .inspect_err(|error| {
+                            debug!(idx = %ctx.idx, %error, "Failed to acquire key for certificate");
+                            key_acquisition_errors.push(format!("cert[{}]: failed to acquire key: {error:#}", ctx.idx));
+                        })
                         .ok()?;
+
                     CngSigningKey::new(key)
-                        .inspect_err(|error| debug!(idx = %ctx.idx, %error, "CngSigningKey::new failed"))
+                        .inspect_err(|error| {
+                            debug!(idx = %ctx.idx, %error, "CngSigningKey::new failed");
+                            key_acquisition_errors
+                                .push(format!("cert[{}]: failed to create signing key: {error:#}", ctx.idx));
+                        })
                         .ok()
                         .map(|key| (ctx, key))
                 })
                 .with_context(|| {
-                    format!("no usable certificate found in the system store; observed issues: {cert_issues}")
+                    let mut error_msg = "no usable certificate found in the system store".to_owned();
+
+                    if !cert_issues.is_empty() {
+                        let _ = write!(error_msg, "; observed issues: {cert_issues}");
+                    }
+
+                    if !key_acquisition_errors.is_empty() {
+                        let _ = write!(
+                            error_msg,
+                            "; key acquisition failures: {}",
+                            key_acquisition_errors.join(", ")
+                        );
+                    }
+
+                    error_msg
                 })
                 .inspect_err(|error| {
                     let _ = SYSTEM_LOGGER.emit(sysevent_codes::tls_no_suitable_certificate(error, cert_issues));
@@ -508,8 +535,9 @@ pub fn check_certificate_now(cert: &[u8]) -> anyhow::Result<CertReport> {
 }
 
 pub fn check_certificate(cert: &[u8], at: time::OffsetDateTime) -> anyhow::Result<CertReport> {
-    use anyhow::Context as _;
     use core::fmt::Write as _;
+
+    use anyhow::Context as _;
 
     let cert = picky::x509::Cert::from_der(cert).context("failed to parse certificate")?;
     let at = picky::x509::date::UtcDate::from(at);
@@ -762,8 +790,9 @@ struct CertInfo {
 }
 
 fn extract_cert_info(cert_der: &[u8]) -> CertInfo {
-    use bytes::Buf as _;
     use std::fmt::Write as _;
+
+    use bytes::Buf as _;
 
     match x509_cert::Certificate::from_der(cert_der) {
         Ok(cert) => {

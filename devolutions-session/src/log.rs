@@ -1,5 +1,6 @@
-use crate::config::Conf;
 use devolutions_log::{LoggerGuard, StaticLogConfig};
+
+use crate::config::Conf;
 
 pub(crate) struct SessionLog;
 

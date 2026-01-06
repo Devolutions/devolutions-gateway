@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use crate::handle::Handle;
 use anyhow::Context;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Threading::{CreateSemaphoreW, ReleaseSemaphore};
+
+use crate::handle::Handle;
 
 /// RAII wrapper for WinAPI semaphore handle.
 #[derive(Debug, Clone)]

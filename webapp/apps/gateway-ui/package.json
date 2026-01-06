@@ -31,7 +31,7 @@
     "@devolutions/iron-remote-desktop-rdp": "^0.6.1",
     "@devolutions/iron-remote-desktop-vnc": "^0.7.0",
     "@devolutions/terminal-shared": "^1.4.0",
-    "@devolutions/web-ssh-gui": "^0.4.0",
+    "@devolutions/web-ssh-gui": "^0.6.2",
     "@devolutions/web-telnet-gui": "^0.4.0",
     "@xterm/addon-clipboard": "^0.1.0",
     "@xterm/xterm": "^5.5.0",

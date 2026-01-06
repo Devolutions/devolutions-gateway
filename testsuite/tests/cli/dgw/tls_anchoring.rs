@@ -111,6 +111,7 @@ async fn read_until_tls_done(mut logs: impl tokio::io::AsyncRead + Unpin) -> any
 /// Starts a dummy TLS server and returns its port.
 async fn start_dummy_tls_server() -> anyhow::Result<u16> {
     use std::sync::Arc;
+
     use tokio::io::AsyncWriteExt as _;
     use tokio::net::TcpListener;
     use tokio_rustls::TlsAcceptor;

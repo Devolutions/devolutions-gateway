@@ -10,10 +10,6 @@ mod config;
 mod event;
 mod id_allocator;
 
-pub use self::config::{FilteringRule, JmuxConfig};
-pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
-pub use jmux_proto::DestinationUrl;
-
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io;
@@ -35,6 +31,13 @@ use tracing::{Instrument as _, Span};
 use self::codec::JmuxCodec;
 use self::event::TrafficCallback;
 use self::id_allocator::IdAllocator;
+
+#[rustfmt::skip]
+pub use jmux_proto::DestinationUrl;
+#[rustfmt::skip]
+pub use self::config::{FilteringRule, JmuxConfig};
+#[rustfmt::skip]
+pub use self::event::{EventOutcome, TrafficEvent, TransportProtocol};
 
 const MAXIMUM_PACKET_SIZE_IN_BYTES: u16 = 4 * 1024; // 4 kiB
 const WINDOW_ADJUSTMENT_THRESHOLD: u32 = 4 * 1024; // 4 kiB

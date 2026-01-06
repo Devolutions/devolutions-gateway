@@ -176,9 +176,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
         passpharse: connectionParameters.privateKeyPassphrase ?? '',
         privateKey: connectionParameters.privateKey ?? '',
         password: connectionParameters.password ?? '',
-        onHostKeyReceived: (_serverName, _fingerprint) => {
-          return Promise.resolve(true);
-        },
       }),
     ).pipe(catchError((error) => throwError(error)));
   }

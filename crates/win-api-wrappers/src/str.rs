@@ -1,20 +1,22 @@
 //! Utility module providing types for manipulating wide strings.
 
 // Re-export relevant items from the widestring crate.
+#[rustfmt::skip]
 pub use widestring::{
     U16CStr, U16CString, U16Str, U16String, Utf16Str, Utf16String, decode_utf16, decode_utf16_lossy, encode_utf16,
     include_utf16str, u16cstr, u16str, utf16str,
 };
 
 #[cfg(target_os = "windows")]
+#[rustfmt::skip]
 pub use self::win_ext::*;
 
 #[cfg(target_os = "windows")]
 mod win_ext {
-    use super::{U16CStr, U16CString};
-
     use windows::Win32::Foundation::UNICODE_STRING;
     use windows::core::{PCWSTR, PWSTR};
+
+    use super::{U16CStr, U16CString};
 
     pub trait U16CStrExt {
         /// # Safety

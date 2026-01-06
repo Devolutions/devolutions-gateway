@@ -1,6 +1,7 @@
+use std::convert::TryFrom;
+
 use bitvec::prelude::*;
 use jmux_proto::LocalChannelId;
-use std::convert::TryFrom;
 
 pub(crate) trait Id: Copy + From<u32> + Into<u32> {}
 

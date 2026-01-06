@@ -9,7 +9,7 @@
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">An unexpected error occurred accessing the system certificate store: {0}</String>
                 <String Id="AuthenticationTokenIsRequired">The authentication token is required</String>
                 <String Id="DomainIsRequiredAndMustBeValid">The domain is required and must be a valid hostname</String>
-                <String Id="Dotnet462IsRequired">The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
+                <String Id="Dotnet471IsRequired">The product requires Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
                 <String Id="NewerInstalled">A newer version of this product is already installed.</String>
                 <String Id="NoMatchingCertificatesFound">No matching certificates found</String>
@@ -204,7 +204,9 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="ProvideDvlsAddressIfUsing">If you're using Devolutions Server, provide the address. This step is optional.</String>
                 <String Id="PublicKeyServerDlgDescription">Automatic server configuration</String>
                 <String Id="PublicKeyServerDlgTitle">Companion Server</String>
+                <String Id="TheCertificateForXIsNotTrustedDoYouWishToProceed">The certificate for {0} is not trusted. Do you wish to proceed?</String>
                 <String Id="ThePublicKeyWillBeDownloaded">The public key will be downloaded</String>
+                <String Id="UntrustedCertificate">Untrusted Certificate</String>
                 <String Id="YoullNeedToProvideThePublicKey">You'll need to provide the companion server public key</String>
                     <!-- dialogs.keys -->
                 <String Id="PrivateKeyFile">Private Key File</String>

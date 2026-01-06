@@ -192,8 +192,8 @@ if ($WebScheme -eq 'https' -and
     $Arguments = @(
         "req", "-x509", "-nodes",
         "-newkey", "rsa:2048",
-        "-keyout", $PrivateKeyFile,
-        "-out", $CertificateFile,
+        "-keyout", $TlsPrivateKeyFile,
+        "-out", $TlsCertificateFile,
         "-subj", "/CN=$Hostname",
         "-days", "1825"
     )

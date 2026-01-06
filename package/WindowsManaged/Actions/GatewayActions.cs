@@ -359,6 +359,7 @@ internal static class GatewayActions
             GatewayProperties.configureWebApp,
             GatewayProperties.generateKeyPair,
             GatewayProperties.devolutionsServerUrl,
+            GatewayProperties.devolutionsServerCertificateExceptions,
         },
         Enumerable.Empty<Condition>());
 

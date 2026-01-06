@@ -4,12 +4,13 @@
 //! and acknowledging traffic audit events, with an underlying task that manages the
 //! `LibSqlTrafficAuditRepo` object.
 
-use anyhow::Context as _;
-use async_trait::async_trait;
 use core::fmt;
-use devolutions_gateway_task::{ShutdownSignal, Task};
 use std::sync::Arc;
 use std::time::Duration;
+
+use anyhow::Context as _;
+use async_trait::async_trait;
+use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::{mpsc, oneshot};
 use traffic_audit::{ClaimedEvent, DynTrafficAuditRepo, TrafficAuditRepo, TrafficEvent};
 use ulid::Ulid;

@@ -1,11 +1,10 @@
 use std::fmt::Debug;
 use std::string::{FromUtf8Error, FromUtf16Error};
 
+use thiserror::Error;
 use windows::Win32::Foundation::{E_POINTER, WIN32_ERROR};
 use windows::Win32::System::Rpc::RPC_STATUS;
 use windows::core::HRESULT;
-
-use thiserror::Error;
 
 use crate::undoc::LSA_SID_NAME_MAPPING_OPERATION_ERROR;
 

@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use crossbeam::channel::{Receiver, Sender};
-
 use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;

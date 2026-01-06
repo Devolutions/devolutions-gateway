@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
-
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
 mod config;
@@ -8,6 +7,7 @@ mod db;
 mod log;
 pub mod model;
 
+#[rustfmt::skip]
 pub use config::Config;
 
 cfg_if::cfg_if! {

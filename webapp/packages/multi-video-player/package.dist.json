@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/multi-video-player",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Multi-segment video player with live streaming support",
   "type": "module",
   "main": "./index.js",
@@ -14,7 +14,7 @@
     "./index.css": "./index.css"
   },
   "dependencies": {
-    "@devolutions/shadow-player": "^0.1.0",
+    "@devolutions/shadow-player": "^0.1.1",
     "video.js": "^8.0.0"
   },
   "repository": {

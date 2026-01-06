@@ -1,4 +1,5 @@
 ﻿using DevolutionsGateway.Configuration;
+using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
 using DevolutionsGateway.Resources;
 using Microsoft.Deployment.WindowsInstaller;
@@ -14,9 +15,12 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Security;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
@@ -217,7 +221,7 @@ namespace DevolutionsGateway.Actions
                         command = string.Format(
                             Constants.ImportDGatewayCertificateWithPasswordCommandFormat,
                             session.Get(GatewayProperties.certificateFile),
-                            session.Get(GatewayProperties.certificatePassword));
+                            session.Get(GatewayProperties.certificatePassword).Replace("'", "''"));
                     }
                 }
                 else
@@ -1452,8 +1456,37 @@ namespace DevolutionsGateway.Actions
 
             url += Constants.DVLSPublicKeyEndpoint;
 
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
-            using HttpClient client = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (sender, certificate, chain, sslPolicyErrors) =>
+                {
+                    if (certificate is null)
+                    {
+                        session.Log("certificate trust verification failed due to invalid (null) certificate");
+                        return false;
+                    }
+
+                    if (sslPolicyErrors == SslPolicyErrors.None)
+                    {
+                        session.Log("certificate trust verification succeeded (certificate is trusted)");
+                        return true;
+                    }
+
+                    X509Certificate2 certificate2 = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
+
+                    CertificateExceptionStore store = CertificateExceptionStore.Deserialize(
+                        session.Get(GatewayProperties.devolutionsServerCertificateExceptions));
+
+                    bool trust = store.IsTrusted(sender.RequestUri.Host, sender.RequestUri.Port, certificate2.Thumbprint);
+
+                    session.Log($"certificate trust verification for {sender.RequestUri.Host}:{sender.RequestUri.Port} ({certificate2.Thumbprint}): {trust}");
+
+                    return trust;
+                },
+                SslProtocols = SslProtocols.Tls | SslProtocols.Tls11 | SslProtocols.Tls12
+            };
+
+            using HttpClient client = new HttpClient(httpClientHandler, true);
             client.Timeout = TimeSpan.FromSeconds(5);
 
             TimeSpan backoff = TimeSpan.FromMilliseconds(500);

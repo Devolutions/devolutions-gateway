@@ -43,7 +43,9 @@ impl From<serde_json::Error> for Error {
 mod request;
 
 mod default_api;
-pub use self::default_api::{DefaultApi, DefaultApiClient};
 
 pub mod client;
 pub mod configuration;
+
+#[rustfmt::skip]
+pub use self::default_api::{DefaultApi, DefaultApiClient};

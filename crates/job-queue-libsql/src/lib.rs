@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 use ulid::Ulid;
 use uuid::Uuid;
 
+#[rustfmt::skip]
 pub use libsql;
 
 /// Implementation of [`JobQueue`] using libSQL as the backend

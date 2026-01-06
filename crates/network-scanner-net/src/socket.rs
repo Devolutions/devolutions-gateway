@@ -1,11 +1,11 @@
-use polling::Event;
 use std::fmt::Debug;
 use std::future::Future;
 use std::mem::MaybeUninit;
+use std::result::Result::Ok;
 use std::sync::Arc;
 
+use polling::Event;
 use socket2::{SockAddr, Socket};
-use std::result::Result::Ok;
 
 use crate::runtime::Socket2Runtime;
 

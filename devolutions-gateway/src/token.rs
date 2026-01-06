@@ -1,17 +1,18 @@
+use core::fmt;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::num::{NonZeroU32, NonZeroU64};
+use std::str::FromStr;
+use std::sync::Arc;
+
 use anyhow::Context as _;
 use async_trait::async_trait;
-use core::fmt;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use nonempty::NonEmpty;
 use parking_lot::Mutex;
 use picky::jose::jws::RawJws;
 use picky::key::{PrivateKey, PublicKey};
 use smol_str::SmolStr;
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::num::{NonZeroU32, NonZeroU64};
-use std::str::FromStr;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -828,10 +829,11 @@ fn validate_token_impl(
     gw_id: Option<Uuid>,
     disconnected_info: Option<DisconnectedInfo>,
 ) -> Result<AccessTokenClaims, TokenError> {
+    use std::collections::hash_map::Entry;
+
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
     use serde_json::Value;
-    use std::collections::hash_map::Entry;
 
     // === Decoding JWT === //
 
@@ -1188,8 +1190,9 @@ pub mod unsafe_debug {
     // Any function in this module should only be used at development stage when deliberately
     // enabling debugging options.
 
-    use super::*;
     use picky::jose::jwt;
+
+    use super::*;
 
     /// Dangerous token validation procedure.
     ///
@@ -1272,9 +1275,8 @@ mod serde_impl {
     use smol_str::SmolStr;
     use uuid::Uuid;
 
-    use crate::target_addr::TargetAddr;
-
     use super::*;
+    use crate::target_addr::TargetAddr;
 
     #[derive(Serialize, Deserialize, Clone)]
     #[serde(rename_all = "kebab-case")]

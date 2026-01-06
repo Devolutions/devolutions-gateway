@@ -2,17 +2,20 @@ mod packets_parsing;
 mod plugin_info;
 mod recording;
 
-pub use packets_parsing::PacketsParser;
-pub use recording::Recorder;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::Context as _;
 use camino::Utf8Path;
 use dlopen::symbor::Library;
 use parking_lot::Mutex;
 use plugin_info::{PluginCapabilities, PluginInformation};
-use std::sync::{Arc, LazyLock};
 
 use crate::config::Conf;
+
+#[rustfmt::skip]
+pub use packets_parsing::PacketsParser;
+#[rustfmt::skip]
+pub use recording::Recorder;
 
 #[derive(Clone)]
 struct Plugin {

@@ -1,5 +1,6 @@
-use crate::DateVersion;
 use std::fmt;
+
+use crate::DateVersion;
 
 /// Example JSON structure:
 ///

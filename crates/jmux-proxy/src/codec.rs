@@ -57,13 +57,15 @@ impl Encoder<Message> for JmuxCodec {
 mod tests {
     #![allow(clippy::unwrap_used, reason = "test code can panic on errors")]
 
-    use super::*;
-    use bytes::Bytes;
-    use futures_util::StreamExt;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+
+    use bytes::Bytes;
+    use futures_util::StreamExt;
     use tokio::io::{AsyncRead, ReadBuf};
     use tokio_util::codec::FramedRead;
+
+    use super::*;
 
     struct MockAsyncReader {
         raw_msg: Vec<u8>,

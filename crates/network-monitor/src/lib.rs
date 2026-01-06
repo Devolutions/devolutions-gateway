@@ -12,6 +12,7 @@ use tracing::warn;
 mod log_queue;
 mod state;
 
+#[rustfmt::skip]
 pub use crate::state::{ConfigCache, State};
 
 #[derive(Error, Debug)]

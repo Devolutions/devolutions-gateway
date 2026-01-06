@@ -4,20 +4,23 @@ pub mod accept;
 pub mod connect;
 pub mod test;
 
+mod utils;
+
+#[rustfmt::skip]
 pub use http::StatusCode;
 
-mod utils;
+use std::env;
+use std::io::{self, Read};
+use std::sync::OnceLock;
+
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use log::trace;
+use test::{JetTestReq, JetTestRsp};
+use uuid::Uuid;
 
 use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::trace;
-use std::env;
-use std::io::{self, Read};
-use std::sync::OnceLock;
-use test::{JetTestReq, JetTestRsp};
-use uuid::Uuid;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
@@ -307,8 +310,9 @@ impl std::fmt::Display for Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use hex_literal::hex;
+
+    use super::*;
 
     //GET /jet/accept/300f1c82-d33b-11e9-bb65-2a2ae2dbcce5/4c8f409a-c1a2-4cae-bda2-84c590fed618 HTTP/1.1
     //Host: jet101.wayk.net

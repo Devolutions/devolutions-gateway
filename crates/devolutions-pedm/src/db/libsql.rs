@@ -9,10 +9,9 @@ use devolutions_pedm_shared::policy::{
 use libsql::params::IntoParams;
 use libsql::{Row, Transaction, Value, params};
 
-use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
-
 use super::err::{DataIntegrityError, InvalidEnumError, ParseTimestampError};
 use super::{Database, DbError};
+use crate::log::{JitElevationLogPage, JitElevationLogQueryOptions, JitElevationLogRow};
 
 pub(crate) struct LibsqlConn(libsql::Connection);
 

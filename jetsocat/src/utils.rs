@@ -1,9 +1,9 @@
-use crate::proxy::{ProxyConfig, ProxyType};
-use anyhow::Context as _;
 use core::time::Duration;
+use std::net::SocketAddr;
+
+use anyhow::Context as _;
 use futures_util::{Future, Sink, Stream, future};
 use proxy_types::{DestAddr, ToDestAddr};
-use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite;
@@ -11,6 +11,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
 use tokio_tungstenite::tungstenite::{Bytes, Utf8Bytes};
 use transport::ErasedReadWrite;
+
+use crate::proxy::{ProxyConfig, ProxyType};
 
 async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
     match dest_addr {

@@ -1,5 +1,6 @@
-use proxy_socks::Socks5Stream;
 use std::{env, io};
+
+use proxy_socks::Socks5Stream;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -181,8 +182,9 @@ mod socks5_no_password {
 }
 
 mod socks4 {
-    use super::*;
     use proxy_socks::Socks4Stream;
+
+    use super::*;
 
     pub(crate) fn test(addr: &str) {
         test! {
@@ -229,8 +231,9 @@ mod socks5_password {
 }
 
 mod http {
-    use super::*;
     use proxy_http::ProxyStream;
+
+    use super::*;
 
     pub(crate) fn test(addr: &str) {
         test! {

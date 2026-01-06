@@ -1,9 +1,10 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
+use std::str::FromStr as _;
+
 use devolutions_gateway::config::dto::*;
 use rstest::*;
-use std::str::FromStr as _;
 use tap::prelude::*;
 use uuid::Uuid;
 

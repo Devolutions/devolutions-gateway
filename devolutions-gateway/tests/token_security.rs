@@ -2,6 +2,8 @@
 #![allow(unused_crate_dependencies)]
 #![allow(clippy::unwrap_used)]
 
+use std::net::IpAddr;
+
 use anyhow::Context as _;
 use devolutions_gateway::recording::ActiveRecordings;
 use devolutions_gateway::token::{
@@ -18,7 +20,6 @@ use proptest::collection::vec;
 use proptest::option;
 use proptest::prelude::*;
 use rstest::{fixture, rstest};
-use std::net::IpAddr;
 use uuid::Uuid;
 
 const PROVISIONER_KEY: &str = r#"-----BEGIN PRIVATE KEY-----

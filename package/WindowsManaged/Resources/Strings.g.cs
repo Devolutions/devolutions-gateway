@@ -113,9 +113,9 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string DotNet48IsStrongRecommendedDownloadNow = "DotNet48IsStrongRecommendedDownloadNow";		
 		/// <summary>
-		/// The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?
+		/// The product requires Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?
 		/// </summary>
-		public const string Dotnet462IsRequired = "Dotnet462IsRequired";		
+		public const string Dotnet471IsRequired = "Dotnet471IsRequired";		
 		/// <summary>
 		/// This product requires Windows PowerShell 5.1
 		/// </summary>
@@ -740,6 +740,14 @@ namespace DevolutionsGateway.Resources
 		/// You'll need to provide the companion server public key
 		/// </summary>
 		public const string YoullNeedToProvideThePublicKey = "YoullNeedToProvideThePublicKey";		
+		/// <summary>
+		/// Untrusted Certificate
+		/// </summary>
+		public const string UntrustedCertificate = "UntrustedCertificate";		
+		/// <summary>
+		/// The certificate for {0} is not trusted. Do you wish to proceed?
+		/// </summary>
+		public const string TheCertificateForXIsNotTrustedDoYouWishToProceed = "TheCertificateForXIsNotTrustedDoYouWishToProceed";		
 		/// <summary>
 		/// Encryption Keys
 		/// </summary>

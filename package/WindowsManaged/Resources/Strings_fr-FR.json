@@ -268,8 +268,8 @@
           "text": "Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
         },
         {
-          "id": "Dotnet462IsRequired",
-          "text": "Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
+          "id": "Dotnet471IsRequired",
+          "text": "Le produit nécessite Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
         },
         {
           "id": "WindowsPowerShell51IsRequired",
@@ -810,6 +810,15 @@
           {
             "id": "YoullNeedToProvideThePublicKey",
             "text": "Vous devrez fournir la clé publique du serveur compagnon"
+          },
+
+          {
+            "id": "UntrustedCertificate",
+            "text": "Certificat non approuvé"
+          },
+          {
+            "id": "TheCertificateForXIsNotTrustedDoYouWishToProceed",
+            "text": "Le certificat pour {0} n'est pas approuvé. Voulez-vous continuer ?"
           }
         ],
         "keys": [
