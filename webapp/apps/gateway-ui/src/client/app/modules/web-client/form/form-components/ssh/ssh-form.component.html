@@ -1,34 +1,54 @@
 <div [formGroup]="form">
-  <div class="col-4 gateway-form-group col-pad-right-lg">
+  <div class="col-4 gateway-form-group">
     <label for="authSettings">Authentication</label>
     <div class="gateway-form-input">
-      <p-select id="authSettings" appendTo="body" formControlName="authMode" [options]="authModeOptions">
+      <p-select
+        id="authSettings"
+        appendTo="body"
+        formControlName="authMode"
+        [options]="authModeOptions"
+      >
       </p-select>
     </div>
   </div>
 
   <div class="col-12 gateway-form-group">
-    <web-client-username-control [parentForm]="form" [inputFormData]="inputFormData"></web-client-username-control>
+    <web-client-username-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+    ></web-client-username-control>
   </div>
 
-  <div class="col-12 gateway-form-group" [hidden]="!formInputVisibility.showPasswordInput">
-    <web-client-password-control [parentForm]="form" [inputFormData]="inputFormData"
-      [isEnabled]="formInputVisibility.showPasswordInput"></web-client-password-control>
+  <div
+    class="col-12 gateway-form-group"
+    [hidden]="!formInputVisibility.showPasswordInput"
+  >
+    <web-client-password-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+      [isEnabled]="formInputVisibility.showPasswordInput"
+    ></web-client-password-control>
   </div>
 
-  <div class="col-12 gateway-form-group" [hidden]="!formInputVisibility.showPrivateKeyInput">
-      <web-client-password-control [parentForm]="form"
-            [inputFormData]="inputFormData"
-            [label]="'Passphrase'"
-            [formKey]="'passphrase'"
-            [isRequired]="false"
-            [isEnabled]="formInputVisibility.showPrivateKeyInput">
-      </web-client-password-control>
+  <div
+    class="col-12 gateway-form-group"
+    [hidden]="!formInputVisibility.showPrivateKeyInput"
+  >
+    <web-client-password-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+      [label]="'Passphrase'"
+      [formKey]="'passphrase'"
+      [isRequired]="false"
+      [isEnabled]="formInputVisibility.showPrivateKeyInput"
+    >
+    </web-client-password-control>
   </div>
 
   <div [hidden]="!formInputVisibility.showPrivateKeyInput">
-    <app-file-control privateKeyFileForm [disabled] ="formInputVisibility.showPrivateKeyInput" ></app-file-control>
+    <app-file-control
+      privateKeyFileForm
+      [disabled]="formInputVisibility.showPrivateKeyInput"
+    ></app-file-control>
   </div>
-
-
 </div>

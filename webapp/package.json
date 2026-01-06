@@ -21,10 +21,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.0",
-    "@angular-devkit/build-angular": "^20.3.5",
-    "@angular-devkit/core": "20.3.5",
-    "@angular/cli": "20.3.5",
-    "@angular/compiler-cli": "20.3.5",
     "@types/uuid": "^10.0.0",
     "cross-env": "^10.1.0",
     "typescript": "^5.8.2"
