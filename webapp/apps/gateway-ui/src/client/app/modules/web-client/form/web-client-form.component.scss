@@ -59,6 +59,10 @@
   }
 }
 
+:host ::ng-deep .p-button {
+  margin-right: 0;
+}
+
 .container {
   display: flex;
   justify-content: center;

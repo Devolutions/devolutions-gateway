@@ -9,6 +9,9 @@
 
 .p-select-label {
   overflow: hidden;
+  padding: 5px 0 5px 8px;
+  line-height: 24px;
+  font-size: $fontSize;
 }
 
 .p-select {
