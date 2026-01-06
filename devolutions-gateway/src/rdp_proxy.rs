@@ -403,7 +403,7 @@ where
 }
 
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
-async fn perform_credssp_with_server<S>(
+pub async fn perform_credssp_with_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     server_name: String,
     server_public_key: Vec<u8>,
@@ -519,7 +519,7 @@ async fn resolve_client_generator(
 }
 
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
-async fn perform_credssp_with_client<S>(
+pub async fn perform_credssp_with_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     client_addr: IpAddr,
     gateway_public_key: Vec<u8>,
@@ -636,7 +636,7 @@ where
     }
 }
 
-async fn get_cached_gateway_public_key(
+pub async fn get_cached_gateway_public_key(
     hostname: String,
     acceptor: tokio_rustls::TlsAcceptor,
 ) -> anyhow::Result<Vec<u8>> {
@@ -686,7 +686,7 @@ async fn retrieve_gateway_public_key(hostname: String, acceptor: tokio_rustls::T
     Ok(public_key)
 }
 
-fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Result<Vec<u8>> {
+pub fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Result<Vec<u8>> {
     use x509_cert::der::Decode as _;
 
     let cert = tls_stream.get_peer_certificate().context("certificate is missing")?;
@@ -704,7 +704,7 @@ fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Resul
     Ok(server_public_key)
 }
 
-trait GetPeerCert {
+pub trait GetPeerCert {
     fn get_peer_certificate(&self) -> Option<&tokio_rustls::rustls::pki_types::CertificateDer<'static>>;
 }
 
@@ -738,7 +738,7 @@ where
     Ok(())
 }
 
-struct NetworkClient;
+pub struct NetworkClient;
 
 impl NetworkClient {
     fn new() -> Self {
