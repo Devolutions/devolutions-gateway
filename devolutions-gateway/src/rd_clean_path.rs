@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use ironrdp_pdu::nego;
 use ironrdp_rdcleanpath::RDCleanPathPdu;
 use tap::prelude::*;
 use thiserror::Error;
@@ -17,14 +18,6 @@ use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
-
-use anyhow::Context as _;
-use ironrdp_pdu::nego;
-use ironrdp_rdcleanpath::RDCleanPathPdu;
-use tap::prelude::*;
-use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tracing::field;
 
 #[derive(Debug, Error)]
 enum AuthorizationError {
@@ -392,6 +385,8 @@ async fn handle_with_credential_injection(
         server_public_key.clone(),
         client_security_protocol,
         &credential_mapping.proxy,
+        None,
+        None,
     );
 
     let server_credssp_fut = crate::rdp_proxy::perform_credssp_with_server(
@@ -400,6 +395,8 @@ async fn handle_with_credential_injection(
         server_public_key,
         server_security_protocol,
         &credential_mapping.target,
+        None,
+        None,
     );
 
     let (client_res, server_res) = tokio::join!(client_credssp_fut, server_credssp_fut);

@@ -738,7 +738,7 @@ where
     Ok(())
 }
 
-struct NetworkClient;
+pub struct NetworkClient;
 
 impl NetworkClient {
     fn new() -> Self {
