@@ -166,7 +166,6 @@ struct CleanPathResult {
     x224_rsp: Vec<u8>,
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn process_cleanpath(
     cleanpath_pdu: RDCleanPathPdu,
     client_addr: SocketAddr,
@@ -175,7 +174,6 @@ async fn process_cleanpath(
     jrl: &CurrentJrl,
     active_recordings: &ActiveRecordings,
     sessions: &SessionMessageSender,
-    _credential_store: &CredentialStoreHandle,
 ) -> Result<CleanPathResult, CleanPathError> {
     use crate::utils;
 
@@ -212,7 +210,7 @@ async fn process_cleanpath(
 
     span.record("session_id", claims.jet_aid.to_string());
 
-    // Sanity check
+    // Sanity check.
     match cleanpath_pdu.destination.as_deref() {
         Some(destination) => match TargetAddr::parse(destination, 3389) {
             Ok(destination) if !destination.eq(targets.first()) => {
@@ -235,19 +233,19 @@ async fn process_cleanpath(
     debug!(%selected_target, "Connected to destination server");
     span.record("target", selected_target.to_string());
 
-    // Send preconnection blob if applicable
+    // Send preconnection blob if applicable.
     if let Some(pcb) = cleanpath_pdu.preconnection_blob {
         server_stream.write_all(pcb.as_bytes()).await?;
     }
 
-    // Send X224 connection request
+    // Send X224 connection request.
     let x224_req = cleanpath_pdu
         .x224_connection_pdu
         .context("request is missing X224 connection PDU")
         .map_err(CleanPathError::BadRequest)?;
     server_stream.write_all(x224_req.as_bytes()).await?;
 
-    // Receive server X224 connection response
+    // == Receive server X224 connection response ==
 
     trace!("Receiving X224 response");
 
@@ -258,7 +256,7 @@ async fn process_cleanpath(
 
     trace!("Establishing TLS connection with server");
 
-    // Establish TLS connection with server
+    // == Establish TLS connection with server ==
 
     let server_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
         .await
@@ -277,7 +275,7 @@ async fn process_cleanpath(
 }
 
 /// Handle RDP connection with credential injection via CredSSP MITM
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn handle_with_credential_injection(
     mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     client_addr: SocketAddr,
@@ -288,24 +286,8 @@ async fn handle_with_credential_injection(
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
-    _credential_entry: crate::credential::ArcCredentialEntry,
 ) -> anyhow::Result<()> {
-    let token = cleanpath_pdu.proxy_auth.as_ref().context("missing token")?;
-
-    // Authorize the token
-    let claims = authorize(client_addr, token, &conf, token_cache, jrl, active_recordings, None)
-        .map_err(|e| anyhow::anyhow!("authorization failed: {}", e))?;
-
-    let crate::token::ConnectionMode::Fwd { targets: _ } = claims.jet_cm else {
-        anyhow::bail!("unexpected connection mode");
-    };
-
-    let span = tracing::Span::current();
-    span.record("session_id", claims.jet_aid.to_string());
-
-    info!("Credential injection: performing CredSSP MITM");
-
-    // Run normal RDCleanPath flow (this will handle server-side TLS and get certs)
+    // Run normal RDCleanPath flow (this will handle server-side TLS and get certs).
     let CleanPathResult {
         destination,
         server_addr,
@@ -320,7 +302,6 @@ async fn handle_with_credential_injection(
         jrl,
         active_recordings,
         &sessions,
-        &CredentialStoreHandle::new(), // Dummy, not used in process_cleanpath
     )
     .await
     .map_err(|e| anyhow::anyhow!("RDCleanPath processing failed: {}", e))?;
@@ -456,10 +437,10 @@ async fn handle_with_credential_injection(
         .context("proxy failed")
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[instrument("fwd", skip_all, fields(session_id = field::Empty, target = field::Empty))]
 pub async fn handle(
-    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
     token_cache: &TokenCache,
@@ -477,19 +458,22 @@ pub async fn handle(
         .await
         .context("couldn't read clean cleanpath PDU")?;
 
-    // Early credential detection: check if we should use RdpProxy instead
+    // Early credential detection: check if we should use RdpProxy instead.
     let token = cleanpath_pdu
         .proxy_auth
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("missing token in RDCleanPath PDU"))?;
 
+    // If a credential mapping has been pushed, we automatically switch to
+    // proxy-based credential injection mode. Otherwise, we continue the usual
+    // clean path procedure.
     if let Some(entry) = crate::token::extract_jti(token)
         .ok()
         .and_then(|token_id| credential_store.get(token_id))
         .filter(|entry| entry.mapping.is_some())
     {
-        // Credentials found! Switch to RdpProxy for credential injection
-        info!("Switching to RdpProxy for credential injection (WebSocket)");
+        anyhow::ensure!(token == entry.token, "token mismatch");
+        debug!("Switching to RdpProxy for credential injection (WebSocket)");
 
         return handle_with_credential_injection(
             client_stream,
@@ -522,7 +506,6 @@ pub async fn handle(
         jrl,
         active_recordings,
         &sessions,
-        credential_store,
     )
     .await
     {
@@ -536,7 +519,7 @@ pub async fn handle(
         }
     };
 
-    // Send success RDCleanPathPdu response
+    // == Send success RDCleanPathPdu response ==
 
     let x509_chain = server_stream
         .get_ref()
@@ -549,11 +532,12 @@ pub async fn handle(
     trace!("Sending RDCleanPath response");
 
     let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+        .context("couldn’t build RDCleanPath response")?;
+    // .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
-    // Start actual RDP session
+    // == Start actual RDP session ==
 
     let info = SessionInfo::builder()
         .id(claims.jet_aid)
@@ -613,8 +597,7 @@ fn io_to_rdcleanpath_err(err: &io::Error) -> RDCleanPathPdu {
     }
 }
 
-#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
-#[allow(dead_code)]
+#[expect(dead_code, non_camel_case_types, clippy::upper_case_acronyms)]
 #[repr(u16)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WsaError {
