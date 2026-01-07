@@ -106,6 +106,7 @@ pub struct Conf {
     pub verbosity_profile: dto::VerbosityProfile,
     pub web_app: WebAppConf,
     pub ai_gateway: AiGatewayConf,
+    pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
 
@@ -799,6 +800,7 @@ impl Conf {
                 .as_ref()
                 .map(AiGatewayConf::from_dto)
                 .unwrap_or_default(),
+            proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -1526,6 +1528,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub traffic_audit_database: Option<Utf8PathBuf>,
 
+        /// HTTP/SOCKS proxy configuration for outbound requests
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy: Option<ProxyConf>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -1578,6 +1584,7 @@ pub mod dto {
                 ai_gateway: None,
                 job_queue_database: None,
                 traffic_audit_database: None,
+                proxy: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }
@@ -2099,5 +2106,81 @@ pub mod dto {
         /// Azure OpenAI API version (default: 2024-02-15-preview)
         #[serde(skip_serializing_if = "Option::is_none")]
         pub api_version: Option<String>,
+    }
+
+    /// Proxy mode determines how proxy configuration is resolved.
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Default, Serialize, Deserialize)]
+    pub enum ProxyMode {
+        /// Never use a proxy, ignore environment variables.
+        Off,
+        /// Use environment variables, Linux sysconfig, Windows Registry, or macOS System Configuration.
+        #[default]
+        System,
+        /// Use manually configured proxy URLs from the configuration file.
+        Manual,
+    }
+
+    /// HTTP/SOCKS proxy configuration for outbound requests.
+    ///
+    /// Mode determines how proxies are configured:
+    /// - Off: Never use a proxy
+    /// - System: Use environment variables, system configuration, or OS-specific settings
+    /// - Manual: Use explicitly configured URLs
+    ///
+    /// In Manual mode, the URL scheme determines the proxy type:
+    /// - `http://proxy.corp:8080` - HTTP CONNECT proxy
+    /// - `socks5://proxy.corp:1080` - SOCKS5 proxy
+    /// - `socks4://proxy.corp:1080` - SOCKS4 proxy
+    ///
+    /// Proxy credentials can be embedded in the URL: `http://user:pass@proxy.corp:8080`
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct ProxyConf {
+        /// How to determine proxy configuration (default: System)
+        #[serde(default)]
+        pub mode: ProxyMode,
+        /// HTTP proxy URL (used only in Manual mode)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub http: Option<Url>,
+        /// HTTPS proxy URL (used only in Manual mode)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub https: Option<Url>,
+        /// Fallback proxy URL for all protocols (used only in Manual mode)
+        /// Typically a SOCKS proxy.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub all: Option<Url>,
+        /// Bypass list for manual mode (same semantics as NO_PROXY).
+        /// Supports hostnames, domain suffixes (.corp.local), IPs, CIDR ranges, and "*" for all.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub exclude: Vec<String>,
+    }
+
+    impl Default for ProxyConf {
+        fn default() -> Self {
+            Self {
+                mode: ProxyMode::System,
+                http: None,
+                https: None,
+                all: None,
+                exclude: Vec::new(),
+            }
+        }
+    }
+
+    impl ProxyConf {
+        /// Convert this DTO to the http-client-proxy ProxyConfig.
+        pub fn to_proxy_config(&self) -> http_client_proxy::ProxyConfig {
+            match self.mode {
+                ProxyMode::Off => http_client_proxy::ProxyConfig::Off,
+                ProxyMode::System => http_client_proxy::ProxyConfig::System,
+                ProxyMode::Manual => http_client_proxy::ProxyConfig::Manual(http_client_proxy::ManualProxyConfig {
+                    http: self.http.clone(),
+                    https: self.https.clone(),
+                    all: self.all.clone(),
+                    exclude: self.exclude.clone(),
+                }),
+            }
+        }
     }
 }

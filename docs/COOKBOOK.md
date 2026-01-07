@@ -7,6 +7,7 @@ Developer-oriented cookbook for testing purposes.
 - [Standalone web application custom authentication](#standalone-web-application-custom-authentication)
 - [Preflight API](#preflight-api)
 - [Network monitoring API](#network-monitoring-api)
+- [HTTP/SOCKS proxy configuration](#httpsocks-proxy-configuration)
 - [Proxy-based credentials injection for RDP](#proxy-based-credentials-injection-for-rdp)
 - [Traffic Audit API](#traffic-audit-api)
 
@@ -301,6 +302,189 @@ The response will look similar to this:
 
 Each log entry is only returned once. After you make this request, the existing log is deleted from memory.
 
+## HTTP/SOCKS proxy configuration
+
+Devolutions Gateway and Devolutions Agent support HTTP/HTTPS/SOCKS proxy configuration for outbound requests.
+Proxies are used for requests such as:
+- Subscriber API notifications (Gateway)
+- AI Gateway provider requests (Gateway)
+- Update downloads and version checks (Agent)
+
+The proxy configuration supports three modes:
+- **Off**: Never use a proxy, ignore environment variables
+- **System**: Auto-detect proxy from environment variables or system settings (default)
+- **Manual**: Use explicitly configured proxy URLs
+
+### System proxy detection (default)
+
+By default (`Mode: System`), proxy configuration is automatically detected from system settings:
+
+- **Environment variables**: HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY
+- **Linux sysconfig**: `/etc/sysconfig/proxy` on RHEL/SUSE systems
+- **Windows Registry**: Per-user and machine-wide settings with WinHTTP fallback
+- **macOS System Configuration**: SCDynamicStoreCopyProxies()
+
+**Gateway configuration example:**
+```json
+{
+  "Proxy": {
+    "Mode": "System"
+  }
+}
+```
+
+**Agent configuration example:**
+```json
+{
+  "Proxy": {
+    "Mode": "System"
+  }
+}
+```
+
+Since `System` is the default mode, you can omit the `Proxy` section entirely to use system proxy detection.
+
+### Manual proxy configuration
+
+You can override auto-detection by setting `Mode: Manual` and specifying explicit proxy URLs.
+The configuration supports protocol-specific proxies (`Http`, `Https`) and a fallback proxy (`All`).
+
+**Protocol-specific proxies:**
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "Http": "http://proxy.corp:8080",
+    "Https": "http://proxy.corp:8443"
+  }
+}
+```
+
+**SOCKS5 proxy as fallback for all protocols:**
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "All": "socks5://proxy.corp:1080"
+  }
+}
+```
+
+**Corporate proxy with authentication:**
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "Http": "http://username:password@proxy.corp:8080",
+    "Https": "http://username:password@proxy.corp:8080"
+  }
+}
+```
+
+**Combined configuration with exclude list:**
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "Http": "http://proxy.corp:8080",
+    "Https": "http://proxy.corp:8080",
+    "Exclude": ["localhost", ".internal.net", "192.168.1.0/24"]
+  }
+}
+```
+
+### Disabling proxy
+
+To completely disable proxy usage (ignoring system settings):
+
+```json
+{
+  "Proxy": {
+    "Mode": "Off"
+  }
+}
+```
+
+### Exclusions
+
+**When using `Mode: Manual`**, specify exclusions in the `Exclude` array:
+
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "Http": "http://proxy.corp:8080",
+    "Exclude": [
+      "localhost",
+      ".internal.corp",
+      "devolutions.net",
+      "127.0.0.1",
+      "192.168.0.0/16"
+    ]
+  }
+}
+```
+
+The `Exclude` list supports NO_PROXY semantics:
+- Wildcard: `*` (bypass proxy for all targets)
+- Exact hostname: `localhost`, `example.com`
+- Domain suffix: `.corp.local` (matches `foo.corp.local`)
+- IP address: `127.0.0.1`
+- CIDR range: `10.0.0.0/8`, `192.168.0.0/16`
+
+### Proxy selection priority
+
+For `Mode: Manual`, the proxy is selected based on the target URL scheme:
+
+1. For `http://` requests → use `Http` proxy, fallback to `All`
+2. For `https://` requests → use `Https` proxy, fallback to `All`
+3. For other schemes → use `All` proxy
+
+If the target matches an entry in the `Exclude` list, no proxy is used.
+
+### Testing proxy configuration
+
+**Test Gateway subscriber notifications with a proxy:**
+
+1. Configure the proxy in `gateway.json`:
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "Https": "http://proxy.corp:8080"
+  },
+  "Subscriber": {
+    "Url": "https://example.com/notifications",
+    "Token": "your-token-here"
+  }
+}
+```
+
+2. Monitor Gateway logs for proxy-related messages:
+```bash
+tail -f /var/log/devolutions-gateway/gateway.log | grep -i proxy
+```
+
+**Test Agent updates with a proxy:**
+
+1. Configure the proxy in `agent.json`:
+```json
+{
+  "Proxy": {
+    "Mode": "Manual",
+    "Https": "http://proxy.corp:8080"
+  },
+  "Updater": {
+    "Enabled": true
+  }
+}
+```
+
+2. Trigger an update check and monitor logs:
+```bash
+# View agent logs
+tail -f /var/log/devolutions-agent/agent.log | grep -i "download\|proxy"
+```
 
 ## Proxy-based credentials injection for RDP
 
