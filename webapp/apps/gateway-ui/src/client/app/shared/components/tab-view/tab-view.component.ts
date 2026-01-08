@@ -71,9 +71,10 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
     this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 
-  onTabChange(event: any): void {
+  onTabChange(event: unknown): void {
     // PrimeNG 20 Tabs onChange event provides the new value in event.value
-    const newIndex = typeof event.value === 'number' ? event.value : Number.parseInt(event.value, 10);
+    const value = (event as { value: unknown })?.value;
+    const newIndex = typeof value === 'number' ? value : Number.parseInt(value as string, 10);
     this.webSessionService.setWebSessionCurrentIndex(newIndex);
   }
 

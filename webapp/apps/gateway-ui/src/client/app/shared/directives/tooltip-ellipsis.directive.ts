@@ -63,14 +63,19 @@ export class TooltipEllipsisDirective extends BaseComponent implements AfterView
     const shouldBeDisabled = !this.isEllipsisActive();
 
     // primeNG Tooltip has setOption; `disabled` may be internal — guard access.
-    const currentDisabled = (this.tooltipInstance as any)?.disabled;
+    interface TooltipWithOptions {
+      disabled?: boolean;
+      setOption?: (options: { disabled: boolean }) => void;
+    }
+    const tooltip = this.tooltipInstance as unknown as TooltipWithOptions;
+    const currentDisabled = tooltip?.disabled;
     if (shouldBeDisabled !== currentDisabled) {
       this.zone.run(() => {
         // use setOption if available; otherwise, try setting `disabled` directly as a fallback
-        if (typeof (this.tooltipInstance as any)?.setOption === 'function') {
-          (this.tooltipInstance as any).setOption({ disabled: shouldBeDisabled });
+        if (typeof tooltip?.setOption === 'function') {
+          tooltip.setOption({ disabled: shouldBeDisabled });
         } else {
-          (this.tooltipInstance as any).disabled = shouldBeDisabled;
+          tooltip.disabled = shouldBeDisabled;
         }
       });
     }

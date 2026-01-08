@@ -5,51 +5,51 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { AutoComplete } from 'primeng/autocomplete';
 import { Badge } from 'primeng/badge';
 import { Button } from 'primeng/button';
-import { DatePicker } from 'primeng/datepicker';
 import { Card } from 'primeng/card';
 import { Carousel } from 'primeng/carousel';
 import { CheckboxModule } from 'primeng/checkbox';
 import { ConfirmDialog } from 'primeng/confirmdialog';
 import { ConfirmPopup } from 'primeng/confirmpopup';
 import { ContextMenu } from 'primeng/contextmenu';
-import { DataView } from 'primeng/dataview';
+import { DataView as PrimeNgDataView } from 'primeng/dataview';
+import { DatePicker } from 'primeng/datepicker';
 import { Dialog } from 'primeng/dialog';
 import { Divider } from 'primeng/divider';
 import { DomHandler } from 'primeng/dom';
-import { Select } from 'primeng/select';
+import { Drawer } from 'primeng/drawer';
 import { Fieldset } from 'primeng/fieldset';
 import { FileUpload } from 'primeng/fileupload';
 import { InputMask } from 'primeng/inputmask';
 import { InputNumber } from 'primeng/inputnumber';
-import { ToggleSwitch } from 'primeng/toggleswitch';
 import { InputText } from 'primeng/inputtext';
-import { Textarea } from 'primeng/textarea';
 import { Listbox } from 'primeng/listbox';
 import { Menu } from 'primeng/menu';
 import { Message } from 'primeng/message';
 import { MultiSelect } from 'primeng/multiselect';
 import { OrderList } from 'primeng/orderlist';
-import { Popover } from 'primeng/popover';
 import { Panel } from 'primeng/panel';
 import { PickList } from 'primeng/picklist';
+import { Popover } from 'primeng/popover';
 import { ProgressSpinner } from 'primeng/progressspinner';
 import { RadioButton } from 'primeng/radiobutton';
+import { Scroller } from 'primeng/scroller';
 import { ScrollPanel } from 'primeng/scrollpanel';
+import { Select } from 'primeng/select';
 import { SelectButton } from 'primeng/selectbutton';
-import { Drawer } from 'primeng/drawer';
 import { Slider } from 'primeng/slider';
 import { SplitButton } from 'primeng/splitbutton';
 import { Stepper } from 'primeng/stepper';
 import { TableModule } from 'primeng/table';
-import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'primeng/tabs';
+import { Tab, TabList, TabPanel, TabPanels, Tabs } from 'primeng/tabs';
+import { Textarea } from 'primeng/textarea';
 import { TieredMenu } from 'primeng/tieredmenu';
 import { Toast } from 'primeng/toast';
 import { ToggleButton } from 'primeng/togglebutton';
+import { ToggleSwitch } from 'primeng/toggleswitch';
 import { Toolbar } from 'primeng/toolbar';
 import { Tooltip, TooltipModule } from 'primeng/tooltip';
 import { Tree } from 'primeng/tree';
 import { TreeTableModule } from 'primeng/treetable';
-import { Scroller } from 'primeng/scroller';
 
 const PRIMENG_MODULES = [
   Divider,
@@ -61,7 +61,7 @@ const PRIMENG_MODULES = [
   Carousel,
   CheckboxModule,
   ContextMenu,
-  DataView,
+  PrimeNgDataView,
   Scroller,
   Dialog,
   Select,

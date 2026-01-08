@@ -7,7 +7,7 @@
 // import { WebFormService } from '@shared/services/web-form.service';
 //
 // @Component({
-  standalone: false,
+//   standalone: false,
 //   selector: 'web-client-sharing-approval-mode-control',
 //   templateUrl: 'sharing-approval-mode-control.component.html',
 //   styleUrls: ['sharing-approval-mode-control.component.scss'],

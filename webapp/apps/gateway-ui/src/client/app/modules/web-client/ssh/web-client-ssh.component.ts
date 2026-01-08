@@ -1,14 +1,4 @@
-import {
-  Component,
-  ElementRef,
-  EventEmitter,
-  Input,
-  OnDestroy,
-  OnInit,
-  Output,
-  Renderer2,
-  ViewChild,
-} from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { LoggingLevel } from '@devolutions/terminal-shared';
 import { SSHTerminal, loggingService as sshLoggingService, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
 import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
@@ -54,7 +44,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
   private remoteTerminalEventListener: () => void;
 
   constructor(
-    private renderer: Renderer2,
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
@@ -255,10 +244,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
 
     const icon: string = status !== TerminalConnectionStatus.connected ? DVL_WARNING_ICON : DVL_SSH_ICON;
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
-  }
-
-  private handleSubscriptionError(error): void {
-    console.error('Error in session event subscription', error);
   }
 
   private handleClientConnectStarted(): void {

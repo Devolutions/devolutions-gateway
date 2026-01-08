@@ -6,7 +6,7 @@
 // import { WebFormService } from '@shared/services/web-form.service';
 //
 // @Component({
-  standalone: false,
+//   standalone: false,
 //   selector: 'web-client-force-ws-port-control',
 //   templateUrl: 'force-ws-port-control.component.html',
 //   styleUrls: ['force-ws-port-control.component.scss'],

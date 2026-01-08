@@ -1,14 +1,4 @@
-import {
-  Component,
-  ElementRef,
-  EventEmitter,
-  Input,
-  OnDestroy,
-  OnInit,
-  Output,
-  Renderer2,
-  ViewChild,
-} from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
@@ -58,7 +48,6 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   private unsubscribeTerminalEvent: () => void;
 
   constructor(
-    private renderer: Renderer2,
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     private webSessionService: WebSessionService,
@@ -252,10 +241,6 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     const icon: string = status !== TerminalConnectionStatus.connected ? DVL_WARNING_ICON : DVL_TELNET_ICON;
 
     void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
-  }
-
-  private handleSubscriptionError(error): void {
-    console.error('Error in session event subscription', error);
   }
 
   private handleClientConnectStarted(): void {

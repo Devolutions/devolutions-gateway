@@ -5,11 +5,10 @@ import { FormsModule } from '@angular/forms';
 import { BrowserModule } from '@angular/platform-browser';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { ExtraOptions, RouterModule } from '@angular/router';
-import { providePrimeNG } from 'primeng/config';
-import Aura from '@primeuix/themes/aura';
 import { AuthInterceptor } from '@gateway/app-auth.interceptor';
 import { MenuListActiveSessionsComponent } from '@gateway/modules/base/menu/menu-list-active-sessions/menu-list-active-sessions.component';
 import { LoginComponent } from '@gateway/modules/login/login.component';
+import Aura from '@primeuix/themes/aura';
 import { GatewayAlertMessageComponent } from '@shared/components/gateway-alert-message/gateway-alert-message.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { LoadingService } from '@shared/services/loading.service';
@@ -20,6 +19,7 @@ import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { SharedModule } from '@shared/shared.module';
 import { AutoComplete } from 'primeng/autocomplete';
+import { providePrimeNG } from 'primeng/config';
 import { Drawer } from 'primeng/drawer';
 import { Tabs } from 'primeng/tabs';
 import { Toast } from 'primeng/toast';
@@ -81,10 +81,10 @@ const routerOptions: ExtraOptions = {
           darkModeSelector: 'system',
           cssLayer: {
             name: 'primeng',
-            order: 'primeng, custom'
-          }
-        }
-      }
+            order: 'primeng, custom',
+          },
+        },
+      },
     }),
   ],
 })

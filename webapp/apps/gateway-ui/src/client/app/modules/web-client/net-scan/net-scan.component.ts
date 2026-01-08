@@ -1,4 +1,4 @@
-import { AfterViewInit, ChangeDetectorRef, Component } from '@angular/core';
+import { AfterViewInit, Component } from '@angular/core';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 
 @Component({
@@ -12,10 +12,7 @@ export class NetScanComponent implements AfterViewInit {
   started = false;
   ended = false;
 
-  constructor(
-    private netscanService: NetScanService,
-    private cd: ChangeDetectorRef,
-  ) {}
+  constructor(private netscanService: NetScanService) {}
 
   ngAfterViewInit(): void {
     this.startScan();

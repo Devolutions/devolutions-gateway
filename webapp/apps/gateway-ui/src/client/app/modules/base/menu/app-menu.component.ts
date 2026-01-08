@@ -141,7 +141,7 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
   // Resize methods
   onResizeStart(event: MouseEvent): void {
     if (this.isMenuSlim) return;
-    
+
     this.isResizing = true;
     this.startX = event.clientX;
     // Get current width in px from the element or parse from stored value
@@ -149,14 +149,14 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
     const container = target.parentElement;
     this.startWidthPx = container ? container.offsetWidth : 250;
     event.preventDefault();
-    
+
     // Bind document-level listeners for reliable drag tracking
     const onMouseMove = (e: MouseEvent) => {
       if (!this.isResizing) return;
-      
+
       const deltaX = e.clientX - this.startX;
       const newWidthPx = this.startWidthPx + deltaX;
-      
+
       // Constrain width between 150px and 400px
       if (newWidthPx >= 150 && newWidthPx <= 400) {
         this.zone.run(() => {
@@ -165,13 +165,13 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
         });
       }
     };
-    
+
     const onMouseUp = () => {
       this.isResizing = false;
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
-    
+
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }
