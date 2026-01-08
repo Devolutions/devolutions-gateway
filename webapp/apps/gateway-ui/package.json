@@ -56,7 +56,7 @@
     "@angular-devkit/core": "20.3.5",
     "@angular/cli": "20.3.5",
     "@angular/compiler-cli": "20.3.5",
-    "@biomejs/biome": "2.0.0",
+    "@biomejs/biome": "2.1.3",
     "@types/node": "^20.19.0",
     "@types/uuid": "^9.0.8",
     "typescript": "~5.8.2",
@@ -64,8 +64,7 @@
     "undici-types": "^6.21.0"
   },
   "optionalDependencies": {
-    "@biomejs/cli-linux-x64": "2.0.0",
-    "@biomejs/cli-win32-x64": "2.0.0",
-    "@rollup/rollup-linux-x64-gnu": "^4.21.2"
+    "@biomejs/cli-linux-x64": "2.1.3",
+    "@biomejs/cli-win32-x64": "2.1.3"
   }
 }

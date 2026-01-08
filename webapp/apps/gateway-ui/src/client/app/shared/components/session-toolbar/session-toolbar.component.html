@@ -1,7 +1,7 @@
 <div
   #sessionToolbar
   id="sessionToolbar"
-  *ngIf="!isFullScreenMode || (isFullScreenMode && showToolbarDiv)"
+  *ngIf="!isFullScreenMode || showToolbarDiv"
   [ngClass]="isFullScreenMode ? 'session-toolbar-layer' : ''"
   class="session-toolbar"
 >
@@ -51,11 +51,6 @@
       <div class="separator" *ngIf="!last"></div>
     </ng-container>
   </div>
-
-  <!-- 
-formControlName="enableCursor"
-        inputId="enableCursor"  
--->
 
   <div class="session-toolbar-middle-group" *ngIf="checkboxes.length > 0">
     <ng-container *ngFor="let checkbox of checkboxes; let last = last">
