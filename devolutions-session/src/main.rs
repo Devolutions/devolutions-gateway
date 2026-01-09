@@ -3,7 +3,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(all(windows, feature = "dvc"))]
-use ::{async_trait as _, now_proto_pdu as _, tempfile as _, thiserror as _, win_api_wrappers as _, windows as _};
+use ::{
+    async_trait as _, devolutions_agent_shared as _, now_proto_pdu as _, tempfile as _, thiserror as _,
+    win_api_wrappers as _, windows as _,
+};
 use ::{
     camino as _, cfg_if as _, ctrlc as _, devolutions_log as _, futures as _, parking_lot as _, serde as _,
     serde_json as _, tap as _,

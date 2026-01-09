@@ -9,10 +9,12 @@ use crate::updater::{Product, UpdaterError};
 pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<DateVersion>, UpdaterError> {
     match product {
         Product::Gateway => {
-            registry::get_installed_product_version(GATEWAY_UPDATE_CODE).map_err(UpdaterError::WindowsRegistry)
+            registry::get_installed_product_version(GATEWAY_UPDATE_CODE, registry::ProductVersionEncoding::Agent)
+                .map_err(UpdaterError::WindowsRegistry)
         }
         Product::HubService => {
-            registry::get_installed_product_version(HUB_SERVICE_UPDATE_CODE).map_err(UpdaterError::WindowsRegistry)
+            registry::get_installed_product_version(HUB_SERVICE_UPDATE_CODE, registry::ProductVersionEncoding::Agent)
+                .map_err(UpdaterError::WindowsRegistry)
         }
     }
 }

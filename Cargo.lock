@@ -1512,6 +1512,7 @@ dependencies = [
  "camino",
  "cfg-if",
  "ctrlc",
+ "devolutions-agent-shared",
  "devolutions-gateway-task",
  "devolutions-log",
  "embed-resource",
