@@ -107,8 +107,10 @@ impl RdmPipeConnection {
 
         // Retry connection with exponential backoff
         // RDM event was signaled, but pipe server might need a moment to accept connections
-        let max_attempts = 10;
-        let mut delay_ms = 50;
+        const MAX_ATTEMPTS: usize = 10;
+        const INITIAL_DELAY_MS: u64 = 50;
+
+        let mut delay_ms = INITIAL_DELAY_MS;
         let mut attempt = 0;
 
         let pipe_error = loop {
@@ -125,7 +127,7 @@ impl RdmPipeConnection {
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                     delay_ms = (delay_ms * 2).min(500); // Cap at 500ms
                     attempt += 1;
-                    if attempt >= max_attempts {
+                    if attempt >= MAX_ATTEMPTS {
                         break error;
                     }
                 }
