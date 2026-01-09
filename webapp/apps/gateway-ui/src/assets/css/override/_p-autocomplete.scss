@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-autocomplete {
   width: 100%;
 
@@ -28,12 +32,11 @@
   .p-autocomplete-dropdown {
     width: 2em;
     background: transparent !important;
-    background: $input-txt-bg-color;
-    color: $dropdown-trigger-color;
+    color: var(--p-select-dropdown-color);
     border: 0 none;
     position: absolute;
     right: 0;
-    top: 4px;
+    top: 8px;
 
     @include transition(color $transitionDuration);
 
@@ -235,4 +238,19 @@
   .p-autocomplete-dropdown {
     border-color: $default-btn-bg-pressed-color;
   }
+}
+
+.p-autocomplete-option-selected {
+  background: $dropdown-item-selected-bg-color;
+  color: $dropdown-item-selected-txt-color;
+}
+
+.p-autocomplete-list {
+  background: $dropdown-item-bg-color;
+  color: $dropdown-item-txt-color;
+}
+
+.p-autocomplete-overlay {
+  border-radius: 0 0 $borderRadius $borderRadius;
+  border: 1px solid $input-txt-border-focus-color;
 }

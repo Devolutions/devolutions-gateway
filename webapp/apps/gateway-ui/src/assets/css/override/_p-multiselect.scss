@@ -1,3 +1,7 @@
+@use '../style/mixins' as *;
+@use '../style/variables' as *;
+@use '../theme/theme-mode-variables' as *;
+
 .p-multiselect {
   white-space: nowrap;
 
@@ -183,4 +187,36 @@
       }
     }
   }
+}
+
+.p-multiselect-overlay {
+  border: 1px solid $dropdown-overlay-border-color;
+  box-shadow: $defaultBoxShadow;
+  margin-top: -1px; /* hack to simulate a thin line */
+  border-radius: 0 0 $borderRadius $borderRadius;
+  opacity: 1 !important;
+
+  @include custom-scrollbar();
+}
+
+.p-multiselect.p-multiselect-open {
+  border-color: $dropdown-overlay-border-color !important; // or $input-txt-border-focus-color
+}
+
+.p-multiselect-list, .p-multiselect-header {
+  background: $dropdown-item-bg-color;
+  color: $dropdown-item-txt-color;
+}
+
+.p-multiselect-option-selected {
+  background: $dropdown-item-selected-bg-color;
+  color: $dropdown-item-selected-txt-color;
+}
+
+.p-multiselect-filter {
+  margin-left: 8px;
+}
+
+.p-multiselect-dropdown {
+  width: 28px;
 }

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, Input, OnInit } from '@angular/core';
+import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
@@ -15,6 +15,7 @@ interface FormInputVisibility {
 }
 
 @Component({
+  standalone: false,
   selector: 'vnc-form',
   templateUrl: 'vnc-form.component.html',
   styleUrls: ['vnc-form.component.scss'],
@@ -34,10 +35,7 @@ export class VncFormComponent extends BaseComponent implements OnInit {
   showExtendedClipboardCheckbox = false;
   showAutoClipboardCheckbox = false;
 
-  constructor(
-    private formService: WebFormService,
-    private cdr: ChangeDetectorRef,
-  ) {
+  constructor(private formService: WebFormService) {
     super();
   }
 

@@ -6,6 +6,7 @@
 // import { WebFormService } from '@shared/services/web-form.service';
 //
 // @Component({
+//   standalone: false,
 //   selector: 'web-client-vm-id-control',
 //   templateUrl: 'vm-id-control.component.html',
 //   styleUrls: ['vm-id-control.component.scss'],

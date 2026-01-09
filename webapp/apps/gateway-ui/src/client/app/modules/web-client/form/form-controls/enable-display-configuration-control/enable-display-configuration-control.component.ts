@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-enable-display-configuration-control',
   templateUrl: 'enable-display-configuration-control.component.html',
   styleUrls: ['enable-display-configuration-control.component.scss'],

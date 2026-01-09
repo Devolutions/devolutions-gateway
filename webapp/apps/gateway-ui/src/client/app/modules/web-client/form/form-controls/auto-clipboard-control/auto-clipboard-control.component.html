@@ -1,7 +1,15 @@
 <div [formGroup]="parentForm">
   <div class="gateway-form-input">
-      <p-checkbox formControlName="autoClipboard" label="Auto Clipboard Mode"
-                  pTooltip="Enables automatic clipboard syncing with the remote server."
-                  binary="true"></p-checkbox>
+    <p-checkbox
+      formControlName="autoClipboard"
+      inputId="autoClipboard"
+      [binary]="true"
+    ></p-checkbox>
+    <label
+      for="autoClipboard"
+      pTooltip="Enables automatic clipboard syncing with the remote server."
+    >
+      Auto Clipboard Mode
+    </label>
   </div>
 </div>

@@ -1,22 +1,27 @@
 <div [formGroup]="parentForm">
   <div class="gateway-form-input">
-      <p-checkbox formControlName="jpegEnabled"
-                  label="Use Tight JPEG"
-                  binary="true"
-                  (onChange)="toggleCheckbox()"></p-checkbox>
+    <p-checkbox
+      formControlName="jpegEnabled"
+      inputId="jpegEnabled"
+      [binary]="true"
+      (onChange)="toggleCheckbox()"
+    ></p-checkbox>
+    <label for="jpegEnabled">Use Tight JPEG</label>
   </div>
 
   @if (jpegEnabled) {
-    <div class="gateway-sub-control">
-      <label for="jpegQualityLevel">JPEG Quality Level</label>
-      <div class="gateway-form-input">
-            <p-inputNumber formControlName="jpegQualityLevel"
-                           id="jpegQualityLevel"
-                           mode="decimal"
-                           [min]="0"
-                           [max]="9"
-                           [showButtons]="true"></p-inputNumber>
-      </div>
+  <div class="gateway-sub-control">
+    <label for="jpegQualityLevel">JPEG Quality Level</label>
+    <div class="gateway-form-input">
+      <p-inputNumber
+        formControlName="jpegQualityLevel"
+        id="jpegQualityLevel"
+        mode="decimal"
+        [min]="0"
+        [max]="9"
+        [showButtons]="true"
+      ></p-inputNumber>
     </div>
+  </div>
   }
 </div>

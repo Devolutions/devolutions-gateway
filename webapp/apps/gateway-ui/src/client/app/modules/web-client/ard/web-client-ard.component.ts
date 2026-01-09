@@ -21,7 +21,8 @@ import { ComponentStatus } from '@shared/models/component-status.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultArdPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Message, MessageService } from 'primeng/api';
+import type { ToastMessageOptions } from 'primeng/api';
+import { MessageService } from 'primeng/api';
 import { EMPTY, from, Observable, of, Subject } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
@@ -41,6 +42,7 @@ enum UserIronRdpErrorKind {
 }
 
 @Component({
+  standalone: false,
   templateUrl: 'web-client-ard.component.html',
   styleUrls: ['web-client-ard.component.scss'],
   providers: [MessageService],
@@ -56,7 +58,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   backendRef = Backend;
 
   formData: ArdFormDataInput;
-  sessionTerminationMessage: Message;
+  sessionTerminationMessage: ToastMessageOptions;
   isFullScreenMode = false;
   cursorOverrideActive = false;
 

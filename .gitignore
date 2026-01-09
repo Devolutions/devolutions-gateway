@@ -2,9 +2,10 @@ target/
 .DS_Store
 .idea/
 .vs/
+.angular/
 bin/
 obj/
+dist/
 /output/
 /config/
 *.DotSettings
-.angular

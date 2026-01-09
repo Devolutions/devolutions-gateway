@@ -1,83 +1,60 @@
 /********** Global import variables/mixins for css (so no need to reimport in all "...scss") **********/
-@import 'mixins';
-@import 'variables';
-@import 'typography';
-@import 'theme-mode-variables';
-@import 'root-theme';
-@import 'dark-theme';
-@import 'light-theme';
+@use 'style/mixins' as *;
+@use 'style/variables' as *;
+@use 'style/typography' as *;
+@use 'theme/theme-mode-variables' as *;
+@use 'theme/root-theme' as *;
+@use 'theme/dark-theme' as *;
+@use 'theme/light-theme' as *;
 
-@import 'base';
-@import 'entry-status';
+@use 'style/base' as *;
+@use 'style/entry-status' as *;
 
-/********** Overrides **********/
-@import '_p-divider';
-@import '_p-chips';
-@import '_p-button-action-button';
-@import '_p-button';
-@import '_p-tree';
-@import '_p-dropdown';
-@import '_p-data-scroller';
-@import '_p-tabview';
-@import '_p-table';
-@import '_p-steps';
-@import '_p-calendar';
-@import '_p-menu';
-@import '_p-input';
-@import '_p-dialog';
-@import '_p-input-number';
-@import '_p-accordion';
-@import '_p-overlaypanel';
-@import '_p-sidebar';
-@import '_p-input-switch';
-@import '_p-toolbar';
-@import '_p-tooltip';
-@import '_p-multiselect';
-@import '_p-tabview-dialog-left-tabs';
-@import '_p-progress-spinner';
-@import '_p-paginator';
-@import '_p-dataview';
-@import '_p-listbox';
-@import '_p-virtual-scroller';
-@import '_p-checkbox';
-@import '_p-autocomplete';
-@import '_p-select-button';
-@import '_p-messages_p-toast';
-@import '_p-card';
-@import '_p-badge';
-@import '_p-progressbar';
-@import '_p-inputgroup';
-@import '_p-cascadeSelect';
-//@import '_p-colorpicker';
-@import '_p-inputMask';
-//@import '_p-knob';
-//@import '_p-rating';
-@import '_p-slider';
-@import '_p-splitbutton';
-@import '_p-orderlist';
-//@import '_p-organizationChart';
-@import '_p-timeLine';
-@import '_p-picklist';
-@import '_p-fieldset';
-@import '_p-confirm-popup';
-@import '_p-skeleton';
-@import '_p-contextMenu';
-@import '_p-breadcrumb';
-//@import '_p-carousel_p-galleria';
-@import '_p-progressbar';
-@import '_p-blockui';
-@import '_p-radio-button';
-@import '_p-panel';
-@import '_p-component-overlay';
-@import '_p-tieredMenu';
-@import '_p-timescircleicon';
+/********** Overrides - Only Used Components **********/
+/* Core Components */
+@use 'override/_p-button' as *;
+@use 'override/_p-button-action-button' as *;
+@use 'override/_p-checkbox' as *;
+@use 'override/_p-input' as *;
+@use 'override/_p-input-switch' as *;
+@use 'override/_p-inputgroup' as *;
 
+/* Dropdowns & Selections */
+@use 'override/_p-autocomplete' as *;
+@use 'override/_p-dropdown' as *;
+@use 'override/_p-multiselect' as *;
+@use 'override/_p-select' as *;
+
+/* Navigation & Layout */
+@use 'override/_p-tabview' as *;
+@use 'override/_p-divider' as *;
+
+/* Feedback Components */
+@use 'override/_p-messages_p-toast' as *;
+@use 'override/_p-progress-spinner' as *;
+@use 'override/_p-tooltip' as *;
+
+/* Miscellaneous */
+@use 'override/_p-chips' as *;
+@use 'override/_p-component-overlay' as *;
+@use 'override/_p-slider' as *;
 
 /********* Fonts imports ************/
 @import url('https://cdnfonts.devolutions.net/OpenSans/variable-font/OpenSans.css');
 @import url('https://cdnfonts.devolutions.net/Roboto/static/Roboto.css');
 
-.full-width-dropdown .p-dropdown {
+
+/* Devolutions icon font must always win */
+.dvl-icon,
+[class*="dvl-icon-"] {
+  font-family: 'devolutions-icons' !important;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+}
+
+.full-width-dropdown .p-dropdown,
+.full-width-dropdown .p-select {
   width: 100%;
 }
 

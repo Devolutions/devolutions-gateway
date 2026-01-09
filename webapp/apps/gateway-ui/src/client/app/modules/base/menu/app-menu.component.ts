@@ -1,5 +1,5 @@
 import { KeyValue } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnInit } from '@angular/core';
 import { ApiService } from '@gateway/shared/services/api.service';
 import { BaseComponent } from '@shared/bases/base.component';
 import { AuthService } from '@shared/services/auth.service';
@@ -11,6 +11,7 @@ import { MainAppComponent } from '../main-app/main-app.component';
 import { RouterMenuItem } from './model/router-menu-item.model';
 
 @Component({
+  standalone: false,
   selector: 'app-menu',
   templateUrl: './app-menu.component.html',
   styleUrls: ['app-menu.component.scss'],
@@ -23,12 +24,20 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
   latestVersion: string;
   gatewayLatestUpdateLink: string;
 
+  // Resize properties
+  menuWidth = '200px';
+  isResizing = false;
+  private startX = 0;
+  private startWidthPx = 0;
+
   constructor(
     public app: MainAppComponent,
     private navigationService: NavigationService,
     private webSessionService: WebSessionService,
     private authService: AuthService,
     private apiService: ApiService,
+    private cdr: ChangeDetectorRef,
+    private zone: NgZone,
   ) {
     super();
     this.initMenu();
@@ -127,6 +136,44 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
 
   hasNewVersion() {
     return this.version && this.latestVersion && compareVersion(this.version, this.latestVersion) < 0;
+  }
+
+  // Resize methods
+  onResizeStart(event: MouseEvent): void {
+    if (this.isMenuSlim) return;
+
+    this.isResizing = true;
+    this.startX = event.clientX;
+    // Get current width in px from the element or parse from stored value
+    const target = event.target as HTMLElement;
+    const container = target.parentElement;
+    this.startWidthPx = container ? container.offsetWidth : 250;
+    event.preventDefault();
+
+    // Bind document-level listeners for reliable drag tracking
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isResizing) return;
+
+      const deltaX = e.clientX - this.startX;
+      const newWidthPx = this.startWidthPx + deltaX;
+
+      // Constrain width between 150px and 400px
+      if (newWidthPx >= 150 && newWidthPx <= 400) {
+        this.zone.run(() => {
+          this.menuWidth = `${newWidthPx}px`;
+          this.cdr.detectChanges();
+        });
+      }
+    };
+
+    const onMouseUp = () => {
+      this.isResizing = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 }
 

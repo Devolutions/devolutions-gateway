@@ -7,6 +7,7 @@ import { SelectItem } from 'primeng/api';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
+  standalone: false,
   selector: 'web-client-screen-size-control',
   templateUrl: 'screen-size-control.component.html',
   styleUrls: ['screen-size-control.component.scss'],

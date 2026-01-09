@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { UAParser } from 'ua-parser-js';
 
 @Component({
+  standalone: false,
   selector: 'rdp-form',
   templateUrl: 'rdp-form.component.html',
   styleUrls: ['rdp-form.component.scss'],

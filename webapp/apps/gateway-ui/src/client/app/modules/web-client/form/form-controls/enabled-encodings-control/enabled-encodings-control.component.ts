@@ -6,6 +6,7 @@ import { WebFormService } from '@shared/services/web-form.service';
 import { SelectItem } from 'primeng/api';
 
 @Component({
+  standalone: false,
   selector: 'web-client-enabled-encodings-control',
   templateUrl: 'enabled-encodings-control.component.html',
   styleUrls: ['enabled-encodings-control.component.scss'],

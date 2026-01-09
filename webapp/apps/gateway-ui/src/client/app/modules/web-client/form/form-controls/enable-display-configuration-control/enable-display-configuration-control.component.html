@@ -1,5 +1,12 @@
 <div [formGroup]="parentForm">
-    <div class="gateway-form-input">
-        <p-checkbox formControlName="enableDisplayControl" label="Enable Dynamic Display Configuration (Display Control)" binary="true"></p-checkbox>
-    </div>
+  <div class="gateway-form-input">
+    <p-checkbox
+      formControlName="enableDisplayControl"
+      inputId="enableDisplayControl"
+      [binary]="true"
+    ></p-checkbox>
+    <label for="enableDisplayControl">
+      Enable Dynamic Display Configuration (Display Control)
+    </label>
   </div>
+</div>

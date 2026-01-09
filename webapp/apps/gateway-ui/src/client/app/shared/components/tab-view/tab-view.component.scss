@@ -12,21 +12,11 @@
   flex-direction: column;
 }
 
-:host ::ng-deep .hidden-tab-headers .p-tabview-nav {
-  display: none;
-}
-
 :host ::ng-deep .session-background {
   background: #F9F9F9 url('../../../../../assets/images/session_background.png');
 }
 
-:host ::ng-deep p-tabview .p-tabview-panels {
+:host ::ng-deep .p-tabs .p-tabpanels {
   padding: 0;
 }
 
-:host ::ng-deep .p-tabview {
-  display: flex;
-  height: 100%;
-  width: 100%;
-  flex-direction: column;
-}

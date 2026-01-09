@@ -5,6 +5,7 @@ import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
+  standalone: false,
   selector: 'web-client-pre-connection-blob-control',
   templateUrl: 'pre-connection-blob-control.component.html',
   styleUrls: ['pre-connection-blob-control.component.scss'],
