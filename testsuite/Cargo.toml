@@ -17,7 +17,7 @@ harness = true
 
 [dependencies]
 anyhow = "1.0"
-assert_cmd = "2.0"
+assert_cmd = "2.1"
 dynosaur = "0.3"
 escargot = "0.5"
 expect-test = "1.5"
