@@ -6,6 +6,7 @@ use std::str::FromStr as _;
 use devolutions_gateway::config::dto::*;
 use rstest::*;
 use tap::prelude::*;
+use url::Url;
 use uuid::Uuid;
 
 struct Sample {
@@ -93,6 +94,7 @@ fn hub_sample() -> Sample {
             verbosity_profile: Some(VerbosityProfile::Tls),
             web_app: None,
             ai_gateway: None,
+            proxy: None,
             debug: None,
             rest: Default::default(),
         },
@@ -138,6 +140,7 @@ fn legacy_sample() -> Sample {
             verbosity_profile: None,
             web_app: None,
             ai_gateway: None,
+            proxy: None,
             debug: None,
             rest: Default::default(),
         },
@@ -182,6 +185,7 @@ fn system_store_sample() -> Sample {
             verbosity_profile: None,
             web_app: None,
             ai_gateway: None,
+            proxy: None,
             debug: None,
             rest: Default::default(),
         },
@@ -258,6 +262,7 @@ fn standalone_custom_auth_sample() -> Sample {
                 static_root_path: None,
             }),
             ai_gateway: None,
+            proxy: None,
             debug: None,
             rest: Default::default(),
         },
@@ -334,6 +339,87 @@ fn standalone_no_auth_sample() -> Sample {
                 static_root_path: Some("/path/to/webapp/static/root".into()),
             }),
             ai_gateway: None,
+            proxy: None,
+            debug: None,
+            rest: Default::default(),
+        },
+    }
+}
+
+fn proxy_sample() -> Sample {
+    Sample {
+        json_repr: r#"{
+        	"Id": "123e4567-e89b-12d3-a456-426614174000",
+        	"Hostname": "hostname.example.io",
+        	"TlsPrivateKeyFile": "/path/to/tls-private.key",
+        	"TlsCertificateFile": "/path/to/tls-certificate.pem",
+        	"ProvisionerPublicKeyFile": "provisioner.pem",
+        	"Listeners": [
+        		{
+        			"InternalUrl": "tcp://*:8080",
+        			"ExternalUrl": "tcp://*:8080"
+        		},
+        		{
+        			"InternalUrl": "http://*:7171",
+        			"ExternalUrl": "https://*:7171"
+        		}
+        	],
+        	"Proxy": {
+        		"Mode": "Manual",
+        		"Http": "http://proxy.corp:8080",
+        		"Exclude": ["localhost", ".internal.net", "192.168.1.0/24"]
+        	}
+        }"#,
+        file_conf: ConfFile {
+            id: Some(Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap()),
+            hostname: Some("hostname.example.io".to_owned()),
+            provisioner_public_key_file: Some("provisioner.pem".into()),
+            provisioner_public_key_data: None,
+            provisioner_private_key_file: None,
+            provisioner_private_key_data: None,
+            sub_provisioner_public_key: None,
+            delegation_private_key_file: None,
+            delegation_private_key_data: None,
+            tls_certificate_source: None,
+            tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
+            tls_private_key_file: Some("/path/to/tls-private.key".into()),
+            tls_private_key_password: None,
+            tls_certificate_subject_name: None,
+            tls_certificate_store_location: None,
+            tls_certificate_store_name: None,
+            tls_verify_strict: None,
+            listeners: vec![
+                ListenerConf {
+                    internal_url: "tcp://*:8080".to_owned(),
+                    external_url: "tcp://*:8080".to_owned(),
+                },
+                ListenerConf {
+                    internal_url: "http://*:7171".to_owned(),
+                    external_url: "https://*:7171".to_owned(),
+                },
+            ],
+            subscriber: None,
+            log_file: None,
+            jrl_file: None,
+            plugins: None,
+            recording_path: None,
+            job_queue_database: None,
+            traffic_audit_database: None,
+            ngrok: None,
+            verbosity_profile: None,
+            web_app: None,
+            ai_gateway: None,
+            proxy: Some(ProxyConf {
+                mode: ProxyMode::Manual,
+                http: Some(Url::parse("http://proxy.corp:8080").unwrap()),
+                https: None,
+                all: None,
+                exclude: vec![
+                    "localhost".to_owned(),
+                    ".internal.net".to_owned(),
+                    "192.168.1.0/24".to_owned(),
+                ],
+            }),
             debug: None,
             rest: Default::default(),
         },
@@ -346,6 +432,7 @@ fn standalone_no_auth_sample() -> Sample {
 #[case(system_store_sample())]
 #[case(standalone_custom_auth_sample())]
 #[case(standalone_no_auth_sample())]
+#[case(proxy_sample())]
 fn sample_parsing(#[case] sample: Sample) {
     let from_json = serde_json::from_str::<ConfFile>(sample.json_repr)
         .unwrap()

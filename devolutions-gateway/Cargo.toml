@@ -34,12 +34,12 @@ terminal-streamer.path = "../crates/terminal-streamer"
 network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
-ironrdp-pdu = { version = "0.5", features = ["std"] }
+ironrdp-pdu = { version = "0.7", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
-ironrdp-rdcleanpath = "0.1"
-ironrdp-tokio = "0.6"
-ironrdp-connector = { version = "0.6" }
-ironrdp-acceptor = { version = "0.6" }
+ironrdp-rdcleanpath = "0.2"
+ironrdp-tokio = "0.8"
+ironrdp-connector = { version = "0.8" }
+ironrdp-acceptor = { version = "0.8" }
 ceviche = "0.7"
 picky-krb = "0.12"
 kdc = "0.1"
@@ -87,7 +87,8 @@ tracing = "0.1"
 # Async, futures…
 tokio = { version = "1.45", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "stream", "http2", "system-proxy", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "stream", "http2", "socks"] }
+http-client-proxy = { path = "../crates/http-client-proxy" }
 futures = "0.3"
 async-trait = "0.1"
 tower = { version = "0.5", features = ["timeout"] }

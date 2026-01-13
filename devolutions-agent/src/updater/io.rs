@@ -5,6 +5,7 @@ use futures::TryFutureExt;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
+use crate::config::dto::ProxyConf;
 use crate::updater::UpdaterError;
 
 /// Parse file:// URL according to RFC 8089
@@ -27,28 +28,43 @@ pub(crate) fn parse_file_url(url: &str) -> Option<&Utf8Path> {
     }
 }
 
-/// Download binary file to memory
-pub(crate) async fn download_binary(url: &str) -> Result<Vec<u8>, UpdaterError> {
+/// Download binary file to memory.
+pub(crate) async fn download_binary(url: &str, proxy_conf: &ProxyConf) -> Result<Vec<u8>, UpdaterError> {
     if let Some(path) = parse_file_url(url) {
         info!(%url, "Reading file from local filesystem...");
         tokio::fs::read(path).await.map_err(UpdaterError::Io)
     } else {
         info!(%url, "Downloading file from network...");
 
-        let body = reqwest::get(url)
+        let target_url = url::Url::parse(url)
+            .map_err(|e| UpdaterError::Io(std::io::Error::other(format!("invalid url ({url}): {e}"))))?;
+
+        let proxy_config = proxy_conf.to_proxy_config();
+
+        let client =
+            http_client_proxy::get_or_create_cached_client(reqwest::Client::builder(), &target_url, &proxy_config)
+                .map_err(|source| UpdaterError::FileDownload {
+                    source,
+                    url: url.to_owned(),
+                })?;
+
+        let body = client
+            .get(url)
+            .send()
             .and_then(|response| response.bytes())
             .map_err(|source| UpdaterError::FileDownload {
                 source,
                 url: url.to_owned(),
             })
             .await?;
+
         Ok(body.to_vec())
     }
 }
 
 /// Download UTF-8 file to memory
-pub(crate) async fn download_utf8(url: &str) -> Result<String, UpdaterError> {
-    let bytes = download_binary(url).await?;
+pub(crate) async fn download_utf8(url: &str, proxy_conf: &ProxyConf) -> Result<String, UpdaterError> {
+    let bytes = download_binary(url, proxy_conf).await?;
     String::from_utf8(bytes).map_err(|_| UpdaterError::Utf8)
 }
 

@@ -230,6 +230,41 @@ Stable options are:
     * **StaticRootPath** (_FilePath_): Path to the static files for the standalone web application.
         This is an advanced option which should typically not be changed.
 
+- **Proxy** (_Object_): HTTP/SOCKS proxy configuration for outbound requests.
+    Supports three modes: Off (never use proxy), System (auto-detect), Manual (explicit configuration).
+
+    * **Mode** (_String_): Proxy mode (default is `System`).
+        - `Off`: Never use a proxy, ignore environment variables
+        - `System`: Auto-detect proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY)
+            or system settings (per-user and machine-wide settings with WinHTTP fallback on Windows,
+            `/etc/sysconfig/proxy` on RHEL/SUSE systems, SCDynamicStoreCopyProxies() on macOS)
+        - `Manual`: Use explicitly configured proxy URLs
+
+    * **Http** (_URL_): HTTP proxy URL for `http://` requests (e.g., `http://proxy.corp:8080`).
+        Only used when Mode is `Manual`.
+
+    * **Https** (_URL_): HTTPS proxy URL for `https://` requests (e.g., `http://proxy.corp:8080`).
+        Only used when Mode is `Manual`.
+
+    * **All** (_URL_): Fallback proxy URL for all protocols (e.g., `socks5://proxy.corp:1080`).
+        Only used when Mode is `Manual`.
+        The URL scheme determines the proxy type:
+        - `http://proxy.corp:8080` - HTTP CONNECT proxy
+        - `socks5://proxy.corp:1080` - SOCKS5 proxy
+        - `socks4://proxy.corp:1080` - SOCKS4 proxy
+
+    * **Exclude** (_Array of Strings_): Bypass list with NO_PROXY semantics (only used when Mode is `Manual`).
+        Supports:
+        - Wildcard: `*` (bypass proxy for all targets)
+        - Exact hostname: `localhost`, `example.com`
+        - Domain suffix: `.corp.local` (matches `foo.corp.local`)
+        - IP address: `127.0.0.1`
+        - CIDR range: `10.0.0.0/8`, `192.168.0.0/16`
+
+    Authentication can be included in proxy URLs: `http://username:password@proxy.corp:8080`
+
+    See the [Cookbook](./docs/COOKBOOK.md) for configuration examples.
+
 - **VerbosityProfile** (_String_): Logging verbosity profile (pre-defined tracing directives).
 
     Possible values:
