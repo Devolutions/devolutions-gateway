@@ -34,12 +34,12 @@ terminal-streamer.path = "../crates/terminal-streamer"
 network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
-ironrdp-pdu = { version = "0.5", features = ["std"] }
-ironrdp-core = { version = "0.1", features = ["std"] }
-ironrdp-rdcleanpath = "0.1"
-ironrdp-tokio = "0.6"
-ironrdp-connector = { version = "0.6" }
-ironrdp-acceptor = { version = "0.6" }
+ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP", rev = "25f81337aa494af9a21f55f12ec27fd946465cbe", features = ["std"] }
+ironrdp-core = { git = "https://github.com/Devolutions/IronRDP", rev = "25f81337aa494af9a21f55f12ec27fd946465cbe", features = ["std"] }
+ironrdp-rdcleanpath = { git = "https://github.com/Devolutions/IronRDP", rev = "25f81337aa494af9a21f55f12ec27fd946465cbe" }
+ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP", rev = "25f81337aa494af9a21f55f12ec27fd946465cbe" }
+ironrdp-connector = { git = "https://github.com/Devolutions/IronRDP", rev = "25f81337aa494af9a21f55f12ec27fd946465cbe" }
+ironrdp-acceptor = { git = "https://github.com/Devolutions/IronRDP", rev = "25f81337aa494af9a21f55f12ec27fd946465cbe" }
 ceviche = "0.7"
 picky-krb = "0.12"
 kdc = "0.1"

@@ -11,7 +11,7 @@ use ironrdp_connector::sspi::kerberos::ServerProperties;
 use ironrdp_connector::sspi::{
     self, AuthIdentityBuffers, CredentialsBuffers, KerberosConfig as SspiKerberosConfig, KerberosServerConfig,
 };
-use ironrdp_pdu::{mcs, nego, x224};
+use ironrdp_pdu::{gcc, mcs, nego, x224};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -269,12 +269,17 @@ where
         ironrdp_core::decode(&received_connect_initial.0.data).context("decode Connect Initial PDU")?;
     trace!(message = ?received_connect_initial, "Received Connect Initial PDU from client");
 
-    received_connect_initial
-        .conference_create_request
-        .gcc_blocks
+    // Extract gcc_blocks to modify server_selected_protocol
+    let mut gcc_blocks = received_connect_initial.conference_create_request.into_gcc_blocks();
+    gcc_blocks
         .core
         .optional_data
         .server_selected_protocol = Some(server_security_protocol);
+    
+    // Reconstruct conference_create_request with modified blocks
+    received_connect_initial.conference_create_request = gcc::ConferenceCreateRequest::new(gcc_blocks)
+        .context("reconstruct ConferenceCreateRequest")?;
+    
     trace!(message = ?received_connect_initial, "Send Connection Request PDU to server");
     let x224_msg_buf = ironrdp_core::encode_vec(&received_connect_initial)?;
     let pdu = x224::X224Data {
