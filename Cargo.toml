@@ -31,16 +31,6 @@ lto = true
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
-# Patch IronRDP crates to use git master which has sspi 0.18.5 (fixes build error with sspi 0.16.1)
-ironrdp-connector = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-acceptor = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c", features = ["reqwest"] }
-ironrdp-async = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-svc = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-core = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-rdcleanpath = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
-ironrdp-error = { git = "https://github.com/Devolutions/IronRDP", rev = "bd2aed76867f4038c32df9a0d24532ee40d2f14c" }
 
 [workspace.lints.rust]
 # Declare the custom cfgs.

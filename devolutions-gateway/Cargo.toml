@@ -34,12 +34,12 @@ terminal-streamer.path = "../crates/terminal-streamer"
 network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
-ironrdp-pdu = { version = "0.6", features = ["std"] }
+ironrdp-pdu = { version = "0.7", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
-ironrdp-tokio = "0.7"
-ironrdp-connector = { version = "0.7" }
-ironrdp-acceptor = { version = "0.7" }
+ironrdp-tokio = "0.8"
+ironrdp-connector = { version = "0.8" }
+ironrdp-acceptor = { version = "0.8" }
 ceviche = "0.7"
 picky-krb = "0.12"
 kdc = "0.1"

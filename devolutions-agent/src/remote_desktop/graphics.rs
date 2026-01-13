@@ -1,8 +1,9 @@
-use std::num::NonZeroU16;
+use std::num::{NonZeroU16, NonZeroUsize};
 use std::time::Duration;
 
+use bytes::Bytes;
 use ironrdp::server::{
-    BitmapUpdate, DesktopSize, DisplayUpdate, PixelFormat, PixelOrder, RdpServerDisplay, RdpServerDisplayUpdates,
+    BitmapUpdate, DesktopSize, DisplayUpdate, PixelFormat, RdpServerDisplay, RdpServerDisplayUpdates,
 };
 
 const WIDTH: u16 = 1024;
@@ -34,7 +35,7 @@ struct DisplayUpdates;
 
 #[async_trait::async_trait]
 impl RdpServerDisplayUpdates for DisplayUpdates {
-    async fn next_update(&mut self) -> Option<DisplayUpdate> {
+    async fn next_update(&mut self) -> anyhow::Result<Option<DisplayUpdate>> {
         use rand::Rng as _;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -56,15 +57,15 @@ impl RdpServerDisplayUpdates for DisplayUpdates {
         trace!(left, top, width, height, "BitmapUpdate");
 
         let bitmap = BitmapUpdate {
-            top,
-            left,
+            x: left,
+            y: top,
             width,
             height,
             format: PixelFormat::BgrA32,
-            order: PixelOrder::TopToBottom,
-            data,
+            stride: NonZeroUsize::new(usize::from(width.get()) * 4).expect("stride is never zero"), // 4 bytes per pixel for BgrA32
+            data: Bytes::from(data),
         };
 
-        Some(DisplayUpdate::Bitmap(bitmap))
+        Ok(Some(DisplayUpdate::Bitmap(bitmap)))
     }
 }
