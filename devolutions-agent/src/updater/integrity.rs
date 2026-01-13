@@ -13,11 +13,11 @@ pub(crate) fn validate_artifact_hash(ctx: &UpdaterCtx, data: &[u8], hash: &str) 
 
     let actual_hash_bytes = Sha256::digest(data);
 
-    if expected_hash_bytes != actual_hash_bytes.as_slice() {
+    if expected_hash_bytes.as_slice() != actual_hash_bytes.as_ref() {
         return Err(UpdaterError::IntegrityCheck {
             product: ctx.product,
             expected_hash: hex::encode(expected_hash_bytes),
-            actual_hash: hex::encode(actual_hash_bytes.as_slice()),
+            actual_hash: hex::encode(actual_hash_bytes.as_ref()),
         });
     }
 
