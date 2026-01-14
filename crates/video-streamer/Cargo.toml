@@ -24,7 +24,7 @@ ebml-iterable = "0.6"
 webm-iterable = "0.6"
 
 [dev-dependencies]
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.45", features = [
     "io-util",
     "rt",
