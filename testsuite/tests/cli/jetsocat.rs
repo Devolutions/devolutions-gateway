@@ -262,13 +262,14 @@ fn jmux_proxy_write_hello_world() {
     std::thread::sleep(LISTENER_WAIT_DURATION);
 
     // Connect to the JMUX client's local listener.
-    let _ = jetsocat_assert_cmd()
+    jetsocat_assert_cmd()
         .env(
             "JETSOCAT_ARGS",
             format!("forward tcp://127.0.0.1:{proxy_listen_port} 'cmd://echo hello world'"),
         )
         .timeout(COMMAND_TIMEOUT)
-        .assert();
+        .assert()
+        .success();
 
     // Kill all processes.
     let _ = jmux_client.kill();
