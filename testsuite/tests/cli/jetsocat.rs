@@ -268,7 +268,8 @@ fn jmux_proxy_write_hello_world() {
             format!("forward tcp://127.0.0.1:{proxy_listen_port} 'cmd://echo hello world'"),
         )
         .timeout(COMMAND_TIMEOUT)
-        .assert();
+        .assert()
+        .success();
 
     // Kill all processes.
     let _ = jmux_client.kill();
