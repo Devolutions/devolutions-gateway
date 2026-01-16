@@ -92,7 +92,7 @@ http-client-proxy = { path = "../crates/http-client-proxy" }
 futures = "0.3"
 async-trait = "0.1"
 tower = { version = "0.5", features = ["timeout"] }
-ngrok = "0.13"
+ngrok = { version = "0.15", default-features = false, features = ["ring"] }
 
 # HTTP
 hyper = "1.6"
