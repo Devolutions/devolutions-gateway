@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use webm_iterable::WebmIterator;
 use webm_iterable::errors::TagIteratorError;
-use webm_iterable::matroska_spec::{Master, MatroskaSpec};
+use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 use crate::StreamingConfig;
 use crate::reopenable::Reopenable;
@@ -96,6 +96,10 @@ where
     let (mut encode_writer, _marker) = header_writer.into_encoded_writer(encode_writer_config)?;
 
     let mut tags_processed: u64 = 0;
+    let mut cluster_timestamp: Option<u64> = None;
+    let mut first_input_block_absolute_time: Option<u64> = None;
+    let mut last_input_block_absolute_time: Option<u64> = None;
+    let mut frames_reencoded: u64 = 0;
     let mut timed_out = false;
     while tags_processed < max_tags {
         if let Some(max_wall) = max_wall
@@ -107,6 +111,46 @@ where
 
         match webm_itr.next() {
             Some(Ok(tag)) => {
+                match &tag {
+                    MatroskaSpec::Timestamp(timestamp) => cluster_timestamp = Some(*timestamp),
+                    MatroskaSpec::SimpleBlock(data) => {
+                        if let Some(cluster_timestamp) = cluster_timestamp {
+                            let simple_block = SimpleBlock::try_from(data)?;
+                            let abs_ms_i64 = i64::try_from(cluster_timestamp)
+                                .context("cluster timestamp does not fit in i64")?
+                                .checked_add(i64::from(simple_block.timestamp))
+                                .context("block absolute timestamp overflow")?;
+                            let abs_ms =
+                                u64::try_from(abs_ms_i64).context("block absolute timestamp does not fit in u64")?;
+                            first_input_block_absolute_time.get_or_insert(abs_ms);
+                            last_input_block_absolute_time = Some(abs_ms);
+                            frames_reencoded += 1;
+                        }
+                    }
+                    MatroskaSpec::BlockGroup(Master::Full(children)) => {
+                        if let Some(cluster_timestamp) = cluster_timestamp {
+                            let raw_block = children.iter().find_map(|t| match t {
+                                MatroskaSpec::Block(block) => Some(block),
+                                _ => None,
+                            });
+
+                            if let Some(raw_block) = raw_block {
+                                let block = Block::try_from(raw_block)?;
+                                let abs_ms_i64 = i64::try_from(cluster_timestamp)
+                                    .context("cluster timestamp does not fit in i64")?
+                                    .checked_add(i64::from(block.timestamp))
+                                    .context("block absolute timestamp overflow")?;
+                                let abs_ms = u64::try_from(abs_ms_i64)
+                                    .context("block absolute timestamp does not fit in u64")?;
+                                first_input_block_absolute_time.get_or_insert(abs_ms);
+                                last_input_block_absolute_time = Some(abs_ms);
+                                frames_reencoded += 1;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
                 tags_processed += 1;
                 match encode_writer.write(tag)? {
                     WriterResult::Continue => {}
@@ -118,17 +162,15 @@ where
         }
     }
 
-    let perf = encode_writer.perf_counters();
-    let input_media_span_ms = perf
-        .last_input_block_absolute_time
-        .zip(perf.first_input_block_absolute_time)
+    let input_media_span_ms = last_input_block_absolute_time
+        .zip(first_input_block_absolute_time)
         .map(|(last, first)| last.saturating_sub(first))
         .unwrap_or(0);
 
     Ok(ReencodeBenchStats {
         wall: started_at.elapsed(),
         tags_processed,
-        frames_reencoded: perf.frames_reencoded,
+        frames_reencoded,
         input_media_span_ms,
         chunks_written: sink.chunks,
         bytes_written: sink.bytes,

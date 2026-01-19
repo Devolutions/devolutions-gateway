@@ -6,8 +6,10 @@ edition = "2024"
 publish = false
 
 [features]
+# Enables extra per-frame logging and diagnostics.
+perf-diagnostics = []
 # Enables internal helpers used by Criterion benchmarks.
-bench = []
+bench = ["perf-diagnostics"]
 
 [dependencies]
 anyhow = "1.0"

@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Context;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
@@ -14,7 +14,8 @@ use crate::debug::mastroka_spec_name;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
 
-fn duration_as_millis_u64(duration: Duration) -> u64 {
+#[cfg(feature = "perf-diagnostics")]
+fn duration_as_millis_u64(duration: std::time::Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
@@ -103,12 +104,12 @@ where
     decoder: VpxDecoder,
     cut_block_state: CutBlockState,
 
+    #[cfg(feature = "perf-diagnostics")]
     stream_start: Instant,
+    #[cfg(feature = "perf-diagnostics")]
     last_report_at: Instant,
+    #[cfg(feature = "perf-diagnostics")]
     frames_reencoded: u64,
-
-    first_input_block_absolute_time: Option<u64>,
-    last_input_block_absolute_time: Option<u64>,
 }
 
 /// A token type that enforces the one-time transition of cut block state.
@@ -186,11 +187,12 @@ where
                 encoder,
                 decoder,
                 cut_block_state: CutBlockState::HaventMet,
+                #[cfg(feature = "perf-diagnostics")]
                 stream_start: Instant::now(),
+                #[cfg(feature = "perf-diagnostics")]
                 last_report_at: Instant::now(),
+                #[cfg(feature = "perf-diagnostics")]
                 frames_reencoded: 0,
-                first_input_block_absolute_time: None,
-                last_input_block_absolute_time: None,
             },
             CutBlockHitMarker,
         ))
@@ -199,14 +201,6 @@ where
 
 pub(crate) enum WriterResult {
     Continue,
-}
-
-#[cfg(feature = "bench")]
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CutClusterWriterPerfCounters {
-    pub frames_reencoded: u64,
-    pub first_input_block_absolute_time: Option<u64>,
-    pub last_input_block_absolute_time: Option<u64>,
 }
 
 impl<T> CutClusterWriter<T>
@@ -262,19 +256,11 @@ where
         Ok(WriterResult::Continue)
     }
 
-    #[cfg(feature = "bench")]
-    pub(crate) fn perf_counters(&self) -> CutClusterWriterPerfCounters {
-        CutClusterWriterPerfCounters {
-            frames_reencoded: self.frames_reencoded,
-            first_input_block_absolute_time: self.first_input_block_absolute_time,
-            last_input_block_absolute_time: self.last_input_block_absolute_time,
-        }
-    }
-
     fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Option<Vec<u8>>> {
         let timestamp = video_block.timestamp;
         let flags = if is_key_frame { VPX_EFLAG_FORCE_KF } else { 0 };
 
+        #[cfg(feature = "perf-diagnostics")]
         let decode_started_at = Instant::now();
         trace!(
             timestamp,
@@ -295,7 +281,9 @@ where
         })?;
 
         {
+            #[cfg(feature = "perf-diagnostics")]
             let decode_ms = duration_as_millis_u64(decode_started_at.elapsed());
+            #[cfg(feature = "perf-diagnostics")]
             let encode_started_at = Instant::now();
             let image = self.decoder.next_frame().inspect_err(|error| {
                 error!(error = %error, timestamp, "VPX decoder.next_frame() failed");
@@ -321,34 +309,37 @@ where
                     );
                 })?;
 
-            let encode_ms = duration_as_millis_u64(encode_started_at.elapsed());
-            let wall_elapsed_ms = duration_as_millis_u64(self.stream_start.elapsed());
-            self.frames_reencoded += 1;
+            #[cfg(feature = "perf-diagnostics")]
+            {
+                let encode_ms = duration_as_millis_u64(encode_started_at.elapsed());
+                let wall_elapsed_ms = duration_as_millis_u64(self.stream_start.elapsed());
+                self.frames_reencoded += 1;
 
-            // PERF-HYPOTHESIS: This log is intended to prove/disprove whether decode+encode throughput is too slow to
-            // follow the recording in near real-time.
-            if encode_ms >= 50 || self.frames_reencoded.is_multiple_of(30) {
-                info!(
-                    prefix = "[LibVPx-Performance-Hypothesis]",
-                    frames_reencoded = self.frames_reencoded,
-                    wall_elapsed_ms,
-                    decode_ms,
-                    encode_ms,
-                    force_kf = (flags & VPX_EFLAG_FORCE_KF) != 0,
-                    input_frame_bytes = frame_size,
-                    "Reencode timing"
-                );
-            } else {
-                trace!(
-                    prefix = "[LibVPx-Performance-Hypothesis]",
-                    frames_reencoded = self.frames_reencoded,
-                    wall_elapsed_ms,
-                    decode_ms,
-                    encode_ms,
-                    force_kf = (flags & VPX_EFLAG_FORCE_KF) != 0,
-                    input_frame_bytes = frame_size,
-                    "Reencode timing"
-                );
+                // PERF-HYPOTHESIS: This log is intended to prove/disprove whether decode+encode throughput is too slow
+                // to follow the recording in near real-time.
+                if encode_ms >= 50 || self.frames_reencoded.is_multiple_of(30) {
+                    info!(
+                        prefix = "[LibVPx-Performance-Hypothesis]",
+                        frames_reencoded = self.frames_reencoded,
+                        wall_elapsed_ms,
+                        decode_ms,
+                        encode_ms,
+                        force_kf = (flags & VPX_EFLAG_FORCE_KF) != 0,
+                        input_frame_bytes = frame_size,
+                        "Reencode timing"
+                    );
+                } else {
+                    trace!(
+                        prefix = "[LibVPx-Performance-Hypothesis]",
+                        frames_reencoded = self.frames_reencoded,
+                        wall_elapsed_ms,
+                        decode_ms,
+                        encode_ms,
+                        force_kf = (flags & VPX_EFLAG_FORCE_KF) != 0,
+                        input_frame_bytes = frame_size,
+                        "Reencode timing"
+                    );
+                }
             }
         }
 
@@ -365,6 +356,7 @@ where
         Ok(frame)
     }
 
+    #[cfg(feature = "perf-diagnostics")]
     fn maybe_report_realtime_ratio(&mut self, current_block_absolute_time: u64, media_advanced_ms: u64) {
         // Report at most once per second to keep logs readable.
         if self.last_report_at.elapsed().as_secs_f32() < 1.0 {
@@ -390,6 +382,9 @@ where
         );
     }
 
+    #[cfg(not(feature = "perf-diagnostics"))]
+    fn maybe_report_realtime_ratio(&mut self, _current_block_absolute_time: u64, _media_advanced_ms: u64) {}
+
     fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
         let block_timestamp = current_video_block.timestamp;
         trace!(
@@ -397,12 +392,6 @@ where
             cut_block_state = ?self.cut_block_state,
             "Processing current block"
         );
-
-        let current_block_absolute_time = current_video_block.absolute_timestamp()?;
-        if self.first_input_block_absolute_time.is_none() {
-            self.first_input_block_absolute_time = Some(current_block_absolute_time);
-        }
-        self.last_input_block_absolute_time = Some(current_block_absolute_time);
 
         let frame = self.reencode(current_video_block, true)?;
         let Some(frame) = frame else {
