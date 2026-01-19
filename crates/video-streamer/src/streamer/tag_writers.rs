@@ -1,3 +1,4 @@
+#[cfg(feature = "perf-diagnostics")]
 use std::time::Instant;
 
 use anyhow::Context;
@@ -384,9 +385,12 @@ where
     }
 
     #[cfg(not(feature = "perf-diagnostics"))]
-    fn maybe_report_realtime_ratio(&mut self, _current_block_absolute_time: u64, _media_advanced_ms: u64) {}
+    fn maybe_report_realtime_ratio(&mut self, _current_block_absolute_time: u64, _media_advanced_ms: u64) {
+        let _ = &self.cut_block_state;
+    }
 
     fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
+        #[cfg(feature = "perf-diagnostics")]
         let block_timestamp = current_video_block.timestamp;
         perf_trace!(
             block_timestamp,
@@ -401,6 +405,7 @@ where
             return Ok(());
         };
 
+        #[cfg(feature = "perf-diagnostics")]
         let frame_size = frame.len();
         perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
 
