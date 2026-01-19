@@ -100,6 +100,9 @@ where
     stream_start: Instant,
     last_report_at: Instant,
     frames_reencoded: u64,
+
+    first_input_block_absolute_time: Option<u64>,
+    last_input_block_absolute_time: Option<u64>,
 }
 
 /// A token type that enforces the one-time transition of cut block state.
@@ -184,6 +187,8 @@ where
                 stream_start: Instant::now(),
                 last_report_at: Instant::now(),
                 frames_reencoded: 0,
+                first_input_block_absolute_time: None,
+                last_input_block_absolute_time: None,
             },
             CutBlockHitMarker,
         ))
@@ -192,6 +197,14 @@ where
 
 pub(crate) enum WriterResult {
     Continue,
+}
+
+#[cfg(feature = "bench")]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CutClusterWriterPerfCounters {
+    pub frames_reencoded: u64,
+    pub first_input_block_absolute_time: Option<u64>,
+    pub last_input_block_absolute_time: Option<u64>,
 }
 
 impl<T> CutClusterWriter<T>
@@ -249,6 +262,15 @@ where
         self.process_current_block(&video_block)?;
 
         Ok(WriterResult::Continue)
+    }
+
+    #[cfg(feature = "bench")]
+    pub(crate) fn perf_counters(&self) -> CutClusterWriterPerfCounters {
+        CutClusterWriterPerfCounters {
+            frames_reencoded: self.frames_reencoded,
+            first_input_block_absolute_time: self.first_input_block_absolute_time,
+            last_input_block_absolute_time: self.last_input_block_absolute_time,
+        }
     }
 
     fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Option<Vec<u8>>> {
@@ -404,6 +426,12 @@ where
             cut_block_state = %state_desc,
             "process_current_block called"
         );
+
+        let current_block_absolute_time = current_video_block.absolute_timestamp()?;
+        if self.first_input_block_absolute_time.is_none() {
+            self.first_input_block_absolute_time = Some(current_block_absolute_time);
+        }
+        self.last_input_block_absolute_time = Some(current_block_absolute_time);
 
         let frame = self.reencode(current_video_block, true)?;
         let Some(frame) = frame else {

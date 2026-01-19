@@ -13,3 +13,13 @@ test streamer="video-streamer":
 # Convenience alias (avoids confusion with positional params).
 test-streamer:
   @just test video-streamer
+
+# Usage:
+#   just bench video-streamer
+#   just bench                # defaults to video-streamer
+#
+# Notes:
+# - Requires `DGATEWAY_LIB_XMF_PATH` to point to `xmf.dll`.
+# - Writes logs to `.llm/bench-<streamer>.log`.
+bench streamer="video-streamer":
+  @$ErrorActionPreference = 'Continue'; $llm = Join-Path (Get-Location) '.llm'; New-Item -ItemType Directory -Force -Path $llm | Out-Null; $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'; $log = Join-Path $llm ('bench-' + '{{streamer}}' + '-' + $stamp + '.log'); $env:RUST_LOG = 'video_streamer=info'; $env:RUST_BACKTRACE = '1'; $env:CARGO_INCREMENTAL = '0'; $env:CARGO_TARGET_DIR = Join-Path $llm ('cargo-target-' + '{{streamer}}' + '-bench-' + $stamp); if ('{{streamer}}' -eq 'video-streamer') { cmd /c "cargo bench -p video-streamer --bench vpx_reencode --features bench 2>&1" | Tee-Object -FilePath $log; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { throw ('Unknown streamer: ' + '{{streamer}}' + ' (supported: video-streamer)') }

@@ -14,3 +14,6 @@ pub use streamer::reopenable_file::ReOpenableFile;
 pub use streamer::signal_writer::SignalWriter;
 #[rustfmt::skip]
 pub use streamer::webm_stream;
+
+#[cfg(feature = "bench")]
+pub mod bench_support;

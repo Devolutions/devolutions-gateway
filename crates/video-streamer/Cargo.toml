@@ -5,6 +5,10 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[features]
+# Enables internal helpers used by Criterion benchmarks.
+bench = []
+
 [dependencies]
 anyhow = "1.0"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -24,6 +28,7 @@ ebml-iterable = "0.6"
 webm-iterable = "0.6"
 
 [dev-dependencies]
+criterion = "0.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.45", features = [
     "io-util",
@@ -40,3 +45,7 @@ transport = { path = "../transport" }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "vpx_reencode"
+harness = false
