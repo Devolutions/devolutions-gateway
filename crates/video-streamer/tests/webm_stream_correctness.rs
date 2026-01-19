@@ -12,6 +12,13 @@ use support::*;
 /// - Drive the protocol with `Start` then repeated `Pull`.
 /// - Collect `ServerMessage::Chunk` payload bytes and parse Cluster timestamps from the output.
 /// - Assert that the first observed Cluster timestamp is exactly 0 (the cut point timeline reset contract).
+///
+/// References:
+/// - [WebM: Muxing Guidelines][webm-muxing-guidelines]
+/// - [Matroska: Cluster][matroska-cluster]
+///
+/// [webm-muxing-guidelines]: https://www.webmproject.org/docs/container/#muxing-guidelines
+/// [matroska-cluster]: https://www.matroska.org/technical/elements.html#cluster
 async fn timeline_starts_at_zero_after_cut_uncued_recording() {
     let _permit = global_stream_test_semaphore()
         .acquire()
@@ -70,6 +77,11 @@ async fn timeline_starts_at_zero_after_cut_uncued_recording() {
 /// - Drive the stream long enough to observe a number of SimpleBlocks.
 /// - Parse Cluster timestamp + SimpleBlock relative timestamp, and compute absolute timestamps in milliseconds.
 /// - Assert absolute timestamps are monotonic non-decreasing and that they advance by at least 500ms.
+///
+/// References:
+/// - [Matroska: SimpleBlock][matroska-simpleblock]
+///
+/// [matroska-simpleblock]: https://www.matroska.org/technical/elements.html#simpleblock
 async fn block_timestamps_monotonic_and_advances_uncued_recording() {
     let _permit = global_stream_test_semaphore()
         .acquire()
@@ -116,7 +128,10 @@ async fn block_timestamps_monotonic_and_advances_uncued_recording() {
         assert!(ts >= last, "block absolute timestamps went backwards: {last} -> {ts}");
         last = ts;
     }
-    assert!(last - first >= 100, "block timestamps did not advance: first={first} last={last}");
+    assert!(
+        last - first >= 100,
+        "block timestamps did not advance: first={first} last={last}"
+    );
     shutdown_and_join(h).await;
 }
 
@@ -272,7 +287,10 @@ async fn pause_then_resume_recovers_from_eof_wait() {
     }
 
     assert!(got_any_chunk, "never received any chunk");
-    assert!(got_chunk_after_stall, "never observed a chunk after a stall (pause/resume)");
+    assert!(
+        got_chunk_after_stall,
+        "never observed a chunk after a stall (pause/resume)"
+    );
     shutdown_and_join(h).await;
 }
 
@@ -353,7 +371,7 @@ async fn client_disconnect_exits_cleanly() {
     drop(h.client_tx);
     h.shutdown.notify_waiters();
 
-    let _ = tokio::time::timeout(Duration::from_secs(20), h.stream_task)
+    tokio::time::timeout(Duration::from_secs(20), h.stream_task)
         .await
         .expect("timeout waiting for webm_stream to exit")
         .expect("webm_stream task panicked")
@@ -361,4 +379,3 @@ async fn client_disconnect_exits_cleanly() {
 
     let _ = h.writer_task.await;
 }
-

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use anyhow::Context as _;
 use futures::{Sink, Stream};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::sync::{Notify, Semaphore, broadcast, mpsc, oneshot};
@@ -123,7 +124,7 @@ pub(crate) fn extract_cluster_timestamps(webm_bytes: &[u8]) -> anyhow::Result<Ve
     let mut in_cluster = false;
     let mut timestamps = Vec::<u64>::new();
 
-    while let Some(tag) = itr.next() {
+    for tag in &mut itr {
         match tag {
             Ok(MatroskaSpec::Cluster(Master::Start)) => {
                 saw_cluster = true;
@@ -159,7 +160,7 @@ pub(crate) fn extract_block_absolute_timestamps_ms(webm_bytes: &[u8]) -> anyhow:
     let mut current_cluster_ts: Option<u64> = None;
     let mut out = Vec::<i64>::new();
 
-    while let Some(tag) = itr.next() {
+    for tag in &mut itr {
         match tag {
             Ok(MatroskaSpec::Cluster(Master::Start)) => {
                 in_cluster = true;
@@ -182,7 +183,8 @@ pub(crate) fn extract_block_absolute_timestamps_ms(webm_bytes: &[u8]) -> anyhow:
                     continue;
                 };
                 let simple_block: webm_iterable::matroska_spec::SimpleBlock<'_> = (&tag).try_into()?;
-                out.push(cluster_ts as i64 + simple_block.timestamp as i64);
+                let cluster_ts_i64 = i64::try_from(cluster_ts).context("cluster timestamp does not fit in i64")?;
+                out.push(cluster_ts_i64 + i64::from(simple_block.timestamp));
             }
             Ok(_) => {}
             Err(TagIteratorError::UnexpectedEOF { .. }) => break,
@@ -205,7 +207,7 @@ pub(crate) fn extract_first_last_block_absolute_timestamps_ms_from_reader<R: std
     let mut last: Option<i64> = None;
     let mut count: u64 = 0;
 
-    while let Some(tag) = itr.next() {
+    for tag in &mut itr {
         match tag {
             Ok(MatroskaSpec::Cluster(Master::Start)) => {
                 in_cluster = true;
@@ -228,7 +230,8 @@ pub(crate) fn extract_first_last_block_absolute_timestamps_ms_from_reader<R: std
                     continue;
                 };
                 let simple_block: webm_iterable::matroska_spec::SimpleBlock<'_> = (&tag).try_into()?;
-                let abs = cluster_ts as i64 + simple_block.timestamp as i64;
+                let cluster_ts_i64 = i64::try_from(cluster_ts).context("cluster timestamp does not fit in i64")?;
+                let abs = cluster_ts_i64 + i64::from(simple_block.timestamp);
                 first.get_or_insert(abs);
                 last = Some(abs);
                 count += 1;
@@ -298,7 +301,7 @@ pub(crate) async fn spawn_live_file_writer(
     {
         dst_opts.share_mode(0x00000002 | 0x00000001 | 0x00000004);
     }
-    let mut dst = dst_opts
+    let mut dest_file = dst_opts
         .open(&dest)
         .await
         .unwrap_or_else(|e| panic!("failed to create temp input {}: {e:#}", dest.display()));
@@ -311,7 +314,9 @@ pub(crate) async fn spawn_live_file_writer(
 
         loop {
             if !paused
-                && cfg.pause_after_bytes.is_some_and(|threshold| total_written >= threshold)
+                && cfg
+                    .pause_after_bytes
+                    .is_some_and(|threshold| total_written >= threshold)
                 && cfg.pause > Duration::from_secs(0)
             {
                 paused = true;
@@ -323,12 +328,12 @@ pub(crate) async fn spawn_live_file_writer(
                 break;
             }
 
-            dst.write_all(&buf[..n]).await?;
-            dst.flush().await?;
+            dest_file.write_all(&buf[..n]).await?;
+            dest_file.flush().await?;
             total_written += n as u64;
             writes += 1;
 
-            if cfg.notify_every_n_writes != 0 && (writes % cfg.notify_every_n_writes == 0) {
+            if cfg.notify_every_n_writes != 0 && writes.is_multiple_of(cfg.notify_every_n_writes) {
                 let _ = written_tx.send(());
             }
 
@@ -344,7 +349,11 @@ pub(crate) async fn spawn_live_file_writer(
     })
 }
 
-pub(crate) async fn spawn_stream_harness(asset: PathBuf, write_cfg: LiveWriteConfig, encoder_threads: usize) -> StreamHarness {
+pub(crate) async fn spawn_stream_harness(
+    asset: PathBuf,
+    write_cfg: LiveWriteConfig,
+    encoder_threads: usize,
+) -> StreamHarness {
     spawn_stream_harness_delayed_start(asset, write_cfg, encoder_threads, Duration::from_secs(0)).await
 }
 
@@ -425,10 +434,7 @@ pub(crate) async fn recv_server_message(
     server_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     timeout: Duration,
 ) -> Option<Vec<u8>> {
-    tokio::time::timeout(timeout, server_rx.recv())
-        .await
-        .ok()
-        .flatten()
+    tokio::time::timeout(timeout, server_rx.recv()).await.ok().flatten()
 }
 
 pub(crate) async fn shutdown_and_join(h: StreamHarness) {
@@ -442,7 +448,7 @@ pub(crate) async fn shutdown_and_join_with_timeout(h: StreamHarness, timeout: Du
     let mut stream_task = h.stream_task;
     match tokio::time::timeout(timeout, &mut stream_task).await {
         Ok(joined) => {
-            let _ = joined
+            joined
                 .expect("webm_stream task panicked")
                 .unwrap_or_else(|e| panic!("webm_stream returned error: {e:#}"));
         }

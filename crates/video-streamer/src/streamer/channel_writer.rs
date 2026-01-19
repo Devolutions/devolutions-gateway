@@ -46,24 +46,16 @@ impl io::Write for ChannelWriter {
         let buf_len = buf.len();
         let write_num = self.writes_count.fetch_add(1, Ordering::Relaxed) + 1;
 
-        trace!(
-            write_num,
-            buf_len,
-            "ChannelWriter::write - sending to channel"
-        );
+        trace!(write_num, buf_len, "ChannelWriter::write - sending to channel");
 
-        self.writer
-            .blocking_send(buf.to_vec())
-            .map_err(|_| {
-                let total_bytes = self.total_bytes_written.load(Ordering::Relaxed);
-                debug!(
-                    write_num,
-                    total_bytes,
-                    buf_len,
-                    "ChannelWriter::write failed - channel closed"
-                );
-                io::Error::other(ChannelWriterError::ChannelClosed)
-            })?;
+        self.writer.blocking_send(buf.to_vec()).map_err(|_| {
+            let total_bytes = self.total_bytes_written.load(Ordering::Relaxed);
+            debug!(
+                write_num,
+                total_bytes, buf_len, "ChannelWriter::write failed - channel closed"
+            );
+            io::Error::other(ChannelWriterError::ChannelClosed)
+        })?;
 
         let total = self.total_bytes_written.fetch_add(buf_len as u64, Ordering::Relaxed) + buf_len as u64;
         trace!(
@@ -92,10 +84,7 @@ pub(crate) struct ChannelWriterReceiver {
 impl ChannelWriterReceiver {
     pub(crate) async fn recv(&mut self) -> Option<Vec<u8>> {
         let read_num = self.reads_count.fetch_add(1, Ordering::Relaxed) + 1;
-        trace!(
-            read_num,
-            "ChannelWriterReceiver::recv - waiting for data"
-        );
+        trace!(read_num, "ChannelWriterReceiver::recv - waiting for data");
 
         let result = self.receiver.recv().await;
 

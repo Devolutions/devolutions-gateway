@@ -99,7 +99,7 @@ where
     let mut timed_out = false;
     while tags_processed < max_tags {
         if let Some(max_wall) = max_wall
-            && started_at.elapsed() >= max_wall
+            && max_wall <= started_at.elapsed()
         {
             timed_out = true;
             break;

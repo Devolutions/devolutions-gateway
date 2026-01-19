@@ -21,6 +21,13 @@ const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
 /// Expected outcome:
 /// - If the regression is specifically triggered by *consecutive forced keyframes*, this variant should be much faster
 ///   (encode_ms should stay low and wall time should be close to media time).
+///
+/// References:
+/// - [WebM: Muxing Guidelines][webm-muxing-guidelines]
+/// - [Matroska: SimpleBlock][matroska-simpleblock]
+///
+/// [webm-muxing-guidelines]: https://www.webmproject.org/docs/container/#muxing-guidelines
+/// [matroska-simpleblock]: https://www.matroska.org/technical/elements.html#simpleblock
 fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
     init_tracing();
     if !maybe_init_xmf() {
@@ -48,7 +55,7 @@ fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
         t20_idx,
         key_abs_ms = frames[key_idx].abs_ms,
         t20_abs_ms = frames[t20_idx].abs_ms,
-        " [LibVPx-Performance-Hypothesis] First-KF-only repro setup"
+        "First-KF-only repro setup"
     );
 
     let mut decoder = VpxDecoder::builder()
@@ -73,8 +80,12 @@ fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
     let started_at = Instant::now();
 
     for (i, f) in frames.iter().enumerate().take(t20_idx).skip(key_idx) {
-        decoder.decode(&f.data).unwrap_or_else(|e| panic!("decode warmup failed at idx={i}: {e:#}"));
-        let _ = decoder.next_frame().unwrap_or_else(|e| panic!("next_frame warmup failed at idx={i}: {e:#}"));
+        decoder
+            .decode(&f.data)
+            .unwrap_or_else(|e| panic!("decode warmup failed at idx={i}: {e:#}"));
+        let _ = decoder
+            .next_frame()
+            .unwrap_or_else(|e| panic!("next_frame warmup failed at idx={i}: {e:#}"));
     }
 
     let mut frames_encoded: u64 = 0;
@@ -92,13 +103,14 @@ fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
         let image = decoder
             .next_frame()
             .unwrap_or_else(|e| panic!("next_frame failed at idx={i} abs_ms={}: {e:#}", f.abs_ms));
-        let decode_ms = decode_started_at.elapsed().as_millis() as u64;
+        let decode_ms = u64::try_from(decode_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
 
         let encode_started_at = Instant::now();
+        let pts = i64::try_from(f.abs_ms).unwrap_or(i64::MAX);
         encoder
-            .encode_frame(&image, f.abs_ms as i64, 30, flags)
+            .encode_frame(&image, pts, 30, flags)
             .unwrap_or_else(|e| panic!("encode_frame failed at idx={i} abs_ms={}: {e:#}", f.abs_ms));
-        let encode_ms = encode_started_at.elapsed().as_millis() as u64;
+        let encode_ms = u64::try_from(encode_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
         max_encode_ms = max_encode_ms.max(encode_ms);
         frames_encoded += 1;
 
@@ -108,7 +120,7 @@ fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
 
         let sec = f.abs_ms / 1000;
         let should_sample = matches!(sec, 20..=26) && last_logged_sec != Some(sec);
-        let wall_elapsed_ms = started_at.elapsed().as_millis() as u64;
+        let wall_elapsed_ms = u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
         if should_sample || encode_ms >= 50 {
             last_logged_sec = Some(sec);
             tracing::info!(
@@ -123,11 +135,11 @@ fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
                 max_encode_ms,
                 force_kf,
                 input_frame_bytes = f.data.len(),
-                " [LibVPx-Performance-Hypothesis] First-KF-only sample"
+                "First-KF-only sample"
             );
         }
 
-        if f.abs_ms >= end_ms {
+        if end_ms <= f.abs_ms {
             break;
         }
     }
@@ -136,8 +148,7 @@ fn vpx_force_only_first_cut_frame_min_repro_attach_20s() {
         prefix = "[LibVPx-Performance-Hypothesis]",
         frames_encoded,
         max_encode_ms,
-        wall_elapsed_ms = started_at.elapsed().as_millis() as u64,
-        " [LibVPx-Performance-Hypothesis] First-KF-only repro done"
+        wall_elapsed_ms = u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "First-KF-only repro done"
     );
 }
-

@@ -1,7 +1,8 @@
+use std::time::{Duration, Instant};
+
 use anyhow::Context;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
-use std::time::Instant;
-use tracing::{trace, debug, error};
+use tracing::{debug, error, trace};
 use webm_iterable::errors::TagWriterError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 use webm_iterable::{WebmWriter, WriteOptions};
@@ -12,6 +13,10 @@ use crate::StreamingConfig;
 use crate::debug::mastroka_spec_name;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
+
+fn duration_as_millis_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
 
 fn write_unknown_sized_element<T>(writer: &mut WebmWriter<T>, tag: &MatroskaSpec) -> Result<(), TagWriterError>
 where
@@ -57,6 +62,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum CutBlockState {
     HaventMet,
     AtCutBlock,
@@ -127,16 +133,15 @@ where
             .height(config.height)
             .codec(config.codec)
             .build()
-            .map_err(|e| {
+            .inspect_err(|error| {
                 error!(
-                    error = %e,
+                    error = %error,
                     width = config.width,
                     height = config.height,
                     threads = config.threads,
                     codec = ?config.codec,
                     "VpxDecoder build failed"
                 );
-                e
             })?;
 
         trace!(
@@ -159,9 +164,9 @@ where
             .threads(config.threads)
             .bitrate(256 * 1024)
             .build()
-            .map_err(|e| {
+            .inspect_err(|error| {
                 error!(
-                    error = %e,
+                    error = %error,
                     width = config.width,
                     height = config.height,
                     threads = config.threads,
@@ -169,12 +174,9 @@ where
                     bitrate = 256 * 1024,
                     "VpxEncoder build failed - this is likely VpxCodecInvalidParam"
                 );
-                e
             })?;
 
-        trace!(
-            "CutClusterWriter created successfully - decoder and encoder initialized"
-        );
+        trace!("CutClusterWriter created successfully - decoder and encoder initialized");
 
         let HeaderWriter { writer } = writer;
         Ok((
@@ -217,11 +219,7 @@ where
         trace!(
             tag_name = %tag_name,
             cluster_timestamp = ?self.cluster_timestamp,
-            cut_block_state = ?format!("{:?}", match &self.cut_block_state {
-                CutBlockState::HaventMet => "HaventMet",
-                CutBlockState::AtCutBlock => "AtCutBlock",
-                CutBlockState::Met { .. } => "Met",
-            }),
+            cut_block_state = ?self.cut_block_state,
             "CutClusterWriter::write called"
         );
 
@@ -280,39 +278,27 @@ where
         let decode_started_at = Instant::now();
         trace!(
             timestamp,
-            is_key_frame,
-            flags,
-            "reencode - getting frame from video block"
+            is_key_frame, flags, "Reencode: getting frame from video block"
         );
 
         let frame = video_block.get_frame()?;
         let frame_size = frame.len();
-        trace!(
-            frame_size,
-            timestamp,
-            "reencode - decoding frame"
-        );
+        trace!(frame_size, timestamp, "Reencode: decoding frame");
 
-        self.decoder.decode(&frame).map_err(|e| {
+        self.decoder.decode(&frame).inspect_err(|error| {
             error!(
-                error = %e,
+                error = %error,
                 frame_size,
                 timestamp,
                 "VPX decoder.decode() failed"
             );
-            e
         })?;
 
         {
-            let decode_ms = decode_started_at.elapsed().as_millis() as u64;
+            let decode_ms = duration_as_millis_u64(decode_started_at.elapsed());
             let encode_started_at = Instant::now();
-            let image = self.decoder.next_frame().map_err(|e| {
-                error!(
-                    error = %e,
-                    timestamp,
-                    "VPX decoder.next_frame() failed"
-                );
-                e
+            let image = self.decoder.next_frame().inspect_err(|error| {
+                error!(error = %error, timestamp, "VPX decoder.next_frame() failed");
             })?;
 
             trace!(
@@ -320,32 +306,28 @@ where
                 is_key_frame,
                 flags,
                 duration = 30,
-                "reencode - encoding frame"
+                "Reencode: encoding frame"
             );
 
-            self.encoder.encode_frame(
-                &image,
-                video_block.timestamp.into(),
-                30,
-                flags,
-            ).map_err(|e| {
-                error!(
-                    error = %e,
-                    timestamp,
-                    is_key_frame,
-                    flags,
-                    "VPX encoder.encode_frame() failed - likely VpxCodecInvalidParam"
-                );
-                e
-            })?;
+            self.encoder
+                .encode_frame(&image, video_block.timestamp.into(), 30, flags)
+                .inspect_err(|error| {
+                    error!(
+                        error = %error,
+                        timestamp,
+                        is_key_frame,
+                        flags,
+                        "VPX encoder.encode_frame() failed - likely VpxCodecInvalidParam"
+                    );
+                })?;
 
-            let encode_ms = encode_started_at.elapsed().as_millis() as u64;
-            let wall_elapsed_ms = self.stream_start.elapsed().as_millis() as u64;
+            let encode_ms = duration_as_millis_u64(encode_started_at.elapsed());
+            let wall_elapsed_ms = duration_as_millis_u64(self.stream_start.elapsed());
             self.frames_reencoded += 1;
 
-            // PERF-HYPOTHESIS: This log is intended to prove/disprove whether decode+encode throughput
-            // is too slow to follow the recording in near real-time.
-            if encode_ms >= 50 || self.frames_reencoded % 30 == 0 {
+            // PERF-HYPOTHESIS: This log is intended to prove/disprove whether decode+encode throughput is too slow to
+            // follow the recording in near real-time.
+            if encode_ms >= 50 || self.frames_reencoded.is_multiple_of(30) {
                 info!(
                     prefix = "[LibVPx-Performance-Hypothesis]",
                     frames_reencoded = self.frames_reencoded,
@@ -354,7 +336,7 @@ where
                     encode_ms,
                     force_kf = (flags & VPX_EFLAG_FORCE_KF) != 0,
                     input_frame_bytes = frame_size,
-                    " [LibVPx-Performance-Hypothesis] Reencode timing"
+                    "Reencode timing"
                 );
             } else {
                 trace!(
@@ -365,24 +347,19 @@ where
                     encode_ms,
                     force_kf = (flags & VPX_EFLAG_FORCE_KF) != 0,
                     input_frame_bytes = frame_size,
-                    " [LibVPx-Performance-Hypothesis] Reencode timing"
+                    "Reencode timing"
                 );
             }
         }
 
-        let frame = self.encoder.next_frame().map_err(|e| {
-            error!(
-                error = %e,
-                timestamp,
-                "VPX encoder.next_frame() failed"
-            );
-            e
+        let frame = self.encoder.next_frame().inspect_err(|error| {
+            error!(error = %error, timestamp, "VPX encoder.next_frame() failed");
         })?;
 
         trace!(
             timestamp,
             output_frame_size = frame.as_ref().map(|f| f.len()),
-            "reencode completed"
+            "Reencode completed"
         );
 
         Ok(frame)
@@ -395,7 +372,7 @@ where
         }
         self.last_report_at = Instant::now();
 
-        let wall_elapsed_ms = self.stream_start.elapsed().as_millis() as u64;
+        let wall_elapsed_ms = duration_as_millis_u64(self.stream_start.elapsed());
         let ratio = if wall_elapsed_ms == 0 {
             0.0
         } else {
@@ -409,22 +386,16 @@ where
             media_advanced_ms,
             realtime_ratio = ratio,
             frames_reencoded = self.frames_reencoded,
-            " [LibVPx-Performance-Hypothesis] Stream advancement"
+            "Stream advancement"
         );
     }
 
     fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
         let block_timestamp = current_video_block.timestamp;
-        let state_desc = match &self.cut_block_state {
-            CutBlockState::HaventMet => "HaventMet".to_string(),
-            CutBlockState::AtCutBlock => "AtCutBlock".to_string(),
-            CutBlockState::Met { cut_block_absolute_time, last_cluster_relative_time } =>
-                format!("Met(cut={}, last_rel={})", cut_block_absolute_time, last_cluster_relative_time),
-        };
         trace!(
             block_timestamp,
-            cut_block_state = %state_desc,
-            "process_current_block called"
+            cut_block_state = ?self.cut_block_state,
+            "Processing current block"
         );
 
         let current_block_absolute_time = current_video_block.absolute_timestamp()?;
@@ -435,45 +406,31 @@ where
 
         let frame = self.reencode(current_video_block, true)?;
         let Some(frame) = frame else {
-            trace!(
-                block_timestamp,
-                "No frame available from encoder - skipping"
-            );
+            trace!(block_timestamp, "No frame available from encoder - skipping");
             // No frame available from the encoder, proceed to the next
             return Ok(());
         };
 
         let frame_size = frame.len();
-        trace!(
-            block_timestamp,
-            frame_size,
-            "Frame available from encoder"
-        );
+        trace!(block_timestamp, frame_size, "Frame available from encoder");
 
         let block = match self.cut_block_state {
             CutBlockState::HaventMet => {
-                trace!(
-                    block_timestamp,
-                    "State is HaventMet - not writing block yet"
-                );
+                trace!(block_timestamp, "State is HaventMet - not writing block yet");
                 return Ok(());
             }
             CutBlockState::AtCutBlock => {
                 let cut_block_absolute_time = current_video_block.absolute_timestamp()?;
                 trace!(
                     block_timestamp,
-                    cut_block_absolute_time,
-                    "State AtCutBlock - starting new cluster at time 0"
+                    cut_block_absolute_time, "State AtCutBlock - starting new cluster at time 0"
                 );
                 self.start_new_cluster(0)?;
                 self.cut_block_state = CutBlockState::Met {
                     cut_block_absolute_time,
                     last_cluster_relative_time: 0,
                 };
-                trace!(
-                    cut_block_absolute_time,
-                    "State transition: AtCutBlock -> Met"
-                );
+                trace!(cut_block_absolute_time, "State transition: AtCutBlock -> Met");
 
                 SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true)
             }
@@ -488,16 +445,13 @@ where
 
                 trace!(
                     current_block_absolute_time,
-                    cut_block_absolute_time,
-                    cluster_relative_timestamp,
-                    "Processing block in Met state"
+                    cut_block_absolute_time, cluster_relative_timestamp, "Processing block in Met state"
                 );
 
                 if self.should_write_new_cluster(current_block_absolute_time) {
                     trace!(
                         current_block_absolute_time,
-                        cluster_relative_timestamp,
-                        "Starting new cluster due to timestamp overflow"
+                        cluster_relative_timestamp, "Starting new cluster due to timestamp overflow"
                     );
                     self.start_new_cluster(cluster_relative_timestamp)?;
 
@@ -509,9 +463,8 @@ where
                 let last_cluster_rel = self
                     .last_cluster_relative_time()
                     .context("missing last cluster relative time")?;
-                let relative_timestamp = current_video_block.absolute_timestamp()?
-                    - cut_block_absolute_time
-                    - last_cluster_rel;
+                let relative_timestamp =
+                    current_video_block.absolute_timestamp()? - cut_block_absolute_time - last_cluster_rel;
 
                 trace!(
                     relative_timestamp,
@@ -521,23 +474,19 @@ where
                     "Calculated block relative timestamp"
                 );
 
-                let timestamp = i16::try_from(relative_timestamp).map_err(|e| {
+                let timestamp = i16::try_from(relative_timestamp).inspect_err(|error| {
                     error!(
-                        error = %e,
+                        error = %error,
                         relative_timestamp,
                         "Failed to convert relative_timestamp to i16 - overflow"
                     );
-                    e
                 })?;
 
                 SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true)
             }
         };
 
-        trace!(
-            block_timestamp,
-            "Writing block to output"
-        );
+        trace!(block_timestamp, "Writing block to output");
         self.write_block(block)?;
         Ok(())
     }
@@ -567,11 +516,7 @@ where
     }
 
     fn start_new_cluster(&mut self, time: u64) -> anyhow::Result<()> {
-        trace!(
-            time,
-            is_first_cluster = (time == 0),
-            "start_new_cluster called"
-        );
+        trace!(time, is_first_cluster = (time == 0), "start_new_cluster called");
 
         if time != 0 {
             trace!("Writing Cluster::End for previous cluster");

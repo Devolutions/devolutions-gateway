@@ -4,16 +4,6 @@ use std::time::Duration;
 mod support;
 use support::*;
 
-fn live_write_cfg_paced_by_duration(asset_len: u64, asset_duration: Duration) -> LiveWriteConfig {
-    let mut cfg = LiveWriteConfig::default();
-    let chunks = asset_len.div_ceil(cfg.chunk_size as u64).max(1);
-    let per_chunk_ms = (asset_duration.as_millis() as u64).div_ceil(chunks).max(1);
-    cfg.delay = Duration::from_millis(per_chunk_ms);
-    cfg.initial_burst_bytes = 0;
-    cfg.notify_every_n_writes = 1;
-    cfg
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore]
 /// Reproduces the production performance symptom where wall clock advances but output media time barely moves.
@@ -22,6 +12,15 @@ fn live_write_cfg_paced_by_duration(asset_len: u64, asset_duration: Duration) ->
 /// - The input is an uncued, non-seekable WebM "recording" that grows over time.
 /// - The stream attaches after 20s and cuts near the live tail (keyframe rollback + timeline reset).
 /// - The test measures output timeline advancement using WebM timestamps (Cluster/Timestamp + SimpleBlock timestamp).
+///
+/// References:
+/// - [WebM: Muxing Guidelines][webm-muxing-guidelines]
+/// - [Matroska: Cluster][matroska-cluster]
+/// - [Matroska: SimpleBlock][matroska-simpleblock]
+///
+/// [webm-muxing-guidelines]: https://www.webmproject.org/docs/container/#muxing-guidelines
+/// [matroska-cluster]: https://www.matroska.org/technical/elements.html#cluster
+/// [matroska-simpleblock]: https://www.matroska.org/technical/elements.html#simpleblock
 async fn webm_stream_progress_stall_attach_at_20s() {
     let _permit = global_stream_test_semaphore()
         .acquire()
@@ -42,7 +41,16 @@ async fn webm_stream_progress_stall_attach_at_20s() {
         .unwrap_or_else(|e| panic!("failed to stat asset {}: {e:#}", asset.display()))
         .len();
 
-    let write_cfg = live_write_cfg_paced_by_duration(asset_len, asset_duration);
+    let write_cfg = {
+        let mut cfg = LiveWriteConfig::default();
+        let chunks = asset_len.div_ceil(cfg.chunk_size as u64).max(1);
+        let asset_duration_ms = u64::try_from(asset_duration.as_millis()).unwrap_or(u64::MAX);
+        let per_chunk_ms = asset_duration_ms.div_ceil(chunks).max(1);
+        cfg.delay = Duration::from_millis(per_chunk_ms);
+        cfg.initial_burst_bytes = 0;
+        cfg.notify_every_n_writes = 1;
+        cfg
+    };
 
     let out_dir = unique_temp_dir("video-streamer-webm_stream_perf");
     std::fs::create_dir_all(&out_dir).expect("create perf output dir");
@@ -91,15 +99,14 @@ async fn webm_stream_progress_stall_attach_at_20s() {
         .unwrap_or_else(|e| panic!("failed to flush output {}: {e:#}", out_path.display()));
     drop(out_file);
 
-    let wall_elapsed_ms = started_at.elapsed().as_millis() as u64;
+    let wall_elapsed_ms = u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
     let file = std::fs::File::open(&out_path)
         .unwrap_or_else(|e| panic!("failed to open output {}: {e:#}", out_path.display()));
-    let (first, last, blocks) =
-        extract_first_last_block_absolute_timestamps_ms_from_reader(BufReader::new(file))
-            .unwrap_or_else(|e| panic!("failed to parse output timestamps: {e:#}"));
+    let (first, last, blocks) = extract_first_last_block_absolute_timestamps_ms_from_reader(BufReader::new(file))
+        .unwrap_or_else(|e| panic!("failed to parse output timestamps: {e:#}"));
 
     let media_advanced_ms = match (first, last) {
-        (Some(f), Some(l)) => (l - f).max(0) as u64,
+        (Some(f), Some(l)) => u64::try_from((l - f).max(0)).unwrap_or(0),
         _ => 0,
     };
     let ratio = if wall_elapsed_ms == 0 {
@@ -120,7 +127,7 @@ async fn webm_stream_progress_stall_attach_at_20s() {
         wall_elapsed_ms,
         media_advanced_ms,
         realtime_ratio = ratio,
-        " [LibVPx-Performance-Hypothesis] Perf reproduction summary"
+        "Perf reproduction summary"
     );
 
     assert!(

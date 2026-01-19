@@ -1,34 +1,34 @@
-use std::path::PathBuf;
+use std::io::{self, Write as _};
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-fn xmf_init_from_env() -> bool {
-    let Ok(path) = std::env::var("DGATEWAY_LIB_XMF_PATH") else {
-        eprintln!("DGATEWAY_LIB_XMF_PATH not set; skipping benchmarks");
-        return false;
-    };
-
-    // SAFETY: This is how the project loads XMF elsewhere.
-    if let Err(e) = unsafe { cadeau::xmf::init(&path) } {
-        eprintln!("failed to initialize XMF from DGATEWAY_LIB_XMF_PATH={path}: {e:#}");
-        return false;
-    }
-
-    true
-}
-
-fn asset_path(file_name: &str) -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("testing-assets").join(file_name)
-}
-
 fn bench_reencode_first_500_tags(c: &mut Criterion) {
-    if !xmf_init_from_env() {
+    let xmf_initialized = {
+        let Ok(path) = std::env::var("DGATEWAY_LIB_XMF_PATH") else {
+            let _ = writeln!(io::stdout(), "DGATEWAY_LIB_XMF_PATH not set; skipping benchmarks");
+            return;
+        };
+
+        // SAFETY: This is how the project loads XMF elsewhere.
+        if let Err(e) = unsafe { cadeau::xmf::init(&path) } {
+            let _ = writeln!(
+                io::stdout(),
+                "failed to initialize XMF from DGATEWAY_LIB_XMF_PATH={path}: {e:#}"
+            );
+            return;
+        }
+
+        true
+    };
+    if !xmf_initialized {
         return;
     }
 
-    let input = asset_path("uncued-recording.webm");
+    let input = {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.join("testing-assets").join("uncued-recording.webm")
+    };
     let mut group = c.benchmark_group("vpx_reencode");
     // Criterion requires sample_size >= 10.
     group.sample_size(10);
@@ -75,7 +75,8 @@ fn bench_reencode_first_500_tags(c: &mut Criterion) {
             let frames_per_sec = (frames_reencoded_total as f64) / elapsed_secs;
             let media_ms_per_sec = (input_media_span_ms_total as f64) / elapsed_secs;
 
-            eprintln!(
+            let _ = writeln!(
+                io::stdout(),
                 "[LibVPx-Performance-Hypothesis] iters={} elapsed_ms={} per_iter_deadline_ms={} frames_total={} frames_per_sec={:.2} input_media_ms_total={} input_media_ms_per_sec={:.2} tags_total={} tags_per_sec={:.2} bytes_total={} bytes_per_sec={:.2} timed_out_any={}",
                 iters,
                 elapsed.as_millis(),

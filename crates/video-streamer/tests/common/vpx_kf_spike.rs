@@ -60,7 +60,7 @@ pub(crate) fn read_headers_and_frames_until(
     let mut current_cluster_ts: Option<u64> = None;
     let mut frames = Vec::<FrameAt>::new();
 
-    while let Some(tag) = itr.next() {
+    for tag in &mut itr {
         match tag {
             Ok(MatroskaSpec::Cluster(Master::Start)) => {
                 in_cluster = true;
@@ -118,8 +118,10 @@ pub(crate) fn read_headers_and_frames_until(
                     _ => continue,
                 };
 
-                let abs_ms_i64 = (cluster_ts as i64)
-                    .checked_add(block_ts as i64)
+                let cluster_ts_i64 =
+                    i64::try_from(cluster_ts).map_err(|_| anyhow::anyhow!("cluster timestamp does not fit in i64"))?;
+                let abs_ms_i64 = cluster_ts_i64
+                    .checked_add(i64::from(block_ts))
                     .ok_or_else(|| anyhow::anyhow!("block timestamp underflow/overflow"))?;
                 let abs_ms: u64 = abs_ms_i64
                     .try_into()
@@ -131,7 +133,7 @@ pub(crate) fn read_headers_and_frames_until(
                     data: frame,
                 });
 
-                if abs_ms >= end_ms {
+                if end_ms <= abs_ms {
                     break;
                 }
             }
@@ -162,4 +164,3 @@ pub(crate) fn find_cut_indices(frames: &[FrameAt], cut_at_ms: u64) -> anyhow::Re
 
     Ok((key_idx, t20_idx))
 }
-
