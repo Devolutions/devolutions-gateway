@@ -80,7 +80,7 @@ pub fn webm_stream(
     );
 
     let mut header_writer = HeaderWriter::new(chunk_writer);
-    debug!(?headers);
+    perf_debug!(?headers);
     for header in &headers {
         header_writer.write(header)?;
     }
@@ -115,7 +115,7 @@ pub fn webm_stream(
                 CorruptedFileError::InvalidTagData { .. },
             ))))
             | None => {
-                trace!("End of file reached or invalid tag data hit, retrying");
+                perf_trace!("End of file reached or invalid tag data hit, retrying");
                 if retry_count >= MAX_RETRY_COUNT {
                     anyhow::bail!("reached max retry count, the webm iterator cannot proceed with the current streaming file");
                 }

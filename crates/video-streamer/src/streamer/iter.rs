@@ -138,7 +138,11 @@ where
                 }
                 Ok(false) => {}
                 Ok(true) => {
-                    trace!(last_tag_position = self.previous_emitted_tag_postion, last_key_frame_info =?self.last_key_frame_info, "Key Frame Found");
+                    perf_trace!(
+                        last_tag_position = self.previous_emitted_tag_postion,
+                        last_key_frame_info = ?self.last_key_frame_info,
+                        "Key Frame Found"
+                    );
                     match self.last_key_frame_info {
                         LastKeyFrameInfo::NotMet {
                             cluster_timestamp,
@@ -197,7 +201,7 @@ where
     }
 
     pub(crate) fn rollback_to_last_successful_tag(&mut self) -> anyhow::Result<()> {
-        debug!(
+        perf_debug!(
             last_tag_position = self.previous_emitted_tag_postion,
             "Rolling back to last successful tag"
         );

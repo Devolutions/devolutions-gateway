@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use anyhow::Context;
 use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
-use tracing::{debug, error, trace};
 use webm_iterable::errors::TagWriterError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 use webm_iterable::{WebmWriter, WriteOptions};
@@ -120,7 +119,7 @@ where
     T: std::io::Write,
 {
     fn new(config: EncodeWriterConfig, writer: HeaderWriter<T>) -> anyhow::Result<(Self, CutBlockHitMarker)> {
-        trace!(
+        perf_trace!(
             width = config.width,
             height = config.height,
             threads = config.threads,
@@ -145,7 +144,7 @@ where
                 );
             })?;
 
-        trace!(
+        perf_trace!(
             width = config.width,
             height = config.height,
             threads = config.threads,
@@ -177,7 +176,7 @@ where
                 );
             })?;
 
-        trace!("CutClusterWriter created successfully - decoder and encoder initialized");
+        perf_trace!("CutClusterWriter created successfully - decoder and encoder initialized");
 
         let HeaderWriter { writer } = writer;
         Ok((
@@ -210,7 +209,7 @@ where
     #[instrument(skip(self, tag))]
     pub(crate) fn write(&mut self, tag: MatroskaSpec) -> anyhow::Result<WriterResult> {
         let tag_name = mastroka_spec_name(&tag);
-        trace!(
+        perf_trace!(
             tag_name = %tag_name,
             cluster_timestamp = ?self.cluster_timestamp,
             cut_block_state = ?self.cut_block_state,
@@ -219,7 +218,7 @@ where
 
         match tag {
             MatroskaSpec::Timestamp(timestamp) => {
-                trace!(
+                perf_trace!(
                     timestamp,
                     previous_cluster_timestamp = ?self.cluster_timestamp,
                     "Updating cluster_timestamp"
@@ -228,7 +227,7 @@ where
                 return Ok(WriterResult::Continue);
             }
             MatroskaSpec::BlockGroup(Master::Full(_)) | MatroskaSpec::SimpleBlock(_) => {
-                trace!(tag_name = %tag_name, "Processing block tag");
+                perf_trace!(tag_name = %tag_name, "Processing block tag");
             }
             MatroskaSpec::BlockGroup(Master::End) | MatroskaSpec::BlockGroup(Master::Start) => {
                 error!(
@@ -239,13 +238,13 @@ where
                 anyhow::bail!("blockGroup start and end tags are not supported");
             }
             _ => {
-                trace!(tag_name = %tag_name, "Skipping non-block tag");
+                perf_trace!(tag_name = %tag_name, "Skipping non-block tag");
                 return Ok(WriterResult::Continue);
             }
         }
 
         let video_block = VideoBlock::new(tag, self.cluster_timestamp)?;
-        trace!(
+        perf_trace!(
             block_timestamp = video_block.timestamp,
             cluster_timestamp = ?self.cluster_timestamp,
             "VideoBlock created"
@@ -262,14 +261,16 @@ where
 
         #[cfg(feature = "perf-diagnostics")]
         let decode_started_at = Instant::now();
-        trace!(
+        perf_trace!(
             timestamp,
-            is_key_frame, flags, "Reencode: getting frame from video block"
+            is_key_frame,
+            flags,
+            "Reencode: getting frame from video block"
         );
 
         let frame = video_block.get_frame()?;
         let frame_size = frame.len();
-        trace!(frame_size, timestamp, "Reencode: decoding frame");
+        perf_trace!(frame_size, timestamp, "Reencode: decoding frame");
 
         self.decoder.decode(&frame).inspect_err(|error| {
             error!(
@@ -289,7 +290,7 @@ where
                 error!(error = %error, timestamp, "VPX decoder.next_frame() failed");
             })?;
 
-            trace!(
+            perf_trace!(
                 timestamp,
                 is_key_frame,
                 flags,
@@ -329,7 +330,7 @@ where
                         "Reencode timing"
                     );
                 } else {
-                    trace!(
+                    perf_trace!(
                         prefix = "[LibVPx-Performance-Hypothesis]",
                         frames_reencoded = self.frames_reencoded,
                         wall_elapsed_ms,
@@ -347,7 +348,7 @@ where
             error!(error = %error, timestamp, "VPX encoder.next_frame() failed");
         })?;
 
-        trace!(
+        perf_trace!(
             timestamp,
             output_frame_size = frame.as_ref().map(|f| f.len()),
             "Reencode completed"
@@ -387,7 +388,7 @@ where
 
     fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
         let block_timestamp = current_video_block.timestamp;
-        trace!(
+        perf_trace!(
             block_timestamp,
             cut_block_state = ?self.cut_block_state,
             "Processing current block"
@@ -395,31 +396,32 @@ where
 
         let frame = self.reencode(current_video_block, true)?;
         let Some(frame) = frame else {
-            trace!(block_timestamp, "No frame available from encoder - skipping");
+            perf_trace!(block_timestamp, "No frame available from encoder - skipping");
             // No frame available from the encoder, proceed to the next
             return Ok(());
         };
 
         let frame_size = frame.len();
-        trace!(block_timestamp, frame_size, "Frame available from encoder");
+        perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
 
         let block = match self.cut_block_state {
             CutBlockState::HaventMet => {
-                trace!(block_timestamp, "State is HaventMet - not writing block yet");
+                perf_trace!(block_timestamp, "State is HaventMet - not writing block yet");
                 return Ok(());
             }
             CutBlockState::AtCutBlock => {
                 let cut_block_absolute_time = current_video_block.absolute_timestamp()?;
-                trace!(
+                perf_trace!(
                     block_timestamp,
-                    cut_block_absolute_time, "State AtCutBlock - starting new cluster at time 0"
+                    cut_block_absolute_time,
+                    "State AtCutBlock - starting new cluster at time 0"
                 );
                 self.start_new_cluster(0)?;
                 self.cut_block_state = CutBlockState::Met {
                     cut_block_absolute_time,
                     last_cluster_relative_time: 0,
                 };
-                trace!(cut_block_absolute_time, "State transition: AtCutBlock -> Met");
+                perf_trace!(cut_block_absolute_time, "State transition: AtCutBlock -> Met");
 
                 SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true)
             }
@@ -432,15 +434,18 @@ where
 
                 self.maybe_report_realtime_ratio(current_block_absolute_time, cluster_relative_timestamp);
 
-                trace!(
+                perf_trace!(
                     current_block_absolute_time,
-                    cut_block_absolute_time, cluster_relative_timestamp, "Processing block in Met state"
+                    cut_block_absolute_time,
+                    cluster_relative_timestamp,
+                    "Processing block in Met state"
                 );
 
                 if self.should_write_new_cluster(current_block_absolute_time) {
-                    trace!(
+                    perf_trace!(
                         current_block_absolute_time,
-                        cluster_relative_timestamp, "Starting new cluster due to timestamp overflow"
+                        cluster_relative_timestamp,
+                        "Starting new cluster due to timestamp overflow"
                     );
                     self.start_new_cluster(cluster_relative_timestamp)?;
 
@@ -455,7 +460,7 @@ where
                 let relative_timestamp =
                     current_video_block.absolute_timestamp()? - cut_block_absolute_time - last_cluster_rel;
 
-                trace!(
+                perf_trace!(
                     relative_timestamp,
                     cut_block_absolute_time,
                     current_block_absolute_timestamp = current_video_block.absolute_timestamp()?,
@@ -475,13 +480,13 @@ where
             }
         };
 
-        trace!(block_timestamp, "Writing block to output");
+        perf_trace!(block_timestamp, "Writing block to output");
         self.write_block(block)?;
         Ok(())
     }
 
     fn write_block(&mut self, block: SimpleBlock<'_>) -> anyhow::Result<()> {
-        trace!("write_block - converting SimpleBlock to MatroskaSpec");
+        perf_trace!("write_block - converting SimpleBlock to MatroskaSpec");
         let block: MatroskaSpec = block.into();
         if let Err(e) = self.writer.write(&block) {
             // When the client disconnects or we are shutting down, the destination channel is closed.
@@ -493,31 +498,31 @@ where
                     .and_then(|inner| inner.downcast_ref::<ChannelWriterError>())
                     .is_some_and(|inner| matches!(inner, &ChannelWriterError::ChannelClosed))
             {
-                trace!("write_block aborted - destination channel closed");
+                perf_trace!("write_block aborted - destination channel closed");
                 return Err(e.into());
             }
 
             error!(error = %e, "write_block failed");
             return Err(e.into());
         }
-        trace!("write_block completed successfully");
+        perf_trace!("write_block completed successfully");
         Ok(())
     }
 
     fn start_new_cluster(&mut self, time: u64) -> anyhow::Result<()> {
-        trace!(time, is_first_cluster = (time == 0), "start_new_cluster called");
+        perf_trace!(time, is_first_cluster = (time == 0), "start_new_cluster called");
 
         if time != 0 {
-            trace!("Writing Cluster::End for previous cluster");
+            perf_trace!("Writing Cluster::End for previous cluster");
             self.writer.write(&MatroskaSpec::Cluster(Master::End))?;
         }
         let cluster_start = MatroskaSpec::Cluster(Master::Start);
         let timestamp = MatroskaSpec::Timestamp(time);
-        trace!(time, "Writing Cluster::Start and Timestamp");
+        perf_trace!(time, "Writing Cluster::Start and Timestamp");
         write_unknown_sized_element(&mut self.writer, &cluster_start)?;
         self.writer.write(&timestamp)?;
         self.update_cluster_time(time);
-        trace!(time, "start_new_cluster completed");
+        perf_trace!(time, "start_new_cluster completed");
         Ok(())
     }
 
@@ -564,7 +569,7 @@ where
     }
 
     pub(crate) fn mark_cut_block_hit(&mut self, _marker: CutBlockHitMarker) {
-        trace!(
+        perf_trace!(
             previous_state = ?format!("{:?}", match &self.cut_block_state {
                 CutBlockState::HaventMet => "HaventMet",
                 CutBlockState::AtCutBlock => "AtCutBlock",
@@ -573,7 +578,7 @@ where
             "mark_cut_block_hit called - transitioning to AtCutBlock"
         );
         self.cut_block_state = CutBlockState::AtCutBlock;
-        trace!("Cut block state is now AtCutBlock");
+        perf_trace!("Cut block state is now AtCutBlock");
     }
 }
 
@@ -596,7 +601,7 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
         let mut height = None;
         let mut codec = None;
 
-        trace!(
+        perf_trace!(
             headers_count = value.len(),
             encoder_threads = config.encoder_threads.value,
             "EncodeWriterConfig::try_from - parsing headers"
@@ -605,14 +610,14 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
         for header in value {
             match header {
                 MatroskaSpec::CodecID(codec_id) => {
-                    trace!(codec_id = %codec_id, "Found CodecID header");
+                    perf_trace!(codec_id = %codec_id, "Found CodecID header");
                     match codec_id.as_str() {
                         "V_VP8" | "vp8" => {
-                            trace!("Codec identified as VP8");
+                            perf_trace!("Codec identified as VP8");
                             codec = Some(VpxCodec::VP8);
                         }
                         "V_VP9" | "vp9" => {
-                            trace!("Codec identified as VP9");
+                            perf_trace!("Codec identified as VP9");
                             codec = Some(VpxCodec::VP9);
                         }
                         _ => {
@@ -622,18 +627,18 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
                     }
                 }
                 MatroskaSpec::PixelWidth(w) => {
-                    trace!(width = w, "Found PixelWidth header");
+                    perf_trace!(width = w, "Found PixelWidth header");
                     width = Some(*w);
                 }
                 MatroskaSpec::PixelHeight(h) => {
-                    trace!(height = h, "Found PixelHeight header");
+                    perf_trace!(height = h, "Found PixelHeight header");
                     height = Some(*h);
                 }
                 _ => {}
             }
         }
 
-        trace!(
+        perf_trace!(
             width = ?width,
             height = ?height,
             codec = ?codec,
@@ -657,7 +662,7 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
             codec: final_codec,
         };
 
-        debug!(
+        perf_debug!(
             width = config.width,
             height = config.height,
             threads = config.threads,
