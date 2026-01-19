@@ -56,7 +56,7 @@ features = [
 ]
 
 [target.'cfg(windows)'.dependencies]
-aws-lc-rs = "1.14"
+aws-lc-rs = "1.15"
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 hex = "0.4"
 notify-debouncer-mini = "0.6"
