@@ -74,6 +74,10 @@ bitflags = "2.9"
 # Security, crypto…
 picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
 zeroize = { version = "1.8", features = ["derive"] }
+chacha20poly1305 = "0.10"
+secrets = "1.2"
+secrecy = { version = "0.10", features = ["serde"] }
+rand = "0.8"
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
