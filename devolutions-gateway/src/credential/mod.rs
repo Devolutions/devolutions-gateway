@@ -1,3 +1,8 @@
+mod crypto;
+
+pub use crypto::{DecryptedPassword, EncryptedPassword, MASTER_KEY};
+use secrecy::ExposeSecret;
+
 use core::fmt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,20 +15,82 @@ use serde::{de, ser};
 use uuid::Uuid;
 
 /// Credential at the application protocol level
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind")]
+#[derive(Debug, Clone)]
 pub enum AppCredential {
-    #[serde(rename = "username-password")]
-    UsernamePassword { username: String, password: Password },
+    UsernamePassword {
+        username: String,
+        password: EncryptedPassword,
+    },
+}
+
+impl AppCredential {
+    /// Decrypt the password using the global master key.
+    ///
+    /// Returns the username and a short-lived decrypted password that zeroizes on drop.
+    pub fn decrypt_password(&self) -> anyhow::Result<(String, DecryptedPassword)> {
+        match self {
+            AppCredential::UsernamePassword { username, password } => {
+                let decrypted = MASTER_KEY.lock().decrypt(password)?;
+                Ok((username.clone(), decrypted))
+            }
+        }
+    }
 }
 
 /// Application protocol level credential mapping
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AppCredentialMapping {
-    #[serde(rename = "proxy_credential")]
     pub proxy: AppCredential,
-    #[serde(rename = "target_credential")]
     pub target: AppCredential,
+}
+
+/// Cleartext credential wrapper used only for deserialization.
+///
+/// This type is converted to `AppCredential` (with encrypted password) immediately after deserialization.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind")]
+pub enum CleartextAppCredential {
+    #[serde(rename = "username-password")]
+    UsernamePassword {
+        username: String,
+        password: secrecy::SecretString,
+    },
+}
+
+impl CleartextAppCredential {
+    /// Encrypt the password and convert to storage-ready `AppCredential`.
+    pub fn encrypt(self) -> anyhow::Result<AppCredential> {
+        match self {
+            CleartextAppCredential::UsernamePassword { username, password } => {
+                let encrypted = MASTER_KEY.lock().encrypt(password.expose_secret())?;
+                Ok(AppCredential::UsernamePassword {
+                    username,
+                    password: encrypted,
+                })
+            }
+        }
+    }
+}
+
+/// Cleartext credential mapping wrapper used only for deserialization.
+///
+/// This type is converted to `AppCredentialMapping` (with encrypted passwords) immediately after deserialization.
+#[derive(Debug, Deserialize)]
+pub struct CleartextAppCredentialMapping {
+    #[serde(rename = "proxy_credential")]
+    pub proxy: CleartextAppCredential,
+    #[serde(rename = "target_credential")]
+    pub target: CleartextAppCredential,
+}
+
+impl CleartextAppCredentialMapping {
+    /// Encrypt passwords and convert to storage-ready `AppCredentialMapping`.
+    pub fn encrypt(self) -> anyhow::Result<AppCredentialMapping> {
+        Ok(AppCredentialMapping {
+            proxy: self.proxy.encrypt()?,
+            target: self.target.encrypt()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -96,78 +163,6 @@ impl CredentialStore {
 
     fn get(&self, token_id: Uuid) -> Option<ArcCredentialEntry> {
         self.entries.get(&token_id).map(Arc::clone)
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, zeroize::Zeroize)]
-pub struct Password(String);
-
-impl Password {
-    /// Do not copy the return value without wrapping into some "Zeroize"able structure
-    pub fn expose_secret(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for Password {
-    fn from(value: &str) -> Self {
-        Self(value.to_owned())
-    }
-}
-
-impl From<String> for Password {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl fmt::Debug for Password {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Password").finish_non_exhaustive()
-    }
-}
-
-impl<'de> de::Deserialize<'de> for Password {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct V;
-
-        impl de::Visitor<'_> for V {
-            type Value = Password;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a string")
-            }
-
-            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Password(v))
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Password(v.to_owned()))
-            }
-        }
-
-        let password = deserializer.deserialize_string(V)?;
-
-        Ok(password)
-    }
-}
-
-impl ser::Serialize for Password {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.0)
     }
 }
 
