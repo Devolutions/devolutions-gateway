@@ -42,8 +42,8 @@ pub struct RdpProxy<C, S> {
 
 impl<A, B> RdpProxy<A, B>
 where
-    A: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-    B: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+    A: AsyncWrite + AsyncRead + Unpin + Send,
+    B: AsyncWrite + AsyncRead + Unpin + Send,
 {
     pub async fn run(self) -> anyhow::Result<()> {
         handle(self).await
@@ -53,8 +53,8 @@ where
 #[instrument("rdp_proxy", skip_all, fields(session_id = proxy.session_info.id.to_string(), target = proxy.server_addr.to_string()))]
 async fn handle<C, S>(proxy: RdpProxy<C, S>) -> anyhow::Result<()>
 where
-    C: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-    S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    C: AsyncRead + AsyncWrite + Unpin + Send,
+    S: AsyncRead + AsyncWrite + Unpin + Send,
 {
     let RdpProxy {
         conf,
@@ -81,15 +81,16 @@ where
 
     // -- Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on -- //
 
-    let gateway_public_key_handle = tokio::spawn(get_cached_gateway_public_key(
+    let gateway_public_key_handle = tokio::spawn(crate::tls::get_public_key_for_acceptor_cached(
         gateway_hostname.clone(),
         tls_conf.acceptor.clone(),
     ));
 
     // -- Dual handshake with the client and the server until the TLS security upgrade -- //
 
-    let mut client_framed = ironrdp_tokio::TokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
-    let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
+    let mut client_framed =
+        ironrdp_tokio::MovableTokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
+    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
     let handshake_result =
         dual_handshake_until_tls_upgrade(&mut client_framed, &mut server_framed, credential_mapping).await?;
@@ -108,13 +109,13 @@ where
     let server_stream = server_stream.context("TLS upgrade with server failed")?;
 
     let server_public_key =
-        extract_tls_server_public_key(&server_stream).context("extract target server TLS public key")?;
+        crate::tls::extract_stream_peer_public_key(&server_stream).context("extract target server TLS public key")?;
     let gateway_public_key = gateway_public_key_handle.await??;
 
     // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
 
-    let mut client_framed = ironrdp_tokio::TokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::TokioFramed::new(server_stream);
+    let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
+    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
     let (krb_server_config, network_client) = if conf.debug.enable_unstable
         && let Some(crate::config::dto::KerberosConfig {
@@ -251,13 +252,13 @@ struct HandshakeResult {
 
 #[instrument(level = "debug", ret, skip_all)]
 async fn intercept_connect_confirm<C, S>(
-    client_framed: &mut ironrdp_tokio::TokioFramed<C>,
-    server_framed: &mut ironrdp_tokio::TokioFramed<S>,
+    client_framed: &mut ironrdp_tokio::MovableTokioFramed<C>,
+    server_framed: &mut ironrdp_tokio::MovableTokioFramed<S>,
     server_security_protocol: nego::SecurityProtocol,
 ) -> anyhow::Result<()>
 where
-    C: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+    C: AsyncWrite + AsyncRead + Unpin + Send,
+    S: AsyncWrite + AsyncRead + Unpin + Send,
 {
     let (_, received_frame) = client_framed
         .read_pdu()
@@ -271,7 +272,7 @@ where
 
     let mut gcc_blocks = received_connect_initial.conference_create_request.into_gcc_blocks();
     gcc_blocks.core.optional_data.server_selected_protocol = Some(server_security_protocol);
-    // Update the conference request with modified gcc_blocks
+    // Update the conference request with modified gcc_blocks.
     received_connect_initial.conference_create_request = ironrdp_pdu::gcc::ConferenceCreateRequest::new(gcc_blocks)?;
     trace!(message = ?received_connect_initial, "Send Connection Request PDU to server");
     let x224_msg_buf = ironrdp_core::encode_vec(&received_connect_initial)?;
@@ -287,13 +288,13 @@ where
 
 #[instrument(name = "dual_handshake", level = "debug", ret, skip_all)]
 async fn dual_handshake_until_tls_upgrade<C, S>(
-    client_framed: &mut ironrdp_tokio::TokioFramed<C>,
-    server_framed: &mut ironrdp_tokio::TokioFramed<S>,
+    client_framed: &mut ironrdp_tokio::MovableTokioFramed<C>,
+    server_framed: &mut ironrdp_tokio::MovableTokioFramed<S>,
     mapping: &AppCredentialMapping,
 ) -> anyhow::Result<HandshakeResult>
 where
-    C: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+    C: AsyncWrite + AsyncRead + Unpin + Send,
+    S: AsyncWrite + AsyncRead + Unpin + Send,
 {
     let (_, received_frame) = client_framed.read_pdu().await.context("read PDU from client")?;
     let received_connection_request: x224::X224<nego::ConnectionRequest> =
@@ -401,7 +402,7 @@ where
 }
 
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
-pub async fn perform_credssp_with_server<S>(
+async fn perform_credssp_with_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     server_name: String,
     server_public_key: Vec<u8>,
@@ -517,7 +518,7 @@ async fn resolve_client_generator(
 }
 
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
-pub async fn perform_credssp_with_client<S>(
+async fn perform_credssp_with_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     client_addr: IpAddr,
     gateway_public_key: Vec<u8>,
@@ -634,99 +635,9 @@ where
     }
 }
 
-pub async fn get_cached_gateway_public_key(
-    hostname: String,
-    acceptor: tokio_rustls::TlsAcceptor,
-) -> anyhow::Result<Vec<u8>> {
-    const LIFETIME_SECS: i64 = 300;
-
-    static CACHE: tokio::sync::Mutex<Cache> = tokio::sync::Mutex::const_new(Cache {
-        key: Vec::new(),
-        update_timestamp: 0,
-    });
-
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-
-    let mut guard = CACHE.lock().await;
-
-    if now < guard.update_timestamp + LIFETIME_SECS {
-        return Ok(guard.key.clone());
-    }
-
-    let key = retrieve_gateway_public_key(hostname, acceptor).await?;
-
-    *guard = Cache {
-        key: key.clone(),
-        update_timestamp: now,
-    };
-
-    return Ok(key);
-
-    struct Cache {
-        key: Vec<u8>,
-        update_timestamp: i64,
-    }
-}
-
-async fn retrieve_gateway_public_key(hostname: String, acceptor: tokio_rustls::TlsAcceptor) -> anyhow::Result<Vec<u8>> {
-    let (client_side, server_side) = tokio::io::duplex(4096);
-
-    let connect_fut = crate::tls::dangerous_connect(hostname, client_side);
-    let accept_fut = acceptor.accept(server_side);
-
-    let (connect_res, _) = tokio::join!(connect_fut, accept_fut);
-
-    let tls_stream = connect_res.context("connect")?;
-
-    let public_key =
-        extract_tls_server_public_key(&tls_stream).context("extract Devolutions Gateway TLS public key")?;
-
-    Ok(public_key)
-}
-
-pub fn extract_tls_server_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Result<Vec<u8>> {
-    use x509_cert::der::Decode as _;
-
-    let cert = tls_stream.get_peer_certificate().context("certificate is missing")?;
-
-    let cert = x509_cert::Certificate::from_der(cert).context("parse X509 certificate")?;
-
-    let server_public_key = cert
-        .tbs_certificate
-        .subject_public_key_info
-        .subject_public_key
-        .as_bytes()
-        .context("subject public key BIT STRING is not aligned")?
-        .to_owned();
-
-    Ok(server_public_key)
-}
-
-pub trait GetPeerCert {
-    fn get_peer_certificate(&self) -> Option<&tokio_rustls::rustls::pki_types::CertificateDer<'static>>;
-}
-
-impl<S> GetPeerCert for tokio_rustls::client::TlsStream<S> {
-    fn get_peer_certificate(&self) -> Option<&tokio_rustls::rustls::pki_types::CertificateDer<'static>> {
-        self.get_ref()
-            .1
-            .peer_certificates()
-            .and_then(|certificates| certificates.first())
-    }
-}
-
-impl<S> GetPeerCert for tokio_rustls::server::TlsStream<S> {
-    fn get_peer_certificate(&self) -> Option<&tokio_rustls::rustls::pki_types::CertificateDer<'static>> {
-        self.get_ref()
-            .1
-            .peer_certificates()
-            .and_then(|certificates| certificates.first())
-    }
-}
-
-async fn send_pdu<S, P>(framed: &mut ironrdp_tokio::TokioFramed<S>, pdu: &P) -> anyhow::Result<()>
+async fn send_pdu<S, P>(framed: &mut ironrdp_tokio::MovableTokioFramed<S>, pdu: &P) -> anyhow::Result<()>
 where
-    S: AsyncWrite + Unpin + Send + Sync,
+    S: AsyncWrite + Unpin + Send,
     P: ironrdp_core::Encode,
 {
     use ironrdp_tokio::FramedWrite as _;
@@ -736,7 +647,7 @@ where
     Ok(())
 }
 
-pub struct NetworkClient;
+struct NetworkClient;
 
 impl NetworkClient {
     fn new() -> Self {

@@ -217,6 +217,131 @@ pub fn install_default_crypto_provider() {
     }
 }
 
+/// Retrieves the TLS server public key from the given acceptor, with per-acceptor caching.
+///
+/// This function extracts the public key from the server certificate presented by the provided
+/// `TlsAcceptor` via an internal loopback TLS handshake. Results are cached per unique acceptor
+/// configuration to avoid redundant handshakes.
+///
+/// # Caching Strategy
+///
+/// - Each unique `TlsAcceptor` configuration (identified by its underlying `ServerConfig` pointer address)
+///   maintains a separate cache entry.
+/// - Cache entries expire after `LIFETIME_SECS` seconds to handle certificate rotation.
+/// - This ensures that different acceptors (e.g., with different certificates) maintain independent caches.
+///
+/// # Arguments
+///
+/// * `hostname` - The hostname to use for the internal TLS connection (typically the gateway's hostname).
+/// * `acceptor` - The TLS acceptor whose server certificate public key will be extracted.
+///
+/// # Returns
+///
+/// The DER-encoded public key bytes from the server certificate's SubjectPublicKeyInfo.
+pub async fn get_public_key_for_acceptor_cached(
+    hostname: String,
+    acceptor: tokio_rustls::TlsAcceptor,
+) -> anyhow::Result<Vec<u8>> {
+    const LIFETIME_SECS: i64 = 300;
+
+    // Cache is keyed by the address of the acceptor's underlying ServerConfig Arc.
+    // This ensures each unique acceptor configuration has its own cache entry.
+    static CACHE: LazyLock<tokio::sync::Mutex<HashMap<usize, Cache>>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
+    // Derive a unique cache key from the acceptor's config pointer address.
+    let cache_key = Arc::as_ptr(acceptor.config()).addr();
+
+    let mut cache_map = CACHE.lock().await;
+
+    // Check if we have a valid cached entry for this acceptor.
+    if let Some(cache_entry) = cache_map.get(&cache_key)
+        && now < cache_entry.update_timestamp + LIFETIME_SECS
+    {
+        return Ok(cache_entry.key.clone());
+    }
+
+    // Cache miss or expired; retrieve the public key via TLS handshake.
+    let key = retrieve_gateway_public_key(hostname, acceptor).await?;
+
+    // Update the cache for this acceptor.
+    cache_map.insert(
+        cache_key,
+        Cache {
+            key: key.clone(),
+            update_timestamp: now,
+        },
+    );
+
+    return Ok(key);
+
+    struct Cache {
+        key: Vec<u8>,
+        update_timestamp: i64,
+    }
+
+    async fn retrieve_gateway_public_key(
+        hostname: String,
+        acceptor: tokio_rustls::TlsAcceptor,
+    ) -> anyhow::Result<Vec<u8>> {
+        let (client_side, server_side) = tokio::io::duplex(4096);
+
+        let connect_fut = dangerous_connect(hostname, client_side);
+        let accept_fut = acceptor.accept(server_side);
+
+        let (connect_res, _) = tokio::join!(connect_fut, accept_fut);
+
+        let tls_stream = connect_res.context("connect")?;
+
+        let public_key =
+            extract_stream_peer_public_key(&tls_stream).context("extract Devolutions Gateway TLS public key")?;
+
+        Ok(public_key)
+    }
+}
+
+pub fn extract_stream_peer_public_key(tls_stream: &impl GetPeerCert) -> anyhow::Result<Vec<u8>> {
+    use x509_cert::der::Decode as _;
+
+    let cert = tls_stream.get_peer_certificate().context("certificate is missing")?;
+
+    let cert = x509_cert::Certificate::from_der(cert).context("parse X509 certificate")?;
+
+    let server_public_key = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .subject_public_key
+        .as_bytes()
+        .context("subject public key BIT STRING is not aligned")?
+        .to_owned();
+
+    Ok(server_public_key)
+}
+
+trait GetPeerCert {
+    fn get_peer_certificate(&self) -> Option<&pki_types::CertificateDer<'static>>;
+}
+
+impl<S> GetPeerCert for TlsStream<S> {
+    fn get_peer_certificate(&self) -> Option<&pki_types::CertificateDer<'static>> {
+        self.get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|certificates| certificates.first())
+    }
+}
+
+impl<S> GetPeerCert for tokio_rustls::server::TlsStream<S> {
+    fn get_peer_certificate(&self) -> Option<&pki_types::CertificateDer<'static>> {
+        self.get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|certificates| certificates.first())
+    }
+}
+
 #[cfg(windows)]
 pub mod windows {
     use std::sync::Arc;
