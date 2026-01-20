@@ -18,5 +18,5 @@ ulid = "1"
 uuid = "1.17"
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = "3.24"
 tokio = { version = "1", features = ["time", "macros", "rt", "rt-multi-thread"] }
