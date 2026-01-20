@@ -114,10 +114,7 @@ where
 
     // -- Perform the CredSSP authentication with the client (acting as a server) and the server (acting as a client) -- //
 
-    let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
-    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
-
-    let (krb_server_config, network_client) = if conf.debug.enable_unstable
+    let (krb_server_config, client_network_client) = if conf.debug.enable_unstable
         && let Some(crate::config::dto::KerberosConfig {
             kerberos_server:
                 KerberosServer {
@@ -159,17 +156,7 @@ where
         (None, None)
     };
 
-    let client_credssp_fut = perform_credssp_with_client(
-        &mut client_framed,
-        client_addr.ip(),
-        gateway_public_key,
-        handshake_result.client_security_protocol,
-        &credential_mapping.proxy,
-        network_client,
-        krb_server_config,
-    );
-
-    let (krb_client_config, network_client) = if conf.debug.enable_unstable
+    let (server_krb_config, server_network_client) = if conf.debug.enable_unstable
         && let Some(crate::config::dto::KerberosConfig {
             kerberos_server: _,
             kdc_url,
@@ -186,19 +173,23 @@ where
         (None, None)
     };
 
-    let server_credssp_fut = perform_credssp_with_server(
-        &mut server_framed,
-        server_dns_name,
+    let (mut client_framed, mut server_framed) = perform_credssp_mitm_framed(
+        client_stream,
+        server_stream,
+        client_addr.ip(),
+        server_dns_name.clone(),
+        gateway_public_key,
         server_public_key,
+        handshake_result.client_security_protocol,
         handshake_result.server_security_protocol,
+        &credential_mapping.proxy,
         &credential_mapping.target,
-        krb_client_config,
-        network_client,
-    );
-
-    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
-    client_credssp_res.context("CredSSP with client")?;
-    server_credssp_res.context("CredSSP with server")?;
+        client_network_client,
+        krb_server_config,
+        server_krb_config,
+        server_network_client,
+    )
+    .await?;
 
     // -- Intercept the Connect Confirm PDU, to override the server_security_protocol field -- //
 
@@ -209,22 +200,11 @@ where
     )
     .await?;
 
-    let (mut client_stream, client_leftover) = client_framed.into_inner();
-    let (mut server_stream, server_leftover) = server_framed.into_inner();
+    let (client_stream, server_stream) = unwrap_and_forward_leftovers(client_framed, server_framed).await?;
 
     // -- At this point, proceed to the usual two-way forwarding -- //
 
     info!("RDP-TLS forwarding (credential injection)");
-
-    client_stream
-        .write_all(&server_leftover)
-        .await
-        .context("write server leftover to client")?;
-
-    server_stream
-        .write_all(&client_leftover)
-        .await
-        .context("write client leftover to server")?;
 
     Proxy::builder()
         .conf(conf)
@@ -399,6 +379,186 @@ where
         .context("send connection confirm to client")?;
 
     handshake_result
+}
+
+/// Performs bidirectional CredSSP MITM authentication and returns framed streams for further processing.
+///
+/// This function wraps both streams in `MovableTokioFramed` and performs parallel CredSSP
+/// authentication with the client (acting as server) and server (acting as client).
+///
+/// The framed streams are returned without unwrapping, allowing the caller to perform additional
+/// operations (such as intercepting PDUs) before extracting the inner streams.
+///
+/// # Arguments
+///
+/// * `client_stream` - The client-side stream
+/// * `server_stream` - The server-side stream
+/// * `client_addr` - Client IP address (for logging/identification)
+/// * `server_dns_name` - DNS name of the target server
+/// * `gateway_public_key` - Gateway's TLS public key (for client CredSSP)
+/// * `server_public_key` - Target server's TLS public key (for server CredSSP)
+/// * `client_security_protocol` - Security protocol to use with client
+/// * `server_security_protocol` - Security protocol to use with server
+/// * `proxy_credentials` - Credentials for client-proxy authentication
+/// * `target_credentials` - Credentials for proxy-server authentication
+/// * `client_network_client` - Optional network client for client CredSSP Kerberos operations
+/// * `client_kerberos_server_config` - Optional Kerberos server config for client CredSSP
+/// * `server_kerberos_config` - Optional Kerberos config for server CredSSP
+/// * `server_network_client` - Optional network client for server CredSSP Kerberos operations
+///
+/// # Returns
+///
+/// The framed client and server streams after CredSSP authentication.
+#[instrument(name = "credssp_mitm", level = "debug", skip_all)]
+pub async fn perform_credssp_mitm_framed<C, S>(
+    client_stream: C,
+    server_stream: S,
+    client_addr: IpAddr,
+    server_dns_name: String,
+    gateway_public_key: Vec<u8>,
+    server_public_key: Vec<u8>,
+    client_security_protocol: nego::SecurityProtocol,
+    server_security_protocol: nego::SecurityProtocol,
+    proxy_credentials: &crate::credential::AppCredential,
+    target_credentials: &crate::credential::AppCredential,
+    client_network_client: Option<NetworkClient>,
+    client_kerberos_server_config: Option<KerberosServerConfig>,
+    server_kerberos_config: Option<KerberosConfig>,
+    server_network_client: Option<NetworkClient>,
+) -> anyhow::Result<(
+    ironrdp_tokio::MovableTokioFramed<C>,
+    ironrdp_tokio::MovableTokioFramed<S>,
+)>
+where
+    C: AsyncWrite + AsyncRead + Unpin + Send,
+    S: AsyncWrite + AsyncRead + Unpin + Send,
+{
+    // Wrap streams in MovableTokioFramed for CredSSP processing.
+    let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
+    let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
+
+    // Perform CredSSP authentication with both client and server in parallel.
+    let client_credssp_fut = perform_credssp_with_client(
+        &mut client_framed,
+        client_addr,
+        gateway_public_key,
+        client_security_protocol,
+        proxy_credentials,
+        client_network_client,
+        client_kerberos_server_config,
+    );
+
+    let server_credssp_fut = perform_credssp_with_server(
+        &mut server_framed,
+        server_dns_name,
+        server_public_key,
+        server_security_protocol,
+        target_credentials,
+        server_kerberos_config,
+        server_network_client,
+    );
+
+    let (client_credssp_res, server_credssp_res) = tokio::join!(client_credssp_fut, server_credssp_fut);
+    client_credssp_res.context("CredSSP with client")?;
+    server_credssp_res.context("CredSSP with server")?;
+
+    Ok((client_framed, server_framed))
+}
+
+/// Unwraps framed streams and forwards any leftover bytes bidirectionally.
+///
+/// This helper extracts the inner streams from `MovableTokioFramed` wrappers and forwards
+/// any leftover bytes that were buffered during framing:
+/// - Server leftovers are written to the client
+/// - Client leftovers are written to the server
+///
+/// # Arguments
+///
+/// * `client_framed` - The framed client stream
+/// * `server_framed` - The framed server stream
+///
+/// # Returns
+///
+/// The unwrapped client and server streams, ready for forwarding.
+#[instrument(name = "unwrap_and_forward_leftovers", level = "debug", skip_all)]
+pub async fn unwrap_and_forward_leftovers<C, S>(
+    client_framed: ironrdp_tokio::MovableTokioFramed<C>,
+    server_framed: ironrdp_tokio::MovableTokioFramed<S>,
+) -> anyhow::Result<(C, S)>
+where
+    C: AsyncWrite + AsyncRead + Unpin + Send,
+    S: AsyncWrite + AsyncRead + Unpin + Send,
+{
+    // Extract unwrapped streams and leftover bytes.
+    let (mut client_stream, client_leftover) = client_framed.into_inner();
+    let (mut server_stream, server_leftover) = server_framed.into_inner();
+
+    // Forward leftover bytes bidirectionally.
+    // Server leftovers are sent to the client.
+    if !server_leftover.is_empty() {
+        client_stream
+            .write_all(&server_leftover)
+            .await
+            .context("write server leftover to client")?;
+    }
+
+    // Client leftovers are sent to the server.
+    if !client_leftover.is_empty() {
+        server_stream
+            .write_all(&client_leftover)
+            .await
+            .context("write client leftover to server")?;
+    }
+
+    Ok((client_stream, server_stream))
+}
+
+/// Performs complete CredSSP MITM authentication with stream unwrapping and leftover forwarding.
+///
+/// This is a convenience wrapper that combines `perform_credssp_mitm_framed` and
+/// `unwrap_and_forward_leftovers` for cases where no intermediate processing is needed.
+///
+/// For the complete parameter documentation, see `perform_credssp_mitm_framed`.
+#[instrument(name = "credssp_mitm_complete", level = "debug", skip_all)]
+pub async fn perform_credssp_mitm<C, S>(
+    client_stream: C,
+    server_stream: S,
+    client_addr: IpAddr,
+    server_dns_name: String,
+    gateway_public_key: Vec<u8>,
+    server_public_key: Vec<u8>,
+    client_security_protocol: nego::SecurityProtocol,
+    server_security_protocol: nego::SecurityProtocol,
+    proxy_credentials: &crate::credential::AppCredential,
+    target_credentials: &crate::credential::AppCredential,
+    client_network_client: Option<NetworkClient>,
+    client_kerberos_server_config: Option<KerberosServerConfig>,
+    server_kerberos_config: Option<KerberosConfig>,
+    server_network_client: Option<NetworkClient>,
+) -> anyhow::Result<(C, S)>
+where
+    C: AsyncWrite + AsyncRead + Unpin + Send,
+    S: AsyncWrite + AsyncRead + Unpin + Send,
+{
+    let (client_framed, server_framed) = perform_credssp_mitm_framed(
+        client_stream,
+        server_stream,
+        client_addr,
+        server_dns_name,
+        gateway_public_key,
+        server_public_key,
+        client_security_protocol,
+        server_security_protocol,
+        proxy_credentials,
+        target_credentials,
+        client_network_client,
+        client_kerberos_server_config,
+        server_kerberos_config,
+        server_network_client,
+    )
+    .await?;
+
+    unwrap_and_forward_leftovers(client_framed, server_framed).await
 }
 
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
@@ -647,10 +807,10 @@ where
     Ok(())
 }
 
-struct NetworkClient;
+pub struct NetworkClient;
 
 impl NetworkClient {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {}
     }
 

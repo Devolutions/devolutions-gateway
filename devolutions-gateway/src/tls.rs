@@ -320,7 +320,7 @@ pub fn extract_stream_peer_public_key(tls_stream: &impl GetPeerCert) -> anyhow::
     Ok(server_public_key)
 }
 
-trait GetPeerCert {
+pub trait GetPeerCert {
     fn get_peer_certificate(&self) -> Option<&pki_types::CertificateDer<'static>>;
 }
 
