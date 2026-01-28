@@ -65,6 +65,10 @@ if ($Env:TCP_ENABLED) {
     }
 }
 
+if (Test-Path Env:TCP_PORT) {
+    $TcpPort = $Env:TCP_PORT
+}
+
 $ExternalTcpPort = $TcpPort
 
 if (Test-Path Env:EXTERNAL_TCP_PORT) {
