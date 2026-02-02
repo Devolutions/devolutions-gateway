@@ -1,3 +1,4 @@
+use std::io::{Read as _, Write as _};
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -33,31 +34,31 @@ use crate::dvc::now_message_dissector::NowMessageDissector;
 
 const PIPE_READ_BUFFER_SIZE: usize = 4096;
 
-/// Generate session-specific RDM agent pipe name.
+/// Generate session-specific RDM agent pipe name with process ID.
 ///
-/// Format: `\\.\pipe\devolutions-session-{session_id}`
-fn get_rdm_pipe_name() -> anyhow::Result<String> {
+/// Format: `\\.\pipe\devolutions-session-rdm-{session_id}-{pid}`
+fn get_rdm_pipe_name(pid: u32) -> anyhow::Result<String> {
     let session_id = get_current_session_id().context("Failed to get current session ID")?;
-    Ok(format!(r"\\.\pipe\devolutions-session-{}", session_id))
+    Ok(format!(r"\\.\pipe\devolutions-session-rdm-{}-{}", session_id, pid))
 }
 
-/// Generate session-specific RDM ready event name.
+/// Generate session-specific RDM ready event name with process ID.
 ///
-/// Format: `Global\devolutions-session-{session_id}-ready`
+/// Format: `Global\devolutions-session-rdm-{session_id}-{pid}-ready`
 /// This event is created by devolutions-session and signaled by RDM when ready.
-fn get_rdm_ready_event_name() -> anyhow::Result<String> {
+fn get_rdm_ready_event_name(pid: u32) -> anyhow::Result<String> {
     let session_id = get_current_session_id().context("Failed to get current session ID")?;
-    Ok(format!(r"Global\devolutions-session-{}-ready", session_id))
+    Ok(format!(r"Global\devolutions-session-rdm-{}-{}-ready", session_id, pid))
 }
 
-/// Create or open the RDM ready event
+/// Create or open the RDM ready event for a specific process
 ///
 /// Creates a named event that RDM will signal when its pipe server is ready.
 /// If RDM already created the event (it was launched before us), we open it instead.
-fn create_or_open_rdm_ready_event() -> anyhow::Result<Event> {
-    let event_name = get_rdm_ready_event_name()?;
+fn create_or_open_rdm_ready_event(pid: u32) -> anyhow::Result<Event> {
+    let event_name = get_rdm_ready_event_name(pid)?;
 
-    info!(event_name, "Creating or opening RDM ready event");
+    info!(event_name, pid, "Creating or opening RDM ready event");
 
     // Check if event already existed after creation
     // Use auto-reset event (false) so it automatically resets after one waiter is released
@@ -66,9 +67,12 @@ fn create_or_open_rdm_ready_event() -> anyhow::Result<Event> {
     let already_exists = win_api_wrappers::Error::last_error().code() == ERROR_ALREADY_EXISTS.0 as i32;
 
     if already_exists {
-        info!(event_name, "RDM ready event already exists (RDM was launched first)");
+        info!(
+            event_name,
+            pid, "RDM ready event already exists (RDM was launched first)"
+        );
     } else {
-        info!(event_name, "Created new RDM ready event");
+        info!(event_name, pid, "Created new RDM ready event");
     }
 
     Ok(event)
@@ -86,8 +90,8 @@ impl RdmPipeConnection {
     ///
     /// Waits for RDM ready event to be signaled, then connects to the pipe.
     /// The ready event is dropped after connection, allowing RDM to own it.
-    async fn connect(timeout_secs: u32, ready_event: Event) -> anyhow::Result<Self> {
-        let pipe_name = get_rdm_pipe_name()?;
+    async fn connect(timeout_secs: u32, ready_event: Event, pid: u32) -> anyhow::Result<Self> {
+        let pipe_name = get_rdm_pipe_name(pid)?;
         let timeout_ms = timeout_secs.saturating_mul(1000);
 
         info!(pipe_name, timeout_secs, "Waiting for RDM and connecting to pipe");
@@ -542,11 +546,11 @@ async fn process_app_start_impl(
 ) -> anyhow::Result<()> {
     info!("Processing RDM app start message");
 
-    // Create or open the ready event that RDM will signal
-    let ready_event = create_or_open_rdm_ready_event().context("Failed to create/open RDM ready event")?;
-
-    // Launch RDM if not already running
-    if !is_rdm_running() {
+    // Re-use already running RDM instance if available or launch new one.
+    let rdm_pid = if let Some(pid) = find_rdm_pid().await {
+        info!(pid, "RDM is already running, using existing instance");
+        pid
+    } else {
         info!("RDM is not running, launching...");
         match launch_rdm_process(&rdm_app_start_msg).await {
             Ok(process_id) => {
@@ -554,6 +558,7 @@ async fn process_app_start_impl(
                     "RDM application started successfully with PID: {} (detached)",
                     process_id
                 );
+                process_id
             }
             Err(error) => {
                 error!(%error, "Failed to launch RDM application");
@@ -561,12 +566,16 @@ async fn process_app_start_impl(
                 return Err(error);
             }
         }
-    } else {
-        info!("RDM application is already running");
-    }
+    };
 
-    // Connect to RDM pipe with timeout
-    let mut pipe = match RdmPipeConnection::connect(rdm_app_start_msg.timeout(), ready_event).await {
+    // Update PID hint for future connections.
+    set_rdm_pid_hint(rdm_pid);
+
+    // Create or open the ready event that RDM will signal.
+    let ready_event = create_or_open_rdm_ready_event(rdm_pid).context("Failed to create/open RDM ready event")?;
+
+    // Connect to RDM pipe with timeout.
+    let mut pipe = match RdmPipeConnection::connect(rdm_app_start_msg.timeout(), ready_event, rdm_pid).await {
         Ok(pipe) => {
             info!("Connected to RDM pipe successfully");
             pipe
@@ -693,20 +702,80 @@ async fn launch_rdm_process(rdm_app_start_msg: &NowRdmAppStartMsg) -> anyhow::Re
     Ok(process_info.dwProcessId)
 }
 
-/// Check if RDM is already running
-fn is_rdm_running() -> bool {
-    let rdm_exe_path = match get_rdm_executable_path() {
-        Some(path) => path,
-        None => return false,
-    };
+fn rdm_pid_hint_file_path() -> anyhow::Result<tempfile::NamedTempFile> {
+    let file = tempfile::Builder::new()
+        .prefix("devolutions-session-rdm")
+        .suffix(".pid")
+        .rand_bytes(0)
+        // Keep file after drop, while still removing on reboot on Windows.
+        .disable_cleanup(true)
+        .make(|path| std::fs::File::create(path))
+        .context("Failed to create temporary file for RDM PID hint")?;
+
+    info!(
+        path = %file.path().display(),
+        "Using temporary file for RDM PID hint"
+    );
+
+    Ok(file)
+}
+
+fn try_get_read_rdm_pid_hint() -> anyhow::Result<u32> {
+    let mut file = rdm_pid_hint_file_path().context("Failed to get RDM PID hint file path")?;
+
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .context("Failed to read RDM PID hint from temporary file")?;
+
+    text.trim()
+        .parse::<u32>()
+        .context("Failed to parse RDM PID hint as u32")
+}
+
+fn get_rdm_pid_hint() -> Option<u32> {
+    match try_get_read_rdm_pid_hint() {
+        Ok(pid) => Some(pid),
+        Err(error) => {
+            warn!(%error, "Failed to get RDM PID hint");
+            None
+        }
+    }
+}
+
+fn try_set_rdm_pid_hint(pid: u32) -> anyhow::Result<()> {
+    let mut file = rdm_pid_hint_file_path().context("Failed to get RDM PID hint file path")?;
+
+    file.write_all(pid.to_string().as_bytes())
+        .context("Failed to write RDM PID hint to temporary file")
+}
+
+fn set_rdm_pid_hint(pid: u32) {
+    if let Err(error) = try_set_rdm_pid_hint(pid) {
+        warn!(%error, "Failed to set RDM PID hint");
+    }
+}
+
+/// Get RDM process pid:
+/// - First tries to read PID hint from temporary file to use the same instance each time
+///   client connects (devolutions-session.exe is restarted each time user connects). This improves
+///   user experience by reusing the same RDM instance as much as possible instead of using random
+///   running instance.
+/// - If PID hint is not available or invalid, enumerates processes to find first matching RDM
+///   executable PID.
+async fn find_rdm_pid() -> Option<u32> {
+    let pid_hint = get_rdm_pid_hint();
+
+    let rdm_exe_path = get_rdm_executable_path()?;
 
     let process_iterator = match ProcessEntry32Iterator::new() {
         Ok(iter) => iter,
         Err(error) => {
             warn!(%error, "Failed to create process iterator for RDM detection");
-            return false;
+            return None;
         }
     };
+
+    let mut found_pid: Option<u32> = None;
 
     for process_entry in process_iterator {
         let pid = process_entry.process_id();
@@ -726,15 +795,39 @@ fn is_rdm_running() -> bool {
             .to_string_lossy()
             .eq_ignore_ascii_case(&rdm_exe_path.to_string_lossy())
         {
-            info!(
-                rdm_path = %rdm_exe_path.display(),
-                found_path = %exe_path.display(),
-                "Found already running RDM process"
-            );
-            return true;
+            match pid_hint {
+                None => {
+                    found_pid = Some(pid);
+                    break;
+                }
+                Some(hint) if pid == hint => {
+                    info!(
+                        rdm_path = %rdm_exe_path.display(),
+                        pid,
+                        "Found RDM instance matching PID hint"
+                    );
+
+                    found_pid = Some(pid);
+                    break;
+                }
+                Some(_) => {
+                    if found_pid.is_none() {
+                        found_pid = Some(pid);
+                    }
+                }
+            }
         }
     }
-    false
+
+    if let Some(pid) = found_pid {
+        info!(
+            rdm_path = %rdm_exe_path.display(),
+            pid,
+            "Found RDM instance"
+        );
+    }
+
+    found_pid
 }
 
 /// Get the RDM executable path from installation location
