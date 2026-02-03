@@ -60,9 +60,7 @@ async fn send_clean_path_response(
     stream: &mut (dyn AsyncWrite + Unpin + Send),
     rd_clean_path_rsp: &RDCleanPathPdu,
 ) -> anyhow::Result<()> {
-    let rd_clean_path_rsp = rd_clean_path_rsp
-        .to_der()
-        .map_err(|e| anyhow::anyhow!("RDCleanPath DER conversion failure: {e}"))?;
+    let rd_clean_path_rsp = rd_clean_path_rsp.to_der().context("RDCleanPath DER conversion")?;
 
     stream.write_all(&rd_clean_path_rsp).await?;
     stream.flush().await?;
@@ -229,7 +227,7 @@ async fn process_cleanpath(
 
     let ((mut server_stream, server_addr), selected_target) = utils::successive_try(targets, utils::tcp_connect)
         .await
-        .context("couldn’t connect to RDP server")?;
+        .context("connect to RDP server")?;
 
     debug!(%selected_target, "Connected to destination server");
     span.record("target", selected_target.to_string());
@@ -615,8 +613,7 @@ pub async fn handle(
     trace!("Sending RDCleanPath response");
 
     let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .context("couldn’t build RDCleanPath response")?;
-    // .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+        .context("build RDCleanPath response")?;
 
     send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
