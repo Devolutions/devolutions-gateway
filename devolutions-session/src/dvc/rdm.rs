@@ -688,6 +688,10 @@ async fn launch_rdm_process(rdm_app_start_msg: &NowRdmAppStartMsg) -> anyhow::Re
 }
 
 fn rdm_pid_hint_file_path() -> anyhow::Result<tempfile::NamedTempFile> {
+    // Keep file after drop so the PID hint persists across devolutions-session
+    // restarts (which occur on every RDP reconnection). See `find_rdm_pid` doc
+    // comment. The file is still cleaned up on Windows reboot since `tempfile`
+    // crate calls `MoveFileEx` with `MOVEFILE_DELAY_UNTIL_REBOOT` flag internally.
     let file = tempfile::Builder::new()
         .prefix("devolutions-session-rdm")
         .suffix(".pid")
