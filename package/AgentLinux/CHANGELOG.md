@@ -1,5 +1,9 @@
 # Packaging changelog
 
+## 2025.3.4 (2026-02-04)
+
+- No changes.
+
 ## 2025.3.3 (2025-12-02)
 
 - Fixes installation issues on RHEL-based distributions where systemd units are located in /usr/lib/systemd/system instead of /lib/systemd/system.
