@@ -38,7 +38,7 @@ const PIPE_READ_BUFFER_SIZE: usize = 4096;
 ///
 /// Format: `\\.\pipe\devolutions-session-rdm-{session_id}-{pid}`
 fn get_rdm_pipe_name(pid: u32) -> anyhow::Result<String> {
-    let session_id = get_current_session_id().context("Failed to get current session ID")?;
+    let session_id = get_current_session_id().context("get current session ID")?;
     Ok(format!(r"\\.\pipe\devolutions-session-rdm-{}-{}", session_id, pid))
 }
 
@@ -47,7 +47,7 @@ fn get_rdm_pipe_name(pid: u32) -> anyhow::Result<String> {
 /// Format: `Global\devolutions-session-rdm-{session_id}-{pid}-ready`
 /// This event is created by devolutions-session and signaled by RDM when ready.
 fn get_rdm_ready_event_name(pid: u32) -> anyhow::Result<String> {
-    let session_id = get_current_session_id().context("Failed to get current session ID")?;
+    let session_id = get_current_session_id().context("get current session ID")?;
     Ok(format!(r"Global\devolutions-session-rdm-{}-{}-ready", session_id, pid))
 }
 
@@ -104,8 +104,8 @@ impl RdmPipeConnection {
             Ok(())
         })
         .await
-        .context("Task join error")?
-        .context("Failed to wait for RDM ready event")?;
+        .context("task join error")?
+        .context("wait for RDM ready event")?;
 
         trace!("RDM ready event signaled, attempting to connect to pipe");
 
@@ -146,13 +146,10 @@ impl RdmPipeConnection {
 
         {
             let mut cursor = WriteCursor::new(&mut buffer);
-            message.encode(&mut cursor).context("Failed to encode message")?;
+            message.encode(&mut cursor).context("encode message")?;
         }
 
-        self.pipe
-            .write_all(&buffer)
-            .await
-            .context("Failed to send message to RDM pipe")?;
+        self.pipe.write_all(&buffer).await.context("send message to RDM pipe")?;
 
         Ok(())
     }
@@ -161,11 +158,7 @@ impl RdmPipeConnection {
         let mut buffer = vec![0u8; PIPE_READ_BUFFER_SIZE];
 
         loop {
-            let bytes_read = self
-                .pipe
-                .read(&mut buffer)
-                .await
-                .context("Failed to read from RDM pipe")?;
+            let bytes_read = self.pipe.read(&mut buffer).await.context("read from RDM pipe")?;
 
             if bytes_read == 0 {
                 bail!("RDM pipe closed");
@@ -174,7 +167,7 @@ impl RdmPipeConnection {
             let messages = self
                 .dissector
                 .dissect(&buffer[..bytes_read])
-                .context("Failed to dissect message from RDM")?;
+                .context("dissect message received from RDM")?;
 
             if !messages.is_empty() {
                 trace!(count = messages.len(), "Read messages from RDM pipe");
@@ -223,23 +216,18 @@ async fn negotiate_with_rdm(
     info!(pipe_name = %pipe.pipe_name(), "Starting NOW protocol negotiation with RDM");
 
     let caps_msg: NowMessage<'_> = agent_caps.clone().into();
-    pipe.send_message(&caps_msg)
-        .await
-        .context("Failed to send capabilities to RDM")?;
+    pipe.send_message(&caps_msg).await.context("send capabilities to RDM")?;
 
     info!("Sent agent capabilities to RDM, waiting for response");
 
-    let messages = pipe
-        .read_messages()
-        .await
-        .context("Failed to read RDM capabilities response")?;
+    let messages = pipe.read_messages().await.context("read RDM capabilities response")?;
 
     let rdm_caps_msg = messages
         .into_iter()
         .next()
-        .context("No capset response received from RDM")?;
+        .context("no capset response received from RDM")?;
 
-    let rdm_caps = validate_capset_response(rdm_caps_msg).context("Invalid capset response from RDM")?;
+    let rdm_caps = validate_capset_response(rdm_caps_msg).context("invalid capset response from RDM")?;
 
     info!(
         rdm_version = ?rdm_caps.version(),
@@ -390,7 +378,7 @@ impl RdmMessageProcessor {
         let client_timestamp = rdm_caps_msg.timestamp();
         let server_timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .context("Failed to get current timestamp")?
+            .context("get current timestamp")?
             .as_secs();
 
         info!(
@@ -416,8 +404,8 @@ impl RdmMessageProcessor {
         };
 
         // Create response message with server timestamp
-        let mut response = NowRdmCapabilitiesMsg::new(server_timestamp, rdm_version)
-            .context("Failed to create RDM capabilities response")?;
+        let mut response =
+            NowRdmCapabilitiesMsg::new(server_timestamp, rdm_version).context("create RDM capabilities response")?;
 
         if is_rdm_available {
             response = response.with_app_available();
@@ -514,10 +502,7 @@ impl RdmMessageProcessor {
             RdmConnectionState::Ready => {
                 if let Some(rdm_tx) = &self.rdm_tx {
                     let now_msg: NowMessage<'static> = NowMessage::Rdm(message);
-                    rdm_tx
-                        .send(now_msg)
-                        .await
-                        .context("Failed to send message to RDM channel")?;
+                    rdm_tx.send(now_msg).await.context("send message to RDM channel")?;
                     Ok(())
                 } else {
                     warn!("RDM state is Ready but channel is not available");
@@ -572,7 +557,7 @@ async fn process_app_start_impl(
     set_rdm_pid_hint(rdm_pid);
 
     // Create or open the ready event that RDM will signal.
-    let ready_event = create_or_open_rdm_ready_event(rdm_pid).context("Failed to create/open RDM ready event")?;
+    let ready_event = create_or_open_rdm_ready_event(rdm_pid).context("create/open RDM ready event")?;
 
     // Connect to RDM pipe with timeout.
     let mut pipe = match RdmPipeConnection::connect(rdm_app_start_msg.timeout(), ready_event, rdm_pid).await {
@@ -583,7 +568,7 @@ async fn process_app_start_impl(
         Err(error) => {
             error!(%error, "Failed to connect to RDM pipe");
             send_rdm_app_notify(&dvc_tx, NowRdmAppState::FAILED, NowRdmReason::LAUNCH_TIMEOUT).await?;
-            return Err(error).context("Failed to connect to RDM pipe");
+            return Err(error).context("connect to RDM pipe");
         }
     };
 
@@ -596,7 +581,7 @@ async fn process_app_start_impl(
             let app_start_msg: NowMessage<'_> = NowMessage::Rdm(NowRdmMessage::AppStart(rdm_app_start_msg));
             pipe.send_message(&app_start_msg)
                 .await
-                .context("Failed to send app start message to RDM")?;
+                .context("send app start message to RDM")?;
 
             trace!("Sent app start message to RDM");
 
@@ -609,7 +594,7 @@ async fn process_app_start_impl(
         Err(error) => {
             error!(%error, "Failed to negotiate with RDM");
             send_rdm_app_notify(&dvc_tx, NowRdmAppState::FAILED, NowRdmReason::STARTUP_FAILURE).await?;
-            Err(error).context("Failed to negotiate with RDM")
+            Err(error).context("negotiate with RDM")
         }
     }
 }
@@ -636,7 +621,7 @@ async fn launch_rdm_process(rdm_app_start_msg: &NowRdmAppStartMsg) -> anyhow::Re
 
     let install_location = rdm_exe_path
         .parent()
-        .context("Failed to get RDM installation directory")?
+        .context("get RDM installation directory")?
         .to_string_lossy()
         .to_string();
 
@@ -710,7 +695,7 @@ fn rdm_pid_hint_file_path() -> anyhow::Result<tempfile::NamedTempFile> {
         // Keep file after drop, while still removing on reboot on Windows.
         .disable_cleanup(true)
         .make(|path| std::fs::File::create(path))
-        .context("Failed to create temporary file for RDM PID hint")?;
+        .context("create temporary file for RDM PID hint")?;
 
     info!(
         path = %file.path().display(),
@@ -721,15 +706,13 @@ fn rdm_pid_hint_file_path() -> anyhow::Result<tempfile::NamedTempFile> {
 }
 
 fn try_get_read_rdm_pid_hint() -> anyhow::Result<u32> {
-    let mut file = rdm_pid_hint_file_path().context("Failed to get RDM PID hint file path")?;
+    let mut file = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
 
     let mut text = String::new();
     file.read_to_string(&mut text)
-        .context("Failed to read RDM PID hint from temporary file")?;
+        .context("read RDM PID hint from temporary file")?;
 
-    text.trim()
-        .parse::<u32>()
-        .context("Failed to parse RDM PID hint as u32")
+    text.trim().parse::<u32>().context("parse RDM PID hint as u32")
 }
 
 fn get_rdm_pid_hint() -> Option<u32> {
@@ -743,10 +726,10 @@ fn get_rdm_pid_hint() -> Option<u32> {
 }
 
 fn try_set_rdm_pid_hint(pid: u32) -> anyhow::Result<()> {
-    let mut file = rdm_pid_hint_file_path().context("Failed to get RDM PID hint file path")?;
+    let mut file = rdm_pid_hint_file_path().context("get RDM PID hint file path")?;
 
     file.write_all(pid.to_string().as_bytes())
-        .context("Failed to write RDM PID hint to temporary file")
+        .context("write RDM PID hint to temporary file")
 }
 
 fn set_rdm_pid_hint(pid: u32) {
