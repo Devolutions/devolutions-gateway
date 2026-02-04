@@ -2,6 +2,151 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2025.3.4 (2026-02-04)
+
+### Security
+
+- _dgw_: redact passwords in preflight API debug logs ([#1613](https://github.com/Devolutions/devolutions-gateway/issues/1613)) ([cc09f344c1](https://github.com/Devolutions/devolutions-gateway/commit/cc09f344c175ec2dca37c1045d51ca454ca911f4)) ([DGW-324](https://devolutions.atlassian.net/browse/DGW-324)) 
+
+  Passwords in provision-credentials preflight requests are now redacted
+  when logged at DEBUG level, preventing credential leakage in logs. The
+  redaction applies to all password fields recursively, replacing them
+  with "***REDACTED***" while preserving other request details for
+  debugging.
+
+### Features
+
+- _agent_: add debug updater overrides ([#1610](https://github.com/Devolutions/devolutions-gateway/issues/1610)) ([8703bc430e](https://github.com/Devolutions/devolutions-gateway/commit/8703bc430ec3f2108d482ffb3b7271a9e3ef604a)) 
+
+  Adds debug configuration switches for the updater so developers can test
+  local productinfo and packages:
+  - Supports overriding productinfo URL (including file://) and validates
+  CDN URLs by default.
+  - Allows opt-in unsafe URLs for local testing and optional skipping of
+  hash/MSI signature validation.
+  - Productinfo loader and package downloader now handle file:// sources
+
+- _installer_: allow untrusted certificates for key downloads ([#1635](https://github.com/Devolutions/devolutions-gateway/issues/1635)) ([0a04f823c6](https://github.com/Devolutions/devolutions-gateway/commit/0a04f823c608f7c099489ed8896c15fb04d38074)) 
+
+  Using the installer, the user has the option to download the provisioner
+  public key direct from a DVLS instance. However, if the DVLS certificate
+  was not trusted this would fail with a nondescript error message
+  ("failed to send request").
+  
+  Now, the user will be prompted to accept an untrusted certificate.
+  Certificate exceptions are serialized in a semi-colon delimited text
+  string in the form:
+
+- _webapp_: update SSH package with deprecated algorithm and keyboard interactive auth support ([#1642](https://github.com/Devolutions/devolutions-gateway/issues/1642)) ([9f0666cd7c](https://github.com/Devolutions/devolutions-gateway/commit/9f0666cd7ccf57582a197c84c5545071976d2b18)) ([DGW-327](https://devolutions.atlassian.net/browse/DGW-327)) 
+
+  Update @devolutions/web-ssh-gui from 0.4.0 to 0.6.2 with the following
+  improvements:
+  
+  - Add Keyboard_Interactive authentication mode for SSH connections
+  - Support for deprecated SSH algorithms (for legacy server
+  compatibility)
+  - Fix deadlock between terminal visibility and host key verification
+  - Library now emits connected status when WebSocket connects, allowing
+  users to see and respond to host key verification prompts
+
+- _dgw_: add support for credential injection for RDCleanPath ([#1614](https://github.com/Devolutions/devolutions-gateway/issues/1614)) ([a881961328](https://github.com/Devolutions/devolutions-gateway/commit/a88196132846c0cd0c0a2ee403576c9d3327f2f9)) 
+
+  This allows web clients to benefit from the proxy-based credential injection features.
+
+- _agent_: RDM messages and pipe passthrough logic ([#1538](https://github.com/Devolutions/devolutions-gateway/issues/1538)) ([198fce96ba](https://github.com/Devolutions/devolutions-gateway/commit/198fce96ba58be49680a055617a573c45932df2b)) ([PI-651](https://devolutions.atlassian.net/browse/PI-651)) 
+
+  Adds RDM (Remote Desktop Manager) message handling capabilities to
+  devolutions-session, enabling bidirectional communication between the
+  agent and RDM through the NOW protocol over the named pipe.
+
+- _webapp_: upgrade to Angular 20 and PrimeNG 20 ([#1652](https://github.com/Devolutions/devolutions-gateway/issues/1652)) ([607ef38127](https://github.com/Devolutions/devolutions-gateway/commit/607ef3812720edc29724479e9db6ef4773887d5c)) 
+
+  Upgrades the standalone webapp to Angular 20 and PrimeNG 20. This keeps the
+  frontend on current, supported framework versions and enables continued UI
+  improvements with the latest PrimeNG components.
+
+- _dgw,agent_: add HTTP/SOCKS proxy configuration support ([#1639](https://github.com/Devolutions/devolutions-gateway/issues/1639)) ([57ade80d14](https://github.com/Devolutions/devolutions-gateway/commit/57ade80d146e96eebd73eeec1b72fb7cbc4928b3)) ([DGW-328](https://devolutions.atlassian.net/browse/DGW-328)) 
+
+  Adds configurable HTTP/HTTPS/SOCKS4/SOCKS5 proxy support for outbound
+  requests in both Gateway and Agent. Proxy settings can be configured
+  manually or auto-detected from environment variables (HTTP_PROXY,
+  HTTPS_PROXY, NO_PROXY) or system settings (per-user and machine-wide
+  settings with WinHTTP fallback on Windows, `/etc/sysconfig/proxy` on
+  RHEL/SUSE systems, SCDynamicStoreCopyProxies() on macOS).
+  
+  This replaces reqwest's system-proxy feature with the proxy_cfg crate
+  for better system integration and per-URL proxy selection, improving
+  support for PAC files and complex enterprise proxy environments.
+
+- _agent_: add window recording support via now proto dvc ([#1583](https://github.com/Devolutions/devolutions-gateway/issues/1583)) ([4e183f0121](https://github.com/Devolutions/devolutions-gateway/commit/4e183f01210f3ba4b2b9f871e4e6351b355aaafb)) ([ARC-353](https://devolutions.atlassian.net/browse/ARC-353)) 
+
+  Adds window recording support to the Devolutions Agent. The
+  implementation uses Windows event hooks to receive foreground window
+  change notifications and optional polling to detect title changes within
+  the same window.
+
+### Bug Fixes
+
+- _agent_: improve error reporting when checking for updates ([#1602](https://github.com/Devolutions/devolutions-gateway/issues/1602)) ([f11b4567bf](https://github.com/Devolutions/devolutions-gateway/commit/f11b4567bfd3b88c3460fbbd5aeffc889608652b)) 
+
+- _dgw_: improve system store certificate resolver error logging ([#1619](https://github.com/Devolutions/devolutions-gateway/issues/1619)) ([819de83454](https://github.com/Devolutions/devolutions-gateway/commit/819de83454673b09c98af7ac826999397dd9a077)) ([DGW-320](https://devolutions.atlassian.net/browse/DGW-320)) 
+
+  The system store certificate resolver now accumulates and displays
+  detailed key acquisition errors at the default log level when no
+  suitable certificate is found. Previously, these errors (such as "keyset
+  does not exist" / error code 0x80090016) were only visible at DEBUG
+  level, making it difficult to diagnose issues like missing private key
+  permissions for the NETWORK SERVICE user.
+  
+  The error message now includes specific failure details for each
+  certificate attempt, including both key acquisition and signing key
+  creation failures.
+
+- _installer_: allow certificate passwords to contain single quotes ([9a9f31ad71](https://github.com/Devolutions/devolutions-gateway/commit/9a9f31ad71d1f0c9d6e879dc159b969e33aa1978)) 
+
+- _dgw_: downgrade benign client disconnects from ERROR to DEBUG ([#1620](https://github.com/Devolutions/devolutions-gateway/issues/1620)) ([592da4dbbc](https://github.com/Devolutions/devolutions-gateway/commit/592da4dbbcbfd413e4b7ca4f82a04dc6001aeee5)) ([DGW-319](https://devolutions.atlassian.net/browse/DGW-319)) 
+
+  Reduces log noise by treating common socket disconnections (BrokenPipe,
+  ConnectionReset, UnexpectedEof) as benign events during HTTP/HTTPS
+  serving and TLS handshake. These disconnects typically occur from health
+  checks, port scanners, aborted browser requests, or early connection
+  termination, and do not indicate server faults.
+  
+  ERROR logs now only appear for genuine server issues, making it easier
+  to identify actionable problems in production deployments.
+
+- _dgw_: self-signed TLS certificate generation of the Docker image build ([#1650](https://github.com/Devolutions/devolutions-gateway/issues/1650)) ([53b1c1801a](https://github.com/Devolutions/devolutions-gateway/commit/53b1c1801a5f33fd81b16a6e2f4a44c4c55b9d44)) 
+
+  Fixes this error:
+  ```
+  Get-Content: Cannot find path '/tmp/gateway-{hostname}.pem' because it does not exist.
+  Exception: Empty certificate chain!
+  ```
+  Hit when generating the self-signed TLS certificate generation in the Docker entrypoint.
+
+- _dgw_: honor TCP_PORT in Linux container entrypoint ([#1667](https://github.com/Devolutions/devolutions-gateway/issues/1667)) ([4fa5ae984a](https://github.com/Devolutions/devolutions-gateway/commit/4fa5ae984a1e6402912bdecf4ac7556719bc77e3)) 
+
+  Fixes an issue where the TCP_PORT environment variable was ignored by
+  the Linux Docker entrypoint.
+  Even when TCP_PORT was set, the gateway continued to use the default TCP
+  port.
+  This change ensures the gateway now correctly applies the configured
+  TCP_PORT value at startup.
+
+- _agent_: add RDM multi-instance support for Jump messages ([#1669](https://github.com/Devolutions/devolutions-gateway/issues/1669)) ([3c97b11ac6](https://github.com/Devolutions/devolutions-gateway/commit/3c97b11ac6b60f746a49bba20f274b993409961f)) ([RDMW-21183](https://devolutions.atlassian.net/browse/RDMW-21183)) 
+
+  Add RDM multi-instance support for Jump messages (separate named pipe
+  for each RDM instance in session)
+
+### Build
+
+- _dgw_: add ARM64 Docker image support ([#1607](https://github.com/Devolutions/devolutions-gateway/issues/1607)) ([b2f5172d0b](https://github.com/Devolutions/devolutions-gateway/commit/b2f5172d0b110ac980a681a7bb99d342f929059a)) ([DGW-325](https://devolutions.atlassian.net/browse/DGW-325)) 
+
+  Adds native ARM64 Docker images for Devolutions Gateway, enabling
+  deployment on ARM-based devices like Raspberry Pi and AWS Graviton
+  instances with full native performance. Multi-arch manifests
+  automatically select the correct image for the user's platform.
+
 ## 2025.3.3 (2025-12-02)
 
 ### Features
