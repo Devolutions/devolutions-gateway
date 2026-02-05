@@ -57,6 +57,16 @@ class DGatewayListener {
         $this.InternalUrl = $InternalUrl
         $this.ExternalUrl = $ExternalUrl
     }
+
+    DGatewayListener([PSCustomObject] $object) {
+        $this.InternalUrl = $object.InternalUrl
+        $this.ExternalUrl = $object.ExternalUrl
+    }
+
+    DGatewayListener([Hashtable] $table) {
+        $this.InternalUrl = $table.InternalUrl
+        $this.ExternalUrl = $table.ExternalUrl
+    }
 }
 
 function New-DGatewayListener() {
@@ -169,6 +179,24 @@ class DGatewayNgrokConfig {
     [PSCustomObject] $Tunnels
 
     DGatewayNgrokConfig() { }
+
+    DGatewayNgrokConfig([PSCustomObject] $object) {
+        $this.AuthToken = $object.AuthToken
+        $this.HeartbeatInterval = $object.HeartbeatInterval
+        $this.HeartbeatTolerance = $object.HeartbeatTolerance
+        $this.Metadata = $object.Metadata
+        $this.ServerAddr = $object.ServerAddr
+        $this.Tunnels = $object.Tunnels
+    }
+
+    DGatewayNgrokConfig([Hashtable] $table) {
+        $this.AuthToken = $table.AuthToken
+        $this.HeartbeatInterval = $table.HeartbeatInterval
+        $this.HeartbeatTolerance = $table.HeartbeatTolerance
+        $this.Metadata = $table.Metadata
+        $this.ServerAddr = $table.ServerAddr
+        $this.Tunnels = $table.Tunnels
+    }
 }
 
 function New-DGatewayNgrokTunnel() {
@@ -260,8 +288,27 @@ class DGatewayWebAppConfig {
     [System.Nullable[System.UInt32]] $AppTokenMaximumLifetime
     [System.Nullable[System.UInt32]] $LoginLimitRate
     [string] $UsersFile
+    [string] $StaticRootPath
 
     DGatewayWebAppConfig() { }
+
+    DGatewayWebAppConfig([PSCustomObject] $object) {
+        $this.Enabled = $object.Enabled
+        $this.Authentication = $object.Authentication
+        $this.AppTokenMaximumLifetime = $object.AppTokenMaximumLifetime
+        $this.LoginLimitRate = $object.LoginLimitRate
+        $this.UsersFile = $object.UsersFile
+        $this.StaticRootPath = $object.StaticRootPath
+    }
+
+    DGatewayWebAppConfig([Hashtable] $table) {
+        $this.Enabled = $table.Enabled
+        $this.Authentication = $table.Authentication
+        $this.AppTokenMaximumLifetime = $table.AppTokenMaximumLifetime
+        $this.LoginLimitRate = $table.LoginLimitRate
+        $this.UsersFile = $table.UsersFile
+        $this.StaticRootPath = $table.StaticRootPath
+    }
 }
 
 function New-DGatewayWebAppConfig() {
