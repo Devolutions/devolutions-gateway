@@ -103,6 +103,7 @@ where
     encoder: VpxEncoder,
     decoder: VpxDecoder,
     cut_block_state: CutBlockState,
+    last_encoded_abs_time: Option<u64>,
 
     #[cfg(feature = "perf-diagnostics")]
     stream_start: Instant,
@@ -187,6 +188,7 @@ where
                 encoder,
                 decoder,
                 cut_block_state: CutBlockState::HaventMet,
+                last_encoded_abs_time: None,
                 #[cfg(feature = "perf-diagnostics")]
                 stream_start: Instant::now(),
                 #[cfg(feature = "perf-diagnostics")]
@@ -261,7 +263,12 @@ where
         Ok(WriterResult::Continue)
     }
 
-    fn reencode(&mut self, video_block: &VideoBlock, is_key_frame: bool) -> anyhow::Result<Option<Vec<u8>>> {
+    fn reencode(
+        &mut self,
+        video_block: &VideoBlock,
+        is_key_frame: bool,
+        duration: usize,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         let timestamp = video_block.timestamp;
         let flags = if is_key_frame { VPX_EFLAG_FORCE_KF } else { 0 };
 
@@ -296,16 +303,10 @@ where
                 error!(error = %error, timestamp, "VPX decoder.next_frame() failed");
             })?;
 
-            perf_trace!(
-                timestamp,
-                is_key_frame,
-                flags,
-                duration = 30,
-                "Reencode: encoding frame"
-            );
+            perf_trace!(timestamp, is_key_frame, flags, duration, "Reencode: encoding frame");
 
             self.encoder
-                .encode_frame(&image, video_block.timestamp.into(), 30, flags)
+                .encode_frame(&image, video_block.timestamp.into(), duration, flags)
                 .inspect_err(|error| {
                     error!(
                         error = %error,
@@ -410,7 +411,9 @@ where
                 return Ok(());
             }
             CutBlockState::AtCutBlock => {
-                let frame = self.reencode(current_video_block, true)?;
+                let abs_time = current_video_block.absolute_timestamp()?;
+                let duration = self.compute_encode_duration(abs_time);
+                let frame = self.reencode(current_video_block, true, duration)?;
                 let Some(frame) = frame else {
                     perf_trace!(block_timestamp, "No frame available from encoder - skipping");
                     return Ok(());
@@ -420,7 +423,7 @@ where
                 let frame_size = frame.len();
                 perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
 
-                let cut_block_absolute_time = current_video_block.absolute_timestamp()?;
+                let cut_block_absolute_time = abs_time;
                 perf_trace!(
                     block_timestamp,
                     cut_block_absolute_time,
@@ -436,12 +439,15 @@ where
                 let block = SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true);
                 perf_trace!(block_timestamp, "Writing block to output");
                 self.write_block(block)?;
+                self.last_encoded_abs_time = Some(abs_time);
             }
             CutBlockState::Met {
                 cut_block_absolute_time,
                 ..
             } => {
-                let frame = self.reencode(current_video_block, false)?;
+                let abs_time = current_video_block.absolute_timestamp()?;
+                let duration = self.compute_encode_duration(abs_time);
+                let frame = self.reencode(current_video_block, false, duration)?;
                 let Some(frame) = frame else {
                     perf_trace!(block_timestamp, "No frame available from encoder - skipping");
                     return Ok(());
@@ -451,18 +457,27 @@ where
                 let frame_size = frame.len();
                 perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
 
-                let timestamp = self.compute_met_timestamp(current_video_block, cut_block_absolute_time)?;
-                let block = SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true);
+                let timestamp = self.compute_met_timestamp(cut_block_absolute_time, abs_time)?;
+                let block = SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, false);
                 perf_trace!(block_timestamp, "Writing block to output");
                 self.write_block(block)?;
+                self.last_encoded_abs_time = Some(abs_time);
             }
         }
 
         Ok(())
     }
 
-    fn compute_met_timestamp(&mut self, block: &VideoBlock, cut_block_absolute_time: u64) -> anyhow::Result<i16> {
-        let abs_time = block.absolute_timestamp()?;
+    fn compute_encode_duration(&self, abs_time: u64) -> usize {
+        let duration_ms = match self.last_encoded_abs_time {
+            Some(last_abs_time) => abs_time.saturating_sub(last_abs_time).max(1),
+            None => 30,
+        };
+
+        usize::try_from(duration_ms).unwrap_or(usize::MAX)
+    }
+
+    fn compute_met_timestamp(&mut self, cut_block_absolute_time: u64, abs_time: u64) -> anyhow::Result<i16> {
         let cluster_rel = abs_time - cut_block_absolute_time;
 
         self.maybe_report_realtime_ratio(abs_time, cluster_rel);
