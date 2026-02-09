@@ -6,6 +6,7 @@ export async function playStream(id: string) {
   const websocketUrl = await getStreamingWebsocketUrl(id);
 
   const videoElement = document.getElementById('shadowPlayer') as ShadowPlayer;
+  videoElement.setDebug(true);
   videoElement.srcChange(websocketUrl);
   videoElement.play();
 }

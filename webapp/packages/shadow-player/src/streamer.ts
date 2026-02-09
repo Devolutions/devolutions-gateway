@@ -182,16 +182,21 @@ export class ShadowPlayer extends HTMLElement {
           return;
         }
 
-        if (this._videoElement.duration - this._videoElement.currentTime > 5) {
-          try {
-            this._videoElement.currentTime = this._videoElement.seekable.end(0);
-          } catch (error) {
-            // ignore error, if not debug
-            // this could happen when the first chunk is received, but it's expected
-            if (this.debug) {
-              console.error('Error seeking:', error);
-            }
-          }
+        if (this.debug) {
+          const v = this._videoElement;
+          const buffered = v.buffered.length > 0
+            ? `[${v.buffered.start(0).toFixed(2)}-${v.buffered.end(0).toFixed(2)}]`
+            : '(empty)';
+          console.log(
+            `[shadow-player] chunk appended: duration=${v.duration.toFixed(2)} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} readyState=${v.readyState}`
+          );
+        }
+
+        if (
+          this._videoElement.buffered.length > 0 &&
+          this._videoElement.buffered.end(0) - this._videoElement.currentTime > 5
+        ) {
+          this._videoElement.currentTime = this._videoElement.buffered.end(0);
         }
       }
 
@@ -223,8 +228,29 @@ export class ShadowPlayer extends HTMLElement {
       this.videoElement.controls = true;
       if (reactiveSourceBuffer && mediaSource.readyState === 'open') {
         try {
+          if (this.debug && this._videoElement) {
+            const v = this._videoElement;
+            const buffered = v.buffered.length > 0
+              ? `[${v.buffered.start(0).toFixed(2)}-${v.buffered.end(0).toFixed(2)}]`
+              : '(empty)';
+            console.log(
+              `[shadow-player] BEFORE endOfStream: duration=${v.duration} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} mediaSource.readyState=${mediaSource.readyState}`
+            );
+          }
           mediaSource.endOfStream();
+          if (this.debug && this._videoElement) {
+            const v = this._videoElement;
+            const buffered = v.buffered.length > 0
+              ? `[${v.buffered.start(0).toFixed(2)}-${v.buffered.end(0).toFixed(2)}]`
+              : '(empty)';
+            console.log(
+              `[shadow-player] AFTER endOfStream: duration=${v.duration} currentTime=${v.currentTime.toFixed(2)} buffered=${buffered} mediaSource.readyState=${mediaSource.readyState}`
+            );
+          }
         } catch (error) {
+          if (this.debug) {
+            console.error('[shadow-player] endOfStream error:', error);
+          }
         }
       }
       this.websocket = null;
