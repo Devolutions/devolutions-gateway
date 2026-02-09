@@ -197,6 +197,11 @@ where
             CutBlockHitMarker,
         ))
     }
+
+    fn decode_only(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
+        self.decoder.decode(&current_video_block.get_frame()?)?;
+        Ok(())
+    }
 }
 
 pub(crate) enum WriterResult {
@@ -398,23 +403,23 @@ where
             "Processing current block"
         );
 
-        let frame = self.reencode(current_video_block, true)?;
-        let Some(frame) = frame else {
-            perf_trace!(block_timestamp, "No frame available from encoder - skipping");
-            // No frame available from the encoder, proceed to the next
-            return Ok(());
-        };
-
-        #[cfg(feature = "perf-diagnostics")]
-        let frame_size = frame.len();
-        perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
-
-        let block = match self.cut_block_state {
+        match self.cut_block_state {
             CutBlockState::HaventMet => {
-                perf_trace!(block_timestamp, "State is HaventMet - not writing block yet");
+                perf_trace!(block_timestamp, "State is HaventMet - decoding block without writing");
+                self.decode_only(current_video_block)?;
                 return Ok(());
             }
             CutBlockState::AtCutBlock => {
+                let frame = self.reencode(current_video_block, true)?;
+                let Some(frame) = frame else {
+                    perf_trace!(block_timestamp, "No frame available from encoder - skipping");
+                    return Ok(());
+                };
+
+                #[cfg(feature = "perf-diagnostics")]
+                let frame_size = frame.len();
+                perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
+
                 let cut_block_absolute_time = current_video_block.absolute_timestamp()?;
                 perf_trace!(
                     block_timestamp,
@@ -428,66 +433,71 @@ where
                 };
                 perf_trace!(cut_block_absolute_time, "State transition: AtCutBlock -> Met");
 
-                SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true)
+                let block = SimpleBlock::new_uncheked(&frame, 1, 0, false, None, false, true);
+                perf_trace!(block_timestamp, "Writing block to output");
+                self.write_block(block)?;
             }
             CutBlockState::Met {
                 cut_block_absolute_time,
                 ..
             } => {
-                let current_block_absolute_time = current_video_block.absolute_timestamp()?;
-                let cluster_relative_timestamp = current_block_absolute_time - cut_block_absolute_time;
+                let frame = self.reencode(current_video_block, false)?;
+                let Some(frame) = frame else {
+                    perf_trace!(block_timestamp, "No frame available from encoder - skipping");
+                    return Ok(());
+                };
 
-                self.maybe_report_realtime_ratio(current_block_absolute_time, cluster_relative_timestamp);
+                #[cfg(feature = "perf-diagnostics")]
+                let frame_size = frame.len();
+                perf_trace!(block_timestamp, frame_size, "Frame available from encoder");
 
-                perf_trace!(
-                    current_block_absolute_time,
-                    cut_block_absolute_time,
-                    cluster_relative_timestamp,
-                    "Processing block in Met state"
-                );
-
-                if self.should_write_new_cluster(current_block_absolute_time) {
-                    perf_trace!(
-                        current_block_absolute_time,
-                        cluster_relative_timestamp,
-                        "Starting new cluster due to timestamp overflow"
-                    );
-                    self.start_new_cluster(cluster_relative_timestamp)?;
-
-                    self.cut_block_state = CutBlockState::Met {
-                        cut_block_absolute_time,
-                        last_cluster_relative_time: cluster_relative_timestamp,
-                    };
-                }
-                let last_cluster_rel = self
-                    .last_cluster_relative_time()
-                    .context("missing last cluster relative time")?;
-                let relative_timestamp =
-                    current_video_block.absolute_timestamp()? - cut_block_absolute_time - last_cluster_rel;
-
-                perf_trace!(
-                    relative_timestamp,
-                    cut_block_absolute_time,
-                    current_block_absolute_timestamp = current_video_block.absolute_timestamp()?,
-                    last_cluster_relative_time = last_cluster_rel,
-                    "Calculated block relative timestamp"
-                );
-
-                let timestamp = i16::try_from(relative_timestamp).inspect_err(|error| {
-                    error!(
-                        error = %error,
-                        relative_timestamp,
-                        "Failed to convert relative_timestamp to i16 - overflow"
-                    );
-                })?;
-
-                SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true)
+                let timestamp = self.compute_met_timestamp(current_video_block, cut_block_absolute_time)?;
+                let block = SimpleBlock::new_uncheked(&frame, 1, timestamp, false, None, false, true);
+                perf_trace!(block_timestamp, "Writing block to output");
+                self.write_block(block)?;
             }
-        };
+        }
 
-        perf_trace!(block_timestamp, "Writing block to output");
-        self.write_block(block)?;
         Ok(())
+    }
+
+    fn compute_met_timestamp(&mut self, block: &VideoBlock, cut_block_absolute_time: u64) -> anyhow::Result<i16> {
+        let abs_time = block.absolute_timestamp()?;
+        let cluster_rel = abs_time - cut_block_absolute_time;
+
+        self.maybe_report_realtime_ratio(abs_time, cluster_rel);
+
+        if self.should_write_new_cluster(abs_time) {
+            perf_trace!(abs_time, cluster_rel, "Starting new cluster due to timestamp overflow");
+            self.start_new_cluster(cluster_rel)?;
+            self.cut_block_state = CutBlockState::Met {
+                cut_block_absolute_time,
+                last_cluster_relative_time: cluster_rel,
+            };
+        }
+
+        let last_cluster_rel = self
+            .last_cluster_relative_time()
+            .context("missing last cluster relative time")?;
+        let relative = abs_time - cut_block_absolute_time - last_cluster_rel;
+
+        perf_trace!(
+            relative,
+            cut_block_absolute_time,
+            current_block_absolute_timestamp = abs_time,
+            last_cluster_relative_time = last_cluster_rel,
+            "Calculated block relative timestamp"
+        );
+
+        i16::try_from(relative)
+            .inspect_err(|error| {
+                error!(
+                    error = %error,
+                    relative_timestamp = relative,
+                    "Relative timestamp i16 overflow"
+                );
+            })
+            .map_err(Into::into)
     }
 
     fn write_block(&mut self, block: SimpleBlock<'_>) -> anyhow::Result<()> {
