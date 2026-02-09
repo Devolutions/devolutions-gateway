@@ -158,6 +158,7 @@ async fn setup_webm_streaming(
     let streaming_file = ReOpenableFile::open(path).with_context(|| format!("failed to open file: {path:?}"))?;
     let streamer_config = video_streamer::StreamingConfig {
         encoder_threads: CpuCount::default(),
+        adaptive_frame_skip: true,
     };
 
     let (websocket_stream, close_handle) =

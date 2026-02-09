@@ -409,6 +409,7 @@ pub(crate) async fn spawn_stream_harness_delayed_start(
             shutdown_for_stream,
             video_streamer::StreamingConfig {
                 encoder_threads: video_streamer::config::CpuCount::new(encoder_threads),
+                adaptive_frame_skip: false,
             },
             when_new_chunk_appended,
         )

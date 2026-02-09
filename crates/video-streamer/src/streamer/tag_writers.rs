@@ -1,4 +1,3 @@
-#[cfg(feature = "perf-diagnostics")]
 use std::time::Instant;
 
 use anyhow::Context;
@@ -105,8 +104,12 @@ where
     cut_block_state: CutBlockState,
     last_encoded_abs_time: Option<u64>,
 
-    #[cfg(feature = "perf-diagnostics")]
+    // Adaptive frame skipping state
     stream_start: Instant,
+    last_ratio: f64,
+    frames_since_last_encode: u32,
+    adaptive_frame_skip: bool,
+
     #[cfg(feature = "perf-diagnostics")]
     last_report_at: Instant,
     #[cfg(feature = "perf-diagnostics")]
@@ -189,8 +192,10 @@ where
                 decoder,
                 cut_block_state: CutBlockState::HaventMet,
                 last_encoded_abs_time: None,
-                #[cfg(feature = "perf-diagnostics")]
                 stream_start: Instant::now(),
+                last_ratio: 1.0,
+                frames_since_last_encode: 0,
+                adaptive_frame_skip: config.adaptive_frame_skip,
                 #[cfg(feature = "perf-diagnostics")]
                 last_report_at: Instant::now(),
                 #[cfg(feature = "perf-diagnostics")]
@@ -364,8 +369,26 @@ where
         Ok(frame)
     }
 
+    fn current_realtime_ratio(&self, media_advanced_ms: u64) -> f64 {
+        let wall_ms = self.stream_start.elapsed().as_millis() as u64;
+        if wall_ms == 0 {
+            1.0
+        } else {
+            media_advanced_ms as f64 / wall_ms as f64
+        }
+    }
+
+    fn should_skip_encode(&self) -> bool {
+        // Skip encoding when falling behind real-time. The ratio naturally self-regulates:
+        // skipping makes processing faster (decode-only), which pushes ratio back above 1.0,
+        // which resumes encoding. This bang-bang control keeps the stream near real-time.
+        self.adaptive_frame_skip && self.last_ratio < 1.0
+    }
+
     #[cfg(feature = "perf-diagnostics")]
     fn maybe_report_realtime_ratio(&mut self, current_block_absolute_time: u64, media_advanced_ms: u64) {
+        self.last_ratio = self.current_realtime_ratio(media_advanced_ms);
+
         // Report at most once per second to keep logs readable.
         if self.last_report_at.elapsed().as_secs_f32() < 1.0 {
             return;
@@ -373,26 +396,21 @@ where
         self.last_report_at = Instant::now();
 
         let wall_elapsed_ms = duration_as_millis_u64(self.stream_start.elapsed());
-        let ratio = if wall_elapsed_ms == 0 {
-            0.0
-        } else {
-            media_advanced_ms as f64 / wall_elapsed_ms as f64
-        };
 
         info!(
             prefix = "[LibVPx-Performance-Hypothesis]",
             wall_elapsed_ms,
             current_block_absolute_time,
             media_advanced_ms,
-            realtime_ratio = ratio,
+            realtime_ratio = self.last_ratio,
             frames_reencoded = self.frames_reencoded,
             "Stream advancement"
         );
     }
 
     #[cfg(not(feature = "perf-diagnostics"))]
-    fn maybe_report_realtime_ratio(&mut self, _current_block_absolute_time: u64, _media_advanced_ms: u64) {
-        let _ = &self.cut_block_state;
+    fn maybe_report_realtime_ratio(&mut self, _current_block_absolute_time: u64, media_advanced_ms: u64) {
+        self.last_ratio = self.current_realtime_ratio(media_advanced_ms);
     }
 
     fn process_current_block(&mut self, current_video_block: &VideoBlock) -> anyhow::Result<()> {
@@ -446,6 +464,29 @@ where
                 ..
             } => {
                 let abs_time = current_video_block.absolute_timestamp()?;
+                let media_advanced_ms = abs_time.saturating_sub(cut_block_absolute_time);
+                self.last_ratio = self.current_realtime_ratio(media_advanced_ms);
+
+                if self.should_skip_encode() {
+                    perf_trace!(
+                        block_timestamp,
+                        frames_since_last_encode = self.frames_since_last_encode,
+                        last_ratio = %self.last_ratio,
+                        "Frame skipped - decode only, encode deferred"
+                    );
+                    self.decode_only(current_video_block)?;
+                    self.frames_since_last_encode += 1;
+                    return Ok(());
+                }
+
+                perf_trace!(
+                    block_timestamp,
+                    frames_skipped = self.frames_since_last_encode,
+                    last_ratio = %self.last_ratio,
+                    "Encoding frame after skip burst"
+                );
+                self.frames_since_last_encode = 0;
+
                 let duration = self.compute_encode_duration(abs_time);
                 let frame = self.reencode(current_video_block, false, duration)?;
                 let Some(frame) = frame else {
@@ -618,6 +659,7 @@ pub(crate) struct EncodeWriterConfig {
     pub width: u32,
     pub height: u32,
     pub codec: VpxCodec,
+    pub adaptive_frame_skip: bool,
 }
 
 pub(crate) type Headers<'a> = &'a [MatroskaSpec];
@@ -690,6 +732,7 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
             width: final_width,
             height: final_height,
             codec: final_codec,
+            adaptive_frame_skip: config.adaptive_frame_skip,
         };
 
         perf_debug!(
