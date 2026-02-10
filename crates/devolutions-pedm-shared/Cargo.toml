@@ -15,7 +15,7 @@ hyper = { version = "~0.14", features = ["client", "http1"], optional = true } #
 serde_json = { version = "1.0", optional = true }
 tokio = { version = "1.45", features = ["net", "sync"], optional = true }
 glob = { version = "0.3", optional = true }
-regex = { version = "1.11", optional = true }
+regex = { version = "1.12", optional = true }
 schemars = { version = "0.8", features = ["uuid1"], optional = true }
 windows-registry = { version = "0.5", optional = true }
 devolutions-pedm-client-http = { path = "./devolutions-pedm-client-http", optional = true }

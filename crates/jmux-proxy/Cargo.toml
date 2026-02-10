@@ -26,7 +26,7 @@ anyhow = "1.0"
 tracing = "0.1"
 
 # codec implementation
-bytes = "1.10"
+bytes = "1.11"
 bitvec = "1.0"
 
 [dev-dependencies]

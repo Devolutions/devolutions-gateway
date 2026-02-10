@@ -9,7 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
-bytes = "1.10"
+bytes = "1.11"
 smol_str = "0.3"
 
 [dev-dependencies]
