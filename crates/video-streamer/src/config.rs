@@ -27,4 +27,7 @@ impl Default for CpuCount {
 
 pub struct StreamingConfig {
     pub encoder_threads: CpuCount,
+    /// When `true`, the encoder adaptively skips frames when falling behind
+    /// real-time, reducing CPU pressure at the cost of lower output frame rate.
+    pub adaptive_frame_skip: bool,
 }

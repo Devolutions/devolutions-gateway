@@ -72,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
             notify,
             StreamingConfig {
                 encoder_threads: CpuCount::default(),
+                adaptive_frame_skip: true,
             },
             || {
                 let (tx, rx) = tokio::sync::oneshot::channel();

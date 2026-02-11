@@ -29,6 +29,9 @@ export class ReactiveSourceBuffer {
     this.bufferQueue.push(buffer);
     if (this.debug) {
       this.allBuffers.push(new Blob([buffer], { type: 'video/webm' })); // Save each buffer
+      console.log(
+        `[sourceBuffer] appendBuffer: size=${buffer.length} queueLen=${this.bufferQueue.length} bufferedRanges=${this.getBufferedRanges() || '(empty)'}`
+      );
     }
     this.tryAppendBuffer();
   }
