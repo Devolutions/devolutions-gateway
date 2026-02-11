@@ -76,7 +76,7 @@ async fn timeline_starts_at_zero_after_cut_uncued_recording() {
 /// How:
 /// - Drive the stream long enough to observe a number of SimpleBlocks.
 /// - Parse Cluster timestamp + SimpleBlock relative timestamp, and compute absolute timestamps in milliseconds.
-/// - Assert absolute timestamps are monotonic non-decreasing and that they advance by at least 500ms.
+/// - Assert absolute timestamps are monotonic non-decreasing and that they advance by at least 100ms.
 ///
 /// References:
 /// - [Matroska: SimpleBlock][matroska-simpleblock]
