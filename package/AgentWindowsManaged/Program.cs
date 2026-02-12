@@ -75,25 +75,23 @@ internal class Program
         return path;
     }
 
-    private static string DevolutionsAgentExePath => ResolveArtifact("DAGENT_EXECUTABLE", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions-agent.exe");
+    private static string DevolutionsAgentExePath => ResolveArtifact("DAGENT_EXECUTABLE", "..\\..\\target\\debug\\devolutions-agent.exe");
 
     private static string DevolutionsDesktopAgentPath
     {
         // ReSharper disable once ArrangeAccessorOwnerBody
-        get => ResolveDirectory("DAGENT_DESKTOP_AGENT_PATH", "..\\..\\dotnet\\DesktopAgent\\bin\\Release\\");
+        get => ResolveDirectory("DAGENT_DESKTOP_AGENT_PATH", "..\\..\\dotnet\\DesktopAgent\\bin\\Debug\\");
     }
 
-    private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions_pedm_shell_ext.dll");
+    private static string DevolutionsPedmShellExtDll => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_DLL", "..\\..\\target\\debug\\devolutions_pedm_shell_ext.dll");
 
-    private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\DevolutionsPedmShellExt.msix");
+    private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "..\\..\\target\\debug\\DevolutionsPedmShellExt.msix");
 
-    private static string DevolutionsSession => ResolveArtifact("DAGENT_SESSION_EXECUTABLE", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\devolutions-session.exe");
+    private static string DevolutionsSession => ResolveArtifact("DAGENT_SESSION_EXECUTABLE", "..\\..\\target\\debug\\devolutions-session.exe");
 
     private static string DevolutionsTun2SocksExe => ResolveArtifact("DAGENT_TUN2SOCKS_EXE", "..\\..\\tun2socks.exe");
 
     private static string DevolutionsWintunDll => ResolveArtifact("DAGENT_WINTUN_DLL", "..\\..\\wintun.dll");
-
-    private static string TargetOutputPath => ResolveDirectory("TARGET_OUTPUT_PATH", "..\\..\\target\\x86_64-pc-windows-msvc\\release\\");
 
     private static Version DevolutionsAgentVersion
     {
