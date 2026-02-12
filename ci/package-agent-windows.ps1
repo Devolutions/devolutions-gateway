@@ -8,6 +8,9 @@ param(
     [string] $PedmMsix,
     [parameter(Mandatory = $true)]
     [string] $SessionExe,
+    [parameter(Mandatory = $true)]
+    [ValidateSet('x64', 'arm64')]
+    [string] $Architecture,
     [string] $Outfile
 )
 
@@ -89,6 +92,10 @@ function New-AgentMsi() {
         [parameter(Mandatory = $true)]
         # The path to the devolutions-session.exe file.
         [string] $SessionExe,
+        [parameter(Mandatory = $true)]
+        [ValidateSet('x64', 'arm64')]
+        # Architecture: x64 or arm64
+        [string] $Architecture,
         # Only required if `Generate` is not set.
         [string] $Outfile
     )
@@ -139,8 +146,9 @@ function New-AgentMsi() {
     Push-Location
     Set-Location "$repoDir\package\AgentWindowsManaged"
 
-    # Set the MSI version, which is read by `package/WindowsManaged/Program.cs`.
+    # Set the MSI version and platform, which are read by `package/AgentWindowsManaged/Program.cs`.
     $Env:DAGENT_VERSION = $version.Substring(2)
+    $Env:DAGENT_PLATFORM = $Architecture
     if ($Generate) {
         # This is used by `package/WindowsManaged/Program.cs`.
         $Env:DAGENT_MSI_SOURCE_ONLY_BUILD = '1'
@@ -167,4 +175,4 @@ function New-AgentMsi() {
     Pop-Location
 }
 
-New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -Outfile $Outfile
+New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -Architecture $Architecture -Outfile $Outfile
