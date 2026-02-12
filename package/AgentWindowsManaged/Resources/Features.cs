@@ -12,24 +12,24 @@ namespace DevolutionsAgent.Resources
 
         internal static IEnumerable<Feature> ExperimentalFeatures => [ ];
 
-        internal static Feature AGENT_UPDATER_FEATURE = new("!(loc.FeatureAgentUpdaterName)", "!(loc.FeatureAgentUpdaterDescription)", true, true)
+        internal static Feature AGENT_UPDATER_FEATURE = new("!(loc.FeatureAgentUpdaterName)", "!(loc.FeatureAgentUpdaterDescription)", isEnabled: true, allowChange: true)
         {
             Id = $"{FEATURE_ID_PREFIX}Updater"
         };
 
-        internal static Feature AGENT_FEATURE = new("!(loc.FeatureAgentName)", true, false)
+        internal static Feature AGENT_FEATURE = new("!(loc.FeatureAgentName)", isEnabled: true, allowChange: false)
         {
             Id = $"{FEATURE_ID_PREFIX}Agent", 
             Description = "!(loc.FeatureAgentDescription)",
             Children = [ AGENT_UPDATER_FEATURE ]
         };
 
-        internal static Feature PEDM_FEATURE = new("!(loc.FeaturePedmName)", "!(loc.FeaturePedmDescription)", false)
+        internal static Feature PEDM_FEATURE = new("!(loc.FeaturePedmName)", "!(loc.FeaturePedmDescription)", isEnabled: false)
         {
             Id = $"{FEATURE_ID_PREFIX}Pedm"
         };
 
-        internal static Feature SESSION_FEATURE = new("!(loc.FeatureSessionName)", "!(loc.FeatureSessionDescription)", true)
+        internal static Feature SESSION_FEATURE = new("!(loc.FeatureSessionName)", "!(loc.FeatureSessionDescription)", isEnabled: true)
         {
             Id = $"{FEATURE_ID_PREFIX}Session"
         };

@@ -48,7 +48,7 @@ public partial class FeaturesDialog : AgentDialog
             Tag = featureItem
         };
 
-        featureItem.View = view;
+        featureItem.ViewModel = view;
 
         if (addLocal)
         {
@@ -94,18 +94,18 @@ public partial class FeaturesDialog : AgentDialog
                 continue;
             }
 
-            featureItem.View = CreateFeatureListItem(featureItem, addLocal.Contains(featureItem.Name), remove.Contains(featureItem.Name));
+            featureItem.ViewModel = CreateFeatureListItem(featureItem, addLocal.Contains(featureItem.Name), remove.Contains(featureItem.Name));
             featureItems.Add(featureItem);
 
             foreach (FeatureItem childFeature in this.features.Where(x => x.ParentName == featureItem.Name))
             {
-                childFeature.View = CreateFeatureListItem(childFeature, addLocal.Contains(childFeature.Name), remove.Contains(childFeature.Name), level: 1);
+                childFeature.ViewModel = CreateFeatureListItem(childFeature, addLocal.Contains(childFeature.Name), remove.Contains(childFeature.Name), level: 1);
                 featureItems.Add(childFeature);
             }
         }
 
         featureItems.Where(x => x.Display != FeatureDisplay.hidden)
-                 .Select(x => x.View)
+                 .Select(x => x.ViewModel)
                  .Cast<ListViewItem>()
                  .ForEach(featuresTree.Items.Add);
 
@@ -165,6 +165,6 @@ public partial class FeaturesDialog : AgentDialog
 
     private static bool IsViewChecked(FeatureItem feature)
     {
-        return feature.View is ListViewItem {Checked: true};
+        return feature.ViewModel is ListViewItem {Checked: true};
     }
 }
