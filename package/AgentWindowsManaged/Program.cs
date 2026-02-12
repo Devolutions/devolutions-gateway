@@ -121,6 +121,34 @@ internal class Program
         }
     }
 
+    private static WixSharp.Platform TargetPlatform
+    {
+         get
+        {
+            string platform = Environment.GetEnvironmentVariable("DAGENT_PLATFORM");
+
+#if DEBUG
+            if (string.IsNullOrWhiteSpace(platform))
+            {
+                return WixSharp.Platform.x64;
+            }
+#endif
+
+            if (string.IsNullOrEmpty(platform))
+            {
+                throw new Exception("The environment variable DAGENT_PLATFORM is not specified or is invalid");
+            }
+
+            // Normalize architecture string to handle various formats from CI/build systems
+            return platform.ToLowerInvariant() switch
+            {
+                "x64" or "x86_64" or "amd64" => WixSharp.Platform.x64,
+                "arm64" or "aarch64" => WixSharp.Platform.arm64,
+                _ => throw new Exception($"unrecognized platform: {platform}. Supported values: x64, x86_64, amd64, arm64, aarch64")
+            };
+        }
+    }
+
     private static bool SourceOnlyBuild => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DAGENT_MSI_SOURCE_ONLY_BUILD"));
 
     private static string ProjectLangId
@@ -164,7 +192,7 @@ internal class Program
             InstallerVersion = 500, // Windows Installer 5.0; Server 2008 R2 / Windows 7
             InstallScope = InstallScope.perMachine,
             InstallPrivileges = InstallPrivileges.elevated,
-            Platform = Platform.x64,
+            Platform = TargetPlatform,
 #if DEBUG
             PreserveTempFiles = true,
             OutDir = "Debug",

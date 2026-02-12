@@ -577,6 +577,7 @@ class TlkRecipe
         $ShortVersion = $this.Version.Substring(2) # msi version
 
         $Env:DAGENT_VERSION="$ShortVersion"
+        $Env:DAGENT_PLATFORM=$this.Target.Architecture
 
         Push-Location
         Set-Location "$($this.SourcePath)/package/Agent$($this.Target.Platform)Managed"
