@@ -9,3 +9,7 @@ dist/
 /output/
 /config/
 *.DotSettings
+
+# Downloaded build dependencies
+tun2socks.exe
+wintun.dll
