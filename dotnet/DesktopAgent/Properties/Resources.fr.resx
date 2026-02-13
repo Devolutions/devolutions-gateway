@@ -118,45 +118,45 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="lblAbout" xml:space="preserve">
-    <value>About</value>
+    <value>À propos</value>
   </data>
   <data name="lblCopyright" xml:space="preserve">
-    <value>Copyright</value>
+    <value>Tous droits réservés</value>
   </data>
   <data name="mnuAbout" xml:space="preserve">
-    <value>About</value>
+    <value>À propos</value>
   </data>
   <data name="mnuExit" xml:space="preserve">
-    <value>Exit</value>
+    <value>Quitter</value>
   </data>
   <data name="mnuProfileNone" xml:space="preserve">
-    <value>None</value>
+    <value>Aucun</value>
   </data>
   <data name="mnuProfiles" xml:space="preserve">
-    <value>Profiles</value>
+    <value>Profils</value>
   </data>
   <data name="mnuServiceUnavailable" xml:space="preserve">
-    <value>Service unavailable</value>
+    <value>Service indisponible</value>
   </data>
   <data name="msgElevationBlocked" xml:space="preserve">
-    <value>Elevation Blocked</value>
+    <value>Élévation bloquée</value>
   </data>
   <data name="msgElevationBlockedDescription" xml:space="preserve">
-    <value>Elevation blocked by the currently selected profile</value>
+    <value>Élévation bloquée par le profil actuellement sélectionné</value>
   </data>
   <data name="msgElevationFailed" xml:space="preserve">
-    <value>Elevation Failed</value>
+    <value>Échec de l’élévation</value>
   </data>
   <data name="msgUnexpectedError" xml:space="preserve">
-    <value>Unexpected Error</value>
+    <value>Erreur inattendue</value>
   </data>
   <data name="msgUnexpectedErrorDescription" xml:space="preserve">
-    <value>An unexpected error occurred</value>
+    <value>Une erreur inattendue s’est produite</value>
   </data>
   <data name="mnuPEDMUnavailable" xml:space="preserve">
-    <value>PEDM unavailable</value>
+    <value>PEDM indisponible</value>
   </data>
   <data name="mnuServiceAvailable" xml:space="preserve">
-    <value>Service running</value>
+    <value>Service en cours d’exécution</value>
   </data>
 </root>

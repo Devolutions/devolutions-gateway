@@ -106,6 +106,8 @@ namespace Devolutions.Agent.Desktop
 
     public class AppContext : ApplicationContext
     {
+        private readonly RootConfig config;
+
         private readonly ContextMenu contextMenu;
 
         private readonly SynchronizationContext synchronizationContext;
@@ -114,6 +116,8 @@ namespace Devolutions.Agent.Desktop
 
         public AppContext()
         {
+            config = Utils.LoadConfig();
+
             Version version = Assembly.GetExecutingAssembly().GetName().Version;
 
             this.synchronizationContext = new WindowsFormsSynchronizationContext();
@@ -121,15 +125,17 @@ namespace Devolutions.Agent.Desktop
             this.contextMenu.Popup += ContextMenuOnPopup;
             this.trayIcon = new NotifyIcon()
             {
-                Icon = Resources.AppIcon,
+                Icon = ImageResources.AppIcon,
                 ContextMenu = contextMenu,
-                Text = $"{Resources.lblProductName} v{version.Major}.{version.Minor}.{version.Build}",
+                Text = $"{StaticResources.DevolutionsAgent} v{version.Major}.{version.Minor}.{version.Build}",
                 Visible = true,
             };
         }
 
         private void ContextMenuOnPopup(object sender, EventArgs e)
         {
+            bool ctrl = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+
             this.contextMenu.MenuItems.Clear();
 
             this.contextMenu.MenuItems.Add(Resources.mnuAbout, (_, _) =>
@@ -139,57 +145,71 @@ namespace Devolutions.Agent.Desktop
             });
 
             this.contextMenu.MenuItems.Add(new MenuItem("-"));
+            this.contextMenu.MenuItems.Add(new MenuItem(Utils.IsServiceRunning("DevolutionsAgent") ? Resources.mnuServiceAvailable : Resources.mnuServiceUnavailable) { Enabled = false });
 
-            if (Client.Available)
+            if (ctrl)
             {
-                List<(long, string)> profiles = new List<(long, string)>();
-                profiles.Add((0, Resources.mnuProfileNone));
+                this.contextMenu.MenuItems.Add(new MenuItem("-"));
+                this.contextMenu.MenuItems.Add(new MenuItem("Updater") { Enabled = false, Checked = config?.Updater?.Enabled ?? false });
+                this.contextMenu.MenuItems.Add(new MenuItem("Session") { Enabled = false, Checked = config?.Session?.Enabled ?? false });
+                this.contextMenu.MenuItems.Add(new MenuItem("PEDM") { Enabled = false, Checked = config?.Pedm?.Enabled ?? false });
+            }
 
-                MenuItem mnuProfiles = new MenuItem(Resources.mnuProfiles);
+            if (config?.Pedm?.Enabled ?? false)
+            {
+                this.contextMenu.MenuItems.Add(new MenuItem("-"));
 
-                GetProfilesMeResponse currentProfiles = null;
-
-                try
+                if (Client.Available)
                 {
-                    currentProfiles = Client.CurrentProfiles();
-                    profiles.AddRange(currentProfiles.Available.Select(z => (z, Client.GetProfile(z).Name)));
-                }
-                catch (Exception exception)
-                {
-                    Program.Log.Error(exception.ToString());
-                }
+                    List<(long, string)> profiles = new List<(long, string)>();
+                    profiles.Add((0, Resources.mnuProfileNone));
 
-                foreach (var profile in profiles)
-                {
-                    MenuItem mnuProfile = new MenuItem(profile.Item2);
-                    mnuProfile.Tag = profile.Item1;
+                    MenuItem mnuProfiles = new MenuItem(Resources.mnuProfiles);
 
-                    if (profile.Item1 == currentProfiles?.Active)
+                    GetProfilesMeResponse currentProfiles = null;
+
+                    try
                     {
-                        mnuProfile.Checked = true;
+                        currentProfiles = Client.CurrentProfiles();
+                        profiles.AddRange(currentProfiles.Available.Select(z => (z, Client.GetProfile(z).Name)));
+                    }
+                    catch (Exception exception)
+                    {
+                        Program.Log.Error(exception.ToString());
                     }
 
-                    mnuProfile.Click += (o, _) =>
+                    foreach (var profile in profiles)
                     {
-                        try
-                        {
-                            long profileId = (long)((MenuItem) o).Tag;
-                            Client.SetCurrentProfile(profileId);
-                        }
-                        catch (Exception exception)
-                        {
-                            Program.Log.Error(exception.ToString());
-                        }
-                    };
+                        MenuItem mnuProfile = new MenuItem(profile.Item2);
+                        mnuProfile.Tag = profile.Item1;
 
-                    mnuProfiles.MenuItems.Add(mnuProfile);
+                        if (profile.Item1 == currentProfiles?.Active)
+                        {
+                            mnuProfile.Checked = true;
+                        }
+
+                        mnuProfile.Click += (o, _) =>
+                        {
+                            try
+                            {
+                                long profileId = (long)((MenuItem)o).Tag;
+                                Client.SetCurrentProfile(profileId);
+                            }
+                            catch (Exception exception)
+                            {
+                                Program.Log.Error(exception.ToString());
+                            }
+                        };
+
+                        mnuProfiles.MenuItems.Add(mnuProfile);
+                    }
+
+                    this.contextMenu.MenuItems.Add(mnuProfiles);
                 }
-
-                this.contextMenu.MenuItems.Add(mnuProfiles);
-            }
-            else
-            {
-                this.contextMenu.MenuItems.Add(new MenuItem(Resources.mnuServiceUnavailable) { Enabled = false });
+                else
+                {
+                    this.contextMenu.MenuItems.Add(new MenuItem(Resources.mnuPEDMUnavailable) { Enabled = false });
+                }
             }
 
             this.contextMenu.MenuItems.Add(new MenuItem("-"));
