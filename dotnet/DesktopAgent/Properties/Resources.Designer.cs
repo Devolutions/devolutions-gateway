@@ -19,7 +19,7 @@ namespace Devolutions.Agent.Desktop.Properties {
     // class via a tool like ResGen or Visual Studio.
     // To add or remove a member, edit your .ResX file then rerun ResGen
     // with the /str option, or rebuild your VS project.
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "17.0.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "18.0.0.0")]
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     internal class Resources {
@@ -61,26 +61,6 @@ namespace Devolutions.Agent.Desktop.Properties {
         }
         
         /// <summary>
-        ///   Looks up a localized resource of type System.Drawing.Icon similar to (Icon).
-        /// </summary>
-        internal static System.Drawing.Icon AppIcon {
-            get {
-                object obj = ResourceManager.GetObject("AppIcon", resourceCulture);
-                return ((System.Drawing.Icon)(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized resource of type System.Byte[].
-        /// </summary>
-        internal static byte[] devolutions_agent_icon_shadow {
-            get {
-                object obj = ResourceManager.GetObject("devolutions-agent-icon-shadow", resourceCulture);
-                return ((byte[])(obj));
-            }
-        }
-        
-        /// <summary>
         ///   Looks up a localized string similar to About.
         /// </summary>
         internal static string lblAbout {
@@ -95,24 +75,6 @@ namespace Devolutions.Agent.Desktop.Properties {
         internal static string lblCopyright {
             get {
                 return ResourceManager.GetString("lblCopyright", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to Devolutions Agent.
-        /// </summary>
-        internal static string lblProductName {
-            get {
-                return ResourceManager.GetString("lblProductName", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to Devolutions Inc..
-        /// </summary>
-        internal static string lblVendor {
-            get {
-                return ResourceManager.GetString("lblVendor", resourceCulture);
             }
         }
         
@@ -135,6 +97,15 @@ namespace Devolutions.Agent.Desktop.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to PEDM unavailable.
+        /// </summary>
+        internal static string mnuPEDMUnavailable {
+            get {
+                return ResourceManager.GetString("mnuPEDMUnavailable", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to None.
         /// </summary>
         internal static string mnuProfileNone {
@@ -149,6 +120,15 @@ namespace Devolutions.Agent.Desktop.Properties {
         internal static string mnuProfiles {
             get {
                 return ResourceManager.GetString("mnuProfiles", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Service running.
+        /// </summary>
+        internal static string mnuServiceAvailable {
+            get {
+                return ResourceManager.GetString("mnuServiceAvailable", resourceCulture);
             }
         }
         

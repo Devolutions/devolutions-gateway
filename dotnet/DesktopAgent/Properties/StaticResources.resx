@@ -117,46 +117,10 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="lblAbout" xml:space="preserve">
-    <value>About</value>
+  <data name="DevolutionsAgent" xml:space="preserve">
+    <value>Devolutions Agent</value>
   </data>
-  <data name="lblCopyright" xml:space="preserve">
-    <value>Copyright</value>
-  </data>
-  <data name="mnuAbout" xml:space="preserve">
-    <value>About</value>
-  </data>
-  <data name="mnuExit" xml:space="preserve">
-    <value>Exit</value>
-  </data>
-  <data name="mnuProfileNone" xml:space="preserve">
-    <value>None</value>
-  </data>
-  <data name="mnuProfiles" xml:space="preserve">
-    <value>Profiles</value>
-  </data>
-  <data name="mnuServiceUnavailable" xml:space="preserve">
-    <value>Service unavailable</value>
-  </data>
-  <data name="msgElevationBlocked" xml:space="preserve">
-    <value>Elevation Blocked</value>
-  </data>
-  <data name="msgElevationBlockedDescription" xml:space="preserve">
-    <value>Elevation blocked by the currently selected profile</value>
-  </data>
-  <data name="msgElevationFailed" xml:space="preserve">
-    <value>Elevation Failed</value>
-  </data>
-  <data name="msgUnexpectedError" xml:space="preserve">
-    <value>Unexpected Error</value>
-  </data>
-  <data name="msgUnexpectedErrorDescription" xml:space="preserve">
-    <value>An unexpected error occurred</value>
-  </data>
-  <data name="mnuPEDMUnavailable" xml:space="preserve">
-    <value>PEDM unavailable</value>
-  </data>
-  <data name="mnuServiceAvailable" xml:space="preserve">
-    <value>Service running</value>
+  <data name="DevolutionsInc" xml:space="preserve">
+    <value>Devolutions Inc.</value>
   </data>
 </root>
