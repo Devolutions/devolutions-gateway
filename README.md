@@ -134,6 +134,15 @@ Stable options are:
     (e.g., Chrome, macOS). Therefore, we strongly recommend using certificates that comply with
     these standards.
 
+- **CredSspCertificateFile** (_FilePath_): Path to the certificate to use for CredSSP credential injection.
+    When set, this certificate is presented to the client during proxy-based credential injection instead
+    of the main TLS certificate. If unset, the TLS certificate is used.
+
+- **CredSspPrivateKeyFile** (_FilePath_): Path to the private key to use for CredSSP credential injection.
+    Required when **CredSspCertificateFile** is set (unless using a PFX/PKCS12 file which bundles the private key).
+
+- **CredSspPrivateKeyPassword** (_String_): Password to use for decrypting the CredSSP private key or PFX/PKCS12 file.
+
 - **Listeners** (_Array_): Array of listener URLs.
 
     Each element has the following schema: 

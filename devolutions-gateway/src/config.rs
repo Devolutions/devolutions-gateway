@@ -95,6 +95,7 @@ pub struct Conf {
     pub job_queue_database: Utf8PathBuf,
     pub traffic_audit_database: Utf8PathBuf,
     pub tls: Option<Tls>,
+    pub credssp_tls: Option<Tls>,
     pub provisioner_public_key: PublicKey,
     pub provisioner_private_key: Option<PrivateKey>,
     pub sub_provisioner_public_key: Option<Subkey>,
@@ -701,6 +702,41 @@ impl Conf {
             anyhow::bail!("TLS usage implied but TLS configuration is missing (certificate or/and private key)");
         }
 
+        let credssp_tls = match conf_file.credssp_certificate_file.as_ref() {
+            None => None,
+            Some(certificate_path) => {
+                let (certificates, private_key) = match certificate_path.extension() {
+                    Some("pfx" | "p12") => {
+                        read_pfx_file(certificate_path, conf_file.credssp_private_key_password.as_ref())
+                            .context("read CredSSP PFX/PKCS12 file")?
+                    }
+                    None | Some(_) => {
+                        let certificates =
+                            read_rustls_certificate_file(certificate_path).context("read CredSSP certificate")?;
+
+                        let private_key = conf_file
+                            .credssp_private_key_file
+                            .as_ref()
+                            .context("CredSSP private key file is missing")?
+                            .pipe_deref(read_rustls_priv_key_file)
+                            .context("read CredSSP private key")?;
+
+                        (certificates, private_key)
+                    }
+                };
+
+                let cert_source = crate::tls::CertificateSource::External {
+                    certificates,
+                    private_key,
+                };
+
+                let credssp_tls =
+                    Tls::init(cert_source, strict_checks).context("failed to initialize CredSSP TLS configuration")?;
+
+                Some(credssp_tls)
+            }
+        };
+
         let data_dir = get_data_dir();
 
         let log_file = conf_file
@@ -780,6 +816,7 @@ impl Conf {
             job_queue_database,
             traffic_audit_database,
             tls,
+            credssp_tls,
             provisioner_public_key,
             provisioner_private_key,
             sub_provisioner_public_key,
@@ -1480,6 +1517,18 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tls_verify_strict: Option<bool>,
 
+        /// Certificate to use for CredSSP credential injection (overrides TLS certificate)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub credssp_certificate_file: Option<Utf8PathBuf>,
+
+        /// Private key to use for CredSSP credential injection (overrides TLS private key)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub credssp_private_key_file: Option<Utf8PathBuf>,
+
+        /// Password to use for decrypting the CredSSP private key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub credssp_private_key_password: Option<Password>,
+
         /// Listeners to launch at startup
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub listeners: Vec<ListenerConf>,
@@ -1563,6 +1612,9 @@ pub mod dto {
                 tls_certificate_store_name: None,
                 tls_certificate_store_location: None,
                 tls_verify_strict: Some(true),
+                credssp_certificate_file: None,
+                credssp_private_key_file: None,
+                credssp_private_key_password: None,
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8181".to_owned(),

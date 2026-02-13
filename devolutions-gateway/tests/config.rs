@@ -73,6 +73,9 @@ fn hub_sample() -> Sample {
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
             tls_verify_strict: Some(true),
+            credssp_certificate_file: None,
+            credssp_private_key_file: None,
+            credssp_private_key_password: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),
@@ -128,6 +131,9 @@ fn legacy_sample() -> Sample {
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
             tls_verify_strict: None,
+            credssp_certificate_file: None,
+            credssp_private_key_file: None,
+            credssp_private_key_password: None,
             listeners: vec![],
             subscriber: None,
             log_file: Some("/path/to/log/file.log".into()),
@@ -173,6 +179,9 @@ fn system_store_sample() -> Sample {
             tls_certificate_store_location: Some(CertStoreLocation::LocalMachine),
             tls_certificate_store_name: Some("My".to_owned()),
             tls_verify_strict: None,
+            credssp_certificate_file: None,
+            credssp_private_key_file: None,
+            credssp_private_key_password: None,
             listeners: vec![],
             subscriber: None,
             log_file: None,
@@ -234,6 +243,9 @@ fn standalone_custom_auth_sample() -> Sample {
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
             tls_verify_strict: None,
+            credssp_certificate_file: None,
+            credssp_private_key_file: None,
+            credssp_private_key_password: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),
@@ -311,6 +323,9 @@ fn standalone_no_auth_sample() -> Sample {
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
             tls_verify_strict: None,
+            credssp_certificate_file: None,
+            credssp_private_key_file: None,
+            credssp_private_key_password: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),
@@ -388,6 +403,9 @@ fn proxy_sample() -> Sample {
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
             tls_verify_strict: None,
+            credssp_certificate_file: None,
+            credssp_private_key_file: None,
+            credssp_private_key_password: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".to_owned(),

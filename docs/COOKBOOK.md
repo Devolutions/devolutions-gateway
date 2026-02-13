@@ -504,6 +504,7 @@ tail -f /var/log/devolutions-agent/agent.log | grep -i "download\|proxy"
   - Generate a session token for the RDP session.
   - Generate a scope token for the preflight API.
 - Configure the TLS certificate and private key.
+  Optionally, configure `CredSspCertificateFile` and `CredSspPrivateKeyFile` to use a different certificate for CredSSP.
 - Run the Devolutions Gateway.
   - We’ll assume it runs on localhost, and it listens for HTTP on 7171 and TCP on 8181.
   - Adjust to your needs.
