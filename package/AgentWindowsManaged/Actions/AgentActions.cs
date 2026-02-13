@@ -194,6 +194,17 @@ internal static class AgentActions
         Impersonate = false,
     };
 
+    private static readonly ManagedAction launchDesktopApp = new(
+        CustomActions.LaunchDesktopApp,
+        Return.ignore,
+        When.After, Step.InstallFinalize,
+        Condition.NOT_Installed & new Condition("(UILevel >= 3 OR WIXSHARP_MANAGED_UI_HANDLE <> \"\")"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+        Impersonate = true,
+    };
+
     /// <summary>
     /// Start the installed DevolutionsAgent service
     /// </summary>
@@ -215,7 +226,7 @@ internal static class AgentActions
     /// This was necessary in the old Wayk installer to reread configurations that may have been updated
     /// by the installer. It's usefulness os questionable with Devolutions Agent.
     /// </remarks>
-    private static readonly ElevatedManagedAction restartAgent= new(
+    private static readonly ElevatedManagedAction restartAgent = new(
         CustomActions.RestartAgent,
         Return.ignore,
         When.After, Step.StartServices,
@@ -330,6 +341,7 @@ internal static class AgentActions
         cleanAgentConfigIfNeededRollback,
         shutdownDesktopApp,
         startAgentIfNeeded,
+        launchDesktopApp,
         restartAgent,
         rollbackConfig,
     };

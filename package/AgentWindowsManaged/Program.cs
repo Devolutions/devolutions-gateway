@@ -287,7 +287,7 @@ internal class Program
                 },
                 Dirs = new[]
                 {
-                    new Dir(Features.AGENT_FEATURE, "desktop", new Files(Features.AGENT_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
+                    new Dir(Features.AGENT_FEATURE, Includes.DESKTOP_DIRECTORY_NAME, new Files(Features.AGENT_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
                     new Dir(Features.PEDM_FEATURE, "ShellExt",
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll),
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix)),
@@ -310,7 +310,7 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
             },
-            new (RegistryHive.LocalMachine, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", Includes.SERVICE_NAME, $"[{AgentProperties.InstallDir}]desktop\\{Includes.DESKTOP_EXECUTABLE_NAME}")
+            new (RegistryHive.LocalMachine, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", Includes.SERVICE_NAME, $"[{AgentProperties.InstallDir}]{Includes.DESKTOP_DIRECTORY_NAME}\\{Includes.DESKTOP_EXECUTABLE_NAME}")
             {
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
