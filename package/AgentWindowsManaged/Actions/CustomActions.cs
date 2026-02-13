@@ -219,6 +219,45 @@ namespace DevolutionsAgent.Actions
             return ActionResult.Success;
         }
 
+        [CustomAction]
+        public static ActionResult LaunchDesktopApp(Session session)
+        {
+            try
+            {
+                string installDir = session.Property(AgentProperties.InstallDir);
+
+                if (string.IsNullOrEmpty(installDir))
+                {
+                    session.Log("skipping launch of desktop application due to empty install dir");
+                    return ActionResult.Success;
+                }
+
+                string path = Path.Combine(installDir, Includes.DESKTOP_DIRECTORY_NAME, Includes.DESKTOP_EXECUTABLE_NAME);
+
+                if (!File.Exists(path))
+                {
+                    session.Log($"skipping launch of desktop application due to missing executable at {path}");
+                    return ActionResult.Success;
+                }
+
+                ProcessStartInfo startInfo = new ProcessStartInfo(path)
+                {
+                    WorkingDirectory = Path.Combine(installDir, Includes.DESKTOP_DIRECTORY_NAME),
+                    UseShellExecute = true,
+                };
+
+                Process.Start(startInfo);
+
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"unexpected error launching desktop application {e}");
+                return ActionResult.Failure;
+            }
+
+        }
+
         static ActionResult ToggleAgentFeature(Session session, string feature, bool enable)
         {
             string path = Path.Combine(ProgramDataDirectory, "agent.json");
