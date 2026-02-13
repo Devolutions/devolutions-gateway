@@ -287,7 +287,7 @@ internal class Program
                 },
                 Dirs = new[]
                 {
-                    new Dir(Features.PEDM_FEATURE, "desktop", new Files(Features.PEDM_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
+                    new Dir(Features.AGENT_FEATURE, "desktop", new Files(Features.AGENT_FEATURE, $"{DevolutionsDesktopAgentPath}\\*.*")),
                     new Dir(Features.PEDM_FEATURE, "ShellExt",
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll),
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix)),
@@ -314,7 +314,7 @@ internal class Program
             {
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
-                Feature = Features.PEDM_FEATURE,
+                Feature = Features.AGENT_FEATURE,
             }
         };
 
