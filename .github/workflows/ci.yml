@@ -1124,14 +1124,16 @@ jobs:
         with:
           sccache-enabled: ${{ needs.preflight.outputs.sccache }}
 
+      # NOTE: Pinned to a specific nightly version for reproducibility.
+      # Update this manually on a regular basis.
       - name: Prepare runner
         run: |
-          rustup toolchain install nightly --component miri
+          rustup toolchain install nightly-2026-02-11 --component miri
 
       - name: Run tests
         run: |
           $Env:MIRIFLAGS = "${{ matrix.miriflags }}"
-          cargo +nightly miri test -p win-api-wrappers
+          cargo +nightly-2026-02-11 miri test -p win-api-wrappers
         shell: pwsh
 
       - name: Show sccache stats
