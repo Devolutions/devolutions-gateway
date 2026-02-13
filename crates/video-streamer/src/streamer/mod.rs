@@ -99,7 +99,7 @@ pub fn webm_stream(
         }
     }
 
-    const MAX_RETRY_COUNT: usize = 3;
+    const MAX_RETRY_COUNT: usize = 25;
     // To make sure we don't retry forever
     // Retry is set to 0 when we successfully read a tag
     let mut retry_count = 0;
@@ -190,6 +190,10 @@ pub fn webm_stream(
                 },
                 _ = stop_notifier.notified() => {
                     let _ = tx.send(WhenEofControlFlow::Break);
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
+                    info!("EOF wait timed out, retrying");
+                    let _ = tx.send(WhenEofControlFlow::Continue);
                 }
             }
         });
