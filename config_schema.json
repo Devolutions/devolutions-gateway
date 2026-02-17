@@ -65,6 +65,18 @@
       "$ref": "#/definitions/CertStoreLocation",
       "description": "Location of the System Certificate Store to use for TLS."
     },
+    "CredSspCertificateFile": {
+      "type": "string",
+      "description": "Path to the certificate to use for CredSSP credential injection (overrides TLS certificate)."
+    },
+    "CredSspPrivateKeyFile": {
+      "type": "string",
+      "description": "Path to the private key to use for CredSSP credential injection (overrides TLS private key)."
+    },
+    "CredSspPrivateKeyPassword": {
+      "type": "string",
+      "description": "Password to use for decrypting the CredSSP private key or PFX/PKCS12 file."
+    },
     "Listeners": {
       "type": "array",
       "items": {

@@ -66,8 +66,9 @@ where
     } = proxy;
 
     let tls_conf = conf
-        .tls
+        .credssp_tls
         .as_ref()
+        .or(conf.tls.as_ref())
         .context("TLS configuration required for credential injection feature")?;
     let gateway_hostname = conf.hostname.clone();
 
