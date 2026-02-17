@@ -597,6 +597,7 @@ jobs:
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
 
+          Move-Item -Path "./windows/arm64/DevolutionsAgent-arm64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-arm64-${versionFull}.msi"
           Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.msi"
           Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.symbols.zip"
           Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
