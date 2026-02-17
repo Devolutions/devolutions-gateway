@@ -12,6 +12,7 @@ use picky::pem::Pem;
 use tap::prelude::*;
 use tokio::sync::Notify;
 use tokio_rustls::rustls::pki_types;
+use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
@@ -95,7 +96,7 @@ pub struct Conf {
     pub job_queue_database: Utf8PathBuf,
     pub traffic_audit_database: Utf8PathBuf,
     pub tls: Option<Tls>,
-    pub credssp_tls: Option<Tls>,
+    pub credssp_tls: Tls,
     pub provisioner_public_key: PublicKey,
     pub provisioner_private_key: Option<PrivateKey>,
     pub sub_provisioner_public_key: Option<Subkey>,
@@ -703,7 +704,6 @@ impl Conf {
         }
 
         let credssp_tls = match conf_file.credssp_certificate_file.as_ref() {
-            None => None,
             Some(certificate_path) => {
                 let (certificates, private_key) = match certificate_path.extension() {
                     Some("pfx" | "p12") => {
@@ -730,13 +730,29 @@ impl Conf {
                     private_key,
                 };
 
-                let credssp_tls =
-                    Tls::init(cert_source, strict_checks).context("failed to initialize CredSSP TLS configuration")?;
-
-                Some(credssp_tls)
+                Tls::init(cert_source, strict_checks).context("failed to initialize CredSSP TLS configuration")?
             }
-        };
+            None => match tls.clone() {
+                Some(tls) => tls,
+                None => {
+                    info!("No TLS certificate configured; generating a self-signed certificate for CredSSP");
 
+                    let (certificates, private_key) = generate_self_signed_certificate(&hostname)
+                        .context("generate self-signed CredSSP certificate")?;
+
+                    let cert_source = crate::tls::CertificateSource::External {
+                        certificates,
+                        private_key,
+                    };
+
+                    // Strict checks are not enforced for the auto-generated CredSSP
+                    // self-signed certificate specifically, as it is only used for
+                    // the CredSSP MITM with the client.
+                    Tls::init(cert_source, false)
+                        .context("failed to initialize self-signed CredSSP TLS configuration")?
+                }
+            },
+        };
         let data_dir = get_data_dir();
 
         let log_file = conf_file
@@ -1104,6 +1120,49 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 
 fn default_hostname() -> Option<String> {
     hostname::get().ok()?.into_string().ok()
+}
+
+fn generate_self_signed_certificate(
+    hostname: &str,
+) -> anyhow::Result<(
+    Vec<pki_types::CertificateDer<'static>>,
+    pki_types::PrivateKeyDer<'static>,
+)> {
+    use picky::x509::certificate::CertificateBuilder;
+    use picky::x509::date::UtcDate;
+    use picky::x509::name::DirectoryName;
+
+    let private_key = PrivateKey::generate_rsa(2048).context("generate RSA private key")?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let not_before = UtcDate::ymd(
+        now.year().try_into().expect("valid year"),
+        now.month().into(),
+        now.day(),
+    )
+    .context("build not_before date")?;
+    let not_after = UtcDate::ymd(
+        (now.year() + 2).try_into().expect("valid year"),
+        now.month().into(),
+        now.day(),
+    )
+    .context("build not_after date")?;
+
+    let name = DirectoryName::new_common_name(hostname);
+
+    let cert = CertificateBuilder::new()
+        .self_signed(name, &private_key)
+        .validity(not_before, not_after)
+        .build()
+        .context("build self-signed certificate")?;
+
+    let cert_der = cert.to_der().context("encode certificate to DER")?;
+    let key_der = private_key
+        .to_pkcs8()
+        .map(|der| pki_types::PrivateKeyDer::Pkcs8(der.into()))
+        .context("encode private key to PKCS8 DER")?;
+
+    Ok((vec![pki_types::CertificateDer::from(cert_der)], key_der))
 }
 
 fn read_pfx_file(

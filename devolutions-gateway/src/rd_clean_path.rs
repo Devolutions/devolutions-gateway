@@ -287,11 +287,7 @@ async fn handle_with_credential_injection(
     cleanpath_pdu: RDCleanPathPdu,
     credential_entry: Arc<CredentialEntry>,
 ) -> anyhow::Result<()> {
-    let tls_conf = conf
-        .credssp_tls
-        .as_ref()
-        .or(conf.tls.as_ref())
-        .context("TLS configuration required for credential injection feature")?;
+    let tls_conf = &conf.credssp_tls;
 
     let gateway_hostname = conf.hostname.clone();
 
