@@ -375,6 +375,8 @@ where
         Ok(frame)
     }
 
+    /// Ratio of media time to active processing time (excluding idle waits like EOF retries),
+    /// so that temporary stalls do not permanently corrupt the frame skip decision.
     fn current_realtime_ratio(&self, media_advanced_ms: u64) -> f64 {
         #[allow(clippy::cast_possible_truncation)] // u64 max is ~584 million years in ms; no real truncation risk
         let processing_ms = self.processing_time.as_millis() as u64;
