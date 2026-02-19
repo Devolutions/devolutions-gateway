@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Description>C# interface to implement Devolutions Gateway Subscriber API</Description>
     <Copyright>No Copyright</Copyright>
     <Authors>Devolutions Inc.</Authors>
