@@ -279,8 +279,8 @@ internal class Program
                             ThirdFailureActionType = FailureActionType.restart,
                             RestartServiceDelayInSeconds = 900,
                             ResetPeriodInDays = 1,
-                            RemoveOn = SvcEvent.Uninstall,
-                            StopOn = SvcEvent.InstallUninstall,
+                            RemoveOn = SvcEvent.Uninstall_Wait,
+                            StopOn = SvcEvent.InstallUninstall_Wait,
                         },
                     },
                     new (Features.SESSION_FEATURE, DevolutionsSession)
