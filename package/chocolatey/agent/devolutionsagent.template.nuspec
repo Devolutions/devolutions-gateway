@@ -4,7 +4,7 @@
     <id>devo-agent</id>
     <title>Devolutions Agent</title>
     <version>$VAR1$</version>
-    <authors>Devolutions inc.</authors>
+    <authors>Devolutions Inc.</authors>
     <summary>A companion agent for managing and securing remote connections.</summary>
     <description>Devolutions Agent is a versatile background process used by many Devolutions products to perform various remote management tasks.</description>
     <projectUrl>https://devolutions.net/agent/</projectUrl>
