@@ -738,7 +738,8 @@ impl Conf {
                     // The self-signed certificate is intentionally not saved to disk.
                     // Users who need a stable certificate should configure one explicitly.
                     // When performing proxy-based credential injection, Devolutions Gateway
-                    // is trusted via DVLS, and RDM should automatically ignore the warnings.
+                    // is trusted via the provisioner (e.g.: Devolutions Server),
+                    // and the client (e.g.: RDM) may automatically ignore the warnings.
                     info!("No TLS certificate configured; generating a self-signed certificate for CredSSP");
 
                     let (certificates, private_key) = generate_self_signed_certificate(&hostname)
