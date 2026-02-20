@@ -65,7 +65,7 @@ where
         disconnect_interest,
     } = proxy;
 
-    let tls_conf = &conf.credssp_tls;
+    let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
     let gateway_hostname = conf.hostname.clone();
 
     let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;

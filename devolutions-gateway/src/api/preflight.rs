@@ -116,10 +116,13 @@ pub(crate) enum PreflightOutputKind {
     Ack,
 }
 
+#[allow(
+    unused,
+    reason = "all values are still part of the public HTTP API even if we stop emitting them later"
+)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub(crate) enum PreflightAlertStatus {
-    #[expect(unused)]
     #[serde(rename = "general-failure")]
     GeneralFailure,
     #[serde(rename = "info")]
@@ -347,17 +350,6 @@ async fn handle_operation(
                     kind: PreflightOutputKind::Alert {
                         status: PreflightAlertStatus::Info,
                         message: "an existing credential entry was replaced".to_owned(),
-                    },
-                });
-            }
-
-            if conf.tls.is_none() && operation.kind.as_str() == OP_PROVISION_CREDENTIALS {
-                outputs.push(PreflightOutput {
-                    operation_id: operation.id,
-                    kind: PreflightOutputKind::Alert {
-                        status: PreflightAlertStatus::Warn,
-                        message: "no TLS certificate configured, this may cause problems with credentials injection"
-                            .to_owned(),
                     },
                 });
             }

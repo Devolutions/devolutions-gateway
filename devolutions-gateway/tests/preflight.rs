@@ -87,7 +87,7 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
 
     let body = response.into_body().collect().await?.to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body)?;
-    assert_eq!(body.as_array().expect("an array").len(), 2);
+    assert_eq!(body.as_array().expect("an array").len(), 1);
     assert_eq!(body[1]["operation_id"], op_id.to_string());
     assert_eq!(body[1]["kind"], "ack", "{:?}", body[1]);
 
