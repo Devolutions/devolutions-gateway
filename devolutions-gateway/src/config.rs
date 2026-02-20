@@ -98,10 +98,7 @@ pub struct CredsspTls(Arc<CredsspTlsState>);
 
 enum CredsspTlsState {
     Ready(Tls),
-    Lazy {
-        once: OnceLock<Tls>,
-        hostname: String,
-    },
+    Lazy { once: OnceLock<Tls>, hostname: String },
 }
 
 impl fmt::Debug for CredsspTls {
@@ -818,8 +815,8 @@ impl Conf {
                     private_key,
                 };
 
-                let tls = Tls::init(cert_source, strict_checks)
-                    .context("failed to initialize CredSSP TLS configuration")?;
+                let tls =
+                    Tls::init(cert_source, strict_checks).context("failed to initialize CredSSP TLS configuration")?;
 
                 CredsspTls::ready(tls)
             }
