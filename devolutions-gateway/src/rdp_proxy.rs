@@ -65,11 +65,7 @@ where
         disconnect_interest,
     } = proxy;
 
-    let tls_conf = conf
-        .credssp_tls
-        .as_ref()
-        .or(conf.tls.as_ref())
-        .context("TLS configuration required for credential injection feature")?;
+    let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
     let gateway_hostname = conf.hostname.clone();
 
     let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;

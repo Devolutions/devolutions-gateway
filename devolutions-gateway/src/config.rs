@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{env, fmt};
 
 use anyhow::Context;
@@ -12,6 +12,7 @@ use picky::pem::Pem;
 use tap::prelude::*;
 use tokio::sync::Notify;
 use tokio_rustls::rustls::pki_types;
+use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
@@ -85,6 +86,91 @@ impl Tls {
     }
 }
 
+/// CredSSP TLS configuration that supports lazy self-signed certificate generation.
+///
+/// When an explicit certificate is configured (or the main TLS cert is reused),
+/// the TLS acceptor is initialized eagerly during config loading.
+/// When no certificate is configured, the self-signed certificate generation
+/// is deferred to the first CredSSP credential injection, avoiding unnecessary
+/// RSA key generation at startup.
+#[derive(Clone)]
+pub struct CredsspTls(Arc<CredsspTlsState>);
+
+enum CredsspTlsState {
+    Ready(Tls),
+    Lazy { once: OnceLock<Tls>, hostname: String },
+}
+
+impl fmt::Debug for CredsspTls {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &*self.0 {
+            CredsspTlsState::Ready(tls) => f.debug_tuple("CredsspTls::Ready").field(tls).finish(),
+            CredsspTlsState::Lazy { once, .. } => {
+                if once.get().is_some() {
+                    f.write_str("CredsspTls::Lazy(initialized)")
+                } else {
+                    f.write_str("CredsspTls::Lazy(pending)")
+                }
+            }
+        }
+    }
+}
+
+impl CredsspTls {
+    fn ready(tls: Tls) -> Self {
+        Self(Arc::new(CredsspTlsState::Ready(tls)))
+    }
+
+    fn lazy(hostname: String) -> Self {
+        Self(Arc::new(CredsspTlsState::Lazy {
+            once: OnceLock::new(),
+            hostname,
+        }))
+    }
+
+    pub fn get(&self) -> anyhow::Result<&Tls> {
+        match &*self.0 {
+            CredsspTlsState::Ready(tls) => Ok(tls),
+            CredsspTlsState::Lazy { once, hostname } => {
+                if let Some(tls) = once.get() {
+                    return Ok(tls);
+                }
+
+                // NOTE: We can't use `OnceLock::get_or_init` here because initialization
+                // is fallible, and `OnceLock::get_or_try_init` is not yet stabilized:
+                // https://github.com/rust-lang/rust/issues/109737
+
+                // The self-signed certificate is intentionally not saved to disk.
+                // Users who need a stable certificate should configure one explicitly.
+                // When performing proxy-based credential injection, Devolutions Gateway
+                // is trusted via the provisioner (e.g.: Devolutions Server),
+                // and the client (e.g.: RDM) may automatically ignore the warnings.
+                info!("Generating a self-signed certificate for CredSSP");
+
+                let (certificates, private_key) =
+                    generate_self_signed_certificate(hostname).context("generate self-signed CredSSP certificate")?;
+
+                let cert_source = crate::tls::CertificateSource::External {
+                    certificates,
+                    private_key,
+                };
+
+                // Strict checks are not enforced for the auto-generated CredSSP
+                // self-signed certificate specifically, as it is only used for
+                // the CredSSP MITM with the client.
+                let tls = Tls::init(cert_source, false)
+                    .context("failed to initialize self-signed CredSSP TLS configuration")?;
+
+                // If another thread raced us and set the value first, their value wins.
+                // This is fine — the discarded key is simply dropped.
+                let _ = once.set(tls);
+
+                Ok(once.get().expect("value was just set or set by a racing thread"))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Conf {
     pub id: Option<Uuid>,
@@ -95,7 +181,7 @@ pub struct Conf {
     pub job_queue_database: Utf8PathBuf,
     pub traffic_audit_database: Utf8PathBuf,
     pub tls: Option<Tls>,
-    pub credssp_tls: Option<Tls>,
+    pub credssp_tls: CredsspTls,
     pub provisioner_public_key: PublicKey,
     pub provisioner_private_key: Option<PrivateKey>,
     pub sub_provisioner_public_key: Option<Subkey>,
@@ -703,7 +789,6 @@ impl Conf {
         }
 
         let credssp_tls = match conf_file.credssp_certificate_file.as_ref() {
-            None => None,
             Some(certificate_path) => {
                 let (certificates, private_key) = match certificate_path.extension() {
                     Some("pfx" | "p12") => {
@@ -730,13 +815,16 @@ impl Conf {
                     private_key,
                 };
 
-                let credssp_tls =
+                let tls =
                     Tls::init(cert_source, strict_checks).context("failed to initialize CredSSP TLS configuration")?;
 
-                Some(credssp_tls)
+                CredsspTls::ready(tls)
             }
+            None => match tls.clone() {
+                Some(tls) => CredsspTls::ready(tls),
+                None => CredsspTls::lazy(hostname.clone()),
+            },
         };
-
         let data_dir = get_data_dir();
 
         let log_file = conf_file
@@ -1104,6 +1192,53 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 
 fn default_hostname() -> Option<String> {
     hostname::get().ok()?.into_string().ok()
+}
+
+fn generate_self_signed_certificate(
+    hostname: &str,
+) -> anyhow::Result<(
+    Vec<pki_types::CertificateDer<'static>>,
+    pki_types::PrivateKeyDer<'static>,
+)> {
+    use picky::x509::certificate::CertificateBuilder;
+    use picky::x509::date::UtcDate;
+    use picky::x509::name::DirectoryName;
+
+    let private_key = PrivateKey::generate_rsa(2048).context("generate RSA private key")?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let not_before = UtcDate::ymd(
+        now.year().try_into().expect("valid year"),
+        now.month().into(),
+        now.day(),
+    )
+    .context("build not_before date")?;
+
+    // Use duration arithmetic instead of manually adding to the year component,
+    // because that would fail on Feb 29 of a leap year (the target year may not be a leap year).
+    let expiry = now + time::Duration::days(730);
+    let not_after = UtcDate::ymd(
+        expiry.year().try_into().expect("valid year"),
+        expiry.month().into(),
+        expiry.day(),
+    )
+    .context("build not_after date")?;
+
+    let name = DirectoryName::new_common_name(hostname);
+
+    let cert = CertificateBuilder::new()
+        .self_signed(name, &private_key)
+        .validity(not_before, not_after)
+        .build()
+        .context("build self-signed certificate")?;
+
+    let cert_der = cert.to_der().context("encode certificate to DER")?;
+    let key_der = private_key
+        .to_pkcs8()
+        .map(|der| pki_types::PrivateKeyDer::Pkcs8(der.into()))
+        .context("encode private key to PKCS8 DER")?;
+
+    Ok((vec![pki_types::CertificateDer::from(cert_der)], key_der))
 }
 
 fn read_pfx_file(
