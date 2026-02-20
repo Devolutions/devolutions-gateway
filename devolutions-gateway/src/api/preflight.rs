@@ -339,9 +339,7 @@ async fn handle_operation(
 
             let previous_entry = credential_store
                 .insert(token, mapping, time_to_live)
-                .inspect_err(
-                    |error| warn!(%operation.id, error = format!("{error:#}"), "Failed to count running sessions"),
-                )
+                .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|e| PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}")))?;
 
             if previous_entry.is_some() {
