@@ -1,5 +1,9 @@
 # Packaging changelog
 
+## 2026.1.0 (2026-02-22)
+
+- No changes.
+
 ## 2025.3.4 (2026-02-04)
 
 - No changes.
