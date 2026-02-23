@@ -2,6 +2,39 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.1.0 (2026-02-23)
+
+### Features
+
+- _agent-installer_: deploy desktop agent in main feature ([5422ae5eed](https://github.com/Devolutions/devolutions-gateway/commit/5422ae5eed086e9ad8a451df7a7b23e81c692ac4)) 
+
+- _agent_: UX improvement for desktop agent app ([ec76aa4f48](https://github.com/Devolutions/devolutions-gateway/commit/ec76aa4f48e6a6978bae63313bebead36b08fd38)) 
+
+- _agent-installer_: auto launch desktop app on install ([aad097b8e4](https://github.com/Devolutions/devolutions-gateway/commit/aad097b8e446dee5a247d6a366ee40d5a20635a3)) 
+
+- _dgw_: add CredSSP certificate configuration keys ([#1676](https://github.com/Devolutions/devolutions-gateway/issues/1676)) ([443e5f0b02](https://github.com/Devolutions/devolutions-gateway/commit/443e5f0b02661c50b0e61cd69e929c5080da967b)) 
+
+  Add optional `CredSspCertificateFile`, `CredSspPrivateKeyFile` and `CredSspPrivateKeyPassword`
+  configuration keys allowing usage of a different certificate for CredSSP
+  credential injection instead of the main TLS certificate. When unset,
+  the existing TLS certificate is used (no behavior change).
+
+- _dgw_: generate self-signed certificate when no TLS cert is configured for CredSSP ([#1682](https://github.com/Devolutions/devolutions-gateway/issues/1682)) ([e4a1b121f8](https://github.com/Devolutions/devolutions-gateway/commit/e4a1b121f8c0da47ed1d9f84a4aaf273c8a882b0)) 
+
+  When neither a CredSSP-specific certificate nor a main TLS certificate
+  is configured, automatically generate a self-signed certificate for
+  CredSSP credential injection.
+
+### Bug Fixes
+
+- _agent-installer_: specify ARM64 platform for ARM64 agent installer ([43266e8dba](https://github.com/Devolutions/devolutions-gateway/commit/43266e8dba3794e5bbd26d1b981a0cc418699885)) 
+
+- _agent-installer_: cleanup of agent installer ([a5ebf58c7a](https://github.com/Devolutions/devolutions-gateway/commit/a5ebf58c7aea4551940e48db561ca027f4b57fee)) 
+
+### Performance
+
+- _dgw_: improve real-time performance of session shadowing ([#1662](https://github.com/Devolutions/devolutions-gateway/issues/1662)) ([ea2e6a8334](https://github.com/Devolutions/devolutions-gateway/commit/ea2e6a8334404c03f823cfd9e380cbe58ee8bdc7)) ([DGW-341](https://devolutions.atlassian.net/browse/DGW-341)) 
+
 ## 2025.3.4 (2026-02-04)
 
 ### Security
