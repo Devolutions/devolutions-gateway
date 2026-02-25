@@ -7,6 +7,7 @@ use ironrdp_connector::credssp::CredsspProcessGenerator as CredsspClientProcessG
 use ironrdp_connector::sspi;
 use ironrdp_connector::sspi::generator::{GeneratorState, NetworkRequest};
 use ironrdp_pdu::{mcs, nego, x224};
+use secrecy::ExposeSecret as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -131,7 +132,11 @@ where
             } = user;
 
             // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(fqdn, "", password))
+            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
+                fqdn,
+                "",
+                password.expose_secret(),
+            ))
         });
 
         Some(sspi::KerberosServerConfig {
@@ -402,14 +407,17 @@ where
 {
     use ironrdp_tokio::FramedWrite as _;
 
-    let credentials = match credentials {
-        crate::credential::AppCredential::UsernamePassword { username, password } => {
-            ironrdp_connector::Credentials::UsernamePassword {
-                username: username.clone(),
-                password: password.expose_secret().to_owned(),
-            }
-        }
+    // Decrypt password into short-lived buffer.
+    let (username, decrypted_password) = credentials
+        .decrypt_password()
+        .context("failed to decrypt credentials")?;
+
+    let credentials = ironrdp_connector::Credentials::UsernamePassword {
+        username,
+        password: decrypted_password.expose_secret().to_owned(),
     };
+    // decrypted_password drops here, zeroizing its buffer; note: a copy of the plaintext
+    // remains in `credentials` above, which is a regular String (downstream API limitation).
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,
@@ -558,14 +566,19 @@ where
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
     {
-        let crate::credential::AppCredential::UsernamePassword { username, password } = credentials;
+        // Decrypt password into short-lived buffer.
+        let (username, decrypted_password) = credentials
+            .decrypt_password()
+            .context("failed to decrypt credentials")?;
 
-        let username = sspi::Username::parse(username).context("invalid username")?;
+        let username = sspi::Username::parse(&username).context("invalid username")?;
 
         let identity = sspi::AuthIdentity {
             username,
-            password: password.expose_secret().to_owned().into(),
+            password: decrypted_password.expose_secret().to_owned().into(),
         };
+        // decrypted_password drops here, zeroizing its buffer; note: a copy of the plaintext
+        // remains in `identity` above (downstream API limitation).
 
         let mut sequence = ironrdp_acceptor::credssp::CredsspSequence::init(
             &identity,
