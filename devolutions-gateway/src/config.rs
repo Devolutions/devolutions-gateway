@@ -9,6 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
+use secrecy::SecretString;
 use tap::prelude::*;
 use tokio::sync::Notify;
 use tokio_rustls::rustls::pki_types;
@@ -17,7 +18,6 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::SYSTEM_LOGGER;
-use crate::credential::Password;
 use crate::listener::ListenerUrls;
 use crate::target_addr::TargetAddr;
 use crate::token::Subkey;
@@ -216,7 +216,7 @@ pub enum WebAppAuth {
 pub struct WebAppUser {
     pub name: String,
     /// Hash of the password, in the PHC string format
-    pub password_hash: Password,
+    pub password_hash: SecretString,
 }
 
 /// AI Router configuration (experimental)
@@ -1243,7 +1243,7 @@ fn generate_self_signed_certificate(
 
 fn read_pfx_file(
     path: &Utf8Path,
-    password: Option<&Password>,
+    password: Option<&SecretString>,
 ) -> anyhow::Result<(
     Vec<pki_types::CertificateDer<'static>>,
     pki_types::PrivateKeyDer<'static>,
@@ -1627,7 +1627,7 @@ pub mod dto {
         pub tls_private_key_file: Option<Utf8PathBuf>,
         /// Password to use for decrypting the TLS private key
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub tls_private_key_password: Option<Password>,
+        pub tls_private_key_password: Option<SecretString>,
         /// Subject name of the certificate to use for TLS
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tls_certificate_subject_name: Option<String>,

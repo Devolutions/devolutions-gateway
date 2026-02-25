@@ -402,14 +402,16 @@ where
 {
     use ironrdp_tokio::FramedWrite as _;
 
-    let credentials = match credentials {
-        crate::credential::AppCredential::UsernamePassword { username, password } => {
-            ironrdp_connector::Credentials::UsernamePassword {
-                username: username.clone(),
-                password: password.expose_secret().to_owned(),
-            }
-        }
+    // Decrypt password into short-lived buffer.
+    let (username, decrypted_password) = credentials
+        .decrypt_password()
+        .context("failed to decrypt credentials")?;
+
+    let credentials = ironrdp_connector::Credentials::UsernamePassword {
+        username,
+        password: decrypted_password.expose_secret().to_owned(),
     };
+    // decrypted_password drops here, zeroizing memory.
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,
@@ -558,14 +560,18 @@ where
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
     {
-        let crate::credential::AppCredential::UsernamePassword { username, password } = credentials;
+        // Decrypt password into short-lived buffer.
+        let (username, decrypted_password) = credentials
+            .decrypt_password()
+            .context("failed to decrypt credentials")?;
 
-        let username = sspi::Username::parse(username).context("invalid username")?;
+        let username = sspi::Username::parse(&username).context("invalid username")?;
 
         let identity = sspi::AuthIdentity {
             username,
-            password: password.expose_secret().to_owned().into(),
+            password: decrypted_password.expose_secret().to_owned().into(),
         };
+        // decrypted_password drops here, zeroizing memory.
 
         let mut sequence = ironrdp_acceptor::credssp::CredsspSequence::init(
             &identity,
