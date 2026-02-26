@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use ironrdp_connector::sspi;
-use secrecy::ExposeSecret as _;
 use ironrdp_pdu::nego;
 use ironrdp_rdcleanpath::RDCleanPathPdu;
+use secrecy::ExposeSecret as _;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -405,7 +405,11 @@ async fn handle_with_credential_injection(
             } = user;
 
             // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(fqdn, "", password.expose_secret()))
+            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
+                fqdn,
+                "",
+                password.expose_secret(),
+            ))
         });
 
         Some(sspi::KerberosServerConfig {

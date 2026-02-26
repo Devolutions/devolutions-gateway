@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use ironrdp_acceptor::credssp::CredsspProcessGenerator as CredsspServerProcessGenerator;
-use secrecy::ExposeSecret as _;
 use ironrdp_connector::credssp::CredsspProcessGenerator as CredsspClientProcessGenerator;
 use ironrdp_connector::sspi;
 use ironrdp_connector::sspi::generator::{GeneratorState, NetworkRequest};
 use ironrdp_pdu::{mcs, nego, x224};
+use secrecy::ExposeSecret as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
 
@@ -131,8 +131,12 @@ where
                 salt: _,
             } = user;
 
-            // The username is an the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(fqdn, "", password.expose_secret()))
+            // The username is in the FQDN format. Thus, the domain field can be empty.
+            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
+                fqdn,
+                "",
+                password.expose_secret(),
+            ))
         });
 
         Some(sspi::KerberosServerConfig {

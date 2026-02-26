@@ -20,11 +20,15 @@ immediately, without going through the acceptance testing process of our quality
 
 ### From sources
 
-Ensure that you have [the Rust toolchain installed][install_rust], then clone this repository and run:
+Ensure that you have [the Rust toolchain installed][install_rust] and [libsodium][libsodium] installed on your system, then clone this repository and run:
 
 ```shell
 cargo install --path ./devolutions-gateway
 ```
+
+> **Note:** `libsodium` is required as a native dependency for in-memory credential protection.
+> On Windows, it is vendored automatically via vcpkg.
+> On Linux and macOS, install it using your system package manager (e.g., `apt install libsodium-dev` or `brew install libsodium`).
 
 ## Configuration
 
@@ -339,6 +343,7 @@ See the dedicated [README.md file](./.github/workflows/README.md) in the `workfl
 [official_website]: https://devolutions.net/gateway/download/
 [github_release]: https://github.com/Devolutions/devolutions-gateway/releases
 [install_rust]: https://www.rust-lang.org/tools/install
+[libsodium]: https://libsodium.org/
 [psmodule]: https://www.powershellgallery.com/packages/DevolutionsGateway/
 [rustls]: https://crates.io/crates/rustls
 [microsoft_tls]: https://learn.microsoft.com/en-us/windows-server/security/tls/tls-registry-settings
