@@ -659,6 +659,10 @@
             "text": "Select the certificate to use"
           },
           {
+            "id": "CertificateCouldNotBeVerified",
+            "text": "Certificate could not be verified"
+          },
+          {
             "id": "AnX509CertificateInBinaryOrPemEncoded",
             "text": "An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded"
           }
