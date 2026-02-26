@@ -14,7 +14,7 @@
 <#@ output extension=".cs" #>
 <#
     const string mainCulture = "en-US";
-	string[] cultures = new string[] { mainCulture, "fr-FR" };
+	string[] cultures = new string[] { mainCulture, "fr-FR", "de-DE" };
 
     JToken mainCultureJson = JToken.Parse(File.ReadAllText(GetI18nFile(mainCulture, Host.TemplateFile)));
     List<LocalizationToken> mainCultureTokens = null;

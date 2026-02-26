@@ -228,7 +228,7 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="ThePrivateKeyIsUsedTo">La clé privée sert à générer des jetons de session pour l'application Web autonome</String>
                 <String Id="ThePublicKeyIsUsedTo">La clé publique sert à vérifier des jetons sans restrictions particulières</String>
                     <!-- dialogs.summary -->
-                <String Id="SummaryDlgDescription">Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
+                <String Id="SummaryDlgDescription">Passez la configuration en revue</String>
                 <String Id="SummaryDlgTitle">Résumé</String>
                     <!-- dialogs.firewall -->
                 <String Id="msierrFirewallCannotConnect">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
