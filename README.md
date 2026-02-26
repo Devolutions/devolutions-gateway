@@ -20,15 +20,23 @@ immediately, without going through the acceptance testing process of our quality
 
 ### From sources
 
-Ensure that you have [the Rust toolchain installed][install_rust] and [libsodium][libsodium] installed on your system, then clone this repository and run:
+Ensure that you have [the Rust toolchain installed][install_rust] and then clone this repository and run:
 
 ```shell
 cargo install --path ./devolutions-gateway
 ```
 
-> **Note:** `libsodium` is required as a native dependency for in-memory credential protection.
-> On Windows, it is vendored automatically via vcpkg.
+To enable enhanced in-memory credential protection (mlock via libsodium), build with the `mlock` feature:
+
+```shell
+cargo install --path ./devolutions-gateway --features mlock
+```
+
+> **Note:** The `mlock` feature requires [libsodium][libsodium] to be installed.
+> On Windows, it is found automatically via vcpkg.
 > On Linux and macOS, install it using your system package manager (e.g., `apt install libsodium-dev` or `brew install libsodium`).
+> Production builds should always include the `mlock` feature.
+> Without it, a startup warning is emitted in release builds.
 
 ## Configuration
 

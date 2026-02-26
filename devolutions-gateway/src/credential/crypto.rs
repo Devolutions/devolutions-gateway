@@ -1,16 +1,19 @@
 //! In-memory credential encryption using ChaCha20-Poly1305.
 //!
 //! This module provides encryption-at-rest for passwords stored in the credential store.
-//! A randomly generated 256-bit master key is protected using libsodium's memory locking
-//! facilities (mlock/mprotect), and passwords are encrypted using ChaCha20-Poly1305 AEAD.
+//! A randomly generated 256-bit master key is stored in a zeroize-on-drop wrapper.
+//! When the `mlock` feature is enabled, libsodium's memory locking facilities
+//! (mlock/mprotect) are additionally used to prevent the key from being swapped to
+//! disk or appearing in core dumps.
 //!
 //! ## Security Properties
 //!
-//! - Master key stored in mlock'd memory (excluded from core dumps)
 //! - Passwords encrypted at rest in regular heap memory
 //! - Decryption on-demand into short-lived zeroized buffers
 //! - ChaCha20-Poly1305 provides authenticated encryption
 //! - Random 96-bit nonces prevent nonce reuse
+//! - Master key zeroized on drop
+//! - With `mlock` feature: Master key stored in mlock'd memory (excluded from core dumps)
 
 use core::fmt;
 use std::sync::LazyLock;
@@ -20,28 +23,33 @@ use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
 use rand::RngCore as _;
+#[cfg(feature = "mlock")]
 use secrets::SecretBox;
+#[cfg(not(feature = "mlock"))]
+use zeroize::Zeroizing;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Global master key for credential encryption.
 ///
-/// Initialized lazily on first access. The key material is stored in memory
-/// protected by mlock/mprotect via libsodium's SecretBox, wrapped in a Mutex
-/// for thread-safe access.
+/// Initialized lazily on first access. The key material is wrapped in a Mutex
+/// for thread-safe access. With the `mlock` feature, key memory is additionally
+/// protected by mlock/mprotect via libsodium's SecretBox.
 pub(super) static MASTER_KEY: LazyLock<Mutex<MasterKeyManager>> = LazyLock::new(|| {
     Mutex::new(MasterKeyManager::new().expect("failed to initialize credential encryption master key"))
 });
 
-/// Manages the master encryption key using libsodium's secure memory facilities.
+/// Manages the master encryption key.
 ///
-/// The key is stored in memory that is:
+/// The key is zeroized on drop. When the `mlock` feature is enabled, the key
+/// memory is additionally:
 /// - Locked (mlock) to prevent swapping to disk
 /// - Protected (mprotect) with appropriate access controls
 /// - Excluded from core dumps
-/// - Zeroized on drop
 pub(super) struct MasterKeyManager {
-    // SecretBox provides mlock/mprotect for the key material.
+    #[cfg(feature = "mlock")]
     key_material: SecretBox<[u8; 32]>,
+    #[cfg(not(feature = "mlock"))]
+    key_material: Zeroizing<[u8; 32]>,
 }
 
 impl MasterKeyManager {
@@ -51,12 +59,19 @@ impl MasterKeyManager {
     ///
     /// Returns error if secure memory allocation fails or RNG fails.
     fn new() -> anyhow::Result<Self> {
-        // SecretBox allocates memory with mlock and mprotect.
+        #[cfg(feature = "mlock")]
         let key_material = SecretBox::try_new(|key_bytes: &mut [u8; 32]| {
             OsRng.fill_bytes(key_bytes);
             Ok::<_, anyhow::Error>(())
         })
         .context("failed to allocate secure memory for master key")?;
+
+        #[cfg(not(feature = "mlock"))]
+        let key_material = {
+            let mut key = Zeroizing::new([0u8; 32]);
+            OsRng.fill_bytes(key.as_mut());
+            key
+        };
 
         Ok(Self { key_material })
     }
@@ -65,8 +80,15 @@ impl MasterKeyManager {
     ///
     /// Returns the nonce and ciphertext (which includes the Poly1305 auth tag).
     pub(super) fn encrypt(&self, plaintext: &str) -> anyhow::Result<EncryptedPassword> {
+        #[cfg(feature = "mlock")]
         let key_ref = self.key_material.borrow();
-        let cipher = ChaCha20Poly1305::new_from_slice(key_ref.as_ref()).expect("key is exactly 32 bytes");
+        #[cfg(feature = "mlock")]
+        let key_bytes: &[u8] = key_ref.as_ref();
+
+        #[cfg(not(feature = "mlock"))]
+        let key_bytes: &[u8] = self.key_material.as_ref();
+
+        let cipher = ChaCha20Poly1305::new_from_slice(key_bytes).expect("key is exactly 32 bytes");
 
         // Generate random 96-bit nonce (12 bytes for ChaCha20-Poly1305).
         let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
@@ -84,8 +106,15 @@ impl MasterKeyManager {
     /// The returned `DecryptedPassword` should have a short lifetime.
     /// Use it immediately and let it drop to zeroize the plaintext.
     pub(super) fn decrypt(&self, encrypted: &EncryptedPassword) -> anyhow::Result<DecryptedPassword> {
+        #[cfg(feature = "mlock")]
         let key_ref = self.key_material.borrow();
-        let cipher = ChaCha20Poly1305::new_from_slice(key_ref.as_ref()).expect("key is exactly 32 bytes");
+        #[cfg(feature = "mlock")]
+        let key_bytes: &[u8] = key_ref.as_ref();
+
+        #[cfg(not(feature = "mlock"))]
+        let key_bytes: &[u8] = self.key_material.as_ref();
+
+        let cipher = ChaCha20Poly1305::new_from_slice(key_bytes).expect("key is exactly 32 bytes");
 
         let plaintext_bytes = cipher
             .decrypt(&encrypted.nonce, encrypted.ciphertext.as_ref())
@@ -98,7 +127,8 @@ impl MasterKeyManager {
     }
 }
 
-// Note: SecretBox handles secure zeroization and munlock automatically on drop.
+// Note: With `mlock` feature, SecretBox handles secure zeroization and munlock automatically on drop.
+// Without `mlock` feature, Zeroizing handles secure zeroization on drop (no mlock).
 
 /// Encrypted password stored in heap memory.
 ///

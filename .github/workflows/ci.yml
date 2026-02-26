@@ -620,13 +620,13 @@ jobs:
         if: ${{ matrix.os == 'linux' }}
         run: |
           sudo apt-get update
-          sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
+          sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make libsodium-dev
 
       - name: Configure Linux (arm) runner
         if: ${{ matrix.os == 'linux' && matrix.arch == 'arm64' }}
         run: |
           sudo dpkg --add-architecture arm64
-          sudo apt-get -o Acquire::Retries=3 install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+          sudo apt-get -o Acquire::Retries=3 install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user libsodium-dev:arm64
           rustup target add aarch64-unknown-linux-gnu
           echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
 
@@ -661,6 +661,22 @@ jobs:
           Enter-VsDevShell
           $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        shell: pwsh
+
+
+      - name: Enable mlock for production
+        # arm64 is excluded: libsodium cross-compilation is not supported in the cbake sysroot.
+        # arm64 production builds will emit a startup warning about missing mlock protection.
+        # On Linux, libsodium-dev is installed in the configure steps above (apt-get).
+        # On Windows, libsodium is installed here via vcpkg (deferred to production to avoid slow builds on PRs).
+        if: ${{ needs.preflight.outputs.rust-profile == 'production' && matrix.arch != 'arm64' }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            # Install libsodium via vcpkg for the mlock feature (requires static library)
+            vcpkg install libsodium:x64-windows-static
+            echo "VCPKG_ROOT=$Env:VCPKG_INSTALLATION_ROOT" >> $Env:GITHUB_ENV
+          }
+          echo "CARGO_FEATURES=mlock" >> $Env:GITHUB_ENV
         shell: pwsh
 
       - name: Build
