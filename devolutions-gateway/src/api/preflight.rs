@@ -337,17 +337,8 @@ async fn handle_operation(
                 });
             }
 
-            // Encrypt passwords before storing.
-            let encrypted_mapping = mapping.map(|m| m.encrypt()).transpose().map_err(|e| {
-                error!(error = format!("{e:#}"), "Failed to encrypt credentials");
-                PreflightError::new(
-                    PreflightAlertStatus::InternalServerError,
-                    "credential encryption failed",
-                )
-            })?;
-
             let previous_entry = credential_store
-                .insert(token, encrypted_mapping, time_to_live)
+                .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|e| PreflightError::new(PreflightAlertStatus::InternalServerError, format!("{e:#}")))?;
 

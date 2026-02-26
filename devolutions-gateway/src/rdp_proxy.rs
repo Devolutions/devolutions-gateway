@@ -412,7 +412,8 @@ where
         username,
         password: decrypted_password.expose_secret().to_owned(),
     };
-    // decrypted_password drops here, zeroizing memory.
+    // decrypted_password drops here, zeroizing its buffer; note: a copy of the plaintext
+    // remains in `credentials` above, which is a regular String (downstream API limitation).
 
     let (mut sequence, mut ts_request) = ironrdp_connector::credssp::CredsspSequence::init(
         credentials,
@@ -572,7 +573,8 @@ where
             username,
             password: decrypted_password.expose_secret().to_owned().into(),
         };
-        // decrypted_password drops here, zeroizing memory.
+        // decrypted_password drops here, zeroizing its buffer; note: a copy of the plaintext
+        // remains in `identity` above (downstream API limitation).
 
         let mut sequence = ironrdp_acceptor::credssp::CredsspSequence::init(
             &identity,

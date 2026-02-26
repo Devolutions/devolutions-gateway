@@ -45,9 +45,10 @@ pub struct AppCredentialMapping {
     pub target: AppCredential,
 }
 
-/// Cleartext credential wrapper used only for deserialization.
+/// Cleartext credential received from the API, used for deserialization only.
 ///
-/// This type is converted to `AppCredential` (with encrypted password) immediately after deserialization.
+/// Passwords are encrypted and stored as [`AppCredential`] inside the credential store.
+/// This type is never stored directly — hand it to [`CredentialStoreHandle::insert`].
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind")]
 pub enum CleartextAppCredential {
@@ -59,8 +60,7 @@ pub enum CleartextAppCredential {
 }
 
 impl CleartextAppCredential {
-    /// Encrypt the password and convert to storage-ready `AppCredential`.
-    pub fn encrypt(self) -> anyhow::Result<AppCredential> {
+    fn encrypt(self) -> anyhow::Result<AppCredential> {
         match self {
             CleartextAppCredential::UsernamePassword { username, password } => {
                 let encrypted = MASTER_KEY.lock().encrypt(password.expose_secret())?;
@@ -73,9 +73,9 @@ impl CleartextAppCredential {
     }
 }
 
-/// Cleartext credential mapping wrapper used only for deserialization.
+/// Cleartext credential mapping received from the API, used for deserialization only.
 ///
-/// This type is converted to `AppCredentialMapping` (with encrypted passwords) immediately after deserialization.
+/// Passwords are encrypted on write. Hand this directly to [`CredentialStoreHandle::insert`].
 #[derive(Debug, Deserialize)]
 pub struct CleartextAppCredentialMapping {
     #[serde(rename = "proxy_credential")]
@@ -85,8 +85,7 @@ pub struct CleartextAppCredentialMapping {
 }
 
 impl CleartextAppCredentialMapping {
-    /// Encrypt passwords and convert to storage-ready `AppCredentialMapping`.
-    pub fn encrypt(self) -> anyhow::Result<AppCredentialMapping> {
+    fn encrypt(self) -> anyhow::Result<AppCredentialMapping> {
         Ok(AppCredentialMapping {
             proxy: self.proxy.encrypt()?,
             target: self.target.encrypt()?,
@@ -111,9 +110,10 @@ impl CredentialStoreHandle {
     pub fn insert(
         &self,
         token: String,
-        mapping: Option<AppCredentialMapping>,
+        mapping: Option<CleartextAppCredentialMapping>,
         time_to_live: time::Duration,
     ) -> anyhow::Result<Option<ArcCredentialEntry>> {
+        let mapping = mapping.map(CleartextAppCredentialMapping::encrypt).transpose()?;
         self.0.lock().insert(token, mapping, time_to_live)
     }
 
