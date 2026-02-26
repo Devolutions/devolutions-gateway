@@ -1,7 +1,7 @@
 mod crypto;
 
 #[rustfmt::skip]
-pub use crypto::{DecryptedPassword, EncryptedPassword};
+pub use crypto::EncryptedPassword;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -51,7 +51,7 @@ impl AppCredential {
     /// Decrypt the password using the global master key.
     ///
     /// Returns the username and a short-lived decrypted password that zeroizes on drop.
-    pub fn decrypt_password(&self) -> anyhow::Result<(String, DecryptedPassword)> {
+    pub fn decrypt_password(&self) -> anyhow::Result<(String, secrecy::SecretString)> {
         match self {
             AppCredential::UsernamePassword { username, password } => {
                 let decrypted = MASTER_KEY.lock().decrypt(password)?;

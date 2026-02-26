@@ -23,11 +23,11 @@ use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
 use rand::RngCore as _;
+use secrecy::SecretString;
 #[cfg(feature = "mlock")]
 use secrets::SecretBox;
 #[cfg(not(feature = "mlock"))]
 use zeroize::Zeroizing;
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Global master key for credential encryption.
 ///
@@ -101,11 +101,11 @@ impl MasterKeyManager {
         Ok(EncryptedPassword { nonce, ciphertext })
     }
 
-    /// Decrypt a password, returning a zeroize-on-drop wrapper.
+    /// Decrypt a password, returning a `SecretString` that zeroizes on drop.
     ///
-    /// The returned `DecryptedPassword` should have a short lifetime.
+    /// The returned `SecretString` should have a short lifetime.
     /// Use it immediately and let it drop to zeroize the plaintext.
-    pub(super) fn decrypt(&self, encrypted: &EncryptedPassword) -> anyhow::Result<DecryptedPassword> {
+    pub(super) fn decrypt(&self, encrypted: &EncryptedPassword) -> anyhow::Result<SecretString> {
         #[cfg(feature = "mlock")]
         let key_ref = self.key_material.borrow();
         #[cfg(feature = "mlock")]
@@ -123,7 +123,7 @@ impl MasterKeyManager {
         // Convert bytes to String.
         let plaintext = String::from_utf8(plaintext_bytes).context("decrypted password is not valid UTF-8")?;
 
-        Ok(DecryptedPassword(plaintext))
+        Ok(SecretString::new(plaintext.into()))
     }
 }
 
@@ -151,32 +151,11 @@ impl fmt::Debug for EncryptedPassword {
     }
 }
 
-/// Temporarily decrypted password, zeroized on drop.
-///
-/// IMPORTANT: This should have a SHORT lifetime. Decrypt immediately before use,
-/// and let it drop as soon as possible to zeroize the plaintext.
-#[derive(Zeroize, ZeroizeOnDrop)]
-pub struct DecryptedPassword(String);
-
-impl DecryptedPassword {
-    /// Expose the plaintext password.
-    ///
-    /// IMPORTANT: Do not store the returned reference beyond the lifetime
-    /// of this `DecryptedPassword`. It will be zeroized when dropped.
-    pub fn expose_secret(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for DecryptedPassword {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DecryptedPassword").finish_non_exhaustive()
-    }
-}
-
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "test code, panics are expected")]
 mod tests {
+    use secrecy::ExposeSecret as _;
+
     use super::*;
 
     #[test]
