@@ -337,6 +337,11 @@ async fn handle_operation(
                 });
             }
 
+            // Validate the token JTI up front so that a bad/missing JTI is reported as
+            // InvalidParams (client error) rather than InternalServerError.
+            crate::token::extract_jti(&token)
+                .map_err(|e| PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}")))?;
+
             let previous_entry = credential_store
                 .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
