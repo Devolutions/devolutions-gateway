@@ -49,6 +49,14 @@ impl GatewayService {
 
         info!(version = env!("CARGO_PKG_VERSION"));
 
+        // Warn in release builds if the mlock security feature is not compiled in.
+        #[cfg(all(not(feature = "mlock"), not(debug_assertions)))]
+        warn!(
+            "Credential encryption master key does not have mlock memory protection. \
+            Rebuild with the `mlock` feature (requires libsodium) to prevent key exposure \
+            in core dumps and swap."
+        );
+
         let conf_file = conf_handle.get_conf_file();
         trace!(?conf_file);
 
