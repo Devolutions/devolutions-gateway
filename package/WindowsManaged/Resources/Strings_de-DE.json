@@ -4,7 +4,7 @@
       "metadata": [
         {
           "id": "Language",
-          "text": "1033"
+          "text": "1031"
         },
         {
           "id": "VendorName",
@@ -16,111 +16,111 @@
         },
         {
           "id": "ProductDescription",
-          "text": "A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection."
+          "text": "Ein blitzschneller Relay-Server, der sich an verschiedene Protokolle und gewünschte Traffic-Inspektionsstufen anpasst."
         }
       ],
       "messages": [
         {
           "id": "ThereIsAProblemWithTheEnteredData",
-          "text": "There is a problem with the entered data. Please correct the issue and try again."
+          "text": "Es gibt ein Problem mit den eingegebenen Daten. Bitte korrigieren Sie das Problem und versuchen Sie es erneut."
         },
         {
           "id": "YouMustEnterAValidPort",
-          "text": "You must enter a valid port"
+          "text": "Sie müssen einen gültigen Port eingeben"
         },
         {
           "id": "YouMustEnterAValidUrl",
-          "text": "You must enter a valid URL"
+          "text": "Sie müssen eine gültige URL eingeben"
         },
         {
           "id": "YouMustProvideAValidHostname",
-          "text": "You must provide a valid hostname"
+          "text": "Sie müssen einen gültigen Hostnamen angeben"
         },
         {
           "id": "YouMustSelectACertificateFromTheSystemCertificateStore",
-          "text": "You must select a certificate from the system certificate store"
+          "text": "Sie müssen ein Zertifikat aus dem System-Zertifikatspeicher auswählen"
         },
         {
           "id": "YouMustProvideAValidCertificateAndPasswordOrKey",
-          "text": "You must provide a valid certificate file and either a password or private key file"
+          "text": "Sie müssen eine gültige Zertifikatsdatei und entweder ein Passwort oder eine private Schlüsseldatei angeben"
         },
         {
           "id": "TheSpecifiedFileWasInvalidOrNotAccessible",
-          "text": "The specified file was invalid or not accessible"
+          "text": "Die angegebene Datei ist ungültig oder nicht zugänglich"
         },
         {
           "id": "NoMatchingCertificatesFound",
-          "text": "No matching certificates found"
+          "text": "Keine übereinstimmenden Zertifikate gefunden"
         },
         {
           "id": "AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX",
-          "text": "An unexpected error occurred accessing the system certificate store: {0}"
+          "text": "Beim Zugriff auf den System-Zertifikatspeicher ist ein unerwarteter Fehler aufgetreten: {0}"
         },
         {
           "id": "AuthenticationTokenIsRequired",
-          "text": "The authentication token is required"
+          "text": "Das Authentifizierungstoken ist erforderlich"
         },
         {
           "id": "DomainIsRequiredAndMustBeValid",
-          "text": "The domain is required and must be a valid hostname"
+          "text": "Die Domäne ist erforderlich und muss ein gültiger Hostname sein"
         },
         {
           "id": "RemoteAddressIsRequired",
-          "text": "The remote address is required"
+          "text": "Die Remote-Adresse ist erforderlich"
         },
         {
           "id": "RemoteAddressMustBeInTheFormat",
-          "text": "The remote address must be a valid host and port in the format {host}:{port}"
+          "text": "Die Remote-Adresse muss ein gültiger Host und Port im Format {host}:{port} sein"
         },
         {
           "id": "YouMustEnterAUsername",
-          "text": "You must enter a username"
+          "text": "Sie müssen einen Benutzernamen eingeben"
         },
         {
           "id": "YouMustEnterAPassword",
-          "text": "You must enter a password"
+          "text": "Sie müssen ein Passwort eingeben"
         },
         {
           "id": "YouMustConfirmThePassword",
-          "text": "You must confirm the password"
+          "text": "Sie müssen das Passwort bestätigen"
         },
         {
           "id": "PasswordsDoNotMatch",
-          "text": "Passwords do not match"
+          "text": "Die Passwörter stimmen nicht überein"
         },
         {
           "id": "OS2Old",
-          "text": "This product requires at least Windows 8 / Windows Server 2012 R2"
+          "text": "Dieses Produkt erfordert mindestens Windows 8 / Windows Server 2012 R2"
         },
         {
           "id": "NewerInstalled",
-          "text": "A newer version of this product is already installed."
+          "text": "Eine neuere Version dieses Produkts ist bereits installiert."
         },
         {
           "id": "x64VersionRequired",
-          "text": "You need to install the 64-bit version of this product on 64-bit Windows."
+          "text": "Sie müssen die 64-Bit-Version dieses Produkts auf 64-Bit-Windows installieren."
         },
         {
           "id": "x86VersionRequired",
-          "text": "You need to install the 32-bit version of this product on 32-bit Windows."
+          "text": "Sie müssen die 32-Bit-Version dieses Produkts auf 32-Bit-Windows installieren."
         },
         {
           "id": "DotNet48IsStrongRecommendedDownloadNow",
-          "text": "Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+          "text": "Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?"
         },
         {
           "id": "Dotnet471IsRequired",
-          "text": "The product requires Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+          "text": "Das Produkt erfordert Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?"
         },
         {
           "id": "WindowsPowerShell51IsRequired",
-          "text": "This product requires Windows PowerShell 5.1"
+          "text": "Dieses Produkt erfordert Windows PowerShell 5.1"
         }
       ],
       "links": [
         {
           "id": "FindYourPublicKeyForXorX",
-          "text": "Find your public key for {0} or {1}"
+          "text": "Öffentlichen Schlüssel für {0} oder {1} suchen"
         },
         {
           "id": "FindYourPublicKeyDevolutionsServerLink",
@@ -132,7 +132,7 @@
         },
         {
           "id": "NgrokReadMoreAtX",
-          "text": "Read more at {0}"
+          "text": "Weitere Informationen auf {0}"
         },
         {
           "id": "NgrokReadMoreLink",
@@ -140,59 +140,59 @@
         },
         {
           "id": "NgrokProvideYourX",
-          "text": "Provide your {0}"
+          "text": "Geben Sie Ihr {0} an"
         },
         {
           "id": "NgrokAuthTokenLink",
-          "text": "authentication token"
+          "text": "Authentifizierungstoken"
         },
         {
           "id": "NgrokXForWebClientAccess",
-          "text": "The {0} for web client access"
+          "text": "Die {0} für den Webclient-Zugriff"
         },
         {
           "id": "NgrokDomainLink",
-          "text": "domain"
+          "text": "Domäne"
         },
         {
           "id": "NgroXForNativeClientAccess",
-          "text": "The {0} for native client access"
+          "text": "Die {0} für den nativen Client-Zugriff"
         },
         {
           "id": "NgrokTcpAddressLink",
-          "text": "TCP address"
+          "text": "TCP-Adresse"
         }
       ],
       "buttons": [
         {
           "id": "ViewButton",
-          "text": "View"
+          "text": "Anzeigen"
         },
         {
           "id": "SearchButton",
-          "text": "Search"
+          "text": "Suchen"
         },
         {
           "id": "ViewLogButton",
-          "text": "View Log"
+          "text": "Protokoll anzeigen"
         },
         {
           "id": "ViewErrorsButton",
-          "text": "View configuration issues"
+          "text": "Konfigurationsprobleme anzeigen"
         },
         {
           "id": "ValidateButton",
-          "text": "Validate"
+          "text": "Überprüfen"
         }
       ],
       "propertyGroups": [
         {
           "id": "Group_InstallLocation",
-          "text": "Install Location"
+          "text": "Installationsort"
         },
         {
           "id": "Group_Service",
-          "text": "Service"
+          "text": "Dienst"
         },
         {
           "id": "Group_Ngrok",
@@ -200,37 +200,37 @@
         },
         {
           "id": "Group_ExternalAccess",
-          "text": "External Access"
+          "text": "Externer Zugriff"
         },
         {
           "id": "Group_Listeners",
-          "text": "Listeners"
+          "text": "Listener"
         },
         {
           "id": "Group_EncryptionKeys",
-          "text": "Encryption Keys"
+          "text": "Verschlüsselungsschlüssel"
         },
         {
           "id": "Group_WebApp",
-          "text": "Web App"
+          "text": "Webanwendung"
         },
         {
           "id": "Group_Certificate",
-          "text": "Certificate"
+          "text": "Zertifikat"
         }
       ],
       "enums": [
         {
           "id": "CustomizeMode_Now",
-          "text": "Now"
+          "text": "Jetzt"
         },
         {
           "id": "CustomizeMode_Later",
-          "text": "Later"
+          "text": "Später"
         },
         {
           "id": "CertificateMode_External",
-          "text": "External"
+          "text": "Extern"
         },
         {
           "id": "CertificateMode_System",
@@ -238,63 +238,63 @@
         },
         {
           "id": "CertificateFindType_Thumbprint",
-          "text": "Thumbprint"
+          "text": "Fingerabdruck"
         },
         {
           "id": "CertificateFindType_SubjectName",
-          "text": "Subject Name"
+          "text": "Antragstellername"
         },
         {
           "id": "AuthenticationMode_None",
-          "text": "None"
+          "text": "Keine"
         },
         {
           "id": "AuthenticationMode_Custom",
-          "text": "Custom"
+          "text": "Benutzerdefiniert"
         },
         {
           "id": "StoreLocation_CurrentUser",
-          "text": "Current User"
+          "text": "Aktueller Benutzer"
         },
         {
           "id": "StoreLocation_LocalMachine",
-          "text": "Local Machine"
+          "text": "Lokaler Computer"
         },
         {
           "id": "StoreName_My",
-          "text": "Personal"
+          "text": "Persönlich"
         },
         {
           "id": "StoreName_Root",
-          "text": "Trusted Root Certification Authorities"
+          "text": "Vertrauenswürdige Stammzertifizierungsstellen"
         },
         {
           "id": "StoreName_CertificateAuthority",
-          "text": "Intermediate Certification Authorities"
+          "text": "Zwischenzertifizierungsstellen"
         },
         {
           "id": "StoreName_TrustedPublisher",
-          "text": "Trusted Publishers"
+          "text": "Vertrauenswürdige Herausgeber"
         },
         {
           "id": "StoreName_Disallowed",
-          "text": "Untrusted Certificates"
+          "text": "Nicht vertrauenswürdige Zertifikate"
         },
         {
           "id": "StoreName_AuthRoot",
-          "text": "Third-Party Root Certification Authorities"
+          "text": "Drittanbieter-Stammzertifizierungsstellen"
         },
         {
           "id": "StoreName_TrustedPeople",
-          "text": "Trusted People"
+          "text": "Vertrauenswürdige Personen"
         },
         {
           "id": "StoreName_AddressBook",
-          "text": "Other People"
+          "text": "Andere Personen"
         },
         {
           "id": "ServiceStartMode_Boot",
-          "text": "Boot"
+          "text": "Start"
         },
         {
           "id": "ServiceStartMode_System",
@@ -302,115 +302,115 @@
         },
         {
           "id": "ServiceStartMode_Automatic",
-          "text": "Automatic"
+          "text": "Automatisch"
         },
         {
           "id": "ServiceStartMode_Manual",
-          "text": "Manual"
+          "text": "Manuell"
         },
         {
           "id": "ServiceStartMode_Disabled",
-          "text": "Disabled"
+          "text": "Deaktiviert"
         }
       ],
       "properties": [
         {
           "id": "Property_CertificateMode",
-          "text": "Certificate Source"
+          "text": "Zertifikatquelle"
         },
         {
           "id": "Property_CertificateFile",
-          "text": "Certificate File"
+          "text": "Zertifikatsdatei"
         },
         {
           "id": "Property_CertificatePassword",
-          "text": "Certificate Password"
+          "text": "Zertifikatpasswort"
         },
         {
           "id": "Property_CertificatePrivateKeyFile",
-          "text": "Certificate Private Key"
+          "text": "Privater Schlüssel des Zertifikats"
         },
         {
           "id": "Property_CertificateLocation",
-          "text": "Certificate Location"
+          "text": "Zertifikatort"
         },
         {
           "id": "Property_CertificateStore",
-          "text": "Certificate Store"
+          "text": "Zertifikatspeicher"
         },
         {
           "id": "Property_CertificateName",
-          "text": "Certificate Name"
+          "text": "Zertifikatname"
         },
         {
           "id": "Property_PublicKeyFile",
-          "text": "Public Key File"
+          "text": "Datei mit öffentlichem Schlüssel"
         },
         {
           "id": "Property_PrivateKeyFile",
-          "text": "Private Key File"
+          "text": "Datei mit privatem Schlüssel"
         },
         {
           "id": "Property_ServiceStart",
-          "text": "Service Start Mode"
+          "text": "Dienststartmodus"
         },
         {
           "id": "Property_AuthenticationMode",
-          "text": "Authentication Mode"
+          "text": "Authentifizierungsmodus"
         },
         {
           "id": "Property_WebUsername",
-          "text": "Default Username"
+          "text": "Standardbenutzername"
         },
         {
           "id": "Property_WebPassword",
-          "text": "Default Password"
+          "text": "Standardpasswort"
         },
         {
           "id": "Property_NgrokAuthToken",
-          "text": "Authentication Token"
+          "text": "Authentifizierungstoken"
         },
         {
           "id": "Property_NgrokHttpDomain",
-          "text": "Domain"
+          "text": "Domäne"
         },
         {
           "id": "Property_NgrokRemoteAddress",
-          "text": "TCP Address"
+          "text": "TCP-Adresse"
         },
         {
           "id": "Property_Directory",
-          "text": "Directory"
+          "text": "Verzeichnis"
         },
         {
           "id": "Property_AccessUri",
-          "text": "Access URI"
+          "text": "Zugriffs-URI"
         },
         {
           "id": "Property_HttpListener",
-          "text": "HTTP Listener"
+          "text": "HTTP-Listener"
         },
         {
           "id": "Property_TcpListener",
-          "text": "TCP Listener"
+          "text": "TCP-Listener"
         },
         {
           "id": "Property_NewKeyPair",
-          "text": "A new key pair will be generated"
+          "text": "Ein neues Schlüsselpaar wird generiert"
         },
         {
           "id": "Property_NewCertificate",
-          "text": "A new self-signed certificate will be generated"
+          "text": "Ein neues selbstsigniertes Zertifikat wird generiert"
         },
         {
           "id": "Property_DevolutionsServerUrl",
-          "text": "Devolutions Server URL"
+          "text": "Devolutions Server-URL"
         }
       ],
       "static": [
         {
           "id": "Protocol",
-          "text": "Protocol"
+          "text": "Protokoll"
         },
         {
           "id": "Host",
@@ -422,299 +422,299 @@
         },
         {
           "id": "UACPromptLabel",
-          "text": "Please wait for UAC prompt to appear.\n\nIf it appears minimized then active it from the taskbar."
+          "text": "Bitte warten Sie auf die UAC-Eingabeaufforderung.\n\nWenn sie minimiert erscheint, aktivieren Sie sie über die Taskleiste."
         }
       ],
       "filters": [
         {
           "id": "Filter_PublicKeyFiles",
-          "text": "Public Key Files (*.pem)"
+          "text": "Dateien mit öffentlichem Schlüssel (*.pem)"
         },
         {
           "id": "Filter_PrivateKeyFiles",
-          "text": "Private Key Files (*.key)"
+          "text": "Dateien mit privatem Schlüssel (*.key)"
         },
         {
           "id": "Filter_PfxFiles",
-          "text": "PFX Files (*.pfx, *.p12)"
+          "text": "PFX-Dateien (*.pfx, *.p12)"
         },
         {
           "id": "Filter_CertificateFiles",
-          "text": "Certificate Files (*.pem, *.crt, *.cer)"
+          "text": "Zertifikatsdateien (*.pem, *.crt, *.cer)"
         },
         {
           "id": "Filter_AllFiles",
-          "text": "All Files"
+          "text": "Alle Dateien"
         }
       ],
       "dialogs": {
         "static": [
           {
             "id": "GatewayDlg_Title",
-            "text": "[ProductName] Setup"
+            "text": "[ProductName]-Setup"
           }
         ],
         "browse": [
           {
             "id": "BrowseDlgTitle",
-            "text": "Change destination folder"
+            "text": "Zielordner ändern"
           },
           {
             "id": "BrowseDlgDescription",
-            "text": "Browse to the destination folder"
+            "text": "Zum Zielordner navigieren"
           }
         ],
         "installDir": [
           {
             "id": "InstallDirDlgTitle",
-            "text": "Destination Folder"
+            "text": "Zielordner"
           },
           {
             "id": "InstallDirDlgDescription",
-            "text": "Click Next to install to the default folder or click Change to choose another."
+            "text": "Klicken Sie auf Weiter, um im Standardordner zu installieren, oder auf Ändern, um einen anderen auszuwählen."
           }
         ],
         "progress": [
           {
             "id": "ProgressDlgTitleInstalling",
-            "text": "Installing [ProductName]"
+            "text": "[ProductName] wird installiert"
           },
           {
             "id": "ProgressDlgTitleChanging",
-            "text": "Changing [ProductName]"
+            "text": "[ProductName] wird geändert"
           },
           {
             "id": "ProgressDlgTitleRepairing",
-            "text": "Repairing [ProductName]"
+            "text": "[ProductName] wird repariert"
           },
           {
             "id": "ProgressDlgTitleRemoving",
-            "text": "Removing [ProductName]"
+            "text": "[ProductName] wird entfernt"
           },
           {
             "id": "ProgressDlgTitleUpdating",
-            "text": "Updating [ProductName]"
+            "text": "[ProductName] wird aktualisiert"
           }
         ],
         "verifyReady": [
           {
             "id": "VerifyReadyDlgInstallTitle",
-            "text": "Ready to install [ProductName]"
+            "text": "Bereit zur Installation von [ProductName]"
           },
           {
             "id": "VerifyReadyDlgChangeTitle",
-            "text": "Ready to change [ProductName]"
+            "text": "Bereit zur Änderung von [ProductName]"
           },
           {
             "id": "VerifyReadyDlgRepairTitle",
-            "text": "Ready to repair [ProductName]"
+            "text": "Bereit zur Reparatur von [ProductName]"
           },
           {
             "id": "VerifyReadyDlgRemoveTitle",
-            "text": "Ready to remove [ProductName]"
+            "text": "Bereit zur Entfernung von [ProductName]"
           },
           {
             "id": "VerifyReadyDlgUpdateTitle",
-            "text": "Ready to update [ProductName]"
+            "text": "Bereit zur Aktualisierung von [ProductName]"
           }
         ],
         "welcome": [
           {
             "id": "WelcomeDlgTitle",
             "overridable": "yes",
-            "text": "Welcome to the [ProductName] 20[ProductVersion] Setup Wizard"
+            "text": "Willkommen beim Setup-Assistenten für [ProductName] 20[ProductVersion]"
           }
         ],
         "customize": [
           {
             "id": "CustomInstallDlgTitle",
-            "text": "Configuration"
+            "text": "Konfiguration"
           },
           {
             "id": "CustomInstallDlgDescription",
-            "text": "Choose how to configure [ProductName]."
+            "text": "Wählen Sie, wie [ProductName] konfiguriert werden soll."
           },
           {
             "id": "CustomInstallDlgInfoLabel",
-            "text": "The Setup Wizard will generate a configuration which you can update later; or you can provide configuration information now."
+            "text": "Der Setup-Assistent generiert eine Konfiguration, die Sie später aktualisieren können; oder Sie können die Konfigurationsinformationen jetzt angeben."
           },
           {
             "id": "RecommendedForMostInstallations",
-            "text": "Recommended for most installations. Generate a basic configuration using this installer and start the Gateway service automatically."
+            "text": "Für die meisten Installationen empfohlen. Generiert eine grundlegende Konfiguration mit diesem Installer und startet den Gateway-Dienst automatisch."
           },
           {
             "id": "RecommendedForManualInstallations",
-            "text": "The Gateway service will need to be manually configured and started after installation."
+            "text": "Der Gateway-Dienst muss nach der Installation manuell konfiguriert und gestartet werden."
           },
           {
             "id": "ConfigureTheGatewayInstallation",
-            "text": "Configure the Gateway installation"
+            "text": "Gateway-Installation konfigurieren"
           },
           {
             "id": "ConfigurationOptions",
-            "text": "Configuration Options"
+            "text": "Konfigurationsoptionen"
           },
           {
             "id": "EnableAccessOverTheInternetUsingNgrok",
-            "text": "Enable access over the internet using ngrok"
+            "text": "Internetzugriff über ngrok aktivieren"
           },
           {
             "id": "EnableTheGatewayWebInterface",
-            "text": "Enable the Gateway web interface"
+            "text": "Gateway-Weboberfläche aktivieren"
           },
           {
             "id": "GenerateASelfSignedHttpsCertificate",
-            "text": "Generate a self-signed HTTPS certificate"
+            "text": "Selbstsigniertes HTTPS-Zertifikat generieren"
           },
           {
             "id": "GenerateEncryptionKeys",
-            "text": "Generate encryption keys"
+            "text": "Verschlüsselungsschlüssel generieren"
           }
         ],
         "accessUri": [
           {
             "id": "AccessUriDlgTitle",
-            "text": "External URL"
+            "text": "Externe URL"
           },
           {
             "id": "AccessUriDlgDescription",
-            "text": "URL to reach [ProductName]."
+            "text": "URL zum Erreichen von [ProductName]."
           },
           {
             "id": "AccessUriDlgExplanation",
-            "text": "The URI to reach the Gateway externally for HTTP operations. This may differ from the HTTP listener address in certain cases (for example, when using a reverse proxy such as IIS)."
+            "text": "Der URI zum externen Erreichen des Gateways für HTTP-Operationen. Dies kann in bestimmten Fällen von der HTTP-Listener-Adresse abweichen (z. B. bei Verwendung eines Reverse-Proxys wie IIS)."
           },
           {
             "id": "AccessUriDlgHttpWarn",
-            "text": "An insecure external URI is not recommended for production environments"
+            "text": "Ein unsicherer externer URI wird für Produktionsumgebungen nicht empfohlen"
           }
         ],
         "certificate": [
           {
             "id": "CertificateDlgTitle",
-            "text": "Certificate"
+            "text": "Zertifikat"
           },
           {
             "id": "CertificateDlgDescription",
-            "text": "A certificate is required when using an HTTPS listener."
+            "text": "Bei Verwendung eines HTTPS-Listeners ist ein Zertifikat erforderlich."
           },
           {
             "id": "CertificateDlgCertConfigLabel",
-            "text": "Certificate Configuration"
+            "text": "Zertifikatkonfiguration"
           },
           {
             "id": "CertificateDlgCertFileLabel",
-            "text": "Certificate File"
+            "text": "Zertifikatsdatei"
           },
           {
             "id": "CertificateDlgCertPasswordLabel",
-            "text": "Certificate Password"
+            "text": "Zertifikatpasswort"
           },
           {
             "id": "CertificateDlgCertKeyFileLabel",
-            "text": "Private Key File"
+            "text": "Datei mit privatem Schlüssel"
           },
           {
             "id": "CertificateSource",
-            "text": "Certificate Source"
+            "text": "Zertifikatquelle"
           },
           {
             "id": "EnterTextToSearch",
-            "text": "Enter text to search"
+            "text": "Suchtext eingeben"
           },
           {
             "id": "SearchForACertificateToUse",
-            "text": "Search for a certificate to use"
+            "text": "Zu verwendendes Zertifikat suchen"
           },
           {
             "id": "StoreLocation",
-            "text": "Store Location"
+            "text": "Speicherort"
           },
           {
             "id": "CertificateStore",
-            "text": "Certificate Store"
+            "text": "Zertifikatspeicher"
           },
           {
             "id": "SearchBy",
-            "text": "Search By"
+            "text": "Suchen nach"
           },
           {
             "id": "Search",
-            "text": "Search"
+            "text": "Suchen"
           },
           {
             "id": "SelectedCertificate",
-            "text": "Selected Certificate"
+            "text": "Ausgewähltes Zertifikat"
           },
           {
             "id": "BrowseForACertificateToUse",
-            "text": "Browse for a certificate to use"
+            "text": "Zu verwendendes Zertifikat durchsuchen"
           },
           {
             "id": "EncryptedPrivateKeysAreNotSupported",
-            "text": "Encrypted private keys are not supported"
+            "text": "Verschlüsselte private Schlüssel werden nicht unterstützt"
           },
           {
             "id": "SelectTheCertificateToUse",
-            "text": "Select the certificate to use"
+            "text": "Das zu verwendende Zertifikat auswählen"
           },
           {
             "id": "CertificateCouldNotBVerified",
-            "text": "Certificate could not be verified"
+            "text": "Zertifikat konnte nicht verifiziert werden"
           },
           {
             "id": "AnX509CertificateInBinaryOrPemEncoded",
-            "text": "An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded"
+            "text": "Ein X.509-Zertifikat im binären PKCS#12-Format (PFX/P12) oder PEM-kodiert"
           }
         ],
         "listeners": [
           {
             "id": "ListenersDlgTitle",
-            "text": "Listeners"
+            "text": "Listener"
           },
           {
             "id": "ListenersDlgDescription",
-            "text": "HTTP(S) and TCP port listeners."
+            "text": "HTTP(S)- und TCP-Port-Listener."
           },
           {
             "id": "ListenersDlgListenersLabel",
-            "text": "Listeners"
+            "text": "Listener"
           },
           {
             "id": "ListenersDlgHTTPLabel",
-            "text": "HTTP Listener"
+            "text": "HTTP-Listener"
           },
           {
             "id": "ListenersDlgTCPLabel",
-            "text": "TCP Listener"
+            "text": "TCP-Listener"
           },
           {
             "id": "AnHttpListenerDoesNotRequireACert",
-            "text": "An HTTP listener does not require a certificate."
+            "text": "Ein HTTP-Listener erfordert kein Zertifikat."
           },
           {
             "id": "AnHttpsListenerRequiresACertSelfSigned",
-            "text": "An HTTPS listener requires a certificate. The self-signed certificate generated by this installer is not trusted by default."
+            "text": "Ein HTTPS-Listener erfordert ein Zertifikat. Das von diesem Installer generierte selbstsignierte Zertifikat ist standardmäßig nicht vertrauenswürdig."
           },
           {
             "id": "AnHttpsListenerRequiresACert",
-            "text": "An HTTPS listener requires a certificate. You will be prompted to configure one."
+            "text": "Ein HTTPS-Listener erfordert ein Zertifikat. Sie werden aufgefordert, eines zu konfigurieren."
           },
           {
             "id": "InvalidPort",
-            "text": "Invalid port"
+            "text": "Ungültiger Port"
           },
           {
             "id": "ChosenPortAvailable",
-            "text": "The chosen port is available"
+            "text": "Der gewählte Port ist verfügbar"
           },
           {
             "id": "ChosenPortNotAvailable",
-            "text": "The chosen port might not be available"
+            "text": "Der gewählte Port ist möglicherweise nicht verfügbar"
           },
           {
             "id": "ChosenPortCouldNotBeChecked",
-            "text": "The chosen port could not be checked"
+            "text": "Der gewählte Port konnte nicht überprüft werden"
           }
         ],
         "ngrok": [
@@ -724,151 +724,181 @@
           },
           {
             "id": "NgrokListenersDlgDescription",
-            "text": "ngrok listener configuration."
+            "text": "ngrok-Listener-Konfiguration."
           },
           {
             "id": "UseNgrokForSimplifiedRemoteAccess",
-            "text": "Use ngrok for simplified remote access from the Internet. Gateway listeners allow access from any IP address by default."
+            "text": "Verwenden Sie ngrok für vereinfachten Fernzugriff aus dem Internet. Gateway-Listener erlauben standardmäßig den Zugriff von jeder IP-Adresse."
           },
           {
             "id": "AuthToken",
-            "text": "Auth Token"
+            "text": "Auth-Token"
           },
           {
             "id": "Domain",
-            "text": "Domain"
+            "text": "Domäne"
           },
           {
             "id": "NativeClientAccess",
-            "text": "Native Client Access"
+            "text": "Nativer Client-Zugriff"
           },
           {
             "id": "Configure",
-            "text": "Configure"
+            "text": "Konfigurieren"
           },
           {
             "id": "RemoteAddress",
-            "text": "Remote Address"
+            "text": "Remote-Adresse"
           }
         ],
         "dvls": [
           {
             "id": "PublicKeyServerDlgTitle",
-            "text": "Companion Server"
+            "text": "Begleitserver"
           },
           {
             "id": "PublicKeyServerDlgDescription",
-            "text": "Automatic server configuration"
+            "text": "Automatische Serverkonfiguration"
           },
           {
             "id": "ProvideDvlsAddressIfUsing",
-            "text": "If you're using Devolutions Server, provide the address. This step is optional."
+            "text": "Wenn Sie Devolutions Server verwenden, geben Sie die Adresse an. Dieser Schritt ist optional."
           },
           {
             "id": "AutomaticConfigurationWithDvls",
-            "text": "Automatic configuration with Devolutions Server"
+            "text": "Automatische Konfiguration mit Devolutions Server"
           },
           {
             "id": "ManualConfiguration",
-            "text": "Manual configuration"
+            "text": "Manuelle Konfiguration"
           },
           {
             "id": "ThePublicKeyWillBeDownloaded",
-            "text": "The public key will be downloaded"
+            "text": "Der öffentliche Schlüssel wird heruntergeladen"
           },
           {
             "id": "YoullNeedToProvideThePublicKey",
-            "text": "You'll need to provide the companion server public key"
+            "text": "Sie müssen den öffentlichen Schlüssel des Begleitservers angeben"
           },
           {
             "id": "UntrustedCertificate",
-            "text": "Untrusted Certificate"
+            "text": "Nicht vertrauenswürdiges Zertifikat"
           },
           {
             "id": "TheCertificateForXIsNotTrustedDoYouWishToProceed",
-            "text": "The certificate for {0} is not trusted. Do you wish to proceed?"
+            "text": "Das Zertifikat für {0} ist nicht vertrauenswürdig. Möchten Sie fortfahren?"
           }
         ],
         "keys": [
           {
             "id": "PublicKeyDlgTitle",
-            "text": "Encryption Keys"
+            "text": "Verschlüsselungsschlüssel"
           },
           {
             "id": "PublicKeyDlgDescription",
-            "text": "Keys for token creation and verification."
+            "text": "Schlüssel für die Token-Erstellung und -Verifizierung."
           },
           {
             "id": "ProvideAnEncryptionKeyPairForTokenVerification",
-            "text": "Provide an encryption key for token verification."
+            "text": "Geben Sie einen Verschlüsselungsschlüssel für die Token-Verifizierung an."
           },
           {
             "id": "ProvideAnEncryptionKeyPairForTokenCreationVerification",
-            "text": "Provide an encryption key pair for token generation and verification."
+            "text": "Geben Sie ein Verschlüsselungsschlüsselpaar für die Token-Generierung und -Verifizierung an."
           },
           {
             "id": "PublicKeyFile",
-            "text": "Public Key File"
+            "text": "Datei mit öffentlichem Schlüssel"
           },
           {
             "id": "ThePublicKeyIsUsedTo",
-            "text": "The public key is used to verify tokens without specific restrictions"
+            "text": "Der öffentliche Schlüssel wird verwendet, um Token ohne bestimmte Einschränkungen zu verifizieren"
           },
           {
             "id": "PrivateKeyFile",
-            "text": "Private Key File"
+            "text": "Datei mit privatem Schlüssel"
           },
           {
             "id": "ThePrivateKeyIsUsedTo",
-            "text": "The private key is used to generate session tokens for the standalone web application"
+            "text": "Der private Schlüssel wird verwendet, um Sitzungstoken für die eigenständige Webanwendung zu generieren"
           },
           {
             "id": "ProvideAPublicKeyForTokenVerification",
-            "text": "Provide a public key for token verification. The private key for token generation is provisioned by a companion service (e.g. Devolutions Server)."
+            "text": "Geben Sie einen öffentlichen Schlüssel für die Token-Verifizierung an. Der private Schlüssel für die Token-Generierung wird von einem Begleitdienst bereitgestellt (z. B. Devolutions Server)."
           }
         ],
         "webApp": [
           {
             "id": "WebAppDlgTitle",
-            "text": "Web Application Options"
+            "text": "Webanwendungsoptionen"
           },
           {
             "id": "WebAppDlgDescription",
-            "text": "Configuration for the embedded web application."
+            "text": "Konfiguration für die eingebettete Webanwendung."
           },
           {
             "id": "ChooseTheAuthenticationMethod",
-            "text": "Choose the authentication method used when accessing the web application"
+            "text": "Wählen Sie die Authentifizierungsmethode für den Zugriff auf die Webanwendung"
           },
           {
             "id": "Authentication",
-            "text": "Authentication"
+            "text": "Authentifizierung"
           },
           {
             "id": "DefaultUser",
-            "text": "Default User"
+            "text": "Standardbenutzer"
           },
           {
             "id": "Username",
-            "text": "Username"
+            "text": "Benutzername"
           },
           {
             "id": "Password",
-            "text": "Password"
+            "text": "Passwort"
           },
           {
             "id": "ConfirmPassword",
-            "text": "Confirm Password"
+            "text": "Passwort bestätigen"
           }
         ],
         "summary": [
           {
             "id": "SummaryDlgTitle",
-            "text": "Summary"
+            "text": "Zusammenfassung"
           },
           {
             "id": "SummaryDlgDescription",
-            "text": "Review the configuration"
+            "text": "Konfiguration überprüfen"
+          }
+        ],
+        "firewall": [
+          {
+            "id": "msierrFirewallCannotConnect",
+            "text": "Verbindung zur Windows-Firewall nicht möglich.  ([2]   [3]   [4]   [5])"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsInstall",
+            "text": "Windows-Firewall konfigurieren"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsUninstall",
+            "text": "Windows-Firewall konfigurieren"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsInstall",
+            "text": "Windows-Firewall-Konfiguration wiederherstellen"
+          },
+          {
+            "id": "WixExecFirewallExceptionsInstall",
+            "text": "Windows-Firewall-Konfiguration installieren"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsUninstall",
+            "text": "Windows-Firewall-Konfiguration wiederherstellen"
+          },
+          {
+            "id": "WixExecFirewallExceptionsUninstall",
+            "text": "Windows-Firewall-Konfiguration deinstallieren"
           }
         ]
       }
