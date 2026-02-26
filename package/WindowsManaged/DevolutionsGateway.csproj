@@ -16,10 +16,12 @@
     <None Remove="Build\**" />
     <None Remove="Resources\DevolutionsGateway_en-us.wxl" />
     <None Remove="Resources\DevolutionsGateway_fr-fr.wxl" />
+    <None Remove="Resources\DevolutionsGateway_de-de.wxl" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\DevolutionsGateway_en-us.wxl" />
     <EmbeddedResource Include="Resources\DevolutionsGateway_fr-fr.wxl" />
+    <EmbeddedResource Include="Resources\DevolutionsGateway_de-de.wxl" />
   </ItemGroup>
   <ItemGroup>
 	<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

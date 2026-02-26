@@ -285,9 +285,9 @@ namespace WixSharpSetup.Dialogs
             this.label2.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label2.Location = new System.Drawing.Point(18, 31);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(205, 13);
+            this.label2.Size = new System.Drawing.Size(124, 13);
             this.label2.TabIndex = 1;
-            this.label2.Text = "Configure the standalone web application.";
+            this.label2.Text = "[WebAppDlgDescription]";
             // 
             // label1
             // 

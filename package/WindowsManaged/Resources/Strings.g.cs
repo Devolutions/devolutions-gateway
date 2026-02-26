@@ -825,7 +825,7 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string SummaryDlgTitle = "SummaryDlgTitle";		
 		/// <summary>
-		/// Click Next to use this configuration or click Back to make changes.
+		/// Review the configuration
 		/// </summary>
 		public const string SummaryDlgDescription = "SummaryDlgDescription";		
 	}

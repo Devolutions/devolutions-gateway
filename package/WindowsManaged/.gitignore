@@ -2,5 +2,6 @@ Debug
 Release
 wix
 fr-FR.*
+de-DE.*
 *_missing.json
 packages

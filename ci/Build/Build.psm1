@@ -46,7 +46,7 @@ function Get-PackageLanguages {
     )
 }
 
-# Sets the specified envrionment varaible to the given path.
+# Sets the specified envrionment variable to the given path.
 #
 # If the environment variable is not set, it is set to the path.
 # If the environment variable is set to a different value than the path provided, an error is thrown.

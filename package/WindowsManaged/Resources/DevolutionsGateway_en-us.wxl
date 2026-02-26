@@ -229,6 +229,6 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="WebAppDlgDescription">Configuration for the embedded web application.</String>
                 <String Id="WebAppDlgTitle">Web Application Options</String>
                     <!-- dialogs.summary -->
-                <String Id="SummaryDlgDescription">Click Next to use this configuration or click Back to make changes.</String>
+                <String Id="SummaryDlgDescription">Review the configuration</String>
                 <String Id="SummaryDlgTitle">Summary</String>
                     </WixLocalization>

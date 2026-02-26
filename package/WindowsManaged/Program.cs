@@ -201,11 +201,14 @@ internal class Program
     {
         { "en-US", "DevolutionsGateway_en-us.wxl" },
         { "fr-FR", "DevolutionsGateway_fr-fr.wxl" },
+        { "de-DE", "DevolutionsGateway_de-de.wxl" },
     };
 
     private static KeyValuePair<string, string> enUS => Languages.First(x => x.Key == "en-US");
 
     private static KeyValuePair<string, string> frFR => Languages.First(x => x.Key == "fr-FR");
+
+    private static KeyValuePair<string, string> deDE => Languages.First(x => x.Key == "de-DE");
 
     static void Main()
     {
@@ -429,7 +432,12 @@ internal class Program
         e.Session.Set(GatewayProperties.installId, installId);
         Wizard.Globals["installId"] = installId.ToString();
 
-        string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "fr" ? frFR.Key : enUS.Key;
+        string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+        {
+            "fr" => frFR.Key,
+            "de" => deDE.Key,
+            _ => enUS.Key,
+        };
 
         using Stream stream = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream($"DevolutionsGateway.Resources.{Languages[lcid]}");
