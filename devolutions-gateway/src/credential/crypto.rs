@@ -123,7 +123,7 @@ impl MasterKeyManager {
         // Convert bytes to String.
         let plaintext = String::from_utf8(plaintext_bytes).context("decrypted password is not valid UTF-8")?;
 
-        Ok(SecretString::new(plaintext.into()))
+        Ok(SecretString::from(plaintext))
     }
 }
 
