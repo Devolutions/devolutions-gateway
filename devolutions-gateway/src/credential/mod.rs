@@ -4,6 +4,7 @@ mod crypto;
 pub use crypto::{DecryptedPassword, EncryptedPassword};
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -14,6 +15,28 @@ use secrecy::ExposeSecret as _;
 use uuid::Uuid;
 
 use self::crypto::MASTER_KEY;
+
+/// Error returned by [`CredentialStoreHandle::insert`].
+#[derive(Debug)]
+pub enum InsertError {
+    /// The provided token is invalid (e.g., missing or malformed JTI).
+    ///
+    /// This is a client-side error: the caller supplied bad input.
+    InvalidToken(anyhow::Error),
+    /// An internal error occurred (e.g., encryption failure).
+    Internal(anyhow::Error),
+}
+
+impl fmt::Display for InsertError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidToken(e) => e.fmt(f),
+            Self::Internal(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for InsertError {}
 
 /// Credential at the application protocol level
 #[derive(Debug, Clone)]
@@ -112,8 +135,11 @@ impl CredentialStoreHandle {
         token: String,
         mapping: Option<CleartextAppCredentialMapping>,
         time_to_live: time::Duration,
-    ) -> anyhow::Result<Option<ArcCredentialEntry>> {
-        let mapping = mapping.map(CleartextAppCredentialMapping::encrypt).transpose()?;
+    ) -> Result<Option<ArcCredentialEntry>, InsertError> {
+        let mapping = mapping
+            .map(CleartextAppCredentialMapping::encrypt)
+            .transpose()
+            .map_err(InsertError::Internal)?;
         self.0.lock().insert(token, mapping, time_to_live)
     }
 
@@ -148,8 +174,10 @@ impl CredentialStore {
         token: String,
         mapping: Option<AppCredentialMapping>,
         time_to_live: time::Duration,
-    ) -> anyhow::Result<Option<ArcCredentialEntry>> {
-        let jti = crate::token::extract_jti(&token).context("failed to extract token ID")?;
+    ) -> Result<Option<ArcCredentialEntry>, InsertError> {
+        let jti = crate::token::extract_jti(&token)
+            .context("failed to extract token ID")
+            .map_err(InsertError::InvalidToken)?;
 
         let entry = CredentialEntry {
             token,

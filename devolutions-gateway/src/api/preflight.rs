@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential::CredentialStoreHandle;
+use crate::credential::{CredentialStoreHandle, InsertError};
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -337,15 +337,17 @@ async fn handle_operation(
                 });
             }
 
-            // Validate the token JTI up front so that a bad/missing JTI is reported as
-            // InvalidParams (client error) rather than InternalServerError.
-            crate::token::extract_jti(&token)
-                .map_err(|e| PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}")))?;
-
             let previous_entry = credential_store
                 .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
-                .map_err(|e| PreflightError::new(PreflightAlertStatus::InternalServerError, format!("{e:#}")))?;
+                .map_err(|e| match e {
+                    InsertError::InvalidToken(_) => {
+                        PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}"))
+                    }
+                    InsertError::Internal(_) => {
+                        PreflightError::new(PreflightAlertStatus::InternalServerError, format!("{e:#}"))
+                    }
+                })?;
 
             if previous_entry.is_some() {
                 outputs.push(PreflightOutput {
