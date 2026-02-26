@@ -16,8 +16,8 @@ use core::fmt;
 use std::sync::LazyLock;
 
 use anyhow::Context as _;
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
+use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
 use rand::RngCore as _;
 use secrets::SecretBox;
@@ -28,7 +28,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// Initialized lazily on first access. The key material is stored in memory
 /// protected by mlock/mprotect via libsodium's SecretBox, wrapped in a Mutex
 /// for thread-safe access.
-pub static MASTER_KEY: LazyLock<Mutex<MasterKeyManager>> = LazyLock::new(|| {
+pub(super) static MASTER_KEY: LazyLock<Mutex<MasterKeyManager>> = LazyLock::new(|| {
     Mutex::new(MasterKeyManager::new().expect("failed to initialize credential encryption master key"))
 });
 
@@ -39,7 +39,7 @@ pub static MASTER_KEY: LazyLock<Mutex<MasterKeyManager>> = LazyLock::new(|| {
 /// - Protected (mprotect) with appropriate access controls
 /// - Excluded from core dumps
 /// - Zeroized on drop
-pub struct MasterKeyManager {
+pub(super) struct MasterKeyManager {
     // SecretBox provides mlock/mprotect for the key material.
     key_material: SecretBox<[u8; 32]>,
 }
@@ -64,37 +64,31 @@ impl MasterKeyManager {
     /// Encrypt a password using ChaCha20-Poly1305.
     ///
     /// Returns the nonce and ciphertext (which includes the Poly1305 auth tag).
-    pub fn encrypt(&self, plaintext: &str) -> anyhow::Result<EncryptedPassword> {
+    pub(super) fn encrypt(&self, plaintext: &str) -> anyhow::Result<EncryptedPassword> {
         let key_ref = self.key_material.borrow();
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(key_ref.as_ref()));
+        let cipher = ChaCha20Poly1305::new_from_slice(key_ref.as_ref()).expect("key is exactly 32 bytes");
 
         // Generate random 96-bit nonce (12 bytes for ChaCha20-Poly1305).
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
 
         // Encrypt (ciphertext includes 16-byte Poly1305 tag).
         let ciphertext = cipher
-            .encrypt(nonce, plaintext.as_bytes())
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
 
-        Ok(EncryptedPassword {
-            nonce: nonce_bytes,
-            ciphertext,
-        })
+        Ok(EncryptedPassword { nonce, ciphertext })
     }
 
     /// Decrypt a password, returning a zeroize-on-drop wrapper.
     ///
     /// The returned `DecryptedPassword` should have a short lifetime.
     /// Use it immediately and let it drop to zeroize the plaintext.
-    pub fn decrypt(&self, encrypted: &EncryptedPassword) -> anyhow::Result<DecryptedPassword> {
+    pub(super) fn decrypt(&self, encrypted: &EncryptedPassword) -> anyhow::Result<DecryptedPassword> {
         let key_ref = self.key_material.borrow();
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(key_ref.as_ref()));
-        let nonce = Nonce::from_slice(&encrypted.nonce);
+        let cipher = ChaCha20Poly1305::new_from_slice(key_ref.as_ref()).expect("key is exactly 32 bytes");
 
         let plaintext_bytes = cipher
-            .decrypt(nonce, encrypted.ciphertext.as_ref())
+            .decrypt(&encrypted.nonce, encrypted.ciphertext.as_ref())
             .map_err(|e| anyhow::anyhow!("decryption failed: {e}"))?;
 
         // Convert bytes to String.
@@ -113,7 +107,7 @@ impl MasterKeyManager {
 #[derive(Clone)]
 pub struct EncryptedPassword {
     /// 96-bit nonce (12 bytes) for ChaCha20-Poly1305.
-    nonce: [u8; 12],
+    nonce: Nonce,
 
     /// Ciphertext + 128-bit auth tag (plaintext_len + 16 bytes).
     ciphertext: Vec<u8>,
@@ -151,6 +145,7 @@ impl fmt::Debug for DecryptedPassword {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code, panics are expected")]
 mod tests {
     use super::*;
 

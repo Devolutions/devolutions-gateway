@@ -10,6 +10,7 @@ use axum::{Json, Router, http};
 use axum_extra::TypedHeader;
 use axum_extra::headers::{self, HeaderMapExt as _};
 use picky::key::PrivateKey;
+use secrecy::ExposeSecret as _;
 use tap::prelude::*;
 use tower_http::services::ServeFile;
 use uuid::Uuid;

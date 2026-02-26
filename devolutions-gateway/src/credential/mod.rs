@@ -1,9 +1,8 @@
 mod crypto;
 
-pub use crypto::{DecryptedPassword, EncryptedPassword, MASTER_KEY};
-use secrecy::ExposeSecret;
+#[rustfmt::skip]
+pub use crypto::{DecryptedPassword, EncryptedPassword};
 
-use core::fmt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -11,8 +10,10 @@ use anyhow::Context;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use parking_lot::Mutex;
-use serde::{de, ser};
+use secrecy::ExposeSecret as _;
 use uuid::Uuid;
+
+use self::crypto::MASTER_KEY;
 
 /// Credential at the application protocol level
 #[derive(Debug, Clone)]
