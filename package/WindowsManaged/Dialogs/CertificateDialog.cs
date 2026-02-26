@@ -32,8 +32,12 @@ public partial class CertificateDialog : GatewayDialog
     public CertificateDialog()
     {
         InitializeComponent();
+
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
+
+        this.pictureBox1.Image =
+            StockIcon.GetStockIcon(StockIcon.SIID_WARNING, StockIcon.SHGSI_SMALLICON).ToBitmap();
     }
 
     public override bool DoValidate()
@@ -169,6 +173,8 @@ public partial class CertificateDialog : GatewayDialog
         this.cmbSearchBy.Source<CertificateFindType>(this.MsiRuntime);
         this.cmbSearchBy.SetSelected(CertificateFindType.Thumbprint);
 
+        this.ttCertVerify.SetToolTip(this.pictureBox1, I18n(Strings.CertificateCouldNotBVerified));
+
         base.OnLoad(sender, e);
     }
 
@@ -295,7 +301,7 @@ public partial class CertificateDialog : GatewayDialog
                 findValue = Regex.Replace(findValue.ToUpper(), @"[^0-9A-F]+", string.Empty);
             }
 
-            return store.Certificates.Find(x509FindType, findValue, true);
+            return store.Certificates.Find(x509FindType, findValue, false);
         }
         finally
         {
@@ -346,10 +352,12 @@ public partial class CertificateDialog : GatewayDialog
         this.SelectedCertificate = certificate;
 
         this.lblCertificateDescription.Text = string.Empty;
+        this.pictureBox1.Visible = false;
         this.lblSelectedCertificate.Visible = this.lblCertificateDescription.Visible = this.butViewCertificate.Visible = this.SelectedCertificate is not null;
 
         if (this.SelectedCertificate is not null)
         {
+            this.pictureBox1.Visible = !this.SelectedCertificate.Verify();
             this.lblCertificateDescription.Text = this.SelectedCertificate?.GetNameInfo(X509NameType.SimpleName, false);
         }
     }

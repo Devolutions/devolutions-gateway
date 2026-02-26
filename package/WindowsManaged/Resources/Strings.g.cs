@@ -629,6 +629,10 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string SelectTheCertificateToUse = "SelectTheCertificateToUse";		
 		/// <summary>
+		/// Certificate could not be verified
+		/// </summary>
+		public const string CertificateCouldNotBVerified = "CertificateCouldNotBVerified";		
+		/// <summary>
 		/// An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded
 		/// </summary>
 		public const string AnX509CertificateInBinaryOrPemEncoded = "AnX509CertificateInBinaryOrPemEncoded";		
