@@ -666,11 +666,9 @@ jobs:
 
 
       - name: Enable mlock for production
-        # arm64 is excluded: libsodium cross-compilation is not supported in the cbake sysroot.
-        # arm64 production builds will emit a startup warning about missing mlock protection.
         # On Linux, libsodium-dev is installed in the configure steps above (apt-get).
         # On Windows, libsodium is installed here via vcpkg (deferred to production to avoid slow builds on PRs).
-        if: ${{ needs.preflight.outputs.rust-profile == 'production' && matrix.arch != 'arm64' }}
+        if: ${{ needs.preflight.outputs.rust-profile == 'production' }}
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
             # Install libsodium via vcpkg for the mlock feature (requires static library)
