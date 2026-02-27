@@ -96,7 +96,8 @@ impl MasterKeyManager {
         // Encrypt (ciphertext includes 16-byte Poly1305 tag).
         let ciphertext = cipher
             .encrypt(&nonce, plaintext.as_bytes())
-            .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
+            .ok()
+            .context("AEAD encryption failed")?;
 
         Ok(EncryptedPassword { nonce, ciphertext })
     }
@@ -118,7 +119,8 @@ impl MasterKeyManager {
 
         let plaintext_bytes = cipher
             .decrypt(&encrypted.nonce, encrypted.ciphertext.as_ref())
-            .map_err(|e| anyhow::anyhow!("decryption failed: {e}"))?;
+            .ok()
+            .context("AEAD decryption failed")?;
 
         // Convert bytes to String.
         let plaintext = String::from_utf8(plaintext_bytes).context("decrypted password is not valid UTF-8")?;
