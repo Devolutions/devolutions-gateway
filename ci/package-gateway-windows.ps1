@@ -28,7 +28,7 @@ Import-Module (Join-Path $PSScriptRoot 'Build')
 function New-GatewayMsi() {
     param(
         [switch]
-        # Generates additional files for the MSI. The MSI is not copied to the output directory if this is set. This produces files `package\WindowsManaged\Release\en-US` and `package\WindowsManaged\Release\fr-FR`.
+        # Generates additional files for the MSI. The MSI is not copied to the output directory if this is set. This produces files `package\WindowsManaged\Release\en-US`, `package\WindowsManaged\Release\fr-FR`, and `package\WindowsManaged\Release\de-DE`.
         $Generate,
         [parameter(Mandatory = $true)]
         # The path to devolutions-gateway.exe.
@@ -82,7 +82,7 @@ function New-GatewayMsi() {
         # This is used by `package/WindowsManaged/Program.cs`.
         $Env:DGATEWAY_MSI_SOURCE_ONLY_BUILD = '1'
        
-        foreach ($lang in Get-PackageLanguages) {
+        foreach ($lang in Get-GatewayPackageLanguages) {
             $Env:DGATEWAY_MSI_LANG_ID = $lang.Name
             & 'MSBuild.exe' 'DevolutionsGateway.sln' '/t:restore,build' '/p:Configuration=Release' | Out-Host
             if ($LASTEXITCODE -ne 0) {

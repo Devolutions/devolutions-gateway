@@ -268,6 +268,21 @@ class TlkRecipe
         }
     )
 
+    static [object[]] $GatewayPackageLanguages = @(
+        [PSCustomObject]@{
+            Name = "en-US";
+            LCID = 1033;
+        },
+        [PSCustomObject]@{
+            Name = "fr-FR";
+            LCID = 1036;
+        },
+        [PSCustomObject]@{
+            Name = "de-DE";
+            LCID = 1031;
+        }
+    )
+
     TlkRecipe() {
         $this.Init()
     }
@@ -483,12 +498,17 @@ class TlkRecipe
 
         $TargetConfiguration = "Release"
 
+        $Languages = switch ($this.Product) {
+            "gateway" { [TlkRecipe]::GatewayPackageLanguages }
+            default   { [TlkRecipe]::PackageLanguages }
+        }
+
         # Build the base (en-US) MSI
         & ".\$TargetConfiguration\Build_$($this.PackageName()).cmd"
 
         $BaseMsi = Join-Path $TargetConfiguration "$($this.PackageName()).msi"
 
-        foreach ($PackageLanguage in $([TlkRecipe]::PackageLanguages | Select-Object -Skip 1)) {
+        foreach ($PackageLanguage in $($Languages | Select-Object -Skip 1)) {
             # Build the localized MSI
             & ".\$TargetConfiguration\$($PackageLanguage.Name)\Build_$($this.PackageName()).cmd"
             $LangDir = Join-Path $TargetConfiguration $PackageLanguage.Name
@@ -501,7 +521,7 @@ class TlkRecipe
         }
 
         # Set the complete language list on the base MSI
-        $LCIDs = ([TlkRecipe]::PackageLanguages | ForEach-Object { $_.LCID }) -join ','
+        $LCIDs = ($Languages | ForEach-Object { $_.LCID }) -join ','
         & 'cscript.exe' "/nologo" "$($this.SourcePath)/ci/WiLangId.vbs" "$BaseMsi" "Package" "$LCIDs" | Out-Host
 
         switch ($this.Product) {
@@ -549,7 +569,7 @@ class TlkRecipe
         & 'MSBuild.exe' "DevolutionsGateway.sln" "/t:restore,build" "/p:Configuration=$TargetConfiguration" | Out-Host
 
         if ($SourceOnlyBuild) {
-            foreach ($PackageLanguage in $([TlkRecipe]::PackageLanguages | Select-Object -Skip 1)) {
+            foreach ($PackageLanguage in $([TlkRecipe]::GatewayPackageLanguages | Select-Object -Skip 1)) {
                 $Env:DGATEWAY_MSI_LANG_ID = $PackageLanguage.Name
                 & 'MSBuild.exe' "DevolutionsGateway.sln" "/t:restore,build" "/p:Configuration=$TargetConfiguration" | Out-Host
             }
