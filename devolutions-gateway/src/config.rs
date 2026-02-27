@@ -974,7 +974,7 @@ impl WebAppConf {
                     let (user, hash) = line.split_once(':').context("missing separator in users file")?;
 
                     users.insert(
-                        user.to_owned(),
+                        user.to_lowercase(),
                         WebAppUser {
                             name: user.to_owned(),
                             password_hash: hash.to_owned().into(),

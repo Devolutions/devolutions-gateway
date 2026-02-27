@@ -91,7 +91,7 @@ pub(crate) async fn sign_app_token(
 
     trace!(request = ?req, "Received sign app token request");
 
-    match login_rate_limit::check(req.subject.clone(), source_addr.ip(), conf.login_limit_rate) {
+    match login_rate_limit::check(req.subject.to_lowercase(), source_addr.ip(), conf.login_limit_rate) {
         Ok(()) => {}
         Err(()) => {
             warn!(user = req.subject, "Detected too many login attempts");
@@ -148,13 +148,13 @@ pub(crate) async fn sign_app_token(
             ));
         };
 
-        if authorization.username() != req.subject {
+        if authorization.username().to_lowercase() != req.subject.to_lowercase() {
             trace!(covmark = "custom_auth_username_mismatch");
             return Err(HttpError::unauthorized().msg("username mismatch"));
         }
 
         let user = users
-            .get(authorization.username())
+            .get(&authorization.username().to_lowercase())
             .ok_or_else(|| HttpError::unauthorized().msg("user not found"))?;
 
         let password_hash = PasswordHash::new(user.password_hash.expose_secret())
