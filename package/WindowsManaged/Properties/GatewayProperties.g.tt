@@ -56,7 +56,8 @@ namespace DevolutionsGateway.Properties
             Name = "<#= this.properties[idx].Name #>",
             Secure = <#= this.properties[idx].Secure.ToString().ToLower() #>,
             Hidden = <#= this.properties[idx].Hidden.ToString().ToLower() #>,
-            Public = <#= this.properties[idx].Public.ToString().ToLower() #>
+            Public = <#= this.properties[idx].Public.ToString().ToLower() #>,
+            Encode = <#= this.properties[idx].Encode.ToString().ToLower() #>,
         };
 
 <# if (!string.IsNullOrEmpty(this.properties[idx].Comment)) { #>
@@ -77,12 +78,44 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
+<# if (this.properties[idx].Encode) { #>
+        internal static readonly WixProperty<String> <#= this.properties[idx].PrivateName #>Encoded = new()
+        {
+            Id = "P.<#=id#>_ENCODED",
+            Default = string.Empty,
+            Name = "<#= this.properties[idx].Name #>Encoded",
+            Secure = true,
+            Hidden = true,
+            Public = true, /* Secure properties must be public */
+            Encode = false,
+        };
+
+        public string <#= this.properties[idx].Name #>Encoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(<#= this.properties[idx].PrivateName #>Encoded.Id);
+                return WixProperties.GetPropertyValue<<#= this.properties[idx].TypeName #>>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(<#= this.properties[idx].PrivateName #>Encoded, value); 
+                }
+            }
+        }
+<# } #>
 <# } #> 
 
         public static IWixProperty[] Properties =
         {
 <# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
             <#= this.properties[idx].PrivateName #>,
+<# if (this.properties[idx].Encode) { #>
+            <#= this.properties[idx].PrivateName #>Encoded,
+<# } #> 
 <# } #> 
         };
     }
@@ -140,30 +173,49 @@ namespace DevolutionsGateway.Properties
     public abstract class BasePropertyDefinition
     {
         public abstract string Comment { get; set; }
+
         public abstract bool Hidden { get; set; }
-        public abstract string Id { get; set; }        
+
+        public abstract string Id { get; set; }      
+        
         public abstract string Name { get; set; }
+
         public abstract string PrivateName { get; }
+
         public abstract bool Public { get; set; }
+
         public abstract bool Secure { get; set; }
+
+        public abstract bool Encode { get; set; }
+
         public abstract string TypeName { get; }
 
         public abstract string Default { get; }
+
         public abstract Type PropertyType { get; }
     }
 
   public class PropertyDefinition<T> : BasePropertyDefinition
   {
     public override string Name { get; set; }
+
     public T DefaultValue { get; set; }
+
     public override bool Public { get; set; }
+
     public override bool Secure { get; set; }
+
     public override bool Hidden { get; set; }
+
     public override string Id { get; set; }
+
     public override string Comment { get; set; }
+
+    public override bool Encode { get; set; }
+
     public bool Private => !this.Public;
 
-    public PropertyDefinition(string name, T defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null)
+    public PropertyDefinition(string name, T defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null, bool encode = false)
     {
         this.Name = name;
         this.DefaultValue = defaultValue;
@@ -172,6 +224,7 @@ namespace DevolutionsGateway.Properties
         this.Hidden = hidden;
         this.Id = id;
         this.Comment = comment;
+        this.Encode = typeof(T) == typeof(string) && encode;
     }
 
     public override string Default
@@ -209,7 +262,7 @@ namespace DevolutionsGateway.Properties
 
     // External certificate mode
     new PropertyDefinition<string>("CertificateFile", ""),
-    new PropertyDefinition<string>("CertificatePassword", "", hidden: true),
+    new PropertyDefinition<string>("CertificatePassword", "", hidden: true, encode: true),
     new PropertyDefinition<string>("CertificatePrivateKeyFile", ""),
 
     // System certificate mode
@@ -224,7 +277,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<string>("CertificateThumbprint", "", isPublic: false, hidden: true, secure: false),
 
     new PropertyDefinition<string>("DevolutionsServerUrl", "", isPublic: true, hidden: false, secure: true),
-    new PropertyDefinition<string>("DevolutionsServerCertificateExceptions", "", isPublic: true, hidden: false, secure: true),
+    new PropertyDefinition<string>("DevolutionsServerCertificateExceptions", "", isPublic: true, hidden: false, secure: true, encode: true),
 
     new PropertyDefinition<bool>("ConfigureGateway", false, secure: false, comment: "`true` to configure the Gateway interactively"),    
     new PropertyDefinition<bool>("HasPowerShell", false, isPublic: false, secure: false),
@@ -250,7 +303,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<bool>("ConfigureWebApp", false, comment: "`true` to configure the standalone web application interactively"),
     new PropertyDefinition<Statics.AuthenticationMode>("AuthenticationMode", Statics.AuthenticationMode.Custom),
     new PropertyDefinition<string>("WebUsername", ""),
-    new PropertyDefinition<string>("WebPassword", "", hidden: true),
+    new PropertyDefinition<string>("WebPassword", "", hidden: true, encode: true),
 
     new PropertyDefinition<bool>("ConfigureNgrok", false, comment: "`true` to use ngrok for ingress listeners"),
     new PropertyDefinition<string>("NgrokAuthToken", ""),
