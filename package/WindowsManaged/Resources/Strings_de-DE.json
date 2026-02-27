@@ -659,7 +659,7 @@
             "text": "Das zu verwendende Zertifikat auswählen"
           },
           {
-            "id": "CertificateCouldNotBVerified",
+            "id": "CertificateCouldNotBeVerified",
             "text": "Zertifikat konnte nicht verifiziert werden"
           },
           {

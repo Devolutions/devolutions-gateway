@@ -178,7 +178,7 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                     <!-- dialogs.certificate -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">Un certificat X.509 en format binaire PKCS#12 (PFX/P12) ou codé en PEM</String>
                 <String Id="BrowseForACertificateToUse">Parcourir pour un certificat à utiliser</String>
-                <String Id="CertificateCouldNotBVerified">Le certificat n'a pas pu être vérifié</String>
+                <String Id="CertificateCouldNotBeVerified">Le certificat n'a pas pu être vérifié</String>
                 <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
                 <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Fichier de clé privée</String>

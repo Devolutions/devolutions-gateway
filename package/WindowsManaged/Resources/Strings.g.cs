@@ -631,7 +631,7 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Certificate could not be verified
 		/// </summary>
-		public const string CertificateCouldNotBVerified = "CertificateCouldNotBVerified";		
+		public const string CertificateCouldNotBeVerified = "CertificateCouldNotBeVerified";		
 		/// <summary>
 		/// An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded
 		/// </summary>

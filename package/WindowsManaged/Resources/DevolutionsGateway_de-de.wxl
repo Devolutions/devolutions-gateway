@@ -160,7 +160,7 @@ Wenn sie minimiert erscheint, aktivieren Sie sie über die Taskleiste.</String>
                     <!-- dialogs.certificate -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">Ein X.509-Zertifikat im binären PKCS#12-Format (PFX/P12) oder PEM-kodiert</String>
                 <String Id="BrowseForACertificateToUse">Zu verwendendes Zertifikat durchsuchen</String>
-                <String Id="CertificateCouldNotBVerified">Zertifikat konnte nicht verifiziert werden</String>
+                <String Id="CertificateCouldNotBeVerified">Zertifikat konnte nicht verifiziert werden</String>
                 <String Id="CertificateDlgCertConfigLabel">Zertifikatkonfiguration</String>
                 <String Id="CertificateDlgCertFileLabel">Zertifikatsdatei</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Datei mit privatem Schlüssel</String>

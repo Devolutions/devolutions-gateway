@@ -173,7 +173,7 @@ public partial class CertificateDialog : GatewayDialog
         this.cmbSearchBy.Source<CertificateFindType>(this.MsiRuntime);
         this.cmbSearchBy.SetSelected(CertificateFindType.Thumbprint);
 
-        this.ttCertVerify.SetToolTip(this.pictureBox1, I18n(Strings.CertificateCouldNotBVerified));
+        this.ttCertVerify.SetToolTip(this.pictureBox1, I18n(Strings.CertificateCouldNotBeVerified));
 
         base.OnLoad(sender, e);
     }

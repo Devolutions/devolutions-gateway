@@ -160,7 +160,7 @@ If it appears minimized then active it from the taskbar.</String>
                     <!-- dialogs.certificate -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
                 <String Id="BrowseForACertificateToUse">Browse for a certificate to use</String>
-                <String Id="CertificateCouldNotBVerified">Certificate could not be verified</String>
+                <String Id="CertificateCouldNotBeVerified">Certificate could not be verified</String>
                 <String Id="CertificateDlgCertConfigLabel">Certificate Configuration</String>
                 <String Id="CertificateDlgCertFileLabel">Certificate File</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Private Key File</String>

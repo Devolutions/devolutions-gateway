@@ -728,7 +728,7 @@
             "text": "Sélectionner le certificat à utiliser"
           },
           {
-            "id": "CertificateCouldNotBVerified",
+            "id": "CertificateCouldNotBeVerified",
             "text": "Le certificat n'a pas pu être vérifié"
           },
           {
