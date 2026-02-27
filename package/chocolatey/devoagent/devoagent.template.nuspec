@@ -5,11 +5,13 @@
     <title>Devolutions Agent</title>
     <version>$VAR1$</version>
     <authors>Devolutions Inc.</authors>
+    <owners>Devolutions Inc.</owners>
     <summary>A companion agent for managing and securing remote connections.</summary>
     <description>Devolutions Agent is a versatile background process used by many Devolutions products to perform various remote management tasks.</description>
     <projectUrl>https://devolutions.net/agent/</projectUrl>
     <tags>devolutions devoagent Agent Jump RemoteDesktopManager remote desktop manager rdp</tags>
     <copyright>Copyright © 2006-2026</copyright>
+    <releaseNotes>https://devolutions.net/agent/release-notes</releaseNotes>
     <licenseUrl>https://cdn.devolutions.net/documents/legal/eula/software-license-agreement-en.pdf</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <iconUrl>https://cdnweb.devolutions.net/images/chocolatey/DevolutionsAgent.png</iconUrl>
