@@ -1,12 +1,35 @@
 ﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using WixSharp;
 
 namespace DevolutionsGateway.Properties
 {
     internal static class WixProperties
     {
+        public static string Decode(this Microsoft.Deployment.WindowsInstaller.Session session, WixProperty<string> prop)
+        {
+            if (!prop.Encode)
+            {
+                return session.Property(prop.Id);
+            }
+
+            byte[] value = Convert.FromBase64String(session.Property(prop.EncodedId()));
+            return Encoding.UTF8.GetString(value);
+        }
+
+        public static void Encode(this Microsoft.Deployment.WindowsInstaller.Session session, WixProperty<string> prop)
+        {
+            if (!prop.Encode)
+            {
+                return;
+            }
+
+            string value = session.Property(prop.Id);
+            session[prop.EncodedId()] = Convert.ToBase64String(Encoding.UTF8.GetBytes(value), Base64FormattingOptions.None);
+        }
+
         public static T Get<T>(this Microsoft.Deployment.WindowsInstaller.Session session, WixProperty<T> prop)
         {
             Debug.Assert(session is not null);
@@ -74,11 +97,18 @@ namespace DevolutionsGateway.Properties
         {
             return new Condition($"{property.Id}<>\"{value}\"");
         }
+
+        internal static string EncodedId(this IWixProperty property)
+        {
+            return property.Encode ? $"{property.Id}_ENCODED" : property.Id;
+        }
     }
 
     internal interface IWixProperty
     {
         public string DefaultValue { get; }
+
+        public bool Encode { get; }
 
         public bool Hidden { get; }
 
@@ -98,6 +128,8 @@ namespace DevolutionsGateway.Properties
         public T Default { get; set; }
 
         public string DefaultValue => Default.ToString();
+
+        public bool Encode { get; set; } = false;
 
         public bool Hidden { get; set; }
 

@@ -68,6 +68,15 @@ internal static class GatewayActions
         Execute = Execute.immediate
     };
 
+    private static readonly ManagedAction encodePropertyData = new(
+        new Id($"CA.{nameof(encodePropertyData)}"),
+        CustomActions.EncodePropertyData,
+        Return.check, When.Before, Step.InstallInitialize, Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+    };
+
     private static readonly ManagedAction setInstallId = new(
         CustomActions.SetInstallId,
         Return.ignore, When.After, Step.InstallInitialize, Condition.Always)
@@ -410,7 +419,10 @@ internal static class GatewayActions
             throw new Exception($"property {properties.First(p => !p.Secure).Id} must be secure");
         }
 
-        return string.Join(";", properties.Distinct().Select(x => $"{x.Id}=[{x.Id}]"));
+        return string.Join(";", properties
+           .Distinct()
+           .Select(p => p.Encode ? p.EncodedId() : p.Id)
+           .Select(id => $"{id}=[{id}]"));
     }
 
     /// <summary>
@@ -465,6 +477,7 @@ internal static class GatewayActions
         isRemovingForUpgrade,
         isUninstalling,
         isMaintenance,
+        encodePropertyData,
         setInstallId,
         getNetFxInstalledVersion,
         checkNetFxInstalledVersion,
