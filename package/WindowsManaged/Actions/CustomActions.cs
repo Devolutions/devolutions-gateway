@@ -16,7 +16,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Security;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Authentication;
@@ -209,7 +208,9 @@ namespace DevolutionsGateway.Actions
                 }
                 else if (mode == Constants.CertificateMode.External)
                 {
-                    if (string.IsNullOrEmpty(session.Get(GatewayProperties.certificatePassword)))
+                    string password = WixProperties.Decode(session, GatewayProperties.certificatePassword);
+
+                    if (string.IsNullOrEmpty(password))
                     {
                         command = string.Format(
                             Constants.ImportDGatewayCertificateWithPrivateKeyCommandFormat,
@@ -221,7 +222,7 @@ namespace DevolutionsGateway.Actions
                         command = string.Format(
                             Constants.ImportDGatewayCertificateWithPasswordCommandFormat,
                             session.Get(GatewayProperties.certificateFile),
-                            session.Get(GatewayProperties.certificatePassword).Replace("'", "''"));
+                            password.Replace("'", "''"));
                     }
                 }
                 else
@@ -432,8 +433,10 @@ namespace DevolutionsGateway.Actions
 
             try
             {
+                string password = WixProperties.Decode(session, GatewayProperties.webPassword);
+
                 // TODO: constants
-                command = $"Set-DGatewayUser -Username '{session.Get(GatewayProperties.webUsername)}' -Password '{session.Get(GatewayProperties.webPassword)}'";
+                command = $"Set-DGatewayUser -Username '{session.Get(GatewayProperties.webUsername)}' -Password '{password.Replace("'", "''")}'";
                 command = FormatPowerShellCommand(session, command);
             }
             catch (Exception e)
@@ -1003,6 +1006,23 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult EncodePropertyData(Session session)
+        {
+            foreach (IWixProperty property in GatewayProperties.Properties.Where(p => p.Encode))
+            {
+                if (property is not WixProperty<string> stringProperty)
+                {
+                    continue;
+                }
+
+                session.Log($"encoding property {property.Id}");
+                WixProperties.Encode(session, stringProperty);
+            }
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
         public static ActionResult SetInstallId(Session session)
         {
             if (session.Get(GatewayProperties.installId) == Guid.Empty)
@@ -1474,8 +1494,8 @@ namespace DevolutionsGateway.Actions
 
                     X509Certificate2 certificate2 = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
 
-                    CertificateExceptionStore store = CertificateExceptionStore.Deserialize(
-                        session.Get(GatewayProperties.devolutionsServerCertificateExceptions));
+                    string exceptions = WixProperties.Decode(session, GatewayProperties.devolutionsServerCertificateExceptions);
+                    CertificateExceptionStore store = CertificateExceptionStore.Deserialize(exceptions);
 
                     bool trust = store.IsTrusted(sender.RequestUri.Host, sender.RequestUri.Port, certificate2.Thumbprint);
 
