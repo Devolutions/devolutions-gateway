@@ -46,7 +46,15 @@ function Get-PackageLanguages {
     )
 }
 
-# Sets the specified envrionment variable to the given path.
+function Get-GatewayPackageLanguages {
+    return @(
+        [PSCustomObject]@{ Name = 'en-US'; LCID = 1033 },
+        [PSCustomObject]@{ Name = 'fr-FR'; LCID = 1036 },
+        [PSCustomObject]@{ Name = 'de-DE'; LCID = 1031 }
+    )
+}
+
+# Sets the specified environment variable to the given path.
 #
 # If the environment variable is not set, it is set to the path.
 # If the environment variable is set to a different value than the path provided, an error is thrown.
@@ -111,5 +119,6 @@ function Merge-Tokens {
 Export-ModuleMember -Function Get-NativeTarget
 Export-ModuleMember -Function Get-Version
 Export-ModuleMember -Function Get-PackageLanguages
+Export-ModuleMember -Function Get-GatewayPackageLanguages
 Export-ModuleMember -Function Set-EnvVarPath
 Export-ModuleMember -Function Merge-Tokens
