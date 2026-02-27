@@ -58,7 +58,8 @@ namespace DevolutionsGateway.Properties
             Name = "AccessUriHost",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String AccessUriHost
@@ -76,6 +77,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<UInt32> accessUriPort = new()
         {
@@ -84,7 +86,8 @@ namespace DevolutionsGateway.Properties
             Name = "AccessUriPort",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public UInt32 AccessUriPort
@@ -102,6 +105,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> accessUriScheme = new()
         {
@@ -110,7 +114,8 @@ namespace DevolutionsGateway.Properties
             Name = "AccessUriScheme",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String AccessUriScheme
@@ -128,6 +133,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<CertificateMode> certificateMode = new()
         {
@@ -136,7 +142,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateMode",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public CertificateMode CertificateMode
@@ -154,6 +161,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> certificateFile = new()
         {
@@ -162,7 +170,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateFile",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String CertificateFile
@@ -180,6 +189,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> certificatePassword = new()
         {
@@ -188,7 +198,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificatePassword",
             Secure = true,
             Hidden = true,
-            Public = true
+            Public = true,
+            Encode = true,
         };
 
         public String CertificatePassword
@@ -206,6 +217,33 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
+        internal static readonly WixProperty<String> certificatePasswordEncoded = new()
+        {
+            Id = "P.CERTIFICATEPASSWORD_ENCODED",
+            Default = string.Empty,
+            Name = "CertificatePasswordEncoded",
+            Secure = true,
+            Hidden = true,
+            Public = true, /* Secure properties must be public */
+            Encode = false,
+        };
+
+        public string CertificatePasswordEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(certificatePasswordEncoded.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(certificatePasswordEncoded, value); 
+                }
+            }
+        }
  
         internal static readonly WixProperty<String> certificatePrivateKeyFile = new()
         {
@@ -214,7 +252,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificatePrivateKeyFile",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String CertificatePrivateKeyFile
@@ -232,6 +271,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<StoreLocation> certificateLocation = new()
         {
@@ -240,7 +280,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateLocation",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public StoreLocation CertificateLocation
@@ -258,6 +299,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<StoreName> certificateStore = new()
         {
@@ -266,7 +308,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateStore",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public StoreName CertificateStore
@@ -284,6 +327,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> certificateName = new()
         {
@@ -292,7 +336,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateName",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String CertificateName
@@ -310,6 +355,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> generateCertificate = new()
         {
@@ -318,7 +364,8 @@ namespace DevolutionsGateway.Properties
             Name = "GenerateCertificate",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public Boolean GenerateCertificate
@@ -336,6 +383,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<CertificateFindType> certificateFindType = new()
         {
@@ -344,7 +392,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateFindType",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public CertificateFindType CertificateFindType
@@ -362,6 +411,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> certificateSearchText = new()
         {
@@ -370,7 +420,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateSearchText",
             Secure = false,
             Hidden = true,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public String CertificateSearchText
@@ -388,6 +439,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> certificateThumbprint = new()
         {
@@ -396,7 +448,8 @@ namespace DevolutionsGateway.Properties
             Name = "CertificateThumbprint",
             Secure = false,
             Hidden = true,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public String CertificateThumbprint
@@ -414,6 +467,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> devolutionsServerUrl = new()
         {
@@ -422,7 +476,8 @@ namespace DevolutionsGateway.Properties
             Name = "DevolutionsServerUrl",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String DevolutionsServerUrl
@@ -440,6 +495,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> devolutionsServerCertificateExceptions = new()
         {
@@ -448,7 +504,8 @@ namespace DevolutionsGateway.Properties
             Name = "DevolutionsServerCertificateExceptions",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = true,
         };
 
         public String DevolutionsServerCertificateExceptions
@@ -466,6 +523,33 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
+        internal static readonly WixProperty<String> devolutionsServerCertificateExceptionsEncoded = new()
+        {
+            Id = "P.DEVOLUTIONSSERVERCERTIFICATEEXCEPTIONS_ENCODED",
+            Default = string.Empty,
+            Name = "DevolutionsServerCertificateExceptionsEncoded",
+            Secure = true,
+            Hidden = true,
+            Public = true, /* Secure properties must be public */
+            Encode = false,
+        };
+
+        public string DevolutionsServerCertificateExceptionsEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(devolutionsServerCertificateExceptionsEncoded.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(devolutionsServerCertificateExceptionsEncoded, value); 
+                }
+            }
+        }
  
         internal static readonly WixProperty<Boolean> configureGateway = new()
         {
@@ -474,7 +558,8 @@ namespace DevolutionsGateway.Properties
             Name = "ConfigureGateway",
             Secure = false,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         /// <summary>`true` to configure the Gateway interactively</summary>
@@ -493,6 +578,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> hasPowerShell = new()
         {
@@ -501,7 +587,8 @@ namespace DevolutionsGateway.Properties
             Name = "HasPowerShell",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public Boolean HasPowerShell
@@ -519,6 +606,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> httpListenerHost = new()
         {
@@ -527,7 +615,8 @@ namespace DevolutionsGateway.Properties
             Name = "HttpListenerHost",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String HttpListenerHost
@@ -545,6 +634,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<UInt32> httpListenerPort = new()
         {
@@ -553,7 +643,8 @@ namespace DevolutionsGateway.Properties
             Name = "HttpListenerPort",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public UInt32 HttpListenerPort
@@ -571,6 +662,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> httpListenerScheme = new()
         {
@@ -579,7 +671,8 @@ namespace DevolutionsGateway.Properties
             Name = "HttpListenerScheme",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String HttpListenerScheme
@@ -597,6 +690,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> didChooseServerConfig = new()
         {
@@ -605,7 +699,8 @@ namespace DevolutionsGateway.Properties
             Name = "DidChooseServerConfig",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         /// <summary>A helper to manage UI state</summary>
@@ -624,6 +719,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> publicKeyFile = new()
         {
@@ -632,7 +728,8 @@ namespace DevolutionsGateway.Properties
             Name = "PublicKeyFile",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String PublicKeyFile
@@ -650,6 +747,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> privateKeyFile = new()
         {
@@ -658,7 +756,8 @@ namespace DevolutionsGateway.Properties
             Name = "PrivateKeyFile",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String PrivateKeyFile
@@ -676,6 +775,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> generateKeyPair = new()
         {
@@ -684,7 +784,8 @@ namespace DevolutionsGateway.Properties
             Name = "GenerateKeyPair",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public Boolean GenerateKeyPair
@@ -702,6 +803,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> powerShellPath = new()
         {
@@ -710,7 +812,8 @@ namespace DevolutionsGateway.Properties
             Name = "PowerShellPath",
             Secure = false,
             Hidden = true,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public String PowerShellPath
@@ -728,6 +831,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> noStartService = new()
         {
@@ -736,7 +840,8 @@ namespace DevolutionsGateway.Properties
             Name = "NoStartService",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String NoStartService
@@ -754,6 +859,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<ServiceStartMode> serviceStart = new()
         {
@@ -762,7 +868,8 @@ namespace DevolutionsGateway.Properties
             Name = "ServiceStart",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public ServiceStartMode ServiceStart
@@ -780,6 +887,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> tcpListenerHost = new()
         {
@@ -788,7 +896,8 @@ namespace DevolutionsGateway.Properties
             Name = "TcpListenerHost",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String TcpListenerHost
@@ -806,6 +915,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<UInt32> tcpListenerPort = new()
         {
@@ -814,7 +924,8 @@ namespace DevolutionsGateway.Properties
             Name = "TcpListenerPort",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public UInt32 TcpListenerPort
@@ -832,6 +943,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> tcpListenerScheme = new()
         {
@@ -840,7 +952,8 @@ namespace DevolutionsGateway.Properties
             Name = "TcpListenerScheme",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String TcpListenerScheme
@@ -858,6 +971,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> configureWebApp = new()
         {
@@ -866,7 +980,8 @@ namespace DevolutionsGateway.Properties
             Name = "ConfigureWebApp",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         /// <summary>`true` to configure the standalone web application interactively</summary>
@@ -885,6 +1000,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<AuthenticationMode> authenticationMode = new()
         {
@@ -893,7 +1009,8 @@ namespace DevolutionsGateway.Properties
             Name = "AuthenticationMode",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public AuthenticationMode AuthenticationMode
@@ -911,6 +1028,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> webUsername = new()
         {
@@ -919,7 +1037,8 @@ namespace DevolutionsGateway.Properties
             Name = "WebUsername",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String WebUsername
@@ -937,6 +1056,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> webPassword = new()
         {
@@ -945,7 +1065,8 @@ namespace DevolutionsGateway.Properties
             Name = "WebPassword",
             Secure = true,
             Hidden = true,
-            Public = true
+            Public = true,
+            Encode = true,
         };
 
         public String WebPassword
@@ -963,6 +1084,33 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
+        internal static readonly WixProperty<String> webPasswordEncoded = new()
+        {
+            Id = "P.WEBPASSWORD_ENCODED",
+            Default = string.Empty,
+            Name = "WebPasswordEncoded",
+            Secure = true,
+            Hidden = true,
+            Public = true, /* Secure properties must be public */
+            Encode = false,
+        };
+
+        public string WebPasswordEncoded
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(webPasswordEncoded.Id);
+                return WixProperties.GetPropertyValue<String>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(webPasswordEncoded, value); 
+                }
+            }
+        }
  
         internal static readonly WixProperty<Boolean> configureNgrok = new()
         {
@@ -971,7 +1119,8 @@ namespace DevolutionsGateway.Properties
             Name = "ConfigureNgrok",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         /// <summary>`true` to use ngrok for ingress listeners</summary>
@@ -990,6 +1139,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> ngrokAuthToken = new()
         {
@@ -998,7 +1148,8 @@ namespace DevolutionsGateway.Properties
             Name = "NgrokAuthToken",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String NgrokAuthToken
@@ -1016,6 +1167,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> ngrokHttpDomain = new()
         {
@@ -1024,7 +1176,8 @@ namespace DevolutionsGateway.Properties
             Name = "NgrokHttpDomain",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String NgrokHttpDomain
@@ -1042,6 +1195,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> ngrokEnableTcp = new()
         {
@@ -1050,7 +1204,8 @@ namespace DevolutionsGateway.Properties
             Name = "NgrokEnableTcp",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public Boolean NgrokEnableTcp
@@ -1068,6 +1223,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> ngrokRemoteAddress = new()
         {
@@ -1076,7 +1232,8 @@ namespace DevolutionsGateway.Properties
             Name = "NgrokRemoteAddress",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String NgrokRemoteAddress
@@ -1094,6 +1251,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> enableCliGeneration = new()
         {
@@ -1102,7 +1260,8 @@ namespace DevolutionsGateway.Properties
             Name = "EnableCliGeneration",
             Secure = false,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public Boolean EnableCliGeneration
@@ -1120,6 +1279,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> debugPowerShell = new()
         {
@@ -1128,7 +1288,8 @@ namespace DevolutionsGateway.Properties
             Name = "DebugPowerShell",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public Boolean DebugPowerShell
@@ -1146,6 +1307,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Guid> installId = new()
         {
@@ -1154,7 +1316,8 @@ namespace DevolutionsGateway.Properties
             Name = "InstallId",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public Guid InstallId
@@ -1172,6 +1335,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<String> userTempPath = new()
         {
@@ -1180,7 +1344,8 @@ namespace DevolutionsGateway.Properties
             Name = "UserTempPath",
             Secure = true,
             Hidden = false,
-            Public = true
+            Public = true,
+            Encode = false,
         };
 
         public String UserTempPath
@@ -1198,6 +1363,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<UInt32> netFx45Version = new()
         {
@@ -1206,7 +1372,8 @@ namespace DevolutionsGateway.Properties
             Name = "NetFx45Version",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public UInt32 NetFx45Version
@@ -1224,6 +1391,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> firstInstall = new()
         {
@@ -1232,7 +1400,8 @@ namespace DevolutionsGateway.Properties
             Name = "FirstInstall",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public Boolean FirstInstall
@@ -1250,6 +1419,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> upgrading = new()
         {
@@ -1258,7 +1428,8 @@ namespace DevolutionsGateway.Properties
             Name = "Upgrading",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public Boolean Upgrading
@@ -1276,6 +1447,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> removingForUpgrade = new()
         {
@@ -1284,7 +1456,8 @@ namespace DevolutionsGateway.Properties
             Name = "RemovingForUpgrade",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public Boolean RemovingForUpgrade
@@ -1302,6 +1475,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> uninstalling = new()
         {
@@ -1310,7 +1484,8 @@ namespace DevolutionsGateway.Properties
             Name = "Uninstalling",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public Boolean Uninstalling
@@ -1328,6 +1503,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
         internal static readonly WixProperty<Boolean> maintenance = new()
         {
@@ -1336,7 +1512,8 @@ namespace DevolutionsGateway.Properties
             Name = "Maintenance",
             Secure = false,
             Hidden = false,
-            Public = false
+            Public = false,
+            Encode = false,
         };
 
         public Boolean Maintenance
@@ -1354,6 +1531,7 @@ namespace DevolutionsGateway.Properties
                 }
             }
         }
+
  
 
         public static IWixProperty[] Properties =
@@ -1361,103 +1539,156 @@ namespace DevolutionsGateway.Properties
  
             accessUriHost,
  
+ 
             accessUriPort,
+ 
  
             accessUriScheme,
  
+ 
             certificateMode,
+ 
  
             certificateFile,
  
+ 
             certificatePassword,
+            certificatePasswordEncoded,
+ 
  
             certificatePrivateKeyFile,
  
+ 
             certificateLocation,
+ 
  
             certificateStore,
  
+ 
             certificateName,
+ 
  
             generateCertificate,
  
+ 
             certificateFindType,
+ 
  
             certificateSearchText,
  
+ 
             certificateThumbprint,
+ 
  
             devolutionsServerUrl,
  
+ 
             devolutionsServerCertificateExceptions,
+            devolutionsServerCertificateExceptionsEncoded,
+ 
  
             configureGateway,
  
+ 
             hasPowerShell,
+ 
  
             httpListenerHost,
  
+ 
             httpListenerPort,
+ 
  
             httpListenerScheme,
  
+ 
             didChooseServerConfig,
+ 
  
             publicKeyFile,
  
+ 
             privateKeyFile,
+ 
  
             generateKeyPair,
  
+ 
             powerShellPath,
+ 
  
             noStartService,
  
+ 
             serviceStart,
+ 
  
             tcpListenerHost,
  
+ 
             tcpListenerPort,
+ 
  
             tcpListenerScheme,
  
+ 
             configureWebApp,
+ 
  
             authenticationMode,
  
+ 
             webUsername,
  
+ 
             webPassword,
+            webPasswordEncoded,
+ 
  
             configureNgrok,
  
+ 
             ngrokAuthToken,
+ 
  
             ngrokHttpDomain,
  
+ 
             ngrokEnableTcp,
+ 
  
             ngrokRemoteAddress,
  
+ 
             enableCliGeneration,
+ 
  
             debugPowerShell,
  
+ 
             installId,
+ 
  
             userTempPath,
  
+ 
             netFx45Version,
+ 
  
             firstInstall,
  
+ 
             upgrading,
+ 
  
             removingForUpgrade,
  
+ 
             uninstalling,
  
+ 
             maintenance,
+ 
  
         };
     }
