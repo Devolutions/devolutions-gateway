@@ -64,11 +64,13 @@ pub(super) async fn trigger_update_check(
             .err(),
     )?;
 
-    std::fs::write(updater_file_path, update_json).map_err(
-        HttpError::internal()
-            .with_msg("failed to write the new `update.json` manifest on disk")
-            .err(),
-    )?;
+    tokio::fs::write(updater_file_path, update_json)
+        .await
+        .map_err(
+            HttpError::internal()
+                .with_msg("failed to write the new `update.json` manifest on disk")
+                .err(),
+        )?;
 
     Ok(Json(UpdateResponse {}))
 }

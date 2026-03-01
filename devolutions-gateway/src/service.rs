@@ -251,7 +251,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
 
-    let jrl = load_jrl_from_disk(&conf)?;
+    let jrl = load_jrl_from_disk(&conf).await?;
 
     let (session_manager_handle, session_manager_rx) = session_manager_channel();
 
@@ -357,12 +357,13 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     Ok(tasks)
 }
 
-fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {
+async fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {
     let jrl_file = config.jrl_file.as_path();
 
     let claims: JrlTokenClaims = if jrl_file.exists() {
         info!("Reading JRL file from disk (path: {jrl_file})");
-        std::fs::read_to_string(jrl_file)
+        tokio::fs::read_to_string(jrl_file)
+            .await
             .context("couldn't read JRL file")?
             .pipe_deref(serde_json::from_str)
             .context("invalid JRL")?

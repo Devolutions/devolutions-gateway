@@ -132,7 +132,8 @@ impl Recorder {
         path_array.truncate(path_size - 1);
 
         #[allow(clippy::cast_sign_loss)] // Losing the sign of the value on purpose.
-        let str_path = String::from_utf8(path_array.iter().map(|element| *element as u8).collect());
+        let byte_array: Vec<u8> = path_array.into_iter().map(|element| element as u8).collect();
+        let str_path = String::from_utf8(byte_array);
 
         match str_path {
             Ok(path) => Ok(PathBuf::from(path)),
