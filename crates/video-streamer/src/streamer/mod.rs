@@ -99,9 +99,10 @@ pub fn webm_stream(
         }
     }
 
-    const MAX_RETRY_COUNT: usize = 3;
-    // To make sure we don't retry forever
-    // Retry is set to 0 when we successfully read a tag
+    // With a 3-second timeout per EOF wait, 25 retries gives a 75-second maximum stall
+    // before giving up. The counter resets to 0 on every successful tag read, so this
+    // only triggers on continuous EOF with zero progress.
+    const MAX_RETRY_COUNT: usize = 25;
     let mut retry_count = 0;
 
     let result = loop {
@@ -190,6 +191,10 @@ pub fn webm_stream(
                 },
                 _ = stop_notifier.notified() => {
                     let _ = tx.send(WhenEofControlFlow::Break);
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
+                    trace!("EOF wait timed out, retrying");
+                    let _ = tx.send(WhenEofControlFlow::Continue);
                 }
             }
         });
