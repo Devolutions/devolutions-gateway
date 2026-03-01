@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="de-de" Codepage="1252" Language="1031" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+        <!-- metadata -->
+                <String Id="Language">1031</String>
+                <String Id="ProductDescription">Ein blitzschneller Relay-Server, der sich an verschiedene Protokolle und gewünschte Traffic-Inspektionsstufen anpasst.</String>
+                <String Id="VendorFullName">Devolutions Inc.</String>
+                <String Id="VendorName">Devolutions</String>
+                    <!-- messages -->
+                <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Beim Zugriff auf den System-Zertifikatspeicher ist ein unerwarteter Fehler aufgetreten: {0}</String>
+                <String Id="AuthenticationTokenIsRequired">Das Authentifizierungstoken ist erforderlich</String>
+                <String Id="DomainIsRequiredAndMustBeValid">Die Domäne ist erforderlich und muss ein gültiger Hostname sein</String>
+                <String Id="Dotnet471IsRequired">Das Produkt erfordert Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?</String>
+                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?</String>
+                <String Id="NewerInstalled">Eine neuere Version dieses Produkts ist bereits installiert.</String>
+                <String Id="NoMatchingCertificatesFound">Keine übereinstimmenden Zertifikate gefunden</String>
+                <String Id="OS2Old">Dieses Produkt erfordert mindestens Windows 8 / Windows Server 2012 R2</String>
+                <String Id="PasswordsDoNotMatch">Die Passwörter stimmen nicht überein</String>
+                <String Id="RemoteAddressIsRequired">Die Remote-Adresse ist erforderlich</String>
+                <String Id="RemoteAddressMustBeInTheFormat">Die Remote-Adresse muss ein gültiger Host und Port im Format {host}:{port} sein</String>
+                <String Id="ThereIsAProblemWithTheEnteredData">Es gibt ein Problem mit den eingegebenen Daten. Bitte korrigieren Sie das Problem und versuchen Sie es erneut.</String>
+                <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">Die angegebene Datei ist ungültig oder nicht zugänglich</String>
+                <String Id="WindowsPowerShell51IsRequired">Dieses Produkt erfordert Windows PowerShell 5.1</String>
+                <String Id="x64VersionRequired">Sie müssen die 64-Bit-Version dieses Produkts auf 64-Bit-Windows installieren.</String>
+                <String Id="x86VersionRequired">Sie müssen die 32-Bit-Version dieses Produkts auf 32-Bit-Windows installieren.</String>
+                <String Id="YouMustConfirmThePassword">Sie müssen das Passwort bestätigen</String>
+                <String Id="YouMustEnterAPassword">Sie müssen ein Passwort eingeben</String>
+                <String Id="YouMustEnterAUsername">Sie müssen einen Benutzernamen eingeben</String>
+                <String Id="YouMustEnterAValidPort">Sie müssen einen gültigen Port eingeben</String>
+                <String Id="YouMustEnterAValidUrl">Sie müssen eine gültige URL eingeben</String>
+                <String Id="YouMustProvideAValidCertificateAndPasswordOrKey">Sie müssen eine gültige Zertifikatsdatei und entweder ein Passwort oder eine private Schlüsseldatei angeben</String>
+                <String Id="YouMustProvideAValidHostname">Sie müssen einen gültigen Hostnamen angeben</String>
+                <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">Sie müssen ein Zertifikat aus dem System-Zertifikatspeicher auswählen</String>
+                    <!-- links -->
+                <String Id="FindYourPublicKeyDevolutionsHubLink">Devolutions Hub</String>
+                <String Id="FindYourPublicKeyDevolutionsServerLink">Devolutions Server</String>
+                <String Id="FindYourPublicKeyForXorX">Öffentlichen Schlüssel für {0} oder {1} suchen</String>
+                <String Id="NgrokAuthTokenLink">Authentifizierungstoken</String>
+                <String Id="NgrokDomainLink">Domäne</String>
+                <String Id="NgrokProvideYourX">Geben Sie Ihr {0} an</String>
+                <String Id="NgrokReadMoreAtX">Weitere Informationen auf {0}</String>
+                <String Id="NgrokReadMoreLink">ngrok.com</String>
+                <String Id="NgrokTcpAddressLink">TCP-Adresse</String>
+                <String Id="NgrokXForWebClientAccess">Die {0} für den Webclient-Zugriff</String>
+                <String Id="NgroXForNativeClientAccess">Die {0} für den nativen Client-Zugriff</String>
+                    <!-- buttons -->
+                <String Id="SearchButton">Suchen</String>
+                <String Id="ValidateButton">Überprüfen</String>
+                <String Id="ViewButton">Anzeigen</String>
+                <String Id="ViewErrorsButton">Konfigurationsprobleme anzeigen</String>
+                <String Id="ViewLogButton">Protokoll anzeigen</String>
+                    <!-- propertyGroups -->
+                <String Id="Group_Certificate">Zertifikat</String>
+                <String Id="Group_EncryptionKeys">Verschlüsselungsschlüssel</String>
+                <String Id="Group_ExternalAccess">Externer Zugriff</String>
+                <String Id="Group_InstallLocation">Installationsort</String>
+                <String Id="Group_Listeners">Listener</String>
+                <String Id="Group_Ngrok">ngrok</String>
+                <String Id="Group_Service">Dienst</String>
+                <String Id="Group_WebApp">Webanwendung</String>
+                    <!-- enums -->
+                <String Id="AuthenticationMode_Custom">Benutzerdefiniert</String>
+                <String Id="AuthenticationMode_None">Keine</String>
+                <String Id="CertificateFindType_SubjectName">Antragstellername</String>
+                <String Id="CertificateFindType_Thumbprint">Fingerabdruck</String>
+                <String Id="CertificateMode_External">Extern</String>
+                <String Id="CertificateMode_System">System</String>
+                <String Id="CustomizeMode_Later">Später</String>
+                <String Id="CustomizeMode_Now">Jetzt</String>
+                <String Id="ServiceStartMode_Automatic">Automatisch</String>
+                <String Id="ServiceStartMode_Boot">Start</String>
+                <String Id="ServiceStartMode_Disabled">Deaktiviert</String>
+                <String Id="ServiceStartMode_Manual">Manuell</String>
+                <String Id="ServiceStartMode_System">System</String>
+                <String Id="StoreLocation_CurrentUser">Aktueller Benutzer</String>
+                <String Id="StoreLocation_LocalMachine">Lokaler Computer</String>
+                <String Id="StoreName_AddressBook">Andere Personen</String>
+                <String Id="StoreName_AuthRoot">Drittanbieter-Stammzertifizierungsstellen</String>
+                <String Id="StoreName_CertificateAuthority">Zwischenzertifizierungsstellen</String>
+                <String Id="StoreName_Disallowed">Nicht vertrauenswürdige Zertifikate</String>
+                <String Id="StoreName_My">Persönlich</String>
+                <String Id="StoreName_Root">Vertrauenswürdige Stammzertifizierungsstellen</String>
+                <String Id="StoreName_TrustedPeople">Vertrauenswürdige Personen</String>
+                <String Id="StoreName_TrustedPublisher">Vertrauenswürdige Herausgeber</String>
+                    <!-- properties -->
+                <String Id="Property_AccessUri">Zugriffs-URI</String>
+                <String Id="Property_AuthenticationMode">Authentifizierungsmodus</String>
+                <String Id="Property_CertificateFile">Zertifikatsdatei</String>
+                <String Id="Property_CertificateLocation">Zertifikatort</String>
+                <String Id="Property_CertificateMode">Zertifikatquelle</String>
+                <String Id="Property_CertificateName">Zertifikatname</String>
+                <String Id="Property_CertificatePassword">Zertifikatpasswort</String>
+                <String Id="Property_CertificatePrivateKeyFile">Privater Schlüssel des Zertifikats</String>
+                <String Id="Property_CertificateStore">Zertifikatspeicher</String>
+                <String Id="Property_DevolutionsServerUrl">Devolutions Server-URL</String>
+                <String Id="Property_Directory">Verzeichnis</String>
+                <String Id="Property_HttpListener">HTTP-Listener</String>
+                <String Id="Property_NewCertificate">Ein neues selbstsigniertes Zertifikat wird generiert</String>
+                <String Id="Property_NewKeyPair">Ein neues Schlüsselpaar wird generiert</String>
+                <String Id="Property_NgrokAuthToken">Authentifizierungstoken</String>
+                <String Id="Property_NgrokHttpDomain">Domäne</String>
+                <String Id="Property_NgrokRemoteAddress">TCP-Adresse</String>
+                <String Id="Property_PrivateKeyFile">Datei mit privatem Schlüssel</String>
+                <String Id="Property_PublicKeyFile">Datei mit öffentlichem Schlüssel</String>
+                <String Id="Property_ServiceStart">Dienststartmodus</String>
+                <String Id="Property_TcpListener">TCP-Listener</String>
+                <String Id="Property_WebPassword">Standardpasswort</String>
+                <String Id="Property_WebUsername">Standardbenutzername</String>
+                    <!-- static -->
+                <String Id="Host">Host</String>
+                <String Id="Port">Port</String>
+                <String Id="Protocol">Protokoll</String>
+                <String Id="UACPromptLabel">Bitte warten Sie auf die UAC-Eingabeaufforderung.
+
+Wenn sie minimiert erscheint, aktivieren Sie sie über die Taskleiste.</String>
+                    <!-- filters -->
+                <String Id="Filter_AllFiles">Alle Dateien</String>
+                <String Id="Filter_CertificateFiles">Zertifikatsdateien (*.pem, *.crt, *.cer)</String>
+                <String Id="Filter_PfxFiles">PFX-Dateien (*.pfx, *.p12)</String>
+                <String Id="Filter_PrivateKeyFiles">Dateien mit privatem Schlüssel (*.key)</String>
+                <String Id="Filter_PublicKeyFiles">Dateien mit öffentlichem Schlüssel (*.pem)</String>
+                    <!-- dialogs.static -->
+                <String Id="GatewayDlg_Title">[ProductName]-Setup</String>
+                    <!-- dialogs.browse -->
+                <String Id="BrowseDlgDescription">Zum Zielordner navigieren</String>
+                <String Id="BrowseDlgTitle">Zielordner ändern</String>
+                    <!-- dialogs.installDir -->
+                <String Id="InstallDirDlgDescription">Klicken Sie auf Weiter, um im Standardordner zu installieren, oder auf Ändern, um einen anderen auszuwählen.</String>
+                <String Id="InstallDirDlgTitle">Zielordner</String>
+                    <!-- dialogs.progress -->
+                <String Id="ProgressDlgTitleChanging">[ProductName] wird geändert</String>
+                <String Id="ProgressDlgTitleInstalling">[ProductName] wird installiert</String>
+                <String Id="ProgressDlgTitleRemoving">[ProductName] wird entfernt</String>
+                <String Id="ProgressDlgTitleRepairing">[ProductName] wird repariert</String>
+                <String Id="ProgressDlgTitleUpdating">[ProductName] wird aktualisiert</String>
+                    <!-- dialogs.verifyReady -->
+                <String Id="VerifyReadyDlgChangeTitle">Bereit zur Änderung von [ProductName]</String>
+                <String Id="VerifyReadyDlgInstallTitle">Bereit zur Installation von [ProductName]</String>
+                <String Id="VerifyReadyDlgRemoveTitle">Bereit zur Entfernung von [ProductName]</String>
+                <String Id="VerifyReadyDlgRepairTitle">Bereit zur Reparatur von [ProductName]</String>
+                <String Id="VerifyReadyDlgUpdateTitle">Bereit zur Aktualisierung von [ProductName]</String>
+                    <!-- dialogs.welcome -->
+                <String Id="WelcomeDlgTitle">Willkommen beim Setup-Assistenten für [ProductName] 20[ProductVersion]</String>
+                    <!-- dialogs.customize -->
+                <String Id="ConfigurationOptions">Konfigurationsoptionen</String>
+                <String Id="ConfigureTheGatewayInstallation">Gateway-Installation konfigurieren</String>
+                <String Id="CustomInstallDlgDescription">Wählen Sie, wie [ProductName] konfiguriert werden soll.</String>
+                <String Id="CustomInstallDlgInfoLabel">Der Setup-Assistent generiert eine Konfiguration, die Sie später aktualisieren können; oder Sie können die Konfigurationsinformationen jetzt angeben.</String>
+                <String Id="CustomInstallDlgTitle">Konfiguration</String>
+                <String Id="EnableAccessOverTheInternetUsingNgrok">Internetzugriff über ngrok aktivieren</String>
+                <String Id="EnableTheGatewayWebInterface">Gateway-Weboberfläche aktivieren</String>
+                <String Id="GenerateASelfSignedHttpsCertificate">Selbstsigniertes HTTPS-Zertifikat generieren</String>
+                <String Id="GenerateEncryptionKeys">Verschlüsselungsschlüssel generieren</String>
+                <String Id="RecommendedForManualInstallations">Der Gateway-Dienst muss nach der Installation manuell konfiguriert und gestartet werden.</String>
+                <String Id="RecommendedForMostInstallations">Für die meisten Installationen empfohlen. Generiert eine grundlegende Konfiguration mit diesem Installer und startet den Gateway-Dienst automatisch.</String>
+                    <!-- dialogs.accessUri -->
+                <String Id="AccessUriDlgDescription">URL zum Erreichen von [ProductName].</String>
+                <String Id="AccessUriDlgExplanation">Der URI zum externen Erreichen des Gateways für HTTP-Operationen. Dies kann in bestimmten Fällen von der HTTP-Listener-Adresse abweichen (z. B. bei Verwendung eines Reverse-Proxys wie IIS).</String>
+                <String Id="AccessUriDlgHttpWarn">Ein unsicherer externer URI wird für Produktionsumgebungen nicht empfohlen</String>
+                <String Id="AccessUriDlgTitle">Externe URL</String>
+                    <!-- dialogs.certificate -->
+                <String Id="AnX509CertificateInBinaryOrPemEncoded">Ein X.509-Zertifikat im binären PKCS#12-Format (PFX/P12) oder PEM-kodiert</String>
+                <String Id="BrowseForACertificateToUse">Zu verwendendes Zertifikat durchsuchen</String>
+                <String Id="CertificateCouldNotBeVerified">Zertifikat konnte nicht verifiziert werden</String>
+                <String Id="CertificateDlgCertConfigLabel">Zertifikatkonfiguration</String>
+                <String Id="CertificateDlgCertFileLabel">Zertifikatsdatei</String>
+                <String Id="CertificateDlgCertKeyFileLabel">Datei mit privatem Schlüssel</String>
+                <String Id="CertificateDlgCertPasswordLabel">Zertifikatpasswort</String>
+                <String Id="CertificateDlgDescription">Bei Verwendung eines HTTPS-Listeners ist ein Zertifikat erforderlich.</String>
+                <String Id="CertificateDlgTitle">Zertifikat</String>
+                <String Id="CertificateSource">Zertifikatquelle</String>
+                <String Id="CertificateStore">Zertifikatspeicher</String>
+                <String Id="EncryptedPrivateKeysAreNotSupported">Verschlüsselte private Schlüssel werden nicht unterstützt</String>
+                <String Id="EnterTextToSearch">Suchtext eingeben</String>
+                <String Id="Search">Suchen</String>
+                <String Id="SearchBy">Suchen nach</String>
+                <String Id="SearchForACertificateToUse">Zu verwendendes Zertifikat suchen</String>
+                <String Id="SelectedCertificate">Ausgewähltes Zertifikat</String>
+                <String Id="SelectTheCertificateToUse">Das zu verwendende Zertifikat auswählen</String>
+                <String Id="StoreLocation">Speicherort</String>
+                    <!-- dialogs.listeners -->
+                <String Id="AnHttpListenerDoesNotRequireACert">Ein HTTP-Listener erfordert kein Zertifikat.</String>
+                <String Id="AnHttpsListenerRequiresACert">Ein HTTPS-Listener erfordert ein Zertifikat. Sie werden aufgefordert, eines zu konfigurieren.</String>
+                <String Id="AnHttpsListenerRequiresACertSelfSigned">Ein HTTPS-Listener erfordert ein Zertifikat. Das von diesem Installer generierte selbstsignierte Zertifikat ist standardmäßig nicht vertrauenswürdig.</String>
+                <String Id="ChosenPortAvailable">Der gewählte Port ist verfügbar</String>
+                <String Id="ChosenPortCouldNotBeChecked">Der gewählte Port konnte nicht überprüft werden</String>
+                <String Id="ChosenPortNotAvailable">Der gewählte Port ist möglicherweise nicht verfügbar</String>
+                <String Id="InvalidPort">Ungültiger Port</String>
+                <String Id="ListenersDlgDescription">HTTP(S)- und TCP-Port-Listener.</String>
+                <String Id="ListenersDlgHTTPLabel">HTTP-Listener</String>
+                <String Id="ListenersDlgListenersLabel">Listener</String>
+                <String Id="ListenersDlgTCPLabel">TCP-Listener</String>
+                <String Id="ListenersDlgTitle">Listener</String>
+                    <!-- dialogs.ngrok -->
+                <String Id="AuthToken">Auth-Token</String>
+                <String Id="Configure">Konfigurieren</String>
+                <String Id="Domain">Domäne</String>
+                <String Id="NativeClientAccess">Nativer Client-Zugriff</String>
+                <String Id="NgrokListenersDlgDescription">ngrok-Listener-Konfiguration.</String>
+                <String Id="NgrokListenersDlgTitle">ngrok</String>
+                <String Id="RemoteAddress">Remote-Adresse</String>
+                <String Id="UseNgrokForSimplifiedRemoteAccess">Verwenden Sie ngrok für vereinfachten Fernzugriff aus dem Internet. Gateway-Listener erlauben standardmäßig den Zugriff von jeder IP-Adresse.</String>
+                    <!-- dialogs.dvls -->
+                <String Id="AutomaticConfigurationWithDvls">Automatische Konfiguration mit Devolutions Server</String>
+                <String Id="ManualConfiguration">Manuelle Konfiguration</String>
+                <String Id="ProvideDvlsAddressIfUsing">Wenn Sie Devolutions Server verwenden, geben Sie die Adresse an. Dieser Schritt ist optional.</String>
+                <String Id="PublicKeyServerDlgDescription">Automatische Serverkonfiguration</String>
+                <String Id="PublicKeyServerDlgTitle">Begleitserver</String>
+                <String Id="TheCertificateForXIsNotTrustedDoYouWishToProceed">Das Zertifikat für {0} ist nicht vertrauenswürdig. Möchten Sie fortfahren?</String>
+                <String Id="ThePublicKeyWillBeDownloaded">Der öffentliche Schlüssel wird heruntergeladen</String>
+                <String Id="UntrustedCertificate">Nicht vertrauenswürdiges Zertifikat</String>
+                <String Id="YoullNeedToProvideThePublicKey">Sie müssen den öffentlichen Schlüssel des Begleitservers angeben</String>
+                    <!-- dialogs.keys -->
+                <String Id="PrivateKeyFile">Datei mit privatem Schlüssel</String>
+                <String Id="ProvideAnEncryptionKeyPairForTokenCreationVerification">Geben Sie ein Verschlüsselungsschlüsselpaar für die Token-Generierung und -Verifizierung an.</String>
+                <String Id="ProvideAnEncryptionKeyPairForTokenVerification">Geben Sie einen Verschlüsselungsschlüssel für die Token-Verifizierung an.</String>
+                <String Id="ProvideAPublicKeyForTokenVerification">Geben Sie einen öffentlichen Schlüssel für die Token-Verifizierung an. Der private Schlüssel für die Token-Generierung wird von einem Begleitdienst bereitgestellt (z. B. Devolutions Server).</String>
+                <String Id="PublicKeyDlgDescription">Schlüssel für die Token-Erstellung und -Verifizierung.</String>
+                <String Id="PublicKeyDlgTitle">Verschlüsselungsschlüssel</String>
+                <String Id="PublicKeyFile">Datei mit öffentlichem Schlüssel</String>
+                <String Id="ThePrivateKeyIsUsedTo">Der private Schlüssel wird verwendet, um Sitzungstoken für die eigenständige Webanwendung zu generieren</String>
+                <String Id="ThePublicKeyIsUsedTo">Der öffentliche Schlüssel wird verwendet, um Token ohne bestimmte Einschränkungen zu verifizieren</String>
+                    <!-- dialogs.webApp -->
+                <String Id="Authentication">Authentifizierung</String>
+                <String Id="ChooseTheAuthenticationMethod">Wählen Sie die Authentifizierungsmethode für den Zugriff auf die Webanwendung</String>
+                <String Id="ConfirmPassword">Passwort bestätigen</String>
+                <String Id="DefaultUser">Standardbenutzer</String>
+                <String Id="Password">Passwort</String>
+                <String Id="Username">Benutzername</String>
+                <String Id="WebAppDlgDescription">Konfiguration für die eingebettete Webanwendung.</String>
+                <String Id="WebAppDlgTitle">Webanwendungsoptionen</String>
+                    <!-- dialogs.summary -->
+                <String Id="SummaryDlgDescription">Konfiguration überprüfen</String>
+                <String Id="SummaryDlgTitle">Zusammenfassung</String>
+                    <!-- dialogs.firewall -->
+                <String Id="msierrFirewallCannotConnect">Verbindung zur Windows-Firewall nicht möglich.  ([2]   [3]   [4]   [5])</String>
+                <String Id="WixExecFirewallExceptionsInstall">Windows-Firewall-Konfiguration installieren</String>
+                <String Id="WixExecFirewallExceptionsUninstall">Windows-Firewall-Konfiguration deinstallieren</String>
+                <String Id="WixRollbackFirewallExceptionsInstall">Windows-Firewall-Konfiguration wiederherstellen</String>
+                <String Id="WixRollbackFirewallExceptionsUninstall">Windows-Firewall-Konfiguration wiederherstellen</String>
+                <String Id="WixSchedFirewallExceptionsInstall">Windows-Firewall konfigurieren</String>
+                <String Id="WixSchedFirewallExceptionsUninstall">Windows-Firewall konfigurieren</String>
+                    </WixLocalization>
