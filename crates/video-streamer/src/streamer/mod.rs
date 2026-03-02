@@ -99,9 +99,15 @@ pub fn webm_stream(
         }
     }
 
-    const MAX_RETRY_COUNT: usize = 3;
-    // To make sure we don't retry forever
-    // Retry is set to 0 when we successfully read a tag
+    // NOTE: MAX_RETRY_COUNT is intentionally set to 25. With the 3-second delay
+    // between retries, this yields a worst-case wait of 75 seconds before we
+    // give up on the current stream. This is acceptable in our live-streaming
+    // context because downstream components already enforce a stricter overall
+    // timeout, and tolerating longer temporary input stalls here reduces
+    // unnecessary reconnect churn on brief network or encoder hiccups.
+    // The counter resets to 0 on every successful tag read, so this only
+    // triggers on continuous EOF with zero progress.
+    const MAX_RETRY_COUNT: usize = 25;
     let mut retry_count = 0;
 
     let result = loop {
@@ -190,6 +196,10 @@ pub fn webm_stream(
                 },
                 _ = stop_notifier.notified() => {
                     let _ = tx.send(WhenEofControlFlow::Break);
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
+                    trace!("EOF wait timed out, retrying");
+                    let _ = tx.send(WhenEofControlFlow::Continue);
                 }
             }
         });
