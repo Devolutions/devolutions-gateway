@@ -1,5 +1,9 @@
 // Used by the jetsocat binary.
-use {dirs_next as _, humantime as _, seahorse as _, tracing_appender as _, tracing_subscriber as _};
+use dirs_next as _;
+use humantime as _;
+use seahorse as _;
+use tracing_appender as _;
+use tracing_subscriber as _;
 // Used by tests
 #[cfg(test)]
 use {proptest as _, test_utils as _};
