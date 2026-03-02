@@ -99,9 +99,14 @@ pub fn webm_stream(
         }
     }
 
-    // With a 3-second timeout per EOF wait, 25 retries gives a 75-second maximum stall
-    // before giving up. The counter resets to 0 on every successful tag read, so this
-    // only triggers on continuous EOF with zero progress.
+    // NOTE: MAX_RETRY_COUNT is intentionally set to 25. With the 3-second delay
+    // between retries, this yields a worst-case wait of 75 seconds before we
+    // give up on the current stream. This is acceptable in our live-streaming
+    // context because downstream components already enforce a stricter overall
+    // timeout, and tolerating longer temporary input stalls here reduces
+    // unnecessary reconnect churn on brief network or encoder hiccups.
+    // The counter resets to 0 on every successful tag read, so this only
+    // triggers on continuous EOF with zero progress.
     const MAX_RETRY_COUNT: usize = 25;
     let mut retry_count = 0;
 
