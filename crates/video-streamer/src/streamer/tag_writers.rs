@@ -13,6 +13,13 @@ use crate::debug::mastroka_spec_name;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
 
+/// Maximum number of consecutive frames that can be skipped when adaptive frame
+/// skipping is active. Controls the trade-off between latency and frame delivery:
+/// - 1 = skip-encode alternating pattern, 50% max information loss (default)
+/// - 2 = up to 2 skips then 1 encode, 67% max loss
+/// - 0 = never skip (disables adaptive skipping effectively)
+const MAX_CONSECUTIVE_FRAME_SKIPS: u32 = 1;
+
 #[cfg(feature = "perf-diagnostics")]
 fn duration_as_millis_u64(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
@@ -391,7 +398,14 @@ where
         // Skip encoding when falling behind real-time. The ratio naturally self-regulates:
         // skipping makes processing faster (decode-only), which pushes ratio back above 1.0,
         // which resumes encoding. This bang-bang control keeps the stream near real-time.
-        self.adaptive_frame_skip && self.last_ratio < 1.0
+        //
+        // Allow at most MAX_CONSECUTIVE_FRAME_SKIPS consecutive skips to cap information loss.
+        // With the default of 1, the pattern is skip-encode-skip-encode (50% max loss).
+        // Accepts growing delay over forced frame drops — preferable for shadow sessions
+        // where a few seconds of latency is tolerable but frozen frames are not.
+        self.adaptive_frame_skip
+            && self.last_ratio < 1.0
+            && self.frames_since_last_encode < MAX_CONSECUTIVE_FRAME_SKIPS
     }
 
     #[cfg(feature = "perf-diagnostics")]
