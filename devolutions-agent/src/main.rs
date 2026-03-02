@@ -2,11 +2,22 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-agent library.
-use {
-    anyhow as _, async_trait as _, camino as _, devolutions_agent_shared as _, devolutions_gateway_task as _,
-    devolutions_log as _, futures as _, ironrdp as _, parking_lot as _, rand as _, rustls_pemfile as _, serde as _,
-    serde_json as _, tap as _, tokio as _, tokio_rustls as _,
-};
+use anyhow as _;
+use async_trait as _;
+use camino as _;
+use devolutions_agent_shared as _;
+use devolutions_gateway_task as _;
+use devolutions_log as _;
+use futures as _;
+use ironrdp as _;
+use parking_lot as _;
+use rand as _;
+use rustls_pemfile as _;
+use serde as _;
+use serde_json as _;
+use tap as _;
+use tokio as _;
+use tokio_rustls as _;
 #[cfg(windows)]
 use {
     devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, thiserror as _, uuid as _,

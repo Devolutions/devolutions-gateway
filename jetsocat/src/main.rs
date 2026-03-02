@@ -2,18 +2,26 @@
 #![allow(clippy::print_stdout)]
 
 // Used by the jetsocat library.
+use base64 as _;
+use futures_util as _;
+use jet_proto as _;
+use jmux_proto as _;
 #[cfg(feature = "native-tls")]
 use native_tls as _;
 #[cfg(all(feature = "native-tls", not(any(target_os = "windows", target_vendor = "apple"))))]
 use openssl as _;
+use openssl_probe as _;
 #[cfg(feature = "detect-proxy")]
 use proxy_cfg as _;
+use proxy_http as _;
+use proxy_socks as _;
+use proxy_types as _;
+use rustls_pemfile as _;
+use tinyjson as _;
+use tokio_tungstenite as _;
+use transport as _;
 #[cfg(windows)]
 use windows as _;
-use {
-    base64 as _, futures_util as _, jet_proto as _, jmux_proto as _, openssl_probe as _, proxy_http as _,
-    proxy_socks as _, proxy_types as _, rustls_pemfile as _, tinyjson as _, tokio_tungstenite as _, transport as _,
-};
 // Used by tests
 #[cfg(test)]
 use {proptest as _, test_utils as _};

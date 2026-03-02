@@ -2,20 +2,58 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-gateway library.
+use argon2 as _;
+use async_trait as _;
+use axum as _;
+use axum_extra as _;
+use backoff as _;
+use bytes as _;
+use camino as _;
+use devolutions_agent_shared as _;
+use dlopen as _;
+use dlopen_derive as _;
+use dunce as _;
+use etherparse as _;
+use hostname as _;
+use http_body_util as _;
+use hyper as _;
+use hyper_util as _;
+use ironrdp_core as _;
+use ironrdp_pdu as _;
+use ironrdp_rdcleanpath as _;
+use jmux_proxy as _;
+use job_queue as _;
+use job_queue_libsql as _;
+use multibase as _;
+use network_scanner as _;
+use ngrok as _;
+use nonempty as _;
+use pcap_file as _;
+use picky as _;
+use picky_krb as _;
+use pin_project_lite as _;
+use portpicker as _;
+use reqwest as _;
 #[cfg(windows)]
 use rustls_cng as _;
+use serde as _;
+use serde_urlencoded as _;
+use smol_str as _;
+use sysinfo as _;
+use thiserror as _;
+use time as _;
+use tokio_rustls as _;
+use tokio_tungstenite as _;
+use tower as _;
+use tower_http as _;
+use transport as _;
+use tungstenite as _;
+use typed_builder as _;
+use url as _;
 #[cfg(feature = "openapi")]
 use utoipa as _;
-use {
-    argon2 as _, async_trait as _, axum as _, axum_extra as _, backoff as _, bytes as _, camino as _,
-    devolutions_agent_shared as _, dlopen as _, dlopen_derive as _, dunce as _, etherparse as _, hostname as _,
-    http_body_util as _, hyper as _, hyper_util as _, ironrdp_core as _, ironrdp_pdu as _, ironrdp_rdcleanpath as _,
-    jmux_proxy as _, job_queue as _, job_queue_libsql as _, multibase as _, network_scanner as _, ngrok as _,
-    nonempty as _, pcap_file as _, picky as _, picky_krb as _, pin_project_lite as _, portpicker as _, reqwest as _,
-    serde as _, serde_urlencoded as _, smol_str as _, sysinfo as _, thiserror as _, time as _, tokio_rustls as _,
-    tokio_tungstenite as _, tower as _, tower_http as _, transport as _, tungstenite as _, typed_builder as _,
-    url as _, uuid as _, zeroize as _,
-};
+use uuid as _;
+use zeroize as _;
 // Used by tests.
 #[cfg(test)]
 use {
