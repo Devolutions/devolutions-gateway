@@ -403,9 +403,7 @@ where
         // With the default of 1, the pattern is skip-encode-skip-encode (50% max loss).
         // Accepts growing delay over forced frame drops — preferable for shadow sessions
         // where a few seconds of latency is tolerable but frozen frames are not.
-        self.adaptive_frame_skip
-            && self.last_ratio < 1.0
-            && self.frames_since_last_encode < MAX_CONSECUTIVE_FRAME_SKIPS
+        self.adaptive_frame_skip && self.last_ratio < 1.0 && self.frames_since_last_encode < MAX_CONSECUTIVE_FRAME_SKIPS
     }
 
     #[cfg(feature = "perf-diagnostics")]
