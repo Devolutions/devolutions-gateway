@@ -51,6 +51,7 @@ pub fn webm_stream(
         headers.push(tag);
     }
     let encode_writer_config = EncodeWriterConfig::try_from((headers.as_slice(), &config))?;
+    webm_itr.set_codec(encode_writer_config.codec);
 
     // we run to the last cluster, skipping everything that has been played
     while let Some(tag) = webm_itr.next() {
