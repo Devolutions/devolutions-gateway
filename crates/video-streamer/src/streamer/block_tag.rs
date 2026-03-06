@@ -1,6 +1,7 @@
 use std::fmt;
 
 use anyhow::Context;
+use cadeau::xmf::vpx::VpxCodec;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 #[derive(Clone)]
@@ -35,7 +36,7 @@ impl fmt::Debug for VideoBlock {
 }
 
 impl VideoBlock {
-    pub(crate) fn new(tag: MatroskaSpec, cluster_timestamp: Option<u64>) -> anyhow::Result<Self> {
+    pub(crate) fn new(tag: MatroskaSpec, cluster_timestamp: Option<u64>, codec: VpxCodec) -> anyhow::Result<Self> {
         let result = match tag {
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let block = children
@@ -51,7 +52,10 @@ impl VideoBlock {
 
                 let block = Block::try_from(block)?;
                 let timestamp = block.timestamp;
-                let is_key_frame = block.read_frame_data()?.iter().any(|frame| is_key_frame(frame.data));
+                let is_key_frame = block
+                    .read_frame_data()?
+                    .iter()
+                    .any(|frame| is_vpx_key_frame(frame.data, codec));
 
                 Self {
                     cluster_timestamp,
@@ -121,9 +125,83 @@ impl VideoBlock {
     }
 }
 
-fn is_key_frame(buffer: &[u8]) -> bool {
+pub(crate) fn is_vpx_key_frame(buffer: &[u8], codec: VpxCodec) -> bool {
+    match codec {
+        VpxCodec::VP8 => is_vp8_key_frame(buffer),
+        VpxCodec::VP9 => is_vp9_key_frame(buffer),
+    }
+}
+
+/// VP8 keyframe detection.
+///
+/// RFC 6386 Section 9.1 "Uncompressed Data Chunk":
+/// https://datatracker.ietf.org/doc/html/rfc6386#section-9.1
+///
+/// First byte layout (LSB-first bitstream):
+///   bit 0: frame_type (0 = key frame, 1 = inter frame)
+///   bits 1-2: version
+///   bit 3: show_frame
+///   bits 4-7: first_part_size (bits 0-3)
+///
+/// We only need bit 0: `buffer[0] & 0x1 == 0` means keyframe.
+fn is_vp8_key_frame(buffer: &[u8]) -> bool {
     if buffer.is_empty() {
         return false;
     }
     buffer[0] & 0x1 == 0
+}
+
+/// VP9 keyframe detection.
+///
+/// VP9 Bitstream & Decoding Process Specification v0.6, Section 6.2 "Uncompressed header syntax":
+/// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v0.2-2016-05-01.pdf
+///
+/// Unlike VP8 which uses a LSB-first bitstream, VP9 uses a MSB-first bitstream.
+/// The first byte layout depends on the profile:
+///
+/// For profiles 0-2 (first byte, MSB to LSB):
+///   bits 7-6: frame_marker (must be 0b10 to identify VP9)
+///   bit 5:    profile_low_bit
+///   bit 4:    profile_high_bit
+///   bit 3:    show_existing_frame (if 1, frame is a reference to an already-decoded frame, not a keyframe)
+///   bit 2:    frame_type (0 = KEY_FRAME, 1 = NON_KEY_FRAME)
+///   bits 1-0: (remaining header fields)
+///
+/// For profile 3 (first byte, MSB to LSB):
+///   bits 7-6: frame_marker (must be 0b10)
+///   bit 5:    profile_low_bit (1)
+///   bit 4:    profile_high_bit (1)
+///   bit 3:    reserved_zero
+///   bit 2:    show_existing_frame
+///   bit 1:    frame_type (0 = KEY_FRAME, 1 = NON_KEY_FRAME)
+///   bit 0:    (remaining header fields)
+///
+/// Profile 3 has an extra reserved_zero bit after the profile bits, which shifts
+/// show_existing_frame and frame_type one position to the right.
+///
+/// Note: the profile is encoded with swapped bit order: `profile = (high_bit << 1) | low_bit`,
+/// i.e. `profile = (bit4 << 1) | bit5`.
+///
+/// A frame is a keyframe when: show_existing_frame == 0 AND frame_type == 0.
+fn is_vp9_key_frame(buffer: &[u8]) -> bool {
+    if buffer.is_empty() {
+        return false;
+    }
+    let b0 = buffer[0];
+
+    // Validate frame_marker (bits 7-6) is 0b10
+    if (b0 >> 6) != 0b10 {
+        return false;
+    }
+
+    // profile = (high_bit << 1) | low_bit = (bit4 << 1) | bit5
+    let profile = (((b0 >> 4) & 1) << 1) | ((b0 >> 5) & 1);
+
+    if profile == 3 {
+        // Profile 3: show_existing_frame is bit 2, frame_type is bit 1
+        (b0 & 0x04) == 0 && (b0 & 0x02) == 0
+    } else {
+        // Profiles 0-2: show_existing_frame is bit 3, frame_type is bit 2
+        (b0 & 0x08) == 0 && (b0 & 0x04) == 0
+    }
 }

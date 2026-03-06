@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder};
+use cadeau::xmf::vpx::{VpxCodec, VpxDecoder, VpxEncoder, VpxEncoderPreset};
 use webm_iterable::errors::TagWriterError;
 use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 use webm_iterable::{WebmWriter, WriteOptions};
@@ -108,6 +108,7 @@ where
     cluster_timestamp: Option<u64>,
     encoder: VpxEncoder,
     decoder: VpxDecoder,
+    codec: VpxCodec,
     cut_block_state: CutBlockState,
     last_encoded_abs_time: Option<u64>,
 
@@ -177,6 +178,7 @@ where
             .height(config.height)
             .threads(config.threads)
             .bitrate(256 * 1024)
+            .preset(VpxEncoderPreset::BestPerformance)
             .build()
             .inspect_err(|error| {
                 error!(
@@ -199,6 +201,7 @@ where
                 cluster_timestamp: None,
                 encoder,
                 decoder,
+                codec: config.codec,
                 cut_block_state: CutBlockState::HaventMet,
                 last_encoded_abs_time: None,
                 #[cfg(feature = "perf-diagnostics")]
@@ -267,7 +270,7 @@ where
             }
         }
 
-        let video_block = VideoBlock::new(tag, self.cluster_timestamp)?;
+        let video_block = VideoBlock::new(tag, self.cluster_timestamp, self.codec)?;
         perf_trace!(
             block_timestamp = video_block.timestamp,
             cluster_timestamp = ?self.cluster_timestamp,
