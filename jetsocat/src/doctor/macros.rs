@@ -18,6 +18,7 @@ macro_rules! diagnostic {
         let diagnostic = Diagnostic {
             name: diagnostic_name.to_owned(),
             success: result.is_ok(),
+            warning: ctx.warning,
             output: (!output.is_empty()).then_some(output.trim_end().to_owned()),
             error: result.as_ref().err().map(|e| format!("{:?}", e)),
             help: ctx.help,

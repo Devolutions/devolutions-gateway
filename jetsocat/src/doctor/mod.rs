@@ -26,6 +26,7 @@ pub struct Args {
 pub struct Diagnostic {
     pub name: String,
     pub success: bool,
+    pub warning: Option<String>,
     pub output: Option<String>,
     pub error: Option<String>,
     pub help: Option<String>,
@@ -68,6 +69,10 @@ impl Diagnostic {
 
         object.insert("name".to_owned(), JsonValue::String(self.name));
         object.insert("success".to_owned(), JsonValue::Boolean(self.success));
+
+        if let Some(warning) = self.warning {
+            object.insert("warning".to_owned(), JsonValue::String(warning));
+        }
 
         if let Some(output) = self.output {
             object.insert("output".to_owned(), JsonValue::String(output));
@@ -119,9 +124,17 @@ impl Diagnostic {
                 write!(f, "=> {} ", self.0.name)?;
 
                 if self.0.success {
-                    write!(f, "OK ✅")?;
+                    if self.0.warning.is_some() {
+                        write!(f, "OK ⚠️")?;
+                    } else {
+                        write!(f, "OK ✅")?;
+                    }
                 } else {
                     write!(f, "FAILED ❌")?;
+                }
+
+                if let Some(warning) = self.0.warning.as_deref() {
+                    write!(f, "\n\n### Warning\n{}", capitalize(warning))?;
                 }
 
                 if let Some(output) = self.0.output.as_deref() {
@@ -180,12 +193,17 @@ impl Link {
 #[derive(Default)]
 struct DiagnosticCtx {
     help: Option<String>,
+    warning: Option<String>,
     links: Vec<Link>,
 }
 
 impl DiagnosticCtx {
     fn attach_help(&mut self, message: impl Into<String>) {
         self.help = Some(message.into());
+    }
+
+    fn attach_warning(&mut self, message: impl Into<String>) {
+        self.warning = Some(message.into());
     }
 
     fn attach_link(&mut self, name: impl Into<String>, href: impl Into<String>, description: impl Into<String>) {

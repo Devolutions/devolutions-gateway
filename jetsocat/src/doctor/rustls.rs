@@ -34,19 +34,29 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     }
 }
 
-fn rustls_load_native_certs(_: &mut DiagnosticCtx, root_store: &mut rustls::RootCertStore) -> anyhow::Result<()> {
+fn rustls_load_native_certs(ctx: &mut DiagnosticCtx, root_store: &mut rustls::RootCertStore) -> anyhow::Result<()> {
     let result = rustls_native_certs::load_native_certs();
 
+    let mut warning_messages = Vec::new();
+
     for error in result.errors {
-        warn!("Error when loading native certs: {:?}", anyhow::Error::new(error),);
+        let error_msg = format!("error when loading native certs: {:?}", anyhow::Error::new(error));
+        warn!("{}", error_msg);
+        warning_messages.push(error_msg);
     }
 
     for cert in result.certs {
         if let Err(e) = root_store.add(cert.clone()) {
-            warn!("Invalid root certificate: {e}");
+            let error_msg = format!("invalid root certificate: {e}");
+            warn!("{}", error_msg);
+            warning_messages.push(error_msg);
             let root_cert_pem = cert_to_pem(&cert).context("failed to write the certificate as PEM")?;
             info!("{root_cert_pem}");
         }
+    }
+
+    if !warning_messages.is_empty() {
+        ctx.attach_warning(warning_messages.join("; "));
     }
 
     Ok(())
