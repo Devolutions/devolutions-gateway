@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "dependencies": {
+    ".NETFramework,Version=v4.5.2": {
+      "Microsoft.NETFramework.ReferenceAssemblies": {
+        "type": "Direct",
+        "requested": "[1.0.3, )",
+        "resolved": "1.0.3",
+        "contentHash": "vUc9Npcs14QsyOD01tnv/m8sQUnGTGOw1BCmKcv77LBJY7OxhJ+zJF7UD/sCL3lYNFuqmQEVlkfS4Quif6FyYg==",
+        "dependencies": {
+          "Microsoft.NETFramework.ReferenceAssemblies.net452": "1.0.3"
+        }
+      },
+      "Newtonsoft.Json": {
+        "type": "Direct",
+        "requested": "[13.0.3, )",
+        "resolved": "13.0.3",
+        "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
+      },
+      "System.IO.Compression": {
+        "type": "Direct",
+        "requested": "[4.3.0, )",
+        "resolved": "4.3.0",
+        "contentHash": "YHndyoiV90iu4iKG115ibkhrG+S3jBm8Ap9OwoUAzO5oPDAWcr0SFwQFm0HjM8WkEZWo0zvLTyLmbvTkW1bXgg=="
+      },
+      "System.ValueTuple": {
+        "type": "Direct",
+        "requested": "[4.5.0, )",
+        "resolved": "4.5.0",
+        "contentHash": "okurQJO6NRE/apDIP23ajJ0hpiNmJ+f0BwOlB/cSqTLQlw5upkf+5+96+iG2Jw40G1fCVCyPz/FhIABUjMR+RQ=="
+      },
+      "WixSharp": {
+        "type": "Direct",
+        "requested": "[1.25.1, )",
+        "resolved": "1.25.1",
+        "contentHash": "JHXjfqkc8qJw+u3iXpIx7lkfqX+zNUud9slQdf6Iz7vLna3qrpAbEWTbtL7MiBGhP89xQh+kYUSdBSiAnznKuA==",
+        "dependencies": {
+          "WixSharp.bin": "1.25.1"
+        }
+      },
+      "WixSharp.bin": {
+        "type": "Direct",
+        "requested": "[1.25.1, )",
+        "resolved": "1.25.1",
+        "contentHash": "iK8NhVK50VQ45yuY3Y2NX8J68yFVovQOvJKYW2TGJKU9RXHuevMSqJt+y1A6qQDkMllzslbughzKEC0NRBguSw=="
+      },
+      "Microsoft.NETFramework.ReferenceAssemblies.net452": {
+        "type": "Transitive",
+        "resolved": "1.0.3",
+        "contentHash": "kuFOgilYbs29xENHlqQ6aJYa+t56u+OqHx85P7GYLVlo7HL3nsug9IQY2DoPgkOpZ2xb9btYV2EFK7Enll8S3A=="
+      }
+    }
+  }
+}
