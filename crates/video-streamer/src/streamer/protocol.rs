@@ -73,7 +73,7 @@ impl codec::Decoder for ProtocolCodeC {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum UserFriendlyError {
     UnexpectedError,
     UnexpectedEOF,
