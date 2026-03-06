@@ -312,10 +312,13 @@ fn schannel_fetch_chain(
         .context("failed to retrieve the remote chain")?;
 
     let mut certificates = Vec::new();
+    let mut warning_messages = Vec::new();
 
     remote_chain.for_each(|cert_idx, element| {
         if let Err(error) = chain_ctx.store.add_x509_encoded_certificate(element.cert.as_x509_der()) {
-            warn!(cert_idx, %error, "Failed to add certificate to the store");
+            let error_msg = format!("failed to add certificate {cert_idx} to the store: {error}");
+            warn!("{}", error_msg);
+            warning_messages.push(error_msg);
         }
 
         certificates.push(CertInspectProxy {
@@ -323,6 +326,10 @@ fn schannel_fetch_chain(
             der: element.cert.as_x509_der().to_owned(),
         });
     });
+
+    if !warning_messages.is_empty() {
+        ctx.attach_warning(warning_messages.join("; "));
+    }
 
     crate::doctor::log_chain(certificates.iter());
     help::x509_io_link(ctx, certificates.iter());
