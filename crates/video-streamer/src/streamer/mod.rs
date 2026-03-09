@@ -65,14 +65,22 @@ pub fn webm_stream(
     let (chunk_writer, chunk_receiver) = ChannelWriter::new();
     let (shutdown_tx, shutdown_rx) = watch::channel(StreamShutdown::Running);
 
-    // Bridge the external shutdown signal into the watch channel (single source of truth)
-    let bridge_handle = {
+    // Bridge the external shutdown signal into the watch channel (single source of truth).
+    // Wrapped in AbortOnDrop so that early returns/bails from webm_stream always abort the
+    // bridge task, dropping its shutdown_tx clone and allowing control_task to resolve.
+    struct AbortOnDrop(tokio::task::JoinHandle<()>);
+    impl Drop for AbortOnDrop {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _bridge_guard = AbortOnDrop({
         let shutdown_tx = shutdown_tx.clone();
         tokio::spawn(async move {
             shutdown_signal.notified().await;
             let _ = shutdown_tx.send(StreamShutdown::ExternalShutdown);
         })
-    };
+    });
 
     spawn_sending_task(
         ws_frame,
@@ -186,11 +194,10 @@ pub fn webm_stream(
 
     info!(?result, "WebM streaming finished");
 
-    // Abort the bridge task so its shutdown_tx clone is dropped.
-    // This ensures control_task's shutdown_rx.changed() will resolve (Err)
-    // instead of hanging forever when webm_stream exits without an explicit shutdown signal.
-    bridge_handle.abort();
-
+    // _bridge_guard (AbortOnDrop) is dropped here, aborting the bridge task so its
+    // shutdown_tx clone is dropped. This ensures control_task's shutdown_rx.changed()
+    // will resolve (Err) instead of hanging forever when webm_stream exits without
+    // an explicit shutdown signal.
     return result;
 
     fn when_eof(
@@ -296,8 +303,17 @@ fn spawn_sending_task<W>(
                 }
             }
         }
-        // Best-effort: deliver End to client before closing the socket
-        ws_send(&ws_frame, protocol::ServerMessage::End).await;
+        // Best-effort: deliver a final message to client before closing the socket.
+        // Read the shutdown reason to decide whether to send End or Error.
+        let shutdown_reason = handle_shutdown_rx.borrow().clone();
+        match shutdown_reason {
+            StreamShutdown::Error(err) => {
+                ws_send(&ws_frame, protocol::ServerMessage::Error(err)).await;
+            }
+            _ => {
+                ws_send(&ws_frame, protocol::ServerMessage::End).await;
+            }
+        }
         let _ = ws_frame.lock().await.get_mut().shutdown().await;
         Ok::<_, anyhow::Error>(())
     });
