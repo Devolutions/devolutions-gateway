@@ -206,7 +206,6 @@ pub(crate) fn is_vp9_key_frame(buffer: &[u8]) -> bool {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::is_vp9_key_frame;
