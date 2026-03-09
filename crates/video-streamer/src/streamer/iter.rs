@@ -1,12 +1,13 @@
 use std::io::Seek;
 
 use anyhow::Context;
-use cadeau::xmf::vpx::is_key_frame;
+use cadeau::xmf::vpx::VpxCodec;
 use thiserror::Error;
 use webm_iterable::WebmIterator;
 use webm_iterable::errors::TagIteratorError;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
+use super::block_tag::is_vpx_key_frame;
 use crate::reopenable::Reopenable;
 
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +41,9 @@ pub(crate) struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
     rolled_back_between_cluster: bool,
 
     should_emit_cache: Option<MatroskaSpec>,
+
+    // VPX codec type for codec-aware keyframe detection.
+    codec: VpxCodec,
 }
 
 #[derive(Debug, Error)]
@@ -60,19 +64,20 @@ impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
 {
-    pub(crate) fn new(mut inner: WebmIterator<R>) -> Self {
+    pub(crate) fn new(mut inner: WebmIterator<R>, codec: VpxCodec, cluster_start_position: usize) -> Self {
         inner.emit_master_end_when_eof(false);
         Self {
             inner: Some(inner),
-            previous_emitted_tag_postion: 0,
-            last_cluster_position: None,
+            previous_emitted_tag_postion: cluster_start_position,
+            last_cluster_position: Some(cluster_start_position),
             rollback_record: None,
             rolled_back_between_cluster: false,
             should_emit_cache: None,
             last_key_frame_info: LastKeyFrameInfo::NotMet {
                 cluster_timestamp: None,
-                cluster_start_position: None,
+                cluster_start_position: Some(cluster_start_position),
             },
+            codec,
         }
     }
 
@@ -132,7 +137,7 @@ where
                 return result.map(|result| result.map_err(|err| err.into()));
             }
 
-            match Self::is_key_frame(tag) {
+            match self.is_key_frame(tag) {
                 Err(e) => {
                     return Some(Err(e));
                 }
@@ -289,7 +294,7 @@ where
         Ok(())
     }
 
-    fn is_key_frame(tag: &MatroskaSpec) -> Result<bool, IteratorError> {
+    fn is_key_frame(&self, tag: &MatroskaSpec) -> Result<bool, IteratorError> {
         match tag {
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let block = children
@@ -308,7 +313,7 @@ where
                 let block = Block::try_from(block)?;
                 let frame = block.read_frame_data()?;
 
-                Ok(frame.into_iter().any(|frame| is_key_frame(frame.data)))
+                Ok(frame.into_iter().any(|frame| is_vpx_key_frame(frame.data, self.codec)))
             }
             MatroskaSpec::SimpleBlock(data) => {
                 let simple_block = SimpleBlock::try_from(data)?;
