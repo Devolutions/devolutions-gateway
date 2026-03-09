@@ -43,8 +43,7 @@ pub(crate) struct WebmPositionedIterator<R: std::io::Read + Seek + Reopenable> {
     should_emit_cache: Option<MatroskaSpec>,
 
     // VPX codec type for codec-aware keyframe detection.
-    // None during header scan (before codec is known from headers).
-    codec: Option<VpxCodec>,
+    codec: VpxCodec,
 }
 
 #[derive(Debug, Error)]
@@ -65,25 +64,21 @@ impl<R> WebmPositionedIterator<R>
 where
     R: std::io::Read + Seek + Reopenable,
 {
-    pub(crate) fn new(mut inner: WebmIterator<R>) -> Self {
+    pub(crate) fn new(mut inner: WebmIterator<R>, codec: VpxCodec, cluster_start_position: usize) -> Self {
         inner.emit_master_end_when_eof(false);
         Self {
             inner: Some(inner),
-            previous_emitted_tag_postion: 0,
-            last_cluster_position: None,
+            previous_emitted_tag_postion: cluster_start_position,
+            last_cluster_position: Some(cluster_start_position),
             rollback_record: None,
             rolled_back_between_cluster: false,
             should_emit_cache: None,
             last_key_frame_info: LastKeyFrameInfo::NotMet {
                 cluster_timestamp: None,
-                cluster_start_position: None,
+                cluster_start_position: Some(cluster_start_position),
             },
-            codec: None,
+            codec,
         }
-    }
-
-    pub(crate) fn set_codec(&mut self, codec: VpxCodec) {
-        self.codec = Some(codec);
     }
 
     pub(crate) fn next(&mut self) -> Option<Result<MatroskaSpec, IteratorError>> {
@@ -300,12 +295,6 @@ where
     }
 
     fn is_key_frame(&self, tag: &MatroskaSpec) -> Result<bool, IteratorError> {
-        let Some(codec) = self.codec else {
-            // Codec not yet known (still scanning headers); no blocks appear before headers,
-            // so returning false is safe.
-            return Ok(false);
-        };
-
         match tag {
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let block = children
@@ -324,7 +313,7 @@ where
                 let block = Block::try_from(block)?;
                 let frame = block.read_frame_data()?;
 
-                Ok(frame.into_iter().any(|frame| is_vpx_key_frame(frame.data, codec)))
+                Ok(frame.into_iter().any(|frame| is_vpx_key_frame(frame.data, self.codec)))
             }
             MatroskaSpec::SimpleBlock(data) => {
                 let simple_block = SimpleBlock::try_from(data)?;

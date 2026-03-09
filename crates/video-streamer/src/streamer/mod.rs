@@ -35,14 +35,11 @@ pub fn webm_stream(
     config: StreamingConfig,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    let mut webm_itr = WebmPositionedIterator::new(WebmIterator::new(
-        input_stream,
-        &[MatroskaSpec::BlockGroup(Master::Start)],
-    ));
+    let mut raw_itr = WebmIterator::new(input_stream, &[MatroskaSpec::BlockGroup(Master::Start)]);
     let mut headers = vec![];
 
     // we extract all the headers before the first cluster
-    while let Some(tag) = webm_itr.next() {
+    for tag in raw_itr.by_ref() {
         let tag = tag?;
         if matches!(tag, MatroskaSpec::Cluster(Master::Start)) {
             break;
@@ -51,7 +48,8 @@ pub fn webm_stream(
         headers.push(tag);
     }
     let encode_writer_config = EncodeWriterConfig::try_from((headers.as_slice(), &config))?;
-    webm_itr.set_codec(encode_writer_config.codec);
+    let cluster_start_position = raw_itr.last_emitted_tag_offset();
+    let mut webm_itr = WebmPositionedIterator::new(raw_itr, encode_writer_config.codec, cluster_start_position);
 
     // we run to the last cluster, skipping everything that has been played
     while let Some(tag) = webm_itr.next() {

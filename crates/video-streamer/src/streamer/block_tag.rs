@@ -154,7 +154,7 @@ fn is_vp8_key_frame(buffer: &[u8]) -> bool {
 /// VP9 keyframe detection.
 ///
 /// VP9 Bitstream & Decoding Process Specification v0.6, Section 6.2 "Uncompressed header syntax":
-/// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream_superframe-and-uncompressed-header_v0.2-2016-05-01.pdf
+/// https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream-specification-v0.6-20160331-draft.pdf
 ///
 /// Unlike VP8 which uses a LSB-first bitstream, VP9 uses a MSB-first bitstream.
 /// The first byte layout depends on the profile:
@@ -183,7 +183,7 @@ fn is_vp8_key_frame(buffer: &[u8]) -> bool {
 /// i.e. `profile = (bit4 << 1) | bit5`.
 ///
 /// A frame is a keyframe when: show_existing_frame == 0 AND frame_type == 0.
-fn is_vp9_key_frame(buffer: &[u8]) -> bool {
+pub(crate) fn is_vp9_key_frame(buffer: &[u8]) -> bool {
     if buffer.is_empty() {
         return false;
     }
@@ -203,5 +203,66 @@ fn is_vp9_key_frame(buffer: &[u8]) -> bool {
     } else {
         // Profiles 0-2: show_existing_frame is bit 3, frame_type is bit 2
         (b0 & 0x08) == 0 && (b0 & 0x04) == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_vp9_key_frame;
+
+    #[test]
+    fn vp9_empty_buffer_is_not_keyframe() {
+        assert!(!is_vp9_key_frame(&[]));
+    }
+
+    #[test]
+    fn vp9_marker_mismatch_is_not_keyframe() {
+        // frame_marker (bits 7-6) != 0b10 → rejected even if other bits look like keyframe.
+        // 0x00 → frame_marker = 0b00
+        assert!(!is_vp9_key_frame(&[0x00]));
+    }
+
+    #[test]
+    fn vp9_profiles_0_to_2_keyframe_detected() {
+        // Profile 0: frame_marker=0b10, profile_low=0, profile_high=0,
+        // show_existing_frame(bit3)=0, frame_type(bit2)=0.
+        // 0b1000_0000 = 0x80
+        assert!(is_vp9_key_frame(&[0x80]));
+    }
+
+    #[test]
+    fn vp9_profiles_0_to_2_show_existing_frame_is_not_keyframe() {
+        // Profile 0: show_existing_frame(bit3)=1, frame_type(bit2)=0.
+        // 0b1000_1000 = 0x88
+        assert!(!is_vp9_key_frame(&[0x88]));
+    }
+
+    #[test]
+    fn vp9_profiles_0_to_2_inter_frame_is_not_keyframe() {
+        // Profile 0: show_existing_frame(bit3)=0, frame_type(bit2)=1.
+        // 0b1000_0100 = 0x84
+        assert!(!is_vp9_key_frame(&[0x84]));
+    }
+
+    #[test]
+    fn vp9_profile_3_keyframe_detected() {
+        // Profile 3: frame_marker=0b10, profile_low(bit5)=1, profile_high(bit4)=1,
+        // reserved_zero(bit3)=0, show_existing_frame(bit2)=0, frame_type(bit1)=0.
+        // 0b1011_0000 = 0xB0
+        assert!(is_vp9_key_frame(&[0xB0]));
+    }
+
+    #[test]
+    fn vp9_profile_3_show_existing_frame_is_not_keyframe() {
+        // Profile 3: show_existing_frame(bit2)=1, frame_type(bit1)=0.
+        // 0b1011_0100 = 0xB4
+        assert!(!is_vp9_key_frame(&[0xB4]));
+    }
+
+    #[test]
+    fn vp9_profile_3_inter_frame_is_not_keyframe() {
+        // Profile 3: show_existing_frame(bit2)=0, frame_type(bit1)=1.
+        // 0b1011_0010 = 0xB2
+        assert!(!is_vp9_key_frame(&[0xB2]));
     }
 }
