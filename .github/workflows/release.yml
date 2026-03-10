@@ -107,6 +107,8 @@ jobs:
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
+    permissions:
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -319,6 +321,16 @@ jobs:
           echo "image-name=${ImageName}:${Version}" >> $Env:GITHUB_OUTPUT
           echo "latest-image-name=${ImageName}:latest" >> $Env:GITHUB_OUTPUT
         shell: pwsh
+
+      - name: Install Cosign
+        if: ${{ !inputs.dry-run }}
+        uses: sigstore/cosign-installer@v4.0.0
+
+      - name: Sign image with Cosign
+        if: ${{ !inputs.dry-run }}
+        run: |
+          cosign sign --yes --recursive ${{ steps.build-container.outputs.image-name }}
+          cosign sign --yes --recursive ${{ steps.build-container.outputs.latest-image-name }}
 
   github-release:
     name: GitHub release
