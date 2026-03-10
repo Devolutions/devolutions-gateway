@@ -73,17 +73,15 @@ impl codec::Decoder for ProtocolCodeC {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum UserFriendlyError {
     UnexpectedError,
-    UnexpectedEOF,
 }
 
 impl UserFriendlyError {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             UserFriendlyError::UnexpectedError => "UnexpectedError",
-            UserFriendlyError::UnexpectedEOF => "UnexpectedEOF",
         }
     }
 }
