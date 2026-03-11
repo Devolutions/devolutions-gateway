@@ -220,8 +220,10 @@ pub fn webm_stream(
                 }
             }
         });
-        // If the oneshot sender is dropped (task panicked), treat as Break
-        rx.blocking_recv().unwrap_or(WhenEofControlFlow::Break)
+        rx.blocking_recv().unwrap_or_else(|_| {
+            warn!("when_eof oneshot sender dropped unexpectedly, treating as shutdown");
+            WhenEofControlFlow::Break
+        })
     }
 
     enum WhenEofControlFlow {
