@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "process"] }
 typed-builder = "0.21"
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 
 [dev-dependencies]
 base64 = "0.22"
