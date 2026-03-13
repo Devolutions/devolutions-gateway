@@ -125,7 +125,7 @@ fn run() -> anyhow::Result<()> {
     // Parse remaining arguments for CLI actions
     let action = match remaining_args.first().map(String::as_str) {
         Some("--service") => CliAction::Run { service_mode: true },
-        Some("service") => match args.next().as_deref() {
+        Some("service") => match remaining_args.get(1).map(String::as_str) {
             Some("register") => CliAction::RegisterService,
             Some("unregister") => CliAction::UnregisterService,
             _ => CliAction::ShowHelp,
