@@ -1,0 +1,61 @@
+# documentation: https://docs.devolutions.net/gateway/standalone/
+# slogan: Protocol-aware relay server with built-in web UI for remote access (RDP, SSH, VNC, Telnet, ARD)
+# tags: devolutions,gateway,rdp,ssh,vnc,telnet,remote-access,relay
+# port: 7171
+
+services:
+  gateway:
+    build: .
+    # To use the official pre-built image instead of building from source, comment
+    # out "build: ." above and uncomment the line below:
+    # image: devolutions/devolutions-gateway:${GATEWAY_VERSION:-latest}
+    environment:
+      # -- Coolify Magic Variables --
+      # SERVICE_FQDN_GATEWAY triggers Coolify to assign a domain to this service.
+      # The generated FQDN is injected at deploy time (e.g. https://gateway-xxxx.example.com).
+      - SERVICE_FQDN_GATEWAY
+      # Auto-generated credentials — visible in Coolify's environment variables UI.
+      - WEB_APP_USERNAME=${SERVICE_USER_GATEWAY}
+      - WEB_APP_PASSWORD=${SERVICE_PASSWORD_GATEWAY}
+
+      # -- Gateway Standalone Configuration --
+      # Enable the built-in web application (admin UI + web-based remote access).
+      - WEB_APP_ENABLED=true
+      # Internal scheme is HTTP; Coolify's Traefik reverse proxy terminates TLS.
+      - WEB_SCHEME=http
+      # Tell the gateway that clients reach it over HTTPS (via Traefik).
+      - EXTERNAL_WEB_SCHEME=https
+      # Session recording storage path inside the container.
+      - RECORDING_PATH=/recordings
+      # Logging verbosity: Default, Debug, Tls, All, Quiet
+      - VERBOSITY_PROFILE=${VERBOSITY_PROFILE:-Default}
+
+    volumes:
+      # Persist session recordings across redeployments.
+      - gateway-recordings:/recordings
+      # Persist gateway configuration (provisioner keys, config files).
+      - gateway-config:/tmp/devolutions-gateway
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7171/jet/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+    # NOTE: Do NOT add "ports:" for port 7171 — Coolify's Traefik proxy handles
+    # HTTP/HTTPS routing automatically based on the assigned domain.
+    #
+    # If you need the TCP relay listener (port 8181) for direct RDP/SSH tunneling,
+    # uncomment the lines below. The TCP listener is disabled by default when
+    # WEB_APP_ENABLED=true; you must also set TCP_ENABLED=true in environment.
+    #
+    # ports:
+    #   - "8181:8181"
+    # And add to environment:
+    #   - TCP_ENABLED=true
+    #   - TCP_PORT=8181
+
+volumes:
+  gateway-recordings:
+  gateway-config:
