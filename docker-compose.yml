@@ -5,7 +5,10 @@
 
 services:
   gateway:
-    image: devolutions/devolutions-gateway:${GATEWAY_VERSION:-latest}
+    build: .
+    # To use the official pre-built image instead of building from source, comment
+    # out "build: ." above and uncomment the line below:
+    # image: devolutions/devolutions-gateway:${GATEWAY_VERSION:-latest}
     environment:
       # -- Coolify Magic Variables --
       # SERVICE_FQDN_GATEWAY triggers Coolify to assign a domain to this service.
