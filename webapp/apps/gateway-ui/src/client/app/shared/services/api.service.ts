@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 import { SessionTokenParameters } from '../interfaces/connection-params.interfaces';
-import type { AgentInfo, AgentsResponse, ResolveTargetRequest, ResolveTargetResponse } from '../interfaces/agent.interfaces';
+import type { AgentInfo, AgentsResponse } from '../interfaces/agent.interfaces';
 
 interface VersionInfo {
   latestVersion?: string;
@@ -138,23 +138,6 @@ export class ApiService {
       catchError((error) => {
         console.error(`Failed to fetch agent ${agentId}`, error);
         return throwError(() => new Error(`Failed to fetch agent ${agentId}`));
-      }),
-    );
-  }
-
-  /**
-   * Resolve which agents can reach a given target
-   */
-  resolveTarget(target: string): Observable<ResolveTargetResponse> {
-    const request: ResolveTargetRequest = { target };
-    return this.http.post<ResolveTargetResponse>(`${this.agentsApiURL}/resolve-target`, request, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }).pipe(
-      catchError((error) => {
-        console.error('Failed to resolve target', error);
-        return throwError(() => new Error('Failed to resolve target'));
       }),
     );
   }

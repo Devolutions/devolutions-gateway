@@ -25,19 +25,3 @@ export interface AgentsResponse {
   agents: AgentInfo[];
 }
 
-/**
- * Request to resolve which agents can reach a target
- */
-export interface ResolveTargetRequest {
-  target: string;
-}
-
-/**
- * Response from resolving target
- */
-export interface ResolveTargetResponse {
-  target: string;
-  target_ip?: string;
-  reachable_agents: AgentInfo[];
-  target_reachable: boolean;
-}

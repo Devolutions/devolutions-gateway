@@ -16,7 +16,6 @@ import type { AgentInfo } from '@shared/interfaces/agent.interfaces';
 export class AgentSelectorControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
   @Input() inputFormData;
-  @Input() destination: string; // Target destination to auto-select agent
 
   agents: AgentInfo[] = [];
   loading = false;
@@ -46,31 +45,11 @@ export class AgentSelectorControlComponent extends BaseComponent implements OnIn
         this.agents = response.agents.filter((agent) => agent.status === 'online');
         this.showAgentSelector = this.agents.length > 0;
         this.loading = false;
-
-        // Auto-select agent if destination is provided
-        if (this.destination && this.agents.length > 0) {
-          this.autoSelectAgent();
-        }
       },
       error: (error) => {
         console.error('Failed to load agents', error);
         this.loading = false;
         this.showAgentSelector = false;
-      },
-    });
-  }
-
-  private autoSelectAgent(): void {
-    this.apiService.resolveTarget(this.destination).subscribe({
-      next: (response) => {
-        if (response.reachable_agents.length > 0) {
-          // Select the first reachable agent
-          const selectedAgent = response.reachable_agents[0];
-          this.parentForm.get('agentId')?.setValue(selectedAgent.agent_id);
-        }
-      },
-      error: (error) => {
-        console.error('Failed to resolve target', error);
       },
     });
   }
