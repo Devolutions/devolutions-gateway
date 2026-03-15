@@ -83,6 +83,13 @@
           ></rdp-form>
 
           <!--// No telnet component required. KAH March 8, 2024 -->
+          <div class="col-12 gateway-form-group" *ngIf="isSelectedProtocolTelnet()">
+            <web-client-agent-selector-control
+              [parentForm]="connectSessionForm"
+              [inputFormData]="inputFormData"
+              [destination]="inputFormData?.destination"
+            ></web-client-agent-selector-control>
+          </div>
 
           <ssh-form
             class="col-12"

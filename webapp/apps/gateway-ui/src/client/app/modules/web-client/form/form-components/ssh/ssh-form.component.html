@@ -51,4 +51,12 @@
       [disabled]="formInputVisibility.showPrivateKeyInput"
     ></app-file-control>
   </div>
+
+  <div class="col-12 gateway-form-group">
+    <web-client-agent-selector-control
+      [parentForm]="form"
+      [inputFormData]="inputFormData"
+      [destination]="inputFormData?.destination"
+    ></web-client-agent-selector-control>
+  </div>
 </div>

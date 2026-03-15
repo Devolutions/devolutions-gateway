@@ -25,6 +25,7 @@ import { SessionToolbarComponent } from '@shared/components/session-toolbar/sess
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
 import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
+import { DropdownModule } from 'primeng/dropdown';
 import { KeyFilterModule } from 'primeng/keyfilter';
 import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';
 import { AutoClipboardControlComponent } from './form/form-controls/auto-clipboard-control/auto-clipboard-control.component';
@@ -41,6 +42,7 @@ import { FileControlComponent } from './form/form-controls/file-control/file-con
 import { JpegQualityLevelControlComponent } from './form/form-controls/jpeg-quality-level-control/jpeg-quality-level-control.component';
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
 import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
+import { AgentSelectorControlComponent } from './form/form-controls/agent-selector-control/agent-selector-control.component';
 import { NetScanComponent } from './net-scan/net-scan.component';
 import { WebClientRdpComponent } from './rdp/web-client-rdp.component';
 import { WebClientComponent } from './web-client.component';
@@ -63,6 +65,7 @@ const routes: Routes = [
     FormsModule,
     NgOptimizedImage,
     CheckboxModule,
+    DropdownModule,
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   declarations: [
@@ -99,6 +102,7 @@ const routes: Routes = [
     UltraVirtualDisplayControlComponent,
     ResolutionQualityControlComponent,
     ArdQualityModeControlComponent,
+    AgentSelectorControlComponent,
     TabViewComponent,
     DynamicTabComponent,
     SessionToolbarComponent,

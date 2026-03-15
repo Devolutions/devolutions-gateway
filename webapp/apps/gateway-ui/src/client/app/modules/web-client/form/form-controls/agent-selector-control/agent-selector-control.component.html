@@ -1,0 +1,33 @@
+<div [formGroup]="parentForm" *ngIf="showAgentSelector">
+  <label for="agentId">Route through Agent (Optional)</label>
+  <div class="gateway-form-input">
+    <p-dropdown
+      id="agentId"
+      [options]="agents"
+      formControlName="agentId"
+      optionLabel="name"
+      optionValue="agent_id"
+      placeholder="Direct connection (no agent)"
+      [showClear]="true"
+      [loading]="loading"
+      (onChange)="onAgentChange($event)">
+      <ng-template pTemplate="selectedItem" let-agent>
+        <div *ngIf="agent">
+          <strong>{{ agent.name }}</strong> - {{ agent.assigned_ip }}
+        </div>
+      </ng-template>
+      <ng-template pTemplate="item" let-agent>
+        <div class="agent-option">
+          <div><strong>{{ agent.name }}</strong></div>
+          <div class="agent-details">
+            <span class="agent-ip">{{ agent.assigned_ip }}</span>
+            <span class="agent-subnets">Networks: {{ agent.advertised_subnets.join(', ') }}</span>
+          </div>
+        </div>
+      </ng-template>
+    </p-dropdown>
+  </div>
+  <div class="form-helper-text">
+    Select an agent to route the connection through a private network.
+  </div>
+</div>

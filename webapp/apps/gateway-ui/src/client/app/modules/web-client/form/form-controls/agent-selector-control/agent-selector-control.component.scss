@@ -1,0 +1,26 @@
+.agent-option {
+  padding: 0.5rem 0;
+
+  .agent-details {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.875rem;
+    color: var(--text-color-secondary, #6c757d);
+    margin-top: 0.25rem;
+
+    .agent-ip {
+      font-family: monospace;
+    }
+
+    .agent-subnets {
+      font-size: 0.75rem;
+      color: var(--text-color-tertiary, #999);
+    }
+  }
+}
+
+:host ::ng-deep {
+  .p-dropdown {
+    width: 100%;
+  }
+}

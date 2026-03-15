@@ -231,6 +231,9 @@ pub(crate) enum SessionTokenContentType {
         destination: TargetAddr,
         /// Unique ID for this session
         session_id: Uuid,
+        /// Optional WireGuard agent ID to route the connection through
+        #[serde(default)]
+        agent_id: Option<Uuid>,
     },
     Jmux {
         /// Protocol for the session (e.g.: "tunnel")
@@ -327,6 +330,7 @@ pub(crate) async fn sign_session_token(
             protocol,
             destination,
             session_id,
+            agent_id,
         } => (
             AssociationTokenClaims {
                 jet_aid: session_id,
@@ -341,6 +345,7 @@ pub(crate) async fn sign_session_token(
                 exp,
                 jti,
                 cert_thumb256: None,
+                jet_agent_id: agent_id,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

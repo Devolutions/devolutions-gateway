@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod ai;
 pub mod config;
 pub mod diagnostics;
@@ -29,6 +30,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/session", session::make_router(state.clone()))
         .nest("/jet/sessions", sessions::make_router(state.clone()))
         .nest("/jet/diagnostics", diagnostics::make_router(state.clone()))
+        .nest("/jet/agents", agents::make_router(state.clone()))
         .route("/jet/jmux", axum::routing::get(jmux::handler))
         .route("/jet/rdp", axum::routing::get(rdp::handler))
         .nest("/jet/fwd", fwd::make_router(state.clone()))
