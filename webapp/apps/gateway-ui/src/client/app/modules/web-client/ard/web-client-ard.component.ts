@@ -372,7 +372,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
   }
 
   private fetchParameters(formData: ArdFormDataInput): Observable<IronARDConnectionParameters> {
-    const { hostname, username, password, resolutionQuality, ardQualityMode, wheelSpeedFactor = 1 } = formData;
+    const { hostname, username, password, resolutionQuality, ardQualityMode, wheelSpeedFactor = 1, agentId } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultArdPort);
 
     const sessionId: string = uuidv4();
@@ -389,6 +389,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       ardQualityMode,
       wheelSpeedFactor,
       sessionId,
+      agentId,
     };
     return of(connectionParameters);
   }

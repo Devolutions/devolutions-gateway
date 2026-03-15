@@ -9,7 +9,8 @@ export interface AgentInfo {
   advertised_subnets: string[];
   route_epoch?: number;
   active_streams: number;
-  last_advertised_at?: string;
+  /** Unix timestamp (seconds since epoch) */
+  last_advertised_at?: number;
 }
 
 /**

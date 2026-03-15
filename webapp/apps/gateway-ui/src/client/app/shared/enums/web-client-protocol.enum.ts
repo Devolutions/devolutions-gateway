@@ -45,6 +45,10 @@ namespace WebClientProtocol {
     return protocol === Protocol.RDP;
   }
 
+  export function isProtocolTelnet(protocol: Protocol): boolean {
+    return protocol === Protocol.Telnet;
+  }
+
   export function isProtocolSsh(protocol: Protocol): boolean {
     return protocol === Protocol.SSH;
   }

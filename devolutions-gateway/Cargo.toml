@@ -34,6 +34,8 @@ terminal-streamer.path = "../crates/terminal-streamer"
 network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
+wireguard-tunnel.path = "../crates/wireguard-tunnel"
+tunnel-proto.path = "../crates/tunnel-proto"
 ironrdp-pdu = { version = "0.7", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
@@ -70,6 +72,9 @@ backoff = "0.4"
 sysinfo = { version = "0.35", default-features = false, features = ["disk"] }
 dunce = "1.0"
 bitflags = "2.9"
+base64 = "0.22"
+ipnetwork = "0.20"
+dashmap = "6.1"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
@@ -93,6 +98,7 @@ futures = "0.3"
 async-trait = "0.1"
 tower = { version = "0.5", features = ["timeout"] }
 ngrok = "0.13"
+tokio-util = { version = "0.7" }
 
 # HTTP
 hyper = "1.6"

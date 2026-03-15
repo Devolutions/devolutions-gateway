@@ -103,6 +103,7 @@ pub(crate) async fn forward_handler(
             jet_rec: request.jet_rec,
             jet_reuse: request.jet_reuse,
             cert_thumb256: request.cert_thumb256,
+            jet_agent_id: None,
         },
     )
     .await

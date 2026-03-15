@@ -32,6 +32,7 @@ pub mod rd_clean_path;
 pub mod rdp_pcb;
 pub mod rdp_proxy;
 pub mod recording;
+pub mod server_stream;
 pub mod session;
 pub mod streaming;
 pub mod subscriber;
@@ -40,6 +41,7 @@ pub mod tls;
 pub mod token;
 pub mod traffic_audit;
 pub mod utils;
+pub mod wireguard;
 pub mod ws;
 
 use std::sync::Arc;
@@ -60,6 +62,7 @@ pub struct DgwState {
     pub credential_store: credential::CredentialStoreHandle,
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
+    pub wireguard_listener: Option<wireguard::WireGuardHandle>,
 }
 
 #[doc(hidden)]
@@ -99,6 +102,7 @@ impl DgwState {
             traffic_audit_handle,
             credential_store,
             monitoring_state,
+            wireguard_listener: None,
         };
 
         let handles = MockHandles {

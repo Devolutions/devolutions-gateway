@@ -468,6 +468,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       jpegEnabled,
       jpegQualityLevel,
       wheelSpeedFactor = 1,
+      agentId,
     } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultVncPort);
 
@@ -493,6 +494,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       enableExtendedClipboard: enableExtendedClipboard ?? false,
       ultraVirtualDisplay,
       wheelSpeedFactor,
+      agentId,
     };
     return of(connectionParameters);
   }

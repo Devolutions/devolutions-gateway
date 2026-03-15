@@ -1,5 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
+import { DropdownChangeEvent } from 'primeng/dropdown';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { WebFormService } from '@shared/services/web-form.service';
@@ -74,7 +75,7 @@ export class AgentSelectorControlComponent extends BaseComponent implements OnIn
     });
   }
 
-  onAgentChange(event: any): void {
+  onAgentChange(event: DropdownChangeEvent): void {
     const agentId = event.value;
     this.parentForm.get('agentId')?.setValue(agentId);
   }

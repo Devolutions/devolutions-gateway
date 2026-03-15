@@ -1,0 +1,19 @@
+[package]
+name = "tunnel-proto"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = "1.10"
+thiserror = "2.0"
+tracing = "0.1"
+bit-vec = "0.6"
+ipnetwork = "0.20"
+
+[dev-dependencies]
+proptest = "1.7"

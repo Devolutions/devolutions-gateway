@@ -15,6 +15,7 @@ use tokio_rustls::rustls::pki_types;
 use tracing::info;
 use url::Url;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::SYSTEM_LOGGER;
 use crate::credential::Password;
@@ -194,6 +195,7 @@ pub struct Conf {
     pub web_app: WebAppConf,
     pub ai_gateway: AiGatewayConf,
     pub proxy: dto::ProxyConf,
+    pub wireguard: Option<WireGuardConf>,
     pub debug: dto::DebugConf,
 }
 
@@ -283,6 +285,143 @@ pub struct AzureOpenAiProviderConf {
     pub deployment_id: String,
     pub api_key: Option<String>,
     pub api_version: String,
+}
+
+/// WireGuard tunnel configuration (runtime)
+#[derive(Clone)]
+pub struct WireGuardConf {
+    pub enabled: bool,
+    pub port: u16,
+    pub private_key: wireguard_tunnel::StaticSecret,
+    pub tunnel_network: ipnetwork::Ipv4Network,
+    pub gateway_ip: std::net::Ipv4Addr,
+    pub peers: Vec<WireGuardPeerConfig>,
+}
+
+impl fmt::Debug for WireGuardConf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WireGuardConf")
+            .field("enabled", &self.enabled)
+            .field("port", &self.port)
+            .field("private_key", &"<redacted>")
+            .field("tunnel_network", &self.tunnel_network)
+            .field("gateway_ip", &self.gateway_ip)
+            .field("peers", &self.peers)
+            .finish()
+    }
+}
+
+/// WireGuard peer configuration (runtime)
+#[derive(Debug, Clone)]
+pub struct WireGuardPeerConfig {
+    pub agent_id: Uuid,
+    pub name: String,
+    pub public_key: wireguard_tunnel::PublicKey,
+    pub assigned_ip: std::net::Ipv4Addr,
+}
+
+impl WireGuardConf {
+    fn from_dto(value: &dto::WireGuardConf) -> anyhow::Result<Self> {
+        // Load private key from file
+        let private_key_path = normalize_data_path(&value.private_key_file, &get_data_dir());
+
+        let private_key_data = Zeroizing::new(
+            std::fs::read_to_string(&private_key_path)
+                .with_context(|| format!("Failed to read WireGuard private key from {}", private_key_path))?,
+        );
+
+        use base64::Engine as _;
+        let private_key_bytes = Zeroizing::new(
+            base64::engine::general_purpose::STANDARD
+                .decode(private_key_data.trim())
+                .context("Failed to decode WireGuard private key (expected base64)")?,
+        );
+
+        if private_key_bytes.len() != 32 {
+            anyhow::bail!(
+                "Invalid WireGuard private key length: expected 32 bytes, got {}",
+                private_key_bytes.len()
+            );
+        }
+
+        let mut key_array = [0u8; 32];
+        key_array.copy_from_slice(&private_key_bytes);
+        let private_key = wireguard_tunnel::StaticSecret::from(key_array);
+
+        // Parse tunnel network
+        let tunnel_network: ipnetwork::Ipv4Network = value
+            .tunnel_network
+            .parse()
+            .with_context(|| format!("Invalid tunnel network CIDR: {}", value.tunnel_network))?;
+
+        // Parse gateway IP
+        let gateway_ip: std::net::Ipv4Addr = value
+            .gateway_ip
+            .parse()
+            .with_context(|| format!("Invalid gateway IP: {}", value.gateway_ip))?;
+
+        // Verify gateway IP is within tunnel network
+        if !tunnel_network.contains(gateway_ip) {
+            anyhow::bail!(
+                "Gateway IP {} is not within tunnel network {}",
+                gateway_ip,
+                tunnel_network
+            );
+        }
+
+        // Parse peers
+        let mut peers = Vec::new();
+        for peer_dto in &value.peers {
+            use base64::Engine as _;
+            let public_key_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&peer_dto.public_key)
+                .with_context(|| format!("Failed to decode public key for peer {}", peer_dto.name))?;
+
+            if public_key_bytes.len() != 32 {
+                anyhow::bail!(
+                    "Invalid public key length for peer {}: expected 32 bytes, got {}",
+                    peer_dto.name,
+                    public_key_bytes.len()
+                );
+            }
+
+            let mut pubkey_array = [0u8; 32];
+            pubkey_array.copy_from_slice(&public_key_bytes);
+            let public_key = wireguard_tunnel::PublicKey::from(pubkey_array);
+
+            let assigned_ip: std::net::Ipv4Addr = peer_dto.assigned_ip.parse().with_context(|| {
+                format!(
+                    "Invalid assigned IP for peer {}: {}",
+                    peer_dto.name, peer_dto.assigned_ip
+                )
+            })?;
+
+            if !tunnel_network.contains(assigned_ip) {
+                anyhow::bail!(
+                    "Peer {} assigned IP {} is not within tunnel network {}",
+                    peer_dto.name,
+                    assigned_ip,
+                    tunnel_network
+                );
+            }
+
+            peers.push(WireGuardPeerConfig {
+                agent_id: peer_dto.agent_id,
+                name: peer_dto.name.clone(),
+                public_key,
+                assigned_ip,
+            });
+        }
+
+        Ok(Self {
+            enabled: value.enabled,
+            port: value.port,
+            private_key,
+            tunnel_network,
+            gateway_ip,
+            peers,
+        })
+    }
 }
 
 impl AiGatewayConf {
@@ -895,6 +1034,17 @@ impl Conf {
             );
         }
 
+        // WireGuard configuration
+        let wireguard = if let Some(wg_conf) = &conf_file.wireguard {
+            if wg_conf.enabled {
+                Some(WireGuardConf::from_dto(wg_conf).context("wireguard config")?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Ok(Conf {
             id: conf_file.id,
             hostname,
@@ -926,6 +1076,7 @@ impl Conf {
                 .map(AiGatewayConf::from_dto)
                 .unwrap_or_default(),
             proxy: conf_file.proxy.clone().unwrap_or_default(),
+            wireguard,
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -1716,6 +1867,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
 
+        /// WireGuard tunnel configuration for agent-based tunneling
+        #[serde(rename = "WireGuard", skip_serializing_if = "Option::is_none")]
+        pub wireguard: Option<WireGuardConf>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -1772,6 +1927,7 @@ pub mod dto {
                 job_queue_database: None,
                 traffic_audit_database: None,
                 proxy: None,
+                wireguard: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }
@@ -2369,5 +2525,108 @@ pub mod dto {
                 }),
             }
         }
+    }
+
+    /// WireGuard tunnel configuration for agent-based tunneling
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct WireGuardConf {
+        /// Enable WireGuard listener
+        #[serde(default)]
+        pub enabled: bool,
+
+        /// UDP port for WireGuard listener (default: 51820)
+        #[serde(default = "default_wireguard_port")]
+        pub port: u16,
+
+        /// Path to WireGuard private key file
+        pub private_key_file: Utf8PathBuf,
+
+        /// Tunnel network CIDR (e.g., "10.10.0.0/16")
+        #[serde(default = "default_tunnel_network")]
+        pub tunnel_network: String,
+
+        /// Gateway's IP address in the tunnel network (e.g., "10.10.0.1")
+        #[serde(default = "default_gateway_ip")]
+        pub gateway_ip: String,
+
+        /// Configured agent peers
+        #[serde(default)]
+        pub peers: Vec<WireGuardPeerConf>,
+    }
+
+    fn default_wireguard_port() -> u16 {
+        51820
+    }
+
+    fn default_tunnel_network() -> String {
+        "10.10.0.0/16".to_owned()
+    }
+
+    fn default_gateway_ip() -> String {
+        "10.10.0.1".to_owned()
+    }
+
+    /// WireGuard peer (agent) configuration
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct WireGuardPeerConf {
+        /// Agent UUID
+        pub agent_id: Uuid,
+
+        /// Friendly name for the agent
+        pub name: String,
+
+        /// Agent's WireGuard public key (base64-encoded)
+        pub public_key: String,
+
+        /// Agent's assigned IP in the tunnel network (e.g., "10.10.0.2")
+        pub assigned_ip: String,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "tests use fixed fixtures")]
+
+    use super::dto;
+
+    #[test]
+    fn conf_file_deserializes_wireguard_block() {
+        let conf = serde_json::from_str::<dto::ConfFile>(
+            r#"{
+                "Hostname": "127.0.0.1",
+                "ProvisionerPublicKeyFile": "provisioner-public.pem",
+                "Listeners": [
+                    {
+                        "InternalUrl": "http://127.0.0.1:7171",
+                        "ExternalUrl": "http://127.0.0.1:7171"
+                    }
+                ],
+                "WireGuard": {
+                    "Enabled": true,
+                    "Port": 51820,
+                    "PrivateKeyFile": "gateway-wireguard-private-key.txt",
+                    "TunnelNetwork": "10.10.0.0/16",
+                    "GatewayIp": "10.10.0.1",
+                    "Peers": [
+                        {
+                            "AgentId": "00000000-0000-0000-0000-000000000001",
+                            "Name": "docker-test-agent",
+                            "PublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                            "AssignedIp": "10.10.0.2"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let wireguard = conf.wireguard.expect("WireGuard block should deserialize");
+        assert!(wireguard.enabled);
+        assert_eq!(wireguard.port, 51820);
+        assert_eq!(wireguard.gateway_ip, "10.10.0.1");
+        assert_eq!(wireguard.peers.len(), 1);
+        assert_eq!(wireguard.peers[0].name, "docker-test-agent");
     }
 }

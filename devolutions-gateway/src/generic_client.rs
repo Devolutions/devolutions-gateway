@@ -11,10 +11,10 @@ use crate::credential::CredentialStoreHandle;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
+use crate::server_stream::connect_target;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
-use crate::utils;
 
 #[derive(TypedBuilder)]
 pub struct GenericClient<S> {
@@ -27,6 +27,8 @@ pub struct GenericClient<S> {
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     credential_store: CredentialStoreHandle,
+    #[builder(default)]
+    wireguard_listener: Option<crate::wireguard::WireGuardHandle>,
 }
 
 impl<S> GenericClient<S>
@@ -48,6 +50,7 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
+            wireguard_listener,
             credential_store,
         } = self;
 
@@ -111,8 +114,13 @@ where
 
                 trace!("Select and connect to target");
 
-                let ((mut server_stream, server_addr), selected_target) =
-                    utils::successive_try(&targets, utils::tcp_connect).await?;
+                let ((mut server_stream, server_addr), selected_target) = connect_target(
+                    wireguard_listener.as_ref(),
+                    claims.jet_aid,
+                    claims.jet_agent_id,
+                    &targets,
+                )
+                .await?;
 
                 trace!(%selected_target, "Connected");
                 span.record("target", selected_target.to_string());

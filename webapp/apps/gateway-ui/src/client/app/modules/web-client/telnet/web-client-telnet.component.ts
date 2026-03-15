@@ -179,7 +179,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   }
 
   private fetchParameters(formData: TelnetFormDataInput): Observable<TelnetConnectionParameters> {
-    const { hostname } = formData;
+    const { hostname, agentId } = formData;
 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultTelnetPort);
@@ -191,6 +191,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       port: extractedData.port,
       gatewayAddress: gatewayAddress,
       sessionId: sessionId,
+      agentId,
     };
     return of(connectionParameters);
   }

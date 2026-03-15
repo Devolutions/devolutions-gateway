@@ -7,6 +7,7 @@ use axum::{Json, Router};
 use uuid::Uuid;
 
 use crate::DgwState;
+use crate::extract::DiagnosticsReadScope;
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::wireguard::AgentInfo;
 
@@ -42,6 +43,7 @@ struct ResolveTargetResponse {
 /// List all WireGuard agents
 async fn list_agents(
     State(DgwState { wireguard_listener, .. }): State<DgwState>,
+    _scope: DiagnosticsReadScope,
 ) -> Result<Json<AgentsResponse>, HttpError> {
     let wg = wireguard_listener
         .as_ref()
@@ -55,6 +57,7 @@ async fn list_agents(
 async fn get_agent(
     State(DgwState { wireguard_listener, .. }): State<DgwState>,
     Path(agent_id): Path<Uuid>,
+    _scope: DiagnosticsReadScope,
 ) -> Result<Json<AgentInfo>, HttpError> {
     let wg = wireguard_listener
         .as_ref()
@@ -70,6 +73,7 @@ async fn get_agent(
 /// Find agents that can reach a target
 async fn resolve_target(
     State(DgwState { wireguard_listener, .. }): State<DgwState>,
+    _scope: DiagnosticsReadScope,
     Json(request): Json<ResolveTargetRequest>,
 ) -> Result<Json<ResolveTargetResponse>, HttpError> {
     let wg = wireguard_listener

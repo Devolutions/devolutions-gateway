@@ -180,7 +180,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
   }
 
   private fetchParameters(formData: SSHFormDataInput): Observable<SshConnectionParameters> {
-    const { hostname, username, password } = formData;
+    const { hostname, username, password, agentId } = formData;
 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
@@ -197,6 +197,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
       sessionId: sessionId,
       privateKey: privateKey,
       privateKeyPassphrase: privateKeyPassphrase,
+      agentId,
     };
     return of(connectionParameters);
   }

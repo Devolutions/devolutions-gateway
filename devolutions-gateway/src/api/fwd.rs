@@ -15,14 +15,15 @@ use tracing::{Instrument as _, field};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::extract::{AssociationToken, BridgeToken};
 use crate::http::HttpError;
 use crate::proxy::Proxy;
+use crate::server_stream::connect_target;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol, RecordingPolicy};
-use crate::{DgwState, utils};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     use axum::routing::{self, MethodFilter, get};
@@ -54,6 +55,7 @@ async fn fwd_tcp(
         sessions,
         subscriber_tx,
         shutdown_signal,
+        wireguard_listener,
         ..
     }): State<DgwState>,
     AssociationToken(claims): AssociationToken,
@@ -78,6 +80,7 @@ async fn fwd_tcp(
             claims,
             source_addr,
             false,
+            wireguard_listener,
         )
         .instrument(span)
     });
@@ -91,6 +94,7 @@ async fn fwd_tls(
         sessions,
         subscriber_tx,
         shutdown_signal,
+        wireguard_listener,
         ..
     }): State<DgwState>,
     AssociationToken(claims): AssociationToken,
@@ -115,6 +119,7 @@ async fn fwd_tls(
             claims,
             source_addr,
             true,
+            wireguard_listener,
         )
         .instrument(span)
     });
@@ -132,6 +137,7 @@ async fn handle_fwd(
     claims: AssociationTokenClaims,
     source_addr: SocketAddr,
     with_tls: bool,
+    wireguard_listener: Option<crate::wireguard::WireGuardHandle>,
 ) {
     let (stream, close_handle) = crate::ws::handle(
         ws,
@@ -154,6 +160,7 @@ async fn handle_fwd(
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
         .with_tls(with_tls)
+        .wireguard_listener(wireguard_listener)
         .build()
         .run()
         .instrument(span.clone())
@@ -184,6 +191,8 @@ struct Forward<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     with_tls: bool,
+    #[builder(default)]
+    wireguard_listener: Option<crate::wireguard::WireGuardHandle>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -207,6 +216,7 @@ where
             sessions,
             subscriber_tx,
             with_tls,
+            wireguard_listener,
         } = self;
 
         match claims.jet_rec {
@@ -226,9 +236,14 @@ where
 
         trace!("Select and connect to target");
 
-        let ((server_stream, server_addr), selected_target) = utils::successive_try(&targets, utils::tcp_connect)
-            .await
-            .map_err(ForwardError::BadGateway)?;
+        let ((server_stream, server_addr), selected_target) = connect_target(
+            wireguard_listener.as_ref(),
+            claims.jet_aid,
+            claims.jet_agent_id,
+            &targets,
+        )
+        .await
+        .map_err(ForwardError::BadGateway)?;
 
         trace!(%selected_target, "Connected");
         span.record("target", selected_target.to_string());

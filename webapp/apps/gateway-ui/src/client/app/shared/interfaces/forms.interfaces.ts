@@ -24,6 +24,7 @@ export interface RdpFormDataInput {
   hostname: string;
   username: string;
   password: string;
+  agentId?: string;
   enableDisplayControl: boolean;
   kdcUrl: string;
   preConnectionBlob: string;
@@ -39,6 +40,7 @@ export interface VncFormDataInput {
   hostname: string;
   username: string;
   password: string;
+  agentId?: string;
   protocol: number;
   enableCursor: boolean;
   // The extended clipboard control may not be initialized if the browser does not support the clipboard API.
@@ -60,6 +62,7 @@ export interface ArdFormDataInput {
   hostname: string;
   username: string;
   password: string;
+  agentId?: string;
   protocol: number;
   wheelSpeedFactor: number;
   resolutionQuality: ResolutionQuality;
@@ -70,6 +73,7 @@ export interface ArdFormDataInput {
 export interface TelnetFormDataInput {
   autoComplete: AutoCompleteInput;
   hostname: string;
+  agentId?: string;
   username?: string;
   password?: string;
 }
@@ -77,6 +81,7 @@ export interface TelnetFormDataInput {
 export interface SSHFormDataInput {
   autoComplete: AutoCompleteInput;
   hostname: string;
+  agentId?: string;
   username?: string;
   password?: string;
   passphrase?: string;

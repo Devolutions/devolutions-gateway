@@ -1,0 +1,84 @@
+# Build stage
+FROM rustlang/rust:nightly-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY devolutions-agent ./devolutions-agent
+COPY devolutions-gateway ./devolutions-gateway
+COPY devolutions-gateway-agent ./devolutions-gateway-agent
+COPY devolutions-session ./devolutions-session
+COPY jetsocat ./jetsocat
+COPY testsuite ./testsuite
+COPY tools ./tools
+
+# Build agent binary for Linux
+RUN cargo build --release -p devolutions-gateway-agent
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies and python for HTTP server
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    python3 \
+    iproute2 \
+    iputils-ping \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy built agent binary from builder stage
+COPY --from=builder /build/target/release/devolutions-gateway-agent /usr/local/bin/devolutions-gateway-agent
+
+# Create app directory
+WORKDIR /app
+
+# Expose HTTP server port
+EXPOSE 8080
+
+# Entry point script
+RUN printf '#!/bin/bash\n\
+\n\
+set -e\n\
+\n\
+echo "=== Devolutions Gateway Agent Test Container ==="\n\
+\n\
+TEST_HTTP_MESSAGE="${TEST_HTTP_MESSAGE:-Hello from Agent Container!}"\n\
+TEST_TARGET_IP="${TEST_TARGET_IP:-}"\n\
+\n\
+if [ -n "$TEST_TARGET_IP" ]; then\n\
+    echo "Adding loopback test target IP: $TEST_TARGET_IP/32"\n\
+    ip addr add "$TEST_TARGET_IP/32" dev lo || true\n\
+fi\n\
+\n\
+echo "Starting HTTP server on :8080..."\n\
+mkdir -p /app/www\n\
+printf "<h1>%%s</h1><p>IP: %%s</p>" "$TEST_HTTP_MESSAGE" "$(hostname -I)" > /app/www/index.html\n\
+cd /app/www\n\
+python3 -m http.server 8080 &\n\
+HTTP_PID=$!\n\
+\n\
+echo "HTTP server started (PID: $HTTP_PID)"\n\
+\n\
+if [ ! -f /app/agent-config.toml ]; then\n\
+    echo "Waiting for /app/agent-config.toml..."\n\
+    while [ ! -f /app/agent-config.toml ]; do\n\
+        sleep 1\n\
+    done\n\
+fi\n\
+\n\
+echo "Config file found, starting agent..."\n\
+echo "Agent ID: $(grep agent_id /app/agent-config.toml | awk '"'"'{print $3}'"'"' | tr -d '"'"'\"'"'"')"\n\
+echo "Gateway: $(grep gateway_endpoint /app/agent-config.toml | awk '"'"'{print $3}'"'"' | tr -d '"'"'\"'"'"')"\n\
+\n\
+exec devolutions-gateway-agent run --config /app/agent-config.toml\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,20 @@
+[package]
+name = "wireguard-tunnel"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+boringtun = "0.7"
+tokio = { version = "1.43", features = ["net", "sync", "time"] }
+tunnel-proto = { path = "../tunnel-proto" }
+bytes = "1.10"
+thiserror = "2.0"
+tracing = "0.1"
+
+[dev-dependencies]
+proptest = "1.7"

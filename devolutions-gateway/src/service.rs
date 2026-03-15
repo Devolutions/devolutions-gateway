@@ -275,6 +275,24 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
+    // Initialize WireGuard listener if enabled
+    let wireguard_listener = if let Some(wg_conf) = &conf.wireguard {
+        if wg_conf.enabled {
+            info!("Initializing WireGuard listener on port {}", wg_conf.port);
+            let bind_addr =
+                std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), wg_conf.port);
+            let (listener, handle) =
+                devolutions_gateway::wireguard::WireGuardListener::init_and_bind(bind_addr, wg_conf)
+                    .context("Failed to initialize WireGuard listener")?;
+            tasks.register(listener);
+            Some(handle)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let state = DgwState {
         conf_handle: conf_handle.clone(),
         token_cache: Arc::clone(&token_cache),
@@ -287,6 +305,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         credential_store: credential_store.clone(),
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
+        wireguard_listener,
     };
 
     for listener in &conf.listeners {

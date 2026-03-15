@@ -470,7 +470,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private fetchParameters(formData: RdpFormDataInput): Observable<IronRDPConnectionParameters> {
-    const { hostname, password, enableDisplayControl, preConnectionBlob, kdcUrl } = formData;
+    const { hostname, password, enableDisplayControl, preConnectionBlob, kdcUrl, agentId } = formData;
 
     const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.formData.username);
 
@@ -487,6 +487,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       enableDisplayControl,
       preConnectionBlob,
       kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88'),
+      agentId,
     };
     return of(connectionParameters);
   }
@@ -529,6 +530,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       kdcProxyUrl,
       // TODO: Parse from config.
       enableDisplayControl: true,
+      agentId: this.formData.agentId,
     };
 
     return of(connectionParameters);
