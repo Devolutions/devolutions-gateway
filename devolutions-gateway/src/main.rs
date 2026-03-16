@@ -73,18 +73,11 @@ use ceviche::controller::{Controller, ControllerInterface, dispatch};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
 use devolutions_gateway::SYSTEM_LOGGER;
+use devolutions_gateway::cli::{CliAction, parse_args_from_env, print_help};
 use devolutions_gateway::config::ConfHandle;
 use tap::prelude::*;
 
 use crate::service::{DESCRIPTION, DISPLAY_NAME, GatewayService, SERVICE_NAME};
-
-enum CliAction {
-    ShowHelp,
-    RegisterService,
-    UnregisterService,
-    Run { service_mode: bool },
-    ConfigInitOnly,
-}
 
 fn main() -> anyhow::Result<()> {
     run().inspect_err(|error| {
@@ -97,70 +90,16 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
-    let mut args = std::env::args();
-    let executable = args.next().context("executable name is missing from the environment")?;
+    let (executable, cli_args) = parse_args_from_env()?;
 
-    // Extract and remove --config-path argument if provided
-    let mut config_path = None;
-    let mut remaining_args = Vec::new();
-
-    while let Some(arg) = args.next() {
-        if arg == "--config-path" {
-            if let Some(path) = args.next() {
-                config_path = Some(path);
-            } else {
-                anyhow::bail!("missing value for --config-path");
-            }
-        } else {
-            remaining_args.push(arg);
-        }
-    }
-
-    // Set the DGATEWAY_CONFIG_PATH if --config-path was provided
-    if let Some(path) = config_path {
+    // Set the DGATEWAY_CONFIG_PATH if --config-path was provided.
+    if let Some(path) = cli_args.config_path {
         // SAFETY: At this point the program is single-threaded.
         unsafe { std::env::set_var("DGATEWAY_CONFIG_PATH", &path) };
     }
 
-    // Parse remaining arguments for CLI actions
-    let action = match remaining_args.first().map(String::as_str) {
-        Some("--service") => CliAction::Run { service_mode: true },
-        Some("service") => match args.next().as_deref() {
-            Some("register") => CliAction::RegisterService,
-            Some("unregister") => CliAction::UnregisterService,
-            _ => CliAction::ShowHelp,
-        },
-        Some("--config-init-only") => CliAction::ConfigInitOnly,
-        None => CliAction::Run { service_mode: false },
-        Some(_) => CliAction::ShowHelp,
-    };
-
-    match action {
-        CliAction::ShowHelp => {
-            println!(
-                r#"HELP:
-
-    Run:
-        "{executable}"
-
-    Run as service:
-        "{executable}" --service
-
-    Initialize configuration only (will not override existing configuration):
-        "{executable}" --config-init-only
-
-    Install service:
-        "{executable}" service register
-
-    Uninstall service:
-        "{executable}" service unregister
-
-        
-    Options:
-        --config-path <CONFIG_PATH>
-"#
-            )
-        }
+    match cli_args.action {
+        CliAction::ShowHelp => print_help(&executable),
         CliAction::RegisterService => {
             let mut controller = service_controller();
 
