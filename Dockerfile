@@ -100,6 +100,7 @@ RUN chmod +x /usr/local/bin/entrypoint.ps1
 
 EXPOSE 7171
 EXPOSE 8181
+EXPOSE 51820/udp
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=15s \
     CMD curl -sf http://localhost:7171/jet/health || exit 1

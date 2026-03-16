@@ -19,8 +19,10 @@ $GatewayStdErr = "D:\devolutions-gateway\test-output\gateway.stderr.log"
 $GatewayPidFile = "D:\devolutions-gateway\test-output\gateway.pid"
 $DockerImage = "devolutions-gateway-agent-test"
 $DockerContainer = "wireguard-agent-test"
+$EnrollContainer = "wireguard-agent-enroll"
 $GatewayExe = "D:\devolutions-gateway\target\debug\devolutions-gateway.exe"
 $PythonClient = "D:\devolutions-gateway\test-websocket-relay.py"
+$SessionId = "11111111-1111-1111-1111-111111111111"
 
 function Stop-TestEnvironment {
     Get-Process -Name "devolutions-gateway" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -33,10 +35,12 @@ function Stop-TestEnvironment {
         Remove-Item -LiteralPath $GatewayPidFile -Force -ErrorAction SilentlyContinue
     }
 
-    $containerId = docker ps -aq -f "name=$DockerContainer" | Out-String
-    $containerId = $containerId.Trim()
-    if ($containerId) {
-        docker rm -f $DockerContainer | Out-Null
+    foreach ($container in @($DockerContainer, $EnrollContainer)) {
+        $containerId = docker ps -aq -f "name=$container" | Out-String
+        $containerId = $containerId.Trim()
+        if ($containerId) {
+            docker rm -f $container | Out-Null
+        }
     }
 }
 
@@ -109,12 +113,121 @@ function Show-DiagnosticsAndFail {
     throw $Message
 }
 
+function Invoke-JsonPost {
+    param(
+        [string]$Uri,
+        [hashtable]$Body,
+        [hashtable]$Headers = @{}
+    )
+
+    $json = $Body | ConvertTo-Json -Depth 8
+    return Invoke-RestMethod -Method Post -Uri $Uri -Headers $Headers -ContentType "application/json" -Body $json
+}
+
+function Invoke-TextPost {
+    param(
+        [string]$Uri,
+        [hashtable]$Body,
+        [hashtable]$Headers = @{}
+    )
+
+    $json = $Body | ConvertTo-Json -Depth 8
+    return Invoke-RestMethod -Method Post -Uri $Uri -Headers $Headers -ContentType "application/json" -Body $json
+}
+
+function Invoke-DockerEnroll {
+    param(
+        [string]$EnrollmentString,
+        [string]$OutputConfigPath
+    )
+
+    if (Test-Path -LiteralPath $OutputConfigPath) {
+        Remove-Item -LiteralPath $OutputConfigPath -Force
+    }
+
+    $createArgs = @(
+        "create",
+        "--name",
+        $EnrollContainer,
+        "--add-host",
+        "host.docker.internal:host-gateway",
+        "--entrypoint",
+        "/usr/local/bin/devolutions-gateway-agent",
+        $DockerImage,
+        "enroll",
+        "--enrollment-string",
+        $EnrollmentString,
+        "--config",
+        "/tmp/agent-config.toml",
+        "--advertise-subnet",
+        "127.0.0.0/8",
+        "--advertise-subnet",
+        "172.0.0.0/8",
+        "--advertise-subnet",
+        "192.168.0.0/16"
+    )
+
+    & docker @createArgs | Out-Null
+    Assert-LastExitCode "docker create enroll"
+
+    docker start -a $EnrollContainer
+    Assert-LastExitCode "docker start enroll"
+
+    docker cp "${EnrollContainer}:/tmp/agent-config.toml" $OutputConfigPath | Out-Null
+    Assert-LastExitCode "docker cp enrolled config"
+
+    docker rm -f $EnrollContainer | Out-Null
+    Assert-LastExitCode "docker rm enroll"
+
+    if (-not (Test-Path -LiteralPath $OutputConfigPath)) {
+        throw "Enrollment did not produce $OutputConfigPath."
+    }
+}
+
+function Get-AgentIdFromConfig {
+    param([string]$Path)
+
+    $content = Get-Content -LiteralPath $Path -Raw
+    if ($content -match 'agent_id\s*=\s*"([^"]+)"') {
+        return $matches[1]
+    }
+
+    throw "Failed to parse agent_id from $Path"
+}
+
+function Wait-AgentOnline {
+    param(
+        [string]$AgentId,
+        [string]$AppToken,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $agent = Invoke-RestMethod `
+                -Method Get `
+                -Uri "http://127.0.0.1:7171/jet/agents/$AgentId" `
+                -Headers @{ Authorization = "Bearer $AppToken"; Accept = "application/json" }
+
+            if ($agent.status -eq "online") {
+                return
+            }
+        } catch {
+        }
+
+        Start-Sleep -Milliseconds 500
+    }
+
+    throw "Timed out waiting for agent $AgentId to become online."
+}
+
 if ($Clean) {
     Stop-TestEnvironment
     if (Test-Path -LiteralPath $TestDir) {
         Remove-Item -LiteralPath $TestDir -Recurse -Force
     }
-    Write-Host "Cleaned WireGuard test environment." -ForegroundColor Green
+    Write-Host "Cleaned WireGuard enrollment test environment." -ForegroundColor Green
     exit 0
 }
 
@@ -123,55 +236,47 @@ Stop-TestEnvironment
 New-Item -ItemType Directory -Path $TestDir -Force | Out-Null
 New-Item -ItemType Directory -Path $GatewayConfigDir -Force | Out-Null
 
-Write-Host "=== WireGuard Agent Tunneling E2E Test ===" -ForegroundColor Cyan
+Write-Host "=== WireGuard Dynamic Enrollment E2E Test ===" -ForegroundColor Cyan
 
-Write-Host "`n[1/8] Building gateway binary..." -ForegroundColor Yellow
+Write-Host "`n[1/9] Building gateway binary..." -ForegroundColor Yellow
 cargo build -q -p devolutions-gateway --bin devolutions-gateway
-Assert-LastExitCode "cargo build"
+Assert-LastExitCode "cargo build gateway"
 
-Write-Host "`n[2/8] Building Docker agent image..." -ForegroundColor Yellow
+Write-Host "`n[2/9] Building Docker agent image..." -ForegroundColor Yellow
 docker build -f "D:\devolutions-gateway\Dockerfile.agent-test" -t $DockerImage "D:\devolutions-gateway"
 Assert-LastExitCode "docker build"
 
-Write-Host "`n[3/8] Generating provisioner keypair..." -ForegroundColor Yellow
+Write-Host "`n[3/9] Generating provisioner keypair..." -ForegroundColor Yellow
 & openssl genrsa -out $ProvisionerPrivateKeyFile 2048 | Out-Null
 Assert-LastExitCode "openssl genrsa"
 & openssl rsa -in $ProvisionerPrivateKeyFile -pubout -out $ProvisionerPublicKeyFile | Out-Null
 Assert-LastExitCode "openssl rsa -pubout"
 
-Write-Host "`n[4/8] Generating WireGuard keypairs..." -ForegroundColor Yellow
+Write-Host "`n[4/9] Generating Gateway WireGuard keypair..." -ForegroundColor Yellow
 $gatewayKeyPair = Get-WireGuardKeyPair
-$agentKeyPair = Get-WireGuardKeyPair
-
 $gatewayKeyPair.Private | Out-File -LiteralPath $GatewayWireGuardPrivateKeyFile -Encoding ascii -NoNewline
 
-$agentId = "00000000-0000-0000-0000-000000000001"
-$sessionId = "11111111-1111-1111-1111-111111111111"
-
-Write-Host "`n[5/8] Writing gateway and agent configs..." -ForegroundColor Yellow
+Write-Host "`n[5/9] Writing Gateway config without static peers..." -ForegroundColor Yellow
 $gatewayConfigObject = [ordered]@{
     Hostname = "127.0.0.1"
     ProvisionerPublicKeyFile = $ProvisionerPublicKeyFile
+    ProvisionerPrivateKeyFile = $ProvisionerPrivateKeyFile
     Listeners = @(
         [ordered]@{
             InternalUrl = "http://127.0.0.1:7171"
             ExternalUrl = "http://127.0.0.1:7171"
         }
     )
+    WebApp = [ordered]@{
+        Enabled = $true
+        Authentication = "None"
+    }
     WireGuard = [ordered]@{
         Enabled = $true
         Port = 51820
         PrivateKeyFile = $GatewayWireGuardPrivateKeyFile
         TunnelNetwork = "10.10.0.0/16"
         GatewayIp = "10.10.0.1"
-        Peers = @(
-            [ordered]@{
-                AgentId = $agentId
-                Name = "docker-test-agent"
-                PublicKey = $agentKeyPair.Public
-                AssignedIp = "10.10.0.2"
-            }
-        )
     }
     VerbosityProfile = "All"
 }
@@ -182,20 +287,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $utf8NoBom
 )
 
-$agentConfigContent = @"
-agent_id = "$agentId"
-name = "docker-test-agent"
-gateway_endpoint = "host.docker.internal:51820"
-private_key = "$($agentKeyPair.Private)"
-gateway_public_key = "$($gatewayKeyPair.Public)"
-assigned_ip = "10.10.0.2"
-gateway_ip = "10.10.0.1"
-advertise_subnets = ["127.0.0.0/8", "172.0.0.0/8", "192.168.0.0/16"]
-keepalive_interval = 25
-"@
-[System.IO.File]::WriteAllText($AgentConfig, $agentConfigContent, $utf8NoBom)
-
-Write-Host "`n[6/8] Starting gateway..." -ForegroundColor Yellow
+Write-Host "`n[6/9] Starting Gateway..." -ForegroundColor Yellow
 $gatewayProcess = Start-Process -FilePath $GatewayExe `
     -ArgumentList "--config-path", $GatewayConfigDir `
     -RedirectStandardOutput $GatewayStdOut `
@@ -209,7 +301,34 @@ if ($gatewayProcess.HasExited) {
     Show-DiagnosticsAndFail "Gateway exited before becoming ready."
 }
 
-Write-Host "`n[7/8] Starting Docker agent container..." -ForegroundColor Yellow
+Write-Host "`n[7/9] Generating enrollment string from Gateway..." -ForegroundColor Yellow
+$appToken = Invoke-TextPost `
+    -Uri "http://127.0.0.1:7171/jet/webapp/app-token" `
+    -Body @{
+        content_type = "WEBAPP"
+        subject = "automation"
+        lifetime = 3600
+    }
+
+$enrollmentResponse = Invoke-JsonPost `
+    -Uri "http://127.0.0.1:7171/jet/webapp/agent-enrollment-string" `
+    -Headers @{ Authorization = "Bearer $appToken" } `
+    -Body @{
+        name = "docker-test-agent"
+        apiBaseUrl = "http://host.docker.internal:7171"
+        wireguardHost = "host.docker.internal"
+        lifetime = 3600
+    }
+
+$enrollmentString = $enrollmentResponse.enrollmentString
+if (-not $enrollmentString) {
+    throw "Gateway did not return an enrollment string."
+}
+
+Write-Host "`n[8/9] Enrolling agent dynamically and starting Docker container..." -ForegroundColor Yellow
+Invoke-DockerEnroll -EnrollmentString $enrollmentString -OutputConfigPath $AgentConfig
+$agentId = Get-AgentIdFromConfig -Path $AgentConfig
+
 docker run -d `
     --name $DockerContainer `
     --add-host host.docker.internal:host-gateway `
@@ -218,14 +337,14 @@ docker run -d `
     $DockerImage | Out-Null
 Assert-LastExitCode "docker run"
 
-Start-Sleep -Seconds 3
+Wait-AgentOnline -AgentId $agentId -AppToken $appToken
 
-Write-Host "`n[8/8] Generating token and running Python client..." -ForegroundColor Yellow
+Write-Host "`n[9/9] Generating session token and exercising real relay path..." -ForegroundColor Yellow
 $token = cargo run -q --manifest-path "D:\devolutions-gateway\tools\tokengen\Cargo.toml" -- sign `
     --provisioner-key $ProvisionerPrivateKeyFile `
     forward `
     --dst-hst "localhost:8080" `
-    --jet-aid $sessionId `
+    --jet-aid $SessionId `
     --jet-agent-id $agentId | Out-String
 Assert-LastExitCode "tokengen sign"
 $token = $token.Trim()
@@ -233,7 +352,7 @@ $token = $token.Trim()
 $pythonArgs = @(
     $PythonClient
     "--gateway-url", "ws://127.0.0.1:7171"
-    "--session-id", $sessionId
+    "--session-id", $SessionId
     "--token", $token
 )
 
@@ -249,10 +368,10 @@ for ($attempt = 1; $attempt -le 10; $attempt++) {
 }
 
 if (-not $clientSucceeded) {
-    Show-DiagnosticsAndFail "Python client did not receive the HTTP response through the tunnel."
+    Show-DiagnosticsAndFail "Python client did not receive the HTTP response through the enrolled agent tunnel."
 }
 
-Write-Host "`nEnd-to-end WireGuard relay test passed." -ForegroundColor Green
+Write-Host "`nDynamic enrollment WireGuard relay test passed." -ForegroundColor Green
 
 if (-not $KeepRunning) {
     Stop-TestEnvironment

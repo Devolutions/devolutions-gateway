@@ -57,6 +57,15 @@ pub struct RuntimeConfig {
     pub keepalive_interval: Option<u64>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentStringPayload {
+    pub version: u8,
+    pub api_base_url: String,
+    pub wireguard_endpoint: String,
+    pub enrollment_token: String,
+}
+
 impl AgentConfig {
     /// Load configuration from TOML file
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
@@ -64,6 +73,12 @@ impl AgentConfig {
             .with_context(|| format!("Failed to read config file: {}", path.as_ref().display()))?;
 
         toml::from_str(&content).context("Failed to parse TOML configuration")
+    }
+
+    pub fn write_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
+        let content = toml::to_string_pretty(self).context("Failed to serialize TOML configuration")?;
+        std::fs::write(path.as_ref(), content)
+            .with_context(|| format!("Failed to write config file: {}", path.as_ref().display()))
     }
 
     /// Validate and convert to runtime configuration
@@ -138,4 +153,49 @@ pub fn generate_sample_config() -> String {
     };
 
     toml::to_string_pretty(&sample).unwrap()
+}
+
+pub fn parse_enrollment_string(enrollment_string: &str) -> Result<EnrollmentStringPayload> {
+    use base64::Engine as _;
+
+    let payload = enrollment_string
+        .strip_prefix("dgw-enroll:v1:")
+        .context("Invalid enrollment string prefix")?;
+    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .context("Invalid base64 in enrollment string")?;
+    let payload: EnrollmentStringPayload =
+        serde_json::from_slice(&payload_bytes).context("Invalid JSON payload in enrollment string")?;
+
+    anyhow::ensure!(payload.version == 1, "Unsupported enrollment string version");
+
+    Ok(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_enrollment_string_roundtrip() {
+        use base64::Engine as _;
+
+        let payload = EnrollmentStringPayload {
+            version: 1,
+            api_base_url: "https://gateway.example.com".to_owned(),
+            wireguard_endpoint: "gateway.example.com:51820".to_owned(),
+            enrollment_token: "token-value".to_owned(),
+        };
+        let payload_json = serde_json::to_vec(&payload).expect("payload should serialize");
+        let enrollment_string = format!(
+            "dgw-enroll:v1:{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json)
+        );
+
+        let decoded = parse_enrollment_string(&enrollment_string).expect("string should parse");
+
+        assert_eq!(decoded.api_base_url, payload.api_base_url);
+        assert_eq!(decoded.wireguard_endpoint, payload.wireguard_endpoint);
+        assert_eq!(decoded.enrollment_token, payload.enrollment_token);
+    }
 }

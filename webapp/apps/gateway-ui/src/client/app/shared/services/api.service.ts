@@ -10,6 +10,20 @@ interface VersionInfo {
   downloadLink?: string;
 }
 
+export interface AgentEnrollmentStringRequest {
+  name?: string;
+  apiBaseUrl: string;
+  wireguardHost?: string;
+  lifetime?: number;
+}
+
+export interface AgentEnrollmentStringResponse {
+  enrollmentString: string;
+  enrollmentCommand: string;
+  wireguardEndpoint: string;
+  expiresAtUnix: number;
+}
+
 export type GetVersionResult = {
   id: string;
   hostname: string;
@@ -24,6 +38,7 @@ let VersionCache: GetVersionResult = null;
 export class ApiService {
   private appTokenApiUrl = '/jet/webapp/app-token';
   private sessionTokenApiURL = '/jet/webapp/session-token';
+  private agentEnrollmentStringApiUrl = '/jet/webapp/agent-enrollment-string';
   private healthApiURL = '/jet/health';
   private devolutionProductApiURL = 'https://devolutions.net/products.htm';
   private agentsApiURL = '/jet/agents';
@@ -138,6 +153,21 @@ export class ApiService {
       catchError((error) => {
         console.error(`Failed to fetch agent ${agentId}`, error);
         return throwError(() => new Error(`Failed to fetch agent ${agentId}`));
+      }),
+    );
+  }
+
+  generateAgentEnrollmentString(
+    request: AgentEnrollmentStringRequest,
+  ): Observable<AgentEnrollmentStringResponse> {
+    return this.http.post<AgentEnrollmentStringResponse>(this.agentEnrollmentStringApiUrl, request, {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }).pipe(
+      catchError((error) => {
+        console.error('Failed to generate agent enrollment string', error);
+        return throwError(() => new Error('Failed to generate agent enrollment string'));
       }),
     );
   }

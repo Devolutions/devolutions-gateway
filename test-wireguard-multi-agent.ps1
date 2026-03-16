@@ -16,17 +16,38 @@ $ProvisionerPublicKeyFile = "D:\devolutions-gateway\test-output-multi-agent\prov
 $GatewayStdOut = "D:\devolutions-gateway\test-output-multi-agent\gateway.stdout.log"
 $GatewayStdErr = "D:\devolutions-gateway\test-output-multi-agent\gateway.stderr.log"
 $GatewayPidFile = "D:\devolutions-gateway\test-output-multi-agent\gateway.pid"
-$AgentAConfig = "D:\devolutions-gateway\test-output-multi-agent\agent-a-config.toml"
-$AgentBConfig = "D:\devolutions-gateway\test-output-multi-agent\agent-b-config.toml"
-$DockerImage = "devolutions-gateway-agent-test"
-$AgentAContainer = "wireguard-agent-test-a"
-$AgentBContainer = "wireguard-agent-test-b"
 $GatewayExe = "D:\devolutions-gateway\target\debug\devolutions-gateway.exe"
 $PythonClient = "D:\devolutions-gateway\test-websocket-relay.py"
-$TargetIp = "127.0.0.1"
-$TargetSubnet = "127.0.0.0/8"
-$TargetAddress = "$TargetIp`:8080"
+$DockerImage = "devolutions-gateway-agent-test"
+$TargetAddress = "localhost:8080"
 $OfflineTimeoutSeconds = 35
+
+$Agents = @(
+    @{
+        Name = "multi-agent-a"
+        Marker = "Hello from Agent A"
+        ConfigPath = "D:\devolutions-gateway\test-output-multi-agent\agent-a-config.toml"
+        RuntimeContainer = "wireguard-agent-test-a"
+        EnrollContainer = "wireguard-agent-enroll-a"
+        SessionId = "11111111-1111-1111-1111-111111111111"
+    },
+    @{
+        Name = "multi-agent-b"
+        Marker = "Hello from Agent B"
+        ConfigPath = "D:\devolutions-gateway\test-output-multi-agent\agent-b-config.toml"
+        RuntimeContainer = "wireguard-agent-test-b"
+        EnrollContainer = "wireguard-agent-enroll-b"
+        SessionId = "22222222-2222-2222-2222-222222222222"
+    },
+    @{
+        Name = "multi-agent-c"
+        Marker = "Hello from Agent C"
+        ConfigPath = "D:\devolutions-gateway\test-output-multi-agent\agent-c-config.toml"
+        RuntimeContainer = "wireguard-agent-test-c"
+        EnrollContainer = "wireguard-agent-enroll-c"
+        SessionId = "33333333-3333-3333-3333-333333333333"
+    }
+)
 
 function Stop-TestEnvironment {
     Get-Process -Name "devolutions-gateway" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -39,25 +60,15 @@ function Stop-TestEnvironment {
         Remove-Item -LiteralPath $GatewayPidFile -Force -ErrorAction SilentlyContinue
     }
 
-    foreach ($container in @($AgentAContainer, $AgentBContainer)) {
-        $containerId = docker ps -aq -f "name=$container" | Out-String
-        $containerId = $containerId.Trim()
-        if ($containerId) {
-            cmd /c "docker rm -f $container >nul 2>&1"
-
-            $deadline = (Get-Date).AddSeconds(15)
-            do {
-                Start-Sleep -Milliseconds 250
-                $containerId = docker ps -aq -f "name=$container" | Out-String
-                $containerId = $containerId.Trim()
-            } while ($containerId -and (Get-Date) -lt $deadline)
+    foreach ($agent in $Agents) {
+        foreach ($container in @($agent.RuntimeContainer, $agent.EnrollContainer)) {
+            $containerId = docker ps -aq -f "name=$container" | Out-String
+            $containerId = $containerId.Trim()
+            if ($containerId) {
+                docker rm -f $container | Out-Null
+            }
         }
     }
-}
-
-function Ensure-TestDirectories {
-    [System.IO.Directory]::CreateDirectory($TestDir) | Out-Null
-    [System.IO.Directory]::CreateDirectory($GatewayConfigDir) | Out-Null
 }
 
 function Assert-LastExitCode {
@@ -123,37 +134,158 @@ function Show-DiagnosticsAndFail {
         Get-Content -LiteralPath $GatewayStdErr
     }
 
-    foreach ($container in @($AgentAContainer, $AgentBContainer)) {
-        Write-Host "`n=== Container logs: $container ===" -ForegroundColor Yellow
-        docker logs $container
+    foreach ($agent in $Agents) {
+        Write-Host "`n=== Container logs: $($agent.RuntimeContainer) ===" -ForegroundColor Yellow
+        docker logs $agent.RuntimeContainer
     }
 
     throw $Message
 }
 
-function Write-AgentConfig {
+function Invoke-JsonPost {
     param(
-        [string]$Path,
-        [string]$AgentId,
-        [string]$AgentName,
-        [string]$PrivateKey,
-        [string]$GatewayPublicKey,
-        [string]$AssignedIp
+        [string]$Uri,
+        [hashtable]$Body,
+        [hashtable]$Headers = @{}
     )
 
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    $content = @"
-agent_id = "$AgentId"
-name = "$AgentName"
-gateway_endpoint = "host.docker.internal:51820"
-private_key = "$PrivateKey"
-gateway_public_key = "$GatewayPublicKey"
-assigned_ip = "$AssignedIp"
-gateway_ip = "10.10.0.1"
-advertise_subnets = ["$TargetSubnet"]
-keepalive_interval = 25
-"@
-    [System.IO.File]::WriteAllText($Path, $content, $utf8NoBom)
+    $json = $Body | ConvertTo-Json -Depth 8
+    return Invoke-RestMethod -Method Post -Uri $Uri -Headers $Headers -ContentType "application/json" -Body $json
+}
+
+function Invoke-TextPost {
+    param(
+        [string]$Uri,
+        [hashtable]$Body,
+        [hashtable]$Headers = @{}
+    )
+
+    $json = $Body | ConvertTo-Json -Depth 8
+    return Invoke-RestMethod -Method Post -Uri $Uri -Headers $Headers -ContentType "application/json" -Body $json
+}
+
+function Invoke-DockerEnroll {
+    param(
+        [string]$ContainerName,
+        [string]$EnrollmentString,
+        [string]$OutputConfigPath
+    )
+
+    if (Test-Path -LiteralPath $OutputConfigPath) {
+        Remove-Item -LiteralPath $OutputConfigPath -Force
+    }
+
+    $createArgs = @(
+        "create",
+        "--name",
+        $ContainerName,
+        "--add-host",
+        "host.docker.internal:host-gateway",
+        "--entrypoint",
+        "/usr/local/bin/devolutions-gateway-agent",
+        $DockerImage,
+        "enroll",
+        "--enrollment-string",
+        $EnrollmentString,
+        "--config",
+        "/tmp/agent-config.toml",
+        "--advertise-subnet",
+        "127.0.0.0/8",
+        "--advertise-subnet",
+        "172.0.0.0/8",
+        "--advertise-subnet",
+        "192.168.0.0/16"
+    )
+
+    & docker @createArgs | Out-Null
+    Assert-LastExitCode "docker create enroll $ContainerName"
+
+    docker start -a $ContainerName
+    Assert-LastExitCode "docker start enroll $ContainerName"
+
+    docker cp "${ContainerName}:/tmp/agent-config.toml" $OutputConfigPath | Out-Null
+    Assert-LastExitCode "docker cp enrolled config $ContainerName"
+
+    docker rm -f $ContainerName | Out-Null
+    Assert-LastExitCode "docker rm enroll $ContainerName"
+
+    if (-not (Test-Path -LiteralPath $OutputConfigPath)) {
+        throw "Enrollment did not produce $OutputConfigPath."
+    }
+}
+
+function Get-AgentIdFromConfig {
+    param([string]$Path)
+
+    $content = Get-Content -LiteralPath $Path -Raw
+    if ($content -match 'agent_id\s*=\s*"([^"]+)"') {
+        return $matches[1]
+    }
+
+    throw "Failed to parse agent_id from $Path"
+}
+
+function Wait-AgentOnline {
+    param(
+        [string]$AgentId,
+        [string]$AppToken,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $agent = Invoke-RestMethod `
+                -Method Get `
+                -Uri "http://127.0.0.1:7171/jet/agents/$AgentId" `
+                -Headers @{ Authorization = "Bearer $AppToken"; Accept = "application/json" }
+
+            if ($agent.status -eq "online") {
+                return
+            }
+        } catch {
+        }
+
+        Start-Sleep -Milliseconds 500
+    }
+
+    throw "Timed out waiting for agent $AgentId to become online."
+}
+
+function Wait-AgentOffline {
+    param(
+        [string]$AgentId,
+        [string]$AppToken,
+        [int]$TimeoutSeconds = 45
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $agent = Invoke-RestMethod `
+                -Method Get `
+                -Uri "http://127.0.0.1:7171/jet/agents/$AgentId" `
+                -Headers @{ Authorization = "Bearer $AppToken"; Accept = "application/json" }
+
+            if ($agent.status -eq "offline") {
+                return
+            }
+        } catch {
+        }
+
+        Start-Sleep -Milliseconds 500
+    }
+
+    throw "Timed out waiting for agent $AgentId to become offline."
+}
+
+function Get-AgentsResponse {
+    param([string]$AppToken)
+
+    return Invoke-RestMethod `
+        -Method Get `
+        -Uri "http://127.0.0.1:7171/jet/agents" `
+        -Headers @{ Authorization = "Bearer $AppToken"; Accept = "application/json" }
 }
 
 function Start-AgentContainer {
@@ -215,7 +347,7 @@ function Invoke-PythonClient {
         "--gateway-url", "ws://127.0.0.1:7171"
         "--session-id", $SessionId
         "--token", $Token
-        "--request", "GET / HTTP/1.1`r`nHost: $TargetIp`r`nConnection: close`r`n`r`n"
+        "--request", "GET / HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n"
         "--expected-marker", $ExpectedMarker
     )
 
@@ -232,70 +364,56 @@ if ($Clean) {
     if (Test-Path -LiteralPath $TestDir) {
         Remove-Item -LiteralPath $TestDir -Recurse -Force
     }
-    Write-Host "Cleaned multi-agent WireGuard test environment." -ForegroundColor Green
+    Write-Host "Cleaned dynamic multi-agent WireGuard test environment." -ForegroundColor Green
     exit 0
 }
 
 Stop-TestEnvironment
 
-Ensure-TestDirectories
+[System.IO.Directory]::CreateDirectory($TestDir) | Out-Null
+[System.IO.Directory]::CreateDirectory($GatewayConfigDir) | Out-Null
 
-Write-Host "=== WireGuard Multi-Agent TDD Test ===" -ForegroundColor Cyan
+Write-Host "=== WireGuard Dynamic Multi-Agent E2E Test ===" -ForegroundColor Cyan
 
 Write-Host "`n[1/10] Building gateway binary..." -ForegroundColor Yellow
 cargo build -q -p devolutions-gateway --bin devolutions-gateway
-Assert-LastExitCode "cargo build"
+Assert-LastExitCode "cargo build gateway"
 
 Write-Host "`n[2/10] Building Docker agent image..." -ForegroundColor Yellow
 docker build -f "D:\devolutions-gateway\Dockerfile.agent-test" -t $DockerImage "D:\devolutions-gateway"
 Assert-LastExitCode "docker build"
 
 Write-Host "`n[3/10] Generating provisioner keypair..." -ForegroundColor Yellow
-Ensure-TestDirectories
 & openssl genrsa -out $ProvisionerPrivateKeyFile 2048 | Out-Null
 Assert-LastExitCode "openssl genrsa"
 & openssl rsa -in $ProvisionerPrivateKeyFile -pubout -out $ProvisionerPublicKeyFile | Out-Null
 Assert-LastExitCode "openssl rsa -pubout"
 
-Write-Host "`n[4/10] Generating WireGuard keypairs..." -ForegroundColor Yellow
+Write-Host "`n[4/10] Generating Gateway WireGuard keypair..." -ForegroundColor Yellow
 $gatewayKeyPair = Get-WireGuardKeyPair
-$agentAKeyPair = Get-WireGuardKeyPair
-$agentBKeyPair = Get-WireGuardKeyPair
 $gatewayKeyPair.Private | Out-File -LiteralPath $GatewayWireGuardPrivateKeyFile -Encoding ascii -NoNewline
 
-$agentAId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-$agentBId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-
-Write-Host "`n[5/10] Writing gateway and agent configs..." -ForegroundColor Yellow
+Write-Host "`n[5/10] Writing Gateway config without static peers..." -ForegroundColor Yellow
 $gatewayConfigObject = [ordered]@{
     Hostname = "127.0.0.1"
     ProvisionerPublicKeyFile = $ProvisionerPublicKeyFile
+    ProvisionerPrivateKeyFile = $ProvisionerPrivateKeyFile
     Listeners = @(
         [ordered]@{
             InternalUrl = "http://127.0.0.1:7171"
             ExternalUrl = "http://127.0.0.1:7171"
         }
     )
+    WebApp = [ordered]@{
+        Enabled = $true
+        Authentication = "None"
+    }
     WireGuard = [ordered]@{
         Enabled = $true
         Port = 51820
         PrivateKeyFile = $GatewayWireGuardPrivateKeyFile
         TunnelNetwork = "10.10.0.0/16"
         GatewayIp = "10.10.0.1"
-        Peers = @(
-            [ordered]@{
-                AgentId = $agentAId
-                Name = "docker-test-agent-a"
-                PublicKey = $agentAKeyPair.Public
-                AssignedIp = "10.10.0.2"
-            },
-            [ordered]@{
-                AgentId = $agentBId
-                Name = "docker-test-agent-b"
-                PublicKey = $agentBKeyPair.Public
-                AssignedIp = "10.10.0.3"
-            }
-        )
     }
     VerbosityProfile = "All"
 }
@@ -306,12 +424,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     $utf8NoBom
 )
 
-Write-AgentConfig -Path $AgentAConfig -AgentId $agentAId -AgentName "docker-test-agent-a" `
-    -PrivateKey $agentAKeyPair.Private -GatewayPublicKey $gatewayKeyPair.Public -AssignedIp "10.10.0.2"
-Write-AgentConfig -Path $AgentBConfig -AgentId $agentBId -AgentName "docker-test-agent-b" `
-    -PrivateKey $agentBKeyPair.Private -GatewayPublicKey $gatewayKeyPair.Public -AssignedIp "10.10.0.3"
-
-Write-Host "`n[6/10] Starting gateway..." -ForegroundColor Yellow
+Write-Host "`n[6/10] Starting Gateway..." -ForegroundColor Yellow
 $gatewayProcess = Start-Process -FilePath $GatewayExe `
     -ArgumentList "--config-path", $GatewayConfigDir `
     -RedirectStandardOutput $GatewayStdOut `
@@ -325,55 +438,95 @@ if ($gatewayProcess.HasExited) {
     Show-DiagnosticsAndFail "Gateway exited before becoming ready."
 }
 
-Write-Host "`n[7/10] Starting agent A..." -ForegroundColor Yellow
-Start-AgentContainer -ContainerName $AgentAContainer -ConfigPath $AgentAConfig -Message "Hello from Agent A"
-Start-Sleep -Seconds 5
+Write-Host "`n[7/10] Generating app token and enrolling three agents..." -ForegroundColor Yellow
+$appToken = Invoke-TextPost `
+    -Uri "http://127.0.0.1:7171/jet/webapp/app-token" `
+    -Body @{
+        content_type = "WEBAPP"
+        subject = "automation"
+        lifetime = 3600
+    }
 
-Write-Host "`n[8/10] Verifying agent A baseline route..." -ForegroundColor Yellow
-$sessionA = "11111111-1111-1111-1111-111111111111"
-$tokenA = Get-ForwardToken -SessionId $sessionA -AgentId $agentAId
-if (-not (Invoke-PythonClient -SessionId $sessionA -Token $tokenA -ExpectedMarker "Hello from Agent A")) {
-    Show-DiagnosticsAndFail "Baseline multi-agent test failed: agent A did not serve the target."
+foreach ($agent in $Agents) {
+    $enrollmentResponse = Invoke-JsonPost `
+        -Uri "http://127.0.0.1:7171/jet/webapp/agent-enrollment-string" `
+        -Headers @{ Authorization = "Bearer $appToken" } `
+        -Body @{
+            name = $agent.Name
+            apiBaseUrl = "http://host.docker.internal:7171"
+            wireguardHost = "host.docker.internal"
+            lifetime = 3600
+        }
+
+    Invoke-DockerEnroll `
+        -ContainerName $agent.EnrollContainer `
+        -EnrollmentString $enrollmentResponse.enrollmentString `
+        -OutputConfigPath $agent.ConfigPath
+
+    $agent.AgentId = Get-AgentIdFromConfig -Path $agent.ConfigPath
 }
 
-Write-Host "`n[9/10] Verifying that missing agent_id does not auto-route..." -ForegroundColor Yellow
+$agentsResponse = Get-AgentsResponse -AppToken $appToken
+if ($agentsResponse.agents.Count -ne 3) {
+    Show-DiagnosticsAndFail "Expected 3 enrolled agents, got $($agentsResponse.agents.Count)."
+}
+
+Write-Host "`n[8/10] Starting all enrolled agent containers..." -ForegroundColor Yellow
+foreach ($agent in $Agents) {
+    Start-AgentContainer -ContainerName $agent.RuntimeContainer -ConfigPath $agent.ConfigPath -Message $agent.Marker
+}
+
+foreach ($agent in $Agents) {
+    Wait-AgentOnline -AgentId $agent.AgentId -AppToken $appToken -TimeoutSeconds 45
+}
+
+Write-Host "`n[9/10] Verifying explicit routing for all three agents..." -ForegroundColor Yellow
+foreach ($agent in $Agents) {
+    $token = Get-ForwardToken -SessionId $agent.SessionId -AgentId $agent.AgentId
+    if (-not (Invoke-PythonClient -SessionId $agent.SessionId -Token $token -ExpectedMarker $agent.Marker)) {
+        Show-DiagnosticsAndFail "Explicit agent routing failed for $($agent.Name)."
+    }
+}
+
 $sessionDirect = "99999999-9999-9999-9999-999999999999"
 $tokenDirect = Get-ForwardToken -SessionId $sessionDirect
-if (Invoke-PythonClient -SessionId $sessionDirect -Token $tokenDirect -ExpectedMarker "Hello from Agent A") {
+if (Invoke-PythonClient -SessionId $sessionDirect -Token $tokenDirect -ExpectedMarker $Agents[0].Marker) {
     Show-DiagnosticsAndFail "Direct session unexpectedly routed through an agent without jet_agent_id."
 }
 
-Write-Host "`n[10/10] Starting agent B and checking explicit agent routing..." -ForegroundColor Yellow
-Start-AgentContainer -ContainerName $AgentBContainer -ConfigPath $AgentBConfig -Message "Hello from Agent B"
-Start-Sleep -Seconds 8
+Write-Host "`n[10/10] Verifying isolation when one enrolled peer goes offline and comes back..." -ForegroundColor Yellow
+$agentB = $Agents[1]
+$agentA = $Agents[0]
+$agentC = $Agents[2]
 
-$sessionB = "22222222-2222-2222-2222-222222222222"
-$tokenB = Get-ForwardToken -SessionId $sessionB -AgentId $agentBId
-if (-not (Invoke-PythonClient -SessionId $sessionB -Token $tokenB -ExpectedMarker "Hello from Agent B")) {
-    Show-DiagnosticsAndFail "Explicit agent routing check failed: expected agent B to serve the target."
+docker rm -f $agentB.RuntimeContainer | Out-Null
+Assert-LastExitCode "docker rm -f $($agentB.RuntimeContainer)"
+Wait-AgentOffline -AgentId $agentB.AgentId -AppToken $appToken -TimeoutSeconds $OfflineTimeoutSeconds
+
+$offlineToken = Get-ForwardToken -SessionId "44444444-4444-4444-4444-444444444444" -AgentId $agentB.AgentId
+if (Invoke-PythonClient -SessionId "44444444-4444-4444-4444-444444444444" -Token $offlineToken -ExpectedMarker $agentB.Marker) {
+    Show-DiagnosticsAndFail "Explicit agent B route should fail while agent B is offline."
 }
 
-docker rm -f $AgentBContainer | Out-Null
-Assert-LastExitCode "docker rm -f $AgentBContainer"
-Start-Sleep -Seconds $OfflineTimeoutSeconds
-
-$sessionFallback = "33333333-3333-3333-3333-333333333333"
-$tokenFallback = Get-ForwardToken -SessionId $sessionFallback -AgentId $agentBId
-if (Invoke-PythonClient -SessionId $sessionFallback -Token $tokenFallback -ExpectedMarker "Hello from Agent B") {
-    Show-DiagnosticsAndFail "Explicit agent routing should fail when the chosen agent is offline."
+$tokenA = Get-ForwardToken -SessionId "55555555-5555-5555-5555-555555555555" -AgentId $agentA.AgentId
+if (-not (Invoke-PythonClient -SessionId "55555555-5555-5555-5555-555555555555" -Token $tokenA -ExpectedMarker $agentA.Marker)) {
+    Show-DiagnosticsAndFail "Agent A should still work while agent B is offline."
 }
 
-Write-Host "`n[11/10] Restarting agent B and checking explicit reconnect..." -ForegroundColor Yellow
-Start-AgentContainer -ContainerName $AgentBContainer -ConfigPath $AgentBConfig -Message "Hello from Agent B"
-Start-Sleep -Seconds 8
-
-$sessionReconnect = "44444444-4444-4444-4444-444444444444"
-$tokenReconnect = Get-ForwardToken -SessionId $sessionReconnect -AgentId $agentBId
-if (-not (Invoke-PythonClient -SessionId $sessionReconnect -Token $tokenReconnect -ExpectedMarker "Hello from Agent B")) {
-    Show-DiagnosticsAndFail "Explicit agent reconnect check failed: expected agent B after reconnect."
+$tokenC = Get-ForwardToken -SessionId "66666666-6666-6666-6666-666666666666" -AgentId $agentC.AgentId
+if (-not (Invoke-PythonClient -SessionId "66666666-6666-6666-6666-666666666666" -Token $tokenC -ExpectedMarker $agentC.Marker)) {
+    Show-DiagnosticsAndFail "Agent C should still work while agent B is offline."
 }
 
-Write-Host "`nExplicit-agent WireGuard TDD test passed." -ForegroundColor Green
+Start-AgentContainer -ContainerName $agentB.RuntimeContainer -ConfigPath $agentB.ConfigPath -Message $agentB.Marker
+Wait-AgentOnline -AgentId $agentB.AgentId -AppToken $appToken -TimeoutSeconds 45
+
+$reconnectToken = Get-ForwardToken -SessionId "77777777-7777-7777-7777-777777777777" -AgentId $agentB.AgentId
+if (-not (Invoke-PythonClient -SessionId "77777777-7777-7777-7777-777777777777" -Token $reconnectToken -ExpectedMarker $agentB.Marker)) {
+    Show-DiagnosticsAndFail "Agent B should work again after reconnect."
+}
+
+Write-Host "`nDynamic enrollment multi-agent WireGuard test passed." -ForegroundColor Green
 
 if (-not $KeepRunning) {
     Stop-TestEnvironment

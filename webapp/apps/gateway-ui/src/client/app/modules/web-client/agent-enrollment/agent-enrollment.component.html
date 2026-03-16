@@ -1,0 +1,52 @@
+<div class="agent-enrollment-page">
+  <h2>Agent Enrollment</h2>
+  <p class="summary">
+    Generate a one-time enrollment string for a new Gateway agent.
+  </p>
+
+  <div class="form-grid">
+    <label>
+      <span>Agent Name</span>
+      <input type="text" [(ngModel)]="requestedName" placeholder="branch-office-agent" />
+    </label>
+
+    <label>
+      <span>WireGuard Host</span>
+      <input type="text" [(ngModel)]="wireguardHost" placeholder="gateway.example.com" />
+    </label>
+
+    <label>
+      <span>Token Lifetime (seconds)</span>
+      <input type="number" [(ngModel)]="lifetimeSeconds" min="60" max="86400" />
+    </label>
+  </div>
+
+  <div class="actions">
+    <button type="button" (click)="submit()" [disabled]="isSubmitting">
+      {{ isSubmitting ? 'Generating...' : 'Generate Enrollment String' }}
+    </button>
+  </div>
+
+  <p *ngIf="errorMessage" class="error">{{ errorMessage }}</p>
+
+  <div *ngIf="enrollment" class="result-card">
+    <div class="result-header">
+      <h3>Enrollment String</h3>
+      <button type="button" (click)="copy(enrollment.enrollmentString)">Copy</button>
+    </div>
+    <textarea readonly [value]="enrollment.enrollmentString"></textarea>
+
+    <div class="result-header">
+      <h3>Bootstrap Command</h3>
+      <button type="button" (click)="copy(enrollment.enrollmentCommand)">Copy</button>
+    </div>
+    <textarea readonly [value]="enrollment.enrollmentCommand"></textarea>
+
+    <p class="meta">
+      WireGuard endpoint: <code>{{ enrollment.wireguardEndpoint }}</code>
+    </p>
+    <p class="meta">
+      Expires at (unix): <code>{{ enrollment.expiresAtUnix }}</code>
+    </p>
+  </div>
+</div>

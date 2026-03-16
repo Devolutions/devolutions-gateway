@@ -27,6 +27,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
             .route("/client", get(get_client))
             .route("/client/{*path}", get(get_client))
             .route("/app-token", post(sign_app_token))
+            .route("/agent-enrollment-string", post(create_agent_enrollment_string))
             .route("/session-token", post(sign_session_token))
     } else {
         Router::new()
@@ -271,6 +272,27 @@ pub(crate) struct SessionTokenSignRequest {
     lifetime: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentEnrollmentStringRequest {
+    #[serde(default)]
+    name: Option<String>,
+    api_base_url: String,
+    #[serde(default)]
+    wireguard_host: Option<String>,
+    #[serde(default)]
+    lifetime: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentEnrollmentStringResponse {
+    enrollment_string: String,
+    enrollment_command: String,
+    wireguard_endpoint: String,
+    expires_at_unix: u64,
+}
+
 /// Requests a session token using a web application token
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -459,6 +481,76 @@ pub(crate) async fn sign_session_token(
     Ok(response)
 }
 
+pub(crate) async fn create_agent_enrollment_string(
+    State(DgwState {
+        conf_handle,
+        enrollment_store,
+        ..
+    }): State<DgwState>,
+    WebAppToken(web_app_token): WebAppToken,
+    Json(req): Json<AgentEnrollmentStringRequest>,
+) -> Result<Json<AgentEnrollmentStringResponse>, HttpError> {
+    use base64::Engine as _;
+
+    const DEFAULT_LIFETIME_SECS: u64 = 3600;
+    const MAXIMUM_LIFETIME_SECS: u64 = 86400;
+
+    let enrollment_store = enrollment_store
+        .as_ref()
+        .ok_or_else(|| HttpError::internal().msg("enrollment store is not available"))?;
+    let conf = conf_handle.get_conf();
+    ensure_enabled(&conf)?;
+    let wireguard_conf = conf
+        .wireguard
+        .as_ref()
+        .ok_or_else(|| HttpError::internal().msg("wireguard is not enabled"))?;
+    let api_base_url =
+        url::Url::parse(&req.api_base_url).map_err(HttpError::bad_request().with_msg("invalid apiBaseUrl").err())?;
+    let wireguard_host = req
+        .wireguard_host
+        .filter(|host| !host.trim().is_empty())
+        .unwrap_or_else(|| api_base_url.host_str().unwrap_or(conf.hostname.as_str()).to_owned());
+    let wireguard_endpoint = format!("{wireguard_host}:{}", wireguard_conf.port);
+    let lifetime_secs = req
+        .lifetime
+        .map(|value| value.min(MAXIMUM_LIFETIME_SECS))
+        .unwrap_or(DEFAULT_LIFETIME_SECS);
+    let issued = enrollment_store
+        .issue_token(req.name.clone(), Duration::from_secs(lifetime_secs))
+        .map_err(HttpError::internal().with_msg("issue enrollment token").err())?;
+
+    let payload = AgentEnrollmentStringPayload {
+        version: 1,
+        api_base_url: api_base_url.to_string(),
+        wireguard_endpoint: wireguard_endpoint.clone(),
+        enrollment_token: issued.token,
+    };
+    let payload_json =
+        serde_json::to_vec(&payload).map_err(HttpError::internal().with_msg("serialize enrollment payload").err())?;
+    let enrollment_string = format!(
+        "dgw-enroll:v1:{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json)
+    );
+    let enrollment_command = format!(
+        "devolutions-gateway-agent enroll --enrollment-string \"{enrollment_string}\" --config agent-config.toml"
+    );
+
+    info!(
+        user = web_app_token.sub,
+        requested_name = ?req.name,
+        expires_at_unix = issued.expires_at_unix,
+        wireguard_endpoint = %wireguard_endpoint,
+        "Issued an agent enrollment string"
+    );
+
+    Ok(Json(AgentEnrollmentStringResponse {
+        enrollment_string,
+        enrollment_command,
+        wireguard_endpoint,
+        expires_at_unix: issued.expires_at_unix,
+    }))
+}
+
 async fn get_client<ReqBody>(
     State(DgwState { conf_handle, .. }): State<DgwState>,
     path: Option<extract::Path<String>>,
@@ -501,6 +593,15 @@ fn extract_conf(conf: &crate::config::Conf) -> Result<&WebAppConf, HttpError> {
         .enabled
         .then_some(&conf.web_app)
         .ok_or_else(|| HttpError::internal().msg("standalone web application not enabled"))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentEnrollmentStringPayload {
+    version: u8,
+    api_base_url: String,
+    wireguard_endpoint: String,
+    enrollment_token: String,
 }
 
 fn ensure_enabled(conf: &crate::config::Conf) -> Result<(), HttpError> {

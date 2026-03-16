@@ -78,6 +78,11 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         path: "/jet/webapp",
         exact_match: true,
     },
+    AuthException {
+        method: Method::POST,
+        path: "/jet/agents/enroll",
+        exact_match: true,
+    },
     // -- Recording Player -- //
     AuthException {
         method: Method::GET,

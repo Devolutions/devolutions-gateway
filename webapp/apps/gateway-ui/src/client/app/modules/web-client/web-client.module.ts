@@ -43,14 +43,20 @@ import { JpegQualityLevelControlComponent } from './form/form-controls/jpeg-qual
 import { ResolutionQualityControlComponent } from './form/form-controls/resolution-quality-control/resolution-quality-control.component';
 import { UltraVirtualDisplayControlComponent } from './form/form-controls/ultra-virtual-display-control/ultra-virtual-display-control.component';
 import { AgentSelectorControlComponent } from './form/form-controls/agent-selector-control/agent-selector-control.component';
+import { AgentEnrollmentComponent } from './agent-enrollment/agent-enrollment.component';
 import { NetScanComponent } from './net-scan/net-scan.component';
 import { WebClientRdpComponent } from './rdp/web-client-rdp.component';
 import { WebClientComponent } from './web-client.component';
 
 const routes: Routes = [
   {
+    path: 'agents',
+    component: AgentEnrollmentComponent,
+  },
+  {
     path: '',
     component: WebClientComponent,
+    pathMatch: 'full',
     resolve: {
       wasmInit: WasmInitResolver,
     },
@@ -103,6 +109,7 @@ const routes: Routes = [
     ResolutionQualityControlComponent,
     ArdQualityModeControlComponent,
     AgentSelectorControlComponent,
+    AgentEnrollmentComponent,
     TabViewComponent,
     DynamicTabComponent,
     SessionToolbarComponent,

@@ -91,7 +91,18 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
       true,
     );
 
+    const agentsMenuItem: RouterMenuItem = this.createMenuItem(
+      'Agents',
+      '',
+      (): void => {
+        this.navigationService.navigateToPath('/session/agents').then(noop);
+      },
+      (url: string) => url.startsWith('/session/agents'),
+      true,
+    );
+
     this.mainMenus.set('Sessions', sessionsMenuItem);
+    this.mainMenus.set('Agents', agentsMenuItem);
   }
 
   private createMenuItem(

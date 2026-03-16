@@ -75,6 +75,7 @@ bitflags = "2.9"
 base64 = "0.22"
 ipnetwork = "0.20"
 dashmap = "6.1"
+rand = "0.8"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }

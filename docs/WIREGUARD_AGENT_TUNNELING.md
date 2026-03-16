@@ -400,6 +400,9 @@ pub struct TunnelManager {
 
 #### Gateway配置 (`gateway.json`)
 
+> Historical note: the static `Peers` and `AllowedSubnets` example below is obsolete.
+> The current implementation uses dynamic enrollment for peer identity and runtime route advertisement for subnet ownership.
+
 ```json
 {
     "Listeners": [
@@ -411,16 +414,7 @@ pub struct TunnelManager {
         "Enabled": true,
         "PrivateKeyFile": "C:\\ProgramData\\Devolutions\\Gateway\\wg_private.key",
         "TunnelNetwork": "10.10.0.0/16",
-        "GatewayIp": "10.10.0.1",
-        "Peers": [
-            {
-                "AgentId": "550e8400-e29b-41d4-a716-446655440000",
-                "Name": "Beijing-Office-Agent",
-                "PublicKey": "base64-encoded-public-key",
-                "AssignedIp": "10.10.0.2",
-                "AllowedSubnets": ["192.168.1.0/24", "10.200.0.0/16"]
-            }
-        ]
+        "GatewayIp": "10.10.0.1"
     }
 }
 ```
@@ -532,16 +526,6 @@ pub struct WireGuardConfig {
     pub private_key_file: PathBuf,
     pub tunnel_network: String,  // "10.10.0.0/16"
     pub gateway_ip: Ipv4Addr,    // 10.10.0.1
-    pub peers: Vec<WireGuardPeerConfig>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct WireGuardPeerConfig {
-    pub agent_id: Uuid,
-    pub name: String,
-    pub public_key: String,
-    pub assigned_ip: Ipv4Addr,
-    pub allowed_subnets: Vec<String>,
 }
 ```
 

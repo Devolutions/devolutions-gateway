@@ -41,6 +41,8 @@ pub struct AgentPeer {
     pub agent_id: Uuid,
     /// Friendly name
     pub name: String,
+    /// Agent WireGuard public key
+    pub public_key: wireguard_tunnel::PublicKey,
     /// WireGuard tunnel instance
     pub tunn: Arc<Mutex<Tunn>>,
     /// Agent's assigned tunnel IP
@@ -80,6 +82,7 @@ impl AgentPeer {
         Ok(Self {
             agent_id: config.agent_id,
             name: config.name,
+            public_key: config.public_key,
             tunn: Arc::new(Mutex::new(tunn)),
             assigned_ip: config.assigned_ip,
             local_tunnel_index,
@@ -204,6 +207,7 @@ impl std::fmt::Debug for AgentPeer {
         f.debug_struct("AgentPeer")
             .field("agent_id", &self.agent_id)
             .field("name", &self.name)
+            .field("public_key", &"<redacted>")
             .field("assigned_ip", &self.assigned_ip)
             .field(
                 "advertised_subnets",

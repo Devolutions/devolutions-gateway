@@ -12,10 +12,12 @@ extern crate tracing;
 #[cfg(feature = "openapi")]
 pub mod openapi;
 
+pub mod agent_store;
 pub mod ai;
 pub mod api;
 pub mod config;
 pub mod credential;
+pub mod enrollment_store;
 pub mod extract;
 pub mod generic_client;
 pub mod http;
@@ -62,6 +64,8 @@ pub struct DgwState {
     pub credential_store: credential::CredentialStoreHandle,
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
+    pub agent_store: Option<Arc<agent_store::AgentStore>>,
+    pub enrollment_store: Option<Arc<enrollment_store::EnrollmentTokenStore>>,
     pub wireguard_listener: Option<wireguard::WireGuardHandle>,
 }
 
@@ -102,6 +106,8 @@ impl DgwState {
             traffic_audit_handle,
             credential_store,
             monitoring_state,
+            agent_store: None,
+            enrollment_store: None,
             wireguard_listener: None,
         };
 

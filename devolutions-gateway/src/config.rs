@@ -295,7 +295,6 @@ pub struct WireGuardConf {
     pub private_key: wireguard_tunnel::StaticSecret,
     pub tunnel_network: ipnetwork::Ipv4Network,
     pub gateway_ip: std::net::Ipv4Addr,
-    pub peers: Vec<WireGuardPeerConfig>,
 }
 
 impl fmt::Debug for WireGuardConf {
@@ -306,7 +305,6 @@ impl fmt::Debug for WireGuardConf {
             .field("private_key", &"<redacted>")
             .field("tunnel_network", &self.tunnel_network)
             .field("gateway_ip", &self.gateway_ip)
-            .field("peers", &self.peers)
             .finish()
     }
 }
@@ -369,57 +367,12 @@ impl WireGuardConf {
             );
         }
 
-        // Parse peers
-        let mut peers = Vec::new();
-        for peer_dto in &value.peers {
-            use base64::Engine as _;
-            let public_key_bytes = base64::engine::general_purpose::STANDARD
-                .decode(&peer_dto.public_key)
-                .with_context(|| format!("Failed to decode public key for peer {}", peer_dto.name))?;
-
-            if public_key_bytes.len() != 32 {
-                anyhow::bail!(
-                    "Invalid public key length for peer {}: expected 32 bytes, got {}",
-                    peer_dto.name,
-                    public_key_bytes.len()
-                );
-            }
-
-            let mut pubkey_array = [0u8; 32];
-            pubkey_array.copy_from_slice(&public_key_bytes);
-            let public_key = wireguard_tunnel::PublicKey::from(pubkey_array);
-
-            let assigned_ip: std::net::Ipv4Addr = peer_dto.assigned_ip.parse().with_context(|| {
-                format!(
-                    "Invalid assigned IP for peer {}: {}",
-                    peer_dto.name, peer_dto.assigned_ip
-                )
-            })?;
-
-            if !tunnel_network.contains(assigned_ip) {
-                anyhow::bail!(
-                    "Peer {} assigned IP {} is not within tunnel network {}",
-                    peer_dto.name,
-                    assigned_ip,
-                    tunnel_network
-                );
-            }
-
-            peers.push(WireGuardPeerConfig {
-                agent_id: peer_dto.agent_id,
-                name: peer_dto.name.clone(),
-                public_key,
-                assigned_ip,
-            });
-        }
-
         Ok(Self {
             enabled: value.enabled,
             port: value.port,
             private_key,
             tunnel_network,
             gateway_ip,
-            peers,
         })
     }
 }
@@ -2549,10 +2502,6 @@ pub mod dto {
         /// Gateway's IP address in the tunnel network (e.g., "10.10.0.1")
         #[serde(default = "default_gateway_ip")]
         pub gateway_ip: String,
-
-        /// Configured agent peers
-        #[serde(default)]
-        pub peers: Vec<WireGuardPeerConf>,
     }
 
     fn default_wireguard_port() -> u16 {
@@ -2565,23 +2514,6 @@ pub mod dto {
 
     fn default_gateway_ip() -> String {
         "10.10.0.1".to_owned()
-    }
-
-    /// WireGuard peer (agent) configuration
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct WireGuardPeerConf {
-        /// Agent UUID
-        pub agent_id: Uuid,
-
-        /// Friendly name for the agent
-        pub name: String,
-
-        /// Agent's WireGuard public key (base64-encoded)
-        pub public_key: String,
-
-        /// Agent's assigned IP in the tunnel network (e.g., "10.10.0.2")
-        pub assigned_ip: String,
     }
 }
 
@@ -2608,15 +2540,7 @@ mod tests {
                     "Port": 51820,
                     "PrivateKeyFile": "gateway-wireguard-private-key.txt",
                     "TunnelNetwork": "10.10.0.0/16",
-                    "GatewayIp": "10.10.0.1",
-                    "Peers": [
-                        {
-                            "AgentId": "00000000-0000-0000-0000-000000000001",
-                            "Name": "docker-test-agent",
-                            "PublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-                            "AssignedIp": "10.10.0.2"
-                        }
-                    ]
+                    "GatewayIp": "10.10.0.1"
                 }
             }"#,
         )
@@ -2626,7 +2550,5 @@ mod tests {
         assert!(wireguard.enabled);
         assert_eq!(wireguard.port, 51820);
         assert_eq!(wireguard.gateway_ip, "10.10.0.1");
-        assert_eq!(wireguard.peers.len(), 1);
-        assert_eq!(wireguard.peers[0].name, "docker-test-agent");
     }
 }

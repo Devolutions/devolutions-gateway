@@ -1,5 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context as _, Result};
@@ -15,7 +16,7 @@ use wireguard_tunnel::TunnResult;
 
 use super::peer::{AgentPeer, StreamHandle};
 use super::stream::VirtualTcpStream;
-use crate::config::WireGuardConf;
+use crate::config::{WireGuardConf, WireGuardPeerConfig};
 use crate::target_addr::TargetAddr;
 
 const AGENT_OFFLINE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -107,15 +108,68 @@ impl Drop for StreamIdGuard {
     }
 }
 
+#[derive(Clone)]
+struct WireGuardPeerRegistry {
+    peers: Arc<DashMap<Uuid, Arc<AgentPeer>>>,
+    pubkey_to_agent: Arc<DashMap<[u8; 32], Uuid>>,
+    tunnel_ip_to_agent: Arc<DashMap<Ipv4Addr, Uuid>>,
+    tunnel_index_to_agent: Arc<DashMap<u32, Uuid>>,
+    next_local_tunnel_index: Arc<AtomicU32>,
+}
+
+impl WireGuardPeerRegistry {
+    fn new() -> Self {
+        Self {
+            peers: Arc::new(DashMap::new()),
+            pubkey_to_agent: Arc::new(DashMap::new()),
+            tunnel_ip_to_agent: Arc::new(DashMap::new()),
+            tunnel_index_to_agent: Arc::new(DashMap::new()),
+            next_local_tunnel_index: Arc::new(AtomicU32::new(1)),
+        }
+    }
+
+    fn allocate_local_tunnel_index(&self) -> Result<u32> {
+        let local_tunnel_index = self.next_local_tunnel_index.fetch_add(1, Ordering::Relaxed);
+        anyhow::ensure!(local_tunnel_index != u32::MAX, "local tunnel index space is exhausted");
+        Ok(local_tunnel_index)
+    }
+
+    fn register_peer(&self, peer: Arc<AgentPeer>) {
+        self.next_local_tunnel_index
+            .fetch_max(peer.local_tunnel_index.saturating_add(1), Ordering::Relaxed);
+        self.pubkey_to_agent
+            .insert(wireguard_public_key_bytes(&peer.public_key), peer.agent_id);
+        self.tunnel_ip_to_agent.insert(peer.assigned_ip, peer.agent_id);
+        self.tunnel_index_to_agent
+            .insert(peer.local_tunnel_index, peer.agent_id);
+        self.peers.insert(peer.agent_id, peer);
+    }
+
+    fn remove_peer(&self, agent_id: &Uuid) -> Option<Arc<AgentPeer>> {
+        let (_, peer) = self.peers.remove(agent_id)?;
+        self.pubkey_to_agent
+            .remove(&wireguard_public_key_bytes(&peer.public_key));
+        self.tunnel_ip_to_agent.remove(&peer.assigned_ip);
+        self.tunnel_index_to_agent.remove(&peer.local_tunnel_index);
+        Some(peer)
+    }
+}
+
+fn wireguard_public_key_bytes(public_key: &wireguard_tunnel::PublicKey) -> [u8; 32] {
+    *public_key.as_bytes()
+}
+
 /// Handle for interacting with WireGuard listener
 #[derive(Clone)]
 pub struct WireGuardHandle {
     /// Configured agent peers (agent_id -> peer)
-    peers: Arc<DashMap<Uuid, Arc<AgentPeer>>>,
+    registry: WireGuardPeerRegistry,
     /// UDP socket for WireGuard traffic
     udp_socket: Arc<UdpSocket>,
     /// Gateway's tunnel IP
     gateway_tunnel_ip: Ipv4Addr,
+    /// Gateway's WireGuard private key
+    gateway_private_key: wireguard_tunnel::StaticSecret,
 }
 
 impl WireGuardHandle {
@@ -126,6 +180,7 @@ impl WireGuardHandle {
         targets: &[TargetAddr],
     ) -> Result<(VirtualTcpStream, SocketAddr, TargetAddr)> {
         let peer = self
+            .registry
             .peers
             .get(&agent_id)
             .with_context(|| format!("Agent {} not found", agent_id))?
@@ -230,7 +285,8 @@ impl WireGuardHandle {
 
     /// List all registered agents with their status
     pub fn list_agents(&self) -> Vec<AgentInfo> {
-        self.peers
+        self.registry
+            .peers
             .iter()
             .map(|entry| {
                 let peer = entry.value();
@@ -241,7 +297,8 @@ impl WireGuardHandle {
 
     /// Get information for a specific agent
     pub fn get_agent(&self, agent_id: &Uuid) -> Option<AgentInfo> {
-        self.peers
+        self.registry
+            .peers
             .get(agent_id)
             .map(|peer| AgentInfo::from_peer(agent_id, &peer))
     }
@@ -249,6 +306,7 @@ impl WireGuardHandle {
     /// Find agents that can reach a given IP address
     pub fn find_agents_for_target(&self, target_ip: IpAddr) -> Vec<AgentInfo> {
         let mut agents = self
+            .registry
             .peers
             .iter()
             .filter(|entry| entry.value().is_online(AGENT_OFFLINE_TIMEOUT))
@@ -265,7 +323,8 @@ impl WireGuardHandle {
         // For overlapping subnets, Gateway only uses the latest online winner and must never
         // retry the same connection attempt against another agent. Agent-to-agent fallback only
         // happens after route ownership changes, such as when the current winner goes offline.
-        self.peers
+        self.registry
+            .peers
             .iter()
             .filter(|entry| entry.value().is_online(AGENT_OFFLINE_TIMEOUT))
             .filter_map(|entry| {
@@ -284,6 +343,53 @@ impl WireGuardHandle {
             })
             .max_by_key(|(received_at, _)| *received_at)
             .map(|(_, peer)| peer)
+    }
+
+    pub fn add_peer(&self, peer_config: WireGuardPeerConfig) -> Result<Arc<AgentPeer>> {
+        anyhow::ensure!(
+            !self.registry.peers.contains_key(&peer_config.agent_id),
+            "WireGuard peer {} already exists",
+            peer_config.agent_id
+        );
+        anyhow::ensure!(
+            !self.registry.tunnel_ip_to_agent.contains_key(&peer_config.assigned_ip),
+            "WireGuard tunnel IP {} is already in use",
+            peer_config.assigned_ip
+        );
+
+        let local_tunnel_index = self.registry.allocate_local_tunnel_index()?;
+        let peer = Arc::new(AgentPeer::new(
+            peer_config,
+            self.gateway_private_key.clone(),
+            self.gateway_tunnel_ip,
+            local_tunnel_index,
+        )?);
+
+        self.registry.register_peer(Arc::clone(&peer));
+
+        info!(
+            agent_id = %peer.agent_id,
+            name = %peer.name,
+            assigned_ip = %peer.assigned_ip,
+            local_tunnel_index,
+            "Registered WireGuard peer at runtime"
+        );
+
+        Ok(peer)
+    }
+
+    pub fn remove_peer(&self, agent_id: &Uuid) -> Option<Arc<AgentPeer>> {
+        let peer = self.registry.remove_peer(agent_id)?;
+
+        info!(
+            agent_id = %peer.agent_id,
+            name = %peer.name,
+            assigned_ip = %peer.assigned_ip,
+            local_tunnel_index = peer.local_tunnel_index,
+            "Removed WireGuard peer at runtime"
+        );
+
+        Some(peer)
     }
 }
 
@@ -337,15 +443,7 @@ pub struct WireGuardListener {
     /// UDP socket for WireGuard traffic
     udp_socket: Arc<UdpSocket>,
     /// Configured agent peers (agent_id -> peer)
-    peers: Arc<DashMap<Uuid, Arc<AgentPeer>>>,
-    /// Mapping from agent public key to agent ID
-    #[allow(dead_code)]
-    pubkey_to_agent: Arc<DashMap<[u8; 32], Uuid>>,
-    /// Mapping from tunnel IP to agent ID
-    #[allow(dead_code)]
-    tunnel_ip_to_agent: Arc<DashMap<Ipv4Addr, Uuid>>,
-    /// Mapping from gateway-local tunnel index to agent ID.
-    tunnel_index_to_agent: Arc<DashMap<u32, Uuid>>,
+    registry: WireGuardPeerRegistry,
     /// Gateway's WireGuard private key
     #[allow(dead_code)]
     gateway_private_key: wireguard_tunnel::StaticSecret,
@@ -356,7 +454,11 @@ pub struct WireGuardListener {
 
 impl WireGuardListener {
     /// Initialize and bind the WireGuard listener
-    pub fn init_and_bind(bind_addr: SocketAddr, config: &WireGuardConf) -> Result<(Self, WireGuardHandle)> {
+    pub fn init_and_bind(
+        bind_addr: SocketAddr,
+        config: &WireGuardConf,
+        initial_peers: Vec<WireGuardPeerConfig>,
+    ) -> Result<(Self, WireGuardHandle)> {
         // Bind UDP socket
         let udp_socket = std::net::UdpSocket::bind(bind_addr)
             .with_context(|| format!("Failed to bind WireGuard UDP socket on {}", bind_addr))?;
@@ -365,15 +467,11 @@ impl WireGuardListener {
 
         info!(?bind_addr, "WireGuard listener bound");
 
-        let peers = Arc::new(DashMap::new());
-        let pubkey_to_agent = Arc::new(DashMap::new());
-        let tunnel_ip_to_agent = Arc::new(DashMap::new());
-        let tunnel_index_to_agent = Arc::new(DashMap::new());
+        let registry = WireGuardPeerRegistry::new();
 
         // Initialize peers
-        for (offset, peer_config) in config.peers.iter().enumerate() {
-            let local_tunnel_index =
-                u32::try_from(offset + 1).context("too many WireGuard peers configured for local index allocation")?;
+        for peer_config in initial_peers {
+            let local_tunnel_index = registry.allocate_local_tunnel_index()?;
             let peer = AgentPeer::new(
                 peer_config.clone(),
                 config.private_key.clone(),
@@ -392,23 +490,19 @@ impl WireGuardListener {
             // For now, we identify peers by endpoint or tunnel IP
             // TODO: Implement proper WireGuard packet header parsing for peer identification
 
-            tunnel_ip_to_agent.insert(peer.assigned_ip, peer.agent_id);
-            tunnel_index_to_agent.insert(local_tunnel_index, peer.agent_id);
-            peers.insert(peer.agent_id, Arc::new(peer));
+            registry.register_peer(Arc::new(peer));
         }
 
         let handle = WireGuardHandle {
-            peers: Arc::clone(&peers),
+            registry: registry.clone(),
             udp_socket: Arc::clone(&udp_socket),
             gateway_tunnel_ip: config.gateway_ip,
+            gateway_private_key: config.private_key.clone(),
         };
 
         let listener = Self {
             udp_socket,
-            peers,
-            pubkey_to_agent,
-            tunnel_ip_to_agent,
-            tunnel_index_to_agent,
+            registry,
             gateway_private_key: config.private_key.clone(),
             gateway_tunnel_ip: config.gateway_ip,
         };
@@ -444,7 +538,7 @@ impl WireGuardListener {
     async fn handle_udp_packet(&self, packet: &[u8], peer_addr: SocketAddr, dst: &mut [u8]) -> Result<()> {
         if matches!(parse_wireguard_packet_kind(packet)?, WireGuardPacketKind::HandshakeInit)
             && self.find_peer_by_endpoint(peer_addr).is_none()
-            && self.peers.len() > 1
+            && self.registry.peers.len() > 1
         {
             return self.handle_handshake_init_packet(packet, peer_addr, dst).await;
         }
@@ -542,7 +636,7 @@ impl WireGuardListener {
     }
 
     async fn handle_handshake_init_packet(&self, packet: &[u8], peer_addr: SocketAddr, dst: &mut [u8]) -> Result<()> {
-        for peer_entry in self.peers.iter() {
+        for peer_entry in self.registry.peers.iter() {
             let peer = Arc::clone(peer_entry.value());
             let handshake_response = {
                 let mut tunn = peer.tunn.lock();
@@ -599,8 +693,8 @@ impl WireGuardListener {
 
     /// Handle timer tick (WireGuard keepalives, rekeys, etc.)
     async fn handle_timer(&self, dst: &mut [u8]) -> Result<()> {
-        trace!("Timer tick, processing {} peers", self.peers.len());
-        for peer_entry in self.peers.iter() {
+        trace!("Timer tick, processing {} peers", self.registry.peers.len());
+        for peer_entry in self.registry.peers.iter() {
             let peer = peer_entry.value();
             peer.clear_routes_if_offline(AGENT_OFFLINE_TIMEOUT);
 
@@ -642,7 +736,7 @@ impl WireGuardListener {
     }
 
     fn find_peer_by_endpoint(&self, peer_addr: SocketAddr) -> Option<Arc<AgentPeer>> {
-        for peer_entry in self.peers.iter() {
+        for peer_entry in self.registry.peers.iter() {
             let peer = peer_entry.value();
             let endpoint = *peer.endpoint.read();
             if endpoint == peer_addr {
@@ -654,9 +748,15 @@ impl WireGuardListener {
     }
 
     fn find_peer_by_tunnel_index(&self, local_tunnel_index: u32) -> Option<Arc<AgentPeer>> {
-        self.tunnel_index_to_agent
+        self.registry
+            .tunnel_index_to_agent
             .get(&local_tunnel_index)
-            .and_then(|agent_id| self.peers.get(agent_id.value()).map(|peer| Arc::clone(peer.value())))
+            .and_then(|agent_id| {
+                self.registry
+                    .peers
+                    .get(agent_id.value())
+                    .map(|peer| Arc::clone(peer.value()))
+            })
     }
 
     /// Find peer for incoming packet using endpoint or receiver index.
@@ -671,8 +771,9 @@ impl WireGuardListener {
             return Ok(peer);
         }
 
-        if self.peers.len() == 1 {
+        if self.registry.peers.len() == 1 {
             return self
+                .registry
                 .peers
                 .iter()
                 .next()
@@ -813,7 +914,7 @@ mod tests {
 
         Arc::new(
             AgentPeer::new(
-                crate::config::WireGuardPeerConfig {
+                WireGuardPeerConfig {
                     agent_id,
                     name: name.to_owned(),
                     public_key: wireguard_tunnel::PublicKey::from(&agent_private_key),
@@ -833,17 +934,18 @@ mod tests {
                 .await
                 .expect("test UDP socket should bind"),
         );
-        let peer_map = Arc::new(DashMap::new());
+        let registry = WireGuardPeerRegistry::new();
 
         for peer in peers {
             *peer.last_packet_at.write() = Some(std::time::Instant::now());
-            peer_map.insert(peer.agent_id, peer);
+            registry.register_peer(peer);
         }
 
         WireGuardHandle {
-            peers: peer_map,
+            registry,
             udp_socket,
             gateway_tunnel_ip: Ipv4Addr::new(10, 10, 0, 1),
+            gateway_private_key: wireguard_tunnel::StaticSecret::from([7u8; 32]),
         }
     }
 
@@ -853,20 +955,15 @@ mod tests {
                 .await
                 .expect("test UDP socket should bind"),
         );
-        let peer_map = Arc::new(DashMap::new());
-        let tunnel_index_to_agent = Arc::new(DashMap::new());
+        let registry = WireGuardPeerRegistry::new();
 
         for peer in peers {
-            tunnel_index_to_agent.insert(peer.local_tunnel_index, peer.agent_id);
-            peer_map.insert(peer.agent_id, peer);
+            registry.register_peer(peer);
         }
 
         WireGuardListener {
             udp_socket,
-            peers: peer_map,
-            pubkey_to_agent: Arc::new(DashMap::new()),
-            tunnel_ip_to_agent: Arc::new(DashMap::new()),
-            tunnel_index_to_agent,
+            registry,
             gateway_private_key: wireguard_tunnel::StaticSecret::from([7u8; 32]),
             gateway_tunnel_ip: Ipv4Addr::new(10, 10, 0, 1),
         }
@@ -920,6 +1017,29 @@ mod tests {
             .expect("defused stream ID must stay allocated");
         assert_ne!(next_stream_id, defused_stream_id);
         peer.free_stream_id(defused_stream_id);
+    }
+
+    #[tokio::test]
+    async fn runtime_add_and_remove_peer_updates_registry() {
+        let handle = test_handle(Vec::new()).await;
+        let agent_id = Uuid::new_v4();
+        let private_key = wireguard_tunnel::StaticSecret::from([11u8; 32]);
+        let peer_config = WireGuardPeerConfig {
+            agent_id,
+            name: "runtime-agent".to_owned(),
+            public_key: wireguard_tunnel::PublicKey::from(&private_key),
+            assigned_ip: Ipv4Addr::new(10, 10, 0, 22),
+        };
+
+        let peer = handle.add_peer(peer_config).expect("peer should be added");
+
+        assert_eq!(peer.agent_id, agent_id);
+        assert!(handle.get_agent(&agent_id).is_some());
+
+        let removed = handle.remove_peer(&agent_id).expect("peer should be removed");
+
+        assert_eq!(removed.agent_id, agent_id);
+        assert!(handle.get_agent(&agent_id).is_none());
     }
 
     #[tokio::test]
@@ -985,7 +1105,7 @@ mod tests {
         let secondary_agent_id = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
         let primary_agent = Arc::new(
             AgentPeer::new(
-                crate::config::WireGuardPeerConfig {
+                WireGuardPeerConfig {
                     agent_id: primary_agent_id,
                     name: "agent-a".to_owned(),
                     public_key: wireguard_tunnel::PublicKey::from(&primary_agent_private_key),
@@ -999,7 +1119,7 @@ mod tests {
         );
         let secondary_agent = Arc::new(
             AgentPeer::new(
-                crate::config::WireGuardPeerConfig {
+                WireGuardPeerConfig {
                     agent_id: secondary_agent_id,
                     name: "agent-b".to_owned(),
                     public_key: wireguard_tunnel::PublicKey::from(&secondary_agent_private_key),

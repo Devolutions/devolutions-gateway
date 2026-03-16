@@ -2,8 +2,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use devolutions_gateway::agent_store::AgentStore;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::credential::CredentialStoreHandle;
+use devolutions_gateway::enrollment_store::EnrollmentTokenStore;
 use devolutions_gateway::listener::{GatewayListener, ListenerUrls};
 use devolutions_gateway::log::GatewayLog;
 use devolutions_gateway::recording::recording_message_channel;
@@ -274,15 +276,22 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         config::get_data_dir().join("monitors_cache.json"),
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
+    let agent_store = Arc::new(AgentStore::load_default().context("failed to load wireguard agent store")?);
+    let enrollment_store =
+        Arc::new(EnrollmentTokenStore::load_default().context("failed to load enrollment token store")?);
 
     // Initialize WireGuard listener if enabled
     let wireguard_listener = if let Some(wg_conf) = &conf.wireguard {
         if wg_conf.enabled {
+            let initial_peers = agent_store
+                .peer_configs()
+                .context("failed to load enrolled WireGuard peers from store")?;
+
             info!("Initializing WireGuard listener on port {}", wg_conf.port);
             let bind_addr =
                 std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), wg_conf.port);
             let (listener, handle) =
-                devolutions_gateway::wireguard::WireGuardListener::init_and_bind(bind_addr, wg_conf)
+                devolutions_gateway::wireguard::WireGuardListener::init_and_bind(bind_addr, wg_conf, initial_peers)
                     .context("Failed to initialize WireGuard listener")?;
             tasks.register(listener);
             Some(handle)
@@ -305,6 +314,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         credential_store: credential_store.clone(),
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
+        agent_store: Some(agent_store),
+        enrollment_store: Some(enrollment_store),
         wireguard_listener,
     };
 

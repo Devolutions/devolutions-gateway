@@ -246,6 +246,7 @@ This distinction is intentional:
 +----+------------------------------------------+--------------------------------------------+------------------------------------------+--------------------------------------------------+
 | ID | E2E 测试名称                             | Docker / 网络布局                           | 操作                                     | 预期结果                                         |
 +----+------------------------------------------+--------------------------------------------+------------------------------------------+--------------------------------------------------+
+| E0 | 单 Agent dynamic enrollment 基本通路     | Gateway + enrolled Docker agent + http target | UI/API 生成 enrollment string -> agent enroll -> run | 返回 "Hello from Agent Container!"      |
 | E1 | 单 Agent 动态 advertise 基本通路         | Gateway + agent-a + http-a                 | 请求 tcp://10.200.1.10:8080              | 返回 "Hello from Agent A"                        |
 | E2 | 双 Agent 首包识别                        | Gateway + agent-a + agent-b                | 先起 A，再起 B                           | Gateway 能识别 B，B 进入 online + advertised     |
 | E3 | 未指定 agent 不自动走隧道                | Gateway + agent-a                           | token 不带 `jet_agent_id`，请求同一目标   | 请求失败，不会偷偷命中 agent                     |
