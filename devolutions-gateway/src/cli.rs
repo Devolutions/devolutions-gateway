@@ -93,13 +93,23 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> anyhow::Result<CliArgs>
     }
 
     let action = match raw.first.as_deref() {
-        Some("--service") => CliAction::Run { service_mode: true },
+        Some("--service") => {
+            if let Some(arg) = raw.second {
+                anyhow::bail!("unexpected argument: {arg}");
+            }
+            CliAction::Run { service_mode: true }
+        }
         Some("service") => match raw.second.as_deref() {
             Some("register") => CliAction::RegisterService,
             Some("unregister") => CliAction::UnregisterService,
             _ => CliAction::ShowHelp,
         },
-        Some("--config-init-only") => CliAction::ConfigInitOnly,
+        Some("--config-init-only") => {
+            if let Some(arg) = raw.second {
+                anyhow::bail!("unexpected argument: {arg}");
+            }
+            CliAction::ConfigInitOnly
+        }
         None => CliAction::Run { service_mode: false },
         Some(_) => CliAction::ShowHelp,
     };
@@ -197,6 +207,18 @@ mod tests {
     #[test]
     fn extra_positional_arg_is_error() {
         let err = parse_args(["service", "register", "extra"].iter().map(|s| s.to_string()));
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn service_flag_with_extra_arg_is_error() {
+        let err = parse_args(["--service", "extra"].iter().map(|s| s.to_string()));
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn config_init_only_with_extra_arg_is_error() {
+        let err = parse_args(["--config-init-only", "extra"].iter().map(|s| s.to_string()));
         assert!(err.is_err());
     }
 }
