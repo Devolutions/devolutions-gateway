@@ -52,7 +52,9 @@ pub fn print_help(executable: &str) {
 /// is consumed from the iterator here and is needed by [`print_help`].
 pub fn parse_args_from_env() -> anyhow::Result<(String, CliArgs)> {
     let mut env_args = std::env::args();
-    let executable = env_args.next().context("executable name is missing from the environment")?;
+    let executable = env_args
+        .next()
+        .context("executable name is missing from the environment")?;
     let cli_args = parse_args(env_args)?;
     Ok((executable, cli_args))
 }
