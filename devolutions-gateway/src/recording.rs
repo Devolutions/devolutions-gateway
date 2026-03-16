@@ -45,15 +45,15 @@ struct JrecManifest {
 }
 
 impl JrecManifest {
-    fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let json = std::fs::read(path)?;
+    async fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let json = fs::read(path).await?;
         let manifest = serde_json::from_slice(&json)?;
         Ok(manifest)
     }
 
-    fn save_to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+    async fn save_to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
         let json = serde_json::to_string_pretty(&self)?;
-        std::fs::write(path, json)?;
+        fs::write(path, json).await?;
         Ok(())
     }
 }
@@ -494,7 +494,7 @@ impl RecordingManagerTask {
             debug!(path = %recording_path, "Recording directory already exists");
 
             let mut existing_manifest =
-                JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
+                JrecManifest::read_from_file(&manifest_path).await.context("read manifest from disk")?;
             let next_file_idx = existing_manifest.files.len();
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -510,6 +510,7 @@ impl RecordingManagerTask {
 
             existing_manifest
                 .save_to_file(&manifest_path)
+                .await
                 .context("override existing manifest")?;
 
             (existing_manifest, recording_file)
@@ -539,6 +540,7 @@ impl RecordingManagerTask {
 
             initial_manifest
                 .save_to_file(&manifest_path)
+                .await
                 .context("write initial manifest to disk")?;
 
             (initial_manifest, recording_file)
@@ -616,6 +618,7 @@ impl RecordingManagerTask {
         ongoing
             .manifest
             .save_to_file(&ongoing.manifest_path)
+            .await
             .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
 
         // Notify all the streamers that recording has ended.
