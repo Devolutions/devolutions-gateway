@@ -157,6 +157,15 @@ export class ApiService {
     );
   }
 
+  deleteAgent(agentId: string): Observable<void> {
+    return this.http.delete<void>(`${this.agentsApiURL}/${agentId}`).pipe(
+      catchError((error) => {
+        console.error(`Failed to delete agent ${agentId}`, error);
+        return throwError(() => new Error(`Failed to delete agent ${agentId}`));
+      }),
+    );
+  }
+
   generateAgentEnrollmentString(
     request: AgentEnrollmentStringRequest,
   ): Observable<AgentEnrollmentStringResponse> {
@@ -167,7 +176,12 @@ export class ApiService {
     }).pipe(
       catchError((error) => {
         console.error('Failed to generate agent enrollment string', error);
-        return throwError(() => new Error('Failed to generate agent enrollment string'));
+        const message =
+          error?.error?.message ||
+          error?.error?.error ||
+          error?.message ||
+          'Failed to generate agent enrollment string';
+        return throwError(() => new Error(message));
       }),
     );
   }

@@ -4,6 +4,28 @@
   margin-bottom: 4px;
 }
 
+.menu-list-item-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 25px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-list-item-button--selected {
+  font-weight: 600;
+}
+
+.menu-list-item-button--icon-only {
+  justify-content: center;
+}
+
 :host-context(.menu-group-list-item.hasHeader) {
   .menu-list-label .menu-label {
     font-weight: 400;

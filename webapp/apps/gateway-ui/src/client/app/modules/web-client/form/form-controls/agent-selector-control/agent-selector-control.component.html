@@ -1,8 +1,10 @@
 <div [formGroup]="parentForm" *ngIf="showAgentSelector">
   <label for="agentId">Route through Agent (Optional)</label>
   <div class="gateway-form-input">
-    <p-dropdown
+    <p-select
       id="agentId"
+      appendTo="body"
+      class="full-width-dropdown"
       [options]="agents"
       formControlName="agentId"
       optionLabel="name"
@@ -25,7 +27,7 @@
           </div>
         </div>
       </ng-template>
-    </p-dropdown>
+    </p-select>
   </div>
   <div class="form-helper-text">
     Select an agent explicitly to route the connection through a private network.

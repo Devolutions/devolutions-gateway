@@ -1,12 +1,94 @@
 .agent-enrollment-page {
   display: flex;
   flex-direction: column;
+  gap: 1.25rem;
+  max-width: 1100px;
+  margin: 2rem auto 0;
+  padding: 0 1.5rem;
+}
+
+.hero-card,
+.generator-card,
+.result-card,
+.agents-card {
+  border: 1px solid #d8dee7;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.hero-card {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
   gap: 1rem;
-  max-width: 960px;
+  padding: 1.5rem;
+  background:
+    linear-gradient(135deg, rgba(28, 110, 242, 0.08), transparent 60%),
+    linear-gradient(180deg, #ffffff, #f8fafc);
+}
+
+.hero-copy h2,
+.card-header h3,
+.result-header h3 {
+  margin: 0;
+}
+
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.eyebrow,
+.result-kicker {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1c6ef2;
 }
 
 .summary {
   margin: 0;
+  color: #445066;
+  line-height: 1.5;
+}
+
+.hero-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-self: stretch;
+  justify-content: center;
+  padding: 1rem;
+  border-radius: 0.875rem;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.hero-note span {
+  line-height: 1.5;
+}
+
+.generator-card,
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.card-header p {
+  margin: 0.25rem 0 0;
+  color: #576277;
 }
 
 .form-grid {
@@ -21,18 +103,43 @@ label {
   gap: 0.5rem;
 }
 
+label span {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #6b7a90;
+  line-height: 1.4;
+}
+
 input,
 textarea {
   width: 100%;
   border: 1px solid #cfd6df;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.85rem 0.9rem;
   font: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: #1c6ef2;
+  box-shadow: 0 0 0 3px rgba(28, 110, 242, 0.15);
 }
 
 textarea {
-  min-height: 7rem;
+  min-height: 8rem;
   resize: vertical;
+  font-family:
+    'Cascadia Code',
+    'Consolas',
+    monospace;
+  line-height: 1.45;
 }
 
 .actions {
@@ -41,44 +148,214 @@ textarea {
 
 button {
   border: 0;
-  border-radius: 0.5rem;
-  background: #1c6ef2;
-  color: #fff;
+  border-radius: 0.75rem;
   cursor: pointer;
   font: inherit;
-  padding: 0.75rem 1rem;
+  font-weight: 600;
+  padding: 0.85rem 1.1rem;
+  transition: transform 120ms ease, opacity 120ms ease, background-color 120ms ease;
+}
+
+button:hover:not([disabled]) {
+  transform: translateY(-1px);
 }
 
 button[disabled] {
   cursor: wait;
-  opacity: 0.7;
+  opacity: 0.72;
 }
 
-.result-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px solid #d8dee7;
-  border-radius: 0.75rem;
-  background: #fff;
+.primary-action,
+.copy-action {
+  background: #1c6ef2;
+  color: #fff;
+}
+
+.copy-action.secondary {
+  background: #e8eef9;
+  color: #163869;
+}
+
+.results-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1.2fr 1fr;
+}
+
+.result-card--primary {
+  background:
+    linear-gradient(180deg, #ffffff, #f7fbff);
 }
 
 .result-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 1rem;
 }
 
-.result-header h3 {
-  margin: 0;
-}
-
+.steps,
 .meta,
 .error {
   margin: 0;
 }
 
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-left: 1.2rem;
+  color: #445066;
+}
+
+.meta-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #445066;
+}
+
+.meta span {
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .error {
   color: #c62828;
+  font-weight: 600;
+}
+
+// Agent list
+.agents-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.refresh-action {
+  background: #e8eef9;
+  color: #163869;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+}
+
+.empty-state {
+  color: #6b7a90;
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.agent-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+}
+
+.agent-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.agent-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+  text-transform: capitalize;
+  background: #fef3c7;
+  color: #92400e;
+
+  &.online {
+    background: #d1fae5;
+    color: #065f46;
+  }
+
+  &.offline {
+    background: #e5e7eb;
+    color: #4b5563;
+  }
+}
+
+.agent-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.detail-label {
+  color: #6b7a90;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: #1f2937;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.82rem;
+}
+
+.agent-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.delete-action {
+  background: transparent;
+  color: #c62828;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.8rem;
+
+  &:hover {
+    background: #fef2f2;
+  }
+}
+
+code {
+  font-family:
+    'Cascadia Code',
+    'Consolas',
+    monospace;
+}
+
+@media (max-width: 900px) {
+  .hero-card,
+  .results-grid {
+    grid-template-columns: 1fr;
+  }
 }

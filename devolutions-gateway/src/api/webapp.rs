@@ -531,9 +531,8 @@ pub(crate) async fn create_agent_enrollment_string(
         "dgw-enroll:v1:{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json)
     );
-    let enrollment_command = format!(
-        "devolutions-gateway-agent enroll --enrollment-string \"{enrollment_string}\" --config agent-config.toml"
-    );
+    let enrollment_command =
+        format!("devolutions-gateway-agent enroll --enrollment-string \"{enrollment_string}\"");
 
     info!(
         user = web_app_token.sub,

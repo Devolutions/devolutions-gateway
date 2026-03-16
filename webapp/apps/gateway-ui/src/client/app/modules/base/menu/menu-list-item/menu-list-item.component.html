@@ -1,4 +1,12 @@
-<i *ngIf="icon" class="dvl-icon" [ngClass]="icon"></i>
-<div class="menu-list-label">
-  <span class="menu-label" [pTooltip]="label" tooltipEllipsis>{{ label }}</span>
-</div>
+<button
+  type="button"
+  class="menu-list-item-button"
+  [class.menu-list-item-button--selected]="item?.selected"
+  [class.menu-list-item-button--icon-only]="iconOnly"
+  (click)="onClick()"
+>
+  <i *ngIf="icon" class="dvl-icon" [ngClass]="icon"></i>
+  <div class="menu-list-label">
+    <span class="menu-label" [pTooltip]="label" tooltipEllipsis>{{ label }}</span>
+  </div>
+</button>

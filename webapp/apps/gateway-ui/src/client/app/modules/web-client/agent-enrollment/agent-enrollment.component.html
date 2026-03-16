@@ -1,52 +1,154 @@
 <div class="agent-enrollment-page">
-  <h2>Agent Enrollment</h2>
-  <p class="summary">
-    Generate a one-time enrollment string for a new Gateway agent.
-  </p>
+  <!-- Agent List -->
+  <div class="agents-card">
+    <div class="card-header">
+      <div>
+        <h3>Registered Agents</h3>
+        <p>Agents currently enrolled with this Gateway.</p>
+      </div>
+      <button type="button" class="refresh-action" (click)="refreshAgents()" [disabled]="isLoadingAgents">
+        {{ isLoadingAgents ? 'Loading…' : 'Refresh' }}
+      </button>
+    </div>
 
-  <div class="form-grid">
-    <label>
-      <span>Agent Name</span>
-      <input type="text" [(ngModel)]="requestedName" placeholder="branch-office-agent" />
-    </label>
+    <p *ngIf="agentsError" class="error">{{ agentsError }}</p>
 
-    <label>
-      <span>WireGuard Host</span>
-      <input type="text" [(ngModel)]="wireguardHost" placeholder="gateway.example.com" />
-    </label>
+    <div *ngIf="!isLoadingAgents && agents.length === 0 && !agentsError" class="empty-state">
+      No agents enrolled yet. Use the form below to generate an enrollment command.
+    </div>
 
-    <label>
-      <span>Token Lifetime (seconds)</span>
-      <input type="number" [(ngModel)]="lifetimeSeconds" min="60" max="86400" />
-    </label>
+    <div *ngIf="agents.length > 0" class="agent-grid">
+      <div *ngFor="let agent of agents" class="agent-card">
+        <div class="agent-card-header">
+          <span class="agent-name">{{ agent.name }}</span>
+          <span class="status-badge" [class.online]="agent.status === 'online'" [class.offline]="agent.status === 'offline'">
+            {{ agent.status }}
+          </span>
+        </div>
+        <div class="agent-details">
+          <div class="detail-row">
+            <span class="detail-label">IP</span>
+            <code class="detail-value">{{ agent.assigned_ip }}</code>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Subnets</span>
+            <span class="detail-value">{{ agent.advertised_subnets.length > 0 ? agent.advertised_subnets.join(', ') : '(none)' }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Streams</span>
+            <span class="detail-value">{{ agent.active_streams }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Last seen</span>
+            <span class="detail-value">{{ formatLastSeen(agent.last_advertised_at) }}</span>
+          </div>
+        </div>
+        <div class="agent-card-actions">
+          <button type="button" class="delete-action" (click)="deleteAgent(agent)">Delete</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="actions">
-    <button type="button" (click)="submit()" [disabled]="isSubmitting">
-      {{ isSubmitting ? 'Generating...' : 'Generate Enrollment String' }}
-    </button>
+  <!-- Enrollment Form -->
+  <div class="hero-card">
+    <div class="hero-copy">
+      <p class="eyebrow">Dynamic Enrollment</p>
+      <h2>Provision a new agent in one step</h2>
+      <p class="summary">
+        Generate a one-time bootstrap command that writes <code>agent-config.toml</code> automatically.
+      </p>
+    </div>
+    <div class="hero-note">
+      <strong>Typical flow</strong>
+      <span>Generate the command here, paste it on the target machine, then run <code>devolutions-gateway-agent run</code>.</span>
+    </div>
+  </div>
+
+  <div class="generator-card">
+    <div class="card-header">
+      <div>
+        <h3>Agent details</h3>
+        <p>Choose the public WireGuard host that the agent machine will actually reach.</p>
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <label>
+        <span>API Base URL</span>
+        <small class="field-hint">HTTP(S) address the agent will call to complete enrollment (e.g. the Gateway's listener URL reachable from the agent machine).</small>
+        <input type="text" [(ngModel)]="apiBaseUrl" placeholder="https://gateway.example.com" />
+      </label>
+
+      <label>
+        <span>WireGuard Host</span>
+        <small class="field-hint">Hostname or IP the agent will use for the WireGuard UDP tunnel. The port is determined by Gateway config.</small>
+        <input type="text" [(ngModel)]="wireguardHost" placeholder="gateway.example.com" />
+      </label>
+
+      <label>
+        <span>Agent Name</span>
+        <small class="field-hint">Optional friendly name for this agent.</small>
+        <input type="text" [(ngModel)]="requestedName" placeholder="branch-office-agent" />
+      </label>
+
+      <label>
+        <span>Token Lifetime (seconds)</span>
+        <small class="field-hint">How long the one-time enrollment token stays valid.</small>
+        <input type="number" [(ngModel)]="lifetimeSeconds" min="60" max="86400" />
+      </label>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="primary-action" (click)="submit()" [disabled]="isSubmitting">
+        {{ isSubmitting ? 'Generating…' : 'Generate Quick Start Command' }}
+      </button>
+    </div>
   </div>
 
   <p *ngIf="errorMessage" class="error">{{ errorMessage }}</p>
 
-  <div *ngIf="enrollment" class="result-card">
-    <div class="result-header">
-      <h3>Enrollment String</h3>
-      <button type="button" (click)="copy(enrollment.enrollmentString)">Copy</button>
+  <div *ngIf="enrollment" class="results-grid">
+    <div class="result-card result-card--primary">
+      <div class="result-header">
+        <div>
+          <p class="result-kicker">Quick Start</p>
+          <h3>Run this on the agent machine</h3>
+        </div>
+        <button type="button" class="copy-action" (click)="copy('command', enrollment.enrollmentCommand)">
+          {{ commandButtonLabel }}
+        </button>
+      </div>
+      <textarea readonly [value]="enrollment.enrollmentCommand"></textarea>
+      <ol class="steps">
+        <li>Paste the command on the target machine.</li>
+        <li>It will write <code>agent-config.toml</code> in the current directory.</li>
+        <li>Start the agent with <code>devolutions-gateway-agent run</code>.</li>
+      </ol>
     </div>
-    <textarea readonly [value]="enrollment.enrollmentString"></textarea>
 
-    <div class="result-header">
-      <h3>Bootstrap Command</h3>
-      <button type="button" (click)="copy(enrollment.enrollmentCommand)">Copy</button>
+    <div class="result-card">
+      <div class="result-header">
+        <div>
+          <p class="result-kicker">Raw Value</p>
+          <h3>Enrollment String</h3>
+        </div>
+        <button type="button" class="copy-action secondary" (click)="copy('string', enrollment.enrollmentString)">
+          {{ stringButtonLabel }}
+        </button>
+      </div>
+      <textarea readonly [value]="enrollment.enrollmentString"></textarea>
+
+      <div class="meta-grid">
+        <p class="meta">
+          <span>WireGuard endpoint</span>
+          <code>{{ enrollment.wireguardEndpoint }}</code>
+        </p>
+        <p class="meta">
+          <span>Expires at (unix)</span>
+          <code>{{ enrollment.expiresAtUnix }}</code>
+        </p>
+      </div>
     </div>
-    <textarea readonly [value]="enrollment.enrollmentCommand"></textarea>
-
-    <p class="meta">
-      WireGuard endpoint: <code>{{ enrollment.wireguardEndpoint }}</code>
-    </p>
-    <p class="meta">
-      Expires at (unix): <code>{{ enrollment.expiresAtUnix }}</code>
-    </p>
   </div>
 </div>

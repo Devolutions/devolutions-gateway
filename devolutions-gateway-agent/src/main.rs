@@ -19,12 +19,16 @@ struct Cli {
     command: Commands,
 }
 
+fn default_agent_config_path() -> PathBuf {
+    PathBuf::from("agent-config.toml")
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Run the agent
     Run {
         /// Path to configuration file
-        #[arg(short, long, value_name = "FILE")]
+        #[arg(short, long, value_name = "FILE", default_value = "agent-config.toml")]
         config: PathBuf,
         /// Additional subnets to advertise to Gateway (repeatable)
         #[arg(long = "advertise-subnet", value_name = "CIDR")]
@@ -105,10 +109,14 @@ async fn main() -> Result<()> {
             println!("\nNext steps:");
             println!("1. Generate keypair: devolutions-gateway-agent keygen");
             println!("2. Edit {} with your settings", output.display());
-            println!(
-                "3. Run agent: devolutions-gateway-agent run --config {}",
-                output.display()
-            );
+            if output == default_agent_config_path() {
+                println!("3. Run agent: devolutions-gateway-agent run");
+            } else {
+                println!(
+                    "3. Run agent: devolutions-gateway-agent run --config {}",
+                    output.display()
+                );
+            }
 
             Ok(())
         }
@@ -189,7 +197,11 @@ async fn main() -> Result<()> {
 
             println!("Agent enrolled successfully.");
             println!("Config written to: {}", config.display());
-            println!("Next step: devolutions-gateway-agent run --config {}", config.display());
+            if config == default_agent_config_path() {
+                println!("Next step: devolutions-gateway-agent run");
+            } else {
+                println!("Next step: devolutions-gateway-agent run --config {}", config.display());
+            }
 
             Ok(())
         }
