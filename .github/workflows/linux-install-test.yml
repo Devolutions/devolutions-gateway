@@ -1,0 +1,210 @@
+name: Linux Install Tests
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PURPOSE:
+#   Smoke-test Linux .deb and .rpm packages produced by the CI workflow.
+#   Catches packaging regressions before release: missing files, broken
+#   installs, service registration issues, configuration initialization
+#   failures, and obvious startup problems.
+#
+# DESIGN:
+#   - Separate reusable workflow (workflow_call + workflow_dispatch + schedule).
+#   - Consumes the merged `devolutions-gateway` artifact from ci.yml.
+#   - Runs package installation tests inside Docker containers on
+#     GitHub-hosted runners (x86_64 only).
+#   - DEB lane: Ubuntu 22.04 container (not 18.04; the package requires
+#     libc6 >= 2.31, which rules out Ubuntu 18.04's glibc 2.27).
+#   - RPM lane: Rocky Linux 9 container (RHEL 9-compatible).
+#   - Tests are split into:
+#       1. Mandatory package smoke tests (must pass).
+#       2. Best-effort systemd service tests (informational only).
+#
+# TRADEOFFS:
+#   - Separate workflow: Keeps the main CI fast; install tests can run
+#     independently or be chained into a release pipeline.
+#   - GitHub-hosted runners: Sufficient for package QA; no self-hosted
+#     infrastructure required.
+#   - Container-based: Close enough to real distros for catching packaging
+#     regressions, though not a perfect replica of production systems.
+#   - RHEL 9-compatible (Rocky Linux 9): Free, widely-used RHEL 9 rebuild;
+#     no exact RHEL version matching is required.
+#   - x86_64 only: GitHub-hosted runners are x86_64; ARM64 packages would
+#     require QEMU or ARM runners, not worth the complexity for v1.
+#   - Service testing is best-effort: systemd inside Docker containers is
+#     unreliable. Full service validation requires a real systemd environment.
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      run-id:
+        description: >
+          CI workflow run ID to download artifacts from.
+          Defaults to the current run ID (for chaining after ci.yml).
+        type: string
+        required: false
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: >
+          CI workflow run ID to download artifacts from.
+          Leave empty to use the latest successful CI run on the default branch.
+        type: string
+        required: false
+  schedule:
+    # Weekly on Monday at 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Resolve CI run ID
+        id: resolve
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Priority:
+          #   1. Explicit input (workflow_dispatch or workflow_call with run-id).
+          #   2. Current run ID (workflow_call without run-id — artifacts
+          #      from the calling workflow persist in the same run).
+          #   3. Latest successful CI run on default branch (schedule trigger).
+
+          RUN_ID="${{ inputs.run-id }}"
+
+          if [ -n "$RUN_ID" ]; then
+            echo "Using provided run ID: $RUN_ID"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Schedule trigger: finding latest successful CI run on default branch…"
+            RUN_ID=$(gh run list \
+              --workflow ci.yml \
+              --status success \
+              --branch "${{ github.event.repository.default_branch }}" \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId' \
+              --repo "$GITHUB_REPOSITORY")
+
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "::error::No successful CI run found on default branch"
+              exit 1
+            fi
+            echo "Found latest successful CI run: $RUN_ID"
+          else
+            RUN_ID="${{ github.run_id }}"
+            echo "Using current run ID: $RUN_ID"
+          fi
+
+          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download version artifact
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ steps.resolve.outputs.run-id }}" \
+            -n version \
+            --repo "$GITHUB_REPOSITORY"
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(head -1 VERSION)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice::Testing packages for version $VERSION from run ${{ steps.resolve.outputs.run-id }}"
+
+  install-test:
+    name: ${{ matrix.display-name }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package-type: deb
+            display-name: "DEB Install Test (Ubuntu 22.04)"
+            container-image: "ubuntu:22.04"
+            test-script: ".github/scripts/deb-install-test.sh"
+            package-glob: "linux/x86_64/*.deb"
+          - package-type: rpm
+            display-name: "RPM Install Test (Rocky Linux 9)"
+            container-image: "rockylinux:9"
+            test-script: ".github/scripts/rpm-install-test.sh"
+            package-glob: "linux/x86_64/*.rpm"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download gateway artifacts
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ needs.preflight.outputs.run-id }}" \
+            -n devolutions-gateway \
+            -D gateway-artifacts \
+            --repo "$GITHUB_REPOSITORY"
+
+      - name: Locate package file
+        id: find-package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_FILE=$(find gateway-artifacts -path '*/${{ matrix.package-glob }}' -type f | head -1)
+
+          if [ -z "$PACKAGE_FILE" ]; then
+            echo "::error::No ${{ matrix.package-type }} package found matching '${{ matrix.package-glob }}'"
+            echo "Available files in gateway-artifacts:"
+            find gateway-artifacts -type f | sort
+            exit 1
+          fi
+
+          echo "Found package: $PACKAGE_FILE"
+          echo "package-file=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"
+          echo "package-basename=$(basename "$PACKAGE_FILE")" >> "$GITHUB_OUTPUT"
+
+      - name: Run install tests in container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          chmod +x "${{ matrix.test-script }}"
+
+          # Strip the gateway-artifacts/ prefix so the path is relative to the mount point.
+          PACKAGE_REL_PATH="${{ steps.find-package.outputs.package-file }}"
+          PACKAGE_IN_CONTAINER="/artifacts/${PACKAGE_REL_PATH#gateway-artifacts/}"
+
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace:ro" \
+            -v "${{ github.workspace }}/gateway-artifacts:/artifacts:ro" \
+            -e "PACKAGE_FILE=$PACKAGE_IN_CONTAINER" \
+            -e "VERSION=${{ needs.preflight.outputs.version }}" \
+            -e "PACKAGE_NAME=devolutions-gateway" \
+            "${{ matrix.container-image }}" \
+            /workspace/${{ matrix.test-script }}
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## ${{ matrix.display-name }}"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| Package | \`${{ steps.find-package.outputs.package-basename }}\` |"
+            echo "| Version | \`${{ needs.preflight.outputs.version }}\` |"
+            echo "| Container | \`${{ matrix.container-image }}\` |"
+            echo "| CI Run | \`${{ needs.preflight.outputs.run-id }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
