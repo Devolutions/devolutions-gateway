@@ -211,5 +211,46 @@ if ($WebScheme -eq 'https' -and
     Remove-Item @($TlsCertificateFile, $TlsPrivateKeyFile) -ErrorAction SilentlyContinue | Out-Null
 }
 
+# -- WireGuard agent tunneling --
+$WireGuardEnabled = $false
+if ($Env:WIREGUARD_ENABLED) {
+    try {
+        $WireGuardEnabled = [bool]::Parse($Env:WIREGUARD_ENABLED)
+    } catch {
+        $WireGuardEnabled = $false
+    }
+}
+
+if ($WireGuardEnabled) {
+    $WgPort = if ($Env:WIREGUARD_PORT) { [int]$Env:WIREGUARD_PORT } else { 51820 }
+    $WgTunnelNetwork = if ($Env:WIREGUARD_TUNNEL_NETWORK) { $Env:WIREGUARD_TUNNEL_NETWORK } else { "10.10.0.0/16" }
+    $WgGatewayIp = if ($Env:WIREGUARD_GATEWAY_IP) { $Env:WIREGUARD_GATEWAY_IP } else { "10.10.0.1" }
+    $WgPrivateKeyFile = "$Env:DGATEWAY_CONFIG_PATH/wireguard-private.key"
+
+    # Generate WireGuard private key if it doesn't exist
+    if (-not (Test-Path $WgPrivateKeyFile)) {
+        Write-Host "Generating WireGuard private key..."
+        $bytes = New-Object byte[] 32
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        $keyBase64 = [Convert]::ToBase64String($bytes)
+        Set-Content -Path $WgPrivateKeyFile -Value $keyBase64 -NoNewline
+    }
+
+    # Patch gateway.json with WireGuard config (PowerShell module doesn't support it yet)
+    $ConfigFile = "$Env:DGATEWAY_CONFIG_PATH/gateway.json"
+    if (Test-Path $ConfigFile) {
+        $json = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+        $json | Add-Member -NotePropertyName 'WireGuard' -NotePropertyValue @{
+            Enabled        = $true
+            Port           = $WgPort
+            PrivateKeyFile = $WgPrivateKeyFile
+            TunnelNetwork  = $WgTunnelNetwork
+            GatewayIp      = $WgGatewayIp
+        } -Force
+        $json | ConvertTo-Json -Depth 10 | Set-Content $ConfigFile
+        Write-Host "WireGuard enabled on UDP port $WgPort (tunnel: $WgTunnelNetwork, gateway IP: $WgGatewayIp)"
+    }
+}
+
 & "$Env:DGATEWAY_EXECUTABLE_PATH"
 [System.Environment]::ExitCode = $LASTEXITCODE

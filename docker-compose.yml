@@ -30,6 +30,10 @@ services:
       # Logging verbosity: Default, Debug, Tls, All, Quiet
       - VERBOSITY_PROFILE=${VERBOSITY_PROFILE:-Default}
 
+      # -- WireGuard Agent Tunneling --
+      # Enable WireGuard listener for agent-based private network routing.
+      - WIREGUARD_ENABLED=true
+
     volumes:
       # Persist session recordings across redeployments.
       - gateway-recordings:/recordings
