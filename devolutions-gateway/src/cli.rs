@@ -21,6 +21,7 @@ pub struct CliArgs {
 }
 
 /// Prints the help text to stdout.
+#[expect(clippy::print_stdout)]
 pub fn print_help(executable: &str) {
     println!(
         r#"HELP:
