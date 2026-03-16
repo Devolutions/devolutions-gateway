@@ -23,19 +23,11 @@ fn config_init_only_prints_json() {
         .success();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
-    // The last line printed is the JSON config; find it.
-    let json_line = stdout
-        .lines()
-        .find(|l| l.trim_start().starts_with('{'))
-        .expect("expected JSON object in stdout");
-
     serde_json::from_str::<serde_json::Value>(
         // The JSON spans multiple lines; collect from the first `{` to end.
         &stdout[stdout.find('{').expect("opening brace")..],
     )
     .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout:\n{stdout}"));
-
-    let _ = json_line; // suppress unused warning
 }
 
 /// `--config-path <dir> --config-init-only` must honour the explicit config path.
