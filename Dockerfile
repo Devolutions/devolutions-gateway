@@ -3,12 +3,13 @@
 # =============================================================================
 # Multi-stage build:
 #   1. rust-builder      — compile the gateway binary from source
-#   2. official-image    — extract webapp, libxmf, and PowerShell module from official image
+#   2. official-image    — extract libxmf and PowerShell module from official image
 #   3. runtime           — assemble the final image
 #
-# The gateway binary is built from THIS repo's source code, so any Rust changes
-# on this branch are included. The webapp, libxmf.so, and PowerShell module
-# (with compiled .NET DLLs) come from the official published image.
+# Both the gateway binary AND the webapp are built from THIS repo's source.
+# The webapp must be pre-built locally (pnpm build:gateway) because some
+# dependencies (@devolutions/icons) require private registry authentication.
+# The libxmf.so and PowerShell module come from the official published image.
 # =============================================================================
 
 # Global ARG — must be before any FROM to be usable in FROM lines
@@ -38,7 +39,7 @@ RUN cargo build --release --package devolutions-gateway \
     && cp target/release/devolutions-gateway /usr/local/bin/devolutions-gateway
 
 # ---------------------------------------------------------------------------
-# Stage 2: Extract webapp + libxmf from the official image
+# Stage 2: Extract libxmf + PowerShell module from the official image
 # ---------------------------------------------------------------------------
 FROM devolutions/devolutions-gateway:${GATEWAY_VERSION} AS official-image
 
@@ -87,8 +88,10 @@ ENV DGATEWAY_WEBAPP_PATH="/opt/devolutions/gateway/webapp"
 # Gateway binary — built from THIS repo's source code
 COPY --from=rust-builder /usr/local/bin/devolutions-gateway $DGATEWAY_EXECUTABLE_PATH
 
-# Webapp + libxmf — extracted from official image
-COPY --from=official-image /opt/devolutions/gateway/webapp $DGATEWAY_WEBAPP_PATH
+# Webapp — pre-built locally (pnpm build:gateway), output in webapp/dist/gateway-ui/
+COPY webapp/dist/gateway-ui/ /opt/devolutions/gateway/webapp/client/
+
+# libxmf — from official image (native library, not built from source)
 COPY --from=official-image /opt/devolutions/gateway/libxmf.so $DGATEWAY_LIB_XMF_PATH
 
 # PowerShell module — from official image (includes pre-compiled .NET DLLs)
