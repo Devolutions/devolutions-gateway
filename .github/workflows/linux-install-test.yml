@@ -55,6 +55,10 @@ on:
     # Weekly on Monday at 06:00 UTC.
     - cron: "0 6 * * 1"
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   preflight:
     name: Preflight
