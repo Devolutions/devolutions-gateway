@@ -5,7 +5,7 @@
 
 services:
   gateway:
-    image: irvingou/devolutions-gateway:latest
+    image: irvingou/devolutions-gateway:wireguard-v1
     # To build from source instead of using the pre-built image, comment out
     # "image:" above and uncomment the line below:
     # build: .
