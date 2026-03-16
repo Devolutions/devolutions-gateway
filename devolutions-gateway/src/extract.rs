@@ -211,6 +211,28 @@ where
 }
 
 #[derive(Clone, Copy)]
+pub struct AgentManagementWriteAccess;
+
+impl<S> FromRequestParts<S> for AgentManagementWriteAccess
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if ConfigWriteScope::from_request_parts(parts, state).await.is_ok() {
+            return Ok(Self);
+        }
+
+        if WebAppToken::from_request_parts(parts, state).await.is_ok() {
+            return Ok(Self);
+        }
+
+        Err(HttpError::forbidden().msg("invalid scope for route"))
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct JrlReadScope;
 
 impl<S> FromRequestParts<S> for JrlReadScope

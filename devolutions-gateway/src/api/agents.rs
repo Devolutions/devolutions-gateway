@@ -9,7 +9,7 @@ use base64::Engine as _;
 use uuid::Uuid;
 
 use crate::DgwState;
-use crate::extract::{AgentManagementReadAccess, ConfigWriteScope};
+use crate::extract::{AgentManagementReadAccess, AgentManagementWriteAccess};
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::wireguard::AgentInfo;
 
@@ -199,7 +199,7 @@ async fn delete_agent(
         ..
     }): State<DgwState>,
     Path(agent_id): Path<Uuid>,
-    _scope: ConfigWriteScope,
+    _access: AgentManagementWriteAccess,
 ) -> Result<StatusCode, HttpError> {
     let agent_store = agent_store
         .as_ref()

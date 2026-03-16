@@ -20,8 +20,8 @@ export class AgentEnrollmentComponent implements OnInit {
 
   // Enrollment form
   requestedName = '';
-  apiBaseUrl = 'http://192.168.100.1:7272';
-  wireguardHost = '192.168.100.1';
+  apiBaseUrl = window.location.origin;
+  wireguardHost = window.location.hostname;
   lifetimeSeconds = 3600;
   isSubmitting = false;
   enrollment: AgentEnrollmentStringResponse | null = null;
