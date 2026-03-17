@@ -261,33 +261,13 @@ impl TunnelManager {
 
     /// Handle timer tick (WireGuard keepalives, rekeys, etc.)
     async fn handle_timer(&self, dst: &mut [u8]) -> Result<()> {
-        // Collect all packets to send before releasing the lock
-        let packets_to_send = {
+        let packets = {
             let mut tunn = self.tunn.lock();
+            wireguard_tunnel::tunn_manager::handle_timer_tick(&mut tunn, dst)
+                .context("timer tick failed")?
+        };
 
-            // Update timers
-            tunn.update_timers(dst);
-
-            // Flush any output
-            let mut packets = Vec::new();
-            loop {
-                match tunn.decapsulate(None, &[], dst) {
-                    TunnResult::WriteToNetwork(encrypted) => {
-                        packets.push(Bytes::copy_from_slice(encrypted));
-                    }
-                    TunnResult::Done => break,
-                    TunnResult::Err(e) => {
-                        warn!(error = ?e, "Timer tick error");
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            packets
-        }; // Release tunn lock
-
-        // Send packets
-        for packet in packets_to_send {
+        for packet in packets {
             self.udp_socket.send_to(&packet, self.gateway_endpoint).await?;
         }
 

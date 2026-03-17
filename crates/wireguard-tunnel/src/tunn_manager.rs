@@ -115,22 +115,37 @@ pub fn receive_udp_packet(
 /// * `dst_buf` - Destination buffer for output (must be at least 65536 bytes)
 ///
 /// # Returns
-/// Packet to send to peer (if any)
-pub fn handle_timer_tick(tunn: &mut Tunn, dst_buf: &mut [u8]) -> Result<Option<Bytes>> {
-    // Update timers
-    tunn.update_timers(dst_buf);
+/// Packets to send to peer (may include rekey handshake initiations, keepalives, etc.)
+pub fn handle_timer_tick(tunn: &mut Tunn, dst_buf: &mut [u8]) -> Result<Vec<Bytes>> {
+    let mut packets = Vec::new();
 
-    // Flush any output
-    match tunn.decapsulate(None, &[], dst_buf) {
-        TunnResult::WriteToNetwork(encrypted) => Ok(Some(Bytes::copy_from_slice(encrypted))),
-        TunnResult::Done => Ok(None),
-        TunnResult::Err(e) => Err(Error::Boringtun(format!("timer tick error: {:?}", e))),
-        _ => Err(Error::Boringtun("unexpected result during timer tick".to_owned())),
+    // CRITICAL: update_timers may return a packet (keepalive, rekey handshake initiation).
+    // Previously this return value was discarded, causing rekey failures after ~2 minutes.
+    match tunn.update_timers(dst_buf) {
+        TunnResult::WriteToNetwork(data) => packets.push(Bytes::copy_from_slice(data)),
+        TunnResult::Err(e) => return Err(Error::Boringtun(format!("update_timers error: {:?}", e))),
+        TunnResult::Done => {}
+        _ => {}
     }
+
+    // Flush any additional output
+    loop {
+        match tunn.decapsulate(None, &[], dst_buf) {
+            TunnResult::WriteToNetwork(data) => packets.push(Bytes::copy_from_slice(data)),
+            TunnResult::Done => break,
+            TunnResult::Err(e) => return Err(Error::Boringtun(format!("timer flush error: {:?}", e))),
+            _ => {}
+        }
+    }
+
+    Ok(packets)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
+    use std::time::Duration;
+
     use boringtun::x25519::{PublicKey, StaticSecret};
 
     use super::*;
@@ -150,6 +165,72 @@ mod tests {
         let initiator = Tunn::new(initiator_private, responder_public, None, None, 0, None);
 
         let responder = Tunn::new(responder_private, initiator_public, None, None, 0, None);
+
+        (initiator, responder)
+    }
+
+    /// Create a tunnel pair with persistent keepalive and complete the handshake.
+    fn create_handshaked_tunn_pair(keepalive_secs: u16) -> (Tunn, Tunn) {
+        let initiator_private = StaticSecret::from([1u8; 32]);
+        let initiator_public = PublicKey::from(&initiator_private);
+        let responder_private = StaticSecret::from([2u8; 32]);
+        let responder_public = PublicKey::from(&responder_private);
+
+        let mut initiator = Tunn::new(
+            initiator_private,
+            responder_public,
+            None,
+            Some(keepalive_secs),
+            0,
+            None,
+        );
+        let mut responder = Tunn::new(
+            responder_private,
+            initiator_public,
+            None,
+            Some(keepalive_secs),
+            0,
+            None,
+        );
+
+        let mut buf = vec![0u8; 65536];
+        let peer_ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        // Step 1: Initiator encapsulates dummy → produces handshake init
+        let dummy = ip_packet::build_ip_packet(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            &[0u8; 1],
+        )
+        .expect("dummy IP packet");
+
+        let handshake_init = match initiator.encapsulate(&dummy, &mut buf) {
+            TunnResult::WriteToNetwork(data) => data.to_vec(),
+            other => panic!("expected WriteToNetwork for handshake init, got {:?}", other),
+        };
+
+        // Step 2: Responder decapsulates handshake init → produces handshake response
+        let handshake_resp = match responder.decapsulate(Some(peer_ip), &handshake_init, &mut buf) {
+            TunnResult::WriteToNetwork(data) => data.to_vec(),
+            other => panic!("expected WriteToNetwork for handshake response, got {:?}", other),
+        };
+
+        // Step 3: Initiator processes handshake response (completes handshake)
+        initiator.decapsulate(Some(peer_ip), &handshake_resp, &mut buf);
+
+        // Flush both sides
+        loop {
+            match initiator.decapsulate(None, &[], &mut buf) {
+                TunnResult::Done => break,
+                _ => {}
+            }
+        }
+        loop {
+            match responder.decapsulate(None, &[], &mut buf) {
+                TunnResult::Done => break,
+                _ => {}
+            }
+        }
 
         (initiator, responder)
     }
@@ -192,8 +273,28 @@ mod tests {
         let (mut tunn, _) = create_test_tunn_pair();
         let mut dst_buf = vec![0u8; 65536];
 
-        // Timer tick should not fail
-        let result = handle_timer_tick(&mut tunn, &mut dst_buf);
-        assert!(result.is_ok());
+        // Timer tick should not fail and returns a Vec
+        let packets = handle_timer_tick(&mut tunn, &mut dst_buf).expect("should not fail");
+        // Fresh tunnel with no pending handshake produces no packets
+        assert!(packets.is_empty());
+    }
+
+    #[test]
+    fn handle_timer_tick_captures_keepalive_from_update_timers() {
+        // Complete a handshake with persistent_keepalive=1s, wait for the
+        // keepalive timer to fire, then verify handle_timer_tick returns
+        // the keepalive packet (which comes from update_timers, not the
+        // flush loop). Before the fix, this output was silently discarded.
+        let (mut initiator, _responder) = create_handshaked_tunn_pair(1);
+        let mut buf = vec![0u8; 65536];
+
+        // Wait for persistent keepalive timer (1 second + margin)
+        std::thread::sleep(Duration::from_millis(1200));
+
+        let packets = handle_timer_tick(&mut initiator, &mut buf).expect("should not fail");
+        assert!(
+            !packets.is_empty(),
+            "update_timers keepalive output must not be discarded"
+        );
     }
 }

@@ -698,35 +698,15 @@ impl WireGuardListener {
             let peer = peer_entry.value();
             peer.clear_routes_if_offline(AGENT_OFFLINE_TIMEOUT);
 
-            // Collect all packets to send before releasing the lock
-            let mut packets_to_send = Vec::new();
-            {
+            let packets = {
                 let mut tunn = peer.tunn.lock();
+                wireguard_tunnel::tunn_manager::handle_timer_tick(&mut tunn, dst)
+                    .context("timer tick failed")?
+            };
 
-                // Update timers
-                tunn.update_timers(dst);
-
-                // Flush any output
-                loop {
-                    let result = tunn.decapsulate(None, &[], dst);
-                    match result {
-                        TunnResult::WriteToNetwork(encrypted) => {
-                            packets_to_send.push(Bytes::copy_from_slice(encrypted));
-                        }
-                        TunnResult::Done => break,
-                        TunnResult::Err(e) => {
-                            warn!(agent_id = %peer.agent_id, error = ?e, "Timer tick error");
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            } // Release tunn lock
-
-            // Send packets (lock is released)
             let endpoint = *peer.endpoint.read();
             if endpoint.port() != 0 {
-                for packet in packets_to_send {
+                for packet in packets {
                     self.udp_socket.send_to(&packet, endpoint).await?;
                 }
             }
