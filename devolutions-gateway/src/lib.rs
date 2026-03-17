@@ -14,6 +14,7 @@ pub mod openapi;
 
 pub mod ai;
 pub mod api;
+pub mod cli;
 pub mod config;
 pub mod credential;
 pub mod extract;
