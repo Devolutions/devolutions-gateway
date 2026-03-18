@@ -8,5 +8,5 @@ Homepage: https://devolutions.net
 
 Package: devolutions-gateway
 Architecture: {{ arch }}
-Depends: libc6 (>= 2.31)
+Depends: libc6 (>= 2.27)
 Description: Blazing fast relay server with desired levels of traffic inspection
