@@ -81,7 +81,3 @@ features = [
   "Win32_Globalization",
 ]
 
-[dev-dependencies]
-test-utils = { path = "../crates/test-utils" }
-tokio = { version = "1.45", features = ["time"] }
-proptest = "1.7"

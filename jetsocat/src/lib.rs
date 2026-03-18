@@ -4,10 +4,6 @@ use humantime as _;
 use seahorse as _;
 use tracing_appender as _;
 use tracing_subscriber as _;
-// Used by tests
-#[cfg(test)]
-use {proptest as _, test_utils as _};
-
 #[macro_use]
 extern crate tracing;
 
