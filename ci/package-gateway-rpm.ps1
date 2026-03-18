@@ -78,8 +78,8 @@ function New-GatewayRpm() {
         "$generatedUpstreamChangelog=/usr/share/doc/devolutions-gateway/ChangeLog"
         "$pkgDir/copyright=/usr/share/doc/devolutions-gateway/copyright"
         "$LibxmfFile=/usr/lib/devolutions-gateway/libxmf.so"
-        "$WebClientDir=/usr/share/devolutions-gateway/webapp"
-        "$WebPlayerDir=/usr/share/devolutions-gateway/webapp"
+        "$WebClientDir=/usr/share/devolutions-gateway/webapp/client"
+        "$WebPlayerDir=/usr/share/devolutions-gateway/webapp/player"
     )
     & 'fpm' @args | Out-Host
 }
