@@ -83,7 +83,7 @@ diagnostics() {
     ls -la "$LIB_DIR/" 2>/dev/null || echo "  (not found)"
     echo ""
     echo "systemd unit files:"
-    UNIT_FILES=$(find /lib/systemd /usr/lib/systemd /etc/systemd -name '*devolutions*' 2>/dev/null)
+    UNIT_FILES=$(find /lib/systemd /usr/lib/systemd /etc/systemd -name '*devolutions*' 2>/dev/null || true)
     if [ -n "$UNIT_FILES" ]; then echo "$UNIT_FILES"; else echo "  (none found)"; fi
     echo "────────────────────────────────────────────────────────────"
 }
