@@ -22,9 +22,6 @@ use tokio_tungstenite as _;
 use transport as _;
 #[cfg(windows)]
 use windows as _;
-// Used by tests
-#[cfg(test)]
-use {proptest as _, test_utils as _};
 #[cfg(feature = "rustls")]
 use {rustls as _, rustls_native_certs as _};
 
