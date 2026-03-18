@@ -35,6 +35,12 @@ name: Linux Install Tests
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
+  # DELETE ME
+  push:
+    branches:
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_call:
     inputs:
       run-id:
