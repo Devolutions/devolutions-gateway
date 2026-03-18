@@ -1157,6 +1157,12 @@ jobs:
           rustup toolchain install nightly
           choco install pstools --yes
 
+      # The Docker service for Windows containers may not be started yet at this point.
+      # Starting it explicitly avoids flaky failures when the daemon is not ready.
+      - name: Start Docker service
+        run: Start-Service docker
+        shell: pwsh
+
       - name: Prepare PEDM simulator build
         run: ./crates/pedm-simulator/prepare.ps1
 
