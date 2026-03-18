@@ -113,7 +113,8 @@ jobs:
             echo "Using current run ID: $RUN_ID"
           fi
 
-          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          # FIXME
+          echo "run-id=23235073993" >> "$GITHUB_OUTPUT"
 
       - name: Download version artifact
         shell: bash
