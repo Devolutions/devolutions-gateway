@@ -21,6 +21,13 @@ jobs:
       ref: ${{ inputs.ref }}
       sccache: false
 
+  # Run Linux install QA against the packages produced by ci.yml before
+  # proceeding with signing and release. Runs in parallel with packaging.
+  call-linux-install-test:
+    needs: [call-ci-workflow]
+    uses: ./.github/workflows/linux-install-test.yml
+    secrets: inherit
+
   call-package-workflow:
     needs: [call-ci-workflow]
     uses: ./.github/workflows/package.yml
@@ -30,7 +37,7 @@ jobs:
 
   call-release-workflow:
     if: ${{ github.ref == 'refs/heads/master' || inputs.dry-run == true }}
-    needs: [call-package-workflow]
+    needs: [call-package-workflow, call-linux-install-test]
     uses: ./.github/workflows/release.yml
     secrets: inherit
     with:

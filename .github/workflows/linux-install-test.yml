@@ -1,0 +1,260 @@
+name: Linux Install Tests
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PURPOSE:
+#   Smoke-test Linux .deb and .rpm packages produced by the CI workflow.
+#   Catches packaging regressions before release: missing files, broken
+#   installs, service registration issues, configuration initialization
+#   failures, and obvious startup problems.
+#
+# DESIGN:
+#   - Separate reusable workflow (workflow_call + workflow_dispatch + schedule).
+#   - Consumes the merged `devolutions-gateway` artifact from ci.yml.
+#   - Runs package installation tests inside Docker containers on
+#     GitHub-hosted runners (x86_64 only).
+#   - DEB lane: Ubuntu 18.04 container (minimum supported distro; the binary
+#     is built against an Ubuntu 18.04 sysroot / glibc 2.27).
+#   - RPM lane: Rocky Linux 9 container (RHEL 9-compatible).
+#   - Tests are split into:
+#       1. Mandatory package smoke tests (must pass).
+#       2. Best-effort systemd service tests (informational only).
+#
+# TRADEOFFS:
+#   - Separate workflow: Keeps the main CI fast; install tests can run
+#     independently or be chained into a release pipeline.
+#   - GitHub-hosted runners: Sufficient for package QA; no self-hosted
+#     infrastructure required.
+#   - Container-based: Close enough to real distros for catching packaging
+#     regressions, though not a perfect replica of production systems.
+#   - RHEL 9-compatible (Rocky Linux 9): Free, widely-used RHEL 9 rebuild;
+#     no exact RHEL version matching is required.
+#   - x86_64 only: GitHub-hosted runners are x86_64; ARM64 packages would
+#     require QEMU or ARM runners, not worth the complexity for v1.
+#   - Service testing is best-effort: systemd inside Docker containers is
+#     unreliable. Full service validation requires a real systemd environment.
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  # Callable from release pipelines (e.g. create-new-release.yml).
+  # The caller may supply an explicit CI run ID; if omitted the shared run
+  # context is used (all workflow_call children share the parent run ID).
+  workflow_call:
+    inputs:
+      run:
+        description: >
+          CI workflow run ID whose package artifacts to test.
+          Leave blank to use the current (shared) run context.
+        type: string
+        required: false
+
+  # Allow ad-hoc manual triggers so engineers can test packages from any
+  # previous CI run without triggering a full rebuild.
+  workflow_dispatch:
+    inputs:
+      run:
+        description: >
+          CI workflow run ID whose package artifacts to test.
+          Leave empty to use the latest successful CI run on the default branch.
+        type: string
+        required: false
+
+  # Weekly scheduled run to catch regressions even when no release is in progress.
+  schedule:
+    - cron: "0 6 * * 1"  # Monday 06:00 UTC
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # ─── Resolve which CI run to pull artifacts from, and read its version ──────
+  #
+  # Priority:
+  #   1. Explicit input (workflow_dispatch or workflow_call with run supplied).
+  #   2. Current run ID when called as workflow_call without explicit input
+  #      (all reusable workflows in a chain share the same top-level run ID,
+  #      so ci.yml artifacts are already in scope).
+  #   3. Latest successful ci.yml run on the default branch (schedule or
+  #      workflow_dispatch without input).
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Resolve CI run ID
+        id: resolve
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $explicitRun = "${{ inputs.run }}"
+
+          if ($explicitRun) {
+            $runId = $explicitRun
+            Write-Host "Using provided run ID: $runId"
+          } elseif ("${{ github.event_name }}" -eq 'workflow_call') {
+            # All reusable workflows in a chain share the parent run ID.
+            $runId = "${{ github.run_id }}"
+            Write-Host "workflow_call: using shared run ID: $runId"
+          } else {
+            # schedule or workflow_dispatch without explicit input.
+            Write-Host "Looking up latest successful ci.yml run on ${{ github.event.repository.default_branch }}..."
+            $runId = gh run list `
+              --workflow ci.yml `
+              --status success `
+              --branch "${{ github.event.repository.default_branch }}" `
+              --limit 1 `
+              --json databaseId `
+              --jq '.[0].databaseId' `
+              --repo $env:GITHUB_REPOSITORY
+
+            if (-not $runId -or $runId -eq 'null') {
+              Write-Host "::error::No successful CI run found on ${{ github.event.repository.default_branch }}"
+              exit 1
+            }
+            Write-Host "Found latest successful CI run: $runId"
+          }
+
+          "run-id=$runId" >> $env:GITHUB_OUTPUT
+
+      - name: Download version artifact
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ steps.resolve.outputs.run-id }}" `
+            -n version `
+            --repo $env:GITHUB_REPOSITORY
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = Get-Content VERSION -First 1
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "::notice::Testing packages for version $version from run ${{ steps.resolve.outputs.run-id }}"
+
+  # ─── DEB and RPM install tests run in parallel via matrix ───────────────────
+  install-test:
+    name: ${{ matrix.display-name }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # DEB lane: Ubuntu 18.04 (minimum supported; built against Ubuntu 18.04 sysroot / glibc 2.27)
+          - package-type: deb
+            display-name: "DEB Install Test (Ubuntu 18.04)"
+            container-image: "ubuntu:18.04"
+            test-script: ".github/scripts/smoke-test-deb.sh"
+            package-pattern: "*.deb"
+          # RPM lane: Rocky Linux 9 (RHEL 9-compatible)
+          - package-type: rpm
+            display-name: "RPM Install Test (Rocky Linux 9)"
+            container-image: "rockylinux:9"
+            test-script: ".github/scripts/smoke-test-rpm.sh"
+            package-pattern: "*.rpm"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download devolutions-gateway artifact
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ needs.preflight.outputs.run-id }}" `
+            -n devolutions-gateway `
+            -D gateway-artifacts `
+            --repo $env:GITHUB_REPOSITORY
+
+      - name: Locate package file
+        id: find-package
+        shell: pwsh
+        run: |
+          $packageFile = Get-ChildItem -Path "gateway-artifacts/linux/x86_64" `
+            -Filter "${{ matrix.package-pattern }}" -File | Select-Object -First 1
+
+          if (-not $packageFile) {
+            Write-Host "::error::No ${{ matrix.package-type }} package found in gateway-artifacts/linux/x86_64"
+            Write-Host "Available files in gateway-artifacts:"
+            Get-ChildItem -Path "gateway-artifacts" -Recurse -File | Sort-Object FullName | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          $packageFilePath = "gateway-artifacts/linux/x86_64/$($packageFile.Name)"
+          Write-Host "Found package: $packageFilePath"
+          "package-file=$packageFilePath" >> $env:GITHUB_OUTPUT
+          "package-basename=$($packageFile.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Run install tests in container
+        id: run-tests
+        shell: pwsh
+        run: |
+          chmod +x "${{ matrix.test-script }}"
+
+          # Strip the gateway-artifacts/ prefix so the path is relative to
+          # the /artifacts mount point inside the container.
+          $packageRelPath = "${{ steps.find-package.outputs.package-file }}"
+          $packageInContainer = "/artifacts/" + ($packageRelPath -replace '^gateway-artifacts/', '')
+
+          docker run --rm `
+            -v "${{ github.workspace }}:/workspace:ro" `
+            -v "${{ github.workspace }}/gateway-artifacts:/artifacts:ro" `
+            -e "PACKAGE_FILE=$packageInContainer" `
+            -e "VERSION=${{ needs.preflight.outputs.version }}" `
+            -e "PACKAGE_NAME=devolutions-gateway" `
+            "${{ matrix.container-image }}" `
+            /workspace/${{ matrix.test-script }}
+
+      - name: Write job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $outcome = "${{ steps.run-tests.outcome }}"
+          $status = if ($outcome -eq 'success') { "✅ Passed" } else { "❌ Failed" }
+
+          @"
+          ## ${{ matrix.display-name }} — $status
+
+          | Property | Value |
+          |----------|-------|
+          | Result | $status |
+          | Package | ``${{ steps.find-package.outputs.package-basename }}`` |
+          | Version | ``${{ needs.preflight.outputs.version }}`` |
+          | Container | ``${{ matrix.container-image }}`` |
+          | CI Run | ``${{ needs.preflight.outputs.run-id }}`` |
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+  # ─── Slack notification on scheduled failure ─────────────────────────────────
+  notify:
+    name: Notify failure
+    runs-on: ubuntu-latest
+    if: ${{ always() && contains(needs.*.result, 'failure') && github.event_name == 'schedule' }}
+    needs:
+      - preflight
+      - install-test
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ARCHITECTURE }}
+      SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*${{ github.repository }}* :fire::fire::fire::fire::fire: \n The scheduled Linux install test for *${{ github.repository }}* is <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|broken>"
+                  }
+                }
+              ]
+            }
