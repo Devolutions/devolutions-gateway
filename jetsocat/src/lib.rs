@@ -4,6 +4,7 @@ use humantime as _;
 use seahorse as _;
 use tracing_appender as _;
 use tracing_subscriber as _;
+
 #[macro_use]
 extern crate tracing;
 
