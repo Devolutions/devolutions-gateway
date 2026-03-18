@@ -510,6 +510,9 @@ jobs:
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     needs: [preflight]
     runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      id-token: write
 
     steps:
       - name: Check out Devolutions/actions
@@ -554,6 +557,12 @@ jobs:
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_x86_64.rpm"
         shell: pwsh
 
+      - name: Attest build provenance
+        if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.prepare.outputs.files-to-upload }}/*
+
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
         if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
@@ -571,6 +580,9 @@ jobs:
     if: ${{ needs.preflight.outputs.skip-publishing == 'false' || inputs.dry-run }}
     needs: [preflight]
     runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      id-token: write
 
     steps:
       - name: Check out Devolutions/actions
@@ -615,6 +627,12 @@ jobs:
           Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
           Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-agent_${versionFull}_x86_64.rpm"
         shell: pwsh
+
+      - name: Attest build provenance
+        if: ${{ needs.preflight.outputs.skip-publishing == 'false' && !inputs.dry-run }}
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.prepare.outputs.files-to-upload }}/*
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
