@@ -1091,7 +1091,10 @@ async fn socks5_to_jmux(#[values(false, true)] use_websocket: bool) {
         format!("tcp-listen://127.0.0.1:{jmux_server_port}")
     };
     let _jmux_server = jetsocat_tokio_cmd()
-        .env("JETSOCAT_ARGS", format!("jmux-proxy {jmux_pipe} --allow-all --no-proxy"))
+        .env(
+            "JETSOCAT_ARGS",
+            format!("jmux-proxy {jmux_pipe} --allow-all --no-proxy"),
+        )
         .kill_on_drop(true)
         .spawn()
         .expect("failed to start JMUX server");
