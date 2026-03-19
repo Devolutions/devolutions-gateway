@@ -299,9 +299,9 @@ fn doctor_no_args_is_valid() {
 #[test]
 fn doctor_verify_chain_with_json_output() {
     // Chain checks that are expected to fail because the leaf certificate is expired.
-    // On Windows, both the rustls and schannel backends run and detect the expiry.
+    // On Windows, only the schannel backend runs (CI builds with native-tls, not rustls).
     let expected_chain_failures: &[&str] = if cfg!(windows) {
-        &["rustls_check_chain", "schannel_check_chain"]
+        &["schannel_check_chain"]
     } else {
         &["rustls_check_chain"]
     };
@@ -463,14 +463,10 @@ CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=
 #[test]
 fn doctor_missing_san_and_eku() {
     // Checks that are expected to fail because the certificate is missing SAN and EKU.
-    // The rustls end entity cert check also fails because rustls requires SAN for hostname verification.
-    // The schannel end entity cert check succeeds because schannel falls back to CN matching.
+    // On non-Windows, rustls runs: end entity cert check also fails because rustls requires SAN.
+    // On Windows (native-tls/schannel only), schannel end entity cert check succeeds (CN fallback).
     let expected_failures: &[&str] = if cfg!(windows) {
         &[
-            "rustls_check_end_entity_cert",
-            "rustls_check_chain",
-            "rustls_check_san_extension",
-            "rustls_check_server_auth_eku",
             "schannel_check_chain",
             "schannel_check_san_extension",
             "schannel_check_server_auth_eku",
@@ -487,8 +483,6 @@ fn doctor_missing_san_and_eku() {
     // Checks expected to carry a warning about TlsVerifyStrict.
     let expected_warnings: &[&str] = if cfg!(windows) {
         &[
-            "rustls_check_san_extension",
-            "rustls_check_server_auth_eku",
             "schannel_check_san_extension",
             "schannel_check_server_auth_eku",
         ]
