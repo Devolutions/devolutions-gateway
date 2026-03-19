@@ -69,6 +69,26 @@ You need to generate a separate certificate valid for server authentication."
     )
 }
 
+pub(crate) fn cert_missing_san(ctx: &mut DiagnosticCtx) {
+    ctx.attach_help(
+        "The certificate is missing the Subject Alternative Name (SAN) extension.
+Modern clients (e.g., Chrome, macOS) require certificates to include SAN entries instead of relying on the Common Name (CN) field.
+The Devolutions Gateway will reject this certificate when the TlsVerifyStrict option is enabled.
+To resolve this, generate a new certificate that includes the appropriate SAN entries for your domain."
+            .to_owned(),
+    );
+}
+
+pub(crate) fn cert_missing_server_auth_eku(ctx: &mut DiagnosticCtx) {
+    ctx.attach_help(
+        "The certificate does not include the serverAuth Extended Key Usage (EKU).
+The serverAuth purpose indicates that the certificate is valid for TLS server authentication.
+The Devolutions Gateway will reject this certificate when the TlsVerifyStrict option is enabled.
+To resolve this, generate a new certificate that includes the serverAuth Extended Key Usage."
+            .to_owned(),
+    );
+}
+
 pub(crate) fn x509_io_link<C>(ctx: &mut DiagnosticCtx, certs: C)
 where
     C: Iterator,

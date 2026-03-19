@@ -31,6 +31,8 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
             rustls_check_end_entity_cert(&server_certificates, args.subject_name.as_deref())
         );
         diagnostic!(callback, rustls_check_chain(&root_store, &server_certificates));
+        diagnostic!(callback, rustls_check_san_extension(&server_certificates));
+        diagnostic!(callback, rustls_check_server_auth_eku(&server_certificates));
     }
 }
 
@@ -202,6 +204,54 @@ fn rustls_check_chain(
         }
     })
     .context("failed to verify certification chain")?;
+
+    Ok(())
+}
+
+fn rustls_check_san_extension(
+    ctx: &mut DiagnosticCtx,
+    server_certificates: &[pki_types::CertificateDer<'static>],
+) -> anyhow::Result<()> {
+    let end_entity_cert = server_certificates.first().context("empty chain")?;
+
+    info!("Check for Subject Alternative Name extension");
+
+    let has_san = crate::doctor::cert_inspect::cert_has_san_extension(end_entity_cert)?;
+
+    if !has_san {
+        ctx.attach_warning(
+            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                .to_owned(),
+        );
+        help::cert_missing_san(ctx);
+        anyhow::bail!("the end entity certificate is missing the Subject Alternative Name (SAN) extension");
+    }
+
+    info!("Subject Alternative Name extension found");
+
+    Ok(())
+}
+
+fn rustls_check_server_auth_eku(
+    ctx: &mut DiagnosticCtx,
+    server_certificates: &[pki_types::CertificateDer<'static>],
+) -> anyhow::Result<()> {
+    let end_entity_cert = server_certificates.first().context("empty chain")?;
+
+    info!("Check for serverAuth Extended Key Usage");
+
+    let has_server_auth = crate::doctor::cert_inspect::cert_has_server_auth_eku(end_entity_cert)?;
+
+    if !has_server_auth {
+        ctx.attach_warning(
+            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                .to_owned(),
+        );
+        help::cert_missing_server_auth_eku(ctx);
+        anyhow::bail!("the end entity certificate does not include the serverAuth Extended Key Usage (EKU)");
+    }
+
+    info!("serverAuth Extended Key Usage found");
 
     Ok(())
 }

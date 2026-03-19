@@ -155,6 +155,8 @@ mod openssl {
             }
 
             diagnostic!(callback, openssl_check_chain(&server_certificates));
+            diagnostic!(callback, openssl_check_san_extension(&server_certificates));
+            diagnostic!(callback, openssl_check_server_auth_eku(&server_certificates));
         }
     }
 
@@ -346,6 +348,54 @@ It is generally considered a bad practice to use self-signed certificates, becau
 To resolve this issue, you can:
 - Trust the self-signed certificate on your system, if you know what you are doing.
 - Obtain and use a certificate signed by a legitimate certification authority.");
+    }
+
+    fn openssl_check_san_extension(ctx: &mut DiagnosticCtx, server_certificates: &[X509]) -> anyhow::Result<()> {
+        let certificate = server_certificates
+            .first()
+            .context("end entity certificate is missing")?;
+        let cert_der = certificate.to_der().context("failed to encode certificate as DER")?;
+
+        info!("Check for Subject Alternative Name extension");
+
+        let has_san = crate::doctor::cert_inspect::cert_has_san_extension(&cert_der)?;
+
+        if !has_san {
+            ctx.attach_warning(
+                "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                    .to_owned(),
+            );
+            help::cert_missing_san(ctx);
+            anyhow::bail!("the end entity certificate is missing the Subject Alternative Name (SAN) extension");
+        }
+
+        info!("Subject Alternative Name extension found");
+
+        Ok(())
+    }
+
+    fn openssl_check_server_auth_eku(ctx: &mut DiagnosticCtx, server_certificates: &[X509]) -> anyhow::Result<()> {
+        let certificate = server_certificates
+            .first()
+            .context("end entity certificate is missing")?;
+        let cert_der = certificate.to_der().context("failed to encode certificate as DER")?;
+
+        info!("Check for serverAuth Extended Key Usage");
+
+        let has_server_auth = crate::doctor::cert_inspect::cert_has_server_auth_eku(&cert_der)?;
+
+        if !has_server_auth {
+            ctx.attach_warning(
+                "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                    .to_owned(),
+            );
+            help::cert_missing_server_auth_eku(ctx);
+            anyhow::bail!("the end entity certificate does not include the serverAuth Extended Key Usage (EKU)");
+        }
+
+        info!("serverAuth Extended Key Usage found");
+
+        Ok(())
     }
 
     impl InspectCert for X509 {
