@@ -3,15 +3,18 @@
 use std::sync::LazyLock;
 
 static JETSOCAT_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
-    escargot::CargoBuild::new()
+    let mut build = escargot::CargoBuild::new()
         .manifest_path("../jetsocat/Cargo.toml")
         .bin("jetsocat")
         .current_release()
-        .current_target()
-        .run()
-        .expect("build jetsocat")
-        .path()
-        .to_path_buf()
+        .current_target();
+
+    // Match CI: on Windows, build with native-tls instead of the default rustls.
+    if cfg!(windows) {
+        build = build.no_default_features().features("native-tls detect-proxy");
+    }
+
+    build.run().expect("build jetsocat").path().to_path_buf()
 });
 
 pub fn jetsocat_assert_cmd() -> assert_cmd::Command {
