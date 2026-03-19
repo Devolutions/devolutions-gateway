@@ -654,9 +654,8 @@ jobs:
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         shell: pwsh
 
-
       - name: Enable mlock for production
-        # On Linux, libsodium-dev is installed in the configure steps above (apt-get).
+        # On Linux, libsodium-dev is installed in the configure steps above (in the script).
         # On Windows, libsodium is installed here via vcpkg (deferred to production to avoid slow builds on PRs).
         if: ${{ needs.preflight.outputs.rust-profile == 'production' }}
         run: |
