@@ -461,6 +461,112 @@ CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=
 }
 
 #[test]
+fn doctor_missing_san_and_eku() {
+    // Checks that are expected to fail because the certificate is missing SAN and EKU.
+    // The rustls end entity cert check also fails because rustls requires SAN for hostname verification.
+    // The schannel end entity cert check succeeds because schannel falls back to CN matching.
+    let expected_failures: &[&str] = if cfg!(windows) {
+        &[
+            "rustls_check_end_entity_cert",
+            "rustls_check_chain",
+            "rustls_check_san_extension",
+            "rustls_check_server_auth_eku",
+            "schannel_check_chain",
+            "schannel_check_san_extension",
+            "schannel_check_server_auth_eku",
+        ]
+    } else {
+        &[
+            "rustls_check_end_entity_cert",
+            "rustls_check_chain",
+            "rustls_check_san_extension",
+            "rustls_check_server_auth_eku",
+        ]
+    };
+
+    // Checks expected to carry a warning about TlsVerifyStrict.
+    let expected_warnings: &[&str] = if cfg!(windows) {
+        &[
+            "rustls_check_san_extension",
+            "rustls_check_server_auth_eku",
+            "schannel_check_san_extension",
+            "schannel_check_server_auth_eku",
+        ]
+    } else {
+        &["rustls_check_san_extension", "rustls_check_server_auth_eku"]
+    };
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let chain_file_path = tempdir.path().join("no-san-no-eku.pem");
+    std::fs::write(&chain_file_path, CERT_WITHOUT_SAN_OR_EKU).unwrap();
+
+    let output = jetsocat_assert_cmd()
+        .args([
+            "doctor",
+            "--chain",
+            chain_file_path.to_str().unwrap(),
+            "--subject-name",
+            "test.example.com",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+
+    for line in stdout.lines() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+
+        let name = entry["name"].as_str().unwrap();
+        let success = entry["success"].as_bool().unwrap();
+
+        if expected_failures.contains(&name) {
+            assert!(!success, "{name} should have failed");
+        } else {
+            assert!(success, "{name} should have succeeded");
+        }
+
+        if expected_warnings.contains(&name) {
+            assert!(
+                entry["warning"].is_string(),
+                "{name} should have a warning about TlsVerifyStrict"
+            );
+            let warning = entry["warning"].as_str().unwrap();
+            assert!(
+                warning.contains("TlsVerifyStrict"),
+                "{name}: warning should mention TlsVerifyStrict, got: {warning}"
+            );
+        }
+    }
+
+    // This certificate is a basic self-signed cert generated with:
+    //   openssl req -x509 -newkey rsa:2048 -keyout /dev/null -nodes -subj "/CN=test.example.com" -days 3650
+    // It has no Subject Alternative Name (SAN) extension and no Extended Key Usage (EKU) extension.
+    // The doctor should report warnings for both missing properties.
+    const CERT_WITHOUT_SAN_OR_EKU: &str = "
+-----BEGIN CERTIFICATE-----
+MIIDFzCCAf+gAwIBAgIUfFwD6PaeQUaW/b9RAunIbruFiOMwDQYJKoZIhvcNAQEL
+BQAwGzEZMBcGA1UEAwwQdGVzdC5leGFtcGxlLmNvbTAeFw0yNjAzMTkwMjQ4MTda
+Fw0zNjAzMTYwMjQ4MTdaMBsxGTAXBgNVBAMMEHRlc3QuZXhhbXBsZS5jb20wggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCVm3m0BFIhYJmxs1yt+QhHVz+T
+YdJlY7tsJmaqR9mtV5BW3rLRL1W+dQJ3cSuBLAtE6BWWhec/guRMxR2nwsJ+8GFo
+G83AE+ulehST+Ymh7LTTD4jHex6bZM0L132wWUkskkFhYzqQiXHBqKkuAmmcOe9l
+gy+tvV4nIlta2vKC7U+1W3cixJS1Anu/BOvy08XctUwRtAxQsSbvFawE1sqGYD95
+sGNraE3w74kc0jRsldv0zGclsW463GQhVlHRu/56SW5DGSXdxhsZXKsChEubphZ5
+u7s0OB8XEqyr4kAJVfmFsdr2xavxkuwW6vuO6CDhrV6bZRYgNnFbVKf1HLjDAgMB
+AAGjUzBRMB0GA1UdDgQWBBQsVvQ0YMe8qMcT1L/XSV4q78G8lzAfBgNVHSMEGDAW
+gBQsVvQ0YMe8qMcT1L/XSV4q78G8lzAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3
+DQEBCwUAA4IBAQAIE5Fy7xFodiOGSSRwhXL90bMa477nONobhF6rdeRaH47H0Sru
+Nj0WvwWgv6QYWvMk40xvCGcOJl8ZO18KxrHV3tKAWv92VWhKcSXXYIVJdrEdi5z1
+qRjFhOl8Bk6jlUomjk2CwbaBjxZctUSM/bpc+szOipSPf7VYA340iWVpb1frmZMW
+Oz1dDMCILaSldUlmPXL9g5VntW6Rr7zfLqyeUwq0BV22O9l349Kbu3i9EifWerAf
+D7Evd6eXm50umoqlchupHZFRmIJCiHrg7vWwXdJQtgP8zYqh7uZIIbHsLHBJAlR3
+4p6zIygy/wRS/nQb/Y+kFRN+uRdfVB7eftRJ
+-----END CERTIFICATE-----";
+}
+
+#[test]
 fn doctor_invalid_server_port() {
     let output = jetsocat_assert_cmd()
         .args([
