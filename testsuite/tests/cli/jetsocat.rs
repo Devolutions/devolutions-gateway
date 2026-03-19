@@ -482,10 +482,7 @@ fn doctor_missing_san_and_eku() {
 
     // Checks expected to carry a warning about TlsVerifyStrict.
     let expected_warnings: &[&str] = if cfg!(windows) {
-        &[
-            "schannel_check_san_extension",
-            "schannel_check_server_auth_eku",
-        ]
+        &["schannel_check_san_extension", "schannel_check_server_auth_eku"]
     } else {
         &["rustls_check_san_extension", "rustls_check_server_auth_eku"]
     };
