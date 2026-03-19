@@ -93,3 +93,50 @@ pub async fn wait_for_tcp_port(port: u16) -> anyhow::Result<()> {
         }
     }
 }
+
+/// Waits until a TCP port on localhost is bound by another process, without connecting to it.
+///
+/// Use this instead of [`wait_for_tcp_port`] when the target listener accepts only a single
+/// connection (e.g. `tcp-listen://` or `ws-listen://` in jetsocat). Connecting to such a
+/// listener would consume its one accept slot. Instead, this function attempts to bind the same
+/// port itself; `AddrInUse` means the target process has already claimed it.
+///
+/// Polls every 50ms until the port is seen as bound or 10 seconds elapse.
+///
+/// # Errors
+/// Returns an error if the port is not bound within the timeout.
+pub async fn wait_for_port_bound(port: u16) -> anyhow::Result<()> {
+    use std::io::ErrorKind;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::time::{Duration, Instant};
+
+    let timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(50);
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let start = Instant::now();
+
+    loop {
+        if start.elapsed() > timeout {
+            anyhow::bail!("port {port} was not bound within {timeout:?}");
+        }
+
+        match tokio::net::TcpListener::bind(addr).await {
+            // We managed to bind it ourselves — the target hasn't claimed it yet.
+            // Explicitly drop before awaiting: in async/await state machines, temporaries in
+            // match arms can be kept alive across the await point, which would leave the port
+            // bound while we sleep and prevent the target from claiming it.
+            Ok(listener) => {
+                drop(listener);
+                tokio::time::sleep(poll_interval).await;
+            }
+            // Someone else owns the port — the target process is ready.
+            // On Linux this is AddrInUse; on Windows with SO_EXCLUSIVEADDRUSE it is
+            // PermissionDenied (WSAEACCES).
+            Err(e) if matches!(e.kind(), ErrorKind::AddrInUse | ErrorKind::PermissionDenied) => {
+                return Ok(())
+            }
+            // Any other error is unexpected; surface it.
+            Err(e) => return Err(e.into()),
+        }
+    }
+}

@@ -5,7 +5,10 @@ use std::time::Duration;
 use expect_test::expect;
 use rstest::rstest;
 use test_utils::find_unused_ports;
-use testsuite::cli::{assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsocat_tokio_cmd, wait_for_tcp_port};
+use testsuite::cli::{
+    assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsocat_tokio_cmd, wait_for_port_bound,
+    wait_for_tcp_port,
+};
 
 // NOTE: Windows needs more time for listeners to be ready due to slower process startup.
 
@@ -1059,13 +1062,16 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     assert!(status.success(), "Proxy should exit successfully, not crash");
 }
 
-/// Multiple SOCKS5 clients → SOCKS5 listener → JMUX tunnel → TCP echo server.
+/// SOCKS5 client → SOCKS5 listener → JMUX tunnel → TCP echo server.
 #[rstest]
 #[tokio::test]
 async fn socks5_to_jmux(#[values(false, true)] use_websocket: bool) {
     use proxy_socks::Socks5Stream;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::timeout;
+
+    let round_trip_timeout = Duration::from_secs(15);
 
     let ports = find_unused_ports(3);
     let echo_port = ports[0];
@@ -1100,8 +1106,9 @@ async fn socks5_to_jmux(#[values(false, true)] use_websocket: bool) {
         .expect("failed to start JMUX server");
 
     // NOTE: Cannot use wait_for_tcp_port here — TcpListen/WebSocketListen accept exactly one
-    // connection, so a probe would consume the slot before the real JMUX client arrives.
-    tokio::time::sleep(LISTENER_WAIT_DURATION).await;
+    // connection, so connecting would consume the slot before the real JMUX client arrives.
+    // Instead, probe by attempting to bind the same port: AddrInUse means the server owns it.
+    wait_for_port_bound(jmux_server_port).await.expect("JMUX server ready");
 
     // Start JMUX client subprocess exposing a SOCKS5 listener.
     let peer_pipe = if use_websocket {
@@ -1121,17 +1128,22 @@ async fn socks5_to_jmux(#[values(false, true)] use_websocket: bool) {
     wait_for_tcp_port(socks5_port).await.expect("SOCKS5 proxy ready");
 
     // Connect via SOCKS5 through the JMUX tunnel to the echo server and verify round-trip.
-    let stream = TcpStream::connect(("127.0.0.1", socks5_port)).await.unwrap();
-    let stream = Socks5Stream::connect(stream, format!("127.0.0.1:{echo_port}"))
-        .await
-        .expect("SOCKS5 connect");
-    let (mut reader, mut writer) = tokio::io::split(stream);
+    // Bound by a timeout so that a broken shutdown path doesn't hang CI indefinitely.
+    timeout(round_trip_timeout, async {
+        let stream = TcpStream::connect(("127.0.0.1", socks5_port)).await.unwrap();
+        let stream = Socks5Stream::connect(stream, format!("127.0.0.1:{echo_port}"))
+            .await
+            .expect("SOCKS5 connect");
+        let (mut reader, mut writer) = tokio::io::split(stream);
 
-    let payload = b"hello socks5 to jmux";
-    writer.write_all(payload).await.unwrap();
-    writer.shutdown().await.unwrap();
+        let payload = b"hello socks5 to jmux";
+        writer.write_all(payload).await.unwrap();
+        writer.shutdown().await.unwrap();
 
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).await.unwrap();
-    assert_eq!(buf, payload);
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).await.unwrap();
+        assert_eq!(buf, payload);
+    })
+    .await
+    .expect("round-trip timed out");
 }
