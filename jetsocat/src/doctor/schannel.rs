@@ -40,6 +40,8 @@ pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
     }
 
     diagnostic!(callback, schannel_check_chain(&chain_ctx));
+    diagnostic!(callback, schannel_check_san_extension(&chain_ctx));
+    diagnostic!(callback, schannel_check_server_auth_eku(&chain_ctx));
 }
 
 fn schannel_open_in_memory_cert_store(_: &mut DiagnosticCtx, chain_ctx: &mut Option<ChainCtx>) -> anyhow::Result<()> {
@@ -536,6 +538,58 @@ fn schannel_check_chain(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow
     fn flags_contains(flags: u32, mask: u32) -> bool {
         flags & mask == mask
     }
+}
+
+fn schannel_check_san_extension(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow::Result<()> {
+    let end_entity_cert = chain_ctx
+        .store
+        .fetch_certificate(&chain_ctx.end_entity_info)
+        .context("failed to fetch end entity cert from in-memory store")?;
+
+    let cert_der = end_entity_cert.as_x509_der();
+
+    info!("Check for Subject Alternative Name extension");
+
+    let has_san = crate::doctor::cert_inspect::cert_has_san_extension(cert_der)?;
+
+    if !has_san {
+        ctx.attach_warning(
+            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                .to_owned(),
+        );
+        help::cert_missing_san(ctx);
+        anyhow::bail!("the end entity certificate is missing the Subject Alternative Name (SAN) extension");
+    }
+
+    info!("Subject Alternative Name extension found");
+
+    Ok(())
+}
+
+fn schannel_check_server_auth_eku(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow::Result<()> {
+    let end_entity_cert = chain_ctx
+        .store
+        .fetch_certificate(&chain_ctx.end_entity_info)
+        .context("failed to fetch end entity cert from in-memory store")?;
+
+    let cert_der = end_entity_cert.as_x509_der();
+
+    info!("Check for serverAuth Extended Key Usage");
+
+    let has_server_auth = crate::doctor::cert_inspect::cert_has_server_auth_eku(cert_der)?;
+
+    if !has_server_auth {
+        ctx.attach_warning(
+            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                .to_owned(),
+        );
+        help::cert_missing_server_auth_eku(ctx);
+        anyhow::bail!("the end entity certificate does not include the serverAuth Extended Key Usage (EKU)");
+    }
+
+    info!("serverAuth Extended Key Usage found");
+
+    Ok(())
 }
 
 mod wrapper {

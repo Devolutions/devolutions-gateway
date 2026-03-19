@@ -1,3 +1,4 @@
+mod cert_inspect;
 mod common;
 mod help;
 mod macros;
