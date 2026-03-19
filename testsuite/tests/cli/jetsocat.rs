@@ -292,18 +292,19 @@ fn jmux_proxy_write_hello_world() {
 }
 
 #[test]
-#[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_no_args_is_valid() {
     jetsocat_assert_cmd().arg("doctor").assert().success();
 }
 
 #[test]
-#[cfg_attr(windows, ignore = "does not pass on Windows")] // FIXME
 fn doctor_verify_chain_with_json_output() {
-    #[cfg(unix)]
-    const CHAIN_CHECK_NAME: &str = "rustls_check_chain";
-    #[cfg(windows)]
-    const CHAIN_CHECK_NAME: &str = "schannel_check_chain";
+    // Chain checks that are expected to fail because the leaf certificate is expired.
+    // On Windows, both the rustls and schannel backends run and detect the expiry.
+    let expected_chain_failures: &[&str] = if cfg!(windows) {
+        &["rustls_check_chain", "schannel_check_chain"]
+    } else {
+        &["rustls_check_chain"]
+    };
 
     let tempdir = tempfile::tempdir().unwrap();
     let chain_file_path = tempdir.path().join("expired-devolutions-net-chain.pem");
@@ -338,6 +339,7 @@ fn doctor_verify_chain_with_json_output() {
                 "name" | "success" => { /* verified above */ }
                 "output" => assert!(value.is_string()),
                 "error" => assert!(value.is_string()),
+                "warning" => assert!(value.is_string()),
                 "help" => assert!(value.is_string()),
                 "links" => assert!(value.is_array()),
 
@@ -346,12 +348,14 @@ fn doctor_verify_chain_with_json_output() {
             }
         }
 
-        if entry["name"].as_str().unwrap() == CHAIN_CHECK_NAME {
-            // Since the leaf certificate is expired, this check should fail.
-            assert!(!entry["success"].as_bool().unwrap());
+        let name = entry["name"].as_str().unwrap();
+
+        if expected_chain_failures.contains(&name) {
+            // Since the leaf certificate is expired, chain checks should fail.
+            assert!(!entry["success"].as_bool().unwrap(), "{name} should have failed");
         } else {
             // All the other checks should succeed.
-            assert!(entry["success"].as_bool().unwrap());
+            assert!(entry["success"].as_bool().unwrap(), "{name} should have succeeded");
         }
     }
 
