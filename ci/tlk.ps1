@@ -890,8 +890,8 @@ class TlkRecipe
 
         if ($this.Product -eq "gateway") {
             $FpmArgs += @(
-                "$DGatewayWebClient=/usr/share/devolutions-gateway/webapp",
-                "$DGatewayWebPlayer=/usr/share/devolutions-gateway/webapp",
+                "$DGatewayWebClient=/usr/share/devolutions-gateway/webapp/client",
+                "$DGatewayWebPlayer=/usr/share/devolutions-gateway/webapp/player",
                 "$DGatewayLibXmf=/usr/lib/devolutions-gateway/libxmf.so"
             )
         }
