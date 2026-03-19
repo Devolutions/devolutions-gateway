@@ -132,9 +132,7 @@ pub async fn wait_for_port_bound(port: u16) -> anyhow::Result<()> {
             // Someone else owns the port — the target process is ready.
             // On Linux this is AddrInUse; on Windows with SO_EXCLUSIVEADDRUSE it is
             // PermissionDenied (WSAEACCES).
-            Err(e) if matches!(e.kind(), ErrorKind::AddrInUse | ErrorKind::PermissionDenied) => {
-                return Ok(())
-            }
+            Err(e) if matches!(e.kind(), ErrorKind::AddrInUse | ErrorKind::PermissionDenied) => return Ok(()),
             // Any other error is unexpected; surface it.
             Err(e) => return Err(e.into()),
         }

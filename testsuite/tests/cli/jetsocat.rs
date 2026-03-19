@@ -6,8 +6,7 @@ use expect_test::expect;
 use rstest::rstest;
 use test_utils::find_unused_ports;
 use testsuite::cli::{
-    assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsocat_tokio_cmd, wait_for_port_bound,
-    wait_for_tcp_port,
+    assert_stderr_eq, jetsocat_assert_cmd, jetsocat_cmd, jetsocat_tokio_cmd, wait_for_port_bound, wait_for_tcp_port,
 };
 
 // NOTE: Windows needs more time for listeners to be ready due to slower process startup.
