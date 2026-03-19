@@ -340,7 +340,7 @@ jobs:
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"
             $Env:CARGO_NO_DEFAULT_FEATURES = "true"
-            $Env:CARGO_FEATURES = "native-tls"
+            $Env:CARGO_FEATURES = "native-tls detect-proxy"
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
