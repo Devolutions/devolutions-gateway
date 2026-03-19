@@ -12,52 +12,60 @@ use wrapper::ScopeGuard;
 use crate::doctor::macros::diagnostic;
 use crate::doctor::{Args, CertInspectProxy, Diagnostic, DiagnosticCtx, help};
 
-struct ChainCtx {
-    store: wrapper::CertStore,
-    end_entity_info: wrapper::CertInfo,
-}
-
 pub(super) fn run(args: &Args, callback: &mut dyn FnMut(Diagnostic) -> bool) {
-    let mut chain_ctx = None;
+    let mut store = None;
 
-    diagnostic!(callback, schannel_open_in_memory_cert_store(&mut chain_ctx));
+    diagnostic!(callback, schannel_open_in_memory_cert_store(&mut store));
 
-    let Some(mut chain_ctx) = chain_ctx else { return };
+    let Some(mut store) = store else { return };
+
+    let mut end_entity_info = None;
 
     if let Some(chain_path) = &args.chain_path {
-        diagnostic!(callback, schannel_read_chain(&chain_path, &mut chain_ctx));
+        diagnostic!(
+            callback,
+            schannel_read_chain(chain_path, &mut store, &mut end_entity_info)
+        );
     } else if let Some(subject_name) = args.subject_name.as_deref()
         && args.allow_network
     {
         diagnostic!(
             callback,
-            schannel_fetch_chain(&mut chain_ctx, subject_name, args.server_port)
+            schannel_fetch_chain(&mut store, &mut end_entity_info, subject_name, args.server_port)
         );
     }
 
+    let Some(end_entity_info) = &end_entity_info else {
+        return;
+    };
+
     if let Some(subject_name) = args.subject_name.as_deref() {
-        diagnostic!(callback, schannel_check_end_entity_cert(&chain_ctx, subject_name));
+        diagnostic!(
+            callback,
+            schannel_check_end_entity_cert(&store, end_entity_info, subject_name)
+        );
     }
 
-    diagnostic!(callback, schannel_check_chain(&chain_ctx));
-    diagnostic!(callback, schannel_check_san_extension(&chain_ctx));
-    diagnostic!(callback, schannel_check_server_auth_eku(&chain_ctx));
+    diagnostic!(callback, schannel_check_chain(&store, end_entity_info));
+    diagnostic!(callback, schannel_check_san_extension(&store, end_entity_info));
+    diagnostic!(callback, schannel_check_server_auth_eku(&store, end_entity_info));
 }
 
-fn schannel_open_in_memory_cert_store(_: &mut DiagnosticCtx, chain_ctx: &mut Option<ChainCtx>) -> anyhow::Result<()> {
+fn schannel_open_in_memory_cert_store(
+    _: &mut DiagnosticCtx,
+    store: &mut Option<wrapper::CertStore>,
+) -> anyhow::Result<()> {
     let opened = wrapper::CertStore::open_in_memory().context("failed to open in-memory certificate store")?;
 
-    *chain_ctx = Some(ChainCtx {
-        store: opened,
-        end_entity_info: wrapper::CertInfo::default(),
-    });
+    *store = Some(opened);
 
     Ok(())
 }
 
 fn schannel_fetch_chain(
     ctx: &mut DiagnosticCtx,
-    chain_ctx: &mut ChainCtx,
+    store: &mut wrapper::CertStore,
+    end_entity_info: &mut Option<wrapper::CertInfo>,
     subject_name: &str,
     port: Option<u16>,
 ) -> anyhow::Result<()> {
@@ -306,8 +314,8 @@ fn schannel_fetch_chain(
     let remote_end_entity_cert =
         wrapper::CertContext::schannel_remote_cert(ctx_handle.as_ref()).context("failed to retrieve remote cert")?;
 
-    // Update the end entity info of the chain context.
-    chain_ctx.end_entity_info = remote_end_entity_cert.to_info();
+    // Update the end entity info.
+    *end_entity_info = Some(remote_end_entity_cert.to_info());
 
     let remote_chain = remote_end_entity_cert
         .chain()
@@ -317,7 +325,7 @@ fn schannel_fetch_chain(
     let mut warning_messages = Vec::new();
 
     remote_chain.for_each(|cert_idx, element| {
-        if let Err(error) = chain_ctx.store.add_x509_encoded_certificate(element.cert.as_x509_der()) {
+        if let Err(error) = store.add_x509_encoded_certificate(element.cert.as_x509_der()) {
             let error_msg = format!("failed to add certificate {cert_idx} to the store: {error}");
             warn!("{}", error_msg);
             warning_messages.push(error_msg);
@@ -361,7 +369,12 @@ fn schannel_fetch_chain(
     }
 }
 
-fn schannel_read_chain(ctx: &mut DiagnosticCtx, chain_path: &Path, chain_ctx: &mut ChainCtx) -> anyhow::Result<()> {
+fn schannel_read_chain(
+    ctx: &mut DiagnosticCtx,
+    chain_path: &Path,
+    store: &mut wrapper::CertStore,
+    end_entity_info: &mut Option<wrapper::CertInfo>,
+) -> anyhow::Result<()> {
     info!("Read file at {}", chain_path.display());
 
     let mut file = std::fs::File::open(chain_path)
@@ -373,16 +386,22 @@ fn schannel_read_chain(ctx: &mut DiagnosticCtx, chain_path: &Path, chain_ctx: &m
     for (idx, cert_der) in rustls_pemfile::certs(&mut file).enumerate() {
         let cert_der = cert_der.with_context(|| format!("failed to read certificate number {idx}"))?;
 
-        let cert_ctx = chain_ctx
-            .store
+        let cert_ctx = store
             .add_x509_encoded_certificate(&cert_der)
             .with_context(|| format!("failed to add certificate number {idx} to the store"))?;
+
+        // The first certificate in the PEM chain is the end entity (leaf) certificate.
+        if idx == 0 {
+            *end_entity_info = Some(cert_ctx.to_info());
+        }
 
         certificates.push(CertInspectProxy {
             friendly_name: cert_ctx.subject_friendly_name().ok(),
             der: cert_ctx.as_x509_der().to_owned(),
         });
     }
+
+    anyhow::ensure!(!certificates.is_empty(), "no certificate found in the chain file");
 
     crate::doctor::log_chain(certificates.iter());
     help::x509_io_link(ctx, certificates.iter());
@@ -392,12 +411,12 @@ fn schannel_read_chain(ctx: &mut DiagnosticCtx, chain_path: &Path, chain_ctx: &m
 
 fn schannel_check_end_entity_cert(
     ctx: &mut DiagnosticCtx,
-    chain_ctx: &ChainCtx,
+    store: &wrapper::CertStore,
+    end_entity_info: &wrapper::CertInfo,
     subject_name_to_verify: &str,
 ) -> anyhow::Result<()> {
-    let end_entity_cert = chain_ctx
-        .store
-        .fetch_certificate(&chain_ctx.end_entity_info)
+    let end_entity_cert = store
+        .fetch_certificate(end_entity_info)
         .context("failed to fetch end entity cert from in-memory store")?;
 
     info!("Inspect the end entity certificate");
@@ -428,10 +447,13 @@ fn schannel_check_end_entity_cert(
     Ok(())
 }
 
-fn schannel_check_chain(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow::Result<()> {
-    let end_entity_cert = chain_ctx
-        .store
-        .fetch_certificate(&chain_ctx.end_entity_info)
+fn schannel_check_chain(
+    ctx: &mut DiagnosticCtx,
+    store: &wrapper::CertStore,
+    end_entity_info: &wrapper::CertInfo,
+) -> anyhow::Result<()> {
+    let end_entity_cert = store
+        .fetch_certificate(end_entity_info)
         .context("failed to fetch end entity cert from in-memory store")?;
 
     let chain = end_entity_cert.chain().context("failed to get certificate chain")?;
@@ -540,10 +562,13 @@ fn schannel_check_chain(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow
     }
 }
 
-fn schannel_check_san_extension(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow::Result<()> {
-    let end_entity_cert = chain_ctx
-        .store
-        .fetch_certificate(&chain_ctx.end_entity_info)
+fn schannel_check_san_extension(
+    ctx: &mut DiagnosticCtx,
+    store: &wrapper::CertStore,
+    end_entity_info: &wrapper::CertInfo,
+) -> anyhow::Result<()> {
+    let end_entity_cert = store
+        .fetch_certificate(end_entity_info)
         .context("failed to fetch end entity cert from in-memory store")?;
 
     let cert_der = end_entity_cert.as_x509_der();
@@ -566,10 +591,13 @@ fn schannel_check_san_extension(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -
     Ok(())
 }
 
-fn schannel_check_server_auth_eku(ctx: &mut DiagnosticCtx, chain_ctx: &ChainCtx) -> anyhow::Result<()> {
-    let end_entity_cert = chain_ctx
-        .store
-        .fetch_certificate(&chain_ctx.end_entity_info)
+fn schannel_check_server_auth_eku(
+    ctx: &mut DiagnosticCtx,
+    store: &wrapper::CertStore,
+    end_entity_info: &wrapper::CertInfo,
+) -> anyhow::Result<()> {
+    let end_entity_cert = store
+        .fetch_certificate(end_entity_info)
         .context("failed to fetch end entity cert from in-memory store")?;
 
     let cert_der = end_entity_cert.as_x509_der();
@@ -1009,7 +1037,6 @@ mod wrapper {
         pub trust_status: Cryptography::CERT_TRUST_STATUS,
     }
 
-    #[derive(Default)]
     pub(super) struct CertInfo {
         issuer: Vec<u8>,
         serial: Vec<u8>,
