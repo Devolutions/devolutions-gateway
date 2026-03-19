@@ -9,6 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
+use secrecy::{ExposeSecret as _, SecretString};
 use tap::prelude::*;
 use tokio::sync::Notify;
 use tokio_rustls::rustls::pki_types;
@@ -17,7 +18,6 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::SYSTEM_LOGGER;
-use crate::credential::Password;
 use crate::listener::ListenerUrls;
 use crate::target_addr::TargetAddr;
 use crate::token::Subkey;
@@ -197,7 +197,7 @@ pub struct Conf {
     pub debug: dto::DebugConf,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct WebAppConf {
     pub enabled: bool,
     pub authentication: WebAppAuth,
@@ -206,17 +206,17 @@ pub struct WebAppConf {
     pub static_root_path: std::path::PathBuf,
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum WebAppAuth {
     Custom(HashMap<String, WebAppUser>),
     None,
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct WebAppUser {
     pub name: String,
     /// Hash of the password, in the PHC string format
-    pub password_hash: Password,
+    pub password_hash: SecretString,
 }
 
 /// AI Router configuration (experimental)
@@ -1243,7 +1243,7 @@ fn generate_self_signed_certificate(
 
 fn read_pfx_file(
     path: &Utf8Path,
-    password: Option<&Password>,
+    password: Option<&SecretString>,
 ) -> anyhow::Result<(
     Vec<pki_types::CertificateDer<'static>>,
     pki_types::PrivateKeyDer<'static>,
@@ -1256,7 +1256,8 @@ fn read_pfx_file(
     use picky::x509::certificate::CertType;
 
     let crypto_context = password
-        .map(|pwd| Pkcs12CryptoContext::new_with_password(pwd.expose_secret()))
+        .map(|secret| secret.expose_secret())
+        .map(Pkcs12CryptoContext::new_with_password)
         .unwrap_or_else(Pkcs12CryptoContext::new_without_password);
     let parsing_params = Pkcs12ParsingParams::default();
 
@@ -1577,6 +1578,8 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
 pub mod dto {
     use std::collections::HashMap;
 
+    use secrecy::ExposeSecret as _;
+
     use super::*;
 
     /// Source of truth for Gateway configuration
@@ -1585,7 +1588,7 @@ pub mod dto {
     /// and is not trying to be too smart.
     ///
     /// Unstable options are subject to change
-    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct ConfFile {
         /// This Gateway unique ID (e.g.: 123e4567-e89b-12d3-a456-426614174000)
@@ -1626,8 +1629,11 @@ pub mod dto {
         #[serde(alias = "PrivateKeyFile", skip_serializing_if = "Option::is_none")]
         pub tls_private_key_file: Option<Utf8PathBuf>,
         /// Password to use for decrypting the TLS private key
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub tls_private_key_password: Option<Password>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_opt_secret_string"
+        )]
+        pub tls_private_key_password: Option<SecretString>,
         /// Subject name of the certificate to use for TLS
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tls_certificate_subject_name: Option<String>,
@@ -1661,8 +1667,11 @@ pub mod dto {
         pub credssp_private_key_file: Option<Utf8PathBuf>,
 
         /// Password to use for decrypting the CredSSP private key
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub credssp_private_key_password: Option<Password>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_opt_secret_string"
+        )]
+        pub credssp_private_key_password: Option<SecretString>,
 
         /// Listeners to launch at startup
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1811,7 +1820,7 @@ pub mod dto {
     }
 
     /// Domain user credentials.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DomainUser {
         /// Username in FQDN format (e.g. "pw13@example.com").
         ///
@@ -1819,7 +1828,8 @@ pub mod dto {
         /// The KDC realm is derived from the gateway ID using the [KerberosServer::realm] method.
         pub fqdn: String,
         /// User password.
-        pub password: String,
+        #[serde(serialize_with = "serialize_secret_string")]
+        pub password: SecretString,
         /// Salt for generating the user's key.
         ///
         /// Usually, it is equal to `{REALM}{username}` (e.g. "EXAMPLEpw13").
@@ -1832,7 +1842,7 @@ pub mod dto {
 
             Self {
                 username: fqdn,
-                password,
+                password: password.expose_secret().to_owned(),
                 salt,
             }
         }
@@ -1841,7 +1851,7 @@ pub mod dto {
     /// Kerberos server config
     ///
     /// This config is used to configure the Kerberos server during RDP proxying.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct KerberosServer {
         /// Users credentials inside fake KDC.
         pub users: Vec<DomainUser>,
@@ -1896,7 +1906,7 @@ pub mod dto {
     }
 
     /// The Kerberos credentials-injection configuration.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct KerberosConfig {
         /// Kerberos server and KDC configuration.
         pub kerberos_server: KerberosServer,
@@ -1910,7 +1920,7 @@ pub mod dto {
     ///
     /// Note to developers: all options should be safe by default, never add an option
     /// that needs to be overridden manually in order to be safe.
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DebugConf {
         /// Dump received tokens using a `debug` statement
         #[serde(default)]
@@ -1974,7 +1984,15 @@ pub mod dto {
 
     impl DebugConf {
         pub fn is_default(&self) -> bool {
-            Self::default().eq(self)
+            !self.dump_tokens
+                && !self.disable_token_validation
+                && self.override_kdc.is_none()
+                && self.log_directives.is_none()
+                && self.capture_path.is_none()
+                && self.lib_xmf_path.is_none()
+                && !self.enable_unstable
+                && self.kerberos.is_none()
+                && self.ws_keep_alive_interval == ws_keep_alive_interval_default_value()
         }
     }
 
@@ -2352,6 +2370,23 @@ pub mod dto {
                 all: None,
                 exclude: Vec::new(),
             }
+        }
+    }
+
+    fn serialize_secret_string<S>(value: &SecretString, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(value.expose_secret())
+    }
+
+    fn serialize_opt_secret_string<S>(value: &Option<SecretString>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match value {
+            Some(s) => serializer.serialize_str(s.expose_secret()),
+            None => serializer.serialize_none(),
         }
     }
 
