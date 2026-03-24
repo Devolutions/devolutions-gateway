@@ -1,21 +1,21 @@
-#[macro_use]
-extern crate serde;
-
 #[cfg(windows)]
 pub mod windows;
 
 mod date_version;
-mod update_json;
+mod update_manifest;
+mod update_status;
 
 use std::env;
 
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
-
-#[rustfmt::skip]
 pub use date_version::{DateVersion, DateVersionError};
-#[rustfmt::skip]
-pub use update_json::{ProductUpdateInfo, UpdateJson, VersionSpecification};
+pub use update_manifest::{
+    ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION, UpdateManifest, UpdateManifestV1, UpdateManifestV2,
+    UpdateProductKey, UpdateSchedule, VersionMajorV2, VersionSpecification, default_schedule_window_start,
+    detect_update_manifest_major_version,
+};
+pub use update_status::{UpdateStatus, UpdateStatusV2};
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -77,7 +77,12 @@ pub fn get_data_dir() -> Utf8PathBuf {
     }
 }
 
-/// Returns the path to the `update.json` file
+/// Returns the path to the `update.json` file.
 pub fn get_updater_file_path() -> Utf8PathBuf {
     get_data_dir().join("update.json")
+}
+
+/// Returns the path to the `agent_status.json` file.
+pub fn get_agent_status_file_path() -> Utf8PathBuf {
+    get_data_dir().join("agent_status.json")
 }

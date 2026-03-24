@@ -815,6 +815,9 @@ jobs:
 
             $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
             echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
+
+            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater.exe"
+            echo "dagent-updater-executable=$DAgentUpdaterExecutable" >> $Env:GITHUB_OUTPUT
           }
 
           $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
@@ -919,6 +922,7 @@ jobs:
       - name: Build
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DAGENT_UPDATER_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-updater-executable }}"
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"
@@ -951,6 +955,7 @@ jobs:
 
             $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
             $Env:DAGENT_DESKTOP_AGENT_PATH = $DesktopStagingPath
+            $Env:DAGENT_UPDATER_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-updater-executable }}"
             $Env:DAGENT_PEDM_SHELL_EXT_DLL = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-dll }}"
             $Env:DAGENT_PEDM_SHELL_EXT_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-shell-ext-msix }}"
             $Env:DAGENT_SESSION_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-session-executable }}"

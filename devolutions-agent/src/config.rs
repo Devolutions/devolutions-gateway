@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_agent_shared::get_data_dir;
+use devolutions_agent_shared::{default_schedule_window_start, get_data_dir};
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
 use url::Url;
@@ -141,6 +141,17 @@ impl ConfHandle {
     pub fn get_conf_file(&self) -> Arc<dto::ConfFile> {
         self.inner.conf_file.read().clone()
     }
+
+    /// Persists a new auto-update schedule to `agent.json` and updates the in-memory state.
+    pub fn save_updater_schedule(&self, schedule: &dto::UpdaterSchedule) -> anyhow::Result<()> {
+        let mut conf_file = (*self.inner.conf_file.read()).as_ref().clone();
+        conf_file.updater.get_or_insert_with(dto::UpdaterConf::default).schedule = Some(schedule.clone());
+        let conf = Conf::from_conf_file(&conf_file).context("invalid configuration")?;
+        save_config(&conf_file).context("failed to save configuration")?;
+        *self.inner.conf.write() = Arc::new(conf);
+        *self.inner.conf_file.write() = Arc::new(conf_file);
+        Ok(())
+    }
 }
 
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
@@ -191,19 +202,89 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 }
 
 pub mod dto {
+    use devolutions_agent_shared::UpdateProductKey;
+
     use super::*;
+
+    /// Mirrors [`devolutions_agent_shared::UpdateSchedule`]
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Default)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct UpdaterSchedule {
+        /// Enable periodic Devolutions Agent self-update checks.
+        pub enabled: bool,
+
+        /// Minimum interval between update checks, in seconds.
+        ///
+        /// 0 value has a special meaning of "only check once at `update_window_start`.
+        #[serde(default)]
+        pub interval: u64,
+
+        /// Start of the maintenance window as seconds past midnight, local time.
+        #[serde(default = "default_schedule_window_start")]
+        pub update_window_start: u32,
+
+        /// End of the maintenance window as seconds past midnight, local time, exclusive.
+        ///
+        /// `None` means no upper bound (only single update check at update_window_start).
+        /// When end < start the window crosses midnight.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub update_window_end: Option<u32>,
+
+        /// Products for which the agent autonomously polls for new versions.
+        #[serde(default)]
+        pub products: Vec<UpdateProductKey>,
+    }
+
+    impl From<devolutions_agent_shared::UpdateSchedule> for UpdaterSchedule {
+        fn from(s: devolutions_agent_shared::UpdateSchedule) -> Self {
+            Self {
+                enabled: s.enabled,
+                interval: s.interval,
+                update_window_start: s.update_window_start,
+                update_window_end: s.update_window_end,
+                products: s.products,
+            }
+        }
+    }
+
+    impl From<UpdaterSchedule> for devolutions_agent_shared::UpdateSchedule {
+        fn from(s: UpdaterSchedule) -> Self {
+            Self {
+                enabled: s.enabled,
+                interval: s.interval,
+                update_window_start: s.update_window_start,
+                update_window_end: s.update_window_end,
+                products: s.products,
+            }
+        }
+    }
+
+    // ── UpdaterConf ──────────────────────────────────────────────────────────
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct UpdaterConf {
-        /// Enable updater module
+        /// Enable updater module.
         pub enabled: bool,
+        /// Periodic Devolutions Agent self-update schedule.
+        ///
+        /// When present and `Enabled` is `true`, the agent automatically checks for a new
+        /// version of itself at the configured interval and triggers a silent MSI update
+        /// during the configured maintenance window.
+        ///
+        /// This setting can be managed remotely via the Devolutions Gateway API
+        /// (`GET`/`POST /jet/update/schedule`) or set directly in this file.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub schedule: Option<UpdaterSchedule>,
     }
 
     #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
     impl Default for UpdaterConf {
         fn default() -> Self {
-            Self { enabled: false }
+            Self {
+                enabled: false,
+                schedule: None,
+            }
         }
     }
 
@@ -324,7 +405,10 @@ pub mod dto {
             Self {
                 verbosity_profile: None,
                 log_file: None,
-                updater: Some(UpdaterConf { enabled: true }),
+                updater: Some(UpdaterConf {
+                    enabled: true,
+                    schedule: None,
+                }),
                 remote_desktop: None,
                 pedm: None,
                 proxy: None,

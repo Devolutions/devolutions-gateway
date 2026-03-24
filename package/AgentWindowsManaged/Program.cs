@@ -87,6 +87,8 @@ internal class Program
 
     private static string DevolutionsPedmShellExtMsix => ResolveArtifact("DAGENT_PEDM_SHELL_EXT_MSIX", "..\\..\\target\\debug\\DevolutionsPedmShellExt.msix");
 
+    private static string DevolutionsAgentUpdaterExePath => ResolveArtifact("DAGENT_UPDATER_EXECUTABLE", "..\\..\\target\\debug\\devolutions-agent-updater.exe");
+
     private static string DevolutionsSession => ResolveArtifact("DAGENT_SESSION_EXECUTABLE", "..\\..\\target\\debug\\devolutions-session.exe");
 
     private static string DevolutionsTun2SocksExe => ResolveArtifact("DAGENT_TUN2SOCKS_EXE", "..\\..\\tun2socks.exe");
@@ -284,6 +286,13 @@ internal class Program
                         },
                     },
                     new (Features.SESSION_FEATURE, DevolutionsSession)
+                    {
+                        TargetFileName = "DevolutionsSession.exe"
+                    },
+                    new (Features.AGENT_UPDATER_FEATURE, DevolutionsAgentUpdaterExePath)
+                    {
+                        TargetFileName = "DevolutionsAgentUpdater.exe"
+                    }
                 },
                 Dirs = new[]
                 {
@@ -291,8 +300,8 @@ internal class Program
                     new Dir(Features.PEDM_FEATURE, "ShellExt",
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtDll),
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix)),
-                    new Dir(Features.AGENT_FEATURE, "tun2socks", 
-                        new File(Features.AGENT_FEATURE, DevolutionsTun2SocksExe), 
+                    new Dir(Features.AGENT_FEATURE, "tun2socks",
+                        new File(Features.AGENT_FEATURE, DevolutionsTun2SocksExe),
                         new File(Features.AGENT_FEATURE, DevolutionsWintunDll))
                 }
             })),

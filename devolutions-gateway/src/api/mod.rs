@@ -35,7 +35,14 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/webapp", webapp::make_router(state.clone()))
         .nest("/jet/net", net::make_router(state.clone()))
         .nest("/jet/traffic", traffic::make_router(state.clone()))
-        .route("/jet/update", axum::routing::post(update::trigger_update_check));
+        .route(
+            "/jet/update",
+            axum::routing::get(update::get_update_products).post(update::trigger_update_check),
+        )
+        .route(
+            "/jet/update/schedule",
+            axum::routing::get(update::get_update_schedule).post(update::set_update_schedule),
+        );
 
     if state.conf_handle.get_conf().web_app.enabled {
         router = router.route(

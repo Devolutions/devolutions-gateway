@@ -112,6 +112,9 @@ impl ServiceUpdateActions {
                     let should_start = match self.product {
                         Product::Gateway => !state.startup_was_automatic && state.was_running,
                         Product::HubService => state.was_running,
+                        // INVARIANT: AgentSelfUpdateActions is used for Product::Agent, not
+                        // ServiceUpdateActions; this branch is unreachable.
+                        Product::Agent => unreachable!("ServiceUpdateActions is never used for Product::Agent"),
                     };
 
                     if should_start {
@@ -185,6 +188,9 @@ impl ProductUpdateActions for ServiceUpdateActions {
                     warn!("No Hub Service features detected, installer may use defaults");
                 }
             }
+            // INVARIANT: AgentSelfUpdateActions is used for Product::Agent, not
+            // ServiceUpdateActions; this branch is unreachable.
+            Product::Agent => unreachable!("ServiceUpdateActions is never used for Product::Agent"),
         }
 
         Vec::new()
@@ -208,5 +214,33 @@ pub(crate) fn build_product_actions(product: Product) -> Box<dyn ProductUpdateAc
             Product::HubService,
             HUB_SERVICE_NAMES,
         )),
+        Product::Agent => Box::new(AgentSelfUpdateActions),
+    }
+}
+
+/// Product update actions for Devolutions Agent self-update.
+///
+/// The agent service lifecycle (stop/start) is fully managed by the MSI installer, so no
+/// explicit service manipulation is needed here. The install step launches a detached shim
+/// process that runs msiexec, allowing the installer to stop and restart the agent service
+/// without interrupting the updater shim.
+struct AgentSelfUpdateActions;
+
+impl ProductUpdateActions for AgentSelfUpdateActions {
+    fn pre_update(&mut self) -> Result<(), UpdaterError> {
+        // The MSI installer manages the agent service lifecycle.
+        Ok(())
+    }
+
+    fn get_msiexec_install_params(&self) -> Vec<String> {
+        // No extra msiexec parameters are needed for the agent self-update.
+        // The updater shim launches msiexec directly with default parameters.
+        Vec::new()
+    }
+
+    fn post_update(&mut self) -> Result<(), UpdaterError> {
+        // The MSI installer manages the agent service lifecycle.
+        // The new agent version will start automatically after the MSI completes.
+        Ok(())
     }
 }
