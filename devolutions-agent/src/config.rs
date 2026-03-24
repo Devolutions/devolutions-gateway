@@ -20,6 +20,7 @@ pub struct Conf {
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
+    pub tunnel: dto::TunnelConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -48,6 +49,7 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
+            tunnel: conf_file.tunnel.clone().unwrap_or_default(),
             proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
@@ -132,6 +134,21 @@ impl ConfHandle {
         })
     }
 
+    /// Initializes configuration from a specific path.
+    pub fn init_from_path(path: &Utf8Path) -> anyhow::Result<Self> {
+        let conf_file = load_conf_file(path)
+            .context("failed to load configuration")?
+            .with_context(|| format!("configuration file not found at {path}"))?;
+        let conf = Conf::from_conf_file(&conf_file).context("invalid configuration file")?;
+
+        Ok(Self {
+            inner: Arc::new(ConfHandleInner {
+                conf: parking_lot::RwLock::new(Arc::new(conf)),
+                conf_file: parking_lot::RwLock::new(Arc::new(conf_file)),
+            }),
+        })
+    }
+
     /// Returns current configuration state (do not hold it forever as it may become outdated)
     pub fn get_conf(&self) -> Arc<Conf> {
         self.inner.conf.read().clone()
@@ -144,13 +161,23 @@ impl ConfHandle {
 }
 
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
-    let conf_file_path = get_conf_file_path();
+    save_config_at_path(default_conf_file_path().as_ref(), conf)
+}
+
+pub fn save_config_at_path(conf_file_path: &Utf8Path, conf: &dto::ConfFile) -> anyhow::Result<()> {
+    if let Some(parent) = conf_file_path.parent()
+        && !parent.as_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create configuration directory at {parent}"))?;
+    }
+
     let json = serde_json::to_string_pretty(conf).context("failed JSON serialization of configuration")?;
-    std::fs::write(&conf_file_path, json).with_context(|| format!("failed to write file at {conf_file_path}"))?;
+    std::fs::write(conf_file_path, json).with_context(|| format!("failed to write file at {conf_file_path}"))?;
     Ok(())
 }
 
-fn get_conf_file_path() -> Utf8PathBuf {
+pub fn default_conf_file_path() -> Utf8PathBuf {
     get_data_dir().join("agent.json")
 }
 
@@ -175,7 +202,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
 
 #[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it’s fine to write to stdout.
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
-    let conf_file_path = get_conf_file_path();
+    let conf_file_path = default_conf_file_path();
 
     let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
         Some(conf_file) => conf_file,
@@ -273,6 +300,56 @@ pub mod dto {
         }
     }
 
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct TunnelConf {
+        /// Enable tunnel module
+        pub enabled: bool,
+
+        /// Gateway QUIC endpoint (e.g., "gateway.example.com:4433")
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        pub gateway_endpoint: String,
+
+        /// Client certificate path (issued during enrollment)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub client_cert_path: Option<Utf8PathBuf>,
+
+        /// Client private key path
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub client_key_path: Option<Utf8PathBuf>,
+
+        /// Gateway CA certificate path
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub gateway_ca_cert_path: Option<Utf8PathBuf>,
+
+        /// Subnets to advertise (e.g., ["10.0.0.0/8", "192.168.1.0/24"])
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub advertise_subnets: Vec<String>,
+
+        /// Heartbeat interval in seconds (default: 60)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub heartbeat_interval_secs: Option<u64>,
+
+        /// Route advertise interval in seconds (default: 30)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub route_advertise_interval_secs: Option<u64>,
+    }
+
+    impl Default for TunnelConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                gateway_endpoint: String::new(),
+                client_cert_path: None,
+                client_key_path: None,
+                gateway_ca_cert_path: None,
+                advertise_subnets: Vec::new(),
+                heartbeat_interval_secs: Some(60),
+                route_advertise_interval_secs: Some(30),
+            }
+        }
+    }
+
     /// Source of truth for Agent configuration
     ///
     /// This struct represents the JSON file used for configuration as close as possible
@@ -304,6 +381,10 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub session: Option<SessionConf>,
 
+        /// Agent Tunnel configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tunnel: Option<TunnelConf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -330,6 +411,7 @@ pub mod dto {
                 proxy: None,
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
+                tunnel: None,
                 rest: serde_json::Map::new(),
             }
         }

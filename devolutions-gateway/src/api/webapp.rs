@@ -341,6 +341,7 @@ pub(crate) async fn sign_session_token(
                 exp,
                 jti,
                 cert_thumb256: None,
+                jet_agent_id: None,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

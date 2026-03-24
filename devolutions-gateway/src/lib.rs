@@ -12,6 +12,7 @@ extern crate tracing;
 #[cfg(feature = "openapi")]
 pub mod openapi;
 
+pub mod agent_tunnel;
 pub mod ai;
 pub mod api;
 pub mod cli;
@@ -61,6 +62,7 @@ pub struct DgwState {
     pub credential_store: credential::CredentialStoreHandle,
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
+    pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 }
 
 #[doc(hidden)]
@@ -100,6 +102,7 @@ impl DgwState {
             traffic_audit_handle,
             credential_store,
             monitoring_state,
+            agent_tunnel_handle: None,
         };
 
         let handles = MockHandles {

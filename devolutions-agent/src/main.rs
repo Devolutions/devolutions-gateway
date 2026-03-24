@@ -2,25 +2,33 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-agent library.
+use agent_tunnel_proto as _;
 use anyhow as _;
 use async_trait as _;
+use bincode as _;
 use camino as _;
 use devolutions_agent_shared as _;
 use devolutions_gateway_task as _;
 use devolutions_log as _;
 use futures as _;
+use http_client_proxy as _;
+use ipnetwork as _;
 use ironrdp as _;
 use parking_lot as _;
+use quiche as _;
 use rand as _;
+use reqwest as _;
 use rustls_pemfile as _;
 use serde as _;
 use serde_json as _;
 use tap as _;
 use tokio as _;
 use tokio_rustls as _;
+use url as _;
+use uuid as _;
 #[cfg(windows)]
 use {
-    devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, thiserror as _, uuid as _,
+    aws_lc_rs as _, devolutions_pedm as _, hex as _, notify_debouncer_mini as _, sha2 as _, thiserror as _,
     win_api_wrappers as _, windows as _,
 };
 
@@ -32,6 +40,8 @@ mod service;
 use std::env;
 use std::sync::mpsc;
 
+use anyhow::{Context as _, Result, bail};
+use camino::Utf8PathBuf;
 use ceviche::Service;
 use ceviche::controller::*;
 use devolutions_agent::AgentServiceEvent;
@@ -42,13 +52,37 @@ use self::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 const BAD_CONFIG_ERR_CODE: u32 = 1;
 const START_FAILED_ERR_CODE: u32 = 2;
 
+#[derive(Debug, PartialEq, Eq)]
+struct UpCommand {
+    gateway_url: String,
+    enrollment_token: String,
+    agent_name: String,
+    config_path: Utf8PathBuf,
+    advertise_subnets: Vec<String>,
+}
+
 fn agent_service_main(
     rx: mpsc::Receiver<AgentServiceEvent>,
     _tx: mpsc::Sender<AgentServiceEvent>,
-    _args: Vec<String>,
+    args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let Ok(conf_handle) = ConfHandle::init() else {
+    use camino::Utf8Path;
+
+    // Parse config path from args (--config <path>)
+    let config_path = args.windows(2).find_map(|window| {
+        if window[0] == "--config" {
+            Some(window[1].clone())
+        } else {
+            None
+        }
+    });
+
+    let Ok(conf_handle) = (if let Some(path) = config_path {
+        ConfHandle::init_from_path(Utf8Path::new(&path))
+    } else {
+        ConfHandle::init()
+    }) else {
         // At this point, the logger is not yet initialized.
         return BAD_CONFIG_ERR_CODE;
     };
@@ -110,6 +144,70 @@ fn agent_service_main(
 
 Service!("agent", agent_service_main);
 
+fn run_agent_foreground(args: Vec<String>) -> u32 {
+    let (tx, rx) = mpsc::channel();
+    let _tx = tx.clone();
+
+    ctrlc::set_handler(move || {
+        let _ = tx.send(AgentServiceEvent::Stop);
+    })
+    .expect("failed to register Ctrl-C handler");
+
+    agent_service_main(rx, _tx, args, true)
+}
+
+fn parse_required_value(args: &[String], index: &mut usize, flag: &str) -> Result<String> {
+    *index += 1;
+    args.get(*index)
+        .cloned()
+        .with_context(|| format!("missing value for {flag}"))
+}
+
+fn parse_advertise_subnets(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|subnet| !subnet.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
+    let mut gateway_url = None;
+    let mut enrollment_token = None;
+    let mut agent_name = None;
+    let mut config_path = None;
+    let mut advertise_subnets = Vec::new();
+
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+
+        match arg {
+            "--gateway" => gateway_url = Some(parse_required_value(args, &mut index, "--gateway")?),
+            "--token" | "--enrollment-token" => enrollment_token = Some(parse_required_value(args, &mut index, arg)?),
+            "--name" | "--agent-name" => agent_name = Some(parse_required_value(args, &mut index, arg)?),
+            "--config" => {
+                config_path = Some(Utf8PathBuf::from(parse_required_value(args, &mut index, "--config")?));
+            }
+            "--advertise-routes" | "--advertise-subnets" => {
+                advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
+            }
+            unexpected => bail!("unknown argument for up: {unexpected}"),
+        }
+
+        index += 1;
+    }
+
+    Ok(UpCommand {
+        gateway_url: gateway_url.context("missing required --gateway")?,
+        enrollment_token: enrollment_token.context("missing required --token")?,
+        agent_name: agent_name.context("missing required --name")?,
+        config_path: config_path.unwrap_or_else(devolutions_agent::config::default_conf_file_path),
+        advertise_subnets,
+    })
+}
+
 fn main() {
     let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
 
@@ -136,20 +234,101 @@ fn main() {
                 }
             }
             "run" => {
-                let (tx, rx) = mpsc::channel();
-                let _tx = tx.clone();
-
-                ctrlc::set_handler(move || {
-                    let _ = tx.send(AgentServiceEvent::Stop);
-                })
-                .expect("failed to register Ctrl-C handler");
-
-                agent_service_main(rx, _tx, vec![], true);
+                // Collect arguments to pass to agent_service_main
+                let args: Vec<String> = env::args().skip(2).collect();
+                std::process::exit(
+                    i32::try_from(run_agent_foreground(args)).expect("service exit code should fit in i32"),
+                );
             }
             "config" => {
                 let subcommand = env::args().nth(2).expect("missing config subcommand");
                 if let Err(e) = devolutions_agent::config::handle_cli(subcommand.as_str()) {
                     eprintln!("[ERROR] Agent configuration failed: {e}");
+                }
+            }
+            "enroll" => {
+                use camino::Utf8PathBuf;
+
+                let gateway_url = env::args()
+                    .nth(2)
+                    .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
+                let enrollment_token = env::args().nth(3).expect("missing enrollment token");
+                let agent_name = env::args().nth(4).expect("missing agent name");
+                let config_path = env::args()
+                    .nth(5)
+                    .expect("missing config path (e.g., agent-config.json)");
+                let subnets_arg = env::args().nth(6).unwrap_or_default();
+
+                let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
+                    Vec::new()
+                } else {
+                    subnets_arg.split(',').map(|s| s.trim().to_owned()).collect()
+                };
+
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                rt.block_on(async {
+                    if let Err(e) = devolutions_agent::enrollment::enroll_agent(
+                        &gateway_url,
+                        &enrollment_token,
+                        &agent_name,
+                        &Utf8PathBuf::from(config_path),
+                        advertise_subnets,
+                    )
+                    .await
+                    {
+                        eprintln!("[ERROR] Enrollment failed: {e:#}");
+                        std::process::exit(1);
+                    }
+                });
+            }
+            "up" => {
+                let args: Vec<String> = env::args().skip(2).collect();
+                let command = match parse_up_command_args(&args) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        eprintln!("[ERROR] Invalid up arguments: {error:#}");
+                        std::process::exit(1);
+                    }
+                };
+
+                println!("Bootstrapping agent with Gateway...");
+                println!("  Gateway URL: {}", command.gateway_url);
+                println!("  Agent Name: {}", command.agent_name);
+                println!("  Config Path: {}", command.config_path);
+                println!("  Advertised Routes: {:?}", command.advertise_subnets);
+
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                let persisted = rt.block_on(async {
+                    devolutions_agent::enrollment::bootstrap_and_persist(
+                        &command.gateway_url,
+                        &command.enrollment_token,
+                        &command.agent_name,
+                        command.config_path.as_ref(),
+                        command.advertise_subnets,
+                    )
+                    .await
+                });
+
+                match persisted {
+                    Ok(persisted) => {
+                        println!("✓ Bootstrap successful");
+                        println!("  Agent ID: {}", persisted.agent_id);
+                        println!("  Agent Name: {}", persisted.agent_name);
+                        println!("  Gateway Endpoint: {}", persisted.quic_endpoint);
+                        println!("  Config Path: {}", persisted.config_path);
+                        println!("Starting agent tunnel...");
+                        std::process::exit(
+                            i32::try_from(run_agent_foreground(vec![
+                                "--config".to_owned(),
+                                persisted.config_path.into_string(),
+                            ]))
+                            .expect("service exit code should fit in i32"),
+                        );
+                    }
+                    Err(error) => {
+                        eprintln!("[ERROR] Bootstrap failed: {error:#}");
+                        std::process::exit(1);
+                    }
                 }
             }
             _ => {
@@ -158,5 +337,58 @@ fn main() {
         }
     } else {
         let _result = controller.register(service_main_wrapper);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_up_command_args_uses_default_config_path() {
+        let args = vec![
+            "--gateway".to_owned(),
+            "https://gateway.example.com:7171".to_owned(),
+            "--token".to_owned(),
+            "bootstrap-token".to_owned(),
+            "--name".to_owned(),
+            "site-a-agent".to_owned(),
+            "--advertise-routes".to_owned(),
+            "10.0.0.0/8,192.168.1.0/24".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(
+            parsed,
+            UpCommand {
+                gateway_url: "https://gateway.example.com:7171".to_owned(),
+                enrollment_token: "bootstrap-token".to_owned(),
+                agent_name: "site-a-agent".to_owned(),
+                config_path: devolutions_agent::config::default_conf_file_path(),
+                advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_up_command_args_accepts_aliases_and_custom_config() {
+        let args = vec![
+            "--gateway".to_owned(),
+            "https://gateway.example.com:7171".to_owned(),
+            "--enrollment-token".to_owned(),
+            "bootstrap-token".to_owned(),
+            "--agent-name".to_owned(),
+            "site-a-agent".to_owned(),
+            "--config".to_owned(),
+            "D:\\state\\agent.json".to_owned(),
+            "--advertise-subnets".to_owned(),
+            "10.0.0.0/8".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(parsed.config_path, Utf8PathBuf::from("D:\\state\\agent.json"));
+        assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
     }
 }

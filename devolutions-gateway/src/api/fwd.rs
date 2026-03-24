@@ -54,6 +54,7 @@ async fn fwd_tcp(
         sessions,
         subscriber_tx,
         shutdown_signal,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     AssociationToken(claims): AssociationToken,
@@ -78,6 +79,7 @@ async fn fwd_tcp(
             claims,
             source_addr,
             false,
+            agent_tunnel_handle,
         )
         .instrument(span)
     });
@@ -91,6 +93,7 @@ async fn fwd_tls(
         sessions,
         subscriber_tx,
         shutdown_signal,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     AssociationToken(claims): AssociationToken,
@@ -115,6 +118,7 @@ async fn fwd_tls(
             claims,
             source_addr,
             true,
+            agent_tunnel_handle,
         )
         .instrument(span)
     });
@@ -132,6 +136,7 @@ async fn handle_fwd(
     claims: AssociationTokenClaims,
     source_addr: SocketAddr,
     with_tls: bool,
+    agent_tunnel_handle: Option<Arc<crate::agent_tunnel::AgentTunnelHandle>>,
 ) {
     let (stream, close_handle) = crate::ws::handle(
         ws,
@@ -154,6 +159,7 @@ async fn handle_fwd(
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
         .with_tls(with_tls)
+        .agent_tunnel_handle(agent_tunnel_handle)
         .build()
         .run()
         .instrument(span.clone())
@@ -184,6 +190,8 @@ struct Forward<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     with_tls: bool,
+    #[builder(default)]
+    agent_tunnel_handle: Option<Arc<crate::agent_tunnel::AgentTunnelHandle>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -207,6 +215,7 @@ where
             sessions,
             subscriber_tx,
             with_tls,
+            agent_tunnel_handle,
         } = self;
 
         match claims.jet_rec {
@@ -223,6 +232,54 @@ where
         };
 
         let span = tracing::Span::current();
+
+        // Route via agent tunnel if jet_agent_id is specified.
+        if let Some(agent_id) = claims.jet_agent_id {
+            let handle = agent_tunnel_handle
+                .context("agent tunnel not configured on this gateway")
+                .map_err(ForwardError::Internal)?;
+
+            let selected_target = targets.first().clone();
+            let target_str = format!("{}:{}", selected_target.host(), selected_target.port());
+
+            info!(%agent_id, %target_str, "Routing via agent tunnel");
+            span.record("target", selected_target.to_string());
+
+            let server_stream = handle
+                .connect_via_agent(agent_id, claims.jet_aid, &target_str)
+                .await
+                .context("connect via agent tunnel")
+                .map_err(ForwardError::BadGateway)?;
+
+            let info = SessionInfo::builder()
+                .id(claims.jet_aid)
+                .application_protocol(claims.jet_ap)
+                .details(ConnectionModeDetails::Fwd {
+                    destination_host: selected_target,
+                })
+                .time_to_live(claims.jet_ttl)
+                .recording_policy(claims.jet_rec)
+                .filtering_policy(claims.jet_flt)
+                .build();
+
+            let server_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
+
+            return Proxy::builder()
+                .conf(conf)
+                .session_info(info)
+                .address_a(client_addr)
+                .transport_a(client_stream)
+                .address_b(server_addr)
+                .transport_b(server_stream)
+                .sessions(sessions)
+                .subscriber_tx(subscriber_tx)
+                .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
+                .build()
+                .select_dissector_and_forward()
+                .await
+                .context("encountered a failure during agent tunnel traffic proxying")
+                .map_err(ForwardError::Internal);
+        }
 
         trace!("Select and connect to target");
 

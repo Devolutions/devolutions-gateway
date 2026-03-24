@@ -6,8 +6,10 @@ use ctrlc as _;
 extern crate tracing;
 
 pub mod config;
+pub mod enrollment;
 pub mod log;
 pub mod remote_desktop;
+pub mod tunnel;
 
 #[cfg(windows)]
 pub mod session_manager;

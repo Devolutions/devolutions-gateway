@@ -95,6 +95,17 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         path: "/jet/ai",
         exact_match: false,
     },
+    // -- Agent Tunnel (uses its own bearer token authentication) -- //
+    AuthException {
+        method: Method::POST,
+        path: "/jet/agent-tunnel/enroll",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::GET,
+        path: "/jet/agent-tunnel/agents",
+        exact_match: true,
+    },
 ];
 
 pub async fn auth_middleware(
