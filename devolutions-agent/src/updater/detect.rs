@@ -1,6 +1,6 @@
 //!  Module which provides logic to detect installed products and their versions.
 use devolutions_agent_shared::DateVersion;
-use devolutions_agent_shared::windows::{GATEWAY_UPDATE_CODE, HUB_SERVICE_UPDATE_CODE, registry};
+use devolutions_agent_shared::windows::{AGENT_UPDATE_CODE, GATEWAY_UPDATE_CODE, HUB_SERVICE_UPDATE_CODE, registry};
 use uuid::Uuid;
 
 use crate::updater::{Product, UpdaterError};
@@ -16,6 +16,10 @@ pub(crate) fn get_installed_product_version(product: Product) -> Result<Option<D
             registry::get_installed_product_version(HUB_SERVICE_UPDATE_CODE, registry::ProductVersionEncoding::Agent)
                 .map_err(UpdaterError::WindowsRegistry)
         }
+        Product::Agent => {
+            registry::get_installed_product_version(AGENT_UPDATE_CODE, registry::ProductVersionEncoding::Agent)
+                .map_err(UpdaterError::WindowsRegistry)
+        }
     }
 }
 
@@ -25,5 +29,6 @@ pub(crate) fn get_product_code(product: Product) -> Result<Option<Uuid>, Updater
         Product::HubService => {
             registry::get_product_code(HUB_SERVICE_UPDATE_CODE).map_err(UpdaterError::WindowsRegistry)
         }
+        Product::Agent => registry::get_product_code(AGENT_UPDATE_CODE).map_err(UpdaterError::WindowsRegistry),
     }
 }

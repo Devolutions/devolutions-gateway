@@ -25,7 +25,10 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::pull_recording_file,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
+        crate::api::update::get_update_products,
         crate::api::update::trigger_update_check,
+        crate::api::update::get_update_schedule,
+        crate::api::update::set_update_schedule,
         crate::api::preflight::post_preflight,
         crate::api::net::get_net_config,
         crate::api::monitoring::handle_set_monitoring_config,
@@ -51,7 +54,14 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
+        crate::api::update::GetUpdateProductsResponse,
+        crate::api::update::UpdateRequestSchema,
+        crate::api::update::UpdateProduct,
+        crate::api::update::UpdateProductInfo,
         crate::api::update::UpdateResponse,
+        crate::api::update::GetUpdateScheduleResponse,
+        crate::api::update::SetUpdateScheduleRequest,
+        crate::api::update::SetUpdateScheduleResponse,
         PreflightOperation,
         PreflightOperationKind,
         AppCredential,
@@ -233,7 +243,7 @@ enum SubscriberMessageKind {
 struct SubscriberMessage {
     /// Name of the event type associated to this message.
     ///
-    /// Presence or absence of additionnal fields depends on the value of this field.
+    /// Presence or absence of additional fields depends on the value of this field.
     kind: SubscriberMessageKind,
     /// Date and time this message was produced.
     #[serde(with = "time::serde::rfc3339")]
@@ -365,7 +375,7 @@ struct PreflightOperation {
     ///
     /// Required for "resolve-host" kind.
     host_to_resolve: Option<String>,
-    /// Minimum persistance duration in seconds for the data provisioned via this operation.
+    /// Minimum persistence duration in seconds for the data provisioned via this operation.
     ///
     /// Optional parameter for "provision-token" and "provision-credentials" kinds.
     time_to_live: Option<u32>,

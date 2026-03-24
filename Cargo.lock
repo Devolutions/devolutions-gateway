@@ -1465,6 +1465,7 @@ dependencies = [
  "sha2 0.10.9",
  "tap",
  "thiserror 2.0.18",
+ "time",
  "tokio 1.49.0",
  "tokio-rustls",
  "tracing",
@@ -1486,6 +1487,14 @@ dependencies = [
  "uuid",
  "windows-registry 0.5.3",
  "windows-result 0.3.4",
+]
+
+[[package]]
+name = "devolutions-agent-updater"
+version = "2026.1.1"
+dependencies = [
+ "camino",
+ "devolutions-agent",
 ]
 
 [[package]]
