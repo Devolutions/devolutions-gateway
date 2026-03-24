@@ -4,6 +4,7 @@ extern crate serde;
 #[cfg(windows)]
 pub mod windows;
 
+pub mod agent_auto_update;
 mod date_version;
 mod update_json;
 
@@ -12,6 +13,8 @@ use std::env;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
 
+#[rustfmt::skip]
+pub use agent_auto_update::AgentAutoUpdateConf;
 #[rustfmt::skip]
 pub use date_version::{DateVersion, DateVersionError};
 #[rustfmt::skip]

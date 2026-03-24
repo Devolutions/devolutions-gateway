@@ -3,6 +3,8 @@ param(
     [parameter(Mandatory = $true)]
     [string] $Exe,
     [parameter(Mandatory = $true)]
+    [string] $UpdaterExe,
+    [parameter(Mandatory = $true)]
     [string] $PedmDll,
     [parameter(Mandatory = $true)]
     [string] $PedmMsix,
@@ -31,7 +33,7 @@ function Set-FileNameAndCopy {
         [string]$Path,
         [string]$NewName
     )
-    
+
     if (-Not (Test-Path $Path)) {
         throw "File not found: $Path"
     }
@@ -84,6 +86,9 @@ function New-AgentMsi() {
         # The path to the devolutions-agent.exe file.
         [string] $Exe,
         [parameter(Mandatory = $true)]
+        # The path to the devolutions-agent-updater.exe file.
+        [string] $UpdaterExe,
+        [parameter(Mandatory = $true)]
         # The path to the devolutions_pedm_shell_ext.dll file.
         [string] $PedmDll,
         [parameter(Mandatory = $true)]
@@ -111,6 +116,7 @@ function New-AgentMsi() {
 
     # Convert slashes. This does not affect function. It's just for display.
     $Exe = Convert-Path -Path $Exe
+    $UpdaterExe = Convert-Path -Path $UpdaterExe
     $PedmDll = Convert-Path -Path $PedmDll
     $PedmMsix = Convert-Path -Path $PedmMsix
     $SessionExe = Convert-Path -Path $SessionExe
@@ -127,20 +133,23 @@ function New-AgentMsi() {
     # These file names don't matter for building, but we will clean them up anyways for consistency. The names can be seen if inspecting the MSI.
     # The Agent exe will get copied to `C:\Program Files\Devolutions\Agent\DevolutionsAgent.exe` after install.
     $myExe = Set-FileNameAndCopy -Path $Exe -NewName 'DevolutionsAgent.exe'
+    # The updater shim is a detached helper for installing MSI updates.
+    $myUpdaterExe = Set-FileNameAndCopy -Path $UpdaterExe -NewName 'devolutions-agent-updater.exe'
     # The session is a service that gets launched on demand.
     $mySessionExe = Set-FileNameAndCopy -Path $SessionExe -NewName 'DevolutionsSession.exe'
 
     Write-Output "$repoDir\dotnet\DesktopAgent\bin\Release\net48\DevolutionsDesktopAgent.exe"
 
     Set-EnvVarPath 'DAGENT_EXECUTABLE' $myExe
+    Set-EnvVarPath 'DAGENT_UPDATER_EXECUTABLE' $myUpdaterExe
     Set-EnvVarPath 'DAGENT_PEDM_SHELL_EXT_DLL' $myPedmDll
     Set-EnvVarPath 'DAGENT_PEDM_SHELL_EXT_MSIX' $myPedmMsix
     Set-EnvVarPath 'DAGENT_SESSION_EXECUTABLE' $mySessionExe
 
     # The actual DevolutionsDesktopAgent.exe will be `\dotnet\DesktopAgent\bin\Release\net48\DevolutionsDesktopAgent.exe`.
-    # After install, the contsnts of `net48` will be copied to `C:\Program Files\Devolutions\Agent\desktop\`. 
+    # After install, the contsnts of `net48` will be copied to `C:\Program Files\Devolutions\Agent\desktop\`.
     Set-EnvVarPath 'DAGENT_DESKTOP_AGENT_PATH' "$repoDir\dotnet\DesktopAgent\bin\Release\net48"
-  
+
     $version = Get-Version
 
     Push-Location
@@ -152,7 +161,7 @@ function New-AgentMsi() {
     if ($Generate) {
         # This is used by `package/WindowsManaged/Program.cs`.
         $Env:DAGENT_MSI_SOURCE_ONLY_BUILD = '1'
-       
+
         foreach ($lang in Get-PackageLanguages) {
             $Env:DAGENT_MSI_LANG_ID = $lang.Name
             & 'MSBuild.exe' 'DevolutionsAgent.sln' '/t:restore,build' '/p:Configuration=Release' | Out-Host
@@ -175,4 +184,4 @@ function New-AgentMsi() {
     Pop-Location
 }
 
-New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -Architecture $Architecture -Outfile $Outfile
+New-AgentMsi -Generate:($Generate.IsPresent) -Exe $Exe -UpdaterExe $UpdaterExe -PedmDll $PedmDll -PedmMsix $PedmMsix -SessionExe $SessionExe -Architecture $Architecture -Outfile $Outfile

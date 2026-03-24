@@ -8,7 +8,7 @@ namespace DevolutionsAgent.Properties
     /// </summary>
     internal partial class AgentProperties
     {
- 
+
         internal static readonly WixProperty<Boolean> configureAgent = new()
         {
             Id = "P.CONFIGUREAGENT",
@@ -27,15 +27,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(configureAgent.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(configureAgent, value); 
+                    this.runtimeSession.Set(configureAgent, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Boolean> debugPowerShell = new()
         {
             Id = "P.DEBUGPOWERSHELL",
@@ -53,15 +53,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(debugPowerShell.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(debugPowerShell, value); 
+                    this.runtimeSession.Set(debugPowerShell, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Guid> installId = new()
         {
             Id = "P.InstallId",
@@ -79,15 +79,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(installId.Id);
                 return WixProperties.GetPropertyValue<Guid>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(installId, value); 
+                    this.runtimeSession.Set(installId, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<UInt32> netFx45Version = new()
         {
             Id = "P.NetFx45Version",
@@ -105,15 +105,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(netFx45Version.Id);
                 return WixProperties.GetPropertyValue<UInt32>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(netFx45Version, value); 
+                    this.runtimeSession.Set(netFx45Version, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Boolean> firstInstall = new()
         {
             Id = "P.FirstInstall",
@@ -131,15 +131,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(firstInstall.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(firstInstall, value); 
+                    this.runtimeSession.Set(firstInstall, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Boolean> upgrading = new()
         {
             Id = "P.Upgrading",
@@ -157,15 +157,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(upgrading.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(upgrading, value); 
+                    this.runtimeSession.Set(upgrading, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Boolean> removingForUpgrade = new()
         {
             Id = "P.RemovingForUpgrade",
@@ -183,15 +183,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(removingForUpgrade.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(removingForUpgrade, value); 
+                    this.runtimeSession.Set(removingForUpgrade, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Boolean> uninstalling = new()
         {
             Id = "P.Uninstalling",
@@ -209,15 +209,15 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(uninstalling.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(uninstalling, value); 
+                    this.runtimeSession.Set(uninstalling, value);
                 }
             }
         }
- 
+
         internal static readonly WixProperty<Boolean> maintenance = new()
         {
             Id = "P.Maintenance",
@@ -235,38 +235,37 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(maintenance.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(maintenance, value); 
+                    this.runtimeSession.Set(maintenance, value);
                 }
             }
         }
- 
+
 
         public static IWixProperty[] Properties =
         {
- 
+
             configureAgent,
- 
+
             debugPowerShell,
- 
+
             installId,
- 
+
             netFx45Version,
- 
+
             firstInstall,
- 
+
             upgrading,
- 
+
             removingForUpgrade,
- 
+
             uninstalling,
- 
+
             maintenance,
- 
+
         };
     }
 }
-

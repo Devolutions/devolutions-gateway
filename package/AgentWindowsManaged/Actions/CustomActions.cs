@@ -291,6 +291,51 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult ConfigureAgentAutoUpdate(Session session)
+        {
+            string path = Path.Combine(ProgramDataDirectory, "agent.json");
+
+            try
+            {
+                bool enable = session.IsFeatureEnabled(Features.AGENT_UPDATER_FEATURE.Id);
+
+                Dictionary<string, object> config = [];
+
+                try
+                {
+                    using StreamReader reader = new StreamReader(path);
+                    config = JsonConvert.DeserializeObject<Dictionary<string, object>>(reader.ReadToEnd());
+                }
+                catch (Exception)
+                {
+                    // ignored. Previous config is either invalid or non-existent.
+                }
+
+                // Navigate into or create the "Updater" section to set AgentAutoUpdate.Enabled.
+                Dictionary<string, object> updaterSection = [];
+
+                if (config.TryGetValue("Updater", out object existing) &&
+                    existing is Newtonsoft.Json.Linq.JObject existingObj)
+                {
+                    updaterSection = existingObj.ToObject<Dictionary<string, object>>();
+                }
+
+                updaterSection["AgentAutoUpdate"] = new Dictionary<string, bool> { { "Enabled", enable } };
+                config["Updater"] = updaterSection;
+
+                using StreamWriter writer = new StreamWriter(path);
+                writer.Write(JsonConvert.SerializeObject(config, Formatting.Indented));
+
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to configure agent auto-update: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
         public static ActionResult ConfigureFeatures(Session session)
         {
             foreach (Feature feature in (Feature[]) [Features.SESSION_FEATURE, Features.PEDM_FEATURE, Features.AGENT_UPDATER_FEATURE])
@@ -319,7 +364,7 @@ namespace DevolutionsAgent.Actions
 
                 string destinationDllPath = Path.Combine(installDir, Includes.SHELL_EXT_BINARY_NAME);
                 File.Copy(dllPath, destinationDllPath, true);
-                
+
                 string clsidPath = $"CLSID\\{Includes.SHELL_EXT_CSLID:B}";
 
                 using RegistryKey clsidKey = Registry.ClassesRoot.CreateSubKey(clsidPath);
@@ -488,7 +533,7 @@ namespace DevolutionsAgent.Actions
                         using EventWaitHandle quitEvent = new EventWaitHandle(false, EventResetMode.ManualReset, $"{mutexId}_{process.Id}");
                         quitEvent.Set();
                     }
-                    
+
                     process.WaitForExit((int)TimeSpan.FromSeconds(1).TotalMilliseconds);
 
                     if (process.HasExited)

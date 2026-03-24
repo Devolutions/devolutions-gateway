@@ -133,6 +133,22 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string InstallDirDlgDescription = "InstallDirDlgDescription";		
 		/// <summary>
+		/// Service Configuration
+		/// </summary>
+		public const string ServiceConfigDlgTitle = "ServiceConfigDlgTitle";		
+		/// <summary>
+		/// Configure optional service features.
+		/// </summary>
+		public const string ServiceConfigDlgDescription = "ServiceConfigDlgDescription";		
+		/// <summary>
+		/// When enabled, the Devolutions Agent will automatically update itself whenever a new version is available within the configured maintenance window.
+		/// </summary>
+		public const string ServiceConfigDlgAgentAutoUpdateDescription = "ServiceConfigDlgAgentAutoUpdateDescription";		
+		/// <summary>
+		/// Enable automatic agent updates
+		/// </summary>
+		public const string ServiceConfigDlgAgentAutoUpdateLabel = "ServiceConfigDlgAgentAutoUpdateLabel";		
+		/// <summary>
 		/// Installing [ProductName]
 		/// </summary>
 		public const string ProgressDlgTitleInstalling = "ProgressDlgTitleInstalling";		

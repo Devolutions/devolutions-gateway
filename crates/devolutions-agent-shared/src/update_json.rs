@@ -11,6 +11,9 @@ use crate::DateVersion;
 ///     },
 ///     "HubService": {
 ///         "TargetVersion": "latest"
+///     },
+///     "Agent": {
+///         "TargetVersion": "latest"
 ///     }
 /// }
 /// ```
@@ -22,6 +25,8 @@ pub struct UpdateJson {
     pub gateway: Option<ProductUpdateInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hub_service: Option<ProductUpdateInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<ProductUpdateInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

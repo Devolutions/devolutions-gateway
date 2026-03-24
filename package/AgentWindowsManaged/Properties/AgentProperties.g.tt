@@ -14,7 +14,7 @@ namespace DevolutionsAgent.Properties
     /// </summary>
     internal partial class AgentProperties
     {
-<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
+<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #>
         internal static readonly WixProperty<<#= this.properties[idx].TypeName #>> <#= this.properties[idx].PrivateName #> = new()
         {
 <# string id = string.IsNullOrEmpty(this.properties[idx].Id) ? this.properties[idx].Name : this.properties[idx].Id; #>
@@ -43,21 +43,21 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(<#= this.properties[idx].PrivateName #>.Id);
                 return WixProperties.GetPropertyValue<<#= this.properties[idx].TypeName #>>(stringValue);
             }
-            set 
-            { 
+            set
+            {
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(<#= this.properties[idx].PrivateName #>, value); 
+                    this.runtimeSession.Set(<#= this.properties[idx].PrivateName #>, value);
                 }
             }
         }
-<# } #> 
+<# } #>
 
         public static IWixProperty[] Properties =
         {
-<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
+<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #>
             <#= this.properties[idx].PrivateName #>,
-<# } #> 
+<# } #>
         };
     }
 }
@@ -67,7 +67,7 @@ namespace DevolutionsAgent.Properties
     {
         public abstract string Comment { get; set; }
         public abstract bool Hidden { get; set; }
-        public abstract string Id { get; set; }        
+        public abstract string Id { get; set; }
         public abstract string Name { get; set; }
         public abstract string PrivateName { get; }
         public abstract bool Public { get; set; }
@@ -139,5 +139,5 @@ namespace DevolutionsAgent.Properties
     new PropertyDefinition<bool>("RemovingForUpgrade", false, isPublic: false, secure: false),
     new PropertyDefinition<bool>("Uninstalling", false, isPublic: false, secure: false),
     new PropertyDefinition<bool>("Maintenance", false, isPublic: false, secure: false),
-  };             
+  };
 #>

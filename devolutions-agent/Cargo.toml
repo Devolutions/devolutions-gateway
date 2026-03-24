@@ -8,6 +8,14 @@ description = "Agent companion service for Devolutions Gateway"
 build = "build.rs"
 publish = false
 
+[[bin]]
+name = "devolutions-agent"
+path = "src/main.rs"
+
+[[bin]]
+name = "devolutions-agent-updater"
+path = "src/agent-updater.rs"
+
 [lints]
 workspace = true
 
@@ -57,6 +65,8 @@ features = [
 
 [target.'cfg(windows)'.dependencies]
 aws-lc-rs = "1.15"
+humantime = "2"
+time = { version = "0.3", features = ["local-offset", "macros", "parsing"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 hex = "0.4"
 notify-debouncer-mini = "0.6"

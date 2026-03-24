@@ -2,7 +2,7 @@
 
 use std::ops::DerefMut;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use uuid::Uuid;
 use win_api_wrappers::utils::WideString;
 
@@ -16,6 +16,9 @@ const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
     "50f753333811ff11f1920274afde3ffd4468b210",
 ];
 
+/// Filename of the updater shim executable installed alongside the agent.
+const AGENT_UPDATER_SHIM_NAME: &str = "devolutions-agent-updater.exe";
+
 pub(crate) async fn install_package(
     ctx: &UpdaterCtx,
     path: &Utf8Path,
@@ -23,6 +26,7 @@ pub(crate) async fn install_package(
 ) -> Result<(), UpdaterError> {
     match ctx.product {
         Product::Gateway | Product::HubService => install_msi(ctx, path, log_path).await,
+        Product::Agent => install_agent_via_shim(path, ctx.downgrade_product_code).await,
     }
 }
 
@@ -33,7 +37,111 @@ pub(crate) async fn uninstall_package(
 ) -> Result<(), UpdaterError> {
     match ctx.product {
         Product::Gateway | Product::HubService => uninstall_msi(ctx, product_code, log_path).await,
+        // For agent self-update the shim handles uninstall + install in sequence; the
+        // in-process uninstall step is skipped to avoid stopping the service prematurely.
+        Product::Agent => Ok(()),
     }
+}
+
+/// Install a new version of Devolutions Agent by launching the updater shim as a detached process.
+///
+/// The shim (`devolutions-agent-updater.exe`) is copied to a temp location before being launched
+/// so that the MSI installer can freely overwrite the agent installation directory. The shim
+/// then runs `msiexec` silently, which stops the agent service, replaces its files, and
+/// restarts it. Since the shim is detached from the agent service, it survives the service
+/// restart and ensures the installation completes.
+///
+/// When `downgrade_product_code` is `Some` the shim will first run `msiexec /x` to uninstall
+/// the currently installed version before running `msiexec /i` for the target version.
+async fn install_agent_via_shim(msi_path: &Utf8Path, downgrade_product_code: Option<Uuid>) -> Result<(), UpdaterError> {
+    let shim_path = find_agent_updater_shim()?;
+
+    // Copy the shim to a temp location so it survives the MSI replacing the installation dir.
+    let temp_shim_path = copy_shim_to_temp(&shim_path).await?;
+    info!(%msi_path, %temp_shim_path, "Launching agent updater shim as detached process");
+
+    // Schedule the temp shim copy for deletion at the next system reboot.
+    if let Err(error) = remove_file_on_reboot(&temp_shim_path) {
+        error!(%error, "Failed to schedule temp shim for deletion on reboot");
+    }
+
+    launch_updater_shim_detached(&temp_shim_path, msi_path, downgrade_product_code)?;
+
+    if downgrade_product_code.is_some() {
+        info!("Agent updater shim launched; agent will be uninstalled then reinstalled at the target version");
+    } else {
+        info!("Agent updater shim launched; agent service will be updated and restarted shortly");
+    }
+
+    Ok(())
+}
+
+/// Locate the agent updater shim executable next to the running agent binary.
+fn find_agent_updater_shim() -> Result<Utf8PathBuf, UpdaterError> {
+    let exe_path = std::env::current_exe().map_err(UpdaterError::Io)?;
+
+    let exe_path = Utf8PathBuf::from_path_buf(exe_path)
+        .map_err(|_| UpdaterError::Io(std::io::Error::other("agent executable path contains invalid UTF-8")))?;
+
+    let exe_dir = exe_path
+        .parent()
+        .ok_or_else(|| UpdaterError::Io(std::io::Error::other("cannot determine agent executable directory")))?;
+
+    let shim_path = exe_dir.join(AGENT_UPDATER_SHIM_NAME);
+
+    if !shim_path.exists() {
+        return Err(UpdaterError::AgentUpdaterShimNotFound { path: shim_path });
+    }
+
+    Ok(shim_path)
+}
+
+/// Copy the shim executable to a temporary path (UUID-named) so it can run independently of
+/// the installation directory.
+async fn copy_shim_to_temp(shim_path: &Utf8Path) -> Result<Utf8PathBuf, UpdaterError> {
+    let temp_shim_path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+        .expect("BUG: OS should always return valid UTF-8 temp path")
+        .join(format!("{}-devolutions-agent-updater.exe", Uuid::new_v4()));
+
+    tokio::fs::copy(shim_path, &temp_shim_path)
+        .await
+        .map_err(UpdaterError::Io)?;
+
+    Ok(temp_shim_path)
+}
+
+/// Launch the updater shim as a detached process so it survives the agent service restart.
+///
+/// `DETACHED_PROCESS` disassociates the child from the parent's console.
+/// `CREATE_NEW_PROCESS_GROUP` creates a new process group so that Ctrl+C signals from the
+/// parent do not propagate to the child.
+///
+/// When `downgrade_product_code` is `Some`, it is passed to the shim as `-x <product_code>`
+/// (before the MSI path) so it can uninstall the old version before installing the new one.
+fn launch_updater_shim_detached(
+    shim_path: &Utf8Path,
+    msi_path: &Utf8Path,
+    downgrade_product_code: Option<Uuid>,
+) -> Result<(), UpdaterError> {
+    use std::os::windows::process::CommandExt as _;
+
+    // Flags reference: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+    let mut cmd = std::process::Command::new(shim_path.as_str());
+    if let Some(code) = downgrade_product_code {
+        cmd.args(["-x", &code.braced().to_string()]);
+    }
+    cmd.arg(msi_path.as_str());
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .map_err(|source| UpdaterError::AgentShimLaunch { source })?;
+
+    Ok(())
 }
 
 async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> Result<(), UpdaterError> {
@@ -224,7 +332,7 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
 
 pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
     match ctx.product {
-        Product::Gateway | Product::HubService => validate_msi(ctx, path),
+        Product::Gateway | Product::HubService | Product::Agent => validate_msi(ctx, path),
     }
 }
 

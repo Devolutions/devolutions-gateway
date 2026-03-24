@@ -37,6 +37,11 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                     <!-- dialogs.installDir -->
                 <String Id="InstallDirDlgDescription">Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier.</String>
                 <String Id="InstallDirDlgTitle">Dossier de destination</String>
+                    <!-- dialogs.serviceConfig -->
+                <String Id="ServiceConfigDlgTitle">Configuration du service</String>
+                <String Id="ServiceConfigDlgDescription">Configurez les fonctionnalités optionnelles du service.</String>
+                <String Id="ServiceConfigDlgAgentAutoUpdateDescription">Lorsqu'activé, Devolutions Agent se met à jour automatiquement dès qu'une nouvelle version est disponible dans la fenêtre de maintenance configurée.</String>
+                <String Id="ServiceConfigDlgAgentAutoUpdateLabel">Activer les mises à jour automatiques de l'agent</String>
                     <!-- dialogs.progress -->
                 <String Id="ProgressDlgTitleChanging">Modification de [ProductName]</String>
                 <String Id="ProgressDlgTitleInstalling">Installation de [ProductName]</String>
@@ -62,8 +67,8 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                     <!-- metadata.- -->
                 <String Id="FeatureAgentDescription">Installs the Devolutions Agent service</String>
                 <String Id="FeatureAgentName">Devolutions Agent</String>
-                <String Id="FeatureAgentUpdaterDescription">Enables the Devolutions Gateway updater</String>
-                <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
+                <String Id="FeatureAgentUpdaterDescription">Lorsqu'activé, Devolutions Agent se met à jour automatiquement dès qu'une nouvelle version est disponible dans la fenêtre de maintenance configurée.</String>
+                <String Id="FeatureAgentUpdaterName">Activer la mise à jour automatique de l'agent</String>
                 <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
                     </WixLocalization>

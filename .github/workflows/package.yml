@@ -319,7 +319,7 @@ jobs:
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
-            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'devolutions-agent-updater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
             'jetsocat' { @('jetsocat_*') }
           })
           $ExcludePattern = "*.pdb"
@@ -473,7 +473,8 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
-          $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
+          $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent_*.exe' | Select -First 1
+          $Env:DAGENT_UPDATER_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions-agent-updater.exe' | Select -First 1
           $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
@@ -482,6 +483,7 @@ jobs:
           $Env:DAGENT_WINTUN_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'wintun.dll' | Select -First 1
 
           Write-Host "DAGENT_EXECUTABLE = ${Env:DAGENT_EXECUTABLE}"
+          Write-Host "DAGENT_UPDATER_EXECUTABLE = ${Env:DAGENT_UPDATER_EXECUTABLE}"
           Write-Host "DAGENT_DESKTOP_AGENT_PATH = ${Env:DAGENT_DESKTOP_AGENT_PATH}"
           Write-Host "DAGENT_PEDM_SHELL_EXT_DLL = ${Env:DAGENT_PEDM_SHELL_EXT_DLL}"
           Write-Host "DAGENT_PEDM_SHELL_EXT_MSIX = ${Env:DAGENT_PEDM_SHELL_EXT_MSIX}"
