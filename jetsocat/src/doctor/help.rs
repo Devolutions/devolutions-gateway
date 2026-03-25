@@ -44,16 +44,11 @@ If none of the above applies, you could be facing a Man-in-the-Middle (MITM) att
 
 pub(crate) fn cert_likely_missing_intermediate(ctx: &mut DiagnosticCtx) {
     ctx.attach_help(
-        "The certificate chain appears to be incomplete: an intermediate \
-certificate is likely missing.\n\
-A well-formed certificate chain must contain the leaf certificate followed by \
-all intermediate CA certificates. The root CA certificate is NOT required \
-(clients obtain it from their own trust store).\n\
-Please ensure that:\n\
-- When configuring your server, the certificate chain file includes both the \
-leaf certificate and all intermediate CA certificates.\n\
-- When checking a live server, the server is configured to send the full chain \
-(leaf + intermediates) during the TLS handshake."
+        "The certificate chain appears to be incomplete: an intermediate certificate is likely missing.
+A well-formed certificate chain must contain the leaf certificate followed by all intermediate CA certificates. The root CA certificate is NOT required (clients obtain it from their own trust store).
+Please ensure that:
+- When configuring your server, the certificate chain file includes both the leaf certificate and all intermediate CA certificates.
+- When checking a live server, the server is configured to send the full chain (leaf + intermediates) during the TLS handshake."
             .to_owned(),
     );
 }
