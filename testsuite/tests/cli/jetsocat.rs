@@ -639,29 +639,30 @@ HfiS7YOPqRb4fQZl+QPimeYSNkDNk2McIDjAIF+A+cB2RPA0MfrmDoxAHR1j0S8e
 ni3u97ReFRox/Q2JNuNORjxnyAmZdj/1ZJtdB7MuSkVt+DutROM2td4NgdqQro+a
 -----END CERTIFICATE-----";
 
-// Self-signed certificate with SAN (DNS:test.example.com) and serverAuth EKU.
+// Self-signed certificate (CA:FALSE) with SAN (DNS:test.example.com) and serverAuth EKU.
 // Generated with:
 // $ openssl req -x509 -newkey rsa:2048 -keyout /dev/null -nodes -subj "//CN=test.example.com" -days 3650 \
-//     -addext "subjectAltName=DNS:test.example.com" -addext "extendedKeyUsage=serverAuth" -out self_signed.pem
+//     -addext "subjectAltName=DNS:test.example.com" -addext "extendedKeyUsage=serverAuth" \
+//     -addext "basicConstraints=CA:FALSE" -out self_signed.pem
 const TEST_SELF_SIGNED_PEM: &str = "-----BEGIN CERTIFICATE-----
-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
+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
+XhjDtMbheBXBE0CCjhh+DOKrpb+CmKM=
 -----END CERTIFICATE-----";
 
 #[rstest]
@@ -726,7 +727,6 @@ fn doctor_intermediate_cert_detection(#[case] chain_parts: &[&str], #[case] expe
                 "{name}: unexpected warning content for expect_missing_intermediate={expect_missing_intermediate}, got: {warning:?}",
             );
         } else if name == chain_check_name {
-            println!("{entry:?}");
             saw_chain_check = true;
 
             // Always fails, because the root CA is never trusted in these tests.
