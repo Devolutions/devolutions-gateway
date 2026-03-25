@@ -8,14 +8,14 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 
+use core::fmt;
+
 #[cfg(not(any(unix, windows)))]
 use fallback as platform;
 #[cfg(unix)]
 use unix as platform;
 #[cfg(windows)]
 use windows as platform;
-
-use core::fmt;
 
 /// The memory-protection features that were successfully activated for a
 /// [`ProtectedBytes`] allocation.
