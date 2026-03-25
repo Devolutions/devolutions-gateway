@@ -190,10 +190,6 @@ fn page_size() -> usize {
     *PAGE_SIZE.get_or_init(|| {
         // SAFETY: `sysconf` with `_SC_PAGESIZE` is always safe to call.
         let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-        if ps > 0 {
-            ps as usize
-        } else {
-            4096 // conservative fallback
-        }
+        usize::try_from(ps).unwrap_or(4096)
     })
 }
