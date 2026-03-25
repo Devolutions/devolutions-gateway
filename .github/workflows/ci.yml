@@ -618,7 +618,7 @@ jobs:
 
       - name: Configure Linux runner
         if: ${{ matrix.os == 'linux' }}
-        run: ./ci/setup-linux-build-deps.ps1 -Architecture ${{ matrix.arch }} -InstallLibsodium
+        run: ./ci/setup-linux-build-deps.ps1 -Architecture ${{ matrix.arch }}
         shell: pwsh
 
       - name: Install fpm
@@ -652,19 +652,6 @@ jobs:
           Enter-VsDevShell
           $path = (Get-Command -Type Application mc).Source | Split-Path -Parent
           Write-Output "windows_sdk_ver_bin_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-        shell: pwsh
-
-      - name: Enable mlock for production
-        # On Linux, libsodium-dev is installed in the configure steps above (in the script).
-        # On Windows, libsodium is installed here via vcpkg (deferred to production to avoid slow builds on PRs).
-        if: ${{ needs.preflight.outputs.rust-profile == 'production' }}
-        run: |
-          if ($Env:RUNNER_OS -eq "Windows") {
-            # Install libsodium via vcpkg for the mlock feature (requires static library)
-            vcpkg install libsodium:x64-windows-static
-            echo "VCPKG_ROOT=$Env:VCPKG_INSTALLATION_ROOT" >> $Env:GITHUB_ENV
-          }
-          echo "CARGO_FEATURES=mlock" >> $Env:GITHUB_ENV
         shell: pwsh
 
       - name: Build

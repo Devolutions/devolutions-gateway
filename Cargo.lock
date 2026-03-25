@@ -1530,7 +1530,7 @@ dependencies = [
  "rustls-cng",
  "rustls-native-certs",
  "secrecy 0.10.3",
- "secrets",
+ "secret-memory",
  "serde",
  "serde-querystring",
  "serde_json",
@@ -6112,14 +6112,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "secrets"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f51745a213c4a2acabad80cd511e40376996bc83db6ceb4ebc7853d41c597988"
+name = "secret-memory"
+version = "0.0.0"
 dependencies = [
  "libc",
- "pkg-config",
- "vcpkg",
+ "tracing",
+ "windows 0.61.3",
+ "zeroize",
 ]
 
 [[package]]

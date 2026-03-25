@@ -1,0 +1,26 @@
+[package]
+name = "secret-memory"
+version = "0.0.0"
+edition = "2024"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Minimal protected in-memory storage for a single master key"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing = "0.1"
+zeroize = "1.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+]
