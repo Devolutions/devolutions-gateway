@@ -362,7 +362,7 @@ To resolve this issue, you can:
 
         if !has_san {
             ctx.attach_warning(
-                "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                "strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate"
                     .to_owned(),
             );
             help::cert_missing_san(ctx);
@@ -386,7 +386,7 @@ To resolve this issue, you can:
 
         if !has_server_auth {
             ctx.attach_warning(
-                "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+                "strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate"
                     .to_owned(),
             );
             help::cert_missing_server_auth_eku(ctx);

@@ -42,6 +42,17 @@ If none of the above applies, you could be facing a Man-in-the-Middle (MITM) att
     );
 }
 
+pub(crate) fn cert_likely_missing_intermediate(ctx: &mut DiagnosticCtx) {
+    ctx.attach_help(
+        "The certificate chain appears to be incomplete: an intermediate certificate is likely missing.
+A well-formed certificate chain must contain the leaf certificate followed by all intermediate CA certificates. The root CA certificate is NOT required (clients obtain it from their own trust store).
+Please ensure that:
+- When configuring your server, the certificate chain file includes both the leaf certificate and all intermediate CA certificates.
+- When checking a live server, the server is configured to send the full chain (leaf + intermediates) during the TLS handshake."
+            .to_owned(),
+    );
+}
+
 pub(crate) fn cert_is_expired(ctx: &mut DiagnosticCtx) {
     ctx.attach_help(
         "The certificate has expired.
@@ -73,7 +84,7 @@ pub(crate) fn cert_missing_san(ctx: &mut DiagnosticCtx) {
     ctx.attach_help(
         "The certificate is missing the Subject Alternative Name (SAN) extension.
 Modern clients (e.g., Chrome, macOS) require certificates to include SAN entries instead of relying on the Common Name (CN) field.
-The Devolutions Gateway will reject this certificate when the TlsVerifyStrict option is enabled.
+Strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate.
 To resolve this, generate a new certificate that includes the appropriate SAN entries for your domain."
             .to_owned(),
     );
@@ -83,7 +94,7 @@ pub(crate) fn cert_missing_server_auth_eku(ctx: &mut DiagnosticCtx) {
     ctx.attach_help(
         "The certificate does not include the serverAuth Extended Key Usage (EKU).
 The serverAuth purpose indicates that the certificate is valid for TLS server authentication.
-The Devolutions Gateway will reject this certificate when the TlsVerifyStrict option is enabled.
+Strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate.
 To resolve this, generate a new certificate that includes the serverAuth Extended Key Usage."
             .to_owned(),
     );

@@ -136,6 +136,14 @@ fn rustls_read_chain(
     crate::doctor::log_chain(server_certificates.iter());
     help::x509_io_link(ctx, server_certificates.iter());
 
+    // Attach a warning based on the raw file contents, before any chain-building step that
+    // could auto-fill missing intermediates from the system trust store.
+    // This gives the user an early, unambiguous structural hint even if the chain verifier
+    // later emits a more generic error.
+    if crate::doctor::cert_inspect::chain_likely_missing_intermediate(server_certificates.iter()) {
+        ctx.attach_warning("an intermediate certificate is likely missing".to_owned());
+    }
+
     Ok(())
 }
 
@@ -197,7 +205,13 @@ fn rustls_check_chain(
             match cert_error {
                 rustls::CertificateError::Expired => help::cert_is_expired(ctx),
                 rustls::CertificateError::NotValidYet => help::cert_is_not_yet_valid(ctx),
-                rustls::CertificateError::UnknownIssuer => help::cert_unknown_issuer(ctx),
+                rustls::CertificateError::UnknownIssuer => {
+                    if crate::doctor::cert_inspect::chain_likely_missing_intermediate(server_certificates.iter()) {
+                        help::cert_likely_missing_intermediate(ctx);
+                    } else {
+                        help::cert_unknown_issuer(ctx);
+                    }
+                }
                 rustls::CertificateError::InvalidPurpose => help::cert_invalid_purpose(ctx),
                 _ => (),
             }
@@ -220,7 +234,7 @@ fn rustls_check_san_extension(
 
     if !has_san {
         ctx.attach_warning(
-            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+            "strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate"
                 .to_owned(),
         );
         help::cert_missing_san(ctx);
@@ -244,7 +258,7 @@ fn rustls_check_server_auth_eku(
 
     if !has_server_auth {
         ctx.attach_warning(
-            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+            "strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate"
                 .to_owned(),
         );
         help::cert_missing_server_auth_eku(ctx);

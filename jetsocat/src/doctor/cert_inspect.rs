@@ -190,3 +190,112 @@ fn der_read_length(data: &[u8]) -> anyhow::Result<(usize, usize)> {
         Ok((length, 1 + num_bytes))
     }
 }
+
+struct TbsFields<'a> {
+    issuer_tlv: &'a [u8],
+    subject_tlv: &'a [u8],
+}
+
+/// Extracts the Issuer and Subject TLV (Tag-Length-Value) slices from a DER-encoded X.509 certificate.
+fn cert_tbs_fields(cert_der: &[u8]) -> anyhow::Result<TbsFields<'_>> {
+    // Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signature }
+    let (tag, cert_content, _) = der_read_tlv(cert_der)?;
+    anyhow::ensure!(tag == 0x30, "expected Certificate SEQUENCE, got tag {tag:#04X}");
+
+    // TBSCertificate ::= SEQUENCE { version?, serial, signature, issuer, validity, subject, ... }
+    let (tag, tbs_content, _) = der_read_tlv(cert_content)?;
+    anyhow::ensure!(tag == 0x30, "expected TBSCertificate SEQUENCE, got tag {tag:#04X}");
+
+    let mut pos = 0;
+
+    // version [0] EXPLICIT (optional)
+    if pos < tbs_content.len() && tbs_content[pos] == 0xA0 {
+        let (_, _, consumed) = der_read_tlv(&tbs_content[pos..])?;
+        pos += consumed;
+    }
+
+    // Skip serialNumber (field 0)
+    anyhow::ensure!(pos < tbs_content.len(), "unexpected end before serialNumber");
+    let (_, _, consumed) = der_read_tlv(&tbs_content[pos..])?;
+    pos += consumed;
+
+    // Skip signature AlgorithmIdentifier (field 1)
+    anyhow::ensure!(pos < tbs_content.len(), "unexpected end before signature");
+    let (_, _, consumed) = der_read_tlv(&tbs_content[pos..])?;
+    pos += consumed;
+
+    // Read issuer (field 2) — full TLV
+    anyhow::ensure!(pos < tbs_content.len(), "unexpected end before issuer");
+    let issuer_start = pos;
+    let (_, _, consumed) = der_read_tlv(&tbs_content[pos..])?;
+    let issuer_tlv = &tbs_content[issuer_start..issuer_start + consumed];
+    pos += consumed;
+
+    // Skip validity (field 3)
+    anyhow::ensure!(pos < tbs_content.len(), "unexpected end before validity");
+    let (_, _, consumed) = der_read_tlv(&tbs_content[pos..])?;
+    pos += consumed;
+
+    // Read subject (field 4) — full TLV
+    anyhow::ensure!(pos < tbs_content.len(), "unexpected end before subject");
+    let subject_start = pos;
+    let (_, _, consumed) = der_read_tlv(&tbs_content[pos..])?;
+    let subject_tlv = &tbs_content[subject_start..subject_start + consumed];
+
+    Ok(TbsFields {
+        issuer_tlv,
+        subject_tlv,
+    })
+}
+
+/// Returns true if the chain is likely missing an intermediate certificate.
+///
+/// Operates purely on the presented bytes — no trust store is consulted.
+///
+/// The result is a best-effort hint, not a definitive verdict. Callers should
+/// use it to select a more specific diagnostic message but must not rely on it
+/// for security decisions.
+///
+/// DER parse errors return `false` (i.e. "chain assumed complete"), which
+/// avoids false-positive warnings. Any underlying malformation should be caught
+/// independently by a proper certificate verifier.
+pub(super) fn chain_likely_missing_intermediate<I>(certs_der: I) -> bool
+where
+    I: IntoIterator,
+    I::Item: AsRef<[u8]>,
+{
+    let mut iter = certs_der.into_iter();
+
+    // Assume the first certificate is the leaf.
+    let Some(leaf) = iter.next() else {
+        return false; // empty chain
+    };
+
+    // A parse failure on the leaf is treated as "chain assumed complete" (no false positive).
+    let Ok(leaf_fields) = cert_tbs_fields(leaf.as_ref()) else {
+        return false;
+    };
+
+    // A self-signed certificate is its own issuer; no intermediate is expected.
+    if leaf_fields.issuer_tlv == leaf_fields.subject_tlv {
+        return false;
+    }
+
+    let leaf_issuer = leaf_fields.issuer_tlv;
+
+    // If any subsequent cert's subject matches the leaf's issuer, the chain appears complete.
+    // A parse failure is treated as "chain assumed complete" (no false positive): the cert may
+    // well be the missing intermediate, we just can't verify it.
+    for cert in iter {
+        match cert_tbs_fields(cert.as_ref()) {
+            // Issuer found → chain appears complete.
+            Ok(fields) if fields.subject_tlv == leaf_issuer => return false,
+            // Not a match, keep looking.
+            Ok(_) => {}
+            // Unreadable cert → assume complete to avoid false positive.
+            Err(_) => return false,
+        }
+    }
+
+    true // no issuer found → likely missing intermediate
+}
