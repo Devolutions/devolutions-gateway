@@ -574,6 +574,176 @@ D7Evd6eXm50umoqlchupHZFRmIJCiHrg7vWwXdJQtgP8zYqh7uZIIbHsLHBJAlR3
 -----END CERTIFICATE-----";
 }
 
+// Three-cert test PKI generated with:
+// $ openssl req -x509 -newkey rsa:2048 -keyout root_key.pem -nodes -subj "//CN=Test Root CA" -days 3650 -out root_cert.pem
+// $ openssl req -newkey rsa:2048 -keyout int_key.pem -nodes -subj "//CN=Test Intermediate CA" -out int_csr.pem
+// $ openssl x509 -req -in int_csr.pem -CA root_cert.pem -CAkey root_key.pem -CAcreateserial -days 3650 -extensions v3_ca -extfile int_ext.cnf -out int_cert.pem
+// $ openssl req -newkey rsa:2048 -keyout leaf_key.pem -nodes -subj "//CN=test.example.com" -out leaf_csr.pem
+// $ openssl x509 -req -in leaf_csr.pem -CA int_cert.pem -CAkey int_key.pem -CAcreateserial -days 3650 -extensions v3_leaf -extfile leaf_ext.cnf -out leaf_cert.pem
+const TEST_ROOT_CA_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUZxRRVbwY49ChgWyQHTm3Xa/oS5wwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMB4XDTI2MDMyNTAxMjAyNloXDTM2
+MDMyMjAxMjAyNlowFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmwVhUvsKSDUeBL6yRcR9x55uQ2DDlFFZIbdW
+TSB3b3w3POkqSGNy/Fh6CRmaKlmoJqzXLMzs/VxEkGJ0wGeCDAAwf2NlTEQK8gun
+ZrZqD8R7dwX79Iw20GMtR2pr1ioVLaSnugat7T8wV0Cuys9owKapqglAKlgRiFSj
+v62TdBJt1XLhVREIfSG5KFo5onGcN3M9g1McoPjR6xmVCaedM2ozIYksZAz+/63Q
+YXlMS9+wCJPrEkF+YS9Woc2jASg8a6GAaYVkB9Hw6hTpULMYGPr1riO9GDlDsbC7
+QhY9mPFIDd9q8DG9eJPqfOqnw50dMsWEGxqTcFdpEAfARxtGBQIDAQABo1MwUTAd
+BgNVHQ4EFgQU2YZ7YewgHYX8IJSlm7g43MeGySowHwYDVR0jBBgwFoAU2YZ7Yewg
+HYX8IJSlm7g43MeGySowDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAG7HyQhtmP3CHFEHfypNHBRbBjM1tuuiXbepEslfK/hs7fO2Otcicppx/XaWe
+QWnGtM6bIK8lqG6wru8B/2EyWMENTxU0awYVQt7UK464APuteVuLBIdh07CY+PBE
+7bUKIUEtZbz471KTWKAL4x54g+C8pUqzTzyqxYuqMeIyOftPxcBdpFa4zYc3JVui
+tNzrw4eJJWshQeaKRQCtySPwB/MzeCreqEhy/VItZQDipjw/Dw/+ZQT8PfBZO5kS
+bzZZAriTbbObEvX8EJVMoFfgmQO2+zKbe5X2T7xS36EYLWg9noJ2qR/heKAzVoiD
+tuoCF30p15RTxDebu/VTTt/ZVg==
+-----END CERTIFICATE-----";
+const TEST_INTERMEDIATE_CA_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIDJzCCAg+gAwIBAgIUKaBPb8wiSebGgbVL9B8Rt+kevXAwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMB4XDTI2MDMyNTAxMjA0N1oXDTM2
+MDMyMjAxMjA0N1owHzEdMBsGA1UEAwwUVGVzdCBJbnRlcm1lZGlhdGUgQ0EwggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC6S5phbyiAPSiGr7IEFZVu2V6P
+bivNGSIHG8QLa/FbsC0V1bRlf04YeImMSIG5915vOEhIN+UxFDy7CRSJhwimiLR8
+6xrsjLKchtBhupR5PmMKo0BvaH3jZw7GorUiLDydx+LI4F+Wrk0JJMLJxfeoVBOK
+jzKYlSu6rP5XZa9gLYwrw882YdGospl7ElHAYyTNG8PE1inVmThI4gOYgH7FaPXE
+aLNqA2t4mSbLTLX1OJZRYF2toRP1hWXCXOi0hbnaeVbgLbvP+TmRAGNCQlt1GXUO
+JJG3AnYer/LQEjoOIzt3MtjtoWWKLk4BebqzwyIxYFW6g9eeft6tvP1ssGMBAgMB
+AAGjYzBhMB0GA1UdDgQWBBS0lZqvKVLibCLjthjp+PiiP65vRzAfBgNVHSMEGDAW
+gBTZhnth7CAdhfwglKWbuDjcx4bJKjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB
+/wQEAwIBhjANBgkqhkiG9w0BAQsFAAOCAQEAOFzRVPQ3d6Cu6EghguFbdxmupBI8
+dbaQfENj5hvrJolETb/nimEPPBl3AqxikhPgPBLjAfHSRFd/d6MxQ5U3XvgPdPGz
+IeJR5Xxqq0+zLXOY/bx4z4+XqBnaQgXkdCDKDgoXZqOM6aTu38DCA5WXqq6LGl1u
+PhR5mQZONOWQcfz8yRjoYWvJByAJqEloGa1aqiLo/NsmDxRRifEtmTlQZHVWjtdn
+MQq/TBNHx8FXzsLOFfP7lwmvQE1tWL+3oHh87SgOb1k+NvXPEzN8AtP2vubEosdL
+NFv0crwYecXxZllEPg50gQotPx+zwblyteRaMiuHOkPCFhcxsGbl1279cg==
+-----END CERTIFICATE-----";
+const TEST_LEAF_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIDXDCCAkSgAwIBAgIUMPgKPFE7dy3fDXDMbKPYuu2BYtEwDQYJKoZIhvcNAQEL
+BQAwHzEdMBsGA1UEAwwUVGVzdCBJbnRlcm1lZGlhdGUgQ0EwHhcNMjYwMzI1MDEy
+MTA1WhcNMzYwMzIyMDEyMTA1WjAbMRkwFwYDVQQDDBB0ZXN0LmV4YW1wbGUuY29t
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmoEQjemF/jx9NIUwEXu5
+nnGkjFJ5WWrBeHj+myudFMnbuh5H2bcHCD67Ul2q0+yYRVW95vf5X4BDV9q8PMfu
+v/snVChbTU7IY/EgR+3CcKpJHRMS84duvB8Tuyu7PtcMQmPOOioCdg+MIF4v0qJd
+eO+wAzdgscIUGh0EX4bUF5Nk0mj/7pOOG4gu00FPIaiqCWk2phRStm4jjOeyHJ25
+kt6GE4q38Jb7ZcdhmGv8cLNA1ZRenwWb0Xt6Fn5e2LGiUFpr0HVWPlL0Ul24we4D
+CZHdiVf+Q/0VJzxvC4D8bkwHGGmyB93eSKtre88ncbLdSM5baEusVU73XVXvpAqo
+QwIDAQABo4GTMIGQMBsGA1UdEQQUMBKCEHRlc3QuZXhhbXBsZS5jb20wEwYDVR0l
+BAwwCgYIKwYBBQUHAwEwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCBaAwHQYD
+VR0OBBYEFJPQQRCPWmnWzS+9tKHrQHy9TWu4MB8GA1UdIwQYMBaAFLSVmq8pUuJs
+IuO2GOn4+KI/rm9HMA0GCSqGSIb3DQEBCwUAA4IBAQCZIlzIboOSstiqfkTJEhKm
+lk7NPRvloDj3CKw7HFITfly4jMXHabf2kuBwiCdtGNALFbfCllxl7MsoTBzUOvDv
+inAx1srqD1uQeXQvH1DFDeioj5fFM6fbkmNvElxe9NJ2rJzkrEiqOF11RuWdX8n6
+jbvTXzmri8qgr1bppTbojubVecSzXdDJVepXzKBTxPdyGnFCSO8yGj/FB0EvCkHo
+HfiS7YOPqRb4fQZl+QPimeYSNkDNk2McIDjAIF+A+cB2RPA0MfrmDoxAHR1j0S8e
+ni3u97ReFRox/Q2JNuNORjxnyAmZdj/1ZJtdB7MuSkVt+DutROM2td4NgdqQro+a
+-----END CERTIFICATE-----";
+
+// Self-signed certificate with SAN (DNS:test.example.com) and serverAuth EKU.
+// Generated with:
+// $ openssl req -x509 -newkey rsa:2048 -keyout /dev/null -nodes -subj "//CN=test.example.com" -days 3650 \
+//     -addext "subjectAltName=DNS:test.example.com" -addext "extendedKeyUsage=serverAuth" -out self_signed.pem
+const TEST_SELF_SIGNED_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIDSzCCAjOgAwIBAgIUfiqVSzoOheXyS3y38r+0eR0uH70wDQYJKoZIhvcNAQEL
+BQAwGzEZMBcGA1UEAwwQdGVzdC5leGFtcGxlLmNvbTAeFw0yNjAzMjUwNjM4NTRa
+Fw0zNjAzMjIwNjM4NTRaMBsxGTAXBgNVBAMMEHRlc3QuZXhhbXBsZS5jb20wggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC0e0VA/+JJG8pt950H2qxosXgW
+pCuzQ6TkfpaUXjT6kB4Wd14J+fudkkpDTLNPhIx+zInJRp2hSw7b6QWFzrxIu/mX
+gFRTcJEXzaijhSdwiegM43se0Zn+95vUkqjGVsjXqCXOe8ge3jyrE9d1Qr8zNPOb
+LjPraIpCzT9MEHm5jYjGw1ADqaqJYixkVKtxbRwg1SYhY4sVsEbUmT9aTjz+tmEn
+76U4ssEag0piJkUuxlz6WYdjD7fQe4VTmGPec60u//bh8zFkhLemZwzWF/wEzv+M
+GgcbGWP+Ml/sV0Vyh8UlwUEWIATAXncCzBlvfGUCeso0nlLFTxno8M6nCdHnAgMB
+AAGjgYYwgYMwHQYDVR0OBBYEFP+gZG5ysjO7IUM0aJfcmQq7Zxs5MB8GA1UdIwQY
+MBaAFP+gZG5ysjO7IUM0aJfcmQq7Zxs5MA8GA1UdEwEB/wQFMAMBAf8wGwYDVR0R
+BBQwEoIQdGVzdC5leGFtcGxlLmNvbTATBgNVHSUEDDAKBggrBgEFBQcDATANBgkq
+hkiG9w0BAQsFAAOCAQEAXGfGlxA/39Bp430uHuLMb3aj/PpcJhjyX2N9tBiLSlZm
+rEboXyYoWeAW/83ohYP8oIJnbrSJqFB9AEhhzw2Dsu4s8ABlwn3qPyIw2oqx3A+D
+DvxVFeQUdEVEqtQx3uE8+NbAGwGPkB9Y+6l+MkXLT1/C5NuA+jjB5Oj7QO3zJTul
+jplwlLp3NvKyhRldXC0U+jtGh/9GUZ0MoCbHOt0+pheChNcPbG9HJxcHpbXKs2Om
+GdHhGL3jZBlNHr/YQvFIwWZlGm8k+s66lBXNIQ6ZviUbabSihmpC+jEcN+fPZIPL
+iwrb83+X4FqCHBTZ09tA/4HbWnfhV+6O6q23s70ESA==
+-----END CERTIFICATE-----";
+
+#[rstest]
+// leaf only — no intermediate presented
+#[case::leaf_only(&[TEST_LEAF_CERT_PEM], true)]
+// leaf + root but no intermediate — root should be stripped by the heuristic
+#[case::leaf_plus_root(&[TEST_LEAF_CERT_PEM, TEST_ROOT_CA_PEM], true)]
+// leaf + intermediate (no root) — the normal server config; chain is structurally complete
+#[case::complete_chain(&[TEST_LEAF_CERT_PEM, TEST_INTERMEDIATE_CA_PEM], false)]
+// leaf + intermediate - root — the root certificate is typically not required, but is not harmful (ignored by the client); chain is structurally complete
+#[case::complete_plus_root(&[TEST_LEAF_CERT_PEM, TEST_INTERMEDIATE_CA_PEM, TEST_ROOT_CA_PEM], false)]
+// self-signed certificate — issuer == subject, no intermediate expected
+#[case::self_signed(&[TEST_SELF_SIGNED_PEM], false)]
+fn doctor_intermediate_cert_detection(#[case] chain_parts: &[&str], #[case] expect_missing_intermediate: bool) {
+    let read_chain_name = if cfg!(windows) {
+        "schannel_read_chain"
+    } else {
+        "rustls_read_chain"
+    };
+    let chain_check_name = if cfg!(windows) {
+        "schannel_check_chain"
+    } else {
+        "rustls_check_chain"
+    };
+
+    let chain_pem = chain_parts.join("\n");
+    let tempdir = tempfile::tempdir().unwrap();
+    let chain_file_path = tempdir.path().join("chain.pem");
+    std::fs::write(&chain_file_path, &chain_pem).unwrap();
+
+    let output = jetsocat_assert_cmd()
+        .args([
+            "doctor",
+            "--chain",
+            chain_file_path.to_str().unwrap(),
+            "--subject-name",
+            "test.example.com",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+
+    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let mut saw_read_chain = false;
+    let mut saw_chain_check = false;
+
+    for line in stdout.lines() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        let name = entry["name"].as_str().unwrap();
+
+        if name == read_chain_name {
+            saw_read_chain = true;
+            // The read step attaches an early warning based on raw file contents,
+            // before any chain-building that might auto-fill missing intermediates.
+            let warning = entry["warning"].as_str().unwrap_or("");
+            assert_eq!(
+                warning.to_lowercase().contains("intermediate"),
+                expect_missing_intermediate,
+                "{name}: unexpected warning content for expect_missing_intermediate={expect_missing_intermediate}, got: {warning:?}",
+            );
+        } else if name == chain_check_name {
+            saw_chain_check = true;
+            // Always fails, because the root CA is never trusted in these tests.
+            assert!(!entry["success"].as_bool().unwrap(), "{name} should have failed");
+
+            let help = entry["help"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name} should have a help message"));
+            assert_eq!(
+                help.to_lowercase()
+                    .contains("intermediate certificate is likely missing"),
+                expect_missing_intermediate,
+                "{name}: unexpected help content for expect_missing_intermediate={expect_missing_intermediate}, got: {help:?}",
+            );
+        }
+    }
+
+    assert!(saw_read_chain, "diagnostic '{read_chain_name}' was never emitted");
+    assert!(saw_chain_check, "diagnostic '{chain_check_name}' was never emitted");
+}
+
 #[test]
 fn doctor_invalid_server_port() {
     let output = jetsocat_assert_cmd()

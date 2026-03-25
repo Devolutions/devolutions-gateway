@@ -406,6 +406,14 @@ fn schannel_read_chain(
     crate::doctor::log_chain(certificates.iter());
     help::x509_io_link(ctx, certificates.iter());
 
+    // Attach a warning based on the raw file contents, before any chain-building step that
+    // could auto-fill missing intermediates from the system trust store.
+    // This gives the user an early, unambiguous structural hint even if the chain verifier
+    // later emits a more generic error.
+    if crate::doctor::cert_inspect::chain_likely_missing_intermediate(certificates.iter().map(|cert| &cert.der)) {
+        ctx.attach_warning("an intermediate certificate is likely missing".to_owned());
+    }
+
     Ok(())
 }
 
@@ -458,8 +466,12 @@ fn schannel_check_chain(
 
     let chain = end_entity_cert.chain().context("failed to get certificate chain")?;
 
+    let mut certs_der: Vec<Vec<u8>> = Vec::new();
+
     // Inspect each certificate of the chain and look for suspicious trust status flags.
     chain.for_each(|cert_idx, element| {
+        certs_der.push(element.cert.as_x509_der().to_owned());
+
         let cert_name = if let Ok(name) = element.cert.subject_friendly_name() {
             name
         } else {
@@ -530,11 +542,20 @@ fn schannel_check_chain(
 
     if flags_contains(trust_status.dwErrorStatus, Cryptography::CERT_TRUST_IS_UNTRUSTED_ROOT) {
         error!("CERT_TRUST_IS_UNTRUSTED_ROOT");
-        help::cert_unknown_issuer(ctx);
     }
 
     if flags_contains(trust_status.dwErrorStatus, Cryptography::CERT_TRUST_IS_PARTIAL_CHAIN) {
         error!("CERT_TRUST_IS_PARTIAL_CHAIN");
+    }
+
+    if flags_contains(trust_status.dwErrorStatus, Cryptography::CERT_TRUST_IS_PARTIAL_CHAIN)
+        || flags_contains(trust_status.dwErrorStatus, Cryptography::CERT_TRUST_IS_UNTRUSTED_ROOT)
+    {
+        if crate::doctor::cert_inspect::chain_likely_missing_intermediate(certs_der.iter()) {
+            help::cert_likely_missing_intermediate(ctx);
+        } else {
+            help::cert_unknown_issuer(ctx);
+        }
     }
 
     if flags_contains(
@@ -579,7 +600,7 @@ fn schannel_check_san_extension(
 
     if !has_san {
         ctx.attach_warning(
-            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+            "strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate"
                 .to_owned(),
         );
         help::cert_missing_san(ctx);
@@ -608,7 +629,7 @@ fn schannel_check_server_auth_eku(
 
     if !has_server_auth {
         ctx.attach_warning(
-            "when TlsVerifyStrict is enabled in the Devolutions Gateway configuration, this certificate will be rejected"
+            "strict TLS peers (e.g., Devolutions Gateway with TlsVerifyStrict enabled) will reject this certificate"
                 .to_owned(),
         );
         help::cert_missing_server_auth_eku(ctx);
