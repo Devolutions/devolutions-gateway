@@ -706,6 +706,7 @@ fn doctor_intermediate_cert_detection(#[case] chain_parts: &[&str], #[case] expe
         .failure();
 
     let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+
     let mut saw_read_chain = false;
     let mut saw_chain_check = false;
 
@@ -715,6 +716,7 @@ fn doctor_intermediate_cert_detection(#[case] chain_parts: &[&str], #[case] expe
 
         if name == read_chain_name {
             saw_read_chain = true;
+
             // The read step attaches an early warning based on raw file contents,
             // before any chain-building that might auto-fill missing intermediates.
             let warning = entry["warning"].as_str().unwrap_or("");
@@ -725,6 +727,7 @@ fn doctor_intermediate_cert_detection(#[case] chain_parts: &[&str], #[case] expe
             );
         } else if name == chain_check_name {
             saw_chain_check = true;
+
             // Always fails, because the root CA is never trusted in these tests.
             assert!(!entry["success"].as_bool().unwrap(), "{name} should have failed");
 
