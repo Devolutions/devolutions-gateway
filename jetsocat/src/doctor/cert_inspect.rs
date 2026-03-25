@@ -288,9 +288,12 @@ where
     // well be the missing intermediate, we just can't verify it.
     for cert in iter {
         match cert_tbs_fields(cert.as_ref()) {
-            Ok(fields) if fields.subject_tlv == leaf_issuer => return false, // issuer found → chain appears complete
-            Ok(_) => {}                                                      // not a match, keep looking
-            Err(_) => return false, // unreadable cert → assume complete to avoid false positive
+            // Issuer found → chain appears complete.
+            Ok(fields) if fields.subject_tlv == leaf_issuer => return false,
+            // Not a match, keep looking.
+            Ok(_) => {}
+            // Unreadable cert → assume complete to avoid false positive.
+            Err(_) => return false,
         }
     }
 
