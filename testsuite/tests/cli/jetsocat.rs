@@ -726,6 +726,7 @@ fn doctor_intermediate_cert_detection(#[case] chain_parts: &[&str], #[case] expe
                 "{name}: unexpected warning content for expect_missing_intermediate={expect_missing_intermediate}, got: {warning:?}",
             );
         } else if name == chain_check_name {
+            println!("{entry:?}");
             saw_chain_check = true;
 
             // Always fails, because the root CA is never trusted in these tests.
