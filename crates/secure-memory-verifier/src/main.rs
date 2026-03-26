@@ -44,10 +44,6 @@ pub fn print_info(msg: &str) {
     println!("[INFO]  {msg}");
 }
 
-pub fn print_skip(msg: &str) {
-    println!("[SKIP]  {msg}");
-}
-
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() {

@@ -6,10 +6,9 @@
 //! memory range from automatically-generated crash reports. This check:
 //!
 //! 1. Creates a `ProtectedBytes<32>` containing a known canary pattern.
-//! 2. Registers the data page with `WerRegisterExcludedMemoryBlock`.
-//! 3. Crashes the process intentionally so WER generates a dump.
-//! 4. The parent process finds the dump and searches it for the canary.
-//! 5. Absence of the canary confirms the exclusion worked.
+//! 2. Crashes a child process so WER generates a full-memory dump.
+//! 3. The parent process finds the dump and searches it for the canary.
+//! 4. Absence of the canary confirms WER honoured the exclusion end-to-end.
 //!
 //! ## Prerequisites (WER LocalDumps must be pre-configured)
 //!
@@ -28,8 +27,8 @@
 //!
 //! ## What this does NOT prove
 //!
-//! - Third-party dump tools (ProcDump, WinDbg, procdump, …) honour
-//!   `WerRegisterExcludedMemoryBlock`. They typically do not (e.g.: minidump)
+//! - Third-party dump tools (ProcDump, WinDbg, …) honour
+//!   `WerRegisterExcludedMemoryBlock`. They typically do not.
 //! - WER exclusion covers every possible dump format or WER version.
 
 use std::path::{Path, PathBuf};
@@ -45,8 +44,6 @@ const WER_CANARY: [u8; 32] = [
     0xDE, 0xC0, 0xAD, 0xDE, 0xEF, 0xBE, 0xAD, 0xDE, 0x57, 0xE8, 0x44, 0x20, 0xC1, 0x0C, 0xDB, 0x20, 0xFE, 0xDC, 0xBA,
     0x98, 0x76, 0x54, 0x32, 0x10, 0xC0, 0xFF, 0xEE, 0xC0, 0xFF, 0xEE, 0x57, 0xE8,
 ];
-
-// ── Parent side ───────────────────────────────────────────────────────────────
 
 pub(crate) fn run() -> bool {
     print_check("wer-dump: verifying WerRegisterExcludedMemoryBlock excludes the secret from WER crash reports");
@@ -90,7 +87,6 @@ pub(crate) fn run() -> bool {
         Ok(_) => {} // non-zero exit code = expected crash
     }
 
-    // Wait up to 30s for WER to generate the dump.
     print_info("wer-dump: waiting for WER to write the crash dump (up to 30s)...");
     let dump_path = match wait_for_new_dump(&dump_folder, baseline_time, Duration::from_secs(30)) {
         Some(p) => p,
@@ -113,9 +109,7 @@ pub(crate) fn run() -> bool {
         }
     };
 
-    let canary_found = find_pattern(&dump_bytes, &WER_CANARY);
-
-    if canary_found {
+    if find_pattern(&dump_bytes, &WER_CANARY) {
         print_fail("wer-dump: canary found in WER dump — WerRegisterExcludedMemoryBlock did NOT exclude the region");
         false
     } else {
