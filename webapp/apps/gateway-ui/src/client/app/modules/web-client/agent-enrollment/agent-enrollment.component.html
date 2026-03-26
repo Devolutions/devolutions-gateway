@@ -1,0 +1,116 @@
+<div class="agent-enrollment-container">
+  <h2>Agent Tunnel Management</h2>
+
+  <!-- Agent List -->
+  <div class="agent-list-section">
+    <div class="section-header">
+      <h3>Connected Agents</h3>
+      <button class="p-button p-button-outlined p-button-sm" (click)="loadAgents()">Refresh</button>
+    </div>
+
+    <div *ngIf="loading" class="loading-indicator">Loading agents...</div>
+
+    <div *ngIf="!loading && agents.length === 0" class="empty-state">
+      No agents registered. Use the enrollment form below to enroll a new agent.
+    </div>
+
+    <div class="agent-cards">
+      <div *ngFor="let agent of agents" class="agent-card">
+        <div class="agent-card-header">
+          <span class="agent-name">{{ agent.name }}</span>
+          <span class="agent-status" [class.online]="agent.is_online" [class.offline]="!agent.is_online">
+            {{ agent.is_online ? 'Online' : 'Offline' }}
+          </span>
+        </div>
+        <div class="agent-card-body">
+          <div class="agent-detail">
+            <span class="detail-label">ID:</span>
+            <span class="detail-value agent-id">{{ agent.agent_id }}</span>
+          </div>
+          <div class="agent-detail">
+            <span class="detail-label">Subnets:</span>
+            <span class="detail-value">{{ agent.subnets.length > 0 ? agent.subnets.join(', ') : 'None' }}</span>
+          </div>
+          <div class="agent-detail">
+            <span class="detail-label">Last seen:</span>
+            <span class="detail-value">{{ humanizeLastSeen(agent.last_seen_ms) }}</span>
+          </div>
+        </div>
+        <div class="agent-card-actions">
+          <button class="p-button p-button-danger p-button-sm p-button-text"
+                  *ngIf="agentToDelete?.agent_id !== agent.agent_id"
+                  (click)="confirmDelete(agent)">
+            Delete
+          </button>
+          <span *ngIf="agentToDelete?.agent_id === agent.agent_id" class="delete-confirm">
+            Are you sure?
+            <button class="p-button p-button-danger p-button-sm p-button-text" (click)="deleteAgent()">Yes</button>
+            <button class="p-button p-button-sm p-button-text" (click)="cancelDelete()">No</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Enrollment Generator -->
+  <div class="enrollment-section">
+    <h3>Enroll New Agent</h3>
+
+    <div class="enrollment-form">
+      <div class="form-field">
+        <label for="apiBaseUrl">API Base URL</label>
+        <input id="apiBaseUrl" type="text" pInputText [(ngModel)]="apiBaseUrl" />
+      </div>
+
+      <div class="form-field">
+        <label for="quicHost">QUIC Host</label>
+        <input id="quicHost" type="text" pInputText [(ngModel)]="quicHost" />
+      </div>
+
+      <div class="form-field">
+        <label for="agentName">Agent Name (optional)</label>
+        <input id="agentName" type="text" pInputText [(ngModel)]="agentName" />
+      </div>
+
+      <div class="form-field">
+        <label for="tokenLifetime">Token Lifetime (seconds)</label>
+        <input id="tokenLifetime" type="number" pInputText [(ngModel)]="tokenLifetime" />
+      </div>
+
+      <button class="p-button p-button-primary"
+              [disabled]="generating || !apiBaseUrl"
+              (click)="generateEnrollmentString()">
+        {{ generating ? 'Generating...' : 'Generate Enrollment String' }}
+      </button>
+    </div>
+
+    <div *ngIf="enrollmentResult" class="enrollment-result">
+      <div class="result-section">
+        <label>Enrollment Command</label>
+        <div class="copyable-field">
+          <code class="code-block">{{ enrollmentResult.enrollment_command }}</code>
+          <button class="p-button p-button-sm p-button-text copy-btn"
+                  (click)="copyToClipboard(enrollmentResult.enrollment_command)">
+            Copy
+          </button>
+        </div>
+      </div>
+
+      <div class="result-section">
+        <label>Enrollment String</label>
+        <div class="copyable-field">
+          <code class="code-block enrollment-string">{{ enrollmentResult.enrollment_string }}</code>
+          <button class="p-button p-button-sm p-button-text copy-btn"
+                  (click)="copyToClipboard(enrollmentResult.enrollment_string)">
+            Copy
+          </button>
+        </div>
+      </div>
+
+      <div class="result-section">
+        <label>QUIC Endpoint:</label>
+        <span>{{ enrollmentResult.quic_endpoint }}</span>
+      </div>
+    </div>
+  </div>
+</div>

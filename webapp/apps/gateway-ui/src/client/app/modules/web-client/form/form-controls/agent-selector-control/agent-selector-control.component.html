@@ -1,0 +1,19 @@
+<div *ngIf="hasAgents" [formGroup]="parentForm">
+  <label for="agentSelector">Agent Tunnel</label>
+  <div class="gateway-form-input">
+    <p-select
+      id="agentSelector"
+      appendTo="body"
+      formControlName="agentId"
+      [options]="agents"
+      optionLabel="name"
+      optionValue="agent_id"
+      placeholder="Direct connection (no agent)"
+      [showClear]="true"
+    >
+      <ng-template let-agent pTemplate="item">
+        <span>{{ getAgentLabel(agent) }}</span>
+      </ng-template>
+    </p-select>
+  </div>
+</div>

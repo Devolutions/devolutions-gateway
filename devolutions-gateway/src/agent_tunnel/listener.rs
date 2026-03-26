@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use super::cert::CaManager;
+use super::enrollment_store::EnrollmentTokenStore;
 use super::registry::{AgentPeer, AgentRegistry};
 use super::stream::{QuicStream, StreamWrite};
 
@@ -41,6 +42,7 @@ pub struct AgentTunnelHandle {
     registry: Arc<AgentRegistry>,
     request_tx: mpsc::Sender<ProxyRequest>,
     ca_manager: Arc<CaManager>,
+    enrollment_token_store: Arc<EnrollmentTokenStore>,
 }
 
 impl AgentTunnelHandle {
@@ -52,6 +54,11 @@ impl AgentTunnelHandle {
     /// Returns a reference to the CA manager (for enrollment).
     pub fn ca_manager(&self) -> &CaManager {
         &self.ca_manager
+    }
+
+    /// Returns a reference to the enrollment token store.
+    pub fn enrollment_token_store(&self) -> &EnrollmentTokenStore {
+        &self.enrollment_token_store
     }
 
     /// Open a proxy stream through a connected agent.
@@ -139,11 +146,13 @@ impl AgentTunnelListener {
         let registry = Arc::new(AgentRegistry::new());
         let (request_tx, request_rx) = mpsc::channel(32);
         let (write_tx, write_rx) = mpsc::unbounded_channel();
+        let enrollment_token_store = Arc::new(EnrollmentTokenStore::new());
 
         let handle = AgentTunnelHandle {
             registry: Arc::clone(&registry),
             request_tx,
             ca_manager,
+            enrollment_token_store,
         };
 
         let listener = Self {

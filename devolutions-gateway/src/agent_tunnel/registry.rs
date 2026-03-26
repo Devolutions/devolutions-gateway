@@ -263,6 +263,26 @@ impl AgentRegistry {
             .map(|(_, agent)| agent)
     }
 
+    /// Returns information about a single agent by ID.
+    pub fn agent_info(&self, agent_id: &Uuid) -> Option<AgentInfo> {
+        self.agents.get(agent_id).map(|entry| {
+            let agent = entry.value();
+            let route_state = agent.route_state();
+            AgentInfo {
+                agent_id: agent.agent_id,
+                name: agent.name.clone(),
+                cert_fingerprint: agent.cert_fingerprint.clone(),
+                is_online: agent.is_online(AGENT_OFFLINE_TIMEOUT),
+                last_seen_ms: agent.last_seen_ms(),
+                subnets: route_state
+                    .as_ref()
+                    .map(|rs| rs.subnets.iter().map(ToString::to_string).collect())
+                    .unwrap_or_default(),
+                route_epoch: route_state.as_ref().map(|rs| rs.epoch),
+            }
+        })
+    }
+
     /// Collects information about all registered agents for API responses.
     pub fn agent_infos(&self) -> Vec<AgentInfo> {
         self.agents

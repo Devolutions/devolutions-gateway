@@ -386,6 +386,66 @@ where
     }
 }
 
+/// Grants read access to agent management endpoints.
+///
+/// Accepts either a scope token with `DiagnosticsRead` (or `Wildcard`) scope,
+/// or a valid `WebApp` token.
+#[derive(Clone, Copy)]
+pub struct AgentManagementReadAccess;
+
+impl<S> FromRequestParts<S> for AgentManagementReadAccess
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let claims = Extension::<AccessTokenClaims>::from_request_parts(parts, state)
+            .await
+            .map_err(HttpError::internal().err())?
+            .0;
+
+        match claims {
+            AccessTokenClaims::Scope(scope) => match scope.scope {
+                AccessScope::Wildcard | AccessScope::DiagnosticsRead => Ok(Self),
+                _ => Err(HttpError::forbidden().msg("invalid scope for agent management read")),
+            },
+            AccessTokenClaims::WebApp(_) => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("token not allowed for agent management read")),
+        }
+    }
+}
+
+/// Grants write access to agent management endpoints (e.g. delete).
+///
+/// Accepts either a scope token with `ConfigWrite` (or `Wildcard`) scope,
+/// or a valid `WebApp` token.
+#[derive(Clone, Copy)]
+pub struct AgentManagementWriteAccess;
+
+impl<S> FromRequestParts<S> for AgentManagementWriteAccess
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let claims = Extension::<AccessTokenClaims>::from_request_parts(parts, state)
+            .await
+            .map_err(HttpError::internal().err())?
+            .0;
+
+        match claims {
+            AccessTokenClaims::Scope(scope) => match scope.scope {
+                AccessScope::Wildcard | AccessScope::ConfigWrite => Ok(Self),
+                _ => Err(HttpError::forbidden().msg("invalid scope for agent management write")),
+            },
+            AccessTokenClaims::WebApp(_) => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("token not allowed for agent management write")),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WebAppToken(pub WebAppTokenClaims);
 

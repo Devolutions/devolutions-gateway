@@ -2,6 +2,11 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
+import {
+  AgentEnrollmentStringRequest,
+  AgentEnrollmentStringResponse,
+  AgentInfo,
+} from '../interfaces/agent.interfaces';
 import { SessionTokenParameters } from '../interfaces/connection-params.interfaces';
 
 interface VersionInfo {
@@ -25,6 +30,8 @@ export class ApiService {
   private sessionTokenApiURL = '/jet/webapp/session-token';
   private healthApiURL = '/jet/health';
   private devolutionProductApiURL = 'https://devolutions.net/products.htm';
+  private agentsApiURL = '/jet/agent-tunnel/agents';
+  private agentEnrollmentStringApiUrl = '/jet/webapp/agent-enrollment-string';
   constructor(private http: HttpClient) {}
 
   generateAppToken(username?: string, password?: string) {
@@ -106,5 +113,26 @@ export class ApiService {
           return throwError(() => new Error('Failed to fetch version info'));
         }),
       );
+  }
+
+  listAgents(): Observable<AgentInfo[]> {
+    return this.http.get<AgentInfo[]>(this.agentsApiURL);
+  }
+
+  getAgent(agentId: string): Observable<AgentInfo> {
+    return this.http.get<AgentInfo>(`${this.agentsApiURL}/${agentId}`);
+  }
+
+  deleteAgent(agentId: string): Observable<void> {
+    return this.http.delete<void>(`${this.agentsApiURL}/${agentId}`);
+  }
+
+  generateAgentEnrollmentString(
+    request: AgentEnrollmentStringRequest,
+  ): Observable<AgentEnrollmentStringResponse> {
+    return this.http.post<AgentEnrollmentStringResponse>(
+      this.agentEnrollmentStringApiUrl,
+      request,
+    );
   }
 }

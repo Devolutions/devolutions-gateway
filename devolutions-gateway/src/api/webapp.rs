@@ -28,6 +28,10 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
             .route("/client/{*path}", get(get_client))
             .route("/app-token", post(sign_app_token))
             .route("/session-token", post(sign_session_token))
+            .route(
+                "/agent-enrollment-string",
+                post(create_agent_enrollment_string),
+            )
     } else {
         Router::new()
     }
@@ -231,6 +235,9 @@ pub(crate) enum SessionTokenContentType {
         destination: TargetAddr,
         /// Unique ID for this session
         session_id: Uuid,
+        /// Optional agent ID for routing through an enrolled agent tunnel.
+        #[serde(default)]
+        agent_id: Option<Uuid>,
     },
     Jmux {
         /// Protocol for the session (e.g.: "tunnel")
@@ -327,6 +334,7 @@ pub(crate) async fn sign_session_token(
             protocol,
             destination,
             session_id,
+            agent_id,
         } => (
             AssociationTokenClaims {
                 jet_aid: session_id,
@@ -341,7 +349,7 @@ pub(crate) async fn sign_session_token(
                 exp,
                 jti,
                 cert_thumb256: None,
-                jet_agent_id: None,
+                jet_agent_id: agent_id,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {
@@ -501,6 +509,95 @@ fn extract_conf(conf: &crate::config::Conf) -> Result<&WebAppConf, HttpError> {
 
 fn ensure_enabled(conf: &crate::config::Conf) -> Result<(), HttpError> {
     extract_conf(conf).map(|_| ())
+}
+
+// -- Agent enrollment string generation -- //
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AgentEnrollmentStringRequest {
+    /// Base URL for the gateway API (e.g. `https://gateway.example.com`).
+    api_base_url: String,
+    /// Optional QUIC host override. Defaults to the gateway hostname.
+    quic_host: Option<String>,
+    /// Optional agent name hint.
+    name: Option<String>,
+    /// Token lifetime in seconds (default: 3600).
+    lifetime: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct AgentEnrollmentStringResponse {
+    enrollment_string: String,
+    enrollment_command: String,
+    quic_endpoint: String,
+    expires_at_unix: u64,
+}
+
+/// Generate a one-time enrollment string for agent enrollment.
+async fn create_agent_enrollment_string(
+    State(DgwState {
+        conf_handle,
+        agent_tunnel_handle,
+        ..
+    }): State<DgwState>,
+    WebAppToken(_web_app_token): WebAppToken,
+    Json(req): Json<AgentEnrollmentStringRequest>,
+) -> Result<Json<AgentEnrollmentStringResponse>, HttpError> {
+    use base64::Engine as _;
+
+    let conf = conf_handle.get_conf();
+
+    let handle = agent_tunnel_handle
+        .as_ref()
+        .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
+
+    let lifetime_secs = req.lifetime.unwrap_or(3600);
+
+    // Generate a one-time enrollment token.
+    let enrollment_token = Uuid::new_v4().to_string();
+    handle
+        .enrollment_token_store()
+        .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs));
+
+    let quic_host = req
+        .quic_host
+        .as_deref()
+        .unwrap_or(&conf.hostname);
+    let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
+
+    // Build the enrollment payload.
+    let payload = serde_json::json!({
+        "version": 1,
+        "api_base_url": req.api_base_url,
+        "quic_endpoint": quic_endpoint,
+        "enrollment_token": enrollment_token,
+    });
+
+    let payload_json = serde_json::to_string(&payload)
+        .map_err(HttpError::internal().with_msg("serialize enrollment payload").err())?;
+
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+    let enrollment_string = format!("dgw-enroll:v1:{encoded}");
+    let enrollment_command = format!("devolutions-agent up --enrollment-string \"{enrollment_string}\"");
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expires_at_unix = now_secs + lifetime_secs;
+
+    info!(
+        agent_name = ?req.name,
+        lifetime_secs,
+        "Generated agent enrollment string"
+    );
+
+    Ok(Json(AgentEnrollmentStringResponse {
+        enrollment_string,
+        enrollment_command,
+        quic_endpoint,
+        expires_at_unix,
+    }))
 }
 
 mod login_rate_limit {

@@ -240,6 +240,10 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
+  isSelectedProtocolTelnet(): boolean {
+    return this.getSelectedProtocol() === Protocol.Telnet;
+  }
+
   private addMessages(newMessages: ToastMessageOptions[]): void {
     const areThereNewMessages: boolean = newMessages.some(
       (newMsg) =>
