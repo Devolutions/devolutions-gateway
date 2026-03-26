@@ -4,7 +4,7 @@
 //! processes control messages (route advertisements, heartbeats), and
 //! creates proxy streams on demand.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -167,10 +167,6 @@ impl AgentTunnelListener {
 
         Ok((listener, handle))
     }
-
-    fn next_id(&self) -> u64 {
-        self.next_internal_id.fetch_add(1, Ordering::Relaxed)
-    }
 }
 
 #[async_trait]
@@ -272,9 +268,11 @@ struct ManagedConnection {
     agent_id: Option<Uuid>,
     peer_addr: SocketAddr,
     /// Active streams whose data is forwarded to a `QuicStream`.
-    stream_readers: HashMap<u64, mpsc::Sender<io::Result<Vec<u8>>>>,
+    stream_readers: HashMap<u64, mpsc::UnboundedSender<io::Result<Vec<u8>>>>,
     /// Streams in the proxy handshake phase (waiting for `ConnectResponse`).
     pending_proxies: HashMap<u64, PendingProxy>,
+    /// Buffered stream writes waiting for additional QUIC send capacity.
+    pending_stream_writes: HashMap<u64, PendingStreamWrite>,
     /// Buffer for partial control-stream reads.
     control_buf: Vec<u8>,
     /// Counter for server-initiated bidirectional stream IDs (1, 5, 9, …).
@@ -288,8 +286,18 @@ struct PendingProxy {
     conn_internal_id: u64,
 }
 
+#[derive(Default)]
+struct PendingStreamWrite {
+    chunks: VecDeque<Vec<u8>>,
+    finish_after_write: bool,
+}
+
 // --- Event loop helpers ---
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "QUIC receive path needs shared mutable state and packet metadata in one place"
+)]
 fn handle_udp_recv(
     config: &mut quiche::Config,
     id_gen: &AtomicU64,
@@ -345,12 +353,13 @@ fn handle_udp_recv(
             peer_addr,
             stream_readers: HashMap::new(),
             pending_proxies: HashMap::new(),
+            pending_stream_writes: HashMap::new(),
             control_buf: Vec::new(),
             next_server_bidi: 1, // First server-initiated bidi stream ID.
         };
 
         connections.insert(new_id, mc);
-        cid_map.insert(dcid_vec.clone(), new_id);
+        cid_map.insert(dcid_vec, new_id);
         cid_map.insert(scid_bytes, new_id);
 
         new_id
@@ -382,6 +391,8 @@ fn handle_udp_recv(
         for stream_id in readable {
             process_readable_stream(mc, stream_id, registry);
         }
+
+        flush_pending_stream_writes(mc);
     }
 }
 
@@ -459,7 +470,7 @@ fn process_readable_stream(mc: &mut ManagedConnection, stream_id: u64, registry:
                         // Forward leftover bytes (after the ConnectResponse) to the new stream.
                         let leftover = &pending.buffer[4 + msg_len..];
                         if !leftover.is_empty() {
-                            let _ = read_handle.tx.try_send(Ok(leftover.to_vec()));
+                            let _ = read_handle.tx.send(Ok(leftover.to_vec()));
                         }
 
                         mc.stream_readers.insert(stream_id, read_handle.tx);
@@ -489,11 +500,11 @@ fn process_readable_stream(mc: &mut ManagedConnection, stream_id: u64, registry:
     // --- Active data stream ---
     if let Some(reader_tx) = mc.stream_readers.get(&stream_id) {
         if !data.is_empty() {
-            let _ = reader_tx.try_send(Ok(data.to_vec()));
+            let _ = reader_tx.send(Ok(data.to_vec()));
         }
         if fin {
             // Signal EOF then remove.
-            let _ = reader_tx.try_send(Ok(Vec::new()));
+            let _ = reader_tx.send(Ok(Vec::new()));
             mc.stream_readers.remove(&stream_id);
         }
     }
@@ -556,11 +567,13 @@ fn process_control_data(mc: &mut ManagedConnection, data: &[u8], registry: &Agen
                 // Reply with HeartbeatAck.
                 let ack = ControlMessage::heartbeat_ack(timestamp_ms);
                 if let Ok(payload) = bincode::serialize(&ack) {
-                    let len = (payload.len() as u32).to_be_bytes();
+                    let len = u32::try_from(payload.len())
+                        .expect("heartbeat ack payload length should fit in u32")
+                        .to_be_bytes();
                     let mut response = Vec::with_capacity(4 + payload.len());
                     response.extend_from_slice(&len);
                     response.extend_from_slice(&payload);
-                    let _ = mc.quiche_conn.stream_send(0, &response, false);
+                    queue_stream_write(mc, 0, response, false);
                 }
             }
             ControlMessage::HeartbeatAck { .. } => {
@@ -601,37 +614,32 @@ fn handle_proxy_request(
             return;
         }
     };
-    let len = (payload.len() as u32).to_be_bytes();
+    let len = u32::try_from(payload.len())
+        .expect("ConnectMessage payload length should fit in u32")
+        .to_be_bytes();
     let mut data = Vec::with_capacity(4 + payload.len());
     data.extend_from_slice(&len);
     data.extend_from_slice(&payload);
 
-    match mc.quiche_conn.stream_send(stream_id, &data, false) {
-        Ok(_) => {
-            info!(
-                agent_id = %request.agent_id,
-                stream_id,
-                target = %request.target,
-                session_id = %request.session_id,
-                "Opened proxy stream to agent"
-            );
+    queue_stream_write(mc, stream_id, data, false);
 
-            mc.pending_proxies.insert(
-                stream_id,
-                PendingProxy {
-                    response_tx: request.response_tx,
-                    buffer: Vec::new(),
-                    write_tx: write_tx.clone(),
-                    conn_internal_id: mc.internal_id,
-                },
-            );
-        }
-        Err(e) => {
-            let _ = request
-                .response_tx
-                .send(Err(anyhow::anyhow!("failed to open stream to agent: {e}")));
-        }
-    }
+    info!(
+        agent_id = %request.agent_id,
+        stream_id,
+        target = %request.target,
+        session_id = %request.session_id,
+        "Opened proxy stream to agent"
+    );
+
+    mc.pending_proxies.insert(
+        stream_id,
+        PendingProxy {
+            response_tx: request.response_tx,
+            buffer: Vec::new(),
+            write_tx: write_tx.clone(),
+            conn_internal_id: mc.internal_id,
+        },
+    );
 }
 
 fn apply_stream_write(connections: &mut HashMap<u64, ManagedConnection>, write: StreamWrite) {
@@ -641,15 +649,78 @@ fn apply_stream_write(connections: &mut HashMap<u64, ManagedConnection>, write: 
     };
 
     if write.data.is_empty() {
-        let _ = mc
-            .quiche_conn
-            .stream_shutdown(write.stream_id, quiche::Shutdown::Write, 0);
+        queue_stream_finish(mc, write.stream_id);
     } else {
-        match mc.quiche_conn.stream_send(write.stream_id, &write.data, false) {
-            Ok(_) => {}
-            Err(e) => {
-                debug!(error = %e, stream_id = write.stream_id, "stream_send error");
+        queue_stream_write(mc, write.stream_id, write.data, false);
+    }
+}
+
+fn queue_stream_write(mc: &mut ManagedConnection, stream_id: u64, data: Vec<u8>, finish_after_write: bool) {
+    let pending = mc.pending_stream_writes.entry(stream_id).or_default();
+
+    if !data.is_empty() {
+        pending.chunks.push_back(data);
+    }
+
+    pending.finish_after_write |= finish_after_write;
+    flush_pending_stream_writes(mc);
+}
+
+fn queue_stream_finish(mc: &mut ManagedConnection, stream_id: u64) {
+    let pending = mc.pending_stream_writes.entry(stream_id).or_default();
+    pending.finish_after_write = true;
+    flush_pending_stream_writes(mc);
+}
+
+fn flush_pending_stream_writes(mc: &mut ManagedConnection) {
+    let stream_ids: Vec<u64> = mc.pending_stream_writes.keys().copied().collect();
+
+    for stream_id in stream_ids {
+        let mut should_remove = false;
+
+        if let Some(pending) = mc.pending_stream_writes.get_mut(&stream_id) {
+            loop {
+                let Some(chunk) = pending.chunks.front_mut() else {
+                    break;
+                };
+
+                match mc.quiche_conn.stream_send(stream_id, chunk, false) {
+                    Ok(written) => {
+                        if written >= chunk.len() {
+                            pending.chunks.pop_front();
+                        } else {
+                            let remainder = chunk[written..].to_vec();
+                            *chunk = remainder;
+                            break;
+                        }
+                    }
+                    Err(quiche::Error::Done) => break,
+                    Err(error) => {
+                        debug!(%error, stream_id, "stream_send error");
+                        pending.finish_after_write = false;
+                        pending.chunks.clear();
+                        should_remove = true;
+                        break;
+                    }
+                }
             }
+
+            if !should_remove && pending.chunks.is_empty() && pending.finish_after_write {
+                match mc.quiche_conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0) {
+                    Ok(()) => should_remove = true,
+                    Err(quiche::Error::Done) => {}
+                    Err(error) => {
+                        debug!(%error, stream_id, "stream_shutdown error");
+                        should_remove = true;
+                    }
+                }
+            } else if !should_remove && pending.chunks.is_empty() && !pending.finish_after_write {
+                should_remove = true;
+            }
+        }
+
+        if should_remove {
+            mc.pending_stream_writes.remove(&stream_id);
         }
     }
 }
@@ -689,11 +760,11 @@ fn reap_closed(
         .collect();
 
     for id in closed_ids {
-        if let Some(mc) = connections.remove(&id) {
-            if let Some(agent_id) = mc.agent_id {
-                info!(%agent_id, "Agent QUIC connection closed");
-                registry.unregister(&agent_id);
-            }
+        if let Some(mc) = connections.remove(&id)
+            && let Some(agent_id) = mc.agent_id
+        {
+            info!(%agent_id, "Agent QUIC connection closed");
+            registry.unregister(&agent_id);
         }
         cid_map.retain(|_, v| *v != id);
     }

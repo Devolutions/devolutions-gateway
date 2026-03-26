@@ -75,7 +75,7 @@ impl AgentPeer {
         let now_ms = current_time_millis();
         // Saturating subtraction handles clock skew gracefully.
         let elapsed_ms = now_ms.saturating_sub(last_ms);
-        elapsed_ms < timeout.as_millis() as u64
+        elapsed_ms < u64::try_from(timeout.as_millis()).expect("timeout in milliseconds should fit in u64")
     }
 
     /// Returns a clone of the current route advertisement state, if any.
@@ -198,6 +198,11 @@ impl AgentRegistry {
     /// Returns the number of agents currently in the registry (including offline ones).
     pub fn len(&self) -> usize {
         self.agents.len()
+    }
+
+    /// Returns `true` when no agent is registered.
+    pub fn is_empty(&self) -> bool {
+        self.agents.is_empty()
     }
 
     /// Returns the number of agents considered online.
@@ -327,10 +332,13 @@ pub struct AgentInfo {
 
 /// Returns the current time as milliseconds since UNIX epoch.
 fn current_time_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as u64
+    u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis(),
+    )
+    .expect("millisecond timestamp should fit in u64")
 }
 
 #[cfg(test)]

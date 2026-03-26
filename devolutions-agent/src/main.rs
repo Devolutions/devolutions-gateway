@@ -41,6 +41,7 @@ use std::env;
 use std::sync::mpsc;
 
 use anyhow::{Context as _, Result, bail};
+use base64::Engine as _;
 use camino::Utf8PathBuf;
 use ceviche::Service;
 use ceviche::controller::*;
@@ -59,6 +60,15 @@ struct UpCommand {
     agent_name: String,
     config_path: Utf8PathBuf,
     advertise_subnets: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct EnrollmentStringPayload {
+    version: u64,
+    api_base_url: String,
+    enrollment_token: String,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 fn agent_service_main(
@@ -172,11 +182,31 @@ fn parse_advertise_subnets(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn parse_enrollment_string(value: &str) -> Result<EnrollmentStringPayload> {
+    const PREFIX: &str = "dgw-enroll:v1:";
+
+    let encoded = value.strip_prefix(PREFIX).context("invalid enrollment string prefix")?;
+
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .context("invalid base64 enrollment string")?;
+
+    let payload: EnrollmentStringPayload =
+        serde_json::from_slice(&decoded).context("invalid enrollment string payload")?;
+
+    if payload.version != 1 {
+        bail!("unsupported enrollment string version: {}", payload.version);
+    }
+
+    Ok(payload)
+}
+
 fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     let mut gateway_url = None;
     let mut enrollment_token = None;
     let mut agent_name = None;
     let mut config_path = None;
+    let mut enrollment_string = None;
     let mut advertise_subnets = Vec::new();
 
     let mut index = 0;
@@ -187,6 +217,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
             "--gateway" => gateway_url = Some(parse_required_value(args, &mut index, "--gateway")?),
             "--token" | "--enrollment-token" => enrollment_token = Some(parse_required_value(args, &mut index, arg)?),
             "--name" | "--agent-name" => agent_name = Some(parse_required_value(args, &mut index, arg)?),
+            "--enrollment-string" => enrollment_string = Some(parse_required_value(args, &mut index, arg)?),
             "--config" => {
                 config_path = Some(Utf8PathBuf::from(parse_required_value(args, &mut index, "--config")?));
             }
@@ -197,6 +228,17 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         }
 
         index += 1;
+    }
+
+    if let Some(enrollment_string) = enrollment_string {
+        let payload = parse_enrollment_string(&enrollment_string)?;
+
+        gateway_url.get_or_insert(payload.api_base_url);
+        enrollment_token.get_or_insert(payload.enrollment_token);
+
+        if agent_name.is_none() {
+            agent_name = payload.name;
+        }
     }
 
     Ok(UpCommand {
@@ -390,5 +432,26 @@ mod tests {
 
         assert_eq!(parsed.config_path, Utf8PathBuf::from("D:\\state\\agent.json"));
         assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
+    }
+
+    #[test]
+    fn parse_up_command_args_accepts_enrollment_string() {
+        let payload = serde_json::json!({
+            "version": 1,
+            "api_base_url": "https://gateway.example.com:7171",
+            "enrollment_token": "bootstrap-token",
+            "name": "site-a-agent",
+        });
+        let enrollment_string = format!(
+            "dgw-enroll:v1:{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string())
+        );
+        let args = vec!["--enrollment-string".to_owned(), enrollment_string];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
+        assert_eq!(parsed.enrollment_token, "bootstrap-token");
+        assert_eq!(parsed.agent_name, "site-a-agent");
     }
 }

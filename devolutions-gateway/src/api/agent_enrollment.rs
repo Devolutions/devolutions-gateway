@@ -35,10 +35,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/enroll", axum::routing::post(enroll_agent))
         .route("/agents", axum::routing::get(list_agents))
-        .route(
-            "/agents/{agent_id}",
-            axum::routing::get(get_agent).delete(delete_agent),
-        )
+        .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
         .route("/agents/resolve-target", axum::routing::post(resolve_target))
         .with_state(state)
 }
@@ -268,18 +265,12 @@ mod tests {
 
     #[test]
     fn parse_target_ip_bare_ipv4() {
-        assert_eq!(
-            parse_target_ip("10.0.0.1"),
-            Some("10.0.0.1".parse().unwrap())
-        );
+        assert_eq!(parse_target_ip("10.0.0.1"), Some("10.0.0.1".parse().unwrap()));
     }
 
     #[test]
     fn parse_target_ip_with_port() {
-        assert_eq!(
-            parse_target_ip("10.0.0.1:3389"),
-            Some("10.0.0.1".parse().unwrap())
-        );
+        assert_eq!(parse_target_ip("10.0.0.1:3389"), Some("10.0.0.1".parse().unwrap()));
     }
 
     #[test]

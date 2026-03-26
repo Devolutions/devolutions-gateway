@@ -28,10 +28,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
             .route("/client/{*path}", get(get_client))
             .route("/app-token", post(sign_app_token))
             .route("/session-token", post(sign_session_token))
-            .route(
-                "/agent-enrollment-string",
-                post(create_agent_enrollment_string),
-            )
+            .route("/agent-enrollment-string", post(create_agent_enrollment_string))
     } else {
         Router::new()
     }
@@ -559,10 +556,7 @@ async fn create_agent_enrollment_string(
         .enrollment_token_store()
         .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs));
 
-    let quic_host = req
-        .quic_host
-        .as_deref()
-        .unwrap_or(&conf.hostname);
+    let quic_host = req.quic_host.as_deref().unwrap_or(&conf.hostname);
     let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
 
     // Build the enrollment payload.
@@ -571,6 +565,7 @@ async fn create_agent_enrollment_string(
         "api_base_url": req.api_base_url,
         "quic_endpoint": quic_endpoint,
         "enrollment_token": enrollment_token,
+        "name": req.name,
     });
 
     let payload_json = serde_json::to_string(&payload)

@@ -31,9 +31,7 @@ pub struct EnrollmentTokenStore {
 impl EnrollmentTokenStore {
     /// Creates a new, empty token store.
     pub fn new() -> Self {
-        Self {
-            tokens: DashMap::new(),
-        }
+        Self { tokens: DashMap::new() }
     }
 
     /// Inserts a new enrollment token.
@@ -42,13 +40,8 @@ impl EnrollmentTokenStore {
         let now = current_time_secs();
         let expires_at = now + lifetime;
 
-        self.tokens.insert(
-            token,
-            EnrollmentTokenEntry {
-                expires_at,
-                agent_name,
-            },
-        );
+        self.tokens
+            .insert(token, EnrollmentTokenEntry { expires_at, agent_name });
     }
 
     /// Consumes a token if it exists and is not expired.
@@ -58,10 +51,10 @@ impl EnrollmentTokenStore {
     pub fn consume(&self, token: &str) -> bool {
         let now = current_time_secs();
 
-        if let Some((_, entry)) = self.tokens.remove(token) {
-            if entry.expires_at > now {
-                return true;
-            }
+        if let Some((_, entry)) = self.tokens.remove(token)
+            && entry.expires_at > now
+        {
+            return true;
             // Token was expired; it's already removed, which is fine.
         }
 

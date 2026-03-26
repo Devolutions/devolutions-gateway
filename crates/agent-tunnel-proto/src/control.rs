@@ -178,7 +178,7 @@ mod proptests {
     use crate::version::CURRENT_PROTOCOL_VERSION;
 
     fn arb_ipv4_network() -> impl Strategy<Value = Ipv4Network> {
-        (any::<[u8; 4]>(), 0_u8..=32).prop_map(|(octets, prefix)| {
+        (any::<[u8; 4]>(), 0u8..=32).prop_map(|(octets, prefix)| {
             let ip = std::net::Ipv4Addr::from(octets);
             // Use network() to normalize the address for the given prefix
             Ipv4Network::new(ip, prefix)

@@ -186,10 +186,7 @@ mod proptests {
     }
 
     fn arb_connect_response() -> impl Strategy<Value = ConnectResponse> {
-        prop_oneof![
-            Just(ConnectResponse::success()),
-            ".*".prop_map(|reason| ConnectResponse::error(reason)),
-        ]
+        prop_oneof![Just(ConnectResponse::success()), ".*".prop_map(ConnectResponse::error),]
     }
 
     proptest! {

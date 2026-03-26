@@ -117,16 +117,38 @@ where
                 if let Some(agent_id) = claims.jet_agent_id {
                     let handle = agent_tunnel_handle.context("agent tunnel not configured on this gateway")?;
 
-                    let selected_target = targets.first().clone();
-                    let target_str = format!("{}:{}", selected_target.host(), selected_target.port());
+                    let mut selected_target = None;
+                    let mut server_stream = None;
+                    let mut last_error = None;
 
-                    info!(%agent_id, %target_str, "Routing via agent tunnel");
+                    for candidate in targets.iter() {
+                        let target_str = format!("{}:{}", candidate.host(), candidate.port());
+
+                        info!(%agent_id, %target_str, "Routing via agent tunnel");
+
+                        match handle.connect_via_agent(agent_id, claims.jet_aid, &target_str).await {
+                            Ok(stream) => {
+                                selected_target = Some(candidate.clone());
+                                server_stream = Some(stream);
+                                break;
+                            }
+                            Err(error) => {
+                                warn!(
+                                    %agent_id,
+                                    %target_str,
+                                    error = format!("{error:#}"),
+                                    "Agent tunnel target failed"
+                                );
+                                last_error = Some(error);
+                            }
+                        }
+                    }
+
+                    let selected_target = selected_target.ok_or_else(|| {
+                        last_error.unwrap_or_else(|| anyhow::anyhow!("agent tunnel target selection failed"))
+                    })?;
                     span.record("target", selected_target.to_string());
-
-                    let server_stream = handle
-                        .connect_via_agent(agent_id, claims.jet_aid, &target_str)
-                        .await
-                        .context("connect via agent tunnel")?;
+                    let server_stream = server_stream.expect("server stream should be present when target is selected");
 
                     let info = SessionInfo::builder()
                         .id(claims.jet_aid)

@@ -36,11 +36,6 @@ fn make_ca_params() -> CertificateParams {
     params
 }
 
-/// Convert DER-encoded certificate bytes to PEM format.
-fn cert_der_to_pem(der: &[u8]) -> String {
-    pem::encode(&pem::Pem::new("CERTIFICATE", der))
-}
-
 /// Manages the CA used to sign agent client certificates and the QUIC server certificate.
 pub struct CaManager {
     ca_cert_pem: String,
@@ -227,10 +222,10 @@ pub fn extract_agent_id_from_der(der_bytes: &[u8]) -> Result<Uuid> {
     for ext in cert.extensions() {
         if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) = ext.parsed_extension() {
             for name in &san.general_names {
-                if let x509_parser::extensions::GeneralName::RFC822Name(val) = name {
-                    if let Some(uuid_str) = val.strip_prefix("urn:uuid:") {
-                        return uuid_str.parse().context("parse UUID from SAN");
-                    }
+                if let x509_parser::extensions::GeneralName::RFC822Name(val) = name
+                    && let Some(uuid_str) = val.strip_prefix("urn:uuid:")
+                {
+                    return uuid_str.parse().context("parse UUID from SAN");
                 }
             }
         }

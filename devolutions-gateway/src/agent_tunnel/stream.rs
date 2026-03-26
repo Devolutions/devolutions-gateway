@@ -24,7 +24,7 @@ pub struct StreamWrite {
 /// Handle held by the connection driver to push received data into a `QuicStream`.
 pub struct StreamReadHandle {
     pub stream_id: u64,
-    pub tx: mpsc::Sender<io::Result<Vec<u8>>>,
+    pub tx: mpsc::UnboundedSender<io::Result<Vec<u8>>>,
 }
 
 /// A bidirectional QUIC stream that implements [`AsyncRead`] and [`AsyncWrite`].
@@ -36,7 +36,7 @@ pub struct QuicStream {
     conn_id: u64,
     stream_id: u64,
     /// Receives data forwarded by the connection driver.
-    read_rx: mpsc::Receiver<io::Result<Vec<u8>>>,
+    read_rx: mpsc::UnboundedReceiver<io::Result<Vec<u8>>>,
     /// Sends data to the connection driver for transmission.
     write_tx: mpsc::UnboundedSender<StreamWrite>,
     /// Partial read buffer (leftover from a previous read when the caller's buffer was smaller).
@@ -53,9 +53,9 @@ impl QuicStream {
         conn_id: u64,
         stream_id: u64,
         write_tx: mpsc::UnboundedSender<StreamWrite>,
-        read_buffer_size: usize,
+        _read_buffer_size: usize,
     ) -> (Self, StreamReadHandle) {
-        let (read_tx, read_rx) = mpsc::channel(read_buffer_size);
+        let (read_tx, read_rx) = mpsc::unbounded_channel();
 
         let stream = Self {
             conn_id,
@@ -184,7 +184,7 @@ mod tests {
         let (mut stream, read_handle) = QuicStream::new(1, 4, write_tx, 16);
 
         // Simulate driver pushing data.
-        read_handle.tx.send(Ok(b"hello world".to_vec())).await.unwrap();
+        read_handle.tx.send(Ok(b"hello world".to_vec())).unwrap();
 
         let mut buf = [0u8; 5];
         let n = stream.read(&mut buf).await.unwrap();
@@ -212,7 +212,7 @@ mod tests {
         let (mut stream, read_handle) = QuicStream::new(1, 0, write_tx, 16);
 
         // Signal EOF.
-        read_handle.tx.send(Ok(Vec::new())).await.unwrap();
+        read_handle.tx.send(Ok(Vec::new())).unwrap();
 
         let mut buf = [0u8; 32];
         let n = stream.read(&mut buf).await.unwrap();
