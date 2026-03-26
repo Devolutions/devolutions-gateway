@@ -1181,11 +1181,26 @@ jobs:
       - name: Configure WER LocalDumps
         shell: pwsh
         run: |
+          # Remove any JIT debugger registration (Visual Studio / .NET register one by
+          # default on Windows runners). WER only handles a crash when no JIT debugger
+          # claims it first; with AeDebug Auto=1 WER never fires.
+          $aeDebug = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug"
+          if (Test-Path $aeDebug) {
+            Set-ItemProperty $aeDebug -Name Auto     -Value 0 -Type String -Force
+            Set-ItemProperty $aeDebug -Name Debugger -Value "" -Type String -Force
+          }
+
           # Enable WER globally (CI runners often have it disabled).
           $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
           Set-ItemProperty $wer -Name Disabled    -Value 0 -Type DWord -Force
           Set-ItemProperty $wer -Name DontShowUI  -Value 1 -Type DWord -Force
           Set-ItemProperty $wer -Name ForceQueue  -Value 0 -Type DWord -Force
+
+          # Override any group-policy-level WER disable.
+          $werPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting"
+          if (Test-Path $werPolicy) {
+            Set-ItemProperty $werPolicy -Name Disabled -Value 0 -Type DWord -Force
+          }
 
           # Start the WER service if it is not already running.
           Start-Service -Name WerSvc -ErrorAction SilentlyContinue
