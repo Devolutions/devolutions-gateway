@@ -24,6 +24,14 @@ The `wer-dump` subcommand requires WER LocalDumps to be configured for the
 verifier executable. This requires administrator rights.
 
 ```powershell
+# Ensure WER is enabled and writes dumps immediately (required on CI runners).
+$wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
+Set-ItemProperty $wer -Name Disabled    -Value 0 -Type DWord -Force
+Set-ItemProperty $wer -Name DontShowUI  -Value 1 -Type DWord -Force
+Set-ItemProperty $wer -Name ForceQueue  -Value 0 -Type DWord -Force
+Start-Service -Name WerSvc -ErrorAction SilentlyContinue
+
+# Per-application LocalDumps configuration.
 $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\secure-memory-verifier.exe"
 New-Item $key -Force | Out-Null
 Set-ItemProperty $key DumpType  2              # 2 = full dump
@@ -31,7 +39,7 @@ Set-ItemProperty $key DumpCount 5
 Set-ItemProperty $key DumpFolder $env:TEMP     # or any writable folder
 ```
 
-If this key is absent, `wer-dump` prints `[FAIL]` and exits 1.
+If the `LocalDumps` key is absent, `wer-dump` prints `[FAIL]` and exits 1.
 
 ## Running locally
 

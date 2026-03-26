@@ -90,13 +90,13 @@ pub(crate) fn run() -> bool {
         Ok(_) => {} // non-zero exit code = expected crash
     }
 
-    // Wait up to 30 s for WER to generate the dump.
-    print_info("wer-dump: waiting for WER to write the crash dump (up to 30 s)...");
-    let dump_path = match wait_for_new_dump(&dump_folder, baseline_time, Duration::from_secs(20)) {
+    // Wait up to 30s for WER to generate the dump.
+    print_info("wer-dump: waiting for WER to write the crash dump (up to 30s)...");
+    let dump_path = match wait_for_new_dump(&dump_folder, baseline_time, Duration::from_secs(30)) {
         Some(p) => p,
         None => {
             print_fail(
-                "wer-dump: no new dump appeared in the WER folder within 30 s. \
+                "wer-dump: no new dump appeared in the WER folder within 30s. \
                  Ensure WER LocalDumps is configured and the service is running.",
             );
             return false;
@@ -240,7 +240,7 @@ fn wait_for_new_dump(folder: &Path, baseline: Option<std::time::SystemTime>, tim
         if start.elapsed() >= timeout {
             return None;
         }
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_millis(300));
     }
 }
 

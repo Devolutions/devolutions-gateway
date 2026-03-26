@@ -1181,6 +1181,16 @@ jobs:
       - name: Configure WER LocalDumps
         shell: pwsh
         run: |
+          # Enable WER globally (CI runners often have it disabled).
+          $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
+          Set-ItemProperty $wer -Name Disabled    -Value 0 -Type DWord -Force
+          Set-ItemProperty $wer -Name DontShowUI  -Value 1 -Type DWord -Force
+          Set-ItemProperty $wer -Name ForceQueue  -Value 0 -Type DWord -Force
+
+          # Start the WER service if it is not already running.
+          Start-Service -Name WerSvc -ErrorAction SilentlyContinue
+
+          # Per-application LocalDumps configuration.
           $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\secure-memory-verifier.exe"
           New-Item $key -Force | Out-Null
           Set-ItemProperty $key DumpType  2
