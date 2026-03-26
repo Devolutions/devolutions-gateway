@@ -30,7 +30,7 @@ use secure_memory::ProtectedBytes;
 /// The key is stored in a [`ProtectedBytes<32>`] allocation.
 /// A [`Mutex`] provides thread-safe interior mutability.
 ///
-/// A warning is logged at startup if full memory hardening is unavailable (see [`ProtectionStatus`]).
+/// A warning is logged when the master key is first initialized if full memory hardening is unavailable (see [`ProtectionStatus`]).
 ///
 /// [`ProtectionStatus`]: secure_memory::ProtectionStatus
 pub(super) static MASTER_KEY: LazyLock<Mutex<MasterKeyManager>> = LazyLock::new(|| Mutex::new(MasterKeyManager::new()));
