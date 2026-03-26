@@ -1,5 +1,5 @@
 [package]
-name = "secret-memory"
+name = "secure-memory"
 version = "0.0.0"
 edition = "2024"
 license = "MIT/Apache-2.0"
@@ -21,6 +21,7 @@ libc = "0.2"
 version = "0.61"
 features = [
     "Win32_Foundation",
+    "Win32_System_ErrorReporting",
     "Win32_System_Memory",
     "Win32_System_SystemInformation",
 ]

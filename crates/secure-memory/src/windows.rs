@@ -17,17 +17,35 @@
 //!
 //! 1. Guard pages via `VirtualProtect(PAGE_NOACCESS)`.
 //! 2. RAM lock via `VirtualLock`.
+//! 3. WER dump exclusion via `WerRegisterExcludedMemoryBlock`.
 //!
-//! ## Dump-exclusion limitation
+//! ## Dump-exclusion on Windows
 //!
-//! Windows does not expose a per-region public API equivalent to Linux's `MADV_DONTDUMP`.
-//! `VirtualLock` prevents the pages from being written to the pagefile but crash dumps (WER, procdump, …) will still include them.
-//! `dump_excluded` is always `false` on Windows.
+//! Windows does not have a single universal per-region dump-exclusion API
+//! equivalent to Linux's `madvise(MADV_DONTDUMP)`.  The protections that exist
+//! are scoped:
+//!
+//! - **WER crash reports**: `WerRegisterExcludedMemoryBlock` tells the Windows
+//!   Error Reporting subsystem to omit the registered range from automatically-
+//!   generated crash dumps. This is the mechanism used here.
+//!   `ProtectionStatus::dump_excluded` reflects whether this registration
+//!   succeeded.
+//!
+//! - **Full-memory / forensic dumps** (`MiniDumpWithFullMemory`, kernel dumps,
+//!   ProcDump `-ma`, …): no public callback API reliably excludes a page from
+//!   these on current Windows versions. Applications that write their own
+//!   dumps using `MiniDumpNormal` (the typical crash-reporter default) will
+//!   not capture non-stack heap pages, but `MiniDumpWithFullMemory` captures
+//!   everything regardless of WER registration or `IncludeVmRegionCallback`.
+//!
+//! `VirtualLock` prevents the secret from being written to the pagefile but
+//! does **not** affect dump capture.
 
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::OnceLock;
 
+use windows::Win32::System::ErrorReporting::{WerRegisterExcludedMemoryBlock, WerUnregisterExcludedMemoryBlock};
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualAlloc,
     VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock,
@@ -44,6 +62,8 @@ pub(crate) struct SecureAlloc<const N: usize> {
     data: *mut u8,
     /// Whether `VirtualLock` succeeded.
     locked: bool,
+    /// Whether `WerRegisterExcludedMemoryBlock` succeeded for the data page.
+    wer_excluded: bool,
     /// Marker: `SecureAlloc` logically owns a `[u8; N]`.
     _marker: std::marker::PhantomData<[u8; N]>,
 }
@@ -61,7 +81,7 @@ impl<const N: usize> SecureAlloc<N> {
         let ps = page_size();
         assert!(
             N <= ps,
-            "secret-memory: N ({N}) exceeds page size ({ps}); not supported"
+            "secure-memory: N ({N}) exceeds page size ({ps}); not supported"
         );
 
         let total = 3 * ps;
@@ -73,7 +93,7 @@ impl<const N: usize> SecureAlloc<N> {
 
         if base_raw.is_null() {
             panic!(
-                "secret-memory: VirtualAlloc({total}) failed ({})",
+                "secure-memory: VirtualAlloc({total}) failed ({})",
                 std::io::Error::last_os_error()
             );
         }
@@ -99,7 +119,7 @@ impl<const N: usize> SecureAlloc<N> {
         let guard_pages = r_guard_before.is_ok() && r_guard_after.is_ok();
         if !guard_pages {
             tracing::debug!(
-                "secret-memory: VirtualProtect for guard pages failed ({}); \
+                "secure-memory: VirtualProtect for guard pages failed ({}); \
                  guard pages are not active",
                 std::io::Error::last_os_error()
             );
@@ -111,7 +131,7 @@ impl<const N: usize> SecureAlloc<N> {
         let locked = r_lock.is_ok();
         if !locked {
             tracing::debug!(
-                "secret-memory: VirtualLock failed ({}); \
+                "secure-memory: VirtualLock failed ({}); \
                  secret may be paged to disk",
                 std::io::Error::last_os_error()
             );
@@ -122,16 +142,36 @@ impl<const N: usize> SecureAlloc<N> {
         //         non-overlapping; both are valid for `N` bytes.
         unsafe { ptr::copy_nonoverlapping(src.as_ptr(), data, N) };
 
+        // ── Register the data page for WER dump exclusion ────────────────────
+        // `WerRegisterExcludedMemoryBlock` asks the Windows Error Reporting
+        // subsystem to omit this page from automatically-generated crash dumps.
+        // Registration covers the full page, not just N bytes, because the
+        // allocation model is page-based.
+
+        // SAFETY: `data` is a valid, committed, page-aligned pointer; `ps` is
+        //         exactly one page — the size passed to `VirtualAlloc`.
+        let wer_hr = unsafe { WerRegisterExcludedMemoryBlock(data.cast::<c_void>(), ps as u32) };
+        let wer_excluded = wer_hr.is_ok();
+        if !wer_excluded {
+            tracing::debug!(
+                "secure-memory: WerRegisterExcludedMemoryBlock failed ({wer_hr:?}); \
+                 the data page will not be excluded from WER crash reports"
+            );
+        }
+
         let alloc = SecureAlloc {
             base,
             data,
             locked,
+            wer_excluded,
             _marker: std::marker::PhantomData,
         };
         let status = ProtectionStatus {
             locked,
             guard_pages,
-            dump_excluded: false, // no per-region dump exclusion on Windows
+            // On Windows, dump_excluded reflects WER exclusion only.
+            // See module-level documentation for scope and limitations.
+            dump_excluded: wer_excluded,
             fallback_backend: false,
         };
 
@@ -162,6 +202,14 @@ impl<const N: usize> Drop for SecureAlloc<N> {
         if self.locked {
             // SAFETY: `self.data` and `ps` are the values used in `VirtualLock`.
             let _ = unsafe { VirtualUnlock(self.data as *const c_void, ps) };
+        }
+
+        // Unregister WER exclusion before freeing the page.
+        // Must happen before `VirtualFree` to avoid a dangling registration.
+        if self.wer_excluded {
+            // SAFETY: `self.data` is the same pointer passed to
+            //         `WerRegisterExcludedMemoryBlock`; still valid here.
+            let _ = unsafe { WerUnregisterExcludedMemoryBlock(self.data.cast::<c_void>()) };
         }
 
         // Release the entire three-page region.

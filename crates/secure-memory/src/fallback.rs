@@ -44,7 +44,7 @@ fn warn_once() {
     static WARNED: Once = Once::new();
     WARNED.call_once(|| {
         tracing::debug!(
-            "secret-memory: advanced memory protection (mlock, guard pages, \
+            "secure-memory: advanced memory protection (mlock, guard pages, \
              dump exclusion) is not available on this platform; \
              falling back to plain heap allocation with zeroize-on-drop only"
         );

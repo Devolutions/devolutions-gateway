@@ -1,7 +1,7 @@
 //! In-memory credential encryption using ChaCha20-Poly1305.
 //!
 //! This module provides encryption-at-rest for passwords stored in the credential store.
-//! A randomly generated 256-bit master key is held in a [`ProtectedBytes<32>`] allocation backed by `secret-memory`, which applies
+//! A randomly generated 256-bit master key is held in a [`ProtectedBytes<32>`] allocation backed by `secure-memory`, which applies
 //! the best available OS hardening (mlock, guard pages, core-dump exclusion) and always zeroizes on drop.
 //!
 //! ## Security properties
@@ -22,7 +22,7 @@ use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
 use rand::RngCore as _;
 use secrecy::SecretString;
-use secret_memory::ProtectedBytes;
+use secure_memory::ProtectedBytes;
 
 /// Global master key for credential encryption.
 ///
@@ -32,7 +32,7 @@ use secret_memory::ProtectedBytes;
 ///
 /// A warning is logged at startup if full memory hardening is unavailable (see [`ProtectionStatus`]).
 ///
-/// [`ProtectionStatus`]: secret_memory::ProtectionStatus
+/// [`ProtectionStatus`]: secure_memory::ProtectionStatus
 pub(super) static MASTER_KEY: LazyLock<Mutex<MasterKeyManager>> = LazyLock::new(|| Mutex::new(MasterKeyManager::new()));
 
 /// Manages the master encryption key.
@@ -69,7 +69,7 @@ impl MasterKeyManager {
                 );
             }
             if !st.dump_excluded {
-                tracing::debug!(
+                tracing::warn!(
                     "master key: core-dump exclusion is not active \
                      (unavailable on this platform or kernel)"
                 );

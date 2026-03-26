@@ -1530,7 +1530,7 @@ dependencies = [
  "rustls-cng",
  "rustls-native-certs",
  "secrecy 0.10.3",
- "secret-memory",
+ "secure-memory",
  "serde",
  "serde-querystring",
  "serde_json",
@@ -6112,13 +6112,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "secret-memory"
+name = "secure-memory"
 version = "0.0.0"
 dependencies = [
  "libc",
  "tracing",
  "windows 0.61.3",
  "zeroize",
+]
+
+[[package]]
+name = "secure-memory-verifier"
+version = "0.0.0"
+dependencies = [
+ "secure-memory",
+ "windows 0.61.3",
 ]
 
 [[package]]

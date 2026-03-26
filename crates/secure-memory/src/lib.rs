@@ -34,10 +34,16 @@ pub struct ProtectionStatus {
     /// Any out-of-bounds access into adjacent memory will fault at the OS level.
     pub guard_pages: bool,
 
-    /// The region is excluded from core / crash dumps.
+    /// The region is excluded from crash / core dumps.
     ///
-    /// Currently only achievable on Linux via `madvise(MADV_DONTDUMP)`.
-    /// Always `false` on Windows and macOS — see the crate README.
+    /// Platform semantics differ:
+    ///
+    /// - **Linux**: `madvise(MADV_DONTDUMP)` excludes the page from kernel
+    ///   core dumps and most user-space dump tools that respect the VMA flags.
+    /// - **Windows**: `WerRegisterExcludedMemoryBlock` excludes the page from
+    ///   WER-generated crash reports.  Full-memory dumps produced by
+    ///   `MiniDumpWithFullMemory`, ProcDump `-ma`, or kernel tools are **not**
+    ///   affected — no public API reliably excludes a page from those.
     pub dump_excluded: bool,
 
     /// No OS-level hardening is available; using plain heap allocation.

@@ -1,4 +1,4 @@
-# secret-memory
+# secure-memory
 
 A minimal, auditable in-memory secret store for a single fixed-size master key.
 
@@ -57,7 +57,7 @@ and runs.
 ## Usage
 
 ```rust
-use secret_memory::ProtectedBytes;
+use secure_memory::ProtectedBytes;
 
 let key = ProtectedBytes::new([0u8; 32]);
 let status = key.protection_status();

@@ -1,0 +1,27 @@
+[package]
+name = "secure-memory-verifier"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+publish = false
+description = "Windows runtime verifier for the secure-memory crate"
+
+[lints]
+workspace = true
+
+[dependencies]
+secure-memory = { path = "../secure-memory" }
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_ErrorReporting",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+]

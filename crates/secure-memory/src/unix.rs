@@ -52,7 +52,7 @@ impl<const N: usize> SecureAlloc<N> {
         let ps = page_size();
         assert!(
             N <= ps,
-            "secret-memory: N ({N}) exceeds page size ({ps}); not supported"
+            "secure-memory: N ({N}) exceeds page size ({ps}); not supported"
         );
 
         let total = 3 * ps;
@@ -72,7 +72,7 @@ impl<const N: usize> SecureAlloc<N> {
         };
 
         if base_raw == libc::MAP_FAILED {
-            panic!("secret-memory: mmap({total}) failed; process is out of address space");
+            panic!("secure-memory: mmap({total}) failed; process is out of address space");
         }
 
         let base = base_raw as *mut u8;
@@ -95,7 +95,7 @@ impl<const N: usize> SecureAlloc<N> {
         let guard_pages = r_guard_before == 0 && r_guard_after == 0;
         if !guard_pages {
             tracing::debug!(
-                "secret-memory: mprotect for guard pages failed ({}); \
+                "secure-memory: mprotect for guard pages failed ({}); \
                  guard pages are not active",
                 std::io::Error::last_os_error()
             );
@@ -107,7 +107,7 @@ impl<const N: usize> SecureAlloc<N> {
         let locked = r_lock == 0;
         if !locked {
             tracing::debug!(
-                "secret-memory: mlock failed ({}); \
+                "secure-memory: mlock failed ({}); \
                  secret may be paged to disk — consider raising `ulimit -l`",
                 std::io::Error::last_os_error()
             );
@@ -120,7 +120,7 @@ impl<const N: usize> SecureAlloc<N> {
             let r = unsafe { libc::madvise(data as *mut libc::c_void, ps, libc::MADV_DONTDUMP) };
             if r != 0 {
                 tracing::debug!(
-                    "secret-memory: madvise(MADV_DONTDUMP) failed ({}); \
+                    "secure-memory: madvise(MADV_DONTDUMP) failed ({}); \
                      region may appear in core dumps",
                     std::io::Error::last_os_error()
                 );

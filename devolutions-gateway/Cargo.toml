@@ -19,7 +19,7 @@ openapi = ["dep:utoipa"]
 [dependencies]
 
 # In-house
-secret-memory.path = "../crates/secret-memory"
+secure-memory.path = "../crates/secure-memory"
 transport.path = "../crates/transport"
 jmux-proxy.path = "../crates/jmux-proxy"
 devolutions-agent-shared.path = "../crates/devolutions-agent-shared"
