@@ -344,9 +344,10 @@ async fn handle_operation(
                     InsertError::InvalidToken(_) => {
                         PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}"))
                     }
-                    InsertError::Internal(_) => {
-                        PreflightError::new(PreflightAlertStatus::InternalServerError, "an internal error occurred".to_owned())
-                    }
+                    InsertError::Internal(_) => PreflightError::new(
+                        PreflightAlertStatus::InternalServerError,
+                        "an internal error occurred".to_owned(),
+                    ),
                 })?;
 
             if previous_entry.is_some() {
