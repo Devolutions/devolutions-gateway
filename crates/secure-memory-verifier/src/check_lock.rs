@@ -42,7 +42,9 @@ pub(crate) fn run() -> bool {
     let status = secret.protection_status();
 
     if !status.locked {
-        print_info("VirtualLock was not achieved (protection_status.locked == false); QueryWorkingSetEx may still reflect this");
+        print_info(
+            "VirtualLock was not achieved (protection_status.locked == false); QueryWorkingSetEx may still reflect this",
+        );
     }
 
     let data_ptr = secret.expose_secret().as_ptr();
@@ -57,8 +59,7 @@ pub(crate) fn run() -> bool {
     //         current process; it is always valid for the current process's lifetime.
     let process = unsafe { GetCurrentProcess() };
 
-    let struct_size =
-        u32::try_from(size_of::<PSAPI_WORKING_SET_EX_INFORMATION>()).expect("struct fits in u32");
+    let struct_size = u32::try_from(size_of::<PSAPI_WORKING_SET_EX_INFORMATION>()).expect("struct fits in u32");
 
     // SAFETY: `info.VirtualAddress` is set to a page-aligned address inside our
     //         3-page VirtualAlloc region; `process` is the current-process pseudo-handle;
