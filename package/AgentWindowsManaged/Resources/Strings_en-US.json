@@ -146,6 +146,24 @@
             "text": "Click Next to install to the default folder or click Change to choose another."
           }
         ],
+        "serviceConfig": [
+          {
+            "id": "ServiceConfigDlgTitle",
+            "text": "Service Configuration"
+          },
+          {
+            "id": "ServiceConfigDlgDescription",
+            "text": "Configure optional service features."
+          },
+          {
+            "id": "ServiceConfigDlgAgentAutoUpdateDescription",
+            "text": "When enabled, the Devolutions Agent will automatically update itself whenever a new version is available within the configured maintenance window."
+          },
+          {
+            "id": "ServiceConfigDlgAgentAutoUpdateLabel",
+            "text": "Enable automatic agent updates"
+          }
+        ],
         "progress": [
           {
             "id": "ProgressDlgTitleInstalling",

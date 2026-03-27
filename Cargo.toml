@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/*",
     "devolutions-agent",
+    "devolutions-agent-updater",
     "devolutions-gateway",
     "devolutions-session",
     "jetsocat",
@@ -11,6 +12,7 @@ members = [
 ]
 default-members = [
     "devolutions-agent",
+    "devolutions-agent-updater",
     "devolutions-gateway",
     "devolutions-session",
     "jetsocat",

@@ -28,7 +28,7 @@ internal static class Wizard
 
         Sequence = dialogs.ToArray();
     }
-    
+
     internal static IEnumerable<Type> Dialogs => Sequence;
 
     internal static int Move(IManagedDialog current, bool forward)

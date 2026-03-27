@@ -3,8 +3,8 @@
         <!-- metadata -->
                 <String Id="FeatureAgentDescription">Installs the Devolutions Agent service</String>
                 <String Id="FeatureAgentName">Devolutions Agent</String>
-                <String Id="FeatureAgentUpdaterDescription">Enables the Devolutions Gateway updater</String>
-                <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
+                <String Id="FeatureAgentUpdaterDescription">When enabled, the Devolutions Agent will automatically update itself whenever a new version is available within the configured maintenance window.</String>
+                <String Id="FeatureAgentUpdaterName">Enable Automatic Agent Updates</String>
                 <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
                 <String Id="FeatureSessionDescription">Installs the RDP Extension</String>
@@ -43,6 +43,11 @@ If it appears minimized then active it from the taskbar.</String>
                     <!-- dialogs.installDir -->
                 <String Id="InstallDirDlgDescription">Click Next to install to the default folder or click Change to choose another.</String>
                 <String Id="InstallDirDlgTitle">Destination Folder</String>
+                    <!-- dialogs.serviceConfig -->
+                <String Id="ServiceConfigDlgTitle">Service Configuration</String>
+                <String Id="ServiceConfigDlgDescription">Configure optional service features.</String>
+                <String Id="ServiceConfigDlgAgentAutoUpdateDescription">When enabled, the Devolutions Agent will automatically update itself whenever a new version is available within the configured maintenance window.</String>
+                <String Id="ServiceConfigDlgAgentAutoUpdateLabel">Enable automatic agent updates</String>
                     <!-- dialogs.progress -->
                 <String Id="ProgressDlgTitleChanging">Changing [ProductName]</String>
                 <String Id="ProgressDlgTitleInstalling">Installing [ProductName]</String>

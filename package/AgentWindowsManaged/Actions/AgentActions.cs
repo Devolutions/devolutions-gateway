@@ -301,6 +301,17 @@ internal static class AgentActions
         Condition = Features.PEDM_FEATURE.BeingUninstall(),
     };
 
+    private static readonly ElevatedManagedAction configureAgentAutoUpdate = new(
+        CustomActions.ConfigureAgentAutoUpdate
+    )
+    {
+        Id = new Id($"CA.{nameof(configureAgentAutoUpdate)}"),
+        Sequence = Sequence.InstallExecuteSequence,
+        Return = Return.check,
+        Step = Step.StartServices,
+        When = When.Before
+    };
+
     private static string UseProperties(IEnumerable<IWixProperty> properties)
     {
         if (!properties?.Any() ?? false)
@@ -329,6 +340,7 @@ internal static class AgentActions
         getInstallDirFromRegistry,
         setArpInstallLocation,
         configureFeatures,
+        configureAgentAutoUpdate,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

@@ -192,18 +192,32 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 
 pub mod dto {
     use super::*;
+    use devolutions_agent_shared::AgentAutoUpdateConf;
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct UpdaterConf {
-        /// Enable updater module
+        /// Enable updater module.
         pub enabled: bool,
+        /// Periodic Devolutions Agent self-update schedule.
+        ///
+        /// When this section is present and `Enabled` is `true`, the agent will automatically
+        /// check for a new version of itself at the configured interval and, if a newer version
+        /// is available, trigger a silent MSI update during the configured maintenance window.
+        ///
+        /// This setting can be managed remotely via the Devolutions Gateway API
+        /// (`GET`/`POST /jet/update-agent`) or set directly in this file.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub agent_auto_update: Option<AgentAutoUpdateConf>,
     }
 
     #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
     impl Default for UpdaterConf {
         fn default() -> Self {
-            Self { enabled: false }
+            Self {
+                enabled: false,
+                agent_auto_update: None,
+            }
         }
     }
 
@@ -324,7 +338,10 @@ pub mod dto {
             Self {
                 verbosity_profile: None,
                 log_file: None,
-                updater: Some(UpdaterConf { enabled: true }),
+                updater: Some(UpdaterConf {
+                    enabled: true,
+                    agent_auto_update: None,
+                }),
                 remote_desktop: None,
                 pedm: None,
                 proxy: None,

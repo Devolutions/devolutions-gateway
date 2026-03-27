@@ -2,12 +2,12 @@
 
 use std::ops::DerefMut;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use uuid::Uuid;
 use win_api_wrappers::utils::WideString;
 
 use crate::updater::io::remove_file_on_reboot;
-use crate::updater::{Product, UpdaterCtx, UpdaterError};
+use crate::updater::{AGENT_UPDATE_IN_PROGRESS, Product, UpdaterCtx, UpdaterError};
 
 /// List of allowed thumbprints for Devolutions code signing certificates
 const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
@@ -16,6 +16,9 @@ const DEVOLUTIONS_CERT_THUMBPRINTS: &[&str] = &[
     "50f753333811ff11f1920274afde3ffd4468b210",
 ];
 
+/// Filename of the updater shim executable installed alongside the agent.
+const AGENT_UPDATER_SHIM_NAME: &str = "DevolutionsAgentUpdater.exe";
+
 pub(crate) async fn install_package(
     ctx: &UpdaterCtx,
     path: &Utf8Path,
@@ -23,6 +26,7 @@ pub(crate) async fn install_package(
 ) -> Result<(), UpdaterError> {
     match ctx.product {
         Product::Gateway | Product::HubService => install_msi(ctx, path, log_path).await,
+        Product::Agent => install_agent_via_shim(ctx, path).await,
     }
 }
 
@@ -33,7 +37,179 @@ pub(crate) async fn uninstall_package(
 ) -> Result<(), UpdaterError> {
     match ctx.product {
         Product::Gateway | Product::HubService => uninstall_msi(ctx, product_code, log_path).await,
+        // For agent self-update the shim handles uninstall + install in sequence; the
+        // in-process uninstall step is skipped to avoid stopping the service prematurely.
+        Product::Agent => Ok(()),
     }
+}
+
+/// Install a new version of Devolutions Agent by launching the updater shim as a detached process.
+///
+/// The shim (`devolutions-agent-updater.exe`) is copied to a temp location before being launched
+/// so that the MSI installer can freely overwrite the agent installation directory. The shim
+/// then runs `msiexec` silently, which stops the agent service, replaces its files, and
+/// restarts it. Since the shim is detached from the agent service, it survives the service
+/// restart and ensures the installation completes.
+///
+/// When `downgrade_product_code` is `Some` the shim will first run `msiexec /x` to uninstall
+/// the currently installed version before running `msiexec /i` for the target version.
+async fn install_agent_via_shim(ctx: &UpdaterCtx, msi_path: &Utf8Path) -> Result<(), UpdaterError> {
+    let shim_path = find_agent_updater_shim()?;
+
+    // Copy the shim to a temp location so it survives the MSI replacing the installation dir.
+    let temp_shim_path = copy_shim_to_temp(&shim_path).await?;
+    info!(%msi_path, %temp_shim_path, "Launching agent updater shim as detached process");
+
+    // Schedule the temp shim copy for deletion at the next system reboot.
+    if let Err(error) = remove_file_on_reboot(&temp_shim_path) {
+        error!(%error, "Failed to schedule temp shim for deletion on reboot");
+    }
+
+    launch_updater_shim_detached(
+        ctx,
+        &temp_shim_path,
+        msi_path,
+        ctx.downgrade_product_code,
+    ).await?;
+
+    if ctx.downgrade_product_code.is_some() {
+        info!("Agent updater shim launched; agent will be uninstalled then reinstalled at the target version");
+    } else {
+        info!("Agent updater shim launched; agent service will be updated and restarted shortly");
+    }
+
+    Ok(())
+}
+
+/// Locate the agent updater shim executable next to the running agent binary.
+fn find_agent_updater_shim() -> Result<Utf8PathBuf, UpdaterError> {
+    let exe_path = std::env::current_exe().map_err(UpdaterError::Io)?;
+
+    let exe_path = Utf8PathBuf::from_path_buf(exe_path)
+        .map_err(|_| UpdaterError::Io(std::io::Error::other("agent executable path contains invalid UTF-8")))?;
+
+    let exe_dir = exe_path
+        .parent()
+        .ok_or_else(|| UpdaterError::Io(std::io::Error::other("cannot determine agent executable directory")))?;
+
+    let shim_path = exe_dir.join(AGENT_UPDATER_SHIM_NAME);
+
+    if !shim_path.exists() {
+        return Err(UpdaterError::AgentUpdaterShimNotFound { path: shim_path });
+    }
+
+    Ok(shim_path)
+}
+
+/// Copy the shim executable to a temporary path (UUID-named) so it can run independently of
+/// the installation directory.
+async fn copy_shim_to_temp(shim_path: &Utf8Path) -> Result<Utf8PathBuf, UpdaterError> {
+    let temp_shim_path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+        .expect("BUG: OS should always return valid UTF-8 temp path")
+        .join(format!("{}-devolutions-agent-updater.exe", Uuid::new_v4()));
+
+    tokio::fs::copy(shim_path, &temp_shim_path)
+        .await
+        .map_err(UpdaterError::Io)?;
+
+    Ok(temp_shim_path)
+}
+
+/// Launch the updater shim and wait for it to finish, a shutdown signal, or a timeout.
+///
+/// Sets [`AGENT_UPDATE_IN_PROGRESS`] for the duration so any concurrent update attempts
+/// are rejected. Clears the flag on timeout or unexpected shim exit, but NOT on shutdown:
+/// when a shutdown signal is received the MSI is assumed to be making progress (it will
+/// stop and restart the agent service), so the flag is left set until the process exits.
+///
+/// `DETACHED_PROCESS` disassociates the child from the parent's console.
+/// `CREATE_NEW_PROCESS_GROUP` creates a new process group so that Ctrl+C signals from the
+/// parent do not propagate to the child.
+/// `CREATE_BREAKAWAY_FROM_JOB` removes the shim (and its children, including msiexec) from
+/// the service's Windows Job Object.  Without this flag the shim inherits the per-service
+/// Job Object that the SCM assigns to every service process.  When the MSI installer stops
+/// the DevolutionsAgent service the SCM terminates that job, which kills the shim and its
+/// msiexec child mid-installation, causing MSI rollback with errors 1923 / 1920.  The agent
+/// runs as LocalSystem, which holds SeTcbPrivilege; that allows breakaway from any job
+/// regardless of whether the job has JOB_OBJECT_LIMIT_BREAKAWAY_OK set.
+///
+/// When `downgrade_product_code` is `Some`, it is passed to the shim as `-x <product_code>`
+/// (before the MSI path) so it can uninstall the old version before installing the new one.
+async fn launch_updater_shim_detached(
+    ctx: &UpdaterCtx,
+    shim_path: &Utf8Path,
+    msi_path: &Utf8Path,
+    downgrade_product_code: Option<Uuid>,
+) -> Result<(), UpdaterError> {
+    use std::sync::atomic::Ordering;
+
+    // Flags reference: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const SHIM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+    // Reject concurrent agent updates.
+    if AGENT_UPDATE_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(UpdaterError::AgentUpdateAlreadyInProgress);
+    }
+
+    let shim_log_path = shim_path.with_extension("shim.log");
+
+    let mut cmd = tokio::process::Command::new(shim_path.as_str());
+    if let Some(code) = downgrade_product_code {
+        cmd.args(["-x", &code.braced().to_string()]);
+    }
+    cmd.arg(msi_path.as_str());
+    let mut child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)
+        .spawn()
+        .map_err(|source| UpdaterError::AgentShimLaunch { source })?;
+
+    info!(%shim_log_path, "Waiting for agent updater shim to complete (or service shutdown)");
+
+    let mut shutdown = ctx.shutdown_signal.clone();
+
+    tokio::select! {
+        result = child.wait() => {
+            // The shim exited before the agent service was stopped by the MSI.
+            // This is unexpected: the MSI should stop the service (killing us) before the
+            // shim finishes. Treat any exit — successful or not — as a failure.
+            let code = result.ok().and_then(|s| s.code()).unwrap_or(-1);
+            AGENT_UPDATE_IN_PROGRESS.store(false, Ordering::Release);
+            error!(
+                %shim_log_path,
+                exit_code = code,
+                "Agent updater shim exited unexpectedly before the service was restarted; \
+                 the update may not have completed. Check the shim log for details.",
+            );
+        }
+        _ = tokio::time::sleep(SHIM_TIMEOUT) => {
+            // Shim has been running for too long; something is wrong.
+            AGENT_UPDATE_IN_PROGRESS.store(false, Ordering::Release);
+            error!(
+                %shim_log_path,
+                timeout_secs = SHIM_TIMEOUT.as_secs(),
+                "Agent updater shim timed out; the update may not have completed. \
+                 Check the shim log for details.",
+            );
+        }
+        _ = shutdown.wait() => {
+            // The service is being stopped — most likely by the MSI installer as part of the
+            // update process. Assume the update is proceeding correctly and exit cleanly.
+            // AGENT_UPDATE_IN_PROGRESS is intentionally left `true`; the next agent instance
+            // starts fresh and resets it via the static initialiser.
+            info!("Shutdown signal received while waiting for updater shim; assuming MSI update is in progress");
+        }
+    }
+
+    Ok(())
 }
 
 async fn install_msi(ctx: &UpdaterCtx, path: &Utf8Path, log_path: &Utf8Path) -> Result<(), UpdaterError> {
@@ -224,7 +400,7 @@ fn ensure_enough_rights() -> Result<(), UpdaterError> {
 
 pub(crate) fn validate_package(ctx: &UpdaterCtx, path: &Utf8Path) -> Result<(), UpdaterError> {
     match ctx.product {
-        Product::Gateway | Product::HubService => validate_msi(ctx, path),
+        Product::Gateway | Product::HubService | Product::Agent => validate_msi(ctx, path),
     }
 }
 

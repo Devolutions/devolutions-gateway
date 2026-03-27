@@ -8,17 +8,32 @@ mod product_actions;
 mod productinfo;
 mod security;
 
+/// Schedule a file for deletion on the next system reboot (best-effort).
+///
+/// Wraps the internal reboot-removal logic with an [`anyhow::Error`] return type for use
+/// outside this crate.
+pub fn remove_file_on_reboot(file_path: &Utf8Path) -> anyhow::Result<()> {
+    io::remove_file_on_reboot(file_path).map_err(anyhow::Error::from)
+}
+
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use time::Time;
+use time::macros::format_description;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_agent_shared::{DateVersion, UpdateJson, VersionSpecification, get_updater_file_path};
+use std::collections::HashMap;
+
+use devolutions_agent_shared::{DateVersion, ProductUpdateInfo, UpdateManifest, UpdateManifestV2, UpdateProductKey, VersionSpecification, VersionedManifest, get_updater_file_path};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use notify_debouncer_mini::notify::RecursiveMode;
 use tokio::fs;
 use uuid::Uuid;
+use win_api_wrappers::service::{ServiceManager, ServiceStartupMode};
 
 use self::detect::get_product_code;
 pub(crate) use self::error::UpdaterError;
@@ -32,10 +47,51 @@ use self::security::set_file_dacl;
 use crate::config::ConfHandle;
 use crate::updater::productinfo::ProductInfoDb;
 
-const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
+/// Windows service name for Devolutions Agent.
+pub const AGENT_SERVICE_NAME: &str = "DevolutionsAgent";
 
-// List of updateable products could be extended in future
-const PRODUCTS: &[Product] = &[Product::Gateway, Product::HubService];
+/// Service state captured before the MSI update begins, used to restore state afterwards.
+pub struct AgentServiceState {
+    pub was_running: bool,
+    pub startup_was_automatic: bool,
+}
+
+/// Query the Devolutions Agent service state before the MSI update begins.
+///
+/// Called while the agent service is still running so startup mode and running state
+/// reflect the pre-update configuration.
+pub fn query_agent_service_state() -> anyhow::Result<AgentServiceState> {
+    let sm = ServiceManager::open_read()?;
+    let svc = sm.open_service_read(AGENT_SERVICE_NAME)?;
+    Ok(AgentServiceState {
+        startup_was_automatic: svc.startup_mode()? == ServiceStartupMode::Automatic,
+        was_running: svc.is_running()?,
+    })
+}
+
+/// Start the Devolutions Agent service after a successful update if its startup mode is manual.
+///
+/// Services configured for automatic startup are restarted by the Windows SCM after the MSI
+/// completes. Services with manual startup must be started explicitly.
+///
+/// Returns `true` if the service was started, `false` if a start was not needed.
+pub fn start_agent_service_if_needed(state: &AgentServiceState) -> anyhow::Result<bool> {
+    // Automatic-startup services restart themselves via the SCM; no action needed.
+    if state.startup_was_automatic || !state.was_running {
+        return Ok(false);
+    }
+    let sm = ServiceManager::open_all_access()?;
+    let svc = sm.open_service_all_access(AGENT_SERVICE_NAME)?;
+    svc.start()?;
+    Ok(true)
+}
+
+const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
+/// How often the task checks whether an auto-update should be triggered.
+const POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+// List of updateable products could be extended in future.
+const PRODUCTS: &[Product] = &[Product::Gateway, Product::HubService, Product::Agent];
 
 /// Load productinfo source from configured URL or file path
 async fn load_productinfo_source(conf: &ConfHandle) -> Result<String, UpdaterError> {
@@ -78,10 +134,14 @@ fn validate_download_url(ctx: &UpdaterCtx, url: &str) -> Result<(), UpdaterError
 }
 
 /// Context for updater task
-struct UpdaterCtx {
+pub(crate) struct UpdaterCtx {
     product: Product,
     actions: Box<dyn ProductUpdateActions + Send + Sync + 'static>,
     conf: ConfHandle,
+    shutdown_signal: ShutdownSignal,
+    /// For agent self-update downgrades: the product code of the currently installed version
+    /// to be uninstalled by the shim before installing the target version.
+    downgrade_product_code: Option<Uuid>,
 }
 
 struct DowngradeInfo {
@@ -95,6 +155,13 @@ struct UpdateOrder {
     package_url: String,
     hash: Option<String>,
 }
+
+/// Set to `true` while the agent self-update shim is running.
+///
+/// Used as a lightweight guard to prevent overlapping agent updates and to block any
+/// other product update from starting while the agent MSI is being installed (the MSI
+/// may restart dependent services).
+static AGENT_UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 pub struct UpdaterTask {
     conf_handle: ConfHandle,
@@ -140,14 +207,70 @@ impl Task for UpdaterTask {
         // Trigger initial check during task startup
         file_change_notification.notify_waiters();
 
+        let mut last_auto_update_trigger: Option<Instant> = None;
+
+        // First poll fires after POLL_INTERVAL, not immediately on startup.
+        let mut poll_ticker = tokio::time::interval_at(
+            tokio::time::Instant::now() + POLL_INTERVAL,
+            POLL_INTERVAL,
+        );
+
         loop {
             tokio::select! {
+                _ = poll_ticker.tick() => {
+                    let auto_update = {
+                        let conf_data = conf.get_conf();
+                        conf_data.updater.agent_auto_update.clone()
+                    };
+
+                    let Some(auto_update) = auto_update else { continue };
+
+                    if !auto_update.enabled {
+                        continue;
+                    }
+
+                    let interval = parse_interval(&auto_update.interval);
+                    if let Some(last) = last_auto_update_trigger
+                        && last.elapsed() < interval
+                    {
+                        continue;
+                    }
+
+                    let now = time::OffsetDateTime::now_local()
+                        .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+                    if !is_in_update_window(now.time(), &auto_update.update_window_start, auto_update.update_window_end.as_deref()) {
+                        continue;
+                    }
+
+                    info!("Agent auto-update: maintenance window active, checking for new version");
+                    last_auto_update_trigger = Some(Instant::now());
+
+                    let mut synthetic: HashMap<UpdateProductKey, ProductUpdateInfo> = HashMap::new();
+                    synthetic.insert(
+                        UpdateProductKey::Agent,
+                        ProductUpdateInfo { target_version: VersionSpecification::Latest },
+                    );
+
+                    match check_for_updates(Product::Agent, &synthetic, &conf).await {
+                        Ok(Some(order)) => {
+                            if let Err(error) = update_product(conf.clone(), Product::Agent, order, shutdown_signal.clone()).await {
+                                error!(error = format!("{error:#}"), "Agent auto-update: failed to update agent");
+                            }
+                        }
+                        Ok(None) => {
+                            info!("Agent auto-update: agent is already up to date");
+                        }
+                        Err(error) => {
+                            error!(error = format!("{error:#}"), "Agent auto-update: failed to check for updates");
+                        }
+                    }
+                }
                 _ = file_change_notification.notified() => {
                     info!("update.json file changed, checking for updates...");
 
 
-                    let update_json = match read_update_json(&update_file_path).await {
-                        Ok(update_json) => update_json,
+                    let products_map = match read_update_json(&update_file_path).await {
+                        Ok(products_map) => products_map,
                         Err(error) => {
                             error!(%error, "Failed to parse `update.json`");
                             // Allow this error to be non-critical, as this file could be
@@ -159,7 +282,7 @@ impl Task for UpdaterTask {
                     let mut update_orders = vec![];
 
                     for product in PRODUCTS {
-                        let update_order = match check_for_updates(*product, &update_json, &conf).await {
+                        let update_order = match check_for_updates(*product, &products_map, &conf).await {
                             Ok(order) => order,
                             Err(error) => {
                                 error!(%product, error = format!("{error:#}"), "Failed to check for updates for a product");
@@ -177,7 +300,7 @@ impl Task for UpdaterTask {
                     }
 
                     for (product, order) in update_orders {
-                        if let Err(error) = update_product(conf.clone(), product, order).await {
+                        if let Err(error) = update_product(conf.clone(), product, order, shutdown_signal.clone()).await {
                             error!(%product, %error, "Failed to update product");
                         }
                     }
@@ -192,7 +315,13 @@ impl Task for UpdaterTask {
     }
 }
 
-async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) -> anyhow::Result<()> {
+async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+    // Block any product update while the agent shim is running in the background.
+    // The agent MSI restarts dependent services and must complete uninterrupted.
+    if AGENT_UPDATE_IN_PROGRESS.load(Ordering::Acquire) {
+        anyhow::bail!("skipping {product} update: agent update is in progress");
+    }
+
     let target_version = order.target_version;
     let hash = order.hash;
 
@@ -200,6 +329,12 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         product,
         actions: build_product_actions(product),
         conf,
+        shutdown_signal,
+        downgrade_product_code: order.downgrade.as_ref().and_then(|d| {
+            // For Agent, the shim handles uninstall + install in sequence; pass the product
+            // code so it can run `msiexec /x` before `msiexec /i`.
+            (product == Product::Agent).then_some(d.product_code)
+        }),
     };
 
     validate_download_url(&ctx, &order.package_url)?;
@@ -238,7 +373,10 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         let uninstall_log_path = package_path.with_extension("uninstall.log");
 
         // NOTE: An uninstall/reinstall will lose any custom feature selection or other options in the existing installation
-        uninstall_package(&ctx, downgrade.product_code, &uninstall_log_path).await?;
+        // For Product::Agent the shim handles uninstall; skip the in-process step.
+        if product != Product::Agent {
+            uninstall_package(&ctx, downgrade.product_code, &uninstall_log_path).await?;
+        }
     }
 
     let log_path = package_path.with_extension("log");
@@ -254,30 +392,22 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
     Ok(())
 }
 
-async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJson> {
-    let update_json_data = fs::read(update_file_path)
+async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<HashMap<UpdateProductKey, ProductUpdateInfo>> {
+    let data = fs::read(update_file_path)
         .await
         .context("failed to read update.json file")?;
 
-    // Strip UTF-8 BOM if present (some editors add it)
-    let data_without_bom = if update_json_data.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        &update_json_data[3..]
-    } else {
-        &update_json_data
-    };
+    let manifest = UpdateManifest::parse(&data).context("failed to parse update.json file")?;
 
-    let update_json: UpdateJson =
-        serde_json::from_slice(data_without_bom).context("failed to parse update.json file")?;
-
-    Ok(update_json)
+    Ok(manifest.into_products())
 }
 
 async fn check_for_updates(
     product: Product,
-    update_json: &UpdateJson,
+    products: &HashMap<UpdateProductKey, ProductUpdateInfo>,
     conf: &ConfHandle,
 ) -> anyhow::Result<Option<UpdateOrder>> {
-    let target_version = match product.get_update_info(update_json).map(|info| info.target_version) {
+    let target_version = match products.get(&product.as_update_product_key()).map(|info| info.target_version.clone()) {
         Some(version) => version,
         None => {
             trace!(%product, "No target version specified in update.json, skipping update check");
@@ -334,12 +464,31 @@ async fn check_for_updates(
             }
         })?;
 
+    // The first agent version with self-update support is 2026.2 (anything built after
+    // 2026.1.x lacks the updater shim and would permanently disable auto-update).
+    const AGENT_MIN_SELF_UPDATE_VERSION: DateVersion = DateVersion {
+        year: 2026,
+        month: 1,
+        day: 0,
+        revision: 0,
+    };
+
     let remote_version = product_info.version.parse::<DateVersion>()?;
 
     match target_version {
         VersionSpecification::Latest => {
             if remote_version <= detected_version {
                 info!(%product, %detected_version, "Product is up to date, skipping update (update to `latest` requested)");
+                return Ok(None);
+            }
+
+            if product == Product::Agent && remote_version <= AGENT_MIN_SELF_UPDATE_VERSION {
+                warn!(
+                    %product,
+                    target_version = %remote_version,
+                    min_version = %AGENT_MIN_SELF_UPDATE_VERSION,
+                    "Latest version does not support agent self-update; skipping to avoid breaking auto-update"
+                );
                 return Ok(None);
             }
 
@@ -400,6 +549,16 @@ async fn check_for_updates(
             }
             // Target MSI found, proceed with update.
 
+            if product == Product::Agent && version <= AGENT_MIN_SELF_UPDATE_VERSION {
+                warn!(
+                    %product,
+                    %version,
+                    min_version = %AGENT_MIN_SELF_UPDATE_VERSION,
+                    "Target version does not support agent self-update; skipping to avoid breaking auto-update"
+                );
+                return Ok(None);
+            }
+
             // For the downgrade, we remove the installed product and install the target
             // version. This is the simplest and more reliable way to handle downgrades. (WiX
             // downgrade is not used).
@@ -427,8 +586,9 @@ async fn check_for_updates(
 async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
     let update_file_path = get_updater_file_path();
 
+    let empty_v2 = UpdateManifest::Manifest(VersionedManifest::V2(UpdateManifestV2::default()));
     let default_update_json =
-        serde_json::to_string_pretty(&UpdateJson::default()).context("failed to serialize default update.json")?;
+        serde_json::to_string_pretty(&empty_v2).context("failed to serialize default update.json")?;
 
     fs::write(&update_file_path, default_update_json)
         .await
@@ -476,9 +636,177 @@ fn try_modify_product_url_version(
     Ok(new_url)
 }
 
+/// Parse a humantime duration string into a [`Duration`].
+///
+/// A bare integer with no unit suffix is treated as seconds.
+/// Falls back to 24 hours if the string cannot be parsed.
+fn parse_interval(s: &str) -> Duration {
+    if let Ok(secs) = s.trim().parse::<u64>() {
+        return Duration::from_secs(secs);
+    }
+    match humantime::parse_duration(s) {
+        Ok(d) => d,
+        Err(_) => {
+            warn!(interval = s, "Agent auto-update: invalid interval format, falling back to 24 hours");
+            Duration::from_secs(86_400)
+        }
+    }
+}
+
+/// Returns `true` when `now` falls within the configured maintenance window.
+///
+/// `window_start` must be in `HH:MM` (24-hour) local-time format.
+/// When `window_end` is `None` the window is unbounded: any time at or after `window_start`
+/// is accepted.  When `window_end` is `Some` and `end \u2264 start`, midnight crossing is assumed
+/// (e.g. `"22:00"`\u2013`"03:00"` covers `[22:00, midnight) \u222a [midnight, 03:00)`).
+fn is_in_update_window(now: Time, window_start: &str, window_end: Option<&str>) -> bool {
+    let fmt = format_description!("[hour]:[minute]");
+    let parse = |s: &str| Time::parse(s, fmt).ok();
+
+    let Some(start) = parse(window_start) else {
+        warn!(
+            window_start,
+            "Agent auto-update: invalid maintenance window start time format, skipping check"
+        );
+        return false;
+    };
+
+    match window_end {
+        None => now >= start,
+        Some(end_str) => {
+            let Some(end) = parse(end_str) else {
+                warn!(
+                    window_end = end_str,
+                    "Agent auto-update: invalid maintenance window end time format, skipping check"
+                );
+                return false;
+            };
+            if end <= start {
+                // Window crosses midnight: [start, midnight) \u222a [midnight, end)
+                now >= start || now < end
+            } else {
+                // Normal window: [start, end)
+                now >= start && now < end
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use time::Time;
+    use time::macros::format_description;
+
     use super::*;
+
+    fn t(s: &str) -> Time {
+        Time::parse(s, format_description!("[hour]:[minute]")).expect("valid test time")
+    }
+
+    // --- Maintenance window tests ---
+
+    #[test]
+    fn inside_window() {
+        assert!(is_in_update_window(t("03:00"), "02:00", Some("04:00")));
+    }
+
+    #[test]
+    fn at_window_start() {
+        assert!(is_in_update_window(t("02:00"), "02:00", Some("04:00")));
+    }
+
+    #[test]
+    fn at_window_end_exclusive() {
+        assert!(!is_in_update_window(t("04:00"), "02:00", Some("04:00")));
+    }
+
+    #[test]
+    fn before_window() {
+        assert!(!is_in_update_window(t("01:59"), "02:00", Some("04:00")));
+    }
+
+    #[test]
+    fn after_window() {
+        assert!(!is_in_update_window(t("04:01"), "02:00", Some("04:00")));
+    }
+
+    #[test]
+    fn invalid_window_format_returns_false() {
+        assert!(!is_in_update_window(t("03:00"), "bad", Some("04:00")));
+        assert!(!is_in_update_window(t("03:00"), "02:00", Some("not-a-time")));
+    }
+
+    #[test]
+    fn no_end_allows_any_time_after_start() {
+        assert!(!is_in_update_window(t("01:59"), "02:00", None));
+        assert!(is_in_update_window(t("02:00"), "02:00", None));
+        assert!(is_in_update_window(t("23:59"), "02:00", None));
+    }
+
+    #[test]
+    fn invalid_start_with_no_end_returns_false() {
+        assert!(!is_in_update_window(t("03:00"), "bad", None));
+    }
+
+    #[test]
+    fn midnight_crossing_inside_early() {
+        // 22:00..03:00 \u2014 time is 01:00, past midnight but before end
+        assert!(is_in_update_window(t("01:00"), "22:00", Some("03:00")));
+    }
+
+    #[test]
+    fn midnight_crossing_inside_late() {
+        // 22:00..03:00 \u2014 time is 23:00, before midnight but after start
+        assert!(is_in_update_window(t("23:00"), "22:00", Some("03:00")));
+    }
+
+    #[test]
+    fn midnight_crossing_at_start() {
+        assert!(is_in_update_window(t("22:00"), "22:00", Some("03:00")));
+    }
+
+    #[test]
+    fn midnight_crossing_at_end_exclusive() {
+        assert!(!is_in_update_window(t("03:00"), "22:00", Some("03:00")));
+    }
+
+    #[test]
+    fn midnight_crossing_outside() {
+        // 22:00..03:00 \u2014 time is 10:00, outside the window
+        assert!(!is_in_update_window(t("10:00"), "22:00", Some("03:00")));
+    }
+
+    // --- Interval parsing tests ---
+
+    #[test]
+    fn interval_bare_number_is_seconds() {
+        assert_eq!(parse_interval("3600"), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn interval_bare_small_number_is_seconds_not_fallback() {
+        // "30" has no unit suffix; must be treated as 30 seconds, not fall back to 24 hours.
+        assert_eq!(parse_interval("30"), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn interval_humantime_day() {
+        assert_eq!(parse_interval("1d"), Duration::from_secs(86_400));
+    }
+
+    #[test]
+    fn interval_humantime_hours_minutes() {
+        assert_eq!(parse_interval("1h 30m"), Duration::from_secs(5400));
+    }
+
+    #[test]
+    fn interval_invalid_falls_back() {
+        assert_eq!(parse_interval("not-a-duration"), Duration::from_secs(86_400));
+    }
+
+    // --- URL version modification tests ---
 
     #[test]
     fn test_try_modify_product_url_version() {
