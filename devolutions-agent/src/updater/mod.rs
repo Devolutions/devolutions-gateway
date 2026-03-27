@@ -26,7 +26,9 @@ use time::macros::format_description;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_agent_shared::{DateVersion, ProductUpdateInfo, UpdateJson, VersionSpecification, get_updater_file_path};
+use std::collections::HashMap;
+
+use devolutions_agent_shared::{DateVersion, ProductUpdateInfo, UpdateManifest, UpdateManifestV2, UpdateProductKey, VersionSpecification, VersionedManifest, get_updater_file_path};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use notify_debouncer_mini::notify::RecursiveMode;
 use tokio::fs;
@@ -243,11 +245,11 @@ impl Task for UpdaterTask {
                     info!("Agent auto-update: maintenance window active, checking for new version");
                     last_auto_update_trigger = Some(Instant::now());
 
-                    let synthetic = UpdateJson {
-                        agent: Some(ProductUpdateInfo { target_version: VersionSpecification::Latest }),
-                        gateway: None,
-                        hub_service: None,
-                    };
+                    let mut synthetic: HashMap<UpdateProductKey, ProductUpdateInfo> = HashMap::new();
+                    synthetic.insert(
+                        UpdateProductKey::Agent,
+                        ProductUpdateInfo { target_version: VersionSpecification::Latest },
+                    );
 
                     match check_for_updates(Product::Agent, &synthetic, &conf).await {
                         Ok(Some(order)) => {
@@ -267,8 +269,8 @@ impl Task for UpdaterTask {
                     info!("update.json file changed, checking for updates...");
 
 
-                    let update_json = match read_update_json(&update_file_path).await {
-                        Ok(update_json) => update_json,
+                    let products_map = match read_update_json(&update_file_path).await {
+                        Ok(products_map) => products_map,
                         Err(error) => {
                             error!(%error, "Failed to parse `update.json`");
                             // Allow this error to be non-critical, as this file could be
@@ -280,7 +282,7 @@ impl Task for UpdaterTask {
                     let mut update_orders = vec![];
 
                     for product in PRODUCTS {
-                        let update_order = match check_for_updates(*product, &update_json, &conf).await {
+                        let update_order = match check_for_updates(*product, &products_map, &conf).await {
                             Ok(order) => order,
                             Err(error) => {
                                 error!(%product, error = format!("{error:#}"), "Failed to check for updates for a product");
@@ -390,30 +392,22 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder, 
     Ok(())
 }
 
-async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJson> {
-    let update_json_data = fs::read(update_file_path)
+async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<HashMap<UpdateProductKey, ProductUpdateInfo>> {
+    let data = fs::read(update_file_path)
         .await
         .context("failed to read update.json file")?;
 
-    // Strip UTF-8 BOM if present (some editors add it)
-    let data_without_bom = if update_json_data.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        &update_json_data[3..]
-    } else {
-        &update_json_data
-    };
+    let manifest = UpdateManifest::parse(&data).context("failed to parse update.json file")?;
 
-    let update_json: UpdateJson =
-        serde_json::from_slice(data_without_bom).context("failed to parse update.json file")?;
-
-    Ok(update_json)
+    Ok(manifest.into_products())
 }
 
 async fn check_for_updates(
     product: Product,
-    update_json: &UpdateJson,
+    products: &HashMap<UpdateProductKey, ProductUpdateInfo>,
     conf: &ConfHandle,
 ) -> anyhow::Result<Option<UpdateOrder>> {
-    let target_version = match product.get_update_info(update_json).map(|info| info.target_version) {
+    let target_version = match products.get(&product.as_update_product_key()).map(|info| info.target_version.clone()) {
         Some(version) => version,
         None => {
             trace!(%product, "No target version specified in update.json, skipping update check");
@@ -592,8 +586,9 @@ async fn check_for_updates(
 async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
     let update_file_path = get_updater_file_path();
 
+    let empty_v2 = UpdateManifest::Manifest(VersionedManifest::V2(UpdateManifestV2::default()));
     let default_update_json =
-        serde_json::to_string_pretty(&UpdateJson::default()).context("failed to serialize default update.json")?;
+        serde_json::to_string_pretty(&empty_v2).context("failed to serialize default update.json")?;
 
     fs::write(&update_file_path, default_update_json)
         .await

@@ -18,7 +18,7 @@ pub use agent_auto_update::AgentAutoUpdateConf;
 #[rustfmt::skip]
 pub use date_version::{DateVersion, DateVersionError};
 #[rustfmt::skip]
-pub use update_json::{ProductUpdateInfo, UpdateJson, VersionSpecification};
+pub use update_json::{ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION, UpdateJson, UpdateManifest, UpdateManifestV2, UpdateProductKey, VersionedManifest, VersionSpecification};
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {

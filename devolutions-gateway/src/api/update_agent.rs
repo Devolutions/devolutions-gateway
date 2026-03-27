@@ -1,15 +1,12 @@
 use axum::Json;
-use axum::extract::Query;
-use devolutions_agent_shared::{ProductUpdateInfo, UpdateJson, VersionSpecification, get_updater_file_path};
 use devolutions_agent_shared::AgentAutoUpdateConf;
 use devolutions_agent_shared::agent_auto_update::{
     DEFAULT_INTERVAL, DEFAULT_WINDOW_END, DEFAULT_WINDOW_START, read_agent_auto_update_conf,
     write_agent_auto_update_conf,
 };
-use hyper::StatusCode;
 
 use crate::extract::UpdateScope;
-use crate::http::{HttpError, HttpErrorBuilder};
+use crate::http::HttpError;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
@@ -156,73 +153,4 @@ pub(super) async fn set_agent_auto_update(
     )?;
 
     Ok(Json(SetAgentAutoUpdateResponse {}))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AgentUpdateQueryParam {
-    version: VersionSpecification,
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize)]
-pub(crate) struct AgentUpdateResponse {}
-
-/// Triggers Devolutions Agent update process.
-///
-/// Writes the requested version into the `Agent` field of `update.json`, which is then
-/// picked up by Devolutions Agent when changes are detected. If the version written is
-/// higher than the currently installed version, Devolutions Agent will proceed with the
-/// update process via the agent-updater shim.
-#[cfg_attr(feature = "openapi", utoipa::path(
-    post,
-    operation_id = "TriggerAgentUpdate",
-    tag = "Update",
-    path = "/jet/agent-update",
-    params(
-        ("version" = String, Query, description = "The version to install; use 'latest' for the latest version, or 'w.x.y.z' for a specific version"),
-    ),
-    responses(
-        (status = 200, description = "Agent update request has been processed successfully", body = AgentUpdateResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Agent updater service is malfunctioning"),
-        (status = 503, description = "Agent updater service is unavailable"),
-    ),
-    security(("scope_token" = ["gateway.update"])),
-))]
-pub(super) async fn trigger_agent_update(
-    Query(query): Query<AgentUpdateQueryParam>,
-    _scope: UpdateScope,
-) -> Result<Json<AgentUpdateResponse>, HttpError> {
-    let target_version = query.version;
-
-    let updater_file_path = get_updater_file_path();
-
-    if !updater_file_path.exists() {
-        return Err(
-            HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE).msg("Agent updater service is not installed")
-        );
-    }
-
-    let update_json = UpdateJson {
-        agent: Some(ProductUpdateInfo { target_version }),
-        gateway: None,
-        hub_service: None,
-    };
-
-    let update_json = serde_json::to_string(&update_json).map_err(
-        HttpError::internal()
-            .with_msg("failed to serialize the update manifest")
-            .err(),
-    )?;
-
-    std::fs::write(updater_file_path, update_json).map_err(
-        HttpError::internal()
-            .with_msg("failed to write the new `update.json` manifest on disk")
-            .err(),
-    )?;
-
-    Ok(Json(AgentUpdateResponse {}))
 }

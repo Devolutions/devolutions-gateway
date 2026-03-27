@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use devolutions_agent_shared::{ProductUpdateInfo, UpdateJson};
+use devolutions_agent_shared::UpdateProductKey;
 
 use crate::updater::productinfo::{AGENT_PRODUCT_ID, GATEWAY_PRODUCT_ID, HUB_SERVICE_PRODUCT_ID};
 
@@ -40,11 +40,12 @@ impl FromStr for Product {
 }
 
 impl Product {
-    pub(crate) fn get_update_info(self, update_json: &UpdateJson) -> Option<ProductUpdateInfo> {
+    /// Convert to the corresponding [`UpdateProductKey`] for looking up update info in a products map.
+    pub(crate) fn as_update_product_key(self) -> UpdateProductKey {
         match self {
-            Product::Gateway => update_json.gateway.clone(),
-            Product::HubService => update_json.hub_service.clone(),
-            Product::Agent => update_json.agent.clone(),
+            Product::Gateway => UpdateProductKey::Gateway,
+            Product::HubService => UpdateProductKey::HubService,
+            Product::Agent => UpdateProductKey::Agent,
         }
     }
 
