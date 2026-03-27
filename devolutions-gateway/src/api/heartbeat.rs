@@ -255,25 +255,35 @@ fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option
 
         if ret == 0 {
             NO_DISK_STATE.on_disk_present();
+
             // f_frsize is the fundamental block size; fall back to f_bsize if zero.
+            // u64::from() is used throughout as a precaution: f_frsize/f_bsize
+            // are c_ulong (u64 on both Linux and macOS); f_blocks/f_bavail are
+            // fsblkcnt_t which is u64 on Linux but u32 on macOS.
+
             let block_size = if stat.f_frsize != 0 {
-                stat.f_frsize as u64
+                u64::from(stat.f_frsize)
             } else {
-                stat.f_bsize as u64
+                u64::from(stat.f_bsize)
             };
-            let total = (stat.f_blocks as u64).saturating_mul(block_size);
+
+            let total = u64::from(stat.f_blocks).saturating_mul(block_size);
+
             // f_bavail is the space available to unprivileged users (vs f_bfree which is root-only).
-            let available = (stat.f_bavail as u64).saturating_mul(block_size);
+            let available = u64::from(stat.f_bavail).saturating_mul(block_size);
+
             debug!(
                 recording_path = %recording_path.display(),
                 total_bytes = total,
                 free_bytes_available = available,
                 "Retrieved disk space via statvfs"
             );
+
             (Some(total), Some(available))
         } else {
             let error = std::io::Error::last_os_error();
             NO_DISK_STATE.on_disk_missing(recording_path, &error.to_string());
+
             (None, None)
         }
     }
