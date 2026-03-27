@@ -1503,6 +1503,7 @@ dependencies = [
  "sysevent-winevent",
  "sysinfo",
  "tap",
+ "tempfile",
  "terminal-streamer",
  "thiserror 2.0.18",
  "time",
@@ -1525,6 +1526,7 @@ dependencies = [
  "utoipa",
  "uuid",
  "video-streamer",
+ "windows-sys 0.61.2",
  "x509-cert",
  "zeroize",
 ]
