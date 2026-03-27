@@ -62,4 +62,6 @@ pub(crate) enum UpdaterError {
     AgentUpdaterShimNotFound { path: Utf8PathBuf },
     #[error("failed to launch agent updater shim")]
     AgentShimLaunch { source: std::io::Error },
+    #[error("an agent update is already in progress; skipping concurrent update request")]
+    AgentUpdateAlreadyInProgress,
 }

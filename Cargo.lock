@@ -1435,6 +1435,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "devolutions-agent-updater"
+version = "2026.1.0"
+dependencies = [
+ "camino",
+ "devolutions-agent",
+]
+
+[[package]]
 name = "devolutions-gateway"
 version = "2026.1.0"
 dependencies = [

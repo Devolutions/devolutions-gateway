@@ -8,7 +8,16 @@ mod product_actions;
 mod productinfo;
 mod security;
 
+/// Schedule a file for deletion on the next system reboot (best-effort).
+///
+/// Wraps the internal reboot-removal logic with an [`anyhow::Error`] return type for use
+/// outside this crate.
+pub fn remove_file_on_reboot(file_path: &Utf8Path) -> anyhow::Result<()> {
+    io::remove_file_on_reboot(file_path).map_err(anyhow::Error::from)
+}
+
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use time::Time;
@@ -22,6 +31,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use notify_debouncer_mini::notify::RecursiveMode;
 use tokio::fs;
 use uuid::Uuid;
+use win_api_wrappers::service::{ServiceManager, ServiceStartupMode};
 
 use self::detect::get_product_code;
 pub(crate) use self::error::UpdaterError;
@@ -34,6 +44,45 @@ use self::productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use self::security::set_file_dacl;
 use crate::config::ConfHandle;
 use crate::updater::productinfo::ProductInfoDb;
+
+/// Windows service name for Devolutions Agent.
+pub const AGENT_SERVICE_NAME: &str = "DevolutionsAgent";
+
+/// Service state captured before the MSI update begins, used to restore state afterwards.
+pub struct AgentServiceState {
+    pub was_running: bool,
+    pub startup_was_automatic: bool,
+}
+
+/// Query the Devolutions Agent service state before the MSI update begins.
+///
+/// Called while the agent service is still running so startup mode and running state
+/// reflect the pre-update configuration.
+pub fn query_agent_service_state() -> anyhow::Result<AgentServiceState> {
+    let sm = ServiceManager::open_read()?;
+    let svc = sm.open_service_read(AGENT_SERVICE_NAME)?;
+    Ok(AgentServiceState {
+        startup_was_automatic: svc.startup_mode()? == ServiceStartupMode::Automatic,
+        was_running: svc.is_running()?,
+    })
+}
+
+/// Start the Devolutions Agent service after a successful update if its startup mode is manual.
+///
+/// Services configured for automatic startup are restarted by the Windows SCM after the MSI
+/// completes. Services with manual startup must be started explicitly.
+///
+/// Returns `true` if the service was started, `false` if a start was not needed.
+pub fn start_agent_service_if_needed(state: &AgentServiceState) -> anyhow::Result<bool> {
+    // Automatic-startup services restart themselves via the SCM; no action needed.
+    if state.startup_was_automatic || !state.was_running {
+        return Ok(false);
+    }
+    let sm = ServiceManager::open_all_access()?;
+    let svc = sm.open_service_all_access(AGENT_SERVICE_NAME)?;
+    svc.start()?;
+    Ok(true)
+}
 
 const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
 /// How often the task checks whether an auto-update should be triggered.
@@ -83,10 +132,11 @@ fn validate_download_url(ctx: &UpdaterCtx, url: &str) -> Result<(), UpdaterError
 }
 
 /// Context for updater task
-struct UpdaterCtx {
+pub(crate) struct UpdaterCtx {
     product: Product,
     actions: Box<dyn ProductUpdateActions + Send + Sync + 'static>,
     conf: ConfHandle,
+    shutdown_signal: ShutdownSignal,
     /// For agent self-update downgrades: the product code of the currently installed version
     /// to be uninstalled by the shim before installing the target version.
     downgrade_product_code: Option<Uuid>,
@@ -103,6 +153,13 @@ struct UpdateOrder {
     package_url: String,
     hash: Option<String>,
 }
+
+/// Set to `true` while the agent self-update shim is running.
+///
+/// Used as a lightweight guard to prevent overlapping agent updates and to block any
+/// other product update from starting while the agent MSI is being installed (the MSI
+/// may restart dependent services).
+static AGENT_UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 pub struct UpdaterTask {
     conf_handle: ConfHandle,
@@ -194,7 +251,7 @@ impl Task for UpdaterTask {
 
                     match check_for_updates(Product::Agent, &synthetic, &conf).await {
                         Ok(Some(order)) => {
-                            if let Err(error) = update_product(conf.clone(), Product::Agent, order).await {
+                            if let Err(error) = update_product(conf.clone(), Product::Agent, order, shutdown_signal.clone()).await {
                                 error!(error = format!("{error:#}"), "Agent auto-update: failed to update agent");
                             }
                         }
@@ -241,7 +298,7 @@ impl Task for UpdaterTask {
                     }
 
                     for (product, order) in update_orders {
-                        if let Err(error) = update_product(conf.clone(), product, order).await {
+                        if let Err(error) = update_product(conf.clone(), product, order, shutdown_signal.clone()).await {
                             error!(%product, %error, "Failed to update product");
                         }
                     }
@@ -256,7 +313,13 @@ impl Task for UpdaterTask {
     }
 }
 
-async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) -> anyhow::Result<()> {
+async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+    // Block any product update while the agent shim is running in the background.
+    // The agent MSI restarts dependent services and must complete uninterrupted.
+    if AGENT_UPDATE_IN_PROGRESS.load(Ordering::Acquire) {
+        anyhow::bail!("skipping {product} update: agent update is in progress");
+    }
+
     let target_version = order.target_version;
     let hash = order.hash;
 
@@ -264,6 +327,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
         product,
         actions: build_product_actions(product),
         conf,
+        shutdown_signal,
         downgrade_product_code: order.downgrade.as_ref().and_then(|d| {
             // For Agent, the shim handles uninstall + install in sequence; pass the product
             // code so it can run `msiexec /x` before `msiexec /i`.

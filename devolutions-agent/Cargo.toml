@@ -12,10 +12,6 @@ publish = false
 name = "devolutions-agent"
 path = "src/main.rs"
 
-[[bin]]
-name = "devolutions-agent-updater"
-path = "src/agent-updater.rs"
-
 [lints]
 workspace = true
 

@@ -286,6 +286,13 @@ internal class Program
                         },
                     },
                     new (Features.SESSION_FEATURE, DevolutionsSession)
+                    {
+                        TargetFileName = "DevolutionsSession.exe"
+                    },
+                    new (Features.AGENT_UPDATER_FEATURE, DevolutionsAgentUpdaterExePath)
+                    {
+                        TargetFileName = "DevolutionsAgentUpdater.exe"
+                    }
                 },
                 Dirs = new[]
                 {
@@ -295,9 +302,7 @@ internal class Program
                         new File(Features.PEDM_FEATURE, DevolutionsPedmShellExtMsix)),
                     new Dir(Features.AGENT_FEATURE, "tun2socks",
                         new File(Features.AGENT_FEATURE, DevolutionsTun2SocksExe),
-                        new File(Features.AGENT_FEATURE, DevolutionsWintunDll)),
-                    new Dir(Features.AGENT_UPDATER_FEATURE, "updater",
-                        new File(Features.AGENT_UPDATER_FEATURE, DevolutionsAgentUpdaterExePath))
+                        new File(Features.AGENT_FEATURE, DevolutionsWintunDll))
                 }
             })),
         };
