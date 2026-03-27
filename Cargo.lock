@@ -1524,7 +1524,6 @@ dependencies = [
  "pin-project-lite 0.2.17",
  "portpicker",
  "proptest",
- "rand 0.8.5",
  "reqwest",
  "rstest",
  "rustls-cng",

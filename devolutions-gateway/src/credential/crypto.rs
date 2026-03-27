@@ -17,10 +17,10 @@ use core::fmt;
 use std::sync::LazyLock;
 
 use anyhow::Context as _;
+use chacha20poly1305::aead::rand_core::RngCore as _;
 use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
-use rand::RngCore as _;
 use secrecy::SecretString;
 use secure_memory::ProtectedBytes;
 
