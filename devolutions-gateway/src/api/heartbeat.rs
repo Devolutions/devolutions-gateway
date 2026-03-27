@@ -180,7 +180,11 @@ pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> Reco
 /// This supports UNC paths (`\\server\share\...`) and mapped drive letters without needing
 /// to enumerate mount points or canonicalize the path.
 ///
-/// On other platforms, enumerates disks via `sysinfo` and finds the longest-prefix mount point.
+/// On Unix, calls `statvfs(2)` directly against the configured recording path.
+/// This supports network filesystems (NFS, CIFS/Samba) and any mount point without needing
+/// to enumerate mount points.
+///
+/// On other platforms, space values are not available and `(None, None)` is returned.
 fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
     static NO_DISK_STATE: NoDiskState = NoDiskState::new();
 
@@ -230,48 +234,64 @@ fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    #[allow(
+        clippy::useless_conversion,
+        reason = "statvfs field types differ across Unix platforms: fsblkcnt_t is u64 on Linux but u32 on macOS"
+    )]
     fn query_storage_space_impl(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
-        use sysinfo::Disks;
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt as _;
 
-        if !sysinfo::IS_SUPPORTED_SYSTEM {
-            debug!("This system does not support listing storage disks");
-            return (None, None);
-        }
-
-        trace!("System is supporting listing storage disks");
-
-        let recording_path = dunce::canonicalize(recording_path)
-            .inspect_err(
-                |error| debug!(%error, recording_path = %recording_path.display(), "Failed to canonicalize recording path"),
-            )
-            .unwrap_or_else(|_| recording_path.to_owned());
-
-        let disks = Disks::new_with_refreshed_list();
-
-        debug!(recording_path = %recording_path.display(), "Search mount point for path");
-        debug!(?disks, "Found disks");
-
-        let mut recording_disk = None;
-        let mut longest_path = 0;
-
-        for disk in disks.list() {
-            let mount_point = disk.mount_point();
-            let path_len = mount_point.components().count();
-            if recording_path.starts_with(mount_point) && longest_path < path_len {
-                recording_disk = Some(disk);
-                longest_path = path_len;
+        let c_path = match CString::new(recording_path.as_os_str().as_bytes()) {
+            Ok(p) => p,
+            Err(_) => {
+                NO_DISK_STATE.on_disk_missing(recording_path, "path contains null byte");
+                return (None, None);
             }
-        }
+        };
 
-        if let Some(disk) = recording_disk {
+        // SAFETY: `stat` is zeroed stack memory whose layout matches what the OS writes into it.
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+
+        // SAFETY: `c_path` is a valid null-terminated C string.
+        let ret = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+
+        if ret == 0 {
             NO_DISK_STATE.on_disk_present();
-            debug!(?disk, "Disk used to store recordings");
-            (Some(disk.total_space()), Some(disk.available_space()))
+
+            // f_frsize is the fundamental block size; fall back to f_bsize if zero.
+            let block_size = if stat.f_frsize != 0 {
+                u64::from(stat.f_frsize)
+            } else {
+                u64::from(stat.f_bsize)
+            };
+
+            let total = u64::from(stat.f_blocks).saturating_mul(block_size);
+
+            // f_bavail is the space available to unprivileged users (vs f_bfree which is root-only).
+            let available = u64::from(stat.f_bavail).saturating_mul(block_size);
+
+            debug!(
+                recording_path = %recording_path.display(),
+                total_bytes = total,
+                free_bytes_available = available,
+                "Retrieved disk space via statvfs"
+            );
+
+            (Some(total), Some(available))
         } else {
-            NO_DISK_STATE.on_disk_missing(&recording_path, "no matching disk mount point found");
+            let error = std::io::Error::last_os_error();
+            NO_DISK_STATE.on_disk_missing(recording_path, &error.to_string());
+
             (None, None)
         }
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    fn query_storage_space_impl(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
+        NO_DISK_STATE.on_disk_missing(recording_path, "unsupported platform");
+        (None, None)
     }
 }
 
@@ -290,9 +310,8 @@ mod tests {
 
         assert!(result.recording_storage_is_writeable);
 
-        // Space values may be None only on platforms where sysinfo is unsupported;
-        // on Windows and common Unix platforms they should be Some.
-        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+        // Space values are Some on Windows (GetDiskFreeSpaceExW) and all Unix platforms (statvfs).
+        #[cfg(any(windows, unix))]
         {
             assert!(
                 result.recording_storage_total_space.is_some(),
@@ -306,6 +325,13 @@ mod tests {
                 result.recording_storage_total_space >= result.recording_storage_available_space,
                 "total space must be >= available space"
             );
+        }
+
+        // Space values are None on other unsupported platforms.
+        #[cfg(not(any(windows, unix)))]
+        {
+            assert!(result.recording_storage_total_space.is_none());
+            assert!(result.recording_storage_available_space.is_none());
         }
     }
 
