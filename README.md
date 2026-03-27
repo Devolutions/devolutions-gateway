@@ -20,7 +20,7 @@ immediately, without going through the acceptance testing process of our quality
 
 ### From sources
 
-Ensure that you have [the Rust toolchain installed][install_rust], then clone this repository and run:
+Ensure that you have [the Rust toolchain installed][install_rust] and then clone this repository and run:
 
 ```shell
 cargo install --path ./devolutions-gateway
