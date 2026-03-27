@@ -60,10 +60,12 @@ impl NoDiskState {
         }
     }
 
-    /// Called when no matching disk is found for the recording path.
+    /// Called when disk space cannot be determined for the recording path.
     ///
-    /// Logs at WARN on the first occurrence in a fault period; subsequent calls log at DEBUG.
-    fn on_disk_missing(&self, recording_path: &std::path::Path) {
+    /// `reason` is a short description of why (e.g. "no matching disk mount point found" or an OS
+    /// error string).  Logs at WARN on the first occurrence in a fault period; subsequent repeated
+    /// occurrences are downgraded to DEBUG to avoid log noise.
+    fn on_disk_missing(&self, recording_path: &std::path::Path, reason: &str) {
         let already_warned = self
             .already_warned
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
@@ -72,13 +74,15 @@ impl NoDiskState {
         if !already_warned {
             warn!(
                 recording_path = %recording_path.display(),
-                "Failed to find disk used for recording storage"
+                reason,
+                "Failed to retrieve recording storage space"
             );
             trace!(covmark = "no_disk_first_occurrence");
         } else {
             debug!(
                 recording_path = %recording_path.display(),
-                "Failed to find disk used for recording storage"
+                reason,
+                "Failed to retrieve recording storage space"
             );
             trace!(covmark = "no_disk_repeated_occurrence");
         }
@@ -149,10 +153,6 @@ pub(crate) struct RecordingStorageResult {
 }
 
 pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> RecordingStorageResult {
-    use sysinfo::Disks;
-
-    static NO_DISK_STATE: NoDiskState = NoDiskState::new();
-
     let recording_storage_is_writeable = {
         let probe_file = recording_path.join("probe");
 
@@ -165,7 +165,80 @@ pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> Reco
         is_ok
     };
 
-    let (recording_storage_total_space, recording_storage_available_space) = if sysinfo::IS_SUPPORTED_SYSTEM {
+    let (recording_storage_total_space, recording_storage_available_space) = query_storage_space(recording_path);
+
+    RecordingStorageResult {
+        recording_storage_is_writeable,
+        recording_storage_total_space,
+        recording_storage_available_space,
+    }
+}
+
+/// Queries total and available disk space for the given path.
+///
+/// On Windows, calls `GetDiskFreeSpaceExW` directly against the configured recording path.
+/// This supports UNC paths (`\\server\share\...`) and mapped drive letters without needing
+/// to enumerate mount points or canonicalize the path.
+///
+/// On other platforms, enumerates disks via `sysinfo` and finds the longest-prefix mount point.
+fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
+    static NO_DISK_STATE: NoDiskState = NoDiskState::new();
+
+    return query_storage_space_impl(recording_path);
+
+    #[cfg(windows)]
+    fn query_storage_space_impl(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
+        use std::os::windows::ffi::OsStrExt as _;
+
+        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+        // Build a null-terminated UTF-16 path.  We use the path as-is (no canonicalization)
+        // so that UNC paths and mapped drive letters are passed straight to the OS.
+        let wide: Vec<u16> = recording_path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0u16))
+            .collect();
+
+        let mut free_bytes_available_to_caller: u64 = 0;
+        let mut total_number_of_bytes: u64 = 0;
+        let mut total_number_of_free_bytes: u64 = 0;
+
+        // SAFETY: `wide` is null-terminated, all output pointers are valid stack locations.
+        let result = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free_bytes_available_to_caller,
+                &mut total_number_of_bytes,
+                &mut total_number_of_free_bytes,
+            )
+        };
+
+        if result != 0 {
+            NO_DISK_STATE.on_disk_present();
+            debug!(
+                recording_path = %recording_path.display(),
+                total_bytes = total_number_of_bytes,
+                free_bytes_available = free_bytes_available_to_caller,
+                "Retrieved disk space via GetDiskFreeSpaceExW"
+            );
+            (Some(total_number_of_bytes), Some(free_bytes_available_to_caller))
+        } else {
+            let error = std::io::Error::last_os_error();
+            NO_DISK_STATE.on_disk_missing(recording_path, &error.to_string());
+            (None, None)
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn query_storage_space_impl(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
+        use sysinfo::Disks;
+
+        if !sysinfo::IS_SUPPORTED_SYSTEM {
+            debug!("This system does not support listing storage disks");
+            return (None, None);
+        }
+
         trace!("System is supporting listing storage disks");
 
         let recording_path = dunce::canonicalize(recording_path)
@@ -194,23 +267,11 @@ pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> Reco
         if let Some(disk) = recording_disk {
             NO_DISK_STATE.on_disk_present();
             debug!(?disk, "Disk used to store recordings");
-
             (Some(disk.total_space()), Some(disk.available_space()))
         } else {
-            NO_DISK_STATE.on_disk_missing(&recording_path);
-
+            NO_DISK_STATE.on_disk_missing(&recording_path, "no matching disk mount point found");
             (None, None)
         }
-    } else {
-        debug!("This system does not support listing storage disks");
-
-        (None, None)
-    };
-
-    RecordingStorageResult {
-        recording_storage_is_writeable,
-        recording_storage_total_space,
-        recording_storage_available_space,
     }
 }
 
@@ -220,19 +281,65 @@ mod tests {
 
     use super::*;
 
+    /// A writable temp directory should report is_writeable = true and return space values on
+    /// supported platforms.
+    #[test]
+    fn writeable_temp_dir_is_healthy() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let result = recording_storage_health(dir.path());
+
+        assert!(result.recording_storage_is_writeable);
+
+        // Space values may be None only on platforms where sysinfo is unsupported;
+        // on Windows and common Unix platforms they should be Some.
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+        {
+            assert!(
+                result.recording_storage_total_space.is_some(),
+                "expected total space to be available on this platform"
+            );
+            assert!(
+                result.recording_storage_available_space.is_some(),
+                "expected available space to be available on this platform"
+            );
+            assert!(
+                result.recording_storage_total_space >= result.recording_storage_available_space,
+                "total space must be >= available space"
+            );
+        }
+    }
+
+    /// A non-existent path should be reported as not writeable.
+    #[test]
+    fn nonexistent_path_is_not_writeable() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let nonexistent = dir.path().join("does_not_exist");
+        let result = recording_storage_health(&nonexistent);
+        assert!(!result.recording_storage_is_writeable);
+    }
+
     #[test]
     fn no_disk_repeated_occurrence_is_debug() {
         let (cov, _guard) = init_cov_mark();
         let state = NoDiskState::new();
 
-        state.on_disk_missing(std::path::Path::new("/recordings"));
+        state.on_disk_missing(
+            std::path::Path::new("/recordings"),
+            "no matching disk mount point found",
+        );
         cov.assert_mark("no_disk_first_occurrence");
 
-        state.on_disk_missing(std::path::Path::new("/recordings"));
+        state.on_disk_missing(
+            std::path::Path::new("/recordings"),
+            "no matching disk mount point found",
+        );
         cov.assert_mark("no_disk_repeated_occurrence");
 
         // Further calls remain at debug.
-        state.on_disk_missing(std::path::Path::new("/recordings"));
+        state.on_disk_missing(
+            std::path::Path::new("/recordings"),
+            "no matching disk mount point found",
+        );
         cov.assert_mark("no_disk_repeated_occurrence");
     }
 
@@ -242,18 +349,27 @@ mod tests {
         let state = NoDiskState::new();
 
         // First failure — WARN.
-        state.on_disk_missing(std::path::Path::new("/recordings"));
+        state.on_disk_missing(
+            std::path::Path::new("/recordings"),
+            "no matching disk mount point found",
+        );
         cov.assert_mark("no_disk_first_occurrence");
 
         // Second failure — DEBUG (repeated).
-        state.on_disk_missing(std::path::Path::new("/recordings"));
+        state.on_disk_missing(
+            std::path::Path::new("/recordings"),
+            "no matching disk mount point found",
+        );
         cov.assert_mark("no_disk_repeated_occurrence");
 
         // Disk comes back.
         state.on_disk_present();
 
         // Condition returns — should WARN again.
-        state.on_disk_missing(std::path::Path::new("/recordings"));
+        state.on_disk_missing(
+            std::path::Path::new("/recordings"),
+            "no matching disk mount point found",
+        );
         cov.assert_mark("no_disk_first_occurrence");
     }
 }
