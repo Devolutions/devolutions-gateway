@@ -247,9 +247,10 @@ fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option
             }
         };
 
-        // SAFETY: `c_path` is a valid null-terminated C string; `stat` is zeroed stack memory
-        // whose layout matches what the OS writes into it.
+        // SAFETY: `stat` is zeroed stack memory whose layout matches what the OS writes into it.
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+
+        // SAFETY: `c_path` is a valid null-terminated C string.
         let ret = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
 
         if ret == 0 {
@@ -299,8 +300,7 @@ mod tests {
 
         assert!(result.recording_storage_is_writeable);
 
-        // Space values are Some on Windows (GetDiskFreeSpaceExW) and all Unix platforms
-        // (statvfs); they may be None on exotic targets that fall back to sysinfo.
+        // Space values are Some on Windows (GetDiskFreeSpaceExW) and all Unix platforms (statvfs).
         #[cfg(any(windows, unix))]
         {
             assert!(
@@ -315,6 +315,13 @@ mod tests {
                 result.recording_storage_total_space >= result.recording_storage_available_space,
                 "total space must be >= available space"
             );
+        }
+
+        // Space values are None on other unsupported platforms.
+        #[cfg(not(any(windows, unix)))]
+        {
+            assert!(result.recording_storage_total_space.is_none());
+            assert!(result.recording_storage_available_space.is_none());
         }
     }
 
