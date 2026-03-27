@@ -312,7 +312,9 @@ mod tests {
     /// A non-existent path should be reported as not writeable.
     #[test]
     fn nonexistent_path_is_not_writeable() {
-        let result = recording_storage_health(std::path::Path::new("/tmp/__devolutions_gateway_no_such_dir_8f3a2b__"));
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let nonexistent = dir.path().join("does_not_exist");
+        let result = recording_storage_health(&nonexistent);
         assert!(!result.recording_storage_is_writeable);
     }
 
