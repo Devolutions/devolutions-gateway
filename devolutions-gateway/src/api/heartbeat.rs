@@ -235,6 +235,10 @@ fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option
     }
 
     #[cfg(unix)]
+    #[allow(
+        clippy::useless_conversion,
+        reason = "statvfs field types differ across Unix platforms: fsblkcnt_t is u64 on Linux but u32 on macOS"
+    )]
     fn query_storage_space_impl(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt as _;
@@ -257,10 +261,6 @@ fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option
             NO_DISK_STATE.on_disk_present();
 
             // f_frsize is the fundamental block size; fall back to f_bsize if zero.
-            // u64::from() is used throughout as a precaution: f_frsize/f_bsize
-            // are c_ulong (u64 on both Linux and macOS); f_blocks/f_bavail are
-            // fsblkcnt_t which is u64 on Linux but u32 on macOS.
-
             let block_size = if stat.f_frsize != 0 {
                 u64::from(stat.f_frsize)
             } else {
