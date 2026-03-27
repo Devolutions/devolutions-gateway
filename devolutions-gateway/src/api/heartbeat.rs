@@ -189,6 +189,7 @@ fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option
     #[cfg(windows)]
     fn query_storage_space_impl(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
         use std::os::windows::ffi::OsStrExt as _;
+
         use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 
         // Build a null-terminated UTF-16 path.  We use the path as-is (no canonicalization)
