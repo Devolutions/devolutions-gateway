@@ -46,10 +46,7 @@ use std::ptr;
 use std::sync::OnceLock;
 
 use windows::Win32::System::ErrorReporting::{WerRegisterExcludedMemoryBlock, WerUnregisterExcludedMemoryBlock};
-use windows::Win32::System::Memory::{
-    VirtualAlloc, VirtualFree, VirtualFree, VirtualFree, VirtualLoc, VirtualLock, VirtualLock, VirtualProtect,
-    VirtualProtect, VirtualUnlock, VirtualUnlock,
-};
+use windows::Win32::System::Memory::{VirtualAlloc, VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock};
 use windows::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 
 use crate::ProtectionStatus;
