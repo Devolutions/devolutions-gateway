@@ -34,42 +34,39 @@ pub struct ProtectionStatus {
     /// Any out-of-bounds access into adjacent memory will fault at the OS level.
     pub guard_pages: bool,
 
-    /// The region is excluded from crash / core dumps.
+    /// The page is registered for exclusion from crash dumps.
     ///
-    /// Platform semantics differ:
-    ///
-    /// - **Linux**: `madvise(MADV_DONTDUMP)` excludes the page from kernel
-    ///   core dumps and most user-space dump tools that respect the VMA flags.
-    /// - **Windows**: `WerRegisterExcludedMemoryBlock` excludes the page from
-    ///   WER-generated crash reports.  Full-memory dumps produced by
-    ///   `MiniDumpWithFullMemory`, ProcDump `-ma`, or kernel tools are **not**
-    ///   affected — no public API reliably excludes a page from those.
+    /// - **Linux**: `madvise(MADV_DONTDUMP)` — excluded from kernel core dumps
+    ///   and user-space tools that respect VMA flags.
+    /// - **Windows**: `WerRegisterExcludedMemoryBlock` — excluded from the mini
+    ///   dump embedded in WER crash reports sent to Microsoft Watson only.
+    ///   Full-memory dumps (`MiniDumpWithFullMemory`, ProcDump `-ma`, kernel live
+    ///   dumps) capture all committed pages regardless. `MiniDumpWriteDump`
+    ///   callbacks (`RemoveMemoryCallback` / `IncludeVmRegionCallback`) can filter
+    ///   regions but only for cooperating dump writers, not externally triggered
+    ///   dumps.
+    /// - **macOS**: always `false`; no equivalent API exists.
     pub dump_excluded: bool,
 
     /// No OS-level hardening is available; using plain heap allocation.
     ///
     /// The secret is still zeroized on drop but none of the other protections
-    /// are active. A warning is logged once at construction time.
+    /// are active. A debug message is logged once at construction time.
     pub fallback_backend: bool,
 }
 
 /// A fixed-size, protected in-memory secret.
 ///
 /// On supported platforms the backing storage is a dedicated page-based
-/// allocation with guard pages, memory locking, and (where available)
-/// exclusion from core dumps. On all platforms the bytes are zeroized
-/// before the backing allocation is released.
+/// allocation with guard pages, memory locking, read-only page protection after
+/// construction, and (where available) exclusion from core dumps. On all
+/// platforms the bytes are zeroized before the backing allocation is released.
 ///
-/// # Safety properties
-///
-/// - Never printed: `Debug` emits `[REDACTED]`; `Display` is absent.
-/// - Not clonable, not copyable.
-/// - One unavoidable stack copy in `new`: the `[u8; N]` argument lives on the
-///   caller's stack until it is zeroized immediately after being transferred
-///   into secure storage.
-/// - `mlock` / `VirtualLock` prevent the secret from being paged to disk but
-///   do **not** prevent transient exposure in CPU registers or on the call stack
-///   while `expose_secret` is in use.
+/// - `Debug` emits `[REDACTED]`; `Display` is absent; not `Clone` or `Copy`.
+/// - One unavoidable stack copy in `new`: the `[u8; N]` argument is zeroized
+///   immediately after being transferred into secure storage.
+/// - `mlock` / `VirtualLock` prevent paging to disk but do not prevent transient
+///   exposure in registers or on the call stack during `expose_secret`.
 pub struct ProtectedBytes<const N: usize> {
     inner: platform::SecureAlloc<N>,
     status: ProtectionStatus,

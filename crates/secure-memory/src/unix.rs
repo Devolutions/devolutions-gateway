@@ -5,22 +5,24 @@
 //! ```text
 //! ┌──────────────┬──────────────┬──────────────┐
 //! │  guard page  │  data page   │  guard page  │
-//! │  PROT_NONE   │ PROT_R|W     │  PROT_NONE   │
+//! │  PROT_NONE   │  PROT_READ   │  PROT_NONE   │
 //! └──────────────┴──────────────┴──────────────┘
 //!  ^base           ^data          ^data + page_size
 //! ```
 //!
-//! The secret occupies the first `N` bytes of the data page.
-//! The rest of the page is unused.
-//! Guard pages are set to `PROT_NONE` so any out-of-bounds access faults immediately at the OS level.
+//! The secret occupies the first `N` bytes of the data page; the rest is unused.
+//! Guard pages are `PROT_NONE` so any out-of-bounds access faults immediately.
+//! The data page is `PROT_READ|WRITE` only during construction (while the secret
+//! is being written). It is demoted to `PROT_READ` before `new` returns.
 //!
 //! ## Hardening steps (best-effort)
 //!
 //! 1. Guard pages via `mprotect(PROT_NONE)`.
 //! 2. RAM lock via `mlock` — may fail under tight `ulimit -l` limits.
 //! 3. Core-dump exclusion via `madvise(MADV_DONTDUMP)` — Linux only.
+//! 4. Data page demoted to `PROT_READ` after the secret is written.
 //!
-//! All three are best-effort: failure is logged and reflected in [`ProtectionStatus`] but does **not** abort the process.
+//! All four are best-effort: failure is logged and reflected in [`ProtectionStatus`] but does **not** abort the process.
 
 use std::ptr;
 use std::sync::OnceLock;
@@ -93,10 +95,15 @@ impl<const N: usize> SecureAlloc<N> {
         let r_guard_after = unsafe { libc::mprotect(guard_after as *mut libc::c_void, ps, libc::PROT_NONE) };
 
         let guard_pages = r_guard_before == 0 && r_guard_after == 0;
-        if !guard_pages {
+        if r_guard_before != 0 {
             tracing::debug!(
-                "secure-memory: mprotect for guard pages failed ({}); \
-                 guard pages are not active",
+                "secure-memory: mprotect for leading guard page failed ({})",
+                std::io::Error::last_os_error()
+            );
+        }
+        if r_guard_after != 0 {
+            tracing::debug!(
+                "secure-memory: mprotect for trailing guard page failed ({})",
                 std::io::Error::last_os_error()
             );
         }
@@ -136,6 +143,19 @@ impl<const N: usize> SecureAlloc<N> {
         //         non-overlapping; both are valid for `N` bytes.
         unsafe { ptr::copy_nonoverlapping(src.as_ptr(), data, N) };
 
+        // ── Demote data page to read-only ────────────────────────────────────
+        // The secret is now in place and never needs to be modified in-place.
+        // Removing write access prevents accidental overwrites.
+        // SAFETY: `data` is page-aligned; `ps` bytes are within the allocation.
+        let r_readonly = unsafe { libc::mprotect(data as *mut libc::c_void, ps, libc::PROT_READ) };
+        if r_readonly != 0 {
+            tracing::debug!(
+                "secure-memory: mprotect(PROT_READ) for data page failed ({}); \
+                 data page remains writable",
+                std::io::Error::last_os_error()
+            );
+        }
+
         let alloc = SecureAlloc {
             base,
             data,
@@ -164,7 +184,7 @@ impl<const N: usize> Drop for SecureAlloc<N> {
         let ps = page_size();
 
         // Restore read+write on the data page so we can zeroize it.
-        // (It should already be RW; this is defensive.)
+        // The page was demoted to PROT_READ in new(); this re-enables writes.
         // SAFETY: `self.data` is page-aligned; `ps` bytes are within our mapping.
         let _ = unsafe { libc::mprotect(self.data as *mut libc::c_void, ps, libc::PROT_READ | libc::PROT_WRITE) };
 

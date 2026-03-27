@@ -13,7 +13,8 @@ It is intentionally **not** a general-purpose secret library.
 
 **Protected against:**
 - Swapping the secret to disk (via `mlock` / `VirtualLock`).
-- The secret appearing in Linux core dumps (via `madvise(MADV_DONTDUMP)`).
+- The secret appearing in Linux core dumps (`madvise(MADV_DONTDUMP)`) and
+  Windows Error Reporting (WER) crash reports (`WerRegisterExcludedMemoryBlock`).
 - Adjacent heap corruption reaching the secret (via guard pages).
 - Accidental logging (redacted `Debug`, no `Display`).
 - Residual bytes after the secret is dropped (zeroize-before-free).
@@ -35,13 +36,17 @@ It is intentionally **not** a general-purpose secret library.
 | Page allocation | `mmap(MAP_ANON)`    | `VirtualAlloc`      | `Box` heap         |
 | Guard pages     | `mprotect(PROT_NONE)` | `VirtualProtect(PAGE_NOACCESS)` | ✗ |
 | RAM lock        | `mlock`             | `VirtualLock`       | ✗                  |
-| Dump exclusion  | `MADV_DONTDUMP`     | ✗ (see note)        | ✗                  |
+| Write protect   | `mprotect(PROT_READ)` | `VirtualProtect(PAGE_READONLY)` | ✗ |
+| Dump exclusion  | `MADV_DONTDUMP`     | `WerRegisterExcludedMemoryBlock` (see note) | ✗ |
 | Zeroize on drop | ✓                   | ✓                   | ✓                  |
 
-**Windows dump exclusion note:** Windows does not expose a per-region public API
-equivalent to `MADV_DONTDUMP`. `VirtualLock` prevents paging, which avoids
-pagefile-based exposure, but crash dumps (WER, procdump, …) will include the
-locked pages. `dump_excluded` is always `false` on Windows.
+**Windows dump exclusion note:** `WerRegisterExcludedMemoryBlock` registers the
+data page for exclusion from WER crash reports sent to Microsoft Watson.
+`dump_excluded = true` means this registration succeeded. It does **not** imply
+universal protection: full-memory dumps (`MiniDumpWithFullMemory`, ProcDump
+`-ma`, LocalDumps `DumpType=2`, kernel dumps) capture all committed read/write
+pages regardless. `MiniDumpWriteDump` callbacks can filter regions but only for
+cooperating dump writers, not externally triggered dumps.
 
 **macOS note:** The Unix backend compiles for macOS (mmap + guard pages + mlock),
 but `MADV_DONTDUMP` is Linux-only, so `dump_excluded` is always `false` on macOS.
@@ -50,8 +55,8 @@ macOS support is not tested in CI.
 ## Fallback behavior
 
 On platforms where neither the Unix nor Windows backend compiles, the crate falls
-back to a plain `Box<[u8; N]>` with `zeroize`-on-drop. A warning is logged
-once at construction time. No feature flag is required; the crate always compiles
+back to a plain `Box<[u8; N]>` with `zeroize`-on-drop. A debug message is
+logged once at construction time. No feature flag is required; the crate always compiles
 and runs.
 
 ## Usage

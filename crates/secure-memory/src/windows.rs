@@ -5,9 +5,13 @@
 //! ```text
 //! ┌──────────────┬──────────────┬──────────────┐
 //! │  guard page  │  data page   │  guard page  │
-//! │ PAGE_NOACCESS│PAGE_READWRITE│ PAGE_NOACCESS│
+//! │ PAGE_NOACCESS│ PAGE_READONLY│ PAGE_NOACCESS│
 //! └──────────────┴──────────────┴──────────────┘
 //!  ^base           ^data          ^data + page_size
+//!
+//! The data page is `PAGE_READWRITE` only during construction (while the
+//! secret is being written). It is immediately demoted to `PAGE_READONLY`
+//! before `new` returns.
 //! ```
 //!
 //! The three pages are a single `VirtualAlloc` region.
@@ -18,28 +22,24 @@
 //! 1. Guard pages via `VirtualProtect(PAGE_NOACCESS)`.
 //! 2. RAM lock via `VirtualLock`.
 //! 3. WER dump exclusion via `WerRegisterExcludedMemoryBlock`.
+//! 4. Data page demoted to `PAGE_READONLY` after the secret is written.
 //!
-//! ## Dump-exclusion on Windows
+//! ## Dump exclusion on Windows
 //!
-//! Windows does not have a single universal per-region dump-exclusion API
-//! equivalent to Linux's `madvise(MADV_DONTDUMP)`.  The protections that exist
-//! are scoped:
+//! `WerRegisterExcludedMemoryBlock` registers the data page for exclusion from
+//! the mini dump embedded in WER crash reports sent to Microsoft Watson. This
+//! is the only public per-region dump-exclusion API on Windows; its scope is
+//! narrower than Linux's `madvise(MADV_DONTDUMP)`.
 //!
-//! - **WER crash reports**: `WerRegisterExcludedMemoryBlock` tells the Windows
-//!   Error Reporting subsystem to omit the registered range from automatically-
-//!   generated crash dumps. This is the mechanism used here.
-//!   `ProtectionStatus::dump_excluded` reflects whether this registration
-//!   succeeded.
+//! Full-memory dumps (`MiniDumpWithFullMemory`, ProcDump `-ma`, LocalDumps with
+//! `DumpType=2`, kernel live dumps) capture all committed read/write pages
+//! unconditionally. `MiniDumpWriteDump` callbacks (`RemoveMemoryCallback` /
+//! `IncludeVmRegionCallback`) can filter regions, but only for dump writers that
+//! explicitly pass a callback; they do not provide a standing process-level
+//! exclusion for externally triggered dumps.
 //!
-//! - **Full-memory / forensic dumps** (`MiniDumpWithFullMemory`, kernel dumps,
-//!   ProcDump `-ma`, …): no public callback API reliably excludes a page from
-//!   these on current Windows versions. Applications that write their own
-//!   dumps using `MiniDumpNormal` (the typical crash-reporter default) will
-//!   not capture non-stack heap pages, but `MiniDumpWithFullMemory` captures
-//!   everything regardless of WER registration or `IncludeVmRegionCallback`.
-//!
-//! `VirtualLock` prevents the secret from being written to the pagefile but
-//! does **not** affect dump capture.
+//! `VirtualLock` prevents the secret from being paged to disk but does not
+//! affect dump capture.
 
 use std::ffi::c_void;
 use std::ptr;
@@ -47,8 +47,8 @@ use std::sync::OnceLock;
 
 use windows::Win32::System::ErrorReporting::{WerRegisterExcludedMemoryBlock, WerUnregisterExcludedMemoryBlock};
 use windows::Win32::System::Memory::{
-    MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualAlloc,
-    VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock,
+    VirtualAlloc, VirtualAlloc, VirtualAlloc, VirtualFree, VirtualFree, VirtualFree, VirtualLoc, VirtualLock,
+    VirtualLock, VirtualProtect, VirtualProtect, VirtualUnlock, VirtualUnlock,
 };
 use windows::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 
@@ -117,10 +117,15 @@ impl<const N: usize> SecureAlloc<N> {
         let r_guard_after = unsafe { VirtualProtect(guard_after as *const c_void, ps, PAGE_NOACCESS, &mut old_prot) };
 
         let guard_pages = r_guard_before.is_ok() && r_guard_after.is_ok();
-        if !guard_pages {
+        if r_guard_before.is_err() {
             tracing::debug!(
-                "secure-memory: VirtualProtect for guard pages failed ({}); \
-                 guard pages are not active",
+                "secure-memory: VirtualProtect for leading guard page failed ({})",
+                std::io::Error::last_os_error()
+            );
+        }
+        if r_guard_after.is_err() {
+            tracing::debug!(
+                "secure-memory: VirtualProtect for trailing guard page failed ({})",
                 std::io::Error::last_os_error()
             );
         }
@@ -137,17 +142,12 @@ impl<const N: usize> SecureAlloc<N> {
             );
         }
 
-        // ── Copy secret into the data page ──────────────────────────────────
-        // SAFETY: `src` (caller stack) and `data` (VirtualAlloc region) are
-        //         non-overlapping; both are valid for `N` bytes.
-        unsafe { ptr::copy_nonoverlapping(src.as_ptr(), data, N) };
-
         // ── Register the data page for WER dump exclusion ────────────────────
-        // `WerRegisterExcludedMemoryBlock` asks the Windows Error Reporting
-        // subsystem to omit this page from automatically-generated crash dumps.
+        // Done before writing the secret so the page is excluded from WER crash
+        // reports from the moment the secret lands on it.
         // Registration covers the full page, not just N bytes, because the
         // allocation model is page-based.
-
+        //
         // SAFETY: `data` is a valid, committed, page-aligned pointer; `ps` is
         //         exactly one page — the size passed to `VirtualAlloc`.
         let wer_hr = unsafe { WerRegisterExcludedMemoryBlock(data.cast::<c_void>(), ps as u32) };
@@ -156,6 +156,24 @@ impl<const N: usize> SecureAlloc<N> {
             tracing::debug!(
                 "secure-memory: WerRegisterExcludedMemoryBlock failed ({wer_hr:?}); \
                  the data page will not be excluded from WER crash reports"
+            );
+        }
+
+        // ── Copy secret into the data page ──────────────────────────────────
+        // SAFETY: `src` (caller stack) and `data` (VirtualAlloc region) are
+        //         non-overlapping; both are valid for `N` bytes.
+        unsafe { ptr::copy_nonoverlapping(src.as_ptr(), data, N) };
+
+        // ── Demote data page to read-only ────────────────────────────────────
+        // The secret is now in place and never needs to be modified in-place.
+        // Removing write access prevents accidental overwrites.
+        // SAFETY: `data` is page-aligned; `ps` committed bytes in our region.
+        let r_readonly = unsafe { VirtualProtect(data as *const c_void, ps, PAGE_READONLY, &mut old_prot) };
+        if r_readonly.is_err() {
+            tracing::debug!(
+                "secure-memory: VirtualProtect(PAGE_READONLY) for data page failed ({}); \
+                 data page remains writable",
+                std::io::Error::last_os_error()
             );
         }
 
@@ -190,6 +208,7 @@ impl<const N: usize> Drop for SecureAlloc<N> {
         let ps = page_size();
 
         // Restore read+write on the data page so we can zeroize it.
+        // The page was demoted to PAGE_READONLY in new(); this re-enables writes.
         let mut old_prot = PAGE_PROTECTION_FLAGS::default();
         // SAFETY: `self.data` is page-aligned; `ps` committed bytes in our region.
         let _ = unsafe { VirtualProtect(self.data as *const c_void, ps, PAGE_READWRITE, &mut old_prot) };

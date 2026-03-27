@@ -1,8 +1,8 @@
 //! Fallback backend: plain heap allocation with zeroize-on-drop.
 //!
 //! Used on platforms where neither the Unix nor the Windows backend is
-//! available. All hardening features are absent; a message is logged once
-//! at construction time.
+//! available. All hardening features are absent; a debug message is logged
+//! once at construction time.
 
 use std::sync::Once;
 

@@ -1,7 +1,7 @@
 # secure-memory-verifier
 
 A Windows-only standalone binary that verifies the runtime behaviour of the
-`secure-memory` crate's four protection tracks independently.
+`secure-memory` crate's protection tracks.
 
 Run it manually on a Windows machine to confirm the OS hardening is active.
 
@@ -12,28 +12,19 @@ Run it manually on a Windows machine to confirm the OS hardening is active.
 | `lock` | RAM locking | `QueryWorkingSetEx` Locked bit |
 | `guard-underflow` | Guard pages (leading) | Child process crashes on access before data |
 | `guard-overflow` | Guard pages (trailing) | Child process crashes on access after data |
-| `wer-dump` | WER dump exclusion | `WerRegisterExcludedMemoryBlock` + crash child + scan dump |
+
+> **Note on WER dump exclusion:** `WerRegisterExcludedMemoryBlock` is called by
+> `ProtectedBytes::new` but is not verified here. It registers the data page for
+> exclusion from WER crash reports sent to Microsoft Watson only. Full-memory
+> dumps (`MiniDumpWithFullMemory`, ProcDump `-ma`, LocalDumps `DumpType=2`,
+> kernel dumps) capture all committed read/write pages regardless. No public
+> Windows API reliably excludes a page from those.
 
 ## Prerequisites
 
 - Windows 10 or later (Windows 11 recommended)
 - Rust toolchain with `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc` target
 - `cargo build -p secure-memory-verifier` or `cargo run -p secure-memory-verifier`
-
-### WER dump-exclusion check prerequisites
-
-The `wer-dump` subcommand requires WER LocalDumps to be configured for the
-verifier executable. This requires administrator rights.
-
-```powershell
-$key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\secure-memory-verifier.exe"
-New-Item $key -Force | Out-Null
-Set-ItemProperty $key DumpType  2              # 2 = full dump
-Set-ItemProperty $key DumpCount 5
-Set-ItemProperty $key DumpFolder $env:TEMP     # or any writable folder
-```
-
-If the key is absent, `wer-dump` prints `[FAIL]` and exits 1.
 
 ## Running locally
 
@@ -45,7 +36,6 @@ cargo build -p secure-memory-verifier
 cargo run -p secure-memory-verifier -- lock
 cargo run -p secure-memory-verifier -- guard-underflow
 cargo run -p secure-memory-verifier -- guard-overflow
-cargo run -p secure-memory-verifier -- wer-dump     # requires LocalDumps pre-config
 
 # All checks
 cargo run -p secure-memory-verifier -- all
@@ -82,19 +72,6 @@ guard-page address. The parent asserts the child exited with exception code
 - Protection is enforced in kernel mode or via DMA.
 - The guard prevents attacks that skip the boundary (e.g. format-string bugs targeting arbitrary addresses).
 
-### `wer-dump` — WER dump exclusion
-
-**Proves:** When the secret's data page is registered with
-`WerRegisterExcludedMemoryBlock` and a crash subsequently occurs, the
-WER-generated full-memory dump does not contain the secret's canary pattern.
-
-**Does not prove:**
-- Third-party dump tools (ProcDump, WinDbg, Task Manager minidump, …) honour
-  `WerRegisterExcludedMemoryBlock`. They typically do not.
-- Every WER dump format or WER version behaves identically.
-- Full-memory dumps produced by `MiniDumpWithFullMemory` or kernel tools are excluded
-  (no public Windows API reliably excludes a page from those).
-
 ## Non-guarantees (applies to all checks)
 
 - **Transient exposure:** The secret briefly exists on the call stack and in CPU
@@ -106,6 +83,8 @@ WER-generated full-memory dump does not contain the secret's canary pattern.
 - **Hibernation / sleep:** `VirtualLock` prevents pagefile writes but does not
   prevent the RAM contents from being written to the hibernation file
   (`hiberfil.sys`).
+- **Full-memory dumps:** `WerRegisterExcludedMemoryBlock` does not exclude the
+  page from `MiniDumpWithFullMemory` or any locally-captured full dump.
 
 ## Common failure modes
 
@@ -114,6 +93,3 @@ WER-generated full-memory dump does not contain the secret's canary pattern.
 | `lock` FAIL — Locked bit not set | Process lacks `SeLockMemoryPrivilege`; increase the working-set limit |
 | `guard-*` FAIL — child exits 0 | `VirtualProtect(PAGE_NOACCESS)` failed; guard pages not established |
 | `guard-*` FAIL — unexpected exit code | Structured exception handler (SEH) in a DLL caught the AV; check for injected DLLs |
-| `wer-dump` FAIL — not configured | WER LocalDumps registry key absent; run the setup PowerShell above |
-| `wer-dump` FAIL — no dump within 30s | WER service not running, or a JIT debugger is intercepting the crash |
-| `wer-dump` FAIL — canary found | `WerRegisterExcludedMemoryBlock` not honoured by WER |
