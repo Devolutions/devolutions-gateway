@@ -117,7 +117,6 @@ impl<const N: usize> fmt::Debug for ProtectedBytes<N> {
 // Intentionally absent: Display, Clone, Copy, Serialize, Deserialize.
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
 
