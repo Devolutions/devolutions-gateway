@@ -47,8 +47,8 @@ use std::sync::OnceLock;
 
 use windows::Win32::System::ErrorReporting::{WerRegisterExcludedMemoryBlock, WerUnregisterExcludedMemoryBlock};
 use windows::Win32::System::Memory::{
-    VirtualAlloc, VirtualAlloc, VirtualAlloc, VirtualFree, VirtualFree, VirtualFree, VirtualLoc, VirtualLock,
-    VirtualLock, VirtualProtect, VirtualProtect, VirtualUnlock, VirtualUnlock,
+    VirtualAlloc, VirtualFree, VirtualFree, VirtualFree, VirtualLoc, VirtualLock, VirtualLock, VirtualProtect,
+    VirtualProtect, VirtualUnlock, VirtualUnlock,
 };
 use windows::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 
