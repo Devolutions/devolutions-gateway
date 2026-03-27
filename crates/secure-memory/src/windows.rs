@@ -150,7 +150,9 @@ impl<const N: usize> SecureAlloc<N> {
         //
         // SAFETY: `data` is a valid, committed, page-aligned pointer; `ps` is
         //         exactly one page — the size passed to `VirtualAlloc`.
-        let wer_hr = unsafe { WerRegisterExcludedMemoryBlock(data.cast::<c_void>(), ps as u32) };
+        let wer_hr = unsafe {
+            WerRegisterExcludedMemoryBlock(data.cast::<c_void>(), u32::try_from(ps).expect("page size fits in u32"))
+        };
         let wer_excluded = wer_hr.is_ok();
         if !wer_excluded {
             tracing::debug!(
