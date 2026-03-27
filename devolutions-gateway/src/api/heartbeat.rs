@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use axum::Json;
 use axum::extract::State;
 use devolutions_agent_shared::get_installed_agent_version;
@@ -36,6 +38,58 @@ pub(crate) struct Heartbeat {
     /// Since v2024.1.6.
     #[serde(skip_serializing_if = "Option::is_none")]
     recording_storage_available_space: Option<u64>,
+}
+
+/// Tracks whether the "no disk found for recording storage" condition has already been emitted at
+/// WARN level for the current fault period.
+///
+/// The first occurrence in a fault period is logged at WARN; subsequent repeated occurrences
+/// are downgraded to DEBUG to avoid log noise on every failure.
+/// When the disk becomes available again, the state resets so that a future recurrence can
+/// surface at WARN once more.
+struct NoDiskState {
+    /// Set to `true` once a WARN has been emitted for the current fault period.
+    /// Reset to `false` when the disk is successfully found (recovery).
+    already_warned: AtomicBool,
+}
+
+impl NoDiskState {
+    const fn new() -> Self {
+        Self {
+            already_warned: AtomicBool::new(false),
+        }
+    }
+
+    /// Called when no matching disk is found for the recording path.
+    ///
+    /// Logs at WARN on the first occurrence in a fault period; subsequent calls log at DEBUG.
+    fn on_disk_missing(&self, recording_path: &std::path::Path) {
+        let already_warned = self
+            .already_warned
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err();
+
+        if !already_warned {
+            warn!(
+                recording_path = %recording_path.display(),
+                "Failed to find disk used for recording storage"
+            );
+            trace!(covmark = "no_disk_first_occurrence");
+        } else {
+            debug!(
+                recording_path = %recording_path.display(),
+                "Failed to find disk used for recording storage"
+            );
+            trace!(covmark = "no_disk_repeated_occurrence");
+        }
+    }
+
+    /// Called when the disk is successfully found.
+    ///
+    /// Resets the warned state so that a future fault surfaces at WARN again.
+    fn on_disk_present(&self) {
+        self.already_warned.store(false, Ordering::Relaxed);
+    }
 }
 
 /// Performs a heartbeat check
@@ -97,6 +151,8 @@ pub(crate) struct RecordingStorageResult {
 pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> RecordingStorageResult {
     use sysinfo::Disks;
 
+    static NO_DISK_STATE: NoDiskState = NoDiskState::new();
+
     let recording_storage_is_writeable = {
         let probe_file = recording_path.join("probe");
 
@@ -136,11 +192,12 @@ pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> Reco
         }
 
         if let Some(disk) = recording_disk {
+            NO_DISK_STATE.on_disk_present();
             debug!(?disk, "Disk used to store recordings");
 
             (Some(disk.total_space()), Some(disk.available_space()))
         } else {
-            warn!("Failed to find disk used for recording storage");
+            NO_DISK_STATE.on_disk_missing(&recording_path);
 
             (None, None)
         }
@@ -154,5 +211,49 @@ pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> Reco
         recording_storage_is_writeable,
         recording_storage_total_space,
         recording_storage_available_space,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing_cov_mark::init_cov_mark;
+
+    use super::*;
+
+    #[test]
+    fn no_disk_repeated_occurrence_is_debug() {
+        let (cov, _guard) = init_cov_mark();
+        let state = NoDiskState::new();
+
+        state.on_disk_missing(std::path::Path::new("/recordings"));
+        cov.assert_mark("no_disk_first_occurrence");
+
+        state.on_disk_missing(std::path::Path::new("/recordings"));
+        cov.assert_mark("no_disk_repeated_occurrence");
+
+        // Further calls remain at debug.
+        state.on_disk_missing(std::path::Path::new("/recordings"));
+        cov.assert_mark("no_disk_repeated_occurrence");
+    }
+
+    #[test]
+    fn no_disk_recovery_re_warns() {
+        let (cov, _guard) = init_cov_mark();
+        let state = NoDiskState::new();
+
+        // First failure — WARN.
+        state.on_disk_missing(std::path::Path::new("/recordings"));
+        cov.assert_mark("no_disk_first_occurrence");
+
+        // Second failure — DEBUG (repeated).
+        state.on_disk_missing(std::path::Path::new("/recordings"));
+        cov.assert_mark("no_disk_repeated_occurrence");
+
+        // Disk comes back.
+        state.on_disk_present();
+
+        // Condition returns — should WARN again.
+        state.on_disk_missing(std::path::Path::new("/recordings"));
+        cov.assert_mark("no_disk_first_occurrence");
     }
 }
