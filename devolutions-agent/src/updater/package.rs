@@ -152,7 +152,8 @@ async fn launch_updater_shim_detached(
         return Err(UpdaterError::AgentUpdateAlreadyInProgress);
     }
 
-    let shim_log_path = shim_path.with_extension("shim.log");
+    // The shim derives its log path from the MSI path (see `devolutions-agent-updater/src/main.rs`).
+    let shim_log_path = format!("{}.shim.log", msi_path);
 
     let mut cmd = tokio::process::Command::new(shim_path.as_str());
     if let Some(code) = downgrade_product_code {

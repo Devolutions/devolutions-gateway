@@ -95,7 +95,6 @@ pub(crate) struct UpdateProductRequest {
 ///
 /// `Other` captures any product name not yet known to this gateway version;
 /// it is forwarded to the agent unchanged so future agents can act on it.
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum UpdateProduct {
     Gateway,
@@ -103,6 +102,29 @@ pub(crate) enum UpdateProduct {
     Agent,
     /// A product name not recognised by this gateway version.
     Other(String),
+}
+
+#[cfg(feature = "openapi")]
+impl<'__s> utoipa::ToSchema<'__s> for UpdateProduct {
+    fn schema() -> (&'__s str, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>) {
+        use utoipa::openapi::schema::{ObjectBuilder, SchemaType};
+        use utoipa::openapi::RefOr;
+        (
+            "UpdateProduct",
+            RefOr::T(
+                ObjectBuilder::new()
+                    .schema_type(SchemaType::String)
+                    .description(Some(
+                        "Product names accepted by the update endpoint.\n\n\
+                         Known values are `Gateway`, `HubService`, and `Agent`. \
+                         Any other product name is also accepted and forwarded to the agent \
+                         unchanged so future product types are supported transparently.",
+                    ))
+                    .build()
+                    .into(),
+            ),
+        )
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for UpdateProduct {
@@ -297,6 +319,13 @@ pub(super) async fn trigger_update_check(
             .insert(UpdateProduct::Gateway, UpdateProductRequest { version });
     }
 
+    // Reject requests that specify no products at all; an empty write would clear any
+    // pending update requests already written into update.json.
+    if request.products.is_empty() {
+        return Err(HttpErrorBuilder::new(StatusCode::BAD_REQUEST)
+            .msg("request must specify at least one product to update"));
+    }
+
     // Read the existing manifest (503 when agent is not installed).
     // `was_v2` tells us if the file on disk was V2; determines which products are accepted.
     let (mut manifest, was_v2) = read_manifest().await?;
@@ -440,7 +469,7 @@ pub(crate) struct SetUpdateScheduleResponse {}
 
 /// Retrieve the current Devolutions Agent auto-update schedule.
 ///
-/// Reads the `Schedule` field from `update.json`.  When the field is absent the response
+/// Reads the `Schedule` field from `agent_status.json`.  When the field is absent the response
 /// contains zeroed defaults (`Enabled: false`, interval `0`, window start `0`, no products).
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,

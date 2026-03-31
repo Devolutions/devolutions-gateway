@@ -678,7 +678,7 @@ async fn check_for_updates(
             }
             // Target MSI found, proceed with update.
 
-            if product == Product::Agent && version <= AGENT_MIN_SELF_UPDATE_VERSION {
+            if product == Product::Agent && version < AGENT_MIN_SELF_UPDATE_VERSION {
                 warn!(
                     %product,
                     %version,

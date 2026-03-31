@@ -682,7 +682,7 @@ paths:
       - Update
       summary: Retrieve the current Devolutions Agent auto-update schedule.
       description: |-
-        Reads the `Schedule` field from `update.json`.  When the field is absent the response
+        Reads the `Schedule` field from `agent_status.json`.  When the field is absent the response
         contains zeroed defaults (`Enabled: false`, interval `0`, window start `0`, no products).
       operationId: GetUpdateSchedule
       responses:
@@ -1661,28 +1661,11 @@ components:
       - tcp
       - udp
     UpdateProduct:
-      oneOf:
-      - type: string
-        enum:
-        - Gateway
-      - type: string
-        enum:
-        - HubService
-      - type: string
-        enum:
-        - Agent
-      - type: object
-        required:
-        - Other
-        properties:
-          Other:
-            type: string
-            description: A product name not recognised by this gateway version.
+      type: string
       description: |-
-        Known product names accepted by the update endpoint.
+        Product names accepted by the update endpoint.
 
-        `Other` captures any product name not yet known to this gateway version;
-        it is forwarded to the agent unchanged so future agents can act on it.
+        Known values are `Gateway`, `HubService`, and `Agent`. Any other product name is also accepted and forwarded to the agent unchanged so future product types are supported transparently.
     UpdateProductRequest:
       type: object
       description: Per-product version request.
@@ -1738,3 +1721,4 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing usage of the standalone web application
+
