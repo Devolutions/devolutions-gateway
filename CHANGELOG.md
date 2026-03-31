@@ -108,7 +108,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _installer_: prevent issues with deferred properties containing semi-colons ([e031fa32b1](https://github.com/Devolutions/devolutions-gateway/commit/e031fa32b1d094ac26556d867a31d1fd901f316a)) ([DGW-359](https://devolutions.atlassian.net/browse/DGW-359))
 
-- _video-streamer_: add codec-aware VP9 keyframe detection ([#1702](https://github.com/Devolutions/devolutions-gateway/issues/1702)) ([737b750425](https://github.com/Devolutions/devolutions-gateway/commit/737b7504253c395dd540cc987eda432de8d35792))
+- _dgw_: add codec-aware VP9 keyframe detection ([#1702](https://github.com/Devolutions/devolutions-gateway/issues/1702)) ([737b750425](https://github.com/Devolutions/devolutions-gateway/commit/737b7504253c395dd540cc987eda432de8d35792))
 
   Add VP9 keyframe detection alongside existing VP8 support, based on
   the VP9 bitstream specification (profiles 0-3). Thread the `VpxCodec`
@@ -116,7 +116,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   the correct codec-specific logic. Set `VpxEncoderPreset::BestPerformance`
   on the re-encoding encoder for improved throughput during session shadowing.
 
-- _video-streamer_: improve unified shutdown correctness ([#1703](https://github.com/Devolutions/devolutions-gateway/issues/1703)) ([9e417f9006](https://github.com/Devolutions/devolutions-gateway/commit/9e417f9006cfb1cd986eb9f4d8baa873adac539c))
+- _dgw_: improve unified shutdown correctness ([#1703](https://github.com/Devolutions/devolutions-gateway/issues/1703)) ([9e417f9006](https://github.com/Devolutions/devolutions-gateway/commit/9e417f9006cfb1cd986eb9f4d8baa873adac539c))
 
   Replace scattered shutdown mechanisms with a single `tokio::sync::watch`
   channel as the source of truth. Handle task now signals `ClientDisconnected`
