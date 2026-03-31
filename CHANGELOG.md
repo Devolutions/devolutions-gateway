@@ -2,6 +2,177 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.1.1 (2026-04-01)
+
+### Features
+
+- _installer_: warn on, instead of hiding, unvalidated certificates ([#1697](https://github.com/Devolutions/devolutions-gateway/issues/1697)) ([40a4247279](https://github.com/Devolutions/devolutions-gateway/commit/40a424727916c0a27fef6fd6bb3bb1f8e2d0c8f0)) ([DGW-356](https://devolutions.atlassian.net/browse/DGW-356))
+
+  When searching for a certificate in the system store we call
+  `X509Certificate2Collection.Find` with the `validOnly` parameter set to
+  `true`.
+
+  > validOnly
+  Boolean
+  true to allow only valid certificates to be returned from the search;
+  otherwise, false.
+
+  The performs basic validation, and only returns valid certificates.
+
+  However, the result is confusing for users as they don't realize that
+  the certificate they are searching for is invalid, they think that the
+  search isn't working.
+
+  Instead, we now return _all_ certificates but if the certificate is
+  determined to be invalid, we flag it in the UI with a warning icon and a
+  text explanation.
+
+- _installer_: add a German localization ([cb63344500](https://github.com/Devolutions/devolutions-gateway/commit/cb63344500ef0deed595c4f77a7229a5d3da52a7)) ([DGW-357](https://devolutions.atlassian.net/browse/DGW-357))
+
+- _jetsocat_: add warning field to doctor diagnostic output ([1f8e7a0441](https://github.com/Devolutions/devolutions-gateway/commit/1f8e7a0441880cdfd18715bc3af4761c0ab0a055))
+
+  Adds support for surfacing warnings in the doctor tool's diagnostic
+  output, allowing external tools to distinguish between complete success,
+  success with warnings, and failure.
+
+  The diagnostic JSON output now includes an optional "warning" field, and
+  the human-readable output displays a warning emoji (⚠️) instead of a
+  success checkmark (✅) when warnings are present.
+
+  This enables better integration with external monitoring and diagnostic
+  tools that need to detect and report warning conditions even when the
+  overall diagnostic succeeds.
+
+- _jetsocat_: add SAN and EKU diagnostics to doctor module ([251795b0f5](https://github.com/Devolutions/devolutions-gateway/commit/251795b0f51c09cdedcfb351e0fb9f3c0d882bde)) ([DGW-350](https://devolutions.atlassian.net/browse/DGW-350))
+
+  Add certificate extension checks mirroring the gateway's TlsVerifyStrict
+  validation. Each TLS backend (rustls, openssl, schannel) now runs two new
+  diagnostics on the end-entity certificate:
+
+  - check_san_extension: verifies the Subject Alternative Name extension is present
+  - check_server_auth_eku: verifies the Extended Key Usage includes serverAuth
+
+- _dgw_: add periodic keyframe forcing for improved seekability ([#1705](https://github.com/Devolutions/devolutions-gateway/issues/1705)) ([9619444aea](https://github.com/Devolutions/devolutions-gateway/commit/9619444aea53cbc9a94c9e712d2fdc581806aef6)) ([DGW-358](https://devolutions.atlassian.net/browse/DGW-358))
+
+- _jetsocat_: detect missing intermediate certificate in doctor ([#1727](https://github.com/Devolutions/devolutions-gateway/issues/1727)) ([ea52ff75ca](https://github.com/Devolutions/devolutions-gateway/commit/ea52ff75ca950e9e8ba8f1e5123a3e05e229dec9)) ([DGW-349](https://devolutions.atlassian.net/browse/DGW-349))
+
+  When a TLS server presents only the leaf certificate (or leaf + root CA
+  but no intermediate), clients fail with an opaque "unknown issuer" error
+  that is hard to diagnose.
+
+  The doctor command now performs a structural analysis of the presented
+  chain before invoking the trust engine:
+
+  - If the chain contains only a leaf and no certificate whose Subject
+  matches the leaf's Issuer, a warning "an intermediate certificate is
+  likely missing" is attached to the read-chain diagnostic.
+  - On chain verification failure (UnknownIssuer /
+  CERT_TRUST_IS_PARTIAL_CHAIN / CERT_TRUST_IS_UNTRUSTED_ROOT), actionable
+  help "intermediate certificate is likely missing" is shown instead of
+  the generic "unknown issuer" message.
+  - Omitting the root CA (the normal server configuration) does not
+  trigger the warning.
+  - Self-signed (root-only) certificates are also not flagged.
+
+- _dgw_: encrypt in-memory credentials at rest with ChaCha20-Poly1305 ([#1689](https://github.com/Devolutions/devolutions-gateway/issues/1689)) ([86775146ed](https://github.com/Devolutions/devolutions-gateway/commit/86775146edd59e0cfae4a017520beb757a6f2b04)) ([DGW-326](https://devolutions.atlassian.net/browse/DGW-326))
+
+  Add ChaCha20-Poly1305 encryption for credentials stored in the
+  credential store. Passwords are encrypted at rest with a randomly generated 256-bit
+  master key held in a protected page.
+
+  The page protection hardening is performed using the best available OS
+  hardening in a best-effort basis:
+
+  - Windows: VirtualLock, guard pages (PAGE_NOACCESS), PAGE_READONLY after
+   write, WerRegisterExcludedMemoryBlock for WER crash report exclusion.
+  - Linux:   mlock, guard pages (PROT_NONE), PROT_READ after write,
+            madvise(MADV_DONTDUMP) for core dump exclusion.
+  - All:     zeroize-before-free on drop; plain heap fallback with
+            zeroize-on-drop on unsupported platforms.
+
+  In concrete terms: this protects users from leaking important secrets in
+  the event of a memory dump captured for debugging purposes.
+
+### Bug Fixes
+
+- _dgw_: fix adaptive frame skipping during EOF waits in session shadowing ([#1678](https://github.com/Devolutions/devolutions-gateway/issues/1678)) ([a1566fd0f9](https://github.com/Devolutions/devolutions-gateway/commit/a1566fd0f94394c992818a0c7ab08a0989ce2f4f)) ([DGW-341](https://devolutions.atlassian.net/browse/DGW-341))
+
+  Fixes video playback freezing permanently during live session shadowing.
+  After brief pauses in the recording stream (e.g., during network hiccups
+  or slow file writes), the shadow player would stop rendering new frames
+  entirely, requiring a session restart.
+
+  With this fix, shadow sessions now recover gracefully from temporary
+  recording pauses, maintaining smooth video playback throughout the
+  session.
+
+- _installer_: prevent issues with deferred properties containing semi-colons ([e031fa32b1](https://github.com/Devolutions/devolutions-gateway/commit/e031fa32b1d094ac26556d867a31d1fd901f316a)) ([DGW-359](https://devolutions.atlassian.net/browse/DGW-359))
+
+- _video-streamer_: add codec-aware VP9 keyframe detection ([#1702](https://github.com/Devolutions/devolutions-gateway/issues/1702)) ([737b750425](https://github.com/Devolutions/devolutions-gateway/commit/737b7504253c395dd540cc987eda432de8d35792))
+
+  Add VP9 keyframe detection alongside existing VP8 support, based on
+  the VP9 bitstream specification (profiles 0-3). Thread the `VpxCodec`
+  type through the iterator and block tag layers so keyframe checks use
+  the correct codec-specific logic. Set `VpxEncoderPreset::BestPerformance`
+  on the re-encoding encoder for improved throughput during session shadowing.
+
+- _video-streamer_: improve unified shutdown correctness ([#1703](https://github.com/Devolutions/devolutions-gateway/issues/1703)) ([9e417f9006](https://github.com/Devolutions/devolutions-gateway/commit/9e417f9006cfb1cd986eb9f4d8baa873adac539c))
+
+  Replace scattered shutdown mechanisms with a single `tokio::sync::watch`
+  channel as the source of truth. Handle task now signals `ClientDisconnected`
+  on client disconnect and uses `select!` on `ws_frame.next()` for shutdown
+  awareness. Bridge task is aborted on `webm_stream` exit to prevent
+  `control_task` from hanging indefinitely.
+
+- _dgw_: update cadeau native library to v2026.3.13.0 ([#1708](https://github.com/Devolutions/devolutions-gateway/issues/1708)) ([836bbedbf8](https://github.com/Devolutions/devolutions-gateway/commit/836bbedbf8e31a308055a5c53430ee1d98ed7fcf)) ([DVLS-14057](https://devolutions.atlassian.net/browse/DVLS-14057)) ([DGW-363](https://devolutions.atlassian.net/browse/DGW-363))
+
+- _dgw_: fix service subcommand parsing ([#1710](https://github.com/Devolutions/devolutions-gateway/issues/1710)) ([aa8805aa87](https://github.com/Devolutions/devolutions-gateway/commit/aa8805aa87f7dee287d21b76ce09f98266cdfcd6)) ([DGW-360](https://devolutions.atlassian.net/browse/DGW-360))
+
+- _dgw_: fix minimum glibc version in deb manifest ([#1716](https://github.com/Devolutions/devolutions-gateway/issues/1716)) ([674818a4d0](https://github.com/Devolutions/devolutions-gateway/commit/674818a4d01c09cb3d77c13d5aca48d253886d73)) ([DGW-361](https://devolutions.atlassian.net/browse/DGW-361))
+
+  We cross-compile against an ubuntu-18.04 sysroot (via cbake), which
+  ships glibc 2.27, not 2.31.
+
+- _dgw_: fix RPM webapp directories installed under wrong names ([#1717](https://github.com/Devolutions/devolutions-gateway/issues/1717)) ([1cbb8b9f59](https://github.com/Devolutions/devolutions-gateway/commit/1cbb8b9f59e2a4ef883de35952d7f3adf3c8b22a)) ([DGW-362](https://devolutions.atlassian.net/browse/DGW-362))
+
+  fpm installs a source directory *by name* inside the destination when
+  given a bare directory path. Specifying explicit target paths ensures
+  webapp/client and webapp/player are consistent with the DEB package.
+
+- _jetsocat_: fix schannel doctor backend ([de4747c937](https://github.com/Devolutions/devolutions-gateway/commit/de4747c937831540a4b61eda56fd7e904e205a8c))
+
+  Set end_entity_info in schannel_read_chain for the leaf certificate, so
+  that cert checks work when loading a chain from a PEM file.
+
+- _dgw_: fix RPM webapp directories installed under wrong names ([#1722](https://github.com/Devolutions/devolutions-gateway/issues/1722)) ([5668b18384](https://github.com/Devolutions/devolutions-gateway/commit/5668b18384a84696db7bca0e574ee41ff5051427)) ([DGW-362](https://devolutions.atlassian.net/browse/DGW-362))
+
+  fpm installs a source directory *by name* inside the destination when
+  given a bare directory path. This is identical to #1717 but targets the
+  currently active code path found in tlk.ps1.
+
+- _dgw_: reduce log noise for missing recording storage disk ([#1728](https://github.com/Devolutions/devolutions-gateway/issues/1728)) ([cceb72b21f](https://github.com/Devolutions/devolutions-gateway/commit/cceb72b21fb9086a93509719bee3f605c9a63333)) ([DGW-353](https://devolutions.atlassian.net/browse/DGW-353))
+
+  When the recording storage disk cannot be found during a heartbeat or
+  preflight check, only the first occurrence is now logged at WARN.
+  Subsequent repeated occurrences are downgraded to DEBUG until the disk
+  becomes available again, at which point the condition can surface at
+  WARN once more. The recording path is included in the log event for
+  context.
+
+- _dgw_: support network drives and UNC paths for recording storage space on Windows ([#1729](https://github.com/Devolutions/devolutions-gateway/issues/1729)) ([f2da923b1e](https://github.com/Devolutions/devolutions-gateway/commit/f2da923b1ef4c4cf627b1f562d924f7d9a254218)) ([DGW-354](https://devolutions.atlassian.net/browse/DGW-354))
+
+- _dgw_: use statvfs for recording storage space on Unix ([#1730](https://github.com/Devolutions/devolutions-gateway/issues/1730)) ([b5de812542](https://github.com/Devolutions/devolutions-gateway/commit/b5de812542a8ccc4c5d000fe886edf15f9e12664)) ([DGW-355](https://devolutions.atlassian.net/browse/DGW-355))
+
+  Replaces the sysinfo disk-enumeration approach on Linux/macOS with a
+  direct statvfs(2) call against the configured recording path. This fixes
+  incorrect or missing space values for network filesystems (NFS,
+  CIFS/Samba) and any mount point the previous heuristic could not
+  resolve.
+
+### Build
+
+- _jetsocat_: enable detect-proxy for Windows jetsocat builds ([#1721](https://github.com/Devolutions/devolutions-gateway/issues/1721)) ([d51d0c4cec](https://github.com/Devolutions/devolutions-gateway/commit/d51d0c4cecafc90bef91763a00c094e59d2f3d5a))
+
 ## 2026.1.0 (2026-02-23)
 
 ### Features

@@ -1,5 +1,10 @@
 # Packaging changelog
 
+## 2026.1.1 (2026-04-01)
+
+- Fixes the minimum glibc version declared in the Debian package manifest (was 2.31, now correctly 2.27), allowing installation on older distributions such as Ubuntu 18.04.
+- Fixes RPM package installing web application directories under incorrect names, making the web interface accessible after installation on RPM-based distributions.
+
 ## 2026.1.0 (2026-02-22)
 
 - No changes.
