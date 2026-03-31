@@ -4,7 +4,7 @@ use axum::Json;
 use axum::body::Bytes;
 use devolutions_agent_shared::{
     ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION, UpdateManifest, UpdateManifestV2, UpdateProductKey,
-    UpdateSchedule, UpdateStatus, VersionSpecification, default_schedule_window_start, get_agent_status_file_path,
+    UpdateSchedule, UpdateStatus, VersionSpecification, default_schedule_window_start, get_update_status_file_path,
     get_updater_file_path,
 };
 use hyper::StatusCode;
@@ -311,7 +311,7 @@ pub(super) async fn trigger_update_check(
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct GetUpdateProductsResponse {
-    /// Version of the `agent_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
+    /// Version of the `update_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
     pub manifest_version: String,
     /// Map of product name to its currently installed version.
     #[serde(default)]
@@ -320,7 +320,7 @@ pub(crate) struct GetUpdateProductsResponse {
 
 /// Retrieve the currently installed version of each Devolutions product.
 ///
-/// Reads `agent_status.json`, which is written by the Devolutions Agent on startup and
+/// Reads `update_status.json`, which is written by the Devolutions Agent on startup and
 /// refreshed after every update run.  When the file does not exist (agent not installed
 /// or is an older version), returns an empty product map.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -338,7 +338,7 @@ pub(crate) struct GetUpdateProductsResponse {
     security(("scope_token" = ["gateway.update.read"])),
 ))]
 pub(super) async fn get_update_products(_scope: UpdateReadScope) -> Result<Json<GetUpdateProductsResponse>, HttpError> {
-    let path = get_agent_status_file_path();
+    let path = get_update_status_file_path();
     let data = match fs::read(&path).await {
         Ok(d) => d,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -373,7 +373,7 @@ pub(super) async fn get_update_products(_scope: UpdateReadScope) -> Result<Json<
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub(crate) struct GetUpdateScheduleResponse {
-    /// Version of the `agent_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
+    /// Version of the `update_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
     #[serde(rename = "ManifestVersion")]
     pub manifest_version: String,
     /// Enable periodic Devolutions Agent self-update checks.
@@ -457,7 +457,7 @@ pub(crate) struct SetUpdateScheduleResponse {}
     security(("scope_token" = ["gateway.update.read"])),
 ))]
 pub(super) async fn get_update_schedule(_scope: UpdateReadScope) -> Result<Json<GetUpdateScheduleResponse>, HttpError> {
-    let path = get_agent_status_file_path();
+    let path = get_update_status_file_path();
     let data = match fs::read(&path).await {
         Ok(d) => d,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

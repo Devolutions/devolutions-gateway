@@ -26,7 +26,7 @@ use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_agent_shared::{
     DateVersion, ProductUpdateInfo, UpdateManifest, UpdateManifestV2, UpdateProductKey, UpdateSchedule, UpdateStatus,
-    UpdateStatusV2, VersionSpecification, get_agent_status_file_path, get_updater_file_path,
+    UpdateStatusV2, VersionSpecification, get_update_status_file_path, get_updater_file_path,
 };
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use notify_debouncer_mini::notify::RecursiveMode;
@@ -193,9 +193,9 @@ impl Task for UpdaterTask {
         // Initialized from agent.json; updates from update.json take precedence.
         let mut current_schedule: Option<UpdateSchedule> = initial_schedule.map(UpdateSchedule::from);
 
-        // Write agent_status.json with the current schedule and installed product versions.
+        // Write update_status.json with the current schedule and installed product versions.
         // The gateway reads this file for GET /jet/update/schedule.
-        init_agent_status_json(current_schedule.as_ref()).await?;
+        init_update_status_json(current_schedule.as_ref()).await?;
 
         let file_change_notification = Arc::new(tokio::sync::Notify::new());
         let file_change_tx = Arc::clone(&file_change_notification);
@@ -295,7 +295,7 @@ impl Task for UpdaterTask {
                         info!("Agent scheduled auto-update: no products configured, skipping");
                     } else if run_product_updates(&scheduled_products, &conf, shutdown_signal.clone()).await {
                         // Update status needs updating.
-                        update_agent_status_json(current_schedule.as_ref()).await;
+                        refresh_update_status_json(current_schedule.as_ref()).await;
                     }
                 }
                 _ = file_change_notification.notified() => {
@@ -341,7 +341,7 @@ impl Task for UpdaterTask {
 
                     // Refresh status after we applied all changes from the manifest.
                     if status_needs_update {
-                        update_agent_status_json(current_schedule.as_ref()).await;
+                        refresh_update_status_json(current_schedule.as_ref()).await;
                     }
                 }
                 _ = shutdown_signal.wait() => {
@@ -360,7 +360,7 @@ impl Task for UpdaterTask {
 /// sorts them so the Agent update runs last (its MSI stops the agent service, which would
 /// abort any subsequent product update), then installs each one.
 ///
-/// Returns `true` when `agent_status.json` should be refreshed after this call.
+/// Returns `true` when `update_status.json` should be refreshed after this call.
 async fn run_product_updates(
     products_map: &HashMap<UpdateProductKey, ProductUpdateInfo>,
     conf: &ConfHandle,
@@ -729,21 +729,21 @@ fn collect_installed_products() -> HashMap<UpdateProductKey, ProductUpdateInfo> 
                 );
             }
             Ok(None) => {
-                trace!(%product, "Product not installed, omitting from agent_status.json");
+                trace!(%product, "Product not installed, omitting from update_status.json");
             }
             Err(error) => {
-                warn!(%product, %error, "Failed to detect installed product version for agent_status.json");
+                warn!(%product, %error, "Failed to detect installed product version for update_status.json");
             }
         }
     }
     products
 }
 
-/// Create `agent_status.json` at startup, populate it with the current schedule and
+/// Create `update_status.json` at startup, populate it with the current schedule and
 /// installed product versions, and apply the DACL that restricts the Gateway service
 /// to read-only access.
-async fn init_agent_status_json(schedule: Option<&UpdateSchedule>) -> anyhow::Result<()> {
-    let status_file_path = get_agent_status_file_path();
+async fn init_update_status_json(schedule: Option<&UpdateSchedule>) -> anyhow::Result<()> {
+    let status_file_path = get_update_status_file_path();
 
     let status = UpdateStatus::StatusV2(UpdateStatusV2 {
         schedule: schedule.cloned(),
@@ -751,38 +751,38 @@ async fn init_agent_status_json(schedule: Option<&UpdateSchedule>) -> anyhow::Re
         ..UpdateStatusV2::default()
     });
 
-    let json = serde_json::to_string_pretty(&status).context("failed to serialize agent_status.json")?;
+    let json = serde_json::to_string_pretty(&status).context("failed to serialize update_status.json")?;
     fs::write(&status_file_path, json)
         .await
-        .context("failed to write agent_status.json")?;
+        .context("failed to write update_status.json")?;
 
-    match set_file_dacl(&status_file_path, security::AGENT_STATUS_JSON_DACL) {
+    match set_file_dacl(&status_file_path, security::UPDATE_STATUS_JSON_DACL) {
         Ok(_) => {
-            info!("Created `agent_status.json` and set permissions successfully");
+            info!("Created `update_status.json` and set permissions successfully");
         }
         Err(err) => {
             std::fs::remove_file(status_file_path.as_std_path()).unwrap_or_else(
-                |error| warn!(%error, "Failed to remove agent_status.json after failed permissions set"),
+                |error| warn!(%error, "Failed to remove update_status.json after failed permissions set"),
             );
-            return Err(anyhow!(err).context("failed to set agent_status.json file permissions"));
+            return Err(anyhow!(err).context("failed to set update_status.json file permissions"));
         }
     }
 
     Ok(())
 }
 
-/// Refresh `agent_status.json` with the latest schedule and re-detected installed
+/// Refresh `update_status.json` with the latest schedule and re-detected installed
 /// product versions.
 ///
 /// Called after each updater run (even when some product updates fail — the file is
 /// always updated to reflect the current on-disk state) and after a schedule change.
 ///
-/// Note: if the agent itself is being updated, `agent_status.json` will be automatically
+/// Note: if the agent itself is being updated, `update_status.json` will be automatically
 /// refreshed when the agent restarts after the update completes.
 ///
 /// Errors are logged but treated as non-fatal so a failed write never aborts the updater.
-async fn update_agent_status_json(schedule: Option<&UpdateSchedule>) {
-    let status_file_path = get_agent_status_file_path();
+async fn refresh_update_status_json(schedule: Option<&UpdateSchedule>) {
+    let status_file_path = get_update_status_file_path();
 
     let status = UpdateStatus::StatusV2(UpdateStatusV2 {
         schedule: schedule.cloned(),
@@ -793,11 +793,11 @@ async fn update_agent_status_json(schedule: Option<&UpdateSchedule>) {
     match serde_json::to_string_pretty(&status) {
         Ok(json) => {
             if let Err(error) = fs::write(&status_file_path, json).await {
-                error!(%error, "Failed to write agent_status.json");
+                error!(%error, "Failed to write update_status.json");
             }
         }
         Err(error) => {
-            error!(%error, "Failed to serialize agent_status.json");
+            error!(%error, "Failed to serialize update_status.json");
         }
     }
 }

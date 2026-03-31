@@ -82,7 +82,7 @@ pub fn get_updater_file_path() -> Utf8PathBuf {
     get_data_dir().join("update.json")
 }
 
-/// Returns the path to the `agent_status.json` file.
-pub fn get_agent_status_file_path() -> Utf8PathBuf {
-    get_data_dir().join("agent_status.json")
+/// Returns the path to the `update_status.json` file.
+pub fn get_update_status_file_path() -> Utf8PathBuf {
+    get_data_dir().join("update_status.json")
 }

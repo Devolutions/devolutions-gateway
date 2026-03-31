@@ -600,7 +600,7 @@ paths:
       - Update
       summary: Retrieve the currently installed version of each Devolutions product.
       description: |-
-        Reads `agent_status.json`, which is written by the Devolutions Agent on startup and
+        Reads `update_status.json`, which is written by the Devolutions Agent on startup and
         refreshed after every update run.  When the file does not exist (agent not installed
         or is an older version), returns an empty product map.
       operationId: GetUpdateProducts
@@ -1004,7 +1004,7 @@ components:
       properties:
         ManifestVersion:
           type: string
-          description: Version of the `agent_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
+          description: Version of the `update_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
         Products:
           type: object
           description: Map of product name to its currently installed version.
@@ -1032,7 +1032,7 @@ components:
           minimum: 0
         ManifestVersion:
           type: string
-          description: Version of the `agent_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
+          description: Version of the `update_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
         Products:
           type: array
           items:
@@ -1738,4 +1738,3 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing usage of the standalone web application
-

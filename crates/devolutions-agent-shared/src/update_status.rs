@@ -20,7 +20,7 @@ use crate::{ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION, UpdateProductKe
 /// }
 /// ```
 ///
-/// Agent runtime status written to `agent_status.json` on agent start and refreshed
+/// Agent runtime status written to `update_status.json` on agent start and refreshed
 /// after each updater run or auto-update schedule change.
 ///
 /// The gateway reads this file for `GET /jet/update` and `GET /jet/update/schedule` so
@@ -31,7 +31,7 @@ use crate::{ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION, UpdateProductKe
 /// the Gateway service: its DACL grants NETWORK SERVICE read access but **no write
 /// access**.  The agent is the sole writer.
 ///
-/// Note: if the agent itself is being updated, `agent_status.json` will be
+/// Note: if the agent itself is being updated, `update_status.json` will be
 /// automatically refreshed when the agent restarts after the update completes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -77,7 +77,7 @@ pub enum UpdateStatus {
 }
 
 impl UpdateStatus {
-    /// Parse `agent_status.json` bytes.
+    /// Parse `update_status.json` bytes.
     ///
     /// Strips a UTF-8 BOM if present before parsing.
     pub fn parse(data: &[u8]) -> serde_json::Result<Self> {
