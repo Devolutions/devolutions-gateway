@@ -133,7 +133,17 @@ foreach ($ticket in $plan.tickets) {
 # 5. Clean up plan file and output results
 # ---------------------------------------------------------------------------
 
-Remove-Item $PlanFile
+if ($errors.Count -eq 0) {
+    try {
+        Remove-Item -LiteralPath $PlanFile -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Failed to delete plan file '$PlanFile': $_"
+    }
+}
+else {
+    Write-Warning "Plan file '$PlanFile' kept for debugging because there were $($errors.Count) error(s)."
+}
 
 $result = @{
     created = $created.ToArray()
