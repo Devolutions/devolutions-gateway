@@ -58,7 +58,7 @@ $SecureToken = ConvertTo-SecureString $JiraToken -AsPlainText -Force
 $Credential  = [System.Management.Automation.PSCredential]::new($JiraEmail, $SecureToken)
 New-JiraSession -Credential $Credential | Out-Null
 
-Write-Host "Connected to $JiraUrl as $JiraEmail"
+Write-Verbose "Connected to $JiraUrl as $JiraEmail"
 
 # ---------------------------------------------------------------------------
 # 3. DGW workflow transition chain
