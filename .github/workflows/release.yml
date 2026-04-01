@@ -517,7 +517,7 @@ jobs:
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Devolutions/actions
           ref: v1
@@ -588,7 +588,7 @@ jobs:
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Devolutions/actions
           ref: v1
@@ -714,7 +714,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Remove labels
         run: ./ci/remove-labels.ps1 -Label 'release-required'
@@ -731,7 +731,7 @@ jobs:
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Devolutions/actions
           ref: v1

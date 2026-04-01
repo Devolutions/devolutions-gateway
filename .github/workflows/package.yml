@@ -102,19 +102,19 @@ jobs:
           CI_RUN: ${{ steps.get-run.outputs.run }}
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.get-commit.outputs.commit }}
 
       - name: Upload version artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: version
           path: VERSION
           overwrite: true
 
       - name: Upload docker file artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker
           path: |
@@ -123,7 +123,7 @@ jobs:
             package/AgentLinux/Dockerfile
 
       - name: Upload changelog artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: changelog
           path: CHANGELOG.md
@@ -170,7 +170,7 @@ jobs:
         shell: pwsh
 
       - name: Upload native libs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-libs
           path: native-libs/
@@ -199,7 +199,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
@@ -396,7 +396,7 @@ jobs:
 
       - name: Download native-libs
         if: ${{ matrix.project == 'devolutions-gateway' && matrix.os == 'windows' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: native-libs
           path: native-libs
@@ -604,7 +604,7 @@ jobs:
         shell: pwsh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.project }}-${{ matrix.os }}-signed
           path: ${{ runner.temp }}/${{ matrix.project }}
@@ -666,7 +666,7 @@ jobs:
         run: tar -czvf devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz webapp-client
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webapp-client
           path: devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz
@@ -680,12 +680,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: jetsocat-signed
           path: jetsocat/nuget/bin
@@ -731,7 +731,7 @@ jobs:
         working-directory: jetsocat/nuget
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jetsocat-nuget
           path: jetsocat/nuget/*.nupkg
@@ -744,12 +744,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Devolutions/actions
           ref: v1
@@ -765,7 +765,7 @@ jobs:
         uses: ./.github/workflows/cdxgen
 
       - name: Save SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: bom.json
