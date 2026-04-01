@@ -1,4 +1,4 @@
-#!/bin/env pwsh
+#!/usr/bin/env pwsh
 # resolve-version.ps1
 # Resolves the next release version given an argument and the current VERSION file.
 #

@@ -110,16 +110,22 @@ foreach ($ticket in $plan.tickets) {
         }
 
         # --- Walk through transition chain to Done ---
+        $allTransitionsSucceeded = $true
         foreach ($transId in $TransitionChain) {
             try {
                 Invoke-JiraIssueTransition -Issue $issue.Key -Transition $transId
             } catch {
                 Write-Warning "  Transition $transId failed for $($issue.Key): $_"
                 Write-Warning "  Remaining transitions skipped — ticket may need manual progression."
+                $allTransitionsSucceeded = $false
                 break
             }
         }
-        Write-Host "  Transitioned $($issue.Key) to Done"
+        if ($allTransitionsSucceeded) {
+            Write-Host "  Transitioned $($issue.Key) to Done"
+        } else {
+            Write-Host "  Did not fully transition $($issue.Key) to Done"
+        }
 
         $created.Add(@{ id = $ticket.id; key = $issue.Key })
     }
