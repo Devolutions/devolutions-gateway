@@ -31,7 +31,7 @@ pwsh <skill-dir>/scripts/resolve-version.ps1 -Arg "<ARGUMENT>"
 The script prints the resolved version to stdout and exits with:
 - **0** — version resolved successfully; use the printed string.
 - **1** — error (malformed VERSION file or bad argument); report and stop.
-- **2** — no argument was provided; the script prints the *current* version. In this case ask the user: "What version are we releasing? Current is `<printed version>`. You can type an explicit version (e.g. `2026.2.0`), or `minor` / `major`." Then re-run the script with their answer.
+- **2** — no argument was provided; the script prints the *current* version. In this case ask the user: "What version are we releasing? Current is `<printed version>`. You can type an explicit version (e.g. `2026.2.0`), or `hotfix` / `cycle`." Then re-run the script with their answer.
 
 Show the resolved version to the user and wait for confirmation before proceeding.
 
