@@ -77,8 +77,25 @@ if ($Arg -eq "cycle") {
     exit 0
 }
 
-# Explicit version string — validate format then pass through
+# Explicit version string — parse components and validate consistently
 if ($Arg -match '^\d{4}\.\d+\.\d+$') {
+    $explicitParts = $Arg -split '\.'
+    $year    = 0
+    $release = 0
+    $patch   = 0
+
+    if (-not [int]::TryParse($explicitParts[0], [ref]$year) -or
+        -not [int]::TryParse($explicitParts[1], [ref]$release) -or
+        -not [int]::TryParse($explicitParts[2], [ref]$patch)) {
+        Write-Error "Explicit version '$Arg' must contain numeric year, release, and patch components."
+        exit 1
+    }
+
+    if ($release -lt 1 -or $release -gt 3) {
+        Write-Error "Release component '$release' in explicit version argument is out of range [1,3]: '$Arg'"
+        exit 1
+    }
+
     Write-Output $Arg
     exit 0
 }

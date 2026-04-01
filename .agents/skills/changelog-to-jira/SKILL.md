@@ -9,6 +9,8 @@ compatibility:
     - mcp__claude_ai_Atlassian__lookupJiraAccountId
     - mcp__claude_ai_Atlassian__getJiraIssue
     - mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql
+    - mcp__claude_ai_Atlassian__getIssueLinkTypes
+    - mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata
 ---
 
 # Changelog to Jira Skill

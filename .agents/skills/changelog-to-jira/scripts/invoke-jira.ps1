@@ -3,7 +3,7 @@
 #
 # Creates Jira tickets from a JSON plan, links cross-project tickets, and
 # walks each ticket through the DGW workflow to Done.
-# Deletes the plan file on completion.
+# On full success, deletes the plan file; on any error, keeps it for debugging.
 #
 # Usage:
 #   pwsh invoke-jira.ps1 -PlanFile jira-plan.json
