@@ -47,30 +47,7 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct McpShutdownSignal(Arc<tokio::sync::Notify>);
-
-impl Default for McpShutdownSignal {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl McpShutdownSignal {
-    pub fn new() -> Self {
-        Self(Arc::new(tokio::sync::Notify::new()))
-    }
-
-    pub fn shutdown(&self) {
-        self.0.notify_one();
-    }
-}
-
-impl Drop for McpShutdownSignal {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
+pub use tokio_util::sync::CancellationToken;
 
 /// A MCP server for testing purposes that implements
 /// the Model Context Protocol 2025-06-18 specification.
@@ -181,24 +158,24 @@ impl McpServer {
         self
     }
 
-    /// Start the server and return a handle for control
-    pub fn start(self) -> anyhow::Result<McpShutdownSignal> {
-        let shutdown_signal = McpShutdownSignal::new();
+    /// Start the server and return a handle for control.
+    pub fn start(self) -> anyhow::Result<CancellationToken> {
+        let token = CancellationToken::new();
 
         tokio::spawn({
-            let shutdown_signal = shutdown_signal.clone();
+            let token = token.clone();
             async move {
                 eprintln!("[MCP-SERVER] spawn task after.");
-                if let Err(e) = self.run(shutdown_signal).await {
+                if let Err(e) = self.run(token).await {
                     eprintln!("[MCP-SERVER] Error running the MCP server: {e:#}");
                 }
             }
         });
 
-        Ok(shutdown_signal)
+        Ok(token)
     }
 
-    pub async fn run(mut self, shutdown_signal: McpShutdownSignal) -> anyhow::Result<()> {
+    pub async fn run(mut self, token: CancellationToken) -> anyhow::Result<()> {
         eprintln!("[MCP-SERVER] Running.");
 
         loop {
@@ -208,16 +185,16 @@ impl McpServer {
                     let peer = peer.context("accept peer")?;
 
                     tokio::spawn({
-                        let shutdown_signal = shutdown_signal.clone();
+                        let token = token.clone();
                         let config = Arc::clone(&self.config);
                         async move {
-                            if let Err(e) = handle_peer(peer, shutdown_signal, &config).await {
+                            if let Err(e) = handle_peer(peer, token, &config).await {
                                 eprintln!("[MCP-SERVER] Error handling connection: {e:#}");
                             }
                         }
                     });
                 }
-                _ = shutdown_signal.0.notified() => {
+                () = token.cancelled() => {
                     return Ok(());
                 }
             }
@@ -227,7 +204,7 @@ impl McpServer {
 
 async fn handle_peer(
     mut peer: Box<DynMcpPeer<'static>>,
-    shutdown_signal: McpShutdownSignal,
+    token: CancellationToken,
     config: &ServerConfig,
 ) -> anyhow::Result<()> {
     loop {
@@ -242,7 +219,7 @@ async fn handle_peer(
                     peer.no_response().await.context("notify no response")?;
                 }
             }
-            _ = shutdown_signal.0.notified() => {
+            () = token.cancelled() => {
                 return Ok(());
             }
         }
