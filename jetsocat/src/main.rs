@@ -445,7 +445,7 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
-        .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stdout instead of log file"))
+        .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stderr instead of log file"))
         .flag(
             Flag::new("color", FlagType::String)
                 .description("When to enable colored output for logs (possible values: `always`, `never` and `auto`)"),
@@ -996,7 +996,7 @@ fn setup_logger(logging: &Logging, coloring: Coloring) -> LoggerGuard {
                 Coloring::Auto => true,
             };
 
-            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout()); // FIXME: Should be to stderr.
+            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stderr());
             let stdio_layer = fmt::layer().with_writer(non_blocking_stdio).with_ansi(ansi);
 
             (stdio_layer, guard)
