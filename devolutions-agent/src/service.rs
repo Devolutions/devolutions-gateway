@@ -7,6 +7,7 @@ use devolutions_agent::log::AgentLog;
 use devolutions_agent::remote_desktop::RemoteDesktopTask;
 #[cfg(windows)]
 use devolutions_agent::session_manager::SessionManager;
+use devolutions_agent::tunnel::TunnelTask;
 #[cfg(windows)]
 use devolutions_agent::updater::UpdaterTask;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
@@ -227,7 +228,11 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
     let service_event_tx = None;
 
     if conf.debug.enable_unstable && conf.remote_desktop.enabled {
-        tasks.register(RemoteDesktopTask::new(conf_handle));
+        tasks.register(RemoteDesktopTask::new(conf_handle.clone()));
+    }
+
+    if conf.tunnel.enabled {
+        tasks.register(TunnelTask::new(conf_handle));
     }
 
     Ok(TasksCtx {

@@ -6,6 +6,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tracing::field;
 use typed_builder::TypedBuilder;
 
+use crate::agent_tunnel::AgentTunnelHandle;
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
 use crate::proxy::Proxy;
@@ -27,6 +28,8 @@ pub struct GenericClient<S> {
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     credential_store: CredentialStoreHandle,
+    #[builder(default)]
+    agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
 
 impl<S> GenericClient<S>
@@ -49,6 +52,7 @@ where
             subscriber_tx,
             active_recordings,
             credential_store,
+            agent_tunnel_handle,
         } = self;
 
         let span = tracing::Span::current();
@@ -107,6 +111,76 @@ where
                 match claims.jet_rec {
                     RecordingPolicy::None | RecordingPolicy::Stream => (),
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
+                }
+
+                // Route via agent tunnel if jet_agent_id is specified.
+                if let Some(agent_id) = claims.jet_agent_id {
+                    let handle = agent_tunnel_handle.context("agent tunnel not configured on this gateway")?;
+
+                    let mut selected_target = None;
+                    let mut server_stream = None;
+                    let mut last_error = None;
+
+                    for candidate in targets.iter() {
+                        let target_str = format!("{}:{}", candidate.host(), candidate.port());
+
+                        info!(%agent_id, %target_str, "Routing via agent tunnel");
+
+                        match handle.connect_via_agent(agent_id, claims.jet_aid, &target_str).await {
+                            Ok(stream) => {
+                                selected_target = Some(candidate.clone());
+                                server_stream = Some(stream);
+                                break;
+                            }
+                            Err(error) => {
+                                warn!(
+                                    %agent_id,
+                                    %target_str,
+                                    error = format!("{error:#}"),
+                                    "Agent tunnel target failed"
+                                );
+                                last_error = Some(error);
+                            }
+                        }
+                    }
+
+                    let selected_target = selected_target.ok_or_else(|| {
+                        last_error.unwrap_or_else(|| anyhow::anyhow!("agent tunnel target selection failed"))
+                    })?;
+                    span.record("target", selected_target.to_string());
+                    let server_stream = server_stream.expect("server stream should be present when target is selected");
+
+                    let info = SessionInfo::builder()
+                        .id(claims.jet_aid)
+                        .application_protocol(claims.jet_ap)
+                        .details(ConnectionModeDetails::Fwd {
+                            destination_host: selected_target.clone(),
+                        })
+                        .time_to_live(claims.jet_ttl)
+                        .recording_policy(claims.jet_rec)
+                        .filtering_policy(claims.jet_flt)
+                        .build();
+
+                    let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
+
+                    // Agent handles the TCP connection; no leftover bytes to forward.
+                    // Use a placeholder server address since the actual target is behind the agent.
+                    let server_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
+
+                    return Proxy::builder()
+                        .conf(conf)
+                        .session_info(info)
+                        .address_a(client_addr)
+                        .transport_a(client_stream)
+                        .address_b(server_addr)
+                        .transport_b(server_stream)
+                        .sessions(sessions)
+                        .subscriber_tx(subscriber_tx)
+                        .disconnect_interest(disconnect_interest)
+                        .build()
+                        .select_dissector_and_forward()
+                        .await
+                        .context("encountered a failure during agent tunnel traffic proxying");
                 }
 
                 trace!("Select and connect to target");

@@ -193,6 +193,7 @@ pub struct Conf {
     pub verbosity_profile: dto::VerbosityProfile,
     pub web_app: WebAppConf,
     pub ai_gateway: AiGatewayConf,
+    pub agent_tunnel: dto::AgentTunnelConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -925,6 +926,7 @@ impl Conf {
                 .as_ref()
                 .map(AiGatewayConf::from_dto)
                 .unwrap_or_default(),
+            agent_tunnel: conf_file.agent_tunnel.clone().unwrap_or_default(),
             proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
@@ -1725,6 +1727,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
 
+        /// (Unstable) Agent tunnel configuration (QUIC-based agent tunnel)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub agent_tunnel: Option<AgentTunnelConf>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
@@ -1780,6 +1786,7 @@ pub mod dto {
                 ai_gateway: None,
                 job_queue_database: None,
                 traffic_audit_database: None,
+                agent_tunnel: None,
                 proxy: None,
                 debug: None,
                 rest: serde_json::Map::new(),
@@ -1912,6 +1919,38 @@ pub mod dto {
         pub kerberos_server: KerberosServer,
         /// Real KDC address for the Kerberos proxy client.
         pub kdc_url: Option<Url>,
+    }
+
+    /// (Unstable) QUIC-based agent tunnel configuration
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct AgentTunnelConf {
+        /// Whether the agent tunnel listener is enabled
+        #[serde(default)]
+        pub enabled: bool,
+        /// UDP port for the QUIC listener (default: 4433)
+        #[serde(default = "AgentTunnelConf::default_listen_port")]
+        pub listen_port: u16,
+        /// Shared secret for agent enrollment.
+        /// If set, agents can enroll by providing this secret as a Bearer token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub enrollment_secret: Option<String>,
+    }
+
+    impl AgentTunnelConf {
+        fn default_listen_port() -> u16 {
+            4433
+        }
+    }
+
+    impl Default for AgentTunnelConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                listen_port: Self::default_listen_port(),
+                enrollment_secret: None,
+            }
+        }
     }
 
     /// Unsafe debug options that should only ever be used at development stage

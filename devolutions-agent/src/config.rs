@@ -20,6 +20,7 @@ pub struct Conf {
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
+    pub tunnel: dto::TunnelConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -48,6 +49,7 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
+            tunnel: conf_file.tunnel.clone().unwrap_or_default(),
             proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
@@ -154,14 +156,14 @@ impl ConfHandle {
     }
 }
 
-fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
+pub fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("failed JSON serialization of configuration")?;
     std::fs::write(&conf_file_path, json).with_context(|| format!("failed to write file at {conf_file_path}"))?;
     Ok(())
 }
 
-fn get_conf_file_path() -> Utf8PathBuf {
+pub fn get_conf_file_path() -> Utf8PathBuf {
     get_data_dir().join("agent.json")
 }
 
@@ -354,6 +356,70 @@ pub mod dto {
         }
     }
 
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct TunnelConf {
+        /// Enable tunnel module
+        pub enabled: bool,
+
+        /// Gateway QUIC endpoint (e.g., "gateway.example.com:4433")
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        pub gateway_endpoint: String,
+
+        /// Client certificate path (issued during enrollment)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub client_cert_path: Option<Utf8PathBuf>,
+
+        /// Client private key path
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub client_key_path: Option<Utf8PathBuf>,
+
+        /// Gateway CA certificate path
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub gateway_ca_cert_path: Option<Utf8PathBuf>,
+
+        /// Subnets to advertise (e.g., ["10.0.0.0/8", "192.168.1.0/24"])
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub advertise_subnets: Vec<String>,
+
+        /// DNS domains to advertise (e.g., ["contoso.local"]). Auto-detected if omitted.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub advertise_domains: Vec<String>,
+
+        /// Whether to auto-detect the machine's DNS domain and add it to advertise_domains (default: true)
+        #[serde(default = "default_true")]
+        pub auto_detect_domain: bool,
+
+        /// Heartbeat interval in seconds (default: 60)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub heartbeat_interval_secs: Option<u64>,
+
+        /// Route advertise interval in seconds (default: 30)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub route_advertise_interval_secs: Option<u64>,
+    }
+
+    fn default_true() -> bool {
+        true
+    }
+
+    impl Default for TunnelConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                gateway_endpoint: String::new(),
+                client_cert_path: None,
+                client_key_path: None,
+                gateway_ca_cert_path: None,
+                advertise_subnets: Vec::new(),
+                advertise_domains: Vec::new(),
+                auto_detect_domain: true,
+                heartbeat_interval_secs: Some(60),
+                route_advertise_interval_secs: Some(30),
+            }
+        }
+    }
+
     /// Source of truth for Agent configuration
     ///
     /// This struct represents the JSON file used for configuration as close as possible
@@ -385,6 +451,10 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub session: Option<SessionConf>,
 
+        /// Agent Tunnel configuration
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tunnel: Option<TunnelConf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -414,6 +484,7 @@ pub mod dto {
                 proxy: None,
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
+                tunnel: None,
                 rest: serde_json::Map::new(),
             }
         }

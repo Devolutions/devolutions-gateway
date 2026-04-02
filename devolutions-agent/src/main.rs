@@ -2,25 +2,35 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-agent library.
+use agent_tunnel_proto as _;
 use anyhow as _;
 use async_trait as _;
+use bincode as _;
 use camino as _;
 use devolutions_agent_shared as _;
 use devolutions_gateway_task as _;
 use devolutions_log as _;
 use futures as _;
+use http_client_proxy as _;
+use ipnetwork as _;
 use ironrdp as _;
 use parking_lot as _;
+use quinn as _;
 use rand as _;
+use reqwest as _;
+use rustls as _;
 use rustls_pemfile as _;
+use rustls_pki_types as _;
 use serde as _;
 use serde_json as _;
 use tap as _;
 use tokio as _;
 use tokio_rustls as _;
+use url as _;
+use uuid as _;
 #[cfg(windows)]
 use {
-    devolutions_pedm as _, hex as _, notify_debouncer_mini as _, reqwest as _, sha2 as _, thiserror as _, uuid as _,
+    aws_lc_rs as _, devolutions_pedm as _, hex as _, notify_debouncer_mini as _, sha2 as _, thiserror as _,
     win_api_wrappers as _, windows as _,
 };
 
@@ -32,6 +42,8 @@ mod service;
 use std::env;
 use std::sync::mpsc;
 
+use anyhow::{Context as _, Result, bail};
+use base64::Engine as _;
 use ceviche::Service;
 use ceviche::controller::*;
 use devolutions_agent::AgentServiceEvent;
@@ -41,6 +53,23 @@ use self::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
 const BAD_CONFIG_ERR_CODE: u32 = 1;
 const START_FAILED_ERR_CODE: u32 = 2;
+
+#[derive(Debug, PartialEq, Eq)]
+struct UpCommand {
+    gateway_url: String,
+    enrollment_token: String,
+    agent_name: String,
+    advertise_subnets: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct EnrollmentStringPayload {
+    version: u64,
+    api_base_url: String,
+    enrollment_token: String,
+    #[serde(default)]
+    name: Option<String>,
+}
 
 fn agent_service_main(
     rx: mpsc::Receiver<AgentServiceEvent>,
@@ -110,6 +139,85 @@ fn agent_service_main(
 
 Service!("agent", agent_service_main);
 
+fn parse_required_value(args: &[String], index: &mut usize, flag: &str) -> Result<String> {
+    *index += 1;
+    args.get(*index)
+        .cloned()
+        .with_context(|| format!("missing value for {flag}"))
+}
+
+fn parse_advertise_subnets(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|subnet| !subnet.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn parse_enrollment_string(value: &str) -> Result<EnrollmentStringPayload> {
+    const PREFIX: &str = "dgw-enroll:v1:";
+
+    let encoded = value.strip_prefix(PREFIX).context("invalid enrollment string prefix")?;
+
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .context("invalid base64 enrollment string")?;
+
+    let payload: EnrollmentStringPayload =
+        serde_json::from_slice(&decoded).context("invalid enrollment string payload")?;
+
+    if payload.version != 1 {
+        bail!("unsupported enrollment string version: {}", payload.version);
+    }
+
+    Ok(payload)
+}
+
+fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
+    let mut gateway_url = None;
+    let mut enrollment_token = None;
+    let mut agent_name = None;
+    let mut enrollment_string = None;
+    let mut advertise_subnets = Vec::new();
+
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+
+        match arg {
+            "--gateway" => gateway_url = Some(parse_required_value(args, &mut index, "--gateway")?),
+            "--token" | "--enrollment-token" => enrollment_token = Some(parse_required_value(args, &mut index, arg)?),
+            "--name" | "--agent-name" => agent_name = Some(parse_required_value(args, &mut index, arg)?),
+            "--enrollment-string" => enrollment_string = Some(parse_required_value(args, &mut index, arg)?),
+            "--advertise-routes" | "--advertise-subnets" => {
+                advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
+            }
+            unexpected => bail!("unknown argument for up: {unexpected}"),
+        }
+
+        index += 1;
+    }
+
+    if let Some(enrollment_string) = enrollment_string {
+        let payload = parse_enrollment_string(&enrollment_string)?;
+
+        gateway_url.get_or_insert(payload.api_base_url);
+        enrollment_token.get_or_insert(payload.enrollment_token);
+
+        if agent_name.is_none() {
+            agent_name = payload.name;
+        }
+    }
+
+    Ok(UpCommand {
+        gateway_url: gateway_url.context("missing required --gateway")?,
+        enrollment_token: enrollment_token.context("missing required --token")?,
+        agent_name: agent_name.context("missing required --name")?,
+        advertise_subnets,
+    })
+}
+
 fn main() {
     let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
 
@@ -152,11 +260,136 @@ fn main() {
                     eprintln!("[ERROR] Agent configuration failed: {e}");
                 }
             }
+            "enroll" => {
+                let gateway_url = env::args()
+                    .nth(2)
+                    .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
+                let enrollment_token = env::args().nth(3).expect("missing enrollment token");
+                let agent_name = env::args().nth(4).expect("missing agent name");
+                let subnets_arg = env::args().nth(5).unwrap_or_default();
+
+                let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
+                    Vec::new()
+                } else {
+                    subnets_arg.split(',').map(|s| s.trim().to_owned()).collect()
+                };
+
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                rt.block_on(async {
+                    if let Err(e) = devolutions_agent::enrollment::enroll_agent(
+                        &gateway_url,
+                        &enrollment_token,
+                        &agent_name,
+                        advertise_subnets,
+                    )
+                    .await
+                    {
+                        eprintln!("[ERROR] Enrollment failed: {e:#}");
+                        std::process::exit(1);
+                    }
+                });
+            }
+            "up" => {
+                let args: Vec<String> = env::args().skip(2).collect();
+                let command = match parse_up_command_args(&args) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        eprintln!("[ERROR] Invalid up arguments: {error:#}");
+                        std::process::exit(1);
+                    }
+                };
+
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                let result = rt.block_on(async {
+                    devolutions_agent::enrollment::bootstrap_and_persist(
+                        &command.gateway_url,
+                        &command.enrollment_token,
+                        &command.agent_name,
+                        command.advertise_subnets,
+                    )
+                    .await
+                });
+
+                if let Err(error) = result {
+                    eprintln!("[ERROR] Bootstrap failed: {error:#}");
+                    std::process::exit(1);
+                }
+            }
             _ => {
                 eprintln!("[ERROR] Invalid command: {cmd}");
             }
         }
     } else {
         let _result = controller.register(service_main_wrapper);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_up_command_args_uses_default_config_path() {
+        let args = vec![
+            "--gateway".to_owned(),
+            "https://gateway.example.com:7171".to_owned(),
+            "--token".to_owned(),
+            "bootstrap-token".to_owned(),
+            "--name".to_owned(),
+            "site-a-agent".to_owned(),
+            "--advertise-routes".to_owned(),
+            "10.0.0.0/8,192.168.1.0/24".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(
+            parsed,
+            UpCommand {
+                gateway_url: "https://gateway.example.com:7171".to_owned(),
+                enrollment_token: "bootstrap-token".to_owned(),
+                agent_name: "site-a-agent".to_owned(),
+                advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_up_command_args_accepts_aliases() {
+        let args = vec![
+            "--gateway".to_owned(),
+            "https://gateway.example.com:7171".to_owned(),
+            "--enrollment-token".to_owned(),
+            "bootstrap-token".to_owned(),
+            "--agent-name".to_owned(),
+            "site-a-agent".to_owned(),
+            "--advertise-subnets".to_owned(),
+            "10.0.0.0/8".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
+    }
+
+    #[test]
+    fn parse_up_command_args_accepts_enrollment_string() {
+        let payload = serde_json::json!({
+            "version": 1,
+            "api_base_url": "https://gateway.example.com:7171",
+            "enrollment_token": "bootstrap-token",
+            "name": "site-a-agent",
+        });
+        let enrollment_string = format!(
+            "dgw-enroll:v1:{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string())
+        );
+        let args = vec!["--enrollment-string".to_owned(), enrollment_string];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
+        assert_eq!(parsed.enrollment_token, "bootstrap-token");
+        assert_eq!(parsed.agent_name, "site-a-agent");
     }
 }

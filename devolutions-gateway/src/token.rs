@@ -425,6 +425,12 @@ pub struct AssociationTokenClaims {
 
     /// Optional SHA-256 thumbprint of target server certificate (for anchored TLS validation)
     pub cert_thumb256: Option<Sha256Thumbprint>,
+
+    /// Optional agent ID for routing connections through an enrolled agent tunnel.
+    ///
+    /// When set alongside `ConnectionMode::Fwd`, the Gateway will proxy the connection
+    /// through the specified agent instead of connecting directly to the target.
+    pub jet_agent_id: Option<Uuid>,
 }
 
 // ----- scope claims ----- //
@@ -468,15 +474,15 @@ pub enum AccessScope {
     NetMonitorDrain,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ScopeTokenClaims {
     pub scope: AccessScope,
 
     /// JWT expiration time claim.
-    exp: i64,
+    pub exp: i64,
 
     /// JWT "JWT ID" claim, the unique ID for this token
-    jti: Uuid,
+    pub jti: Uuid,
 }
 
 // ----- bridge claims ----- //
@@ -1314,6 +1320,8 @@ mod serde_impl {
         jti: Uuid,
         #[serde(default)]
         cert_thumb256: Option<SmolStr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jet_agent_id: Option<Uuid>,
     }
 
     #[derive(Deserialize)]
@@ -1422,6 +1430,7 @@ mod serde_impl {
                 exp: self.exp,
                 jti: self.jti,
                 cert_thumb256: self.cert_thumb256.as_ref().map(|thumb| SmolStr::new(thumb.as_str())),
+                jet_agent_id: self.jet_agent_id,
             }
             .serialize(serializer)
         }
@@ -1471,6 +1480,7 @@ mod serde_impl {
                     .map(crate::tls::thumbprint::normalize_sha256_thumbprint)
                     .transpose()
                     .map_err(de::Error::custom)?,
+                jet_agent_id: claims.jet_agent_id,
             })
         }
     }
