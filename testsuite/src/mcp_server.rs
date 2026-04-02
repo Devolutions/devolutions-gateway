@@ -11,6 +11,8 @@ const ERROR_CODE_INVALID_REQUEST: i32 = -32600;
 const ERROR_CODE_METHOD_NOT_FOUND: i32 = -32601;
 const ERROR_CODE_INVALID_PARAMS: i32 = -32602;
 
+pub use tokio_util::sync::CancellationToken;
+
 #[dynosaur::dynosaur(pub DynMcpTransport = dyn(box) McpTransport)]
 #[allow(unreachable_pub)] // false positive.
 pub trait McpTransport: Send + Sync {
@@ -46,8 +48,6 @@ where
         (self)(method, params)
     }
 }
-
-pub use tokio_util::sync::CancellationToken;
 
 /// A MCP server for testing purposes that implements
 /// the Model Context Protocol 2025-06-18 specification.
