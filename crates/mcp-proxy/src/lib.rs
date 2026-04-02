@@ -301,8 +301,9 @@ impl McpProxy {
                         error!(error = format!("{error:#}"), "Couldn't forward request");
 
                         let message = if let Some(id) = request_id {
+                            let detail = json_escape_str(&format!("{error:#}"));
                             let json_rpc_error_response = format!(
-                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {error:#}"}}}}"#
+                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {detail}"}}}}"#
                             );
                             Some(Message::normalize(json_rpc_error_response))
                         } else {
@@ -345,8 +346,9 @@ impl McpProxy {
                         })
                     } else {
                         let message = if let Some(id) = request_id {
+                            let detail = json_escape_str(&io_error.to_string());
                             let json_rpc_error_response = format!(
-                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {io_error}"}}}}"#
+                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"Forward failure: {detail}"}}}}"#
                             );
                             Some(Message::normalize(json_rpc_error_response))
                         } else {
@@ -702,6 +704,26 @@ fn extract_sse_json_line(body: &str) -> Option<&str> {
     body.lines().find_map(|l| l.strip_prefix("data: ").map(|s| s.trim()))
 }
 
+/// Escape a string for safe embedding inside a JSON string value.
+fn json_escape_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write as _;
+                write!(out, "\\u{:04x}", c as u32).expect("write to String is infallible");
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Build the message to send to the MCP client when the backend connection breaks fatally.
 ///
 /// - If there is a `pending_request_id`, returns a JSON-RPC error response correlating the
@@ -709,13 +731,14 @@ fn extract_sse_json_line(body: &str) -> Option<&str> {
 /// - Otherwise, returns a `$/proxy/serverDisconnected` notification so the client knows the
 ///   server is no longer reachable without having an in-flight request to correlate to.
 fn make_server_disconnected_message(pending_request_id: Option<i32>, error_detail: &str) -> Message {
+    let detail = json_escape_str(error_detail);
     let raw = if let Some(id) = pending_request_id {
         format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"server disconnected: {error_detail}"}}}}"#
+            r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"server disconnected: {detail}"}}}}"#
         )
     } else {
         format!(
-            r#"{{"jsonrpc":"2.0","method":"$/proxy/serverDisconnected","params":{{"message":"server disconnected: {error_detail}"}}}}"#
+            r#"{{"jsonrpc":"2.0","method":"$/proxy/serverDisconnected","params":{{"message":"server disconnected: {detail}"}}}}"#
         )
     };
     Message::normalize(raw)
@@ -752,7 +775,7 @@ fn extract_id_best_effort(message: &str) -> Option<i32> {
 
     loop {
         match rest.next() {
-            Some(',') => break,
+            Some(',') | Some('}') => break,
             Some(ch) => acc.push(ch),
             None => break,
         }
