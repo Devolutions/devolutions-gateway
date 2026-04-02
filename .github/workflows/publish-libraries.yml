@@ -53,7 +53,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build
         run: |
@@ -68,7 +68,7 @@ jobs:
         shell: pwsh
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nupkg-${{matrix.library}}
           path: |
@@ -106,7 +106,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -132,7 +132,7 @@ jobs:
         shell: pwsh
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-${{matrix.library}}
           path: npm-packages/*.tgz
@@ -161,7 +161,7 @@ jobs:
 
     steps:
       - name: Download NuGet packages artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nupkg
           path: nuget-packages
@@ -209,7 +209,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -218,7 +218,7 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Download NPM packages artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: npm
           path: npm-packages
@@ -248,7 +248,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Remove labels
         run: ./ci/remove-labels.ps1 -Label 'publish-required'

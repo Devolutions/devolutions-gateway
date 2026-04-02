@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - if: ${{ github.event.action == 'opened' }}
         uses: ./.github/actions/create-comment
@@ -51,7 +51,7 @@ jobs:
             message: Please publish libraries
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Verify labels
         id: verify-labels

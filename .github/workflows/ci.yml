@@ -109,7 +109,7 @@ jobs:
 
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.get-commit.outputs.ref }}
 
@@ -154,7 +154,7 @@ jobs:
         shell: pwsh
 
       - name: Upload version artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: version
           path: VERSION
@@ -174,7 +174,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -213,7 +213,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -252,7 +252,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -270,7 +270,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -367,7 +367,7 @@ jobs:
         run: sccache --show-stats
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jetsocat-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ steps.build.outputs.staging-path }}
@@ -391,7 +391,7 @@ jobs:
     needs: [preflight, jetsocat, jetsocat-merge]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: jetsocat
 
@@ -409,7 +409,7 @@ jobs:
         shell: pwsh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jetsocat
           path: .
@@ -424,12 +424,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Devolutions/actions
           ref: v1
@@ -476,13 +476,13 @@ jobs:
         working-directory: webapp
 
       - name: Upload gateway-ui artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webapp-client
           path: webapp/dist/gateway-ui/
 
       - name: Upload recording-player artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webapp-player
           path: webapp/dist/recording-player/
@@ -494,7 +494,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -528,7 +528,7 @@ jobs:
           ./powershell/run-tests.ps1
         shell: pwsh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: devolutions-gateway-powershell
           path: powershell-staging
@@ -544,7 +544,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -555,20 +555,20 @@ jobs:
 
       - name: Download webapp-client
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: webapp-client
           path: webapp/dist/gateway-ui
 
       - name: Download webapp-player
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: webapp-player
           path: webapp/dist/recording-player
 
       - name: Download devolutions-gateway-powershell
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: devolutions-gateway-powershell
           path: powershell-staging
@@ -716,7 +716,7 @@ jobs:
         run: sccache --show-stats
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devolutions-gateway-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ steps.load-variables.outputs.staging-path }}
@@ -743,7 +743,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -755,7 +755,7 @@ jobs:
         shell: pwsh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devolutions-pedm-desktop
           path: ./dotnet/DesktopAgent/bin/Release/net48/*
@@ -770,7 +770,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -817,7 +817,7 @@ jobs:
 
       - name: Download devolutions-pedm-desktop
         if: ${{ matrix.os == 'windows' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: devolutions-pedm-desktop
           path: devolutions-pedm-desktop
@@ -840,7 +840,7 @@ jobs:
 
       - name: Upload tun2socks artifacts
         if: ${{ matrix.os == 'windows' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tun2socks-${{ matrix.os }}-${{ matrix.arch }}
           path: tun2socks/
@@ -966,7 +966,7 @@ jobs:
         run: sccache --show-stats
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devolutions-agent-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ steps.load-variables.outputs.staging-path }}
@@ -991,7 +991,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -1000,7 +1000,7 @@ jobs:
         shell: pwsh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devolutions-pedm-client
           path: ./crates/devolutions-pedm/openapi/dotnet-client/src/Devolutions.Pedm.Client/bin/Release/Devolutions.Pedm.Client.*
@@ -1012,7 +1012,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -1030,7 +1030,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -1097,7 +1097,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -1130,7 +1130,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -1169,7 +1169,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -1209,7 +1209,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 10
@@ -1219,7 +1219,7 @@ jobs:
         shell: pwsh
 
       - name: Upload git-log.txt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: git-log
           path: ./git-log.txt
@@ -1233,7 +1233,7 @@ jobs:
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Devolutions/actions
           ref: v1
@@ -1249,22 +1249,22 @@ jobs:
         with:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: jetsocat
           path: ${{ runner.temp }}/artifacts_raw
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: devolutions-gateway
           path: ${{ runner.temp }}/artifacts_raw
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: devolutions-agent
           path: ${{ runner.temp }}/artifacts_raw
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: git-log
           path: ${{ runner.temp }}/artifacts_raw
