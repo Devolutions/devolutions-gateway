@@ -143,6 +143,15 @@ impl Message {
 
 pub struct McpProxy {
     transport: InnerTransport,
+    /// ID of the last forwarded request that has not yet received a response.
+    ///
+    /// Set when a request (message with both `id` and `method`) is successfully sent to the
+    /// backend. Cleared when a matching response (same `id`, no `method`) is received.
+    /// Server-initiated notifications leave this unchanged.
+    ///
+    /// Used to build a meaningful JSON-RPC error when `ReadError::Fatal` fires: if a request
+    /// is pending we can correlate the error to it; otherwise we send a notification.
+    pending_request_id: Option<i32>,
 }
 
 /// Error that can occur when sending a message.
@@ -150,8 +159,9 @@ pub struct McpProxy {
 pub enum SendError {
     /// Fatal error - the proxy must stop as the connection is broken.
     Fatal {
-        /// Optional error message to send back when a request ID is detected.
-        message: Option<Message>,
+        /// Message to send back to the client: a JSON-RPC error response if there was a pending
+        /// request ID, or a `$/proxy/serverDisconnected` notification otherwise.
+        message: Message,
         /// The underlying error for logging/debugging.
         source: anyhow::Error,
     },
@@ -168,7 +178,13 @@ pub enum SendError {
 #[derive(Debug)]
 pub enum ReadError {
     /// Fatal error - the proxy must stop as the connection is broken.
-    Fatal(anyhow::Error),
+    Fatal {
+        /// Message to send back to the client: a JSON-RPC error response if there was a pending
+        /// request ID, or a `$/proxy/serverDisconnected` notification otherwise.
+        message: Message,
+        /// The underlying error for logging/debugging.
+        source: anyhow::Error,
+    },
     /// Transient error - the proxy can continue operating.
     Transient(anyhow::Error),
 }
@@ -200,7 +216,10 @@ impl McpProxy {
             }
         };
 
-        Ok(McpProxy { transport })
+        Ok(McpProxy {
+            transport,
+            pending_request_id: None,
+        })
     }
 
     /// Send a message to the peer.
@@ -222,23 +241,31 @@ impl McpProxy {
         }
 
         // Try to parse as request first, then as response.
-        let request_id = match JsonRpcMessage::parse(message) {
-            Ok(request) => {
-                match (request.id, request.method) {
+        let (request_id, is_request) = match JsonRpcMessage::parse(message) {
+            Ok(msg) => {
+                let is_request = match (msg.id, msg.method) {
                     (None, None) => {
                         warn!(
-                            jsonrpc = request.jsonrpc,
+                            jsonrpc = msg.jsonrpc,
                             "Sending a malformed JSON-RPC message (missing both `id` and `method`)"
-                        )
+                        );
+                        false
                     }
                     (None, Some(method)) => {
-                        debug!(jsonrpc = request.jsonrpc, method, "Sending a notification")
+                        debug!(jsonrpc = msg.jsonrpc, method, "Sending a notification");
+                        false
                     }
-                    (Some(id), None) => debug!(jsonrpc = request.jsonrpc, id, "Sending a response"),
-                    (Some(id), Some(method)) => debug!(jsonrpc = request.jsonrpc, method, id, "Sending a request"),
+                    (Some(id), None) => {
+                        debug!(jsonrpc = msg.jsonrpc, id, "Sending a response");
+                        false
+                    }
+                    (Some(id), Some(method)) => {
+                        debug!(jsonrpc = msg.jsonrpc, method, id, "Sending a request");
+                        true
+                    }
                 };
 
-                request.id
+                (msg.id, is_request)
             }
             Err(error) => {
                 // Not a JSON-RPC message, try best-effort ID extraction.
@@ -250,7 +277,7 @@ impl McpProxy {
                     warn!(error = format!("{error:#}"), "Sending a malformed JSON-RPC message");
                 }
 
-                id
+                (id, false)
             }
         };
 
@@ -296,31 +323,13 @@ impl McpProxy {
             }
         };
 
-        return ret;
-
-        fn extract_id_best_effort(request_str: &str) -> Option<i32> {
-            let idx = request_str.find("\"id\"")?;
-
-            let mut rest = request_str[idx + "\"id\"".len()..].chars();
-
-            loop {
-                if rest.next()? == ':' {
-                    break;
-                }
-            }
-
-            let mut acc = String::new();
-
-            loop {
-                match rest.next() {
-                    Some(',') => break,
-                    Some(ch) => acc.push(ch),
-                    None => break,
-                }
-            }
-
-            acc.parse().ok()
+        // Track pending request ID for Process/NamedPipe transports so that if the backend
+        // breaks while we're waiting for the response, we can synthesise a meaningful error.
+        if ret.is_ok() && is_request {
+            self.pending_request_id = request_id;
         }
+
+        return ret;
 
         fn handle_write_result(result: std::io::Result<()>, request_id: Option<i32>) -> Result<(), SendError> {
             match result {
@@ -328,14 +337,7 @@ impl McpProxy {
                 Err(io_error) => {
                     // Classify the error.
                     if is_fatal_io_error(&io_error) {
-                        let message = if let Some(id) = request_id {
-                            let json_rpc_error_response = format!(
-                                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"connection broken: {io_error}"}}}}"#
-                            );
-                            Some(Message::normalize(json_rpc_error_response))
-                        } else {
-                            None
-                        };
+                        let message = make_server_disconnected_message(request_id, &io_error.to_string());
 
                         Err(SendError::Fatal {
                             message,
@@ -397,13 +399,29 @@ impl McpProxy {
         match result {
             Ok(message) => {
                 trace!(%message, "Inbound message");
+
+                // Clear the pending request ID when the matching response arrives.
+                // We use best-effort ID extraction to avoid a full JSON parse in the hot path.
+                // Server-initiated requests with the same ID are rare enough that we accept
+                // the minor inaccuracy of treating any matching-ID message as the response.
+                if let Some(pending_id) = self.pending_request_id
+                    && extract_id_best_effort(message.as_raw()) == Some(pending_id)
+                {
+                    self.pending_request_id = None;
+                }
+
                 Ok(message)
             }
             Err(io_error) => {
-                if is_fatal_io_error(&io_error) {
-                    Err(ReadError::Fatal(anyhow::Error::new(io_error)))
+                let is_fatal = is_fatal_io_error(&io_error);
+                let message = make_server_disconnected_message(self.pending_request_id, &io_error.to_string());
+                self.pending_request_id = None;
+                let source = anyhow::Error::new(io_error);
+
+                if is_fatal {
+                    Err(ReadError::Fatal { message, source })
                 } else {
-                    Err(ReadError::Transient(anyhow::Error::new(io_error)))
+                    Err(ReadError::Transient(source))
                 }
             }
         }
@@ -684,6 +702,25 @@ fn extract_sse_json_line(body: &str) -> Option<&str> {
     body.lines().find_map(|l| l.strip_prefix("data: ").map(|s| s.trim()))
 }
 
+/// Build the message to send to the MCP client when the backend connection breaks fatally.
+///
+/// - If there is a `pending_request_id`, returns a JSON-RPC error response correlating the
+///   failure to that outstanding request.
+/// - Otherwise, returns a `$/proxy/serverDisconnected` notification so the client knows the
+///   server is no longer reachable without having an in-flight request to correlate to.
+fn make_server_disconnected_message(pending_request_id: Option<i32>, error_detail: &str) -> Message {
+    let raw = if let Some(id) = pending_request_id {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":{FORWARD_FAILURE_CODE},"message":"server disconnected: {error_detail}"}}}}"#
+        )
+    } else {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"$/proxy/serverDisconnected","params":{{"message":"server disconnected: {error_detail}"}}}}"#
+        )
+    };
+    Message::normalize(raw)
+}
+
 /// Check if an I/O error is fatal (connection broken)
 ///
 /// For process stdio and named pipe transports, these errors indicate the connection is permanently broken:
@@ -698,4 +735,28 @@ fn is_fatal_io_error(error: &std::io::Error) -> bool {
         error.kind(),
         std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
     )
+}
+
+fn extract_id_best_effort(message: &str) -> Option<i32> {
+    let idx = message.find("\"id\"")?;
+
+    let mut rest = message[idx + "\"id\"".len()..].chars();
+
+    loop {
+        if rest.next()? == ':' {
+            break;
+        }
+    }
+
+    let mut acc = String::new();
+
+    loop {
+        match rest.next() {
+            Some(',') => break,
+            Some(ch) => acc.push(ch),
+            None => break,
+        }
+    }
+
+    acc.trim().parse().ok()
 }

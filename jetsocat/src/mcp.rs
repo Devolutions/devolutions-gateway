@@ -49,11 +49,7 @@ pub(crate) async fn run_mcp_proxy(pipe: Pipe, mut mcp_proxy: mcp_proxy::McpProxy
                     }
                     Err(mcp_proxy::SendError::Fatal { message, source }) => {
                         error!(error = format!("{source:#}"), "Fatal error sending message, stopping proxy");
-
-                        if let Some(msg) = message {
-                            let _ = write_flush_message(&mut writer, msg).await;
-                        }
-
+                        let _ = write_flush_message(&mut writer, message).await;
                         return Ok(());
                     }
                 }
@@ -68,8 +64,9 @@ pub(crate) async fn run_mcp_proxy(pipe: Pipe, mut mcp_proxy: mcp_proxy::McpProxy
                     Err(mcp_proxy::ReadError::Transient(source)) => {
                         warn!(error = format!("{source:#}"), "Transient error reading from peer");
                     }
-                    Err(mcp_proxy::ReadError::Fatal(source)) => {
+                    Err(mcp_proxy::ReadError::Fatal { message, source }) => {
                         error!(error = format!("{source:#}"), "Fatal error reading from peer, stopping proxy");
+                        let _ = write_flush_message(&mut writer, message).await;
                         return Ok(());
                     }
                 }

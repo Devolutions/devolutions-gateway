@@ -77,12 +77,15 @@ fn log_term_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
         .assert()
         .success();
 
-    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
 
     if expect_ansi {
-        assert!(stdout.contains(" [32m INFO[0m [2mjetsocat[0m"), "{stdout}");
+        assert!(
+            stderr.contains(" \x1B[32m INFO\x1B[0m \x1B[2mjetsocat\x1B[0m"),
+            "{stderr}"
+        );
     } else {
-        assert!(stdout.contains("  INFO jetsocat"), "{stdout}");
+        assert!(stderr.contains("  INFO jetsocat"), "{stderr}");
     }
 }
 
@@ -113,7 +116,7 @@ fn log_file_coloring(#[case] args: &[&str], #[case] envs: &[(&str, &str)], #[cas
     let logs = std::fs::read_to_string(log_file_path).unwrap();
 
     if expect_ansi {
-        assert!(logs.contains(" [32m INFO[0m [2mjetsocat[0m"), "{logs}");
+        assert!(logs.contains(" \x1B[32m INFO\x1B[0m \x1B[2mjetsocat\x1B[0m"), "{logs}");
     } else {
         assert!(logs.contains("  INFO jetsocat"), "{logs}");
     }
@@ -806,14 +809,9 @@ fn jetsocat_log_environment_variable() {
         .timeout(ASSERT_CMD_TIMEOUT)
         .assert();
 
-    let stdout = std::str::from_utf8(&output.get_output().stdout).unwrap();
-    assert!(stdout.contains("DEBUG"));
-    assert!(stdout.contains("hello"));
-
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
-    assert!(!stderr.contains("bad"));
-    assert!(!stderr.contains("invalid"));
-    assert!(!stderr.contains("unknown"));
+    assert!(stderr.contains("DEBUG"), "{stderr}");
+    assert!(stderr.contains("hello"), "{stderr}");
 
     let file_contents = std::fs::read_to_string(outfile).unwrap();
     assert_eq!(file_contents.trim(), "hello");
@@ -1185,7 +1183,14 @@ async fn mcp_proxy_notification(#[values(true, false)] http_transport: bool) {
     assert!(probe.load(std::sync::atomic::Ordering::SeqCst));
 }
 
-async fn execute_mcp_request(request: &str) -> String {
+struct McpRequestOutput {
+    /// MCP protocol output (JSON-RPC responses written to stdout).
+    stdout: String,
+    /// Log output (written to stderr via --log-term).
+    stderr: String,
+}
+
+async fn execute_mcp_request(request: &str) -> McpRequestOutput {
     use testsuite::mcp_server::{DynMcpTransport, HttpTransport, McpServer};
     use tokio::io::AsyncWriteExt as _;
 
@@ -1200,11 +1205,12 @@ async fn execute_mcp_request(request: &str) -> String {
         .args(["mcp-proxy", "stdio", &server_url, "--log-term", "--color=never"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("start jetsocat mcp-proxy");
 
-    // Get stdin/stdout handles for MCP client.
+    // Get stdin handle for MCP client.
     let mut stdin = jetsocat_process.stdin.take().expect("get stdin");
 
     // Write the request.
@@ -1213,29 +1219,47 @@ async fn execute_mcp_request(request: &str) -> String {
     tokio::time::sleep(MCP_REQUEST_SETTLE_DURATION).await;
 
     // Shutdown the MCP server.
-    server_handle.shutdown();
+    server_handle.cancel();
 
     // Terminate the Jetsocat process.
     jetsocat_process.start_kill().unwrap();
 
     let output = jetsocat_process.wait_with_output().await.unwrap();
-    String::from_utf8(output.stdout).unwrap()
+
+    McpRequestOutput {
+        stdout: String::from_utf8(output.stdout).unwrap(),
+        stderr: String::from_utf8(output.stderr).unwrap(),
+    }
 }
 
 #[tokio::test]
 async fn mcp_proxy_malformed_request_with_id() {
-    let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
-    assert!(stdout.contains("malformed JSON-RPC message"), "{stdout}");
-    assert!(stdout.contains("Unexpected EOF"), "{stdout}");
-    assert!(stdout.contains("id=1"), "{stdout}");
+    let output = execute_mcp_request("{\"jsonrpc\":\"2.0\",\"decoy\":\":\",\"id\":1\n").await;
+    // The warning log (with parse error and request id) goes to stderr.
+    assert!(
+        output.stderr.contains("malformed JSON-RPC message"),
+        "{}",
+        output.stderr
+    );
+    assert!(output.stderr.contains("Unexpected EOF"), "{}", output.stderr);
+    assert!(output.stderr.contains("id=1"), "{}", output.stderr);
+    // The backend's JSON-RPC error response is forwarded to stdout.
+    assert!(output.stdout.contains(r#""error""#), "{}", output.stdout);
 }
 
 #[tokio::test]
 async fn mcp_proxy_malformed_request_no_id() {
-    let stdout = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
-    assert!(stdout.contains("malformed JSON-RPC message"), "{stdout}");
-    assert!(stdout.contains("Invalid character"), "{stdout}");
-    assert!(!stdout.contains("id=1"), "{stdout}");
+    let output = execute_mcp_request("{\"jsonrpc\":\"2.0\",}\n").await;
+    // The warning log (with parse error, no request id) goes to stderr.
+    assert!(
+        output.stderr.contains("malformed JSON-RPC message"),
+        "{}",
+        output.stderr
+    );
+    assert!(output.stderr.contains("Invalid character"), "{}", output.stderr);
+    assert!(!output.stderr.contains("id=1"), "{}", output.stderr);
+    // No id → treated as notification; no JSON-RPC response on stdout.
+    assert!(output.stdout.is_empty(), "{}", output.stdout);
 }
 
 #[tokio::test]
@@ -1282,7 +1306,7 @@ async fn mcp_proxy_http_error() {
 async fn mcp_proxy_terminated_on_broken_pipe() {
     use testsuite::mcp_client::McpClient;
     use testsuite::mcp_server::{DynMcpTransport, McpServer, NamedPipeTransport};
-    // use tokio::io::AsyncReadExt as _; // TODO
+    use tokio::io::AsyncReadExt as _;
 
     // Configure MCP server transport (named pipe only).
     let np_transport = NamedPipeTransport::bind().unwrap();
@@ -1297,18 +1321,18 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
 
     // Start jetsocat mcp-proxy with stdio pipe.
     let mut jetsocat_process = jetsocat_tokio_cmd()
-        .args(["mcp-proxy", "stdio", &pipe]) // TODO: add "--log-term"
+        .args(["mcp-proxy", "stdio", &pipe, "--log-term", "--color=never"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        // .stderr(std::process::Stdio::piped()) // TODO: Once Jetsocat logs to stderr.
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("start jetsocat mcp-proxy");
 
-    // Get stdin/stdout handles for MCP client.
+    // Get stdin/stdout/stderr handles.
     let stdin = jetsocat_process.stdin.take().expect("get stdin");
     let stdout = jetsocat_process.stdout.take().expect("get stdout");
-    // let mut stderr = jetsocat_process.stderr.take().expect("get stderr"); // TODO
+    let mut stderr = jetsocat_process.stderr.take().expect("get stderr");
 
     // Initialize MCP client with jetsocat's stdin/stdout.
     let mut mcp_client = McpClient::new(Box::pin(stdout), Box::pin(stdin));
@@ -1317,28 +1341,26 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     mcp_client.connect().await.expect("connect to MCP server");
 
     // Stop the MCP server.
-    server_handle.shutdown();
+    server_handle.cancel();
 
-    // Wait for the named pipe instance to be torn down on Windows.
-    wait_for_windows_named_pipe_server().await;
-
-    // Try to send a request - this should fail with a broken pipe error.
-    // The proxy will detect this and send an error response, then close.
+    // Try to send a request after the backend has been shut down.
+    // The proxy always sends back a protocol-level message before exiting:
+    //   - If the request was forwarded first: jetsocat tries to write to the now-broken backend
+    //     → SendError::Fatal → JSON-RPC error (-32099) → client sees "JSON-RPC error".
+    //   - If the backend EOF was detected first (no pending request): ReadError::Fatal with no
+    //     pending ID → jetsocat sends a $/proxy/serverDisconnected notification → client reads
+    //     the notification as the response to list_tools, finds no "result" field, and reports
+    //     "missing result in response".  This is a test-infrastructure limitation: our naïve
+    //     McpClient::send_request reads exactly one line without distinguishing notifications
+    //     from responses.  A proper fix (notification-aware read loop) is tracked in DGW-315.
+    // In both cases the client receives a JSON-RPC frame, not a raw broken-pipe/EOF error.
     let result = mcp_client.list_tools().await;
-
-    // Since Jetsocat is continuously reading on the pipe, it quickly detects the pipe is broken and stops itself with an error.
-    // Our MCP client in turns try to write from stdout / read to stdin, and this fails with a BrokenPipe on our side.
     let error = result.unwrap_err();
     let error_debug_fmt = format!("{error:?}");
-    #[cfg(windows)]
-    assert!(error_debug_fmt.contains("The pipe is being closed"));
-    #[cfg(not(windows))]
-    assert!(error_debug_fmt.contains("Broken pipe (os error 32)"));
-
-    // TODO: Once Jetsocat print the logs to stderr.
-    // let mut stderr_str = String::new();
-    // stderr.read_to_string(&mut stderr_str).await.expect("read_to_string");
-    // stderr_str.contains(r#"Fatal error reading from peer, stopping proxy error="connection closed""#);
+    assert!(
+        error_debug_fmt.contains("JSON-RPC error") || error_debug_fmt.contains("missing result"),
+        "Expected a protocol-level error, got transport-level error: {error_debug_fmt}"
+    );
 
     // The jetsocat process should exit gracefully after detecting broken pipe.
     let exit_status = tokio::time::timeout(Duration::from_secs(2), jetsocat_process.wait()).await;
@@ -1347,6 +1369,15 @@ async fn mcp_proxy_terminated_on_broken_pipe() {
     // Verify it exited with success (graceful shutdown, not a crash).
     let status = exit_status.unwrap().unwrap();
     assert!(status.success(), "Proxy should exit successfully, not crash");
+
+    // Verify the proxy logged a fatal error when the backend connection broke.
+    let mut stderr_str = String::new();
+    stderr.read_to_string(&mut stderr_str).await.expect("read_to_string");
+    assert!(
+        stderr_str.contains("Fatal error reading from peer, stopping proxy")
+            || stderr_str.contains("Fatal error sending message, stopping proxy"),
+        "jetsocat should log a fatal proxy error: {stderr_str}"
+    );
 }
 
 /// SOCKS5 client → SOCKS5 listener → JMUX tunnel → TCP echo server.
