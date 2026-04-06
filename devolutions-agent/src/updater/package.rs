@@ -185,6 +185,7 @@ async fn launch_updater_shim_detached(
                 "Agent updater shim exited unexpectedly before the service was restarted; \
                  the update may not have completed. Check the shim log for details.",
             );
+            return Err(UpdaterError::AgentShimExitedUnexpectedly { exit_code: code });
         }
         _ = tokio::time::sleep(SHIM_TIMEOUT) => {
             // Shim has been running for too long; something is wrong.
@@ -195,6 +196,7 @@ async fn launch_updater_shim_detached(
                 "Agent updater shim timed out; the update may not have completed. \
                  Check the shim log for details.",
             );
+            return Err(UpdaterError::AgentShimTimedOut);
         }
         _ = shutdown.wait() => {
             // The service is being stopped — most likely by the MSI installer as part of the

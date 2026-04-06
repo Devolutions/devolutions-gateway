@@ -602,7 +602,8 @@ paths:
       description: |-
         Reads `update_status.json`, which is written by the Devolutions Agent on startup and
         refreshed after every update run.  When the file does not exist (agent not installed
-        or is an older version), returns an empty product map.
+        or is an older version), the endpoint returns HTTP 503 because updater status is
+        unavailable.
       operationId: GetUpdateProducts
       responses:
         '200':
@@ -682,7 +683,7 @@ paths:
       - Update
       summary: Retrieve the current Devolutions Agent auto-update schedule.
       description: |-
-        Reads the `Schedule` field from `agent_status.json`.  When the field is absent the response
+        Reads the `Schedule` field from `update_status.json`.  When the field is absent the response
         contains zeroed defaults (`Enabled: false`, interval `0`, window start `0`, no products).
       operationId: GetUpdateSchedule
       responses:
@@ -1674,14 +1675,19 @@ components:
       properties:
         Version:
           $ref: '#/components/schemas/VersionSpecification'
-    UpdateRequest:
+    UpdateRequestSchema:
       type: object
       description: |-
         OpenAPI schema for the update request body.
 
-        The API accepts a map from product name to update information.
-      additionalProperties:
-        $ref: '#/components/schemas/UpdateProductInfo'
+        The API accepts an object containing a `Products` map, whose keys are product names
+        and whose values are update information.
+      properties:
+        Products:
+          type: object
+          description: Map of product name to update information.
+          additionalProperties:
+            $ref: '#/components/schemas/UpdateProductInfo'
     UpdateResponse:
       type: object
       description: Response returned by the update endpoint.

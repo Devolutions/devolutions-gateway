@@ -440,7 +440,7 @@ async fn run_product_updates(
     }
 
     // If the agent was successfully updated a restart is imminent; status refreshes on next start.
-    update_successful & (!agent_updated)
+    update_successful && !agent_updated
 }
 
 async fn update_product(

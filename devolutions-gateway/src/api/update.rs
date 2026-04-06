@@ -174,12 +174,16 @@ pub(crate) struct UpdateRequest {
 
 /// OpenAPI schema for the update request body.
 ///
-/// The API accepts a map from product name to update information.
+/// The API accepts an object containing a `Products` map, whose keys are product names
+/// and whose values are update information.
 #[cfg(feature = "openapi")]
 #[derive(Serialize, utoipa::ToSchema)]
-#[schema(as = UpdateRequest)]
-#[serde(transparent)]
-pub(crate) struct UpdateRequestSchema(pub HashMap<String, UpdateProductInfo>);
+#[serde(rename_all = "PascalCase")]
+pub(crate) struct UpdateRequestSchema {
+    /// Map of product name to update information.
+    #[serde(default)]
+    pub products: HashMap<String, UpdateProductInfo>,
+}
 
 /// Response returned by the update endpoint.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -360,7 +364,8 @@ pub(crate) struct GetUpdateProductsResponse {
 ///
 /// Reads `update_status.json`, which is written by the Devolutions Agent on startup and
 /// refreshed after every update run.  When the file does not exist (agent not installed
-/// or is an older version), returns an empty product map.
+/// or is an older version), the endpoint returns HTTP 503 because updater status is
+/// unavailable.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetUpdateProducts",
@@ -478,7 +483,7 @@ pub(crate) struct SetUpdateScheduleResponse {}
 
 /// Retrieve the current Devolutions Agent auto-update schedule.
 ///
-/// Reads the `Schedule` field from `agent_status.json`.  When the field is absent the response
+/// Reads the `Schedule` field from `update_status.json`.  When the field is absent the response
 /// contains zeroed defaults (`Enabled: false`, interval `0`, window start `0`, no products).
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
