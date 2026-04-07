@@ -12,7 +12,7 @@ use agent_tunnel_proto::{
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
-use ipnetwork::Ipv4Network;
+use ipnetwork::IpNetwork;
 use sha2::Digest as _;
 
 use crate::config::ConfHandle;
@@ -185,7 +185,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
     let key_path = &tunnel_conf.client_key_path;
     let ca_path = &tunnel_conf.gateway_ca_cert_path;
 
-    let advertise_subnets: Vec<Ipv4Network> = tunnel_conf
+    let advertise_subnets: Vec<IpNetwork> = tunnel_conf
         .advertise_subnets
         .iter()
         .map(|subnet| subnet.parse())
@@ -201,7 +201,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         .advertise_domains
         .iter()
         .map(|d| agent_tunnel_proto::DomainAdvertisement {
-            domain: d.clone(),
+            domain: agent_tunnel_proto::DomainName::new(d),
             auto_detected: false,
         })
         .collect();
@@ -210,11 +210,11 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         if let Some(detected) = crate::domain_detect::detect_domain() {
             if !advertise_domains
                 .iter()
-                .any(|d| d.domain.eq_ignore_ascii_case(&detected))
+                .any(|d| d.domain.as_str().eq_ignore_ascii_case(&detected))
             {
                 info!(domain = %detected, "Auto-detected DNS domain");
                 advertise_domains.push(agent_tunnel_proto::DomainAdvertisement {
-                    domain: detected,
+                    domain: agent_tunnel_proto::DomainName::new(detected),
                     auto_detected: true,
                 });
             }
@@ -435,7 +435,7 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: ControlRe
 // Session proxy
 // ---------------------------------------------------------------------------
 
-async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::SendStream, recv: quinn::RecvStream) {
+async fn run_session_proxy(advertise_subnets: Vec<IpNetwork>, send: quinn::SendStream, recv: quinn::RecvStream) {
     let _: anyhow::Result<()> = async {
         let mut session: SessionStream<_, _> = (send, recv).into();
 

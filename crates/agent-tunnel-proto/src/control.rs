@@ -1,4 +1,4 @@
-use ipnetwork::Ipv4Network;
+use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
 
 use crate::version::CURRENT_PROTOCOL_VERSION;
@@ -6,11 +6,43 @@ use crate::version::CURRENT_PROTOCOL_VERSION;
 /// Maximum encoded message size (1 MiB) to prevent denial-of-service via oversized frames.
 pub const MAX_CONTROL_MESSAGE_SIZE: u32 = 1024 * 1024;
 
+/// A normalized DNS domain name (lowercase).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct DomainName(String);
+
+impl DomainName {
+    pub fn new(domain: impl Into<String>) -> Self {
+        Self(domain.into().to_ascii_lowercase())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns `true` if `hostname` matches this domain via DNS suffix matching.
+    ///
+    /// Matches if `hostname == domain` (exact) or `hostname` ends with `.domain`.
+    pub fn matches_hostname(&self, hostname: &str) -> bool {
+        let hostname = hostname.to_ascii_lowercase();
+        hostname == self.0
+            || (hostname.len() > self.0.len()
+                && hostname.as_bytes()[hostname.len() - self.0.len() - 1] == b'.'
+                && hostname.ends_with(&self.0))
+    }
+}
+
+impl std::fmt::Display for DomainName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// A DNS domain advertisement with its source.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DomainAdvertisement {
     /// The DNS domain (e.g., "contoso.local").
-    pub domain: String,
+    pub domain: DomainName,
     /// Whether this domain was auto-detected (`true`) or explicitly configured (`false`).
     pub auto_detected: bool,
 }
@@ -23,8 +55,8 @@ pub enum ControlMessage {
         protocol_version: u16,
         /// Monotonically increasing epoch within this agent process lifetime.
         epoch: u64,
-        /// Reachable IPv4 subnets.
-        subnets: Vec<Ipv4Network>,
+        /// Reachable subnets (IPv4 and IPv6).
+        subnets: Vec<IpNetwork>,
         /// DNS domains this agent can resolve, with source tracking.
         domains: Vec<DomainAdvertisement>,
     },
@@ -48,7 +80,7 @@ pub enum ControlMessage {
 
 impl ControlMessage {
     /// Create a new RouteAdvertise with the current protocol version.
-    pub fn route_advertise(epoch: u64, subnets: Vec<Ipv4Network>, domains: Vec<DomainAdvertisement>) -> Self {
+    pub fn route_advertise(epoch: u64, subnets: Vec<IpNetwork>, domains: Vec<DomainAdvertisement>) -> Self {
         Self::RouteAdvertise {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             epoch,
@@ -118,11 +150,11 @@ mod tests {
             vec!["10.0.0.0/8".parse().expect("valid CIDR")],
             vec![
                 DomainAdvertisement {
-                    domain: "contoso.local".to_owned(),
+                    domain: DomainName::new("contoso.local"),
                     auto_detected: false,
                 },
                 DomainAdvertisement {
-                    domain: "finance.contoso.local".to_owned(),
+                    domain: DomainName::new("finance.contoso.local"),
                     auto_detected: true,
                 },
             ],
@@ -134,9 +166,9 @@ mod tests {
         match &decoded {
             ControlMessage::RouteAdvertise { domains, .. } => {
                 assert_eq!(domains.len(), 2);
-                assert_eq!(domains[0].domain, "contoso.local");
+                assert_eq!(domains[0].domain.as_str(), "contoso.local");
                 assert!(!domains[0].auto_detected);
-                assert_eq!(domains[1].domain, "finance.contoso.local");
+                assert_eq!(domains[1].domain.as_str(), "finance.contoso.local");
                 assert!(domains[1].auto_detected);
             }
             _ => panic!("expected RouteAdvertise"),
@@ -180,25 +212,29 @@ mod proptests {
     use crate::stream::ControlStream;
     use crate::version::CURRENT_PROTOCOL_VERSION;
 
-    fn arb_ipv4_network() -> impl Strategy<Value = Ipv4Network> {
+    fn arb_ip_network() -> impl Strategy<Value = IpNetwork> {
         (any::<[u8; 4]>(), 0u8..=32).prop_map(|(octets, prefix)| {
             let ip = std::net::Ipv4Addr::from(octets);
-            Ipv4Network::new(ip, prefix)
-                .map(|n| Ipv4Network::new(n.network(), prefix).expect("normalized network should be valid"))
-                .unwrap_or_else(|_| Ipv4Network::new(std::net::Ipv4Addr::UNSPECIFIED, 0).expect("0.0.0.0/0 is valid"))
+            ipnetwork::Ipv4Network::new(ip, prefix)
+                .map(|n| IpNetwork::V4(ipnetwork::Ipv4Network::new(n.network(), prefix).expect("normalized")))
+                .unwrap_or_else(|_| {
+                    IpNetwork::V4(ipnetwork::Ipv4Network::new(std::net::Ipv4Addr::UNSPECIFIED, 0).expect("0.0.0.0/0"))
+                })
         })
     }
 
     fn arb_domain_advertisement() -> impl Strategy<Value = DomainAdvertisement> {
-        ("[a-z]{3,10}\\.[a-z]{2,5}", any::<bool>())
-            .prop_map(|(domain, auto_detected)| DomainAdvertisement { domain, auto_detected })
+        ("[a-z]{3,10}\\.[a-z]{2,5}", any::<bool>()).prop_map(|(domain, auto_detected)| DomainAdvertisement {
+            domain: DomainName::new(domain),
+            auto_detected,
+        })
     }
 
     fn arb_control_message() -> impl Strategy<Value = ControlMessage> {
         prop_oneof![
             (
                 any::<u64>(),
-                proptest::collection::vec(arb_ipv4_network(), 0..50),
+                proptest::collection::vec(arb_ip_network(), 0..50),
                 proptest::collection::vec(arb_domain_advertisement(), 0..5),
             )
                 .prop_map(|(epoch, subnets, domains)| {

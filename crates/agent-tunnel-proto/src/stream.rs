@@ -12,42 +12,6 @@ use crate::control::{ControlMessage, MAX_CONTROL_MESSAGE_SIZE};
 use crate::error::ProtoError;
 use crate::session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
 
-/// Encode a message as length-prefixed bincode and write to a stream.
-async fn write_framed<W: AsyncWrite + Unpin>(writer: &mut W, payload: &[u8], max_size: u32) -> Result<(), ProtoError> {
-    let len = u32::try_from(payload.len()).map_err(|_| ProtoError::MessageTooLarge {
-        size: u32::MAX,
-        max: max_size,
-    })?;
-    if len > max_size {
-        return Err(ProtoError::MessageTooLarge {
-            size: len,
-            max: max_size,
-        });
-    }
-    writer.write_all(&len.to_be_bytes()).await?;
-    writer.write_all(payload).await?;
-    writer.flush().await?;
-    Ok(())
-}
-
-/// Read a length-prefixed bincode message from a stream.
-async fn read_framed<R: AsyncRead + Unpin>(reader: &mut R, max_size: u32) -> Result<Vec<u8>, ProtoError> {
-    let mut len_buf = [0u8; 4];
-    reader.read_exact(&mut len_buf).await?;
-    let len = u32::from_be_bytes(len_buf);
-
-    if len > max_size {
-        return Err(ProtoError::MessageTooLarge {
-            size: len,
-            max: max_size,
-        });
-    }
-
-    let mut payload = vec![0u8; len as usize];
-    reader.read_exact(&mut payload).await?;
-    Ok(payload)
-}
-
 // ---------------------------------------------------------------------------
 // Control stream — bidirectional, send-only, recv-only
 // ---------------------------------------------------------------------------
@@ -57,6 +21,12 @@ pub struct ControlStream<S, R> {
     pub send: S,
     pub recv: R,
 }
+
+/// Send-only half of a control stream.
+pub struct ControlSendStream<S>(pub S);
+
+/// Recv-only half of a control stream.
+pub struct ControlRecvStream<R>(pub R);
 
 impl<S, R> From<(S, R)> for ControlStream<S, R> {
     fn from((send, recv): (S, R)) -> Self {
@@ -86,18 +56,12 @@ impl<S: AsyncWrite + Unpin, R: AsyncRead + Unpin> ControlStream<S, R> {
     }
 }
 
-/// Send-only half of a control stream.
-pub struct ControlSendStream<S>(pub S);
-
 impl<S: AsyncWrite + Unpin> ControlSendStream<S> {
     pub async fn send(&mut self, msg: &ControlMessage) -> Result<(), ProtoError> {
         let payload = bincode::serialize(msg)?;
         write_framed(&mut self.0, &payload, MAX_CONTROL_MESSAGE_SIZE).await
     }
 }
-
-/// Recv-only half of a control stream.
-pub struct ControlRecvStream<R>(pub R);
 
 impl<R: AsyncRead + Unpin> ControlRecvStream<R> {
     pub async fn recv(&mut self) -> Result<ControlMessage, ProtoError> {
@@ -157,4 +121,44 @@ impl<S: AsyncWrite + Unpin, R: AsyncRead + Unpin> SessionStream<S, R> {
     pub fn into_inner(self) -> (S, R) {
         (self.send, self.recv)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Framing helpers (length-prefixed bincode)
+// ---------------------------------------------------------------------------
+
+/// Encode a message as length-prefixed bincode and write to a stream.
+async fn write_framed<W: AsyncWrite + Unpin>(writer: &mut W, payload: &[u8], max_size: u32) -> Result<(), ProtoError> {
+    let len = u32::try_from(payload.len()).map_err(|_| ProtoError::MessageTooLarge {
+        size: u32::MAX,
+        max: max_size,
+    })?;
+    if len > max_size {
+        return Err(ProtoError::MessageTooLarge {
+            size: len,
+            max: max_size,
+        });
+    }
+    writer.write_all(&len.to_be_bytes()).await?;
+    writer.write_all(payload).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+/// Read a length-prefixed bincode message from a stream.
+async fn read_framed<R: AsyncRead + Unpin>(reader: &mut R, max_size: u32) -> Result<Vec<u8>, ProtoError> {
+    let mut len_buf = [0u8; 4];
+    reader.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf);
+
+    if len > max_size {
+        return Err(ProtoError::MessageTooLarge {
+            size: len,
+            max: max_size,
+        });
+    }
+
+    let mut payload = vec![0u8; len as usize];
+    reader.read_exact(&mut payload).await?;
+    Ok(payload)
 }

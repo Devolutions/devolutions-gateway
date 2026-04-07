@@ -19,7 +19,7 @@ pub mod session;
 pub mod stream;
 pub mod version;
 
-pub use control::{ControlMessage, DomainAdvertisement, MAX_CONTROL_MESSAGE_SIZE};
+pub use control::{ControlMessage, DomainAdvertisement, DomainName, MAX_CONTROL_MESSAGE_SIZE};
 pub use error::ProtoError;
 pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
 pub use stream::{ControlRecvStream, ControlSendStream, ControlStream, SessionStream};

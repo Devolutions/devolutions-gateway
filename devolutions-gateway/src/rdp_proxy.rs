@@ -637,7 +637,7 @@ where
 async fn send_network_request(request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
     let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
 
-    send_krb_message(&target_addr, &request.data)
+    send_krb_message(&target_addr, &request.data, None)
         .await
         .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
 }

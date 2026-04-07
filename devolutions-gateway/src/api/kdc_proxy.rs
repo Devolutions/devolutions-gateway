@@ -25,6 +25,7 @@ async fn kdc_proxy(
         token_cache,
         jrl,
         recordings,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     extract::Path(token): extract::Path<String>,
@@ -105,7 +106,12 @@ async fn kdc_proxy(
         &claims.krb_kdc
     };
 
-    let kdc_reply_message = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;
+    let kdc_reply_message = send_krb_message(
+        kdc_addr,
+        &kdc_proxy_message.kerb_message.0.0,
+        agent_tunnel_handle.as_deref(),
+    )
+    .await?;
 
     let kdc_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message)
         .map_err(HttpError::internal().with_msg("couldn't create KDC proxy reply").err())?;
@@ -115,11 +121,11 @@ async fn kdc_proxy(
     kdc_reply_message.to_vec().map_err(HttpError::internal().err())
 }
 
-async fn read_kdc_reply_message(connection: &mut TcpStream) -> io::Result<Vec<u8>> {
-    let len = connection.read_u32().await?;
+async fn read_kdc_reply_message<R: AsyncReadExt + Unpin>(reader: &mut R) -> io::Result<Vec<u8>> {
+    let len = reader.read_u32().await?;
     let mut buf = vec![0; (len + 4).try_into().expect("u32-to-usize")];
     buf[0..4].copy_from_slice(&(len.to_be_bytes()));
-    connection.read_exact(&mut buf[4..]).await?;
+    reader.read_exact(&mut buf[4..]).await?;
     Ok(buf)
 }
 
@@ -148,7 +154,41 @@ fn unable_to_reach_kdc_server_err(error: io::Error) -> HttpError {
 }
 
 /// Sends the Kerberos message to the specified KDC address.
-pub async fn send_krb_message(kdc_addr: &TargetAddr, message: &[u8]) -> Result<Vec<u8>, HttpError> {
+///
+/// Uses the same routing pipeline as connection forwarding:
+/// if an agent claims the KDC's domain/subnet, traffic goes through the tunnel.
+/// Falls back to direct connect only when no agent matches.
+pub async fn send_krb_message(
+    kdc_addr: &TargetAddr,
+    message: &[u8],
+    agent_tunnel_handle: Option<&crate::agent_tunnel::AgentTunnelHandle>,
+) -> Result<Vec<u8>, HttpError> {
+    // Route through agent tunnel using the SAME pipeline as connection forwarding.
+    let kdc_target = kdc_addr.to_string();
+
+    if let Some((mut stream, _agent)) = crate::agent_tunnel::routing::try_route(
+        agent_tunnel_handle,
+        None,
+        kdc_addr.host(),
+        uuid::Uuid::new_v4(),
+        &kdc_target,
+    )
+    .await
+    .map_err(|e| HttpError::bad_gateway().build(format!("KDC routing through agent tunnel failed: {e:#}")))?
+    {
+        stream.write_all(message).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to send KDC message through agent tunnel")
+                .err(),
+        )?;
+
+        return read_kdc_reply_message(&mut stream).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to read KDC reply through agent tunnel")
+                .err(),
+        );
+    }
+
     let protocol = kdc_addr.scheme();
 
     debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
