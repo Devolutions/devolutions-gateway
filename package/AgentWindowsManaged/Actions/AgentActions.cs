@@ -258,6 +258,18 @@ internal static class AgentActions
         Condition = Condition.NOT_BeingRemoved & new Condition("(UILevel >= 3 OR WIXSHARP_MANAGED_UI_HANDLE <> \"\")")
     };
 
+    private static readonly ElevatedManagedAction enrollAgentTunnel = new(
+        new Id($"CA.{nameof(enrollAgentTunnel)}"),
+        CustomActions.EnrollAgentTunnel,
+        Return.check,
+        When.Before, Step.StartServices,
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
         CustomActions.RegisterExplorerCommand
     )
@@ -330,6 +342,7 @@ internal static class AgentActions
         getInstallDirFromRegistry,
         setArpInstallLocation,
         configureFeatures,
+        enrollAgentTunnel,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

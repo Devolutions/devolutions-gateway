@@ -1,0 +1,22 @@
+services:
+  ssh-target:
+    image: lscr.io/linuxserver/openssh-server:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - USER_NAME=testuser
+      - USER_PASSWORD=testpass
+      - PASSWORD_ACCESS=true
+      - LISTEN_PORT=22
+    ports:
+      - "22:22"
+    networks:
+      agent-net:
+        ipv4_address: 10.55.0.2
+
+networks:
+  agent-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.55.0.0/24

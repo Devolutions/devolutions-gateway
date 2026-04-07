@@ -57,4 +57,12 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="VerifyReadyDlgUpdateTitle">Ready to update [ProductName]</String>
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
+                    <!-- dialogs.agentTunnel -->
+                <String Id="AgentTunnelDlgTitle">Agent Tunnel Configuration</String>
+                <String Id="AgentTunnelDlgDescription">Configure the agent tunnel to connect to a Devolutions Gateway. Leave blank to skip.</String>
+                <String Id="AgentTunnelDlgEnrollmentStringLabel">Enrollment String (from Gateway web interface):</String>
+                <String Id="AgentTunnelDlgSubnetsLabel">Advertise Subnets:</String>
+                <String Id="AgentTunnelDlgSubnetsHint">Comma-separated CIDR notation, e.g. 10.10.0.0/24, 192.168.1.0/24. Leave blank for auto-detection.</String>
+                <String Id="InstallDirDlgFolderLabel">Install [ProductName] to:</String>
+                <String Id="InstallDirDlgChange">Change...</String>
                     </WixLocalization>
