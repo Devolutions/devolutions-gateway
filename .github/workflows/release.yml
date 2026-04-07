@@ -380,7 +380,7 @@ jobs:
             @{ OS = "linux"; Arch = "x86_64"; Extension = "" },
             @{ OS = "linux"; Arch = "arm64"; Extension = "" },
             @{ OS = "macos"; Arch = "x86_64"; Extension = "" },
-            @{ OS = "macos"; Arch = "arm64"; Extension = "" }
+            @{ OS = "macos"; Arch = "arm64"; Extension = "" },
           )
 
           foreach ($Platform in $Platforms) {
@@ -417,6 +417,17 @@ jobs:
             } else {
               Write-Warning "Could not find binary for $OS $Arch"
             }
+          }
+
+          # Rename macOS universal binary to follow the naming convention (without version).
+          Get-ChildItem -Recurse -Filter "jetsocat_*_${Version}_universal" -File | ForEach-Object {
+            Rename-Item -Path $_.FullName -NewName "jetsocat-macos-universal"
+          }
+
+          # Rename Windows PDB files to follow the naming convention (without version).
+          Get-ChildItem -Recurse -Filter "jetsocat_Windows_${Version}_*.pdb" -File | ForEach-Object {
+            $Arch = $_.BaseName -replace "jetsocat_Windows_${Version}_", ""
+            Rename-Item -Path $_.FullName -NewName "jetsocat-windows-$Arch.pdb"
           }
         shell: pwsh
 
