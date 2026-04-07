@@ -367,8 +367,6 @@ jobs:
 
       - name: Create jetsocat ZIP files for winget
         run: |
-          Set-PSDebug -Trace 1
-
           $Version = "${{ needs.preflight.outputs.version }}"
           $ZipFolder = "jetsocat-zips"
           New-Item -ItemType Directory -Path $ZipFolder -Force
