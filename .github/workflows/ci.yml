@@ -379,7 +379,7 @@ jobs:
 
     steps:
       - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v7
         with:
           name: jetsocat
           pattern: jetsocat-*
@@ -437,12 +437,12 @@ jobs:
           path: ./.github/workflows
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20.x'
           cache: 'pnpm'
@@ -678,7 +678,7 @@ jobs:
 
       - name: Add msbuild to PATH
         if: ${{ matrix.os == 'windows' }}
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Package
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -730,7 +730,7 @@ jobs:
 
     steps:
       - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v7
         with:
           name: devolutions-gateway
           pattern: devolutions-gateway-*
@@ -748,7 +748,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Build
         run: ./dotnet/DesktopAgent/build.ps1
@@ -896,7 +896,7 @@ jobs:
 
       - name: Add msbuild to PATH
         if: ${{ matrix.os == 'windows' }}
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Build
         run: |
@@ -978,7 +978,7 @@ jobs:
 
     steps:
       - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v7
         with:
           name: devolutions-agent
           pattern: devolutions-agent-*
