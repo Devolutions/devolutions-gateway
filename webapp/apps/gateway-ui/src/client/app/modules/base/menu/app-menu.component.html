@@ -34,7 +34,8 @@
     <gateway-menu-list-item *ngFor="let menuKVP of mainMenus | keyvalue: asIsOrder"
                             [label]="menuKVP.value.label"
                             [icon]="menuKVP.value.icon"
-                            [iconOnly]="isMenuSlim"></gateway-menu-list-item>
+                            [iconOnly]="isMenuSlim"
+                            (click)="menuKVP.value.executeAction()"></gateway-menu-list-item>
 
     <gateway-menu-list-active-sessions [isMenuSlim]="isMenuSlim">
     </gateway-menu-list-active-sessions>

@@ -1,0 +1,158 @@
+<div class="agent-page">
+  <!-- Header -->
+  <div class="page-header">
+    <div class="header-title-row">
+      <h2>Agents</h2>
+      <div class="header-actions">
+        <button class="btn btn-outlined" (click)="loadAgents()">
+          <svg class="btn-icon" viewBox="0 0 16 16" fill="none"><path d="M13.5 8A5.5 5.5 0 1 1 8 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 1v3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Refresh
+        </button>
+        <button class="btn btn-primary" (click)="showEnrollment = !showEnrollment">
+          <svg class="btn-icon" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Enroll Agent
+        </button>
+      </div>
+    </div>
+    <p class="page-subtitle">Manage tunnel agents that provide access to private networks.</p>
+  </div>
+
+  <!-- Enrollment Panel (collapsible) -->
+  <div class="enrollment-panel" *ngIf="showEnrollment">
+    <div class="panel-header">
+      <span class="panel-title">Enroll New Agent</span>
+      <button class="btn-icon-only" (click)="showEnrollment = false">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div class="enrollment-form-grid">
+      <div class="form-field">
+        <label for="apiBaseUrl">Gateway URL</label>
+        <input id="apiBaseUrl" type="text" pInputText [(ngModel)]="apiBaseUrl" placeholder="https://gateway.company.com" />
+      </div>
+
+      <div class="form-field">
+        <label for="quicHost">QUIC Host</label>
+        <input id="quicHost" type="text" pInputText [(ngModel)]="quicHost" placeholder="gateway.company.com" />
+      </div>
+
+      <div class="form-field">
+        <label for="agentName">Agent Name</label>
+        <input id="agentName" type="text" pInputText [(ngModel)]="agentName" placeholder="e.g. site-toronto" />
+      </div>
+
+      <div class="form-field">
+        <label for="tokenLifetime">Token Lifetime (s)</label>
+        <input id="tokenLifetime" type="number" pInputText [(ngModel)]="tokenLifetime" />
+      </div>
+    </div>
+
+    <div class="enrollment-actions">
+      <button class="btn btn-primary" [disabled]="generating || !apiBaseUrl" (click)="generateEnrollmentString()">
+        <svg class="btn-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2v4.5L5.5 8M8 2a6 6 0 1 1-5.6 3.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><rect x="6" y="9" width="4" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 9V7.5a1 1 0 0 1 2 0V9" stroke="currentColor" stroke-width="1.2"/></svg>
+        {{ generating ? 'Generating...' : 'Generate Enrollment Command' }}
+      </button>
+    </div>
+
+    <div *ngIf="enrollmentError" class="enrollment-error">
+      <svg class="error-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      {{ enrollmentError }}
+    </div>
+
+    <div *ngIf="enrollmentResult" class="enrollment-result">
+      <div class="result-block">
+        <div class="result-label">
+          <span>Enrollment String</span>
+          <span class="result-hint">(paste into MSI installer or agent CLI)</span>
+          <button class="btn-text" (click)="copyToClipboard(enrollmentResult.enrollment_string)">
+            <svg class="btn-icon-sm" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M11 3H4.5A1.5 1.5 0 0 0 3 4.5V11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Copy
+          </button>
+        </div>
+        <code class="code-block">{{ enrollmentResult.enrollment_string }}</code>
+      </div>
+
+      <div class="result-meta">
+        <span class="meta-item">
+          <svg class="meta-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="9" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/><circle cx="5" cy="5" r="0.8" fill="currentColor"/><circle cx="5" cy="11" r="0.8" fill="currentColor"/></svg>
+          {{ enrollmentResult.quic_endpoint }}
+        </span>
+        <span class="meta-item">
+          <svg class="meta-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.5V8L10.5 9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          Expires {{ humanizeExpiry(enrollmentResult.expires_at_unix) }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent List -->
+  <div class="agent-list">
+    <div *ngIf="loading" class="loading-state">
+      <svg class="spinner" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2.5" opacity="0.2"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+      <span>Loading agents...</span>
+    </div>
+
+    <div *ngIf="!loading && agents.length === 0" class="empty-state">
+      <svg class="empty-icon" viewBox="0 0 48 48" fill="none">
+        <rect x="8" y="14" width="32" height="10" rx="2" stroke="currentColor" stroke-width="2"/>
+        <rect x="8" y="28" width="32" height="10" rx="2" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/>
+        <circle cx="14" cy="19" r="1.5" fill="currentColor"/>
+        <circle cx="14" cy="33" r="1.5" fill="currentColor" opacity="0.4"/>
+        <path d="M24 6L28 12H20L24 6Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+      </svg>
+      <span class="empty-title">No agents connected</span>
+      <span class="empty-desc">Deploy an agent in your private network and enroll it to get started.</span>
+    </div>
+
+    <div *ngFor="let agent of agents" class="agent-row">
+      <div class="agent-identity">
+        <div class="agent-indicator" [class.online]="agent.is_online" [class.offline]="!agent.is_online"></div>
+        <div class="agent-info">
+          <span class="agent-name">{{ agent.name }}</span>
+          <span class="agent-id">{{ agent.agent_id }}</span>
+        </div>
+      </div>
+
+      <div class="agent-routes">
+        <div class="route-group" *ngIf="agent.subnets.length > 0">
+          <span class="route-label">Subnets</span>
+          <div class="tag-list">
+            <span class="tag subnet-tag" *ngFor="let s of agent.subnets">{{ s }}</span>
+          </div>
+        </div>
+        <div class="route-group" *ngIf="agent.domains && agent.domains.length > 0">
+          <span class="route-label">Domains</span>
+          <div class="tag-list">
+            <span class="tag domain-tag" *ngFor="let d of agent.domains">
+              {{ d.domain }}
+              <span class="auto-indicator" *ngIf="d.auto_detected" title="Auto-detected">auto</span>
+            </span>
+          </div>
+        </div>
+        <div class="route-group no-routes" *ngIf="agent.subnets.length === 0 && (!agent.domains || agent.domains.length === 0)">
+          <span class="route-label">No routes configured</span>
+        </div>
+      </div>
+
+      <div class="agent-meta">
+        <span class="meta-badge" [class.online]="agent.is_online" [class.offline]="!agent.is_online">
+          {{ agent.is_online ? 'Online' : 'Offline' }}
+        </span>
+        <span class="last-seen">{{ humanizeLastSeen(agent.last_seen_ms) }}</span>
+      </div>
+
+      <div class="agent-actions">
+        <button *ngIf="agentToDelete?.agent_id !== agent.agent_id"
+                class="btn-icon-only btn-danger" (click)="confirmDelete(agent)">
+          <svg viewBox="0 0 16 16" fill="none"><path d="M3 4.5h10M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M5 4.5l.5 8.5h5l.5-8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span *ngIf="agentToDelete?.agent_id === agent.agent_id" class="delete-confirm">
+          <span>Delete?</span>
+          <button class="btn-text btn-danger-text" (click)="deleteAgent()">Yes</button>
+          <button class="btn-text" (click)="cancelDelete()">No</button>
+        </span>
+      </div>
+    </div>
+  </div>
+</div>

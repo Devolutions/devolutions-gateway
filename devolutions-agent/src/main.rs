@@ -60,6 +60,7 @@ struct UpCommand {
     enrollment_token: String,
     agent_name: String,
     advertise_subnets: Vec<String>,
+    quic_endpoint_override: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -69,6 +70,8 @@ struct EnrollmentStringPayload {
     enrollment_token: String,
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    quic_endpoint: Option<String>,
 }
 
 fn agent_service_main(
@@ -199,11 +202,14 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         index += 1;
     }
 
+    let mut quic_endpoint_override = None;
+
     if let Some(enrollment_string) = enrollment_string {
         let payload = parse_enrollment_string(&enrollment_string)?;
 
         gateway_url.get_or_insert(payload.api_base_url);
         enrollment_token.get_or_insert(payload.enrollment_token);
+        quic_endpoint_override = payload.quic_endpoint;
 
         if agent_name.is_none() {
             agent_name = payload.name;
@@ -215,6 +221,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         enrollment_token: enrollment_token.context("missing required --token")?,
         agent_name: agent_name.context("missing required --name")?,
         advertise_subnets,
+        quic_endpoint_override,
     })
 }
 
@@ -306,6 +313,7 @@ fn main() {
                         &command.enrollment_token,
                         &command.agent_name,
                         command.advertise_subnets,
+                        command.quic_endpoint_override,
                     )
                     .await
                 });

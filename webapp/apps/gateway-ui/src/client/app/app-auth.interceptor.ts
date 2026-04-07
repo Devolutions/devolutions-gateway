@@ -18,6 +18,9 @@ export class AuthInterceptor implements HttpInterceptor {
     // If the request is for the app token, we don't need to add the Authorization header
     const goToNext = [];
     goToNext.push(req.url.endsWith(this.appTokenUrl));
+    // Requests that already carry their own Authorization header (e.g. agent tunnel
+    // endpoints using scope tokens) should not be overwritten by the app token.
+    goToNext.push(req.headers.has('Authorization'));
 
     // If the requesting third party host, we don't need to add the Authorization header
     try {

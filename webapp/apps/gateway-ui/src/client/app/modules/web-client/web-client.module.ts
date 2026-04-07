@@ -2,11 +2,13 @@ import { NgOptimizedImage } from '@angular/common';
 import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
+import { AgentEnrollmentComponent } from '@gateway/modules/web-client/agent-enrollment/agent-enrollment.component';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { ArdFormComponent } from '@gateway/modules/web-client/form/form-components/ard/ard-form.component';
 import { RdpFormComponent } from '@gateway/modules/web-client/form/form-components/rdp/rdp-form.component';
 import { SshFormComponent } from '@gateway/modules/web-client/form/form-components/ssh/ssh-form.component';
 import { VncFormComponent } from '@gateway/modules/web-client/form/form-components/vnc/vnc-form.component';
+import { AgentSelectorControlComponent } from './form/form-controls/agent-selector-control/agent-selector-control.component';
 import { EnableCursorControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-cursor-control/enable-cursor-control.component';
 import { EnableDisplayConfigurationControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-display-configuration-control/enable-display-configuration-control.component';
 import { KdcUrlControlComponent } from '@gateway/modules/web-client/form/form-controls/kdc-url-control/kdc-url-control.component';
@@ -52,6 +54,10 @@ const routes: Routes = [
     resolve: {
       wasmInit: WasmInitResolver,
     },
+  },
+  {
+    path: 'agents',
+    component: AgentEnrollmentComponent,
   },
 ];
 
@@ -104,6 +110,8 @@ const routes: Routes = [
     SessionToolbarComponent,
     FileControlComponent,
     NetScanComponent,
+    AgentEnrollmentComponent,
+    AgentSelectorControlComponent,
   ],
   exports: [DynamicTabComponent, WebClientFormComponent, NetScanComponent],
   providers: [],

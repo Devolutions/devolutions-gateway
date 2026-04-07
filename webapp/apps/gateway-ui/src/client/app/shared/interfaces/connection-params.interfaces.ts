@@ -8,6 +8,7 @@ export interface SessionTokenParameters {
   session_id?: string;
   krb_kdc?: string;
   krb_realm?: string;
+  agent_id?: string;
 }
 
 export interface IronRDPConnectionParameters {
@@ -25,6 +26,7 @@ export interface IronRDPConnectionParameters {
   kdcProxyUrl?: string;
   preConnectionBlob?: string;
   sessionId?: string;
+  agentId?: string;
 }
 
 export interface IronVNCConnectionParameters {
@@ -43,6 +45,7 @@ export interface IronVNCConnectionParameters {
   ultraVirtualDisplay: boolean;
   wheelSpeedFactor: number;
   sessionId?: string;
+  agentId?: string;
 }
 
 export interface IronARDConnectionParameters {
@@ -56,6 +59,7 @@ export interface IronARDConnectionParameters {
   ardQualityMode?: string;
   wheelSpeedFactor: number;
   sessionId?: string;
+  agentId?: string;
 }
 
 export interface TelnetConnectionParameters {
@@ -64,6 +68,7 @@ export interface TelnetConnectionParameters {
   gatewayAddress?: string;
   token?: string;
   sessionId?: string;
+  agentId?: string;
 }
 
 export interface SshConnectionParameters {
@@ -76,4 +81,5 @@ export interface SshConnectionParameters {
   sessionId?: string;
   privateKey?: string;
   privateKeyPassphrase?: string;
+  agentId?: string;
 }

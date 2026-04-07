@@ -197,6 +197,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
       sessionId: sessionId,
       privateKey: privateKey,
       privateKeyPassphrase: privateKeyPassphrase,
+      agentId: (formData as { agentId?: string }).agentId || undefined,
     };
     return of(connectionParameters);
   }
