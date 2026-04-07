@@ -380,7 +380,7 @@ jobs:
             @{ OS = "linux"; Arch = "x86_64"; Extension = "" },
             @{ OS = "linux"; Arch = "arm64"; Extension = "" },
             @{ OS = "macos"; Arch = "x86_64"; Extension = "" },
-            @{ OS = "macos"; Arch = "arm64"; Extension = "" },
+            @{ OS = "macos"; Arch = "arm64"; Extension = "" }
           )
 
           foreach ($Platform in $Platforms) {
