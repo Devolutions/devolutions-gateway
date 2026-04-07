@@ -1,0 +1,323 @@
+<div
+  #toolbarEl
+  class="floating-session-toolbar"
+  [class]="dockClass"
+  [class.is-dragging]="isDragging"
+  [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
+  [class.is-hidden]="isHidden"
+  [style.left.px]="toolbarMode === 'free' && freePosition ? freePosition.x : null"
+  [style.top.px]="toolbarMode === 'free' && freePosition ? freePosition.y : null"
+  [style.transform]="toolbarMode === 'free' ? 'none' : null"
+  role="toolbar"
+  aria-label="Session toolbar"
+  (mouseenter)="onToolbarMouseEnter()"
+  (mouseleave)="onToolbarMouseLeave()"
+>
+
+  <button type="button" class="toolbar-button toolbar-button-dim"
+    aria-label="Move" title="Drag to reposition"
+    (pointerdown)="onHandlePointerdown($event)">
+    <i class="dvl-icon dvl-icon-move" aria-hidden="true"></i>
+  </button>
+
+  @if (features.windowsKey) {
+    <button type="button" class="toolbar-button"
+      aria-label="Windows key" title="Send Windows key"
+      (click)="windowsKeyPress.emit()">
+      <i class="dvl-icon dvl-icon-windows" aria-hidden="true"></i>
+    </button>
+
+    <button type="button" class="toolbar-button"
+      aria-label="Session info" title="Session info">
+      <i class="dvl-icon dvl-icon-entry-SampleInformation" aria-hidden="true"></i>
+    </button>
+  }
+
+  <!-- Divider only shown when there are optional action buttons to separate -->
+  @if (features.windowsKey || features.ctrlAltDel || features.screenMode) {
+    <div class="toolbar-divider" aria-hidden="true"></div>
+  }
+
+  @if (features.ctrlAltDel) {
+    <button type="button" class="toolbar-button toolbar-button-cad"
+      aria-label="Send Ctrl+Alt+Delete" title="Send Ctrl + Alt + Del"
+      (click)="ctrlAltDelPress.emit()">
+      @if (isVertical) {
+        <span class="cad-text-vertical">Ctrl<br>+<br>Alt<br>+<br>Del</span>
+      } @else {
+        <span>Ctrl + Alt + Del</span>
+      }
+    </button>
+  }
+
+  <!-- Grouped section: Minimize / Fullscreen / Fit — three-way toggle -->
+  @if (features.screenMode) {
+    <div class="toolbar-btn-section" role="group" aria-label="Window controls group">
+      <button
+        type="button"
+        class="toolbar-button"
+        [class.toolbar-button-active]="screenMode === 'minimize'"
+        aria-label="Actual size" title="Actual size"
+        (click)="setScreenMode('minimize')">
+        <i class="dvl-icon dvl-icon-minimize" aria-hidden="true"></i>
+      </button>
+
+      <button
+        type="button"
+        class="toolbar-button"
+        [class.toolbar-button-active]="screenMode === 'fullscreen'"
+        aria-label="Full screen" title="Full screen"
+        (click)="setScreenMode('fullscreen')">
+        <i class="dvl-icon dvl-icon-fullscreen" aria-hidden="true"></i>
+      </button>
+
+      <button
+        type="button"
+        class="toolbar-button"
+        [class.toolbar-button-active]="screenMode === 'fit'"
+        aria-label="Fit to screen" title="Fit to screen"
+        (click)="setScreenMode('fit')">
+        <i class="dvl-icon dvl-icon-screen" aria-hidden="true"></i>
+      </button>
+    </div>
+  }
+
+  <button
+    type="button"
+    class="toolbar-button"
+    [class.toolbar-button-active]="showMenu"
+    aria-label="More options" title="More options"
+    aria-haspopup="true"
+    [attr.aria-expanded]="showMenu"
+    (click)="toggleMenu()">
+    <i class="dvl-icon dvl-icon-more-vert" aria-hidden="true"></i>
+  </button>
+
+  <!-- ── Dropdown menu ─────────────────────────────────────────────────────── -->
+  @if (showMenu) {
+    <div class="toolbar-dropdown" role="menu">
+      <div class="dropdown-border-overlay" aria-hidden="true"></div>
+
+      <div class="dropdown-content">
+
+        <!-- Auto-hide toolbar -->
+        <div class="dropdown-row">
+          <span class="dropdown-item-label"
+            [class.dropdown-item-label-disabled]="toolbarMode === 'free'">Auto-hide toolbar</span>
+          <button
+            class="toggle-switch"
+            [class.is-on]="autoHide"
+            type="button"
+            [attr.aria-checked]="autoHide"
+            [disabled]="toolbarMode === 'free'"
+            (click)="toggleAutoHide()">
+            <span class="toggle-thumb"></span>
+          </button>
+        </div>
+
+        <!-- White background — only shown when parent has not set [theme] -->
+        @if (!themeIsSet) {
+          <div class="dropdown-row">
+            <span class="dropdown-item-label">White background</span>
+            <button
+              class="toggle-switch"
+              [class.is-on]="whiteBackground"
+              type="button"
+              [attr.aria-checked]="whiteBackground"
+              (click)="toggleWhiteBackground()">
+              <span class="toggle-thumb"></span>
+            </button>
+          </div>
+        }
+
+        <div class="dropdown-splitter"></div>
+
+        <!-- Toolbar position — dock icons have no dvl-icon equivalent, keep SVG -->
+        <div class="dropdown-section-title">Toolbar position</div>
+        <div class="dropdown-dock-row">
+          <button class="dock-btn" [class.is-active]="toolbarPosition === 'top'"
+            type="button" aria-label="Dock top" (click)="setToolbarPosition('top')">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path [attr.d]="icons.dockTop"
+                    [attr.fill]="toolbarPosition === 'top' ? ICON_COLOR_ACTIVE : ICON_COLOR_INACTIVE" />
+            </svg>
+          </button>
+          <button class="dock-btn" [class.is-active]="toolbarPosition === 'bottom'"
+            type="button" aria-label="Dock bottom" (click)="setToolbarPosition('bottom')">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path [attr.d]="icons.dockBottom"
+                    [attr.fill]="toolbarPosition === 'bottom' ? ICON_COLOR_ACTIVE : ICON_COLOR_INACTIVE" />
+            </svg>
+          </button>
+          <button class="dock-btn" [class.is-active]="toolbarPosition === 'left'"
+            type="button" aria-label="Dock left" (click)="setToolbarPosition('left')">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path [attr.d]="icons.dockLeft"
+                    [attr.fill]="toolbarPosition === 'left' ? ICON_COLOR_ACTIVE : ICON_COLOR_INACTIVE" />
+            </svg>
+          </button>
+          <button class="dock-btn" [class.is-active]="toolbarPosition === 'right'"
+            type="button" aria-label="Dock right" (click)="setToolbarPosition('right')">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path [attr.d]="icons.dockRight"
+                    [attr.fill]="toolbarPosition === 'right' ? ICON_COLOR_ACTIVE : ICON_COLOR_INACTIVE" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="dropdown-splitter"></div>
+
+        <!-- Session Settings — only rendered for protocols that support them -->
+        @if (showSessionSettings) {
+          <div class="dropdown-section-title">Session Settings</div>
+
+          @if (features.dynamicResize) {
+            <div class="dropdown-row">
+              <span class="dropdown-item-label">Dynamic resize</span>
+              <button class="toggle-switch" [class.is-on]="dynamicResize"
+                type="button" [attr.aria-checked]="dynamicResize"
+                (click)="toggleDynamicResize()">
+                <span class="toggle-thumb"></span>
+              </button>
+            </div>
+          }
+
+          @if (features.unicodeKeyboard) {
+            <div class="dropdown-row">
+              <span class="dropdown-item-label">Unicode keyboard mode</span>
+              <button class="toggle-switch" [class.is-on]="unicodeKeyboard"
+                type="button" [attr.aria-checked]="unicodeKeyboard"
+                (click)="toggleUnicodeKeyboard()">
+                <span class="toggle-thumb"></span>
+              </button>
+            </div>
+          }
+
+          @if (features.cursorCrosshair) {
+            <div class="dropdown-row">
+              <span class="dropdown-item-label">Show cursor as crosshair</span>
+              <button class="toggle-switch" [class.is-on]="cursorCrosshair"
+                type="button" [attr.aria-checked]="cursorCrosshair"
+                (click)="toggleCursorCrosshair()">
+                <span class="toggle-thumb"></span>
+              </button>
+            </div>
+          }
+
+          @if (features.wheelSpeed && wheelSpeedControl) {
+            <div class="dropdown-slider">
+              <div class="dropdown-slider-header">
+                <span class="dropdown-item-label">{{ wheelSpeedLabel }}</span>
+                <span class="dropdown-slider-value">{{ wheelSpeed }}</span>
+              </div>
+              <input
+                #wheelSpeedSlider
+                class="dropdown-slider-input"
+                type="range"
+                [min]="wheelSpeedControl.min"
+                [max]="wheelSpeedControl.max"
+                [step]="wheelSpeedControl.step"
+                [value]="wheelSpeed"
+                (input)="onWheelSpeedInput(wheelSpeedSlider.value)"
+              />
+            </div>
+          }
+        }
+
+        <!-- Clipboard actions — only rendered when the host passes them in -->
+        @if (clipboardActionButtons.length > 0) {
+          <div class="dropdown-splitter"></div>
+          <div class="dropdown-section-title">Clipboard</div>
+          @for (btn of clipboardActionButtons; track btn.label) {
+            <button
+              type="button"
+              class="dropdown-action-btn"
+              [disabled]="!btn.enabled()"
+              [title]="btn.tooltip"
+              (click)="showMenu = false; btn.action()">
+              <i [class]="btn.icon" aria-hidden="true"></i>
+              <span>{{ btn.label }}</span>
+            </button>
+          }
+        }
+
+      </div>
+    </div>
+  }
+
+  <div class="toolbar-divider" aria-hidden="true"></div>
+
+  <button type="button" class="toolbar-button toolbar-button-close"
+    aria-label="Close session" title="Close session"
+    (click)="onCloseSession()">
+    <i class="dvl-icon dvl-icon-close" aria-hidden="true"></i>
+  </button>
+
+</div>
+
+<!-- Auto-hide indicator pill — shown when toolbar is hidden and docked, hover to recall -->
+@if (isHidden && toolbarMode === 'docked') {
+  <div
+    class="autohide-indicator"
+    [class.autohide-indicator-top]="toolbarPosition === 'top'"
+    [class.autohide-indicator-bottom]="toolbarPosition === 'bottom'"
+    [class.autohide-indicator-left]="toolbarPosition === 'left'"
+    [class.autohide-indicator-right]="toolbarPosition === 'right'"
+    [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
+    title="Hover to show toolbar"
+    aria-hidden="true"
+    (mouseenter)="onToolbarMouseEnter()"
+  >
+    <div class="autohide-indicator-border" aria-hidden="true"></div>
+  </div>
+}
+
+<!-- ── Drag dock targets ─────────────────────────────────────────────────────
+  Shown during drag (after 300ms delay). The toolbar's center point is tested
+  against each target's bounding rect; the matching one is highlighted.
+  pointer-events: none — detection is coordinate-based, not DOM hover.        -->
+@if (showDropzones) {
+  <!-- Top dock target — horizontal pill, top center -->
+  <div class="drag-dropzone drag-dropzone-top"
+    [class.drag-dropzone-active]="activeDropzone === 'top'"
+    [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
+    aria-hidden="true">
+    <div class="drag-dropzone-inner">
+      <span class="drag-dropzone-label">Dock top</span>
+    </div>
+    <div class="drag-dropzone-overlay"></div>
+  </div>
+
+  <!-- Bottom dock target — horizontal pill, bottom center -->
+  <div class="drag-dropzone drag-dropzone-bottom"
+    [class.drag-dropzone-active]="activeDropzone === 'bottom'"
+    [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
+    aria-hidden="true">
+    <div class="drag-dropzone-inner">
+      <span class="drag-dropzone-label">Dock bottom</span>
+    </div>
+    <div class="drag-dropzone-overlay"></div>
+  </div>
+
+  <!-- Left dock target — vertical pill, left center -->
+  <div class="drag-dropzone drag-dropzone-left"
+    [class.drag-dropzone-active]="activeDropzone === 'left'"
+    [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
+    aria-hidden="true">
+    <div class="drag-dropzone-inner">
+      <span class="drag-dropzone-label">Dock left</span>
+    </div>
+    <div class="drag-dropzone-overlay"></div>
+  </div>
+
+  <!-- Right dock target — vertical pill, right center -->
+  <div class="drag-dropzone drag-dropzone-right"
+    [class.drag-dropzone-active]="activeDropzone === 'right'"
+    [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
+    aria-hidden="true">
+    <div class="drag-dropzone-inner">
+      <span class="drag-dropzone-label">Dock right</span>
+    </div>
+    <div class="drag-dropzone-overlay"></div>
+  </div>
+}

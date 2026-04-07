@@ -6,14 +6,8 @@
   background: #F9F9F9 url('../../../../../assets/images/session_background.png');
 }
 
-:host ::ng-deep .separator {
-  border: solid 1px var(--border-secondary-color);
-  width: 0;
-  height: 14px;
-  margin: 0 8px;
-}
-
 #web-telnet-terminal-app {
+  position: relative;
   flex-grow: 1;
   display: flex;
   flex-direction: column;
@@ -29,7 +23,11 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .loading-info {
@@ -37,15 +35,30 @@
   place-items: center;
   height: 100vh;
   width: 100vw;
+  min-width: 0;
+  min-height: 0;
 }
 
 web-telnet-gui {
   height: 100vh;
   width: 100vw;
+  min-width: 0;
+  min-height: 0;
 }
 
 .session-form {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   height: 100%;
 }
+
+.toolbar-overlay-anchor {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none; // anchor is transparent — the toolbar children opt-in via pointer-events: auto
+}
+

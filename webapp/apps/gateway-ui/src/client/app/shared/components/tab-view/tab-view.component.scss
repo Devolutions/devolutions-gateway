@@ -16,7 +16,27 @@
   background: #F9F9F9 url('../../../../../assets/images/session_background.png');
 }
 
+:host ::ng-deep .p-tabs {
+  flex: 1;          // fill tabview-container (flex column parent)
+  min-height: 0;    // prevent flex overflow blowout
+  display: flex;
+  flex-direction: column;
+}
+
 :host ::ng-deep .p-tabs .p-tabpanels {
+  flex: 1;
+  min-height: 0;
   padding: 0;
+  overflow: auto;
+  background: unset;
+  display: flex;
+  flex-direction: column;
+}
+
+:host ::ng-deep .p-tabs .p-tabpanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 

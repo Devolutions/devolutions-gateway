@@ -1,28 +1,48 @@
-<div #sessionRdpContainer>
-  <div *ngIf="currentStatus.isDisabled" class="session-form">
-    <web-client-form
-      [webSessionId]="webSessionId"
-      [inputFormData]="formData"
-      [sessionTerminationMessage]="sessionTerminationMessage"
-      [isFormExists]="true"></web-client-form>
-  </div>
-
-  <session-toolbar
-    [sessionContainerParent]="sessionContainerElement"
-    [leftButtons]="leftToolbarButtons"
-    [middleButtons]="middleToolbarButtons"
-    [middleToggleButtons]="middleToolbarToggleButtons"
-    [rightButtons]="rightToolbarButtons"
-    [checkboxes]="checkboxes"
-    [clipboardActionButtons]="clipboardActionButtons">
-  </session-toolbar>
-
-  <div class="loading-info-container" *ngIf="loading">
-    <div class="loading-info">
-      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
+<div #sessionRdpContainer class="session-rdp-container" style="position: relative;">
+  @if (currentStatus.isDisabled) {
+    <div class="session-form">
+      <web-client-form
+        [webSessionId]="webSessionId"
+        [inputFormData]="formData"
+        [sessionTerminationMessage]="sessionTerminationMessage"
+        [isFormExists]="true"></web-client-form>
     </div>
-  </div>
+  }
+
+  @if (loading) {
+    <div class="loading-info-container">
+      <div class="loading-info">
+        @if (!hideSpinnerOnly) {
+          <p-progressSpinner></p-progressSpinner>
+        }
+      </div>
+    </div>
+  }
 
   <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true" [module]="backendRef"></iron-remote-desktop>
+
+  <!-- Floating toolbar — only rendered once the session is live.
+       Keeping it out of the DOM during the initial connect and any
+       reconnect cycle prevents the toolbar from being positioned
+       against a wider ancestor while the tab panel is still being
+       laid out (which caused it to jump to the viewport center). -->
+  @if (!loading && !currentStatus.isDisabled) {
+    <div class="toolbar-overlay-anchor">
+      <floating-session-toolbar
+        [features]="toolbarFeatures"
+        [initialDynamicResize]="dynamicResizeEnabled"
+        [initialUnicodeKeyboard]="useUnicodeKeyboard"
+        [initialCursorCrosshair]="cursorOverrideActive"
+        [clipboardActionButtons]="clipboardActionButtons"
+        (windowsKeyPress)="sendWindowsKey()"
+        (ctrlAltDelPress)="sendCtrlAltDel()"
+        (sessionClose)="startTerminationProcess()"
+        (screenModeChange)="onScreenModeChange($event)"
+        (dynamicResizeChange)="onDynamicResizeChange($event)"
+        (unicodeKeyboardChange)="onUnicodeKeyboardChange($event)"
+        (cursorCrosshairChange)="onCursorCrosshairChange($event)">
+      </floating-session-toolbar>
+    </div>
+  }
 
 </div>

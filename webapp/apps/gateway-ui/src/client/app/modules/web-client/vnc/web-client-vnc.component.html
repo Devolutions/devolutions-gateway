@@ -1,29 +1,44 @@
-<div #sessionVncContainer>
-  <div *ngIf="currentStatus.isDisabled" class="session-form">
-    <web-client-form
-      [webSessionId]="webSessionId"
-      [inputFormData]="formData"
-      [sessionTerminationMessage]="sessionTerminationMessage"
-      [isFormExists]="true"></web-client-form>
-  </div>
-
-  <session-toolbar
-    [sessionContainerParent]="sessionContainerElement"
-    [leftButtons]="leftToolbarButtons"
-    [middleButtons]="middleToolbarButtons"
-    [middleToggleButtons]="middleToolbarToggleButtons"
-    [rightButtons]="rightToolbarButtons"
-    [checkboxes]="checkboxes"
-    [sliders]="sliders"
-    [clipboardActionButtons]="clipboardActionButtons">
-  </session-toolbar>
-
-  <div class="loading-info-container" *ngIf="loading">
-    <div class="loading-info">
-      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
+<div #sessionVncContainer class="sessionVncContainer">
+  @if (currentStatus.isDisabled) {
+    <div class="session-form">
+      <web-client-form
+        [webSessionId]="webSessionId"
+        [inputFormData]="formData"
+        [sessionTerminationMessage]="sessionTerminationMessage"
+        [isFormExists]="true"></web-client-form>
     </div>
-  </div>
+  }
+
+  @if (loading) {
+    <div class="loading-info-container">
+      <div class="loading-info">
+        @if (!hideSpinnerOnly) {
+          <p-progressSpinner></p-progressSpinner>
+        }
+      </div>
+    </div>
+  }
 
   <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true" [module]="backendRef"></iron-remote-desktop>
+
+  @if (!loading && !currentStatus.isDisabled) {
+    <div class="toolbar-overlay-anchor">
+      <floating-session-toolbar
+        [features]="toolbarFeatures"
+        [initialDynamicResize]="dynamicResizeEnabled"
+        [initialCursorCrosshair]="cursorOverrideActive"
+        [initialWheelSpeed]="wheelSpeed"
+        [wheelSpeedControl]="wheelSpeedControl"
+        [clipboardActionButtons]="clipboardActionButtons"
+        (windowsKeyPress)="sendWindowsKey()"
+        (ctrlAltDelPress)="sendCtrlAltDel()"
+        (sessionClose)="startTerminationProcess()"
+        (screenModeChange)="onScreenModeChange($event)"
+        (dynamicResizeChange)="onDynamicResizeChange($event)"
+        (cursorCrosshairChange)="onCursorCrosshairChange($event)"
+        (wheelSpeedChange)="onWheelSpeedChange($event)">
+      </floating-session-toolbar>
+    </div>
+  }
 
 </div>

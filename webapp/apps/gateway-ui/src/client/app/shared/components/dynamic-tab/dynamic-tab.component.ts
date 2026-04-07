@@ -5,8 +5,10 @@ import {
   ElementRef,
   EventEmitter,
   Input,
+  OnChanges,
   OnDestroy,
   Output,
+  SimpleChanges,
   ViewChild,
   ViewContainerRef,
 } from '@angular/core';
@@ -28,7 +30,7 @@ import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss'],
 })
-export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
+export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements OnChanges, AfterViewInit, OnDestroy {
   @Input() webSessionTab: WebSession<T>;
   @Input() sessionsContainerElement: ElementRef;
 
@@ -45,6 +47,17 @@ export class DynamicTabComponent<T extends SessionType> extends BaseComponent im
   }
 
   ngAfterViewInit(): void {
+    this.initializeDynamicComponent();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (!changes.webSessionTab || !this.container) {
+      return;
+    }
+
+    // Failed-session retries replace the session object in-place. If the old
+    // componentRef was destroyed during updateSession(), this hook recreates the
+    // protocol component for the updated session/tab.
     this.initializeDynamicComponent();
   }
 

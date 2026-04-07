@@ -1,0 +1,80 @@
+// _indicator.scss
+// ── Auto-hide indicator pill ──────────────────────────────────────────────────
+// Small edge-anchored pill shown when the toolbar is hidden (auto-hide mode).
+// Hovering it calls onToolbarMouseEnter() to bring the toolbar back.
+
+.autohide-indicator {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 21;
+  background: var(--indicator-bg);
+  box-shadow: var(--toolbar-shadow);
+  transition: background-color 150ms ease;
+
+  &:hover {
+    background: var(--indicator-hover-bg);
+  }
+
+  // Inset border overlay
+  .autohide-indicator-border {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 1px solid var(--indicator-border-color);
+  }
+
+  // ── Position variants ───────────────────────────────────────────────────
+  &.autohide-indicator-top {
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 6px;
+    border-radius: 0 0 8px 8px;
+
+    .autohide-indicator-border { border-radius: 0 0 8px 8px; }
+  }
+
+  &.autohide-indicator-bottom {
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 6px;
+    border-radius: 8px 8px 0 0;
+
+    .autohide-indicator-border { border-radius: 8px 8px 0 0; }
+  }
+
+  &.autohide-indicator-left {
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 80px;
+    border-radius: 0 8px 8px 0;
+
+    .autohide-indicator-border { border-radius: 0 8px 8px 0; }
+  }
+
+  &.autohide-indicator-right {
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 80px;
+    border-radius: 8px 0 0 8px;
+
+    .autohide-indicator-border { border-radius: 8px 0 0 8px; }
+  }
+
+  // ── Light theme ───────────────────────────────────────────────────────────
+  &.theme-light {
+    --indicator-bg:           #ffffff;
+    --indicator-hover-bg:     #e6f2ff;
+    --indicator-border-color: #f2f2f2;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06), inset 0 0 0 1px #f2f2f2;
+  }
+}
+

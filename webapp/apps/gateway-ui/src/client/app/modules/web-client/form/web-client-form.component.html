@@ -12,12 +12,14 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          <p-messages
-            *ngIf="messages.length > 0"
-            [escape]="false"
-            [closable]="false"
-            [value]="messages"
-          ></p-messages>
+          @for (msg of messages; track msg.summary) {
+            <p-message [severity]="$any(msg.severity)" [escape]="false" [closable]="false">
+              <span class="msg-summary">{{ msg.summary }}</span>
+              @if (msg.detail) {
+                <div class="msg-detail" [innerHTML]="msg.detail"></div>
+              }
+            </p-message>
+          }
         </div>
         <div class="box-content grid nomargin nopad">
           <div class="col-4 gateway-form-group">

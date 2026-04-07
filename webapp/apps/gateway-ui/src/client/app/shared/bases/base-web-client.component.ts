@@ -22,7 +22,6 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     isDisabled: false,
     isDisabledByUser: false,
   };
-
   protected constructor(
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     protected analyticService: AnalyticService,
@@ -31,6 +30,9 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
   }
 
   abstract removeWebClientGuiElement(): void;
+
+
+  // ── Session lifecycle helpers ──────────────────────────────────────────────
 
   //For translation 'ConnectionSuccessful
   protected webClientConnectionSuccess(message = 'Connection successful'): void {
@@ -57,6 +59,15 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     if (this.analyticHandle) {
       this.analyticService.sendCloseEvent(this.analyticHandle);
     }
+  }
+
+  protected getGatewayWebSocketUrl(baseUrl: string, sessionId?: string): string {
+    const normalizedBasePath = baseUrl.replace(/\/+$/, '');
+    const path = sessionId ? `${normalizedBasePath}/${sessionId}` : normalizedBasePath;
+    const gatewayUrl: URL = new URL(path, window.location.href);
+
+    gatewayUrl.protocol = gatewayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    return gatewayUrl.toString();
   }
 
   protected abstract getProtocol(): ProtocolString;

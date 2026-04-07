@@ -11,9 +11,13 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { IronError, SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
 import { Backend, displayControl, kdcProxyUrl, preConnectionBlob, RdpFile } from '@devolutions/iron-remote-desktop-rdp';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
+import {
+  ScreenMode,
+  ToolbarFeatures,
+} from '@shared/components/floating-session-toolbar/floating-session-toolbar.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
@@ -33,10 +37,8 @@ import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { ActivatedRoute } from '@angular/router';
 import { DVL_RDP_ICON, DVL_WARNING_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { NavigationService } from '@shared/services/navigation.service';
-import { UAParser } from 'ua-parser-js';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -53,7 +55,7 @@ enum UserIronRdpErrorKind {
   styleUrls: ['web-client-rdp.component.scss'],
   providers: [MessageService],
 })
-export class WebClientRdpComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientRdpComponent extends DesktopWebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;
   @Input() sessionsContainerElement: ElementRef;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
@@ -73,127 +75,20 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
 
-  saveRemoteClipboardButtonEnabled = false;
-
   rdpConfig: string | null;
 
-  leftToolbarButtons = [
-    {
-      label: 'Start',
-      icon: 'dvl-icon dvl-icon-windows',
-      action: () => this.sendWindowsKey(),
-    },
-    {
-      label: 'Ctrl+Alt+Del',
-      icon: 'dvl-icon dvl-icon-admin',
-      action: () => this.sendCtrlAltDel(),
-    },
-  ];
-
-  middleToolbarButtons = [
-    {
-      label: 'Full Screen',
-      icon: 'dvl-icon dvl-icon-fullscreen',
-      action: () => this.toggleFullscreen(),
-    },
-    {
-      label: 'Fit to Screen',
-      icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(ScreenScale.Fit),
-    },
-    {
-      label: 'Actual Size',
-      icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(ScreenScale.Real),
-    },
-  ];
-
-  middleToolbarToggleButtons = [
-    {
-      label: 'Toggle Cursor Kind',
-      icon: 'dvl-icon dvl-icon-cursor',
-      action: () => this.toggleCursorKind(),
-      isActive: () => !this.cursorOverrideActive,
-    },
-  ];
-
-  rightToolbarButtons = [
-    {
-      label: 'Close Session',
-      icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess(),
-    },
-  ];
-
-  checkboxes = [
-    {
-      inputId: 'unicodeKeyboardMode',
-      label: 'Unicode Keyboard Mode',
-      value: this.useUnicodeKeyboard,
-      onChange: () => {
-        this.useUnicodeKeyboard = !this.useUnicodeKeyboard;
-        this.setKeyboardUnicodeMode(this.useUnicodeKeyboard);
-      },
-      enabled: () => true,
-    },
-    {
-      inputId: 'dynamicResize',
-      label: 'Dynamic Resize',
-      value: this.dynamicResizeEnabled,
-      onChange: () => this.toggleDynamicResize(),
-      enabled: () => this.dynamicResizeSupported,
-    },
-  ];
-
-  clipboardActionButtons: {
-    label: string;
-    tooltip: string;
-    icon: string;
-    action: () => Promise<void>;
-    enabled: () => boolean;
-  }[] = [];
-
-  private setupClipboardHandling(): void {
-    // Clipboard API is available only in secure contexts (HTTPS).
-    if (!window.isSecureContext) {
-      return;
-    }
-
-    let autoClipboardMode: boolean;
-
-    // If the user connects to the session via URL.
-    if (this.formData === undefined) {
-      autoClipboardMode = new UAParser().getEngine().name === 'Blink';
-    } else autoClipboardMode = this.formData.autoClipboard;
-
-    if (autoClipboardMode) {
-      return;
-    }
-
-    // We don't check for clipboard write support, as all recent browser versions support it.
-    this.clipboardActionButtons.push({
-      label: 'Save Clipboard',
-      tooltip: 'Copy received clipboard content to your local clipboard.',
-      icon: 'dvl-icon dvl-icon-save',
-      action: () => this.saveRemoteClipboard(),
-      enabled: () => this.saveRemoteClipboardButtonEnabled,
-    });
-
-    // Check if the browser supports reading local clipboard.
-    if (navigator.clipboard.readText) {
-      this.clipboardActionButtons.push({
-        label: 'Send Clipboard',
-        tooltip: 'Send your local clipboard content to the remote server.',
-        icon: 'dvl-icon dvl-icon-send',
-        action: () => this.sendClipboard(),
-        enabled: () => true,
-      });
-    }
-  }
+  /** Feature flags passed to the floating toolbar — enables all RDP-specific controls. */
+  readonly toolbarFeatures: ToolbarFeatures = {
+    windowsKey: true,
+    ctrlAltDel: true,
+    screenMode: true,
+    dynamicResize: true,
+    unicodeKeyboard: true,
+    cursorCrosshair: true,
+  };
 
   protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;
-  private remoteClient: UserInteraction;
 
   private componentResizeObserverDisconnect?: () => void;
   private dynamicComponentResizeSubscription?: Subscription;
@@ -219,8 +114,10 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-    this.setupClipboardHandling();
     this.setRdpConfig();
+    if (this.rdpConfig) {
+      this.setupClipboardHandling();
+    }
     // Navigate to /session route to clear query params.
     this.navigation.navigateToNewSession().then(noop);
   }
@@ -275,27 +172,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     this.remoteClient.setKeyboardUnicodeMode(useUnicode);
   }
 
-  async saveRemoteClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.saveRemoteClipboardData();
-
-      super.webClientSuccess('Clipboard content has been copied to your clipboard!');
-      this.saveRemoteClipboardButtonEnabled = false;
-    } catch (err) {
-      this.handleSessionError(err);
-    }
-  }
-
-  async sendClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.sendClipboardData();
-
-      super.webClientSuccess('Clipboard content has been sent to the remote server!');
-    } catch (err) {
-      this.handleSessionError(err);
-    }
-  }
-
   toggleCursorKind(): void {
     if (this.cursorOverrideActive) {
       this.remoteClient.setCursorStyleOverride(null);
@@ -319,14 +195,49 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       this.dynamicComponentResizeSubscription = this.componentResizeService.resize$
         .pipe(debounceTime(RESIZE_DEBOUNCE_TIME))
         .subscribe(({ width, height }) => {
-          if (!this.isFullScreenMode) {
-            height -= WebSession.TOOLBAR_SIZE;
-          }
+          // Floating toolbar is an overlay — it does not consume layout space,
+          // so the full container dimensions are passed directly to the client.
           this.remoteClient.resize(width, height);
         });
     } else {
       this.dynamicComponentResizeSubscription?.unsubscribe();
       this.componentResizeObserverDisconnect?.();
+    }
+  }
+
+  // ── Floating toolbar output handlers ─────────────────────────────────────
+  // Each method maps a toolbar event to the existing RDP action, keeping all
+  // protocol logic in this component and the toolbar presentational-only.
+
+  onScreenModeChange(mode: ScreenMode): void {
+    switch (mode) {
+      case 'fullscreen':
+        this.toggleFullscreen();
+        break;
+      case 'fit':
+        this.scaleTo(ScreenScale.Fit);
+        break;
+      case 'minimize':
+        this.scaleTo(ScreenScale.Real);
+        break;
+    }
+  }
+
+  onDynamicResizeChange(enabled: boolean): void {
+    if (enabled !== this.dynamicResizeEnabled) {
+      this.toggleDynamicResize();
+    }
+  }
+
+  onUnicodeKeyboardChange(enabled: boolean): void {
+    this.useUnicodeKeyboard = enabled;
+    this.setKeyboardUnicodeMode(enabled);
+  }
+
+  onCursorCrosshairChange(enabled: boolean): void {
+    // cursorCrosshair (toolbar) === cursorOverrideActive (RDP): both true = crosshair on
+    if (enabled !== this.cursorOverrideActive) {
+      this.toggleCursorKind();
     }
   }
 
@@ -393,14 +304,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   private handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
-
-    const sessionContainerElement = this.sessionContainerElement.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
-    }
-
+    // The floating toolbar is position:absolute and needs no DOM manipulation
+    // when exiting fullscreen — the legacy #sessionToolbar querySelector is gone.
     this.scaleTo(ScreenScale.Fit);
   }
 
@@ -419,13 +324,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
-    // If the user connects to the session via URL.
-    if (this.formData === undefined) {
-      const autoClipboardMode = new UAParser().getEngine().name === 'Blink';
-      this.remoteClient.setEnableAutoClipboard(autoClipboardMode);
-    } else if (this.formData.autoClipboard !== true) {
-      this.remoteClient.setEnableAutoClipboard(false);
-    }
+    this.remoteClient.setEnableAutoClipboard(this.isAutoClipboardMode(this.formData?.autoClipboard));
 
     // Register callbacks for events.
     this.remoteClient.onWarningCallback((data: string) => {
@@ -465,6 +364,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
       map((currentWebSession) => {
         this.formData = currentWebSession.data as RdpFormDataInput;
+        this.setupClipboardHandling(this.formData.autoClipboard);
       }),
     );
   }
@@ -584,16 +484,27 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
     const config = configBuilder.build();
 
-    from(this.remoteClient.connect(config))
+    // Guard against synchronous throws from the underlying WASM library before
+    // the promise is even returned (observed in some auth-failure edge cases).
+    let connectPromise: Promise<unknown>;
+    try {
+      connectPromise = this.remoteClient.connect(config);
+    } catch (syncErr) {
+      this.handleSessionTerminatedWithError(syncErr);
+      return;
+    }
+
+    from(connectPromise)
       .pipe(
         takeUntil(this.destroyed$),
         switchMap((newSessionInfo) => {
           this.handleSessionStarted();
-          return from(newSessionInfo.run());
+          return from((newSessionInfo as { run(): Promise<unknown> }).run());
         }),
       )
       .subscribe({
-        next: (sessionTerminationInfo) => this.handleSessionTerminatedGracefully(sessionTerminationInfo),
+        next: (sessionTerminationInfo) =>
+          this.handleSessionTerminatedGracefully(sessionTerminationInfo as SessionTerminationInfo),
         error: (err) => this.handleSessionTerminatedWithError(err),
       });
   }
@@ -637,6 +548,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   }
 
   private handleSessionTerminated(): void {
+    this.loading = false;
     if (document.fullscreenElement) {
       this.exitFullScreen();
     }
@@ -645,24 +557,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     super.webClientConnectionClosed();
   }
 
-  private handleSessionError(err: unknown): void {
-    if (this.isIronError(err)) {
-      this.webClientError(err.backtrace());
-    } else {
-      this.webClientError(`${err}`);
-    }
-  }
-
-  private isIronError(error: unknown): error is IronError {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      typeof (error as IronError).backtrace === 'function' &&
-      typeof (error as IronError).kind === 'function'
-    );
-  }
-
   private handleError(error: string): void {
+    this.loading = false;
     this.sessionTerminationMessage = {
       summary: 'Unexpected error occurred',
       detail: error,

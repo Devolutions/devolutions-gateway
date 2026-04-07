@@ -105,6 +105,16 @@ export class WebSessionService {
     const index: number = currentSessions.findIndex((webSession) => webSession.id === updatedWebSession.id);
 
     if (index !== -1) {
+      const previousSession = currentSessions[index];
+
+      // Re-submitting a failed connection replaces the session object with a new
+      // one so the protocol component can be recreated from fresh form data.
+      // Explicitly destroy the old componentRef first so no stale toolbar / DOM
+      // instance survives into the reconnect path.
+      if (previousSession.componentRef) {
+        this.dynamicComponentService.destroyComponent(previousSession.componentRef);
+      }
+
       updatedWebSession.tabIndex = currentSessions[index].tabIndex;
       const updatedSessions = [...currentSessions];
       updatedSessions[index] = updatedWebSession;

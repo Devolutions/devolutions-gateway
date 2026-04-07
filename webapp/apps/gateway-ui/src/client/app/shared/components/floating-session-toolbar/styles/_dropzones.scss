@@ -1,0 +1,109 @@
+// _dropzones.scss
+// ── Drag dock targets ─────────────────────────────────────────────────────────
+// Four edge-anchored targets shown during drag (after 300ms delay).
+// The toolbar's center point is tested against each target's bounding rect;
+// the matching one gets the active highlight.
+// pointer-events: none — detection is coordinate-based, not DOM hover.
+
+.drag-dropzone {
+  position: absolute;
+  z-index: 18; // below toolbar (z-index: 20), above session content
+  pointer-events: none;
+  border-radius: 16px;
+  overflow: hidden;
+  transition: background-color 150ms ease, transform 150ms ease;
+
+  background: var(--dropzone-bg);
+  box-shadow: var(--toolbar-shadow);
+
+  // Inner frame — dashed border + centered label
+  .drag-dropzone-inner {
+    position: absolute;
+    inset: 4px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--dropzone-inner-border-color);
+  }
+
+  .drag-dropzone-label {
+    font-family: 'Open Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dropzone-label-color);
+    text-align: center;
+    white-space: pre-wrap; // allows "Dock\nleft" in narrow vertical targets
+  }
+
+  // Outer inset border overlay (solid — matches demo's double-border pattern)
+  .drag-dropzone-overlay {
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--dropzone-overlay-border-color);
+    border-radius: 16px;
+    pointer-events: none;
+    transition: border-color 150ms ease, border-width 150ms ease;
+  }
+
+  // ── Position variants ──────────────────────────────────────────────────────
+
+  &.drag-dropzone-top,
+  &.drag-dropzone-bottom {
+    width: 320px;
+    height: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  &.drag-dropzone-top    { top:    8px; }
+  &.drag-dropzone-bottom { bottom: 8px; }
+
+  &.drag-dropzone-left,
+  &.drag-dropzone-right {
+    width: 60px;
+    height: 320px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  &.drag-dropzone-left  { left:  8px; }
+  &.drag-dropzone-right { right: 8px; }
+
+  // ── Active state (toolbar center is inside this target) ───────────────────
+
+  &.drag-dropzone-active {
+    background: var(--dropzone-active-bg);
+
+    .drag-dropzone-overlay {
+      border-color: var(--dropzone-active-overlay-color);
+      border-width: 2px;
+    }
+
+    // Scale must preserve the translate for each axis
+    &.drag-dropzone-top,
+    &.drag-dropzone-bottom {
+      transform: translateX(-50%) scale(1.03);
+    }
+
+    &.drag-dropzone-left,
+    &.drag-dropzone-right {
+      transform: translateY(-50%) scale(1.03);
+    }
+  }
+
+  // ── Light theme overrides ─────────────────────────────────────────────────
+  &.theme-light {
+    --dropzone-bg:                   #ffffff;
+    --dropzone-inner-border-color:   #b2b2b2;
+    --dropzone-label-color:          #0068c3;
+    --dropzone-overlay-border-color: #f2f2f2;
+
+    &.drag-dropzone-active {
+      --dropzone-active-bg:            #e6f2ff;
+      --dropzone-inner-border-color:   #0068c3;
+      --dropzone-active-overlay-color: #0068c3;
+    }
+  }
+}
+

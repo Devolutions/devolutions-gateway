@@ -20,8 +20,8 @@ import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { WasmInitResolver } from '@gateway/shared/resolvers/wasm-init.resolver';
 import { DynamicTabComponent } from '@shared/components/dynamic-tab/dynamic-tab.component';
+import { FloatingSessionToolbarComponent } from '@shared/components/floating-session-toolbar/floating-session-toolbar.component';
 import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
-import { SessionToolbarComponent } from '@shared/components/session-toolbar/session-toolbar.component';
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
 import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
@@ -59,6 +59,7 @@ const routes: Routes = [
   imports: [
     RouterModule.forChild(routes),
     SharedModule,
+    FloatingSessionToolbarComponent,
     KeyFilterModule,
     FormsModule,
     NgOptimizedImage,
@@ -101,7 +102,6 @@ const routes: Routes = [
     ArdQualityModeControlComponent,
     TabViewComponent,
     DynamicTabComponent,
-    SessionToolbarComponent,
     FileControlComponent,
     NetScanComponent,
   ],

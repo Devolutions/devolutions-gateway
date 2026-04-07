@@ -11,8 +11,13 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { IronError, SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
+import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
+import {
+  ScreenMode,
+  ToolbarFeatures,
+  WheelSpeedControl,
+} from '@shared/components/floating-session-toolbar/floating-session-toolbar.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
@@ -42,7 +47,6 @@ import {
 import { DVL_VNC_ICON, DVL_WARNING_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { Encoding } from '@shared/enums/encoding.enum';
-import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -62,7 +66,7 @@ enum UserIronRdpErrorKind {
   styleUrls: ['web-client-vnc.component.scss'],
   providers: [MessageService],
 })
-export class WebClientVncComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientVncComponent extends DesktopWebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;
   @Input() sessionsContainerElement: ElementRef;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
@@ -77,122 +81,28 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   sessionTerminationMessage: ToastMessageOptions;
   isFullScreenMode = false;
   cursorOverrideActive = false;
+  wheelSpeed = 1;
 
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
 
-  saveRemoteClipboardButtonEnabled = false;
+  readonly toolbarFeatures: ToolbarFeatures = {
+    windowsKey: true,
+    ctrlAltDel: true,
+    screenMode: true,
+    dynamicResize: true,
+    cursorCrosshair: true,
+    wheelSpeed: true,
+  };
 
-  leftToolbarButtons = [
-    {
-      label: 'Start',
-      icon: 'dvl-icon dvl-icon-windows',
-      action: () => this.sendWindowsKey(),
-    },
-    {
-      label: 'Ctrl+Alt+Del',
-      icon: 'dvl-icon dvl-icon-admin',
-      action: () => this.sendCtrlAltDel(),
-    },
-  ];
-
-  middleToolbarButtons = [
-    {
-      label: 'Full Screen',
-      icon: 'dvl-icon dvl-icon-fullscreen',
-      action: () => this.toggleFullscreen(),
-    },
-    {
-      label: 'Fit to Screen',
-      icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(ScreenScale.Fit),
-    },
-    {
-      label: 'Actual Size',
-      icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(ScreenScale.Real),
-    },
-  ];
-
-  middleToolbarToggleButtons = [
-    {
-      label: 'Toggle Cursor Kind',
-      icon: 'dvl-icon dvl-icon-cursor',
-      action: () => this.toggleCursorKind(),
-      isActive: () => !this.cursorOverrideActive,
-    },
-  ];
-
-  checkboxes = [
-    {
-      inputId: 'dynamicResize',
-      label: 'Dynamic Resize',
-      value: this.dynamicResizeEnabled,
-      onChange: () => this.toggleDynamicResize(),
-      enabled: () => this.dynamicResizeSupported,
-    },
-  ];
-
-  rightToolbarButtons = [
-    {
-      label: 'Close Session',
-      icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess(),
-    },
-  ];
-
-  sliders = [
-    {
-      label: 'Wheel Speed',
-      value: 1,
-      onChange: (value: number) => this.setWheelSpeedFactor(value),
-      min: 0.1,
-      max: 3,
-      step: 0.1,
-    },
-  ];
-
-  clipboardActionButtons: {
-    label: string;
-    tooltip: string;
-    icon: string;
-    action: () => Promise<void>;
-    enabled: () => boolean;
-  }[] = [];
-
-  private setupClipboardHandling(): void {
-    // Clipboard API is available only in secure contexts (HTTPS).
-    if (!window.isSecureContext) {
-      return;
-    }
-
-    if (this.formData.autoClipboard === true) {
-      return;
-    }
-
-    // We don't check for clipboard write support, as all recent browser versions support it.
-    this.clipboardActionButtons.push({
-      label: 'Save Clipboard',
-      tooltip: 'Copy received clipboard content to your local clipboard.',
-      icon: 'dvl-icon dvl-icon-save',
-      action: () => this.saveRemoteClipboard(),
-      enabled: () => this.saveRemoteClipboardButtonEnabled,
-    });
-
-    // Check if the browser supports reading local clipboard.
-    if (navigator.clipboard.readText) {
-      this.clipboardActionButtons.push({
-        label: 'Send Clipboard',
-        tooltip: 'Send your local clipboard content to the remote server.',
-        icon: 'dvl-icon dvl-icon-send',
-        action: () => this.sendClipboard(),
-        enabled: () => true,
-      });
-    }
-  }
+  readonly wheelSpeedControl: WheelSpeedControl = {
+    label: 'Wheel speed',
+    min: 0.1,
+    max: 3,
+    step: 0.1,
+  };
 
   protected removeElement: Subject<unknown> = new Subject();
-  private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
 
   private componentResizeObserverDisconnect?: () => void;
@@ -217,7 +127,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-    this.setupClipboardHandling();
   }
 
   ngAfterViewInit(): void {
@@ -265,27 +174,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     this.remoteClient.setKeyboardUnicodeMode(useUnicode);
   }
 
-  async saveRemoteClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.saveRemoteClipboardData();
-
-      super.webClientSuccess('Clipboard content has been copied to your clipboard!');
-      this.saveRemoteClipboardButtonEnabled = false;
-    } catch (err) {
-      this.handleSessionError(err);
-    }
-  }
-
-  async sendClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.sendClipboardData();
-
-      super.webClientSuccess('Clipboard content has been sent to the remote server!');
-    } catch (err) {
-      this.handleSessionError(err);
-    }
-  }
-
   toggleCursorKind(): void {
     if (this.cursorOverrideActive) {
       this.remoteClient.setCursorStyleOverride(null);
@@ -297,7 +185,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   }
 
   setWheelSpeedFactor(factor: number): void {
-    this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+    this.wheelSpeed = factor;
+    if (this.remoteClient) {
+      this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+    }
   }
 
   toggleDynamicResize(): void {
@@ -313,9 +204,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       this.dynamicComponentResizeSubscription = this.componentResizeService.resize$
         .pipe(debounceTime(RESIZE_DEBOUNCE_TIME))
         .subscribe(({ width, height }) => {
-          if (!this.isFullScreenMode) {
-            height -= WebSession.TOOLBAR_SIZE;
-          }
+          // The floating toolbar is an overlay and does not consume layout height.
           this.remoteClient.resize(width, height);
         });
     } else {
@@ -357,6 +246,36 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     }
   }
 
+  onScreenModeChange(mode: ScreenMode): void {
+    switch (mode) {
+      case 'fullscreen':
+        this.toggleFullscreen();
+        break;
+      case 'fit':
+        this.scaleTo(ScreenScale.Fit);
+        break;
+      case 'minimize':
+        this.scaleTo(ScreenScale.Real);
+        break;
+    }
+  }
+
+  onDynamicResizeChange(enabled: boolean): void {
+    if (enabled !== this.dynamicResizeEnabled) {
+      this.toggleDynamicResize();
+    }
+  }
+
+  onCursorCrosshairChange(enabled: boolean): void {
+    if (enabled !== this.cursorOverrideActive) {
+      this.toggleCursorKind();
+    }
+  }
+
+  onWheelSpeedChange(factor: number): void {
+    this.setWheelSpeedFactor(factor);
+  }
+
   private toggleFullscreen(): void {
     this.isFullScreenMode = !this.isFullScreenMode;
     !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
@@ -388,14 +307,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   private handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
-
-    const sessionContainerElement = this.sessionContainerElement.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
-    }
-
+    // The floating toolbar overlays the session, so no DOM toolbar adjustments are needed here.
     this.scaleTo(ScreenScale.Fit);
   }
 
@@ -414,9 +326,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
-    if (this.formData.autoClipboard !== true) {
-      this.remoteClient.setEnableAutoClipboard(false);
-    }
+    this.remoteClient.setEnableAutoClipboard(this.isAutoClipboardMode(this.formData?.autoClipboard));
 
     // Register callbacks for events.
     this.remoteClient.onWarningCallback((data: string) => {
@@ -451,6 +361,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       map((currentWebSession) => {
         // It's not possibe to infer the type of currentWebSession.data, we case it on the fly
         this.formData = currentWebSession.data as unknown as VncFormDataInput;
+        this.wheelSpeed = this.formData.wheelSpeedFactor ?? 1;
+        this.setupClipboardHandling(this.formData.autoClipboard);
       }),
     );
   }
@@ -549,6 +461,8 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       configBuilder.withExtension(jpegQualityLevel(connectionParameters.jpegQualityLevel));
     }
 
+    configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
+
     const config = configBuilder.build();
 
     this.setKeyboardUnicodeMode(true);
@@ -612,23 +526,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     this.disableComponentStatus();
     super.webClientConnectionClosed();
-  }
-
-  private handleSessionError(err: unknown): void {
-    if (this.isIronError(err)) {
-      this.webClientError(err.backtrace());
-    } else {
-      this.webClientError(`${err}`);
-    }
-  }
-
-  private isIronError(error: unknown): error is IronError {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      typeof (error as IronError).backtrace === 'function' &&
-      typeof (error as IronError).kind === 'function'
-    );
   }
 
   private handleError(error: string): void {
