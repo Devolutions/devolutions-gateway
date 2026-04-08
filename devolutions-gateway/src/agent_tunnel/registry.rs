@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -32,6 +31,19 @@ pub struct RouteAdvertisementState {
     pub updated_at: SystemTime,
 }
 
+impl Default for RouteAdvertisementState {
+    fn default() -> Self {
+        let now = SystemTime::now();
+        Self {
+            epoch: 0,
+            subnets: Vec::new(),
+            domains: Vec::new(),
+            received_at: now,
+            updated_at: now,
+        }
+    }
+}
+
 /// Represents a QUIC-connected agent peer tracked by the gateway.
 #[derive(Debug)]
 pub struct AgentPeer {
@@ -43,8 +55,8 @@ pub struct AgentPeer {
     pub cert_fingerprint: String,
     /// Last heartbeat timestamp in milliseconds since UNIX epoch (updated atomically).
     pub(crate) last_seen: AtomicU64,
-    /// Current route advertisement state, if any.
-    route_state: RwLock<Option<RouteAdvertisementState>>,
+    /// Current route advertisement state.
+    route_state: RwLock<RouteAdvertisementState>,
 }
 
 impl AgentPeer {
@@ -56,7 +68,7 @@ impl AgentPeer {
             name,
             cert_fingerprint,
             last_seen: AtomicU64::new(now_ms),
-            route_state: RwLock::new(None),
+            route_state: RwLock::new(RouteAdvertisementState::default()),
         }
     }
 
@@ -82,8 +94,8 @@ impl AgentPeer {
         elapsed_ms < u64::try_from(timeout.as_millis()).expect("timeout in milliseconds should fit in u64")
     }
 
-    /// Returns a clone of the current route advertisement state, if any.
-    pub fn route_state(&self) -> Option<RouteAdvertisementState> {
+    /// Returns a clone of the current route advertisement state.
+    pub fn route_state(&self) -> RouteAdvertisementState {
         self.route_state.read().clone()
     }
 
@@ -97,63 +109,48 @@ impl AgentPeer {
         let mut state = self.route_state.write();
         let now = SystemTime::now();
 
-        match state.as_ref() {
-            Some(current) if epoch < current.epoch => {
-                // Stale epoch; ignore.
-                debug!(
-                    agent_id = %self.agent_id,
-                    received_epoch = epoch,
-                    current_epoch = current.epoch,
-                    "Ignoring stale route advertisement"
-                );
-            }
-            Some(current) if epoch == current.epoch => {
-                // Same epoch: refresh timestamp only, do not replace subnets or domains.
-                debug!(
-                    agent_id = %self.agent_id,
-                    epoch,
-                    subnet_count = subnets.len(),
-                    domain_count = current.domains.len(),
-                    "Refreshing route advertisement (same epoch)"
-                );
-                *state = Some(RouteAdvertisementState {
-                    epoch,
-                    subnets: current.subnets.clone(),
-                    domains: current.domains.clone(),
-                    received_at: current.received_at,
-                    updated_at: now,
-                });
-            }
-            _ => {
-                // New epoch (or first advertisement): replace everything.
-                info!(
-                    agent_id = %self.agent_id,
-                    epoch,
-                    subnet_count = subnets.len(),
-                    domain_count = domains.len(),
-                    "Accepted new route advertisement"
-                );
-                *state = Some(RouteAdvertisementState {
-                    epoch,
-                    subnets,
-                    domains,
-                    received_at: now,
-                    updated_at: now,
-                });
-            }
-        }
-    }
+        let current = &*state;
 
-    /// Returns `true` if this agent can route traffic to the given IP address.
-    pub fn can_reach(&self, target_ip: IpAddr) -> bool {
-        self.route_state
-            .read()
-            .as_ref()
-            .map(|route_state| match target_ip {
-                IpAddr::V4(ipv4) => route_state.subnets.iter().any(|subnet| subnet.contains(ipv4)),
-                IpAddr::V6(_) => false,
-            })
-            .unwrap_or(false)
+        if epoch < current.epoch {
+            debug!(
+                agent_id = %self.agent_id,
+                received_epoch = epoch,
+                current_epoch = current.epoch,
+                "Ignoring stale route advertisement"
+            );
+        } else if epoch == current.epoch {
+            // Same epoch: refresh timestamp only, do not replace subnets or domains.
+            debug!(
+                agent_id = %self.agent_id,
+                epoch,
+                subnet_count = subnets.len(),
+                domain_count = current.domains.len(),
+                "Refreshing route advertisement (same epoch)"
+            );
+            *state = RouteAdvertisementState {
+                epoch,
+                subnets: current.subnets.clone(),
+                domains: current.domains.clone(),
+                received_at: current.received_at,
+                updated_at: now,
+            };
+        } else {
+            // New epoch (or first advertisement): replace everything.
+            info!(
+                agent_id = %self.agent_id,
+                epoch,
+                subnet_count = subnets.len(),
+                domain_count = domains.len(),
+                "Accepted new route advertisement"
+            );
+            *state = RouteAdvertisementState {
+                epoch,
+                subnets,
+                domains,
+                received_at: now,
+                updated_at: now,
+            };
+        }
     }
 }
 
@@ -220,89 +217,6 @@ impl AgentRegistry {
             .count()
     }
 
-    /// Finds all online agents whose advertised subnets include the given target IP.
-    ///
-    /// Results are sorted by `received_at` in descending order (most recently received first).
-    pub fn find_agents_for_target(&self, target_ip: IpAddr) -> Vec<Arc<AgentPeer>> {
-        let mut candidates: Vec<(SystemTime, Arc<AgentPeer>)> = self
-            .agents
-            .iter()
-            .filter(|entry| entry.value().is_online(AGENT_OFFLINE_TIMEOUT))
-            .filter_map(|entry| {
-                let agent = Arc::clone(entry.value());
-                let route_state = agent.route_state()?;
-                let matches = match target_ip {
-                    IpAddr::V4(ipv4) => route_state.subnets.iter().any(|subnet| subnet.contains(ipv4)),
-                    IpAddr::V6(_) => false,
-                };
-
-                if matches {
-                    Some((route_state.received_at, agent))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Sort by received_at descending (most recent first).
-        candidates.sort_by(|a, b| b.0.cmp(&a.0));
-
-        candidates.into_iter().map(|(_, agent)| agent).collect()
-    }
-
-    /// Selects a single online agent that can route to the given target IP.
-    ///
-    /// When multiple agents match, the one with the most recent `received_at` wins.
-    pub fn select_agent_for_target(&self, target_ip: IpAddr) -> Option<Arc<AgentPeer>> {
-        self.find_agents_for_target(target_ip).into_iter().next()
-    }
-
-    /// Finds all online agents whose advertised domains match the given hostname via suffix match.
-    ///
-    /// Uses longest suffix match: if agent-A advertises "contoso.local" and agent-B advertises
-    /// "finance.contoso.local", hostname "db01.finance.contoso.local" matches agent-B only.
-    ///
-    /// Results are sorted by `received_at` descending (most recently received first).
-    pub fn select_agents_for_domain(&self, hostname: &str) -> Vec<Arc<AgentPeer>> {
-        let hostname_lower = hostname.to_ascii_lowercase();
-
-        let mut best_suffix_len: usize = 0;
-        let mut candidates: Vec<(SystemTime, Arc<AgentPeer>)> = Vec::new();
-
-        for entry in self.agents.iter() {
-            let agent = entry.value();
-            if !agent.is_online(AGENT_OFFLINE_TIMEOUT) {
-                continue;
-            }
-
-            let route_state = match agent.route_state() {
-                Some(rs) => rs,
-                None => continue,
-            };
-
-            for domain_adv in &route_state.domains {
-                let domain_lower = domain_adv.domain.to_ascii_lowercase();
-                let matches = hostname_lower == domain_lower
-                    || (hostname_lower.len() > domain_lower.len()
-                        && hostname_lower.as_bytes()[hostname_lower.len() - domain_lower.len() - 1] == b'.'
-                        && hostname_lower.ends_with(domain_lower.as_str()));
-
-                if matches {
-                    if best_suffix_len < domain_lower.len() {
-                        best_suffix_len = domain_lower.len();
-                        candidates.clear();
-                        candidates.push((route_state.received_at, Arc::clone(agent)));
-                    } else if domain_lower.len() == best_suffix_len {
-                        candidates.push((route_state.received_at, Arc::clone(agent)));
-                    }
-                }
-            }
-        }
-
-        candidates.sort_by(|a, b| b.0.cmp(&a.0));
-        candidates.into_iter().map(|(_, agent)| agent).collect()
-    }
-
     /// Returns information about a single agent by ID.
     pub fn agent_info(&self, agent_id: &Uuid) -> Option<AgentInfo> {
         self.agents.get(agent_id).map(|entry| AgentInfo::from(entry.value()))
@@ -337,7 +251,7 @@ pub struct AgentInfo {
     pub last_seen_ms: u64,
     pub subnets: Vec<String>,
     pub domains: Vec<DomainInfo>,
-    pub route_epoch: Option<u64>,
+    pub route_epoch: u64,
 }
 
 impl From<&Arc<AgentPeer>> for AgentInfo {
@@ -349,23 +263,16 @@ impl From<&Arc<AgentPeer>> for AgentInfo {
             cert_fingerprint: agent.cert_fingerprint.clone(),
             is_online: agent.is_online(AGENT_OFFLINE_TIMEOUT),
             last_seen_ms: agent.last_seen_ms(),
-            subnets: route_state
-                .as_ref()
-                .map(|rs| rs.subnets.iter().map(ToString::to_string).collect())
-                .unwrap_or_default(),
+            subnets: route_state.subnets.iter().map(ToString::to_string).collect(),
             domains: route_state
-                .as_ref()
-                .map(|rs| {
-                    rs.domains
-                        .iter()
-                        .map(|d| DomainInfo {
-                            domain: d.domain.clone(),
-                            auto_detected: d.auto_detected,
-                        })
-                        .collect()
+                .domains
+                .iter()
+                .map(|d| DomainInfo {
+                    domain: d.domain.clone(),
+                    auto_detected: d.auto_detected,
                 })
-                .unwrap_or_default(),
-            route_epoch: route_state.as_ref().map(|rs| rs.epoch),
+                .collect(),
+            route_epoch: route_state.epoch,
         }
     }
 }
@@ -444,13 +351,13 @@ mod tests {
         let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
 
         peer.update_routes(1, vec![subnet], vec![]);
-        let state = peer.route_state().expect("route state should exist");
+        let state = peer.route_state();
         assert_eq!(state.epoch, 1);
         assert_eq!(state.subnets.len(), 1);
 
         let new_subnet: Ipv4Network = "192.168.0.0/16".parse().expect("valid CIDR");
         peer.update_routes(2, vec![new_subnet], vec![]);
-        let state = peer.route_state().expect("route state should exist");
+        let state = peer.route_state();
         assert_eq!(state.epoch, 2);
         assert_eq!(state.subnets.len(), 1);
         assert_eq!(state.subnets[0], new_subnet);
@@ -462,14 +369,14 @@ mod tests {
         let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
 
         peer.update_routes(1, vec![subnet], vec![]);
-        let state_before = peer.route_state().expect("route state should exist");
+        let state_before = peer.route_state();
         let received_at_before = state_before.received_at;
 
         // Same epoch with different subnets should NOT replace subnets.
         let different_subnet: Ipv4Network = "172.16.0.0/12".parse().expect("valid CIDR");
         peer.update_routes(1, vec![different_subnet], vec![]);
 
-        let state_after = peer.route_state().expect("route state should exist");
+        let state_after = peer.route_state();
         assert_eq!(state_after.epoch, 1);
         // Subnets should remain unchanged (original advertisement).
         assert_eq!(state_after.subnets[0], subnet);
@@ -488,89 +395,9 @@ mod tests {
         let old_subnet: Ipv4Network = "172.16.0.0/12".parse().expect("valid CIDR");
         peer.update_routes(3, vec![old_subnet], vec![]);
 
-        let state = peer.route_state().expect("route state should exist");
+        let state = peer.route_state();
         assert_eq!(state.epoch, 5);
         assert_eq!(state.subnets[0], subnet);
-    }
-
-    #[test]
-    fn can_reach_matching_subnet() {
-        let peer = make_peer("reachable-agent");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        peer.update_routes(1, vec![subnet], vec![]);
-
-        assert!(peer.can_reach("10.1.2.3".parse().expect("valid IP")));
-        assert!(!peer.can_reach("192.168.1.1".parse().expect("valid IP")));
-    }
-
-    #[test]
-    fn can_reach_returns_false_for_ipv6() {
-        let peer = make_peer("v4-only-agent");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        peer.update_routes(1, vec![subnet], vec![]);
-
-        assert!(!peer.can_reach("::1".parse().expect("valid IP")));
-    }
-
-    #[test]
-    fn select_agent_for_target_picks_most_recent() {
-        let registry = AgentRegistry::new();
-
-        let agent_a = make_peer("agent-a");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        agent_a.update_routes(1, vec![subnet], vec![]);
-        registry.register(Arc::clone(&agent_a));
-
-        // Small delay to ensure different received_at timestamps.
-        std::thread::sleep(Duration::from_millis(10));
-
-        let agent_b = make_peer("agent-b");
-        agent_b.update_routes(1, vec![subnet], vec![]);
-        registry.register(Arc::clone(&agent_b));
-
-        let target: IpAddr = "10.5.5.5".parse().expect("valid IP");
-        let winner = registry.select_agent_for_target(target).expect("should find an agent");
-        // agent_b was registered later, so its received_at is more recent.
-        assert_eq!(winner.agent_id, agent_b.agent_id);
-    }
-
-    #[test]
-    fn find_agents_for_target_returns_sorted() {
-        let registry = AgentRegistry::new();
-
-        let agent_a = make_peer("agent-a");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        agent_a.update_routes(1, vec![subnet], vec![]);
-        registry.register(Arc::clone(&agent_a));
-
-        std::thread::sleep(Duration::from_millis(10));
-
-        let agent_b = make_peer("agent-b");
-        agent_b.update_routes(1, vec![subnet], vec![]);
-        registry.register(Arc::clone(&agent_b));
-
-        let target: IpAddr = "10.5.5.5".parse().expect("valid IP");
-        let agents = registry.find_agents_for_target(target);
-        assert_eq!(agents.len(), 2);
-        // Most recent first.
-        assert_eq!(agents[0].agent_id, agent_b.agent_id);
-        assert_eq!(agents[1].agent_id, agent_a.agent_id);
-    }
-
-    #[test]
-    fn find_agents_excludes_offline() {
-        let registry = AgentRegistry::new();
-
-        let agent = make_peer("offline-agent");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        agent.update_routes(1, vec![subnet], vec![]);
-        // Force agent to appear offline.
-        agent.last_seen.store(0, Ordering::Release);
-        registry.register(agent);
-
-        let target: IpAddr = "10.5.5.5".parse().expect("valid IP");
-        let agents = registry.find_agents_for_target(target);
-        assert!(agents.is_empty());
     }
 
     #[test]
@@ -586,7 +413,7 @@ mod tests {
         assert_eq!(infos[0].name, "info-agent");
         assert!(infos[0].is_online);
         assert_eq!(infos[0].subnets, vec!["10.0.0.0/8"]);
-        assert_eq!(infos[0].route_epoch, Some(1));
+        assert_eq!(infos[0].route_epoch, 1);
     }
 
     #[test]
@@ -610,7 +437,7 @@ mod tests {
         assert_eq!(registry.len(), 0);
     }
 
-    // ── Domain routing tests ──────────────────────────────────────────
+    // ── Domain advertisement tests ─────────────────────────────────────
 
     fn domain(name: &str, auto: bool) -> DomainAdvertisement {
         DomainAdvertisement {
@@ -625,7 +452,7 @@ mod tests {
         let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
 
         peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
-        let state = peer.route_state().expect("route state should exist");
+        let state = peer.route_state();
         assert_eq!(state.domains.len(), 1);
         assert_eq!(state.domains[0].domain, "contoso.local");
         assert!(!state.domains[0].auto_detected);
@@ -639,7 +466,7 @@ mod tests {
         peer.update_routes(1, vec![subnet], vec![domain("old.local", false)]);
         peer.update_routes(2, vec![subnet], vec![domain("new.local", true)]);
 
-        let state = peer.route_state().expect("route state should exist");
+        let state = peer.route_state();
         assert_eq!(state.epoch, 2);
         assert_eq!(state.domains[0].domain, "new.local");
         assert!(state.domains[0].auto_detected);
@@ -653,121 +480,8 @@ mod tests {
         peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
         peer.update_routes(1, vec![subnet], vec![domain("different.local", true)]);
 
-        let state = peer.route_state().expect("route state should exist");
+        let state = peer.route_state();
         assert_eq!(state.domains[0].domain, "contoso.local");
         assert!(!state.domains[0].auto_detected);
-    }
-
-    #[test]
-    fn select_agent_for_domain_suffix_match() {
-        let registry = AgentRegistry::new();
-        let peer = make_peer("agent-a");
-        let agent_id = peer.agent_id;
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
-        registry.register(peer);
-
-        let agents = registry.select_agents_for_domain("dc01.contoso.local");
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].agent_id, agent_id);
-    }
-
-    #[test]
-    fn select_agent_for_domain_no_match() {
-        let registry = AgentRegistry::new();
-        let peer = make_peer("agent-a");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
-        registry.register(peer);
-
-        let agents = registry.select_agents_for_domain("dc01.other.local");
-        assert!(agents.is_empty());
-    }
-
-    #[test]
-    fn select_agent_for_domain_longest_suffix_wins() {
-        let registry = AgentRegistry::new();
-
-        let agent_a = make_peer("agent-a");
-        let id_a = agent_a.agent_id;
-        let subnet_a: Ipv4Network = "10.1.0.0/16".parse().expect("valid CIDR");
-        agent_a.update_routes(1, vec![subnet_a], vec![domain("contoso.local", false)]);
-        registry.register(agent_a);
-
-        let agent_b = make_peer("agent-b");
-        let id_b = agent_b.agent_id;
-        let subnet_b: Ipv4Network = "10.2.0.0/16".parse().expect("valid CIDR");
-        agent_b.update_routes(1, vec![subnet_b], vec![domain("finance.contoso.local", false)]);
-        registry.register(agent_b);
-
-        let agents = registry.select_agents_for_domain("db01.finance.contoso.local");
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].agent_id, id_b);
-
-        let agents = registry.select_agents_for_domain("dc01.contoso.local");
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].agent_id, id_a);
-    }
-
-    #[test]
-    fn select_agent_for_domain_multiple_agents_same_domain() {
-        let registry = AgentRegistry::new();
-
-        let agent_a = make_peer("agent-a");
-        let subnet_a: Ipv4Network = "10.1.0.0/16".parse().expect("valid CIDR");
-        agent_a.update_routes(1, vec![subnet_a], vec![domain("contoso.local", false)]);
-        registry.register(Arc::clone(&agent_a));
-
-        std::thread::sleep(Duration::from_millis(10));
-
-        let agent_b = make_peer("agent-b");
-        let id_b = agent_b.agent_id;
-        let subnet_b: Ipv4Network = "10.2.0.0/16".parse().expect("valid CIDR");
-        agent_b.update_routes(1, vec![subnet_b], vec![domain("contoso.local", false)]);
-        registry.register(Arc::clone(&agent_b));
-
-        let agents = registry.select_agents_for_domain("dc01.contoso.local");
-        assert_eq!(agents.len(), 2);
-        assert_eq!(agents[0].agent_id, id_b);
-    }
-
-    #[test]
-    fn select_agent_for_domain_excludes_offline() {
-        let registry = AgentRegistry::new();
-
-        let agent = make_peer("offline-agent");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        agent.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
-        agent.last_seen.store(0, Ordering::Release);
-        registry.register(agent);
-
-        let agents = registry.select_agents_for_domain("dc01.contoso.local");
-        assert!(agents.is_empty());
-    }
-
-    #[test]
-    fn select_agent_for_domain_exact_match() {
-        let registry = AgentRegistry::new();
-        let peer = make_peer("agent-a");
-        let agent_id = peer.agent_id;
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
-        registry.register(peer);
-
-        let agents = registry.select_agents_for_domain("contoso.local");
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].agent_id, agent_id);
-    }
-
-    #[test]
-    fn select_agent_for_domain_bare_hostname_no_match() {
-        let registry = AgentRegistry::new();
-        let peer = make_peer("agent-a");
-        let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
-        peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
-        registry.register(peer);
-
-        let agents = registry.select_agents_for_domain("server01");
-        assert!(agents.is_empty());
     }
 }

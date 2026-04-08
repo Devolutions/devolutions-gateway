@@ -13,7 +13,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
 
 use crate::config::ConfHandle;
-use crate::tunnel_helpers::{connect_to_target, current_time_millis, resolve_target_candidates};
+use crate::tunnel_helpers::{Target, connect_to_target, current_time_millis, resolve_target};
 
 // ---------------------------------------------------------------------------
 // Custom TLS verifier: verify cert chain against CA, skip hostname check
@@ -448,7 +448,8 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
             bail!("unsupported protocol version in ConnectRequest");
         }
 
-        let candidates = resolve_target_candidates(&connect_msg.target, &advertise_subnets).await?;
+        let target = Target::parse(&connect_msg.target).context("parse connect target")?;
+        let candidates = resolve_target(&target, &advertise_subnets).await?;
         let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
         info!(target = %selected_target, "TCP connection established");
 

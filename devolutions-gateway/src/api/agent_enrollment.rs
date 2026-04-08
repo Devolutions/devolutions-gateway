@@ -1,5 +1,3 @@
-use std::net::IpAddr;
-
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::{Json, Router};
@@ -49,7 +47,6 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/enroll", axum::routing::post(enroll_agent))
         .route("/agents", axum::routing::get(list_agents))
         .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
-        .route("/agents/resolve-target", axum::routing::post(resolve_target))
         .with_state(state)
 }
 
@@ -94,7 +91,7 @@ async fn enroll_agent(
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
     // Try one-time enrollment token from the store first.
-    let token_valid = handle.enrollment_token_store().consume(provided_token);
+    let token_valid = handle.enrollment_token_store().redeem(provided_token);
 
     if !token_valid {
         // Fall back to the static enrollment secret.
@@ -189,114 +186,4 @@ async fn delete_agent(
     info!(%agent_id, "Agent deleted via API");
 
     Ok(axum::http::StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize)]
-struct ResolveTargetRequest {
-    target: String,
-}
-
-#[derive(Serialize)]
-struct ResolveTargetResponse {
-    target: String,
-    target_ip: Option<IpAddr>,
-    reachable_agents: Vec<crate::agent_tunnel::registry::AgentInfo>,
-    target_reachable: bool,
-}
-
-/// Resolve a target string to find which agents can reach it.
-async fn resolve_target(
-    State(DgwState {
-        agent_tunnel_handle, ..
-    }): State<DgwState>,
-    _access: AgentManagementReadAccess,
-    Json(req): Json<ResolveTargetRequest>,
-) -> Result<Json<ResolveTargetResponse>, HttpError> {
-    let handle = agent_tunnel_handle
-        .as_ref()
-        .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
-
-    let target_ip = parse_target_ip(&req.target);
-
-    // Use the same routing logic as fwd.rs: IP → subnet match, hostname → domain suffix match
-    let matching_peers = if let Some(ip) = target_ip {
-        handle.registry().find_agents_for_target(ip)
-    } else {
-        let hostname = strip_scheme_and_port(&req.target);
-        handle.registry().select_agents_for_domain(hostname)
-    };
-
-    let reachable_agents: Vec<_> = matching_peers
-        .iter()
-        .map(crate::agent_tunnel::registry::AgentInfo::from)
-        .collect();
-
-    let target_reachable = !reachable_agents.is_empty();
-
-    Ok(Json(ResolveTargetResponse {
-        target: req.target,
-        target_ip,
-        reachable_agents,
-        target_reachable,
-    }))
-}
-
-/// Strip scheme prefix and port from a target string, returning the bare host.
-///
-/// Handles `tcp://host:port`, `http://host:port`, `host:port`, and bare hostnames.
-fn strip_scheme_and_port(target: &str) -> &str {
-    let host_port = target
-        .strip_prefix("tcp://")
-        .or_else(|| target.strip_prefix("http://"))
-        .or_else(|| target.strip_prefix("https://"))
-        .unwrap_or(target);
-
-    let host = if let Some((h, _port)) = host_port.rsplit_once(':') {
-        h
-    } else {
-        host_port
-    };
-
-    // Strip brackets for IPv6 literals like [::1].
-    host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host)
-}
-
-fn parse_target_ip(target: &str) -> Option<IpAddr> {
-    strip_scheme_and_port(target).parse::<IpAddr>().ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_target_ip_bare_ipv4() {
-        assert_eq!(parse_target_ip("10.0.0.1"), Some("10.0.0.1".parse().expect("test")));
-    }
-
-    #[test]
-    fn parse_target_ip_with_port() {
-        assert_eq!(
-            parse_target_ip("10.0.0.1:3389"),
-            Some("10.0.0.1".parse().expect("test"))
-        );
-    }
-
-    #[test]
-    fn parse_target_ip_tcp_scheme() {
-        assert_eq!(
-            parse_target_ip("tcp://192.168.1.1:22"),
-            Some("192.168.1.1".parse().expect("test"))
-        );
-    }
-
-    #[test]
-    fn parse_target_ip_hostname_returns_none() {
-        assert_eq!(parse_target_ip("myserver.local:3389"), None);
-    }
-
-    #[test]
-    fn parse_target_ip_bare_hostname_returns_none() {
-        assert_eq!(parse_target_ip("myserver"), None);
-    }
 }

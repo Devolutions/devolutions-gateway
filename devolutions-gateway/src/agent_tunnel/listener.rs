@@ -49,6 +49,7 @@ impl AgentTunnelHandle {
     }
 
     /// Open a proxy stream through a connected agent.
+    // TODO: Emit TrafficEvent for connections routed through the agent tunnel.
     pub async fn connect_via_agent(
         &self,
         agent_id: Uuid,

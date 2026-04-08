@@ -3,6 +3,7 @@
 //! Manages a self-signed CA that issues client certificates to agents during enrollment,
 //! and a server certificate for the QUIC listener.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -51,32 +52,39 @@ pub struct SignedAgentCert {
 
 impl CaManager {
     /// Load an existing CA from disk, or generate a new one.
-    pub fn load_or_generate(data_dir: &Utf8Path) -> anyhow::Result<Self> {
+    pub fn load_or_generate(data_dir: &Utf8Path) -> anyhow::Result<Arc<Self>> {
         let cert_path = data_dir.join(CA_CERT_FILENAME);
         let key_path = data_dir.join(CA_KEY_FILENAME);
 
         if cert_path.exists() && key_path.exists() {
+            // --- Load existing CA ---
+
             info!(%cert_path, "Loading existing agent tunnel CA");
+
             let ca_cert_pem =
                 std::fs::read_to_string(&cert_path).with_context(|| format!("read CA cert from {cert_path}"))?;
             let ca_key_pem =
                 std::fs::read_to_string(&key_path).with_context(|| format!("read CA key from {key_path}"))?;
             let ca_key_pair = KeyPair::from_pem(&ca_key_pem).context("parse CA key pair from PEM")?;
-            Ok(Self {
+
+            Ok(Arc::new(Self {
                 ca_cert_pem,
                 ca_key_pair,
                 data_dir: data_dir.to_owned(),
-            })
+            }))
         } else {
-            info!("Generating new agent tunnel CA certificate");
-            let ca_key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate CA key pair")?;
+            // --- Generate new CA ---
 
+            info!("Generating new agent tunnel CA certificate");
+
+            let ca_key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate CA key pair")?;
             let ca_params = make_ca_params();
             let ca_cert = ca_params
                 .self_signed(&ca_key_pair)
                 .context("self-sign CA certificate")?;
             let ca_cert_pem = ca_cert.pem();
 
+            // Persist to disk.
             std::fs::create_dir_all(data_dir).with_context(|| format!("create data directory {data_dir}"))?;
             std::fs::write(&cert_path, &ca_cert_pem).with_context(|| format!("write CA cert to {cert_path}"))?;
             std::fs::write(&key_path, ca_key_pair.serialize_pem())
@@ -89,13 +97,16 @@ impl CaManager {
                     .with_context(|| format!("set permissions on {key_path}"))?;
             }
 
+            // TODO: On Windows, set explicit DACL on the CA key file.
+            // Currently relying on ProgramData directory ACL (SYSTEM + Admins only).
+
             info!(%cert_path, "Agent tunnel CA certificate generated and saved");
 
-            Ok(Self {
+            Ok(Arc::new(Self {
                 ca_cert_pem,
                 ca_key_pair,
                 data_dir: data_dir.to_owned(),
-            })
+            }))
         }
     }
 
@@ -225,47 +236,56 @@ impl CaManager {
         // Ensure rustls crypto provider is installed (ring).
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let (cert_path, key_path) = self.ensure_server_cert(hostname)?;
+        let (server_cert_path, server_key_path) = self.ensure_server_cert(hostname)?;
 
-        // Load server certificate chain (server cert + CA cert).
-        let cert_file = std::fs::File::open(cert_path.as_std_path())
-            .with_context(|| format!("open server cert file {cert_path}"))?;
-        let server_certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut BufReader::new(cert_file))
-            .collect::<Result<Vec<_>, _>>()
-            .context("parse server certificate PEM")?;
+        // Load server certificate.
+        let server_cert_file = std::fs::File::open(server_cert_path.as_std_path())
+            .with_context(|| format!("open server cert file {server_cert_path}"))?;
 
-        // Also include CA cert in chain.
+        let mut server_cert_chain: Vec<CertificateDer<'static>> =
+            rustls_pemfile::certs(&mut BufReader::new(server_cert_file))
+                .collect::<Result<Vec<_>, _>>()
+                .context("parse server certificate PEM")?;
+
+        // Load CA certificate.
         let ca_cert_path = self.ca_cert_path();
-        let ca_file = std::fs::File::open(ca_cert_path.as_std_path())
+
+        let ca_cert_file = std::fs::File::open(ca_cert_path.as_std_path())
             .with_context(|| format!("open CA cert file {ca_cert_path}"))?;
-        let ca_certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut BufReader::new(ca_file))
+
+        let ca_certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut BufReader::new(ca_cert_file))
             .collect::<Result<Vec<_>, _>>()
             .context("parse CA certificate PEM")?;
 
-        let mut cert_chain = server_certs;
-        cert_chain.extend(ca_certs.clone());
+        // Build cert chain: [server_cert, ca_cert].
+        server_cert_chain.extend(ca_certs.clone());
 
         // Load server private key.
-        let key_file =
-            std::fs::File::open(key_path.as_std_path()).with_context(|| format!("open server key file {key_path}"))?;
-        let private_key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut BufReader::new(key_file))
-            .context("parse server private key PEM")?
-            .context("no private key found in PEM file")?;
+        let server_key_file = std::fs::File::open(server_key_path.as_std_path())
+            .with_context(|| format!("open server key file {server_key_path}"))?;
 
-        // Build root cert store with our CA for client verification.
-        let mut roots = rustls::RootCertStore::empty();
-        for ca_cert in &ca_certs {
-            roots.add(ca_cert.clone()).context("add CA cert to root store")?;
-        }
+        let server_private_key: PrivateKeyDer<'static> =
+            rustls_pemfile::private_key(&mut BufReader::new(server_key_file))
+                .context("parse server private key PEM")?
+                .context("no private key found in PEM file")?;
+
+        // Build root cert store with our CA for client (agent) verification.
+        let ca_roots =
+            ca_certs
+                .into_iter()
+                .try_fold(rustls::RootCertStore::empty(), |mut roots, cert| -> anyhow::Result<_> {
+                    roots.add(cert).context("add CA cert to root store")?;
+                    Ok(roots)
+                })?;
 
         // Require client certificates signed by our CA.
-        let client_verifier = rustls::server::WebPkiClientVerifier::builder(roots.into())
+        let client_verifier = rustls::server::WebPkiClientVerifier::builder(ca_roots.into())
             .build()
             .context("build client certificate verifier")?;
 
         let mut tls_config = rustls::ServerConfig::builder()
             .with_client_cert_verifier(client_verifier)
-            .with_single_cert(cert_chain, private_key)
+            .with_single_cert(server_cert_chain, server_private_key)
             .context("build rustls ServerConfig")?;
 
         tls_config.alpn_protocols = vec![b"devolutions-agent-tunnel".to_vec()];

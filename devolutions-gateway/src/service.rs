@@ -280,10 +280,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         let data_dir = config::get_data_dir();
         let hostname = &conf.hostname;
 
-        let ca_manager = Arc::new(
-            agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
-                .context("failed to initialize agent tunnel CA")?,
-        );
+        let ca_manager = agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
+            .context("failed to initialize agent tunnel CA")?;
 
         let listen_addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
 
