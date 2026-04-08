@@ -9,16 +9,18 @@
 //! - **Control stream** (QUIC stream 0): carries [`ControlMessage`] variants
 //!   (route advertisements, heartbeats).
 //! - **Session streams** (QUIC streams 1..N): each stream proxies one TCP
-//!   connection. The first message is a [`ConnectMessage`] from Gateway,
+//!   connection. The first message is a [`ConnectRequest`] from Gateway,
 //!   followed by a [`ConnectResponse`] from Agent. After a successful
 //!   response, raw TCP bytes flow bidirectionally.
 
 pub mod control;
 pub mod error;
 pub mod session;
+pub mod stream;
 pub mod version;
 
 pub use control::{ControlMessage, DomainAdvertisement, MAX_CONTROL_MESSAGE_SIZE};
 pub use error::ProtoError;
-pub use session::{ConnectMessage, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
+pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
+pub use stream::{ControlRecvStream, ControlSendStream, ControlStream, SessionStream};
 pub use version::{CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_VERSION, validate_protocol_version};

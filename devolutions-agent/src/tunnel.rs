@@ -3,18 +3,17 @@
 //! This module implements a QUIC client that connects to the Gateway's agent tunnel
 //! endpoint, advertises reachable subnets, and handles incoming TCP proxy requests.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_tunnel_proto::{ConnectMessage, ConnectResponse, ControlMessage};
+use agent_tunnel_proto::{ConnectResponse, ControlMessage, ControlRecvStream, ControlStream, SessionStream};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
-use tokio::net::TcpStream;
 
 use crate::config::ConfHandle;
+use crate::tunnel_helpers::{connect_to_target, current_time_millis, resolve_target_candidates};
 
 // ---------------------------------------------------------------------------
 // Custom TLS verifier: verify cert chain against CA, skip hostname check
@@ -100,6 +99,20 @@ impl Task for TunnelTask {
     type Output = anyhow::Result<()>;
     const NAME: &'static str = "tunnel";
 
+    /// Reconnect loop with exponential backoff and jitter.
+    ///
+    /// Backoff strategy:
+    /// - Starts at 1s, doubles each retry (with ±25% jitter), caps at 60s.
+    /// - Resets to 1s after a connection survives 30s (considered stable).
+    ///
+    /// Example progression (without jitter):
+    ///   attempt 1: fail immediately  → wait ~1s
+    ///   attempt 2: fail immediately  → wait ~2s
+    ///   attempt 3: fail immediately  → wait ~4s
+    ///   attempt 4: fail immediately  → wait ~8s
+    ///   ...
+    ///   attempt N: fail immediately  → wait 60s (cap)
+    ///   attempt M: connected 45s    → next backoff resets to 1s
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
         const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
         const MAX_BACKOFF: Duration = Duration::from_secs(60);
@@ -122,7 +135,8 @@ impl Task for TunnelTask {
                 }
             }
 
-            if CONNECTED_THRESHOLD < start.elapsed() {
+            // Reset backoff if the connection was stable long enough.
+            if start.elapsed() > CONNECTED_THRESHOLD {
                 backoff = INITIAL_BACKOFF;
             }
 
@@ -136,6 +150,7 @@ impl Task for TunnelTask {
                 _ = tokio::time::sleep(backoff) => {}
             }
 
+            // Exponential backoff with ±25% jitter to avoid thundering herd.
             let jitter_factor = rand::Rng::gen_range(&mut rand::thread_rng(), 0.75..1.25);
             backoff =
                 Duration::from_secs_f64((backoff.as_secs_f64() * 2.0 * jitter_factor).min(MAX_BACKOFF.as_secs_f64()));
@@ -258,23 +273,21 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         .with_custom_certificate_verifier(Arc::new(SkipHostnameVerification(verifier)))
         .with_client_auth_cert(certs, key)
         .context("build rustls client config with client auth")?;
+
     client_crypto.alpn_protocols = vec![b"devolutions-agent-tunnel".to_vec()];
 
-    let client_config = quinn::ClientConfig::new(Arc::new(
+    let mut transport = quinn::TransportConfig::default();
+    transport
+        .max_idle_timeout(Some(
+            Duration::from_secs(120).try_into().context("idle timeout conversion")?,
+        ))
+        .keep_alive_interval(Some(Duration::from_secs(15)))
+        .max_concurrent_bidi_streams(100u32.into());
+
+    let mut client_config = quinn::ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
             .context("build QuicClientConfig from rustls config")?,
     ));
-
-    // -- Transport config --
-
-    let mut transport = quinn::TransportConfig::default();
-    transport.max_idle_timeout(Some(
-        Duration::from_secs(120).try_into().context("idle timeout conversion")?,
-    ));
-    transport.keep_alive_interval(Some(Duration::from_secs(15)));
-    transport.max_concurrent_bidi_streams(100u32.into());
-
-    let mut client_config = client_config;
     client_config.transport_config(Arc::new(transport));
 
     // -- DNS resolve --
@@ -298,26 +311,25 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         .context("initiate QUIC connection")?
         .await
         .context("QUIC handshake")?;
+
     info!("QUIC connection established");
 
     // -- Open control stream --
 
-    let (mut ctrl_send, mut ctrl_recv) = connection.open_bi().await.context("open control stream")?;
+    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.context("open control stream")?.into();
 
     // Send initial RouteAdvertise.
     let epoch = 1u64;
     let msg = ControlMessage::route_advertise(epoch, advertise_subnets.clone(), advertise_domains.clone());
-    msg.encode(&mut ctrl_send)
-        .await
-        .context("encode initial RouteAdvertise")?;
+
+    ctrl.send(&msg).await.context("send initial RouteAdvertise")?;
+
     info!(epoch, "Sent initial RouteAdvertise");
 
-    // Spawn control stream reader.
-    tokio::spawn(async move {
-        let _ = handle_control_recv(&mut ctrl_recv)
-            .await
-            .inspect_err(|e| error!(%e, "Control recv stream failed"));
-    });
+    // Split: recv half goes to a reader task, send half stays for periodic messages.
+    let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
+    let mut task_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    task_handles.push(tokio::spawn(run_control_reader(ctrl_recv)));
 
     // -- Main loop: accept incoming session streams + periodic tasks --
 
@@ -336,19 +348,19 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
             _ = shutdown_signal.wait() => {
                 info!("Tunnel task shutting down");
                 connection.close(0u32.into(), b"shutting down");
-                return Ok(());
+                break;
             }
 
             _ = route_tick.tick() => {
                 let msg = ControlMessage::route_advertise(epoch, advertise_subnets.clone(), advertise_domains.clone());
-                let _ = msg.encode(&mut ctrl_send).await
+                let _ = ctrl_send.send(&msg).await
                     .inspect(|_| trace!(epoch, "Sent RouteAdvertise (refresh)"))
                     .inspect_err(|e| error!(%e, "Failed to send RouteAdvertise"));
             }
 
             _ = heartbeat_tick.tick() => {
                 let msg = ControlMessage::heartbeat(current_time_millis(), 0);
-                let _ = msg.encode(&mut ctrl_send).await
+                let _ = ctrl_send.send(&msg).await
                     .inspect(|_| trace!("Sent Heartbeat"))
                     .inspect_err(|e| error!(%e, "Failed to send Heartbeat"));
             }
@@ -356,157 +368,110 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
             result = connection.accept_bi() => {
                 let (send, recv) = result.context("accept incoming bidi stream")?;
                 let subnets = advertise_subnets.clone();
-                tokio::spawn(async move {
-                    let _ = handle_session_stream(&subnets, send, recv).await
-                        .inspect_err(|e| error!(%e, "Session stream failed"));
-                });
+                task_handles.push(tokio::spawn(run_session_proxy(subnets, send, recv)));
             }
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// Control stream reader
-// ---------------------------------------------------------------------------
-
-async fn handle_control_recv(recv: &mut quinn::RecvStream) -> anyhow::Result<()> {
-    loop {
-        let message = ControlMessage::decode(recv).await.context("decode control message")?;
-
-        match message {
-            ControlMessage::HeartbeatAck {
-                protocol_version,
-                timestamp_ms,
-            } => {
-                if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
-                    warn!(%protocol_version, %e, "Ignoring HeartbeatAck: unsupported protocol version");
-                    continue;
-                }
-                let rtt = current_time_millis().saturating_sub(timestamp_ms);
-                debug!(rtt_ms = rtt, "Received HeartbeatAck");
-            }
-            unexpected => {
-                warn!(message = ?unexpected, "Unexpected control message from gateway");
-            }
-        }
+    // Abort all spawned tasks on shutdown.
+    for handle in &task_handles {
+        handle.abort();
     }
-}
-
-// ---------------------------------------------------------------------------
-// Session stream handler
-// ---------------------------------------------------------------------------
-
-async fn handle_session_stream(
-    advertise_subnets: &[Ipv4Network],
-    mut send: quinn::SendStream,
-    mut recv: quinn::RecvStream,
-) -> anyhow::Result<()> {
-    // Read ConnectMessage (length-prefixed) directly from the Quinn stream.
-    let connect_msg = ConnectMessage::decode(&mut recv)
-        .await
-        .context("decode ConnectMessage")?;
-
-    info!(
-        session_id = %connect_msg.session_id,
-        target = %connect_msg.target,
-        "Received ConnectMessage"
-    );
-
-    if let Err(e) = agent_tunnel_proto::validate_protocol_version(connect_msg.protocol_version) {
-        warn!(
-            protocol_version = %connect_msg.protocol_version,
-            %e,
-            "Rejecting ConnectMessage: unsupported protocol version"
-        );
-        let response = ConnectResponse::error(format!("unsupported protocol version: {e}"));
-        response
-            .encode(&mut send)
-            .await
-            .context("send ConnectResponse error for unsupported version")?;
-        bail!("unsupported protocol version in ConnectMessage");
-    }
-
-    // Validate and connect to target.
-    let candidates = resolve_target_candidates(&connect_msg.target, advertise_subnets).await?;
-    let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
-    info!(target = %selected_target, "TCP connection established");
-
-    // Send ConnectResponse::Success.
-    ConnectResponse::success()
-        .encode(&mut send)
-        .await
-        .context("send ConnectResponse")?;
-    info!("Sent ConnectResponse::Success");
-
-    // Bidirectional proxy using tokio::io::copy.
-    let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
-
-    let quic_to_tcp = tokio::io::copy(&mut recv, &mut tcp_write);
-    let tcp_to_quic = tokio::io::copy(&mut tcp_read, &mut send);
-
-    tokio::select! {
-        r = quic_to_tcp => {
-            r.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
-        }
-        r = tcp_to_quic => {
-            r.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
-        }
+    for handle in task_handles {
+        let _ = handle.await;
     }
 
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Utilities (no QUIC involvement)
+// Control stream reader
 // ---------------------------------------------------------------------------
 
-async fn resolve_target_candidates(target: &str, advertise_subnets: &[Ipv4Network]) -> anyhow::Result<Vec<SocketAddr>> {
-    let resolved: Vec<SocketAddr> = tokio::net::lookup_host(target)
-        .await
-        .with_context(|| format!("resolve target {target}"))?
-        .collect();
+async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: ControlRecvStream<R>) {
+    let _ = async move {
+        loop {
+            let message = ctrl.recv().await.context("recv control message")?;
 
-    if resolved.is_empty() {
-        bail!("no addresses resolved for target {target}");
-    }
-
-    let reachable: Vec<SocketAddr> = resolved
-        .into_iter()
-        .filter(|addr| match addr.ip() {
-            std::net::IpAddr::V4(ipv4) => advertise_subnets.iter().any(|subnet| subnet.contains(ipv4)),
-            // TODO: Support IPv6.
-            std::net::IpAddr::V6(_) => false,
-        })
-        .collect();
-
-    if reachable.is_empty() {
-        bail!("target {target} is not in advertised subnets");
-    }
-
-    Ok(reachable)
-}
-
-async fn connect_to_target(candidates: &[SocketAddr]) -> anyhow::Result<(TcpStream, SocketAddr)> {
-    let mut last_error = None;
-
-    for candidate in candidates {
-        match TcpStream::connect(candidate).await {
-            Ok(stream) => return Ok((stream, *candidate)),
-            Err(error) => last_error = Some((candidate, error)),
+            match message {
+                ControlMessage::HeartbeatAck {
+                    protocol_version,
+                    timestamp_ms,
+                } => {
+                    if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
+                        warn!(%protocol_version, %e, "Ignoring HeartbeatAck: unsupported protocol version");
+                        continue;
+                    }
+                    let rtt = current_time_millis().saturating_sub(timestamp_ms);
+                    debug!(rtt_ms = rtt, "Received HeartbeatAck");
+                }
+                unexpected => {
+                    warn!(message = ?unexpected, "Unexpected control message from gateway");
+                }
+            }
         }
+
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
     }
-
-    let Some((candidate, error)) = last_error else {
-        bail!("no target candidates available");
-    };
-
-    Err(error).with_context(|| format!("TCP connect failed for {candidate}"))
+    .await
+    .inspect_err(|e| error!(%e, "Control reader failed"));
 }
 
-fn current_time_millis() -> u64 {
-    let elapsed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time should be after unix epoch");
+// ---------------------------------------------------------------------------
+// Session proxy
+// ---------------------------------------------------------------------------
 
-    u64::try_from(elapsed.as_millis()).expect("millisecond timestamp should fit in u64")
+async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::SendStream, recv: quinn::RecvStream) {
+    let _: anyhow::Result<()> = async {
+        let mut session: SessionStream<_, _> = (send, recv).into();
+
+        let connect_msg = session.recv_request().await.context("recv ConnectRequest")?;
+
+        info!(
+            session_id = %connect_msg.session_id,
+            target = %connect_msg.target,
+            "Received ConnectRequest"
+        );
+
+        if let Err(e) = agent_tunnel_proto::validate_protocol_version(connect_msg.protocol_version) {
+            warn!(
+                protocol_version = %connect_msg.protocol_version,
+                %e,
+                "Rejecting ConnectRequest: unsupported protocol version"
+            );
+            let response = ConnectResponse::error(format!("unsupported protocol version: {e}"));
+            session
+                .send_response(&response)
+                .await
+                .context("send ConnectResponse error for unsupported version")?;
+            bail!("unsupported protocol version in ConnectRequest");
+        }
+
+        let candidates = resolve_target_candidates(&connect_msg.target, &advertise_subnets).await?;
+        let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
+        info!(target = %selected_target, "TCP connection established");
+
+        session
+            .send_response(&ConnectResponse::success())
+            .await
+            .context("send ConnectResponse")?;
+        info!("Sent ConnectResponse::Success");
+
+        let (mut send, mut recv) = session.into_inner();
+        let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
+
+        tokio::select! {
+            r = tokio::io::copy(&mut recv, &mut tcp_write) => {
+                r.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
+            }
+            r = tokio::io::copy(&mut tcp_read, &mut send) => {
+                r.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
+            }
+        }
+
+        Ok(())
+    }
+    .await
+    .inspect_err(|e| error!(%e, "Session proxy failed"));
 }

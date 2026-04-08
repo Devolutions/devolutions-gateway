@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_tunnel_proto::{ConnectMessage, ConnectResponse, ControlMessage};
+use agent_tunnel_proto::{ConnectRequest, ConnectResponse, ControlMessage, ControlStream, SessionStream};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -61,19 +61,24 @@ impl AgentTunnelHandle {
             .map(|entry| entry.value().clone())
             .ok_or_else(|| anyhow::anyhow!("agent {} not connected", agent_id))?;
 
-        let (mut send, mut recv) = conn.open_bi().await.context("open bidirectional stream to agent")?;
-
-        // Send ConnectMessage.
-        let connect_msg = ConnectMessage::new(session_id, target.to_owned());
-        connect_msg
-            .encode(&mut send)
+        let mut session: SessionStream<_, _> = conn
+            .open_bi()
             .await
-            .map_err(|e| anyhow::anyhow!("encode ConnectMessage: {e}"))?;
+            .context("open bidirectional stream to agent")?
+            .into();
+
+        // Send ConnectRequest.
+        let connect_msg = ConnectRequest::new(session_id, target.to_owned());
+        session
+            .send_request(&connect_msg)
+            .await
+            .map_err(|e| anyhow::anyhow!("send ConnectRequest: {e}"))?;
 
         // Read ConnectResponse.
-        let response = ConnectResponse::decode(&mut recv)
+        let response = session
+            .recv_response()
             .await
-            .map_err(|e| anyhow::anyhow!("decode ConnectResponse: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("recv ConnectResponse: {e}"))?;
 
         if !response.is_success() {
             let reason = match &response {
@@ -90,6 +95,7 @@ impl AgentTunnelHandle {
             "Proxy stream established via agent tunnel"
         );
 
+        let (send, recv) = session.into_inner();
         Ok(TunnelStream { send, recv })
     }
 }
@@ -121,13 +127,15 @@ impl AgentTunnelListener {
 
         // Configure transport parameters.
         let mut transport = quinn::TransportConfig::default();
-        transport.max_idle_timeout(Some(
-            Duration::from_secs(120)
-                .try_into()
-                .expect("120s should be a valid idle timeout"),
-        ));
-        transport.keep_alive_interval(Some(Duration::from_secs(15)));
-        transport.max_concurrent_bidi_streams(100u32.into());
+        transport
+            .max_idle_timeout(Some(
+                Duration::from_secs(120)
+                    .try_into()
+                    .expect("120s should be a valid idle timeout"),
+            ))
+            .keep_alive_interval(Some(Duration::from_secs(15)))
+            .max_concurrent_bidi_streams(100u32.into());
+
         server_config.transport_config(Arc::new(transport));
 
         let endpoint = quinn::Endpoint::server(server_config, listen_addr)
@@ -165,6 +173,8 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
         let local_addr = self.endpoint.local_addr()?;
         info!(%local_addr, "Agent tunnel listener started");
 
+        let mut conn_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
         loop {
             tokio::select! {
                 biased;
@@ -184,13 +194,18 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
                     let registry = Arc::clone(&self.registry);
                     let agent_connections = Arc::clone(&self.agent_connections);
 
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_agent_connection(registry, agent_connections, incoming).await {
-                            warn!(error = format!("{e:#}"), "Agent connection handler failed");
-                        }
-                    });
+                    conn_handles.push(tokio::spawn(
+                        run_agent_connection(registry, agent_connections, incoming),
+                    ));
                 }
             }
+        }
+
+        for handle in &conn_handles {
+            handle.abort();
+        }
+        for handle in conn_handles {
+            let _ = handle.await;
         }
 
         Ok(())
@@ -201,63 +216,67 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
 // Per-connection handler
 // ---------------------------------------------------------------------------
 
-async fn handle_agent_connection(
+async fn run_agent_connection(
     registry: Arc<AgentRegistry>,
     agent_connections: Arc<DashMap<Uuid, quinn::Connection>>,
     incoming: quinn::Incoming,
-) -> anyhow::Result<()> {
+) {
     let peer_addr = incoming.remote_address();
-    info!(%peer_addr, "Accepting new QUIC connection");
 
-    let conn = incoming.await.context("QUIC handshake failed")?;
+    let result: anyhow::Result<()> = async {
+        info!(%peer_addr, "Accepting new QUIC connection");
 
-    // Extract peer certificate to identify the agent.
-    let peer_identity = conn.peer_identity().context("no peer identity after handshake")?;
+        let conn = incoming.await.context("QUIC handshake failed")?;
 
-    let peer_certs = peer_identity
-        .downcast::<Vec<rustls_pki_types::CertificateDer<'static>>>()
-        .map_err(|_| anyhow::anyhow!("unexpected peer identity type"))?;
+        // Extract peer certificate to identify the agent.
+        let peer_identity = conn.peer_identity().context("no peer identity after handshake")?;
 
-    let peer_cert_der = peer_certs.first().context("no peer certificate in chain")?;
+        let peer_certs = peer_identity
+            .downcast::<Vec<rustls_pki_types::CertificateDer<'static>>>()
+            .map_err(|_| anyhow::anyhow!("unexpected peer identity type"))?;
 
-    let agent_id =
-        super::cert::extract_agent_id_from_der(peer_cert_der).context("extract agent_id from peer certificate")?;
+        let peer_cert_der = peer_certs.first().context("no peer certificate in chain")?;
 
-    let agent_name =
-        super::cert::extract_agent_name_from_der(peer_cert_der).unwrap_or_else(|_| format!("agent-{agent_id}"));
+        let agent_id =
+            super::cert::extract_agent_id_from_der(peer_cert_der).context("extract agent_id from peer certificate")?;
 
-    let fingerprint = super::cert::cert_fingerprint_from_der(peer_cert_der);
+        let agent_name =
+            super::cert::extract_agent_name_from_der(peer_cert_der).unwrap_or_else(|_| format!("agent-{agent_id}"));
 
-    info!(%agent_id, %agent_name, %peer_addr, "Agent authenticated via mTLS");
+        let fingerprint = super::cert::cert_fingerprint_from_der(peer_cert_der);
 
-    let peer = Arc::new(AgentPeer::new(agent_id, agent_name, fingerprint));
-    registry.register(Arc::clone(&peer));
-    agent_connections.insert(agent_id, conn.clone());
+        info!(%agent_id, %agent_name, %peer_addr, "Agent authenticated via mTLS");
 
-    // Accept the first bidirectional stream as the control stream.
-    let control_result = handle_control_stream(&conn, agent_id, &registry).await;
+        let peer = Arc::new(AgentPeer::new(agent_id, agent_name, fingerprint));
+        registry.register(Arc::clone(&peer));
+        agent_connections.insert(agent_id, conn.clone());
 
-    // Agent disconnected — clean up.
-    info!(%agent_id, "Agent QUIC connection closed");
-    registry.unregister(&agent_id);
-    agent_connections.remove(&agent_id);
+        // Accept the first bidirectional stream as the control stream.
+        let control_result = run_control_loop(&conn, agent_id, &registry).await;
 
-    control_result
+        // Agent disconnected — clean up.
+        info!(%agent_id, "Agent QUIC connection closed");
+        registry.unregister(&agent_id);
+        agent_connections.remove(&agent_id);
+
+        control_result
+    }
+    .await;
+
+    if let Err(e) = result {
+        warn!(%peer_addr, error = format!("{e:#}"), "Agent connection failed");
+    }
 }
 
-async fn handle_control_stream(
-    conn: &quinn::Connection,
-    agent_id: Uuid,
-    registry: &AgentRegistry,
-) -> anyhow::Result<()> {
-    let (mut control_send, mut control_recv) = conn.accept_bi().await.context("accept control stream")?;
+async fn run_control_loop(conn: &quinn::Connection, agent_id: Uuid, registry: &AgentRegistry) -> anyhow::Result<()> {
+    let mut ctrl: ControlStream<_, _> = conn.accept_bi().await.context("accept control stream")?.into();
 
     info!(%agent_id, "Control stream accepted");
 
     loop {
         tokio::select! {
             // Read control messages from the agent.
-            msg_result = ControlMessage::decode(&mut control_recv) => {
+            msg_result = ctrl.recv() => {
                 let msg = match msg_result {
                     Ok(msg) => msg,
                     Err(agent_tunnel_proto::ProtoError::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
@@ -270,7 +289,7 @@ async fn handle_control_stream(
                     }
                 };
 
-                handle_control_message(registry, agent_id, &mut control_send, msg).await;
+                handle_control_message(registry, agent_id, &mut ctrl, msg).await;
             }
 
             // Detect connection close.
@@ -284,10 +303,10 @@ async fn handle_control_stream(
     Ok(())
 }
 
-async fn handle_control_message(
+async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::AsyncRead + Unpin>(
     registry: &AgentRegistry,
     agent_id: Uuid,
-    control_send: &mut quinn::SendStream,
+    ctrl: &mut ControlStream<S, R>,
     msg: ControlMessage,
 ) {
     match msg {
@@ -325,7 +344,7 @@ async fn handle_control_message(
             }
 
             let ack = ControlMessage::heartbeat_ack(timestamp_ms);
-            if let Err(e) = ack.encode(control_send).await {
+            if let Err(e) = ctrl.send(&ack).await {
                 warn!(%agent_id, error = %e, "Failed to send heartbeat ack");
             }
         }

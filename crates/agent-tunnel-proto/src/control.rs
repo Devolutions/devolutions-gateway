@@ -1,8 +1,6 @@
 use ipnetwork::Ipv4Network;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-use crate::error::ProtoError;
 use crate::version::CURRENT_PROTOCOL_VERSION;
 
 /// Maximum encoded message size (1 MiB) to prevent denial-of-service via oversized frames.
@@ -76,44 +74,6 @@ impl ControlMessage {
         }
     }
 
-    /// Length-prefixed bincode encode and write to an async writer.
-    pub async fn encode<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<(), ProtoError> {
-        let payload = bincode::serialize(self)?;
-        let len = u32::try_from(payload.len()).map_err(|_| ProtoError::MessageTooLarge {
-            size: u32::MAX,
-            max: MAX_CONTROL_MESSAGE_SIZE,
-        })?;
-        if MAX_CONTROL_MESSAGE_SIZE < len {
-            return Err(ProtoError::MessageTooLarge {
-                size: len,
-                max: MAX_CONTROL_MESSAGE_SIZE,
-            });
-        }
-        writer.write_all(&len.to_be_bytes()).await?;
-        writer.write_all(&payload).await?;
-        writer.flush().await?;
-        Ok(())
-    }
-
-    /// Read and decode a length-prefixed bincode message from an async reader.
-    pub async fn decode<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Self, ProtoError> {
-        let mut len_buf = [0u8; 4];
-        reader.read_exact(&mut len_buf).await?;
-        let len = u32::from_be_bytes(len_buf);
-
-        if MAX_CONTROL_MESSAGE_SIZE < len {
-            return Err(ProtoError::MessageTooLarge {
-                size: len,
-                max: MAX_CONTROL_MESSAGE_SIZE,
-            });
-        }
-
-        let mut payload = vec![0u8; len as usize];
-        reader.read_exact(&mut payload).await?;
-        let msg: Self = bincode::deserialize(&payload)?;
-        Ok(msg)
-    }
-
     /// Extract the protocol version from any variant.
     pub fn protocol_version(&self) -> u16 {
         match self {
@@ -127,6 +87,16 @@ impl ControlMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::ControlStream;
+
+    async fn roundtrip(msg: &ControlMessage) -> ControlMessage {
+        let mut buf = Vec::new();
+        let mut stream = ControlStream::new(&mut buf, &[][..]);
+        stream.send(msg).await.expect("send should succeed");
+
+        let mut stream = ControlStream::new(tokio::io::sink(), buf.as_slice());
+        stream.recv().await.expect("recv should succeed")
+    }
 
     #[tokio::test]
     async fn roundtrip_route_advertise() {
@@ -138,15 +108,7 @@ mod tests {
             ],
             vec![],
         );
-
-        let mut buf = Vec::new();
-        msg.encode(&mut buf).await.expect("encode should succeed");
-
-        let decoded = ControlMessage::decode(&mut buf.as_slice())
-            .await
-            .expect("decode should succeed");
-
-        assert_eq!(msg, decoded);
+        assert_eq!(msg, roundtrip(&msg).await);
     }
 
     #[tokio::test]
@@ -166,13 +128,7 @@ mod tests {
             ],
         );
 
-        let mut buf = Vec::new();
-        msg.encode(&mut buf).await.expect("encode should succeed");
-
-        let decoded = ControlMessage::decode(&mut buf.as_slice())
-            .await
-            .expect("decode should succeed");
-
+        let decoded = roundtrip(&msg).await;
         assert_eq!(msg, decoded);
 
         match &decoded {
@@ -190,54 +146,29 @@ mod tests {
     #[tokio::test]
     async fn roundtrip_route_advertise_empty_domains() {
         let msg = ControlMessage::route_advertise(1, vec!["192.168.1.0/24".parse().expect("valid CIDR")], vec![]);
-
-        let mut buf = Vec::new();
-        msg.encode(&mut buf).await.expect("encode should succeed");
-
-        let decoded = ControlMessage::decode(&mut buf.as_slice())
-            .await
-            .expect("decode should succeed");
-
-        assert_eq!(msg, decoded);
+        assert_eq!(msg, roundtrip(&msg).await);
     }
 
     #[tokio::test]
     async fn roundtrip_heartbeat() {
         let msg = ControlMessage::heartbeat(1_700_000_000_000, 5);
-
-        let mut buf = Vec::new();
-        msg.encode(&mut buf).await.expect("encode should succeed");
-
-        let decoded = ControlMessage::decode(&mut buf.as_slice())
-            .await
-            .expect("decode should succeed");
-
-        assert_eq!(msg, decoded);
+        assert_eq!(msg, roundtrip(&msg).await);
     }
 
     #[tokio::test]
     async fn roundtrip_heartbeat_ack() {
         let msg = ControlMessage::heartbeat_ack(1_700_000_000_000);
-
-        let mut buf = Vec::new();
-        msg.encode(&mut buf).await.expect("encode should succeed");
-
-        let decoded = ControlMessage::decode(&mut buf.as_slice())
-            .await
-            .expect("decode should succeed");
-
-        assert_eq!(msg, decoded);
+        assert_eq!(msg, roundtrip(&msg).await);
     }
 
     #[tokio::test]
     async fn reject_oversized_message() {
-        // Craft a length prefix that exceeds the maximum
         let bad_len = (MAX_CONTROL_MESSAGE_SIZE + 1).to_be_bytes();
         let mut buf = bad_len.to_vec();
-        buf.extend_from_slice(&[0u8; 32]); // dummy payload
+        buf.extend_from_slice(&[0u8; 32]);
 
-        let result = ControlMessage::decode(&mut buf.as_slice()).await;
-        assert!(result.is_err());
+        let mut stream = ControlStream::new(tokio::io::sink(), buf.as_slice());
+        assert!(stream.recv().await.is_err());
     }
 }
 
@@ -246,12 +177,12 @@ mod proptests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::stream::ControlStream;
     use crate::version::CURRENT_PROTOCOL_VERSION;
 
     fn arb_ipv4_network() -> impl Strategy<Value = Ipv4Network> {
         (any::<[u8; 4]>(), 0u8..=32).prop_map(|(octets, prefix)| {
             let ip = std::net::Ipv4Addr::from(octets);
-            // Use network() to normalize the address for the given prefix
             Ipv4Network::new(ip, prefix)
                 .map(|n| Ipv4Network::new(n.network(), prefix).expect("normalized network should be valid"))
                 .unwrap_or_else(|_| Ipv4Network::new(std::net::Ipv4Addr::UNSPECIFIED, 0).expect("0.0.0.0/0 is valid"))
@@ -298,8 +229,11 @@ mod proptests {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
             rt.block_on(async {
                 let mut buf = Vec::new();
-                msg.encode(&mut buf).await.expect("encode should succeed");
-                let decoded = ControlMessage::decode(&mut buf.as_slice()).await.expect("decode should succeed");
+                let mut stream = ControlStream::new(&mut buf, &[][..]);
+                stream.send(&msg).await.expect("send should succeed");
+
+                let mut stream = ControlStream::new(tokio::io::sink(), buf.as_slice());
+                let decoded = stream.recv().await.expect("recv should succeed");
                 prop_assert_eq!(msg, decoded);
                 Ok(())
             })?;
