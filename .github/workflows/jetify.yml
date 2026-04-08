@@ -123,7 +123,7 @@ jobs:
 
       - name: Restore Detours Cache (${{matrix.arch}})
         id: cache-detours
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: dependencies/detours
           key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
@@ -138,7 +138,7 @@ jobs:
 
       - name: Save Detours Cache (${{matrix.arch}})
         if: ${{ steps.cache-detours.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: dependencies/detours
           key: detours-${{ matrix.arch }}-${{ needs.preflight.outputs.detours-git-commit }}
