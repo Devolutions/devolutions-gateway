@@ -114,6 +114,13 @@ async fn enroll_agent(
 
     let agent_id = req.agent_id;
 
+    // Reject duplicate agent IDs to prevent identity shadowing.
+    if handle.registry().get(&agent_id).is_some() {
+        return Err(
+            crate::http::HttpErrorBuilder::new(axum::http::StatusCode::CONFLICT).msg("agent ID already registered")
+        );
+    }
+
     let signed = handle
         .ca_manager()
         .sign_agent_csr(agent_id, &req.agent_name, &req.csr_pem, req.agent_hostname.as_deref())

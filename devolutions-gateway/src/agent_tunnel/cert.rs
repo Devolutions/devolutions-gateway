@@ -141,7 +141,7 @@ impl CaManager {
         agent_params
             .distinguished_name
             .push(DnType::OrganizationName, CA_ORG_NAME);
-        agent_params.subject_alt_names.push(SanType::Rfc822Name(
+        agent_params.subject_alt_names.push(SanType::URI(
             format!("urn:uuid:{agent_id}").try_into().context("SAN URI")?,
         ));
         if let Some(hostname) = agent_hostname {
@@ -364,7 +364,7 @@ pub fn extract_agent_id_from_der(der_bytes: &[u8]) -> anyhow::Result<Uuid> {
     for ext in cert.extensions() {
         if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) = ext.parsed_extension() {
             for name in &san.general_names {
-                if let x509_parser::extensions::GeneralName::RFC822Name(val) = name
+                if let x509_parser::extensions::GeneralName::URI(val) = name
                     && let Some(uuid_str) = val.strip_prefix("urn:uuid:")
                 {
                     return uuid_str.parse().context("parse UUID from SAN");

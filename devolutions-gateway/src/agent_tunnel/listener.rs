@@ -75,10 +75,10 @@ impl AgentTunnelHandle {
             .await
             .map_err(|e| anyhow::anyhow!("send ConnectRequest: {e}"))?;
 
-        // Read ConnectResponse.
-        let response = session
-            .recv_response()
+        // Read ConnectResponse (with timeout to prevent stalled peers).
+        let response = tokio::time::timeout(Duration::from_secs(30), session.recv_response())
             .await
+            .map_err(|_| anyhow::anyhow!("session handshake timeout (30s)"))?
             .map_err(|e| anyhow::anyhow!("recv ConnectResponse: {e}"))?;
 
         if !response.is_success() {
@@ -174,7 +174,7 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
         let local_addr = self.endpoint.local_addr()?;
         info!(%local_addr, "Agent tunnel listener started");
 
-        let mut conn_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+        let mut conn_handles = tokio::task::JoinSet::new();
 
         loop {
             tokio::select! {
@@ -195,19 +195,17 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
                     let registry = Arc::clone(&self.registry);
                     let agent_connections = Arc::clone(&self.agent_connections);
 
-                    conn_handles.push(tokio::spawn(
+                    conn_handles.spawn(
                         run_agent_connection(registry, agent_connections, incoming),
-                    ));
+                    );
                 }
+
+                // Reap completed connection tasks to prevent unbounded growth.
+                Some(_) = conn_handles.join_next() => {}
             }
         }
 
-        for handle in &conn_handles {
-            handle.abort();
-        }
-        for handle in conn_handles {
-            let _ = handle.await;
-        }
+        conn_handles.shutdown().await;
 
         Ok(())
     }

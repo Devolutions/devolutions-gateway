@@ -447,7 +447,10 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
     let _: anyhow::Result<()> = async {
         let mut session: SessionStream<_, _> = (send, recv).into();
 
-        let connect_msg = session.recv_request().await.context("recv ConnectRequest")?;
+        let connect_msg = tokio::time::timeout(Duration::from_secs(30), session.recv_request())
+            .await
+            .context("session handshake timeout")?
+            .context("recv ConnectRequest")?;
 
         info!(
             session_id = %connect_msg.session_id,
@@ -483,14 +486,14 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
         let (mut send, mut recv) = session.into_inner();
         let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
 
-        tokio::select! {
-            r = tokio::io::copy(&mut recv, &mut tcp_write) => {
-                r.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
-            }
-            r = tokio::io::copy(&mut tcp_read, &mut send) => {
-                r.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
-            }
-        }
+        // Use join! (not select!) to wait for BOTH directions to finish.
+        // select! would cancel in-flight data when one direction closes first.
+        let (r1, r2) = tokio::join!(
+            tokio::io::copy(&mut recv, &mut tcp_write),
+            tokio::io::copy(&mut tcp_read, &mut send),
+        );
+        r1.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
+        r2.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
 
         Ok(())
     }
