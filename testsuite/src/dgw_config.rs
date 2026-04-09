@@ -149,7 +149,7 @@ impl DgwConfigHandle {
             let path_str = path.to_string_lossy().replace('\\', "/");
             format!(
                 r#",
-    "recording_path": "{path_str}""#
+    "RecordingPath": "{path_str}""#
             )
         } else {
             String::new()
