@@ -83,12 +83,3 @@ pub(crate) async fn connect_to_target(candidates: &[SocketAddr]) -> anyhow::Resu
 
     Err(error).with_context(|| format!("TCP connect failed for {candidate}"))
 }
-
-/// Current wall-clock time in milliseconds since UNIX epoch.
-pub(crate) fn current_time_millis() -> u64 {
-    let elapsed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time should be after unix epoch");
-
-    u64::try_from(elapsed.as_millis()).expect("millisecond timestamp should fit in u64")
-}

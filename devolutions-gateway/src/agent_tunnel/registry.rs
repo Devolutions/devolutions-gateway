@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use agent_tunnel_proto::DomainAdvertisement;
 use dashmap::DashMap;
@@ -124,16 +124,10 @@ impl AgentPeer {
                 agent_id = %self.agent_id,
                 epoch,
                 subnet_count = subnets.len(),
-                domain_count = current.domains.len(),
+                domain_count = state.domains.len(),
                 "Refreshing route advertisement (same epoch)"
             );
-            *state = RouteAdvertisementState {
-                epoch,
-                subnets: current.subnets.clone(),
-                domains: current.domains.clone(),
-                received_at: current.received_at,
-                updated_at: now,
-            };
+            state.updated_at = now;
         } else {
             // New epoch (or first advertisement): replace everything.
             info!(
@@ -234,13 +228,6 @@ impl Default for AgentRegistry {
     }
 }
 
-/// Domain info with source tracking for API responses.
-#[derive(Debug, Clone, Serialize)]
-pub struct DomainInfo {
-    pub domain: String,
-    pub auto_detected: bool,
-}
-
 /// Serializable snapshot of an agent's state, suitable for API responses.
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentInfo {
@@ -250,7 +237,7 @@ pub struct AgentInfo {
     pub is_online: bool,
     pub last_seen_ms: u64,
     pub subnets: Vec<String>,
-    pub domains: Vec<DomainInfo>,
+    pub domains: Vec<DomainAdvertisement>,
     pub route_epoch: u64,
 }
 
@@ -264,29 +251,13 @@ impl From<&Arc<AgentPeer>> for AgentInfo {
             is_online: agent.is_online(AGENT_OFFLINE_TIMEOUT),
             last_seen_ms: agent.last_seen_ms(),
             subnets: route_state.subnets.iter().map(ToString::to_string).collect(),
-            domains: route_state
-                .domains
-                .iter()
-                .map(|d| DomainInfo {
-                    domain: d.domain.clone(),
-                    auto_detected: d.auto_detected,
-                })
-                .collect(),
+            domains: route_state.domains.clone(),
             route_epoch: route_state.epoch,
         }
     }
 }
 
-/// Returns the current time as milliseconds since UNIX epoch.
-fn current_time_millis() -> u64 {
-    u64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis(),
-    )
-    .expect("millisecond timestamp should fit in u64")
-}
+use agent_tunnel_proto::current_time_millis;
 
 #[cfg(test)]
 mod tests {

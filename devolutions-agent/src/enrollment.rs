@@ -56,16 +56,6 @@ pub async fn enroll_agent(
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
-) -> anyhow::Result<()> {
-    bootstrap_and_persist(gateway_url, enrollment_token, agent_name, advertise_subnets).await?;
-    Ok(())
-}
-
-pub async fn bootstrap_and_persist(
-    gateway_url: &str,
-    enrollment_token: &str,
-    agent_name: &str,
-    advertise_subnets: Vec<String>,
 ) -> anyhow::Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;

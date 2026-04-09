@@ -52,6 +52,7 @@ impl EnrollmentTokenStore {
     ///
     /// Returns `true` if the token was valid and has been redeemed (removed).
     /// Returns `false` if the token doesn't exist or is expired.
+    #[must_use = "check whether the token was valid"]
     pub fn redeem(&self, token: &str) -> bool {
         let now = current_time_secs();
 

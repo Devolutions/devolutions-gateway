@@ -301,7 +301,7 @@ fn main() {
 
                 let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 let result = rt.block_on(async {
-                    devolutions_agent::enrollment::bootstrap_and_persist(
+                    devolutions_agent::enrollment::enroll_agent(
                         &command.gateway_url,
                         &command.enrollment_token,
                         &command.agent_name,

@@ -20,6 +20,7 @@ const CA_VALIDITY_DAYS: u32 = 3650; // ~10 years
 const SERVER_CERT_VALIDITY_DAYS: u32 = 365; // 1 year
 const AGENT_CERT_VALIDITY_DAYS: u32 = 365; // 1 year
 
+const SECS_PER_DAY: u64 = 86_400;
 const CA_COMMON_NAME: &str = "Devolutions Gateway Agent Tunnel CA";
 const CA_ORG_NAME: &str = "Devolutions Inc.";
 
@@ -33,7 +34,8 @@ fn make_ca_params() -> CertificateParams {
     params.key_usages.push(KeyUsagePurpose::KeyCertSign);
     params.key_usages.push(KeyUsagePurpose::CrlSign);
     params.not_before = time::OffsetDateTime::now_utc();
-    params.not_after = time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(CA_VALIDITY_DAYS) * 86400);
+    params.not_after =
+        time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(CA_VALIDITY_DAYS) * SECS_PER_DAY);
     params
 }
 
@@ -154,7 +156,7 @@ impl CaManager {
             .push(ExtendedKeyUsagePurpose::ClientAuth);
         agent_params.not_before = time::OffsetDateTime::now_utc();
         agent_params.not_after =
-            time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(AGENT_CERT_VALIDITY_DAYS) * 86400);
+            time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(AGENT_CERT_VALIDITY_DAYS) * SECS_PER_DAY);
 
         // Sign with the CA, embedding the public key from the CSR.
         let ca_cert = self.reconstruct_ca_cert()?;
@@ -201,7 +203,7 @@ impl CaManager {
             .push(ExtendedKeyUsagePurpose::ServerAuth);
         server_params.not_before = time::OffsetDateTime::now_utc();
         server_params.not_after =
-            time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(SERVER_CERT_VALIDITY_DAYS) * 86400);
+            time::OffsetDateTime::now_utc() + Duration::from_secs(u64::from(SERVER_CERT_VALIDITY_DAYS) * SECS_PER_DAY);
 
         let ca_cert = self.reconstruct_ca_cert()?;
 

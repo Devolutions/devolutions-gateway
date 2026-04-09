@@ -73,19 +73,15 @@ impl AgentTunnelHandle {
         session
             .send_request(&connect_msg)
             .await
-            .map_err(|e| anyhow::anyhow!("send ConnectRequest: {e}"))?;
+            .context("send ConnectRequest")?;
 
         // Read ConnectResponse (with timeout to prevent stalled peers).
         let response = tokio::time::timeout(Duration::from_secs(30), session.recv_response())
             .await
             .map_err(|_| anyhow::anyhow!("session handshake timeout (30s)"))?
-            .map_err(|e| anyhow::anyhow!("recv ConnectResponse: {e}"))?;
+            .context("recv ConnectResponse")?;
 
-        if !response.is_success() {
-            let reason = match &response {
-                ConnectResponse::Error { reason, .. } => reason.clone(),
-                _ => "unknown".to_owned(),
-            };
+        if let ConnectResponse::Error { reason, .. } = &response {
             anyhow::bail!("agent refused connection: {reason}");
         }
 

@@ -24,3 +24,14 @@ pub use error::ProtoError;
 pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
 pub use stream::{ControlRecvStream, ControlSendStream, ControlStream, SessionStream};
 pub use version::{CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_VERSION, validate_protocol_version};
+
+/// Current wall-clock time in milliseconds since UNIX epoch.
+pub fn current_time_millis() -> u64 {
+    u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_millis(),
+    )
+    .expect("millisecond timestamp should fit in u64")
+}

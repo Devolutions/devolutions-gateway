@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_tunnel_proto::{ConnectResponse, ControlMessage, ControlRecvStream, ControlStream, SessionStream};
+use agent_tunnel_proto::{
+    ConnectResponse, ControlMessage, ControlRecvStream, ControlStream, SessionStream, current_time_millis,
+};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
@@ -14,7 +16,7 @@ use ipnetwork::Ipv4Network;
 use sha2::Digest as _;
 
 use crate::config::ConfHandle;
-use crate::tunnel_helpers::{Target, connect_to_target, current_time_millis, resolve_target};
+use crate::tunnel_helpers::{Target, connect_to_target, resolve_target};
 
 // ---------------------------------------------------------------------------
 // Custom TLS verifier: chain + hostname validation + SPKI pinning
@@ -349,8 +351,8 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     // Split: recv half goes to a reader task, send half stays for periodic messages.
     let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
-    let mut task_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    task_handles.push(tokio::spawn(run_control_reader(ctrl_recv)));
+    let mut task_handles = tokio::task::JoinSet::new();
+    task_handles.spawn(run_control_reader(ctrl_recv));
 
     // -- Main loop: accept incoming session streams + periodic tasks --
 
@@ -380,6 +382,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
             }
 
             _ = heartbeat_tick.tick() => {
+                // TODO: track actual active_stream_count instead of hardcoded 0.
                 let msg = ControlMessage::heartbeat(current_time_millis(), 0);
                 let _ = ctrl_send.send(&msg).await
                     .inspect(|_| trace!("Sent Heartbeat"))
@@ -389,18 +392,15 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
             result = connection.accept_bi() => {
                 let (send, recv) = result.context("accept incoming bidi stream")?;
                 let subnets = advertise_subnets.clone();
-                task_handles.push(tokio::spawn(run_session_proxy(subnets, send, recv)));
+                task_handles.spawn(run_session_proxy(subnets, send, recv));
             }
+
+            // Reap completed session tasks.
+            Some(_) = task_handles.join_next() => {}
         }
     }
 
-    // Abort all spawned tasks on shutdown.
-    for handle in &task_handles {
-        handle.abort();
-    }
-    for handle in task_handles {
-        let _ = handle.await;
-    }
+    task_handles.shutdown().await;
 
     Ok(())
 }
