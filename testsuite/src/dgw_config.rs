@@ -54,6 +54,12 @@ pub struct DgwConfig {
     /// Enable unstable features (required for AI gateway).
     #[builder(default = false)]
     enable_unstable: bool,
+    /// Override the recording path in the gateway config.
+    ///
+    /// When `None`, the gateway uses its default (`<data_dir>/recordings`).
+    /// Pass a path that does not yet exist to test behaviour before the folder is created.
+    #[builder(default, setter(into))]
+    recording_path: Option<std::path::PathBuf>,
 }
 
 fn find_unused_port() -> u16 {
@@ -85,6 +91,7 @@ impl DgwConfigHandle {
             verbosity_profile,
             ai_gateway,
             enable_unstable,
+            recording_path,
         } = config;
 
         let tempdir = tempfile::tempdir().context("create tempdir")?;
@@ -137,6 +144,15 @@ impl DgwConfigHandle {
             String::new()
         };
 
+        let recording_path_json = if let Some(path) = recording_path {
+            // Use forward slashes so the JSON value is valid on all platforms.
+            let path_str = path.to_string_lossy().replace('\\', "/");
+            format!(r#",
+    "recording_path": "{path_str}""#)
+        } else {
+            String::new()
+        };
+
         let config = format!(
             r#"{{
     "ProvisionerPublicKeyData": {{
@@ -156,7 +172,7 @@ impl DgwConfigHandle {
     "__debug__": {{
         "disable_token_validation": {disable_token_validation},
         "enable_unstable": {enable_unstable}
-    }}{ai_gateway_json}
+    }}{ai_gateway_json}{recording_path_json}
 }}"#
         );
 
