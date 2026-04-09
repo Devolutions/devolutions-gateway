@@ -69,12 +69,16 @@ function New-GatewayRpm() {
         '--url', 'https://devolutions.net'
         '--license', 'Apache-2.0 OR MIT'
         '--rpm-attr', '755,root,root:/usr/bin/devolutions-gateway'
+        '--rpm-attr', '644,root,root:/usr/lib/systemd/system/devolutions-gateway.service'
+        '--rpm-attr', '644,root,root:/usr/lib/systemd/system-preset/85-devolutions-gateway.preset'
         '--rpm-changelog', $pkgChangelog
         '--after-install', 'package/Linux/gateway/rpm/postinst'
         '--before-remove', 'package/Linux/gateway/rpm/prerm'
         '--after-remove', 'package/Linux/gateway/rpm/postrm'
         '--'
         "$Bin=/usr/bin/devolutions-gateway"
+        'package/Linux/gateway/rpm/service=/usr/lib/systemd/system/devolutions-gateway.service'
+        'package/Linux/gateway/rpm/preset=/usr/lib/systemd/system-preset/85-devolutions-gateway.preset'
         "$generatedUpstreamChangelog=/usr/share/doc/devolutions-gateway/ChangeLog"
         "$pkgDir/copyright=/usr/share/doc/devolutions-gateway/copyright"
         "$LibxmfFile=/usr/lib/devolutions-gateway/libxmf.so"

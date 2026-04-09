@@ -1,16 +1,14 @@
 #!/bin/sh
 
+set -e
+
 if [ ! -d /etc/devolutions-gateway ]; then
 	/bin/mkdir /etc/devolutions-gateway
-	/bin/chmod 655 /etc/devolutions-gateway
+	/bin/chmod 750 /etc/devolutions-gateway
 fi
 
-if [ -d /run/systemd/system ]; then
-	# Generate /etc/devolutions-gateway/gateway.json
-	/usr/bin/devolutions-gateway --config-init-only >/dev/null
-fi
+/usr/bin/devolutions-gateway --config-init-only >/dev/null
 
-set -e
 # Automatically added by dh_installsystemd/13.18ubuntu2.1
 if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
 	# The following line should be removed in trixie or trixie+1
@@ -33,11 +31,21 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
 	if [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
 		systemctl --system daemon-reload >/dev/null || true
 		if [ -n "$2" ]; then
-			_dh_action=restart
-		else
-			_dh_action=start
+			# Upgrade: restart only if already running.
+			deb-systemd-invoke try-restart 'devolutions-gateway.service' >/dev/null || true
 		fi
-		deb-systemd-invoke $_dh_action 'devolutions-gateway.service' >/dev/null || true
 	fi
 fi
 # End automatically added section
+
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+	echo ""
+	echo "Devolutions Gateway has been installed."
+	echo "Edit /etc/devolutions-gateway/gateway.json, then run:"
+	if [ -d /run/systemd/system ]; then
+		echo "  systemctl start devolutions-gateway"
+	else
+		echo "  Start devolutions-gateway using your init system or run it directly."
+	fi
+	echo ""
+fi

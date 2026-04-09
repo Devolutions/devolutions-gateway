@@ -1,14 +1,27 @@
 #!/bin/sh
 
+set -e
+
 if [ ! -d /etc/devolutions-gateway ]; then
 	/bin/mkdir /etc/devolutions-gateway
-	/bin/chmod 655 /etc/devolutions-gateway
+	/bin/chmod 750 /etc/devolutions-gateway
 fi
 
-if [ -d /run/systemd/system ]; then
-	/usr/bin/devolutions-gateway service register >/dev/null
-	systemctl daemon-reload
-	/usr/bin/devolutions-gateway --config-init-only >/dev/null
-	systemctl enable --now devolutions-gateway >/dev/null 2>&1
-	systemctl restart devolutions-gateway >/dev/null 2>&1
+/usr/bin/devolutions-gateway --config-init-only >/dev/null
+
+# Equivalent to %systemd_post: preset (enable) on fresh install only.
+if [ -d /run/systemd/system ] && [ "$1" -eq 1 ]; then
+	systemctl preset devolutions-gateway.service >/dev/null 2>&1 || true
+fi
+
+if [ "$1" -eq 1 ]; then
+	echo ""
+	echo "Devolutions Gateway has been installed."
+	echo "Edit /etc/devolutions-gateway/gateway.json, then run:"
+	if [ -d /run/systemd/system ]; then
+		echo "  systemctl start devolutions-gateway"
+	else
+		echo "  Start devolutions-gateway using your init system or run it directly."
+	fi
+	echo ""
 fi
