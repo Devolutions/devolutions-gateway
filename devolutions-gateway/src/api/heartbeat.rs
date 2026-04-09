@@ -176,18 +176,18 @@ pub(crate) fn recording_storage_health(recording_path: &std::path::Path) -> Reco
 
 /// Queries total and available disk space for the given path.
 ///
-/// On Windows, calls `GetDiskFreeSpaceExW` directly against the configured recording path.
-/// This supports UNC paths (`\\server\share\...`) and mapped drive letters without needing
-/// to enumerate mount points or canonicalize the path.
+/// On Windows, calls `GetDiskFreeSpaceExW` against an existing path on the same volume as the
+/// configured recording path.  This supports UNC paths (`\\server\share\...`) and mapped drive
+/// letters without needing to enumerate mount points or canonicalize the path.
 ///
-/// On Unix, calls `statvfs(2)` directly against the configured recording path.
-/// This supports network filesystems (NFS, CIFS/Samba) and any mount point without needing
-/// to enumerate mount points.
+/// On Unix, calls `statvfs(2)` against an existing path on the same volume as the configured
+/// recording path.  This supports network filesystems (NFS, CIFS/Samba) and any mount point
+/// without needing to enumerate mount points.
 ///
 /// On other platforms, space values are not available and `(None, None)` is returned.
 ///
 /// If `recording_path` does not exist yet (e.g. the recordings folder was never created),
-/// the nearest existing ancestor is used instead. Disk space is a volume property, so any
+/// the nearest existing ancestor is used instead.  Disk space is a volume property, so any
 /// path on the same volume yields the correct result.
 fn query_storage_space(recording_path: &std::path::Path) -> (Option<u64>, Option<u64>) {
     static NO_DISK_STATE: NoDiskState = NoDiskState::new();
