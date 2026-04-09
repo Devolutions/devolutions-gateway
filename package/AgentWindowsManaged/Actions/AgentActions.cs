@@ -254,7 +254,8 @@ internal static class AgentActions
         Sequence = Sequence.InstallExecuteSequence,
         Return = Return.check,
         Step = Step.StartServices,
-        When = When.Before
+        When = When.Before,
+        Condition = Condition.NOT_BeingRemoved & new Condition("(UILevel >= 3 OR WIXSHARP_MANAGED_UI_HANDLE <> \"\")")
     };
 
     private static readonly ElevatedManagedAction registerExplorerCommand = new(

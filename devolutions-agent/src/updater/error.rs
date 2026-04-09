@@ -58,4 +58,16 @@ pub(crate) enum UpdaterError {
     QueryServiceState { product: Product, source: anyhow::Error },
     #[error("failed to start service for `{product}`")]
     StartService { product: Product, source: anyhow::Error },
+    #[error("agent updater shim not found at expected path: `{path}`")]
+    AgentUpdaterShimNotFound { path: Utf8PathBuf },
+    #[error("failed to launch agent updater shim")]
+    AgentShimLaunch { source: std::io::Error },
+    #[error(
+        "agent updater shim exited unexpectedly before service restart (exit code {exit_code}); update may not have completed"
+    )]
+    AgentShimExitedUnexpectedly { exit_code: i32 },
+    #[error("agent updater shim timed out; update may not have completed")]
+    AgentShimTimedOut,
+    #[error("an agent update is already in progress; skipping concurrent update request")]
+    AgentUpdateAlreadyInProgress,
 }

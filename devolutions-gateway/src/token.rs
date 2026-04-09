@@ -454,6 +454,8 @@ pub enum AccessScope {
     RecordingsRead,
     #[serde(rename = "gateway.update")]
     Update,
+    #[serde(rename = "gateway.update.read")]
+    UpdateRead,
     #[serde(rename = "gateway.preflight")]
     Preflight,
     #[serde(rename = "gateway.traffic.claim")]

@@ -1,0 +1,15 @@
+[package]
+name = "devolutions-agent-updater"
+version.workspace = true
+edition = "2024"
+license = "MIT/Apache-2.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Updater shim for Devolutions Agent"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+win-api-wrappers = { path = "../crates/win-api-wrappers" }

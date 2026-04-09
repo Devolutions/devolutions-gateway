@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2025.3.2
+  version: 2026.1.1
 paths:
   /jet/config:
     patch:
@@ -595,25 +595,71 @@ paths:
       - scope_token:
         - gateway.traffic.claim
   /jet/update:
+    get:
+      tags:
+      - Update
+      summary: Retrieve the currently installed version of each Devolutions product.
+      description: |-
+        Reads `update_status.json`, which is written by the Devolutions Agent on startup and
+        refreshed after every update run.  When the file does not exist (agent not installed
+        or is an older version), the endpoint returns HTTP 503 because updater status is
+        unavailable.
+      operationId: GetUpdateProducts
+      responses:
+        '200':
+          description: Installed product versions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUpdateProductsResponse'
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to read agent status file
+        '503':
+          description: Agent updater service is unavailable
+      security:
+      - scope_token:
+        - gateway.update.read
     post:
       tags:
       - Update
-      summary: Triggers Devolutions Gateway update process.
+      summary: Trigger an update for one or more Devolutions products.
       description: |-
-        This is done via updating `Agent/update.json` file, which is then read by Devolutions Agent
-        when changes are detected. If the version written to `update.json` is indeed higher than the
-        currently installed version, Devolutions Agent will proceed with the update process.
+        Writes the requested version(s) into `Agent/update.json`, which is watched by Devolutions
+        Agent. When a requested version is higher than the installed version the agent proceeds
+        with the update.
+
+        **Body form** (preferred): pass a JSON body with a `Products` map.
+
+        **Query-param form** (legacy, gateway-only): `POST /jet/update?version=latest`.
+        This form updates only the Gateway product and is kept for backward compatibility.
+
+        Both forms cannot be used simultaneously; doing so returns HTTP 400.
       operationId: TriggerUpdate
       parameters:
       - name: version
         in: query
-        description: The version to install; use 'latest' for the latest version, or 'w.x.y.z' for a specific version
-        required: true
+        description: Gateway-only target version; use the request body for multi-product updates
+        required: false
+        deprecated: true
         schema:
           type: string
+          nullable: true
+      requestBody:
+        description: Products and target versions to update
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/UpdateRequestSchema'
+              nullable: true
+        required: false
       responses:
         '200':
-          description: Update request has been processed successfully
+          description: Update request accepted
           content:
             application/json:
               schema:
@@ -625,7 +671,72 @@ paths:
         '403':
           description: Insufficient permissions
         '500':
-          description: Agent updater service is malfunctioning
+          description: Failed to write update manifest
+        '503':
+          description: Agent updater service is unavailable
+      security:
+      - scope_token:
+        - gateway.update
+  /jet/update/schedule:
+    get:
+      tags:
+      - Update
+      summary: Retrieve the current Devolutions Agent auto-update schedule.
+      description: |-
+        Reads the `Schedule` field from `update_status.json`.  When the field is absent the response
+        contains zeroed defaults (`Enabled: false`, interval `0`, window start `0`, no products).
+      operationId: GetUpdateSchedule
+      responses:
+        '200':
+          description: Current auto-update schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUpdateScheduleResponse'
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to read agent status file
+        '503':
+          description: Agent updater service is unavailable
+      security:
+      - scope_token:
+        - gateway.update.read
+    post:
+      tags:
+      - Update
+      summary: Set the Devolutions Agent auto-update schedule.
+      description: |-
+        Writes the `Schedule` field into `update.json`.  The agent watches this file and
+        applies the new schedule immediately, then persists it to `agent.json`.
+
+        All other fields in `update.json` are preserved; the `VersionMinor` field is reset to
+        the minor version this gateway build understands so the agent does not see an unknown
+        future version.
+      operationId: SetUpdateSchedule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetUpdateScheduleRequest'
+        required: true
+      responses:
+        '200':
+          description: Auto-update schedule applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetUpdateScheduleResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to write update manifest
         '503':
           description: Agent updater service is unavailable
       security:
@@ -708,6 +819,7 @@ components:
       - gateway.recording.delete
       - gateway.recordings.read
       - gateway.update
+      - gateway.update.read
       - gateway.preflight
       - gateway.traffic.claim
       - gateway.traffic.ack
@@ -885,6 +997,61 @@ components:
       - connect_failure
       - normal_termination
       - abnormal_termination
+    GetUpdateProductsResponse:
+      type: object
+      description: Installed version of each product, as reported by Devolutions Agent.
+      required:
+      - ManifestVersion
+      properties:
+        ManifestVersion:
+          type: string
+          description: Version of the `update_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
+        Products:
+          type: object
+          description: Map of product name to API-specific product info.
+          additionalProperties:
+            $ref: '#/components/schemas/UpdateProductInfo'
+    GetUpdateScheduleResponse:
+      type: object
+      description: Current auto-update schedule for Devolutions Agent.
+      required:
+      - ManifestVersion
+      - Enabled
+      - Interval
+      - UpdateWindowStart
+      properties:
+        Enabled:
+          type: boolean
+          description: Enable periodic Devolutions Agent self-update checks.
+        Interval:
+          type: integer
+          format: int64
+          description: |-
+            Minimum interval between auto-update checks, in seconds.
+
+            `0` means check once at `UpdateWindowStart`.
+          minimum: 0
+        ManifestVersion:
+          type: string
+          description: Version of the `update_status.json` format in `"major.minor"` form (e.g. `"1.1"`).
+        Products:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateProduct'
+          description: Products the agent autonomously polls for new versions.
+        UpdateWindowEnd:
+          type: integer
+          format: int32
+          description: |-
+            End of the maintenance window as seconds past midnight (local time, exclusive).
+            `None` means no upper bound (single check at `UpdateWindowStart`).
+          nullable: true
+          minimum: 0
+        UpdateWindowStart:
+          type: integer
+          format: int32
+          description: Start of the maintenance window as seconds past midnight (local time).
+          minimum: 0
     Heartbeat:
       type: object
       required:
@@ -1137,7 +1304,7 @@ components:
           type: integer
           format: int32
           description: |-
-            Minimum persistance duration in seconds for the data provisioned via this operation.
+            Minimum persistence duration in seconds for the data provisioned via this operation.
 
             Optional parameter for "provision-token" and "provision-credentials" kinds.
           nullable: true
@@ -1361,6 +1528,45 @@ components:
             $ref: '#/components/schemas/MonitorDefinitionProbeTypeError'
           description: An optional list of probes that this server could not parse.
           nullable: true
+    SetUpdateScheduleRequest:
+      type: object
+      description: Desired auto-update schedule to apply to Devolutions Agent.
+      required:
+      - Enabled
+      properties:
+        Enabled:
+          type: boolean
+          description: Enable periodic Devolutions Agent self-update checks.
+        Interval:
+          type: integer
+          format: int64
+          description: |-
+            Minimum interval between auto-update checks, in seconds.
+
+            `0` means check once at `UpdateWindowStart` (default).
+          minimum: 0
+        Products:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateProduct'
+          description: 'Products the agent autonomously polls for new versions (default: empty).'
+        UpdateWindowEnd:
+          type: integer
+          format: int32
+          description: |-
+            End of the maintenance window as seconds past midnight in local time, exclusive.
+
+            `null` (default) means no upper bound - a single check fires at `UpdateWindowStart`.
+            When end < start the window crosses midnight.
+          nullable: true
+          minimum: 0
+        UpdateWindowStart:
+          type: integer
+          format: int32
+          description: 'Start of the maintenance window as seconds past midnight in local time (default: `7200` = 02:00).'
+          minimum: 0
+    SetUpdateScheduleResponse:
+      type: object
     SubProvisionerKey:
       type: object
       required:
@@ -1455,8 +1661,36 @@ components:
       enum:
       - tcp
       - udp
+    UpdateProduct:
+      type: string
+      description: |-
+        Product names accepted by the update endpoint.
+
+        Known values are `Gateway`, `HubService`, and `Agent`. Any other product name is also accepted and forwarded to the agent unchanged so future product types are supported transparently.
+    UpdateProductInfo:
+      type: object
+      description: Per-product update information.
+      required:
+      - Version
+      properties:
+        Version:
+          $ref: '#/components/schemas/VersionSpecification'
+    UpdateRequestSchema:
+      type: object
+      description: |-
+        OpenAPI schema for the update request body.
+
+        The API accepts an object containing a `Products` map, whose keys are product names
+        and whose values are update information.
+      properties:
+        Products:
+          type: object
+          description: Map of product name to update information.
+          additionalProperties:
+            $ref: '#/components/schemas/UpdateProductInfo'
     UpdateResponse:
       type: object
+      description: Response returned by the update endpoint.
   securitySchemes:
     jrec_token:
       type: http
