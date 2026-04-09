@@ -147,8 +147,10 @@ impl DgwConfigHandle {
         let recording_path_json = if let Some(path) = recording_path {
             // Use forward slashes so the JSON value is valid on all platforms.
             let path_str = path.to_string_lossy().replace('\\', "/");
-            format!(r#",
-    "recording_path": "{path_str}""#)
+            format!(
+                r#",
+    "recording_path": "{path_str}""#
+            )
         } else {
             String::new()
         };
