@@ -8,10 +8,6 @@ description = "Agent companion service for Devolutions Gateway"
 build = "build.rs"
 publish = false
 
-[[bin]]
-name = "devolutions-agent"
-path = "src/main.rs"
-
 [lints]
 workspace = true
 

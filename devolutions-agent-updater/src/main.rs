@@ -27,7 +27,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(windows)]
-use devolutions_agent::updater::{self, AgentServiceState};
+use std::path::Path;
+
+#[cfg(windows)]
+use win_api_wrappers::service::{ServiceManager, ServiceStartupMode};
+
+#[cfg(windows)]
+const AGENT_SERVICE_NAME: &str = "DevolutionsAgent";
+
+#[cfg(windows)]
+struct AgentServiceState {
+    was_running: bool,
+    startup_was_automatic: bool,
+}
 
 fn main() {
     #[cfg(not(windows))]
@@ -87,7 +99,7 @@ fn windows_main() {
     write_log(&shim_log_path, &format!("  Install log: {install_log_path}"));
 
     // Capture agent service state before the update so we can restore it afterwards.
-    let service_state = match updater::query_agent_service_state() {
+    let service_state = match query_agent_service_state() {
         Ok(state) => {
             write_log(
                 &shim_log_path,
@@ -113,7 +125,7 @@ fn windows_main() {
     );
 
     // Always mark the shim log for deletion on the next reboot (best-effort).
-    let _ = updater::remove_file_on_reboot(camino::Utf8Path::new(&shim_log_path));
+    mark_file_for_deletion_on_reboot(&shim_log_path);
 
     if exit_code != 0 {
         std::process::exit(exit_code);
@@ -148,7 +160,7 @@ fn run_update(
             .status();
 
         // Mark the uninstall log for deletion on reboot regardless of the msiexec result.
-        let _ = updater::remove_file_on_reboot(camino::Utf8Path::new(&uninstall_log_path));
+        mark_file_for_deletion_on_reboot(&uninstall_log_path);
 
         match status {
             Ok(exit_status) => {
@@ -184,7 +196,7 @@ fn run_update(
         .status();
 
     // Mark the install log for deletion on reboot regardless of the msiexec result.
-    let _ = updater::remove_file_on_reboot(camino::Utf8Path::new(install_log_path));
+    mark_file_for_deletion_on_reboot(install_log_path);
 
     match status {
         Ok(exit_status) => {
@@ -202,7 +214,7 @@ fn run_update(
                     );
                     // Post-update: restore service running state when startup mode is manual.
                     if let Some(state) = service_state {
-                        match updater::start_agent_service_if_needed(state) {
+                        match start_agent_service_if_needed(state) {
                             Ok(true) => write_log(shim_log_path, "Agent service started successfully"),
                             Ok(false) => {}
                             Err(e) => write_log(shim_log_path, &format!("Failed to start agent service: {e:#}")),
@@ -244,4 +256,33 @@ fn write_log(path: &str, msg: &str) {
 fn write_to_stderr(msg: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     writeln!(std::io::stderr(), "{msg}")
+}
+
+#[cfg(windows)]
+fn mark_file_for_deletion_on_reboot(path: &str) {
+    if let Err(error) = win_api_wrappers::fs::remove_file_on_reboot(Path::new(path)) {
+        let _ = write_to_stderr(&format!("Failed to mark file for deletion on reboot: {error:#}"));
+    }
+}
+
+#[cfg(windows)]
+fn query_agent_service_state() -> anyhow::Result<AgentServiceState> {
+    let sm = ServiceManager::open_read()?;
+    let svc = sm.open_service_read(AGENT_SERVICE_NAME)?;
+    Ok(AgentServiceState {
+        startup_was_automatic: svc.startup_mode()? == ServiceStartupMode::Automatic,
+        was_running: svc.is_running()?,
+    })
+}
+
+#[cfg(windows)]
+fn start_agent_service_if_needed(state: &AgentServiceState) -> anyhow::Result<bool> {
+    if state.startup_was_automatic || !state.was_running {
+        return Ok(false);
+    }
+
+    let sm = ServiceManager::open_all_access()?;
+    let svc = sm.open_service_all_access(AGENT_SERVICE_NAME)?;
+    svc.start()?;
+    Ok(true)
 }

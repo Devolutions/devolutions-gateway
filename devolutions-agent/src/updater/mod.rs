@@ -33,7 +33,6 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use notify_debouncer_mini::notify::RecursiveMode;
 use tokio::fs;
 use uuid::Uuid;
-use win_api_wrappers::service::{ServiceManager, ServiceStartupMode};
 
 use self::detect::get_product_code;
 pub(crate) use self::error::UpdaterError;
@@ -47,45 +46,6 @@ use self::security::set_file_dacl;
 use crate::config::ConfHandle;
 use crate::config::dto::UpdaterSchedule;
 use crate::updater::productinfo::ProductInfoDb;
-
-/// Windows service name for Devolutions Agent.
-pub const AGENT_SERVICE_NAME: &str = "DevolutionsAgent";
-
-/// Service state captured before the MSI update begins, used to restore state afterwards.
-pub struct AgentServiceState {
-    pub was_running: bool,
-    pub startup_was_automatic: bool,
-}
-
-/// Query the Devolutions Agent service state before the MSI update begins.
-///
-/// Called while the agent service is still running so startup mode and running state
-/// reflect the pre-update configuration.
-pub fn query_agent_service_state() -> anyhow::Result<AgentServiceState> {
-    let sm = ServiceManager::open_read()?;
-    let svc = sm.open_service_read(AGENT_SERVICE_NAME)?;
-    Ok(AgentServiceState {
-        startup_was_automatic: svc.startup_mode()? == ServiceStartupMode::Automatic,
-        was_running: svc.is_running()?,
-    })
-}
-
-/// Start the Devolutions Agent service after a successful update if its startup mode is manual.
-///
-/// Services configured for automatic startup are restarted by the Windows SCM after the MSI
-/// completes. Services with manual startup must be started explicitly.
-///
-/// Returns `true` if the service was started, `false` if a start was not needed.
-pub fn start_agent_service_if_needed(state: &AgentServiceState) -> anyhow::Result<bool> {
-    // Automatic-startup services restart themselves via the SCM; no action needed.
-    if state.startup_was_automatic || !state.was_running {
-        return Ok(false);
-    }
-    let sm = ServiceManager::open_all_access()?;
-    let svc = sm.open_service_all_access(AGENT_SERVICE_NAME)?;
-    svc.start()?;
-    Ok(true)
-}
 
 const UPDATE_JSON_WATCH_INTERVAL: Duration = Duration::from_secs(3);
 

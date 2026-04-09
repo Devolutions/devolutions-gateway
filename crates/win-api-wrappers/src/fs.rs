@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::Context as _;
 use windows::Win32::Foundation::MAX_PATH;
 use windows::Win32::Storage::FileSystem;
+use windows::Win32::Storage::FileSystem::MOVEFILE_DELAY_UNTIL_REBOOT;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 
 use crate::security::attributes::SecurityAttributes;
@@ -43,4 +44,13 @@ pub fn get_system32_path() -> anyhow::Result<String> {
     Ok(OsString::from_wide(&buffer[..len as usize])
         .to_string_lossy()
         .into_owned())
+}
+
+pub fn remove_file_on_reboot(path: &Path) -> anyhow::Result<()> {
+    let path = U16CString::from_os_str(path.as_os_str()).context("invalid path")?;
+
+    // SAFETY: `path` is a valid, null-terminated UTF-16 path.
+    unsafe { FileSystem::MoveFileExW(path.as_pcwstr(), None, MOVEFILE_DELAY_UNTIL_REBOOT) }?;
+
+    Ok(())
 }

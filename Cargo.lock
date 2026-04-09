@@ -1493,8 +1493,8 @@ dependencies = [
 name = "devolutions-agent-updater"
 version = "2026.1.1"
 dependencies = [
- "camino",
- "devolutions-agent",
+ "anyhow",
+ "win-api-wrappers",
 ]
 
 [[package]]

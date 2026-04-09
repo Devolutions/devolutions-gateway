@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use axum::Json;
 use axum::body::Bytes;
+use axum::{Json, Router};
 use devolutions_agent_shared::{
     ProductUpdateInfo, UPDATE_MANIFEST_V2_MINOR_VERSION, UpdateManifest, UpdateManifestV2, UpdateProductKey,
     UpdateSchedule, UpdateStatus, VersionSpecification, default_schedule_window_start, get_update_status_file_path,
@@ -12,6 +12,16 @@ use tokio::fs;
 
 use crate::extract::{UpdateReadScope, UpdateScope};
 use crate::http::{HttpError, HttpErrorBuilder};
+
+pub fn make_router<S>(state: crate::DgwState) -> Router<S> {
+    Router::new()
+        .route("/", axum::routing::get(get_update_products).post(trigger_update_check))
+        .route(
+            "/schedule",
+            axum::routing::get(get_update_schedule).post(set_update_schedule),
+        )
+        .with_state(state)
+}
 
 // ── Shared async file I/O ─────────────────────────────────────────────────────
 

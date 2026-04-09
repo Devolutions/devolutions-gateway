@@ -11,5 +11,5 @@ publish = false
 workspace = true
 
 [dependencies]
-camino = "1.1"
-devolutions-agent = { path = "../devolutions-agent" }
+anyhow = "1"
+win-api-wrappers = { path = "../crates/win-api-wrappers" }
