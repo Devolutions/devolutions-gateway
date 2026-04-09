@@ -17,6 +17,9 @@ struct EnrollRequest {
     agent_name: String,
     /// PEM-encoded Certificate Signing Request
     csr_pem: String,
+    /// Optional hostname of the agent machine (added as DNS SAN in the issued certificate)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_hostname: Option<String>,
 }
 
 /// Response from enrollment API
@@ -27,6 +30,7 @@ struct EnrollResponse {
     client_cert_pem: String,
     gateway_ca_cert_pem: String,
     quic_endpoint: String,
+    server_spki_sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -93,7 +97,7 @@ async fn request_enrollment(
     csr_pem: &str,
 ) -> anyhow::Result<EnrollResponse> {
     let client = reqwest::Client::new();
-    let enroll_url = format!("{}/jet/agent-tunnel/enroll", gateway_url.trim_end_matches('/'));
+    let enroll_url = format!("{}/jet/tunnel/enroll", gateway_url.trim_end_matches('/'));
 
     let response = client
         .post(&enroll_url)
@@ -101,6 +105,10 @@ async fn request_enrollment(
         .json(&EnrollRequest {
             agent_name: agent_name.to_owned(),
             csr_pem: csr_pem.to_owned(),
+            agent_hostname: hostname::get()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .filter(|h| !h.is_empty()),
         })
         .send()
         .await
@@ -175,6 +183,7 @@ fn persist_enrollment_response(
         auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
         heartbeat_interval_secs: Some(60),
         route_advertise_interval_secs: Some(30),
+        server_spki_sha256: Some(enroll_response.server_spki_sha256.clone()),
     };
 
     conf_file.tunnel = Some(tunnel_conf);

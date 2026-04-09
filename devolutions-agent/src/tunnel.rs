@@ -11,50 +11,57 @@ use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use ipnetwork::Ipv4Network;
+use sha2::Digest as _;
 
 use crate::config::ConfHandle;
 use crate::tunnel_helpers::{Target, connect_to_target, current_time_millis, resolve_target};
 
 // ---------------------------------------------------------------------------
-// Custom TLS verifier: verify cert chain against CA, skip hostname check
+// Custom TLS verifier: chain + hostname validation + SPKI pinning
 // ---------------------------------------------------------------------------
 
-/// Wraps a `WebPkiServerVerifier` but skips the hostname verification step.
+/// Wraps a standard `WebPkiServerVerifier` and additionally verifies that the
+/// server certificate's SPKI (Subject Public Key Info) matches the expected
+/// SHA-256 hash obtained during enrollment.
 ///
-/// For our private PKI, the agent may connect by IP address (e.g., `127.0.0.1`)
-/// while the server cert has the gateway's hostname (e.g., `devolutions432`).
-/// The cert chain is still validated against our private CA — only the
-/// hostname-to-SAN matching is bypassed.
+/// Verification order:
+/// 1. Full chain validation + hostname matching (via inner `WebPkiServerVerifier`)
+/// 2. SPKI pin check — rejects if the server's public key doesn't match
+///
+/// This is strictly MORE secure than standard TLS: even a compromised CA
+/// cannot mint a server cert that passes the SPKI check.
 #[derive(Debug)]
-struct SkipHostnameVerification(Arc<dyn rustls::client::danger::ServerCertVerifier>);
+struct SpkiPinnedVerifier {
+    inner: Arc<dyn rustls::client::danger::ServerCertVerifier>,
+    expected_spki_sha256: String,
+}
 
-impl rustls::client::danger::ServerCertVerifier for SkipHostnameVerification {
+impl rustls::client::danger::ServerCertVerifier for SpkiPinnedVerifier {
     fn verify_server_cert(
         &self,
         end_entity: &rustls_pki_types::CertificateDer<'_>,
         intermediates: &[rustls_pki_types::CertificateDer<'_>],
-        _server_name: &rustls_pki_types::ServerName<'_>,
+        server_name: &rustls_pki_types::ServerName<'_>,
         ocsp_response: &[u8],
         now: rustls_pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        // Verify the cert chain against our CA, skipping hostname verification.
-        // We call the inner verifier with a dummy name; if it fails specifically
-        // because of hostname mismatch (CertNotValidForName), we accept it.
-        // All other errors (expired cert, unknown CA, bad signature) propagate.
-        self.0
-            .verify_server_cert(
-                end_entity,
-                intermediates,
-                &rustls_pki_types::ServerName::try_from("dummy.local").expect("valid dummy server name"),
-                ocsp_response,
-                now,
-            )
-            .or_else(|e| match e {
-                rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidForName) => {
-                    Ok(rustls::client::danger::ServerCertVerified::assertion())
-                }
-                other => Err(other),
-            })
+        // 1. Standard chain + hostname validation.
+        self.inner
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)?;
+
+        // 2. SPKI pin check.
+        let (_, cert) = x509_parser::parse_x509_certificate(end_entity.as_ref())
+            .map_err(|_| rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
+
+        let spki_hash = hex::encode(sha2::Sha256::digest(cert.public_key().raw));
+
+        if spki_hash != self.expected_spki_sha256 {
+            return Err(rustls::Error::General(
+                "server SPKI hash does not match pinned value from enrollment".into(),
+            ));
+        }
+
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -63,7 +70,7 @@ impl rustls::client::danger::ServerCertVerifier for SkipHostnameVerification {
         cert: &rustls_pki_types::CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        self.0.verify_tls12_signature(message, cert, dss)
+        self.inner.verify_tls12_signature(message, cert, dss)
     }
 
     fn verify_tls13_signature(
@@ -72,11 +79,11 @@ impl rustls::client::danger::ServerCertVerifier for SkipHostnameVerification {
         cert: &rustls_pki_types::CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        self.0.verify_tls13_signature(message, cert, dss)
+        self.inner.verify_tls13_signature(message, cert, dss)
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.supported_verify_schemes()
+        self.inner.supported_verify_schemes()
     }
 }
 
@@ -261,16 +268,25 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         roots.add(cert)?;
     }
 
-    // Use a custom verifier that validates the cert chain against our private CA
-    // but skips hostname verification. This is correct for a private PKI where the
-    // agent connects by IP address but the server cert has the gateway's hostname.
+    // Build verifier: standard chain + hostname validation, plus SPKI pinning if available.
     let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))
         .build()
         .context("build server cert verifier")?;
 
+    let effective_verifier: Arc<dyn rustls::client::danger::ServerCertVerifier> =
+        if let Some(ref expected_spki) = tunnel_conf.server_spki_sha256 {
+            Arc::new(SpkiPinnedVerifier {
+                inner: verifier,
+                expected_spki_sha256: expected_spki.clone(),
+            })
+        } else {
+            warn!("No server SPKI pin configured — re-enroll to enable pinning");
+            verifier
+        };
+
     let mut client_crypto = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(SkipHostnameVerification(verifier)))
+        .with_custom_certificate_verifier(effective_verifier)
         .with_client_auth_cert(certs, key)
         .context("build rustls client config with client auth")?;
 
@@ -292,13 +308,19 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     // -- DNS resolve --
 
+    // Extract hostname for TLS server name validation.
+    let (gateway_hostname, _) = tunnel_conf
+        .gateway_endpoint
+        .rsplit_once(':')
+        .context("gateway_endpoint missing port separator")?;
+
     let gateway_addr = tokio::net::lookup_host(&tunnel_conf.gateway_endpoint)
         .await
         .context("failed to resolve gateway endpoint")?
         .next()
         .context("no addresses resolved for gateway endpoint")?;
 
-    info!(gateway_addr = %gateway_addr, "Connecting to gateway");
+    info!(gateway_addr = %gateway_addr, %gateway_hostname, "Connecting to gateway");
 
     // -- Connect --
 
@@ -307,7 +329,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
-        .connect(gateway_addr, "gateway")
+        .connect(gateway_addr, gateway_hostname)
         .context("initiate QUIC connection")?
         .await
         .context("QUIC handshake")?;

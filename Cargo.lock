@@ -1521,6 +1521,7 @@ dependencies = [
  "expect-test",
  "futures",
  "hex",
+ "hostname 0.4.2",
  "http-client-proxy",
  "ipnetwork",
  "ironrdp",
@@ -1547,6 +1548,7 @@ dependencies = [
  "uuid",
  "win-api-wrappers",
  "windows 0.61.3",
+ "x509-parser",
 ]
 
 [[package]]

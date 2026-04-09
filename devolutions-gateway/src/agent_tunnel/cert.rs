@@ -124,7 +124,13 @@ impl CaManager {
     ///
     /// The agent generates its own key pair and sends only the CSR.
     /// The private key never leaves the agent.
-    pub fn sign_agent_csr(&self, agent_id: Uuid, agent_name: &str, csr_pem: &str) -> anyhow::Result<SignedAgentCert> {
+    pub fn sign_agent_csr(
+        &self,
+        agent_id: Uuid,
+        agent_name: &str,
+        csr_pem: &str,
+        agent_hostname: Option<&str>,
+    ) -> anyhow::Result<SignedAgentCert> {
         // Parse and verify the CSR (signature check included).
         let csr_params = rcgen::CertificateSigningRequestParams::from_pem(csr_pem)
             .map_err(|e| anyhow::anyhow!("invalid CSR: {e}"))?;
@@ -138,6 +144,11 @@ impl CaManager {
         agent_params.subject_alt_names.push(SanType::Rfc822Name(
             format!("urn:uuid:{agent_id}").try_into().context("SAN URI")?,
         ));
+        if let Some(hostname) = agent_hostname {
+            agent_params
+                .subject_alt_names
+                .push(SanType::DnsName(hostname.try_into().context("agent hostname DNS SAN")?));
+        }
         agent_params
             .extended_key_usages
             .push(ExtendedKeyUsagePurpose::ClientAuth);
@@ -292,6 +303,25 @@ impl CaManager {
 
         Ok(tls_config)
     }
+
+    /// Compute the SPKI SHA-256 hash of the server certificate.
+    ///
+    /// Loads the cert from disk. Only called during enrollment (infrequent).
+    pub fn server_spki_sha256(&self, hostname: &str) -> anyhow::Result<String> {
+        let (server_cert_path, _) = self.ensure_server_cert(hostname)?;
+        let pem_str = std::fs::read_to_string(&server_cert_path)
+            .with_context(|| format!("read server cert from {server_cert_path}"))?;
+        let parsed = pem::parse(&pem_str).context("parse server cert PEM")?;
+        spki_sha256_from_der(parsed.contents())
+    }
+}
+
+/// SHA-256 hash of a DER certificate's Subject Public Key Info (hex string).
+pub fn spki_sha256_from_der(der_bytes: &[u8]) -> anyhow::Result<String> {
+    let (_, cert) = x509_parser::parse_x509_certificate(der_bytes)
+        .map_err(|e| anyhow::anyhow!("parse certificate for SPKI: {e}"))?;
+    let digest = Sha256::digest(cert.public_key().raw);
+    Ok(hex::encode(digest))
 }
 
 /// Compute SHA-256 fingerprint of a PEM-encoded certificate (hex string).
@@ -370,7 +400,7 @@ mod tests {
         let agent_id = Uuid::new_v4();
         let (_key_pair, csr_pem) = generate_test_csr("test-agent");
         let signed = ca
-            .sign_agent_csr(agent_id, "test-agent", &csr_pem)
+            .sign_agent_csr(agent_id, "test-agent", &csr_pem, Some("test-agent.local"))
             .expect("sign CSR should succeed");
 
         assert!(signed.client_cert_pem.contains("BEGIN CERTIFICATE"));
@@ -383,7 +413,7 @@ mod tests {
         // Sign a CSR from the reloaded CA and verify it works.
         let (_key_pair2, csr_pem2) = generate_test_csr("test-agent-2");
         let signed2 = ca2
-            .sign_agent_csr(Uuid::new_v4(), "test-agent-2", &csr_pem2)
+            .sign_agent_csr(Uuid::new_v4(), "test-agent-2", &csr_pem2, None)
             .expect("sign CSR from reloaded CA should succeed");
         assert!(signed2.client_cert_pem.contains("BEGIN CERTIFICATE"));
 
@@ -416,7 +446,7 @@ mod tests {
         let (_key_pair, csr_pem) = generate_test_csr("csr-test-agent");
 
         let signed = ca
-            .sign_agent_csr(agent_id, "csr-test-agent", &csr_pem)
+            .sign_agent_csr(agent_id, "csr-test-agent", &csr_pem, Some("csr-test.local"))
             .expect("sign CSR should succeed");
 
         assert!(signed.client_cert_pem.contains("BEGIN CERTIFICATE"));
@@ -445,7 +475,7 @@ mod tests {
         der_bytes[len - 2] ^= 0xFF;
         let tampered_pem = pem::encode(&pem::Pem::new("CERTIFICATE REQUEST", der_bytes));
 
-        let result = ca.sign_agent_csr(Uuid::new_v4(), "tampered-agent", &tampered_pem);
+        let result = ca.sign_agent_csr(Uuid::new_v4(), "tampered-agent", &tampered_pem, None);
         assert!(result.is_err(), "tampered CSR should be rejected");
 
         let _ = std::fs::remove_dir_all(&temp_dir);

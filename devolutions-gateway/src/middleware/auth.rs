@@ -100,7 +100,7 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
     // is infeasible, but rate limiting is good defense-in-depth).
     AuthException {
         method: Method::POST,
-        path: "/jet/agent-tunnel/enroll",
+        path: "/jet/tunnel/enroll",
         exact_match: true,
     },
 ];

@@ -26,6 +26,9 @@ pub struct EnrollRequest {
     pub agent_name: String,
     /// PEM-encoded Certificate Signing Request from the agent.
     pub csr_pem: String,
+    /// Optional hostname of the agent machine (added as DNS SAN in the issued certificate).
+    #[serde(default)]
+    pub agent_hostname: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -40,6 +43,9 @@ pub struct EnrollResponse {
     pub gateway_ca_cert_pem: String,
     /// QUIC endpoint to connect to (`host:port`).
     pub quic_endpoint: String,
+    /// SHA-256 hash of the server certificate's SPKI (hex-encoded).
+    /// Used by the agent to pin the server's public key.
+    pub server_spki_sha256: String,
 }
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -110,10 +116,15 @@ async fn enroll_agent(
 
     let signed = handle
         .ca_manager()
-        .sign_agent_csr(agent_id, &req.agent_name, &req.csr_pem)
+        .sign_agent_csr(agent_id, &req.agent_name, &req.csr_pem, req.agent_hostname.as_deref())
         .map_err(HttpError::bad_request().with_msg("invalid CSR").err())?;
 
     let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
+
+    let server_spki_sha256 = handle
+        .ca_manager()
+        .server_spki_sha256(&conf.hostname)
+        .map_err(HttpError::internal().with_msg("compute server SPKI").err())?;
 
     info!(
         %agent_id,
@@ -127,6 +138,7 @@ async fn enroll_agent(
         client_cert_pem: signed.client_cert_pem,
         gateway_ca_cert_pem: signed.ca_cert_pem,
         quic_endpoint,
+        server_spki_sha256,
     }))
 }
 

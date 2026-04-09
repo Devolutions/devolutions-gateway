@@ -397,6 +397,10 @@ pub mod dto {
         /// Route advertise interval in seconds (default: 30)
         #[serde(skip_serializing_if = "Option::is_none")]
         pub route_advertise_interval_secs: Option<u64>,
+
+        /// SHA-256 of gateway server cert SPKI (hex, from enrollment)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub server_spki_sha256: Option<String>,
     }
 
     fn default_true() -> bool {
@@ -416,6 +420,7 @@ pub mod dto {
                 auto_detect_domain: true,
                 heartbeat_interval_secs: Some(60),
                 route_advertise_interval_secs: Some(30),
+                server_spki_sha256: None,
             }
         }
     }
