@@ -1,7 +1,4 @@
-//! Heartbeat API regression tests.
-//!
-//! These tests verify the `/jet/heartbeat` endpoint behaviour under various
-//! recording-path configurations.
+//! Heartbeat API tests.
 
 use anyhow::Context as _;
 use testsuite::cli::{dgw_tokio_cmd, wait_for_tcp_port};
@@ -67,8 +64,7 @@ async fn get_heartbeat(http_port: u16) -> anyhow::Result<serde_json::Value> {
     serde_json::from_str(&body).with_context(|| format!("parse heartbeat JSON: {body:?}"))
 }
 
-/// Regression test: when the configured recording folder does not exist yet (as is the case
-/// immediately after upgrading before the gateway has had a chance to create it), the heartbeat
+/// Regression test: when the configured recording folder does not exist yet, the heartbeat
 /// endpoint must still report disk space information.
 ///
 /// Prior to the fix this regressed in 2026.1.1: `GetDiskFreeSpaceExW` / `statvfs` were called
