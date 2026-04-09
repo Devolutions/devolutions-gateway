@@ -1507,6 +1507,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "aws-lc-rs",
+ "backoff",
  "base64 0.22.1",
  "bincode",
  "bytes 1.11.1",

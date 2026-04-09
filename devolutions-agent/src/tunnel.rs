@@ -106,28 +106,25 @@ impl Task for TunnelTask {
     type Output = anyhow::Result<()>;
     const NAME: &'static str = "tunnel";
 
-    /// Reconnect loop with exponential backoff and jitter.
+    /// Reconnect loop with exponential backoff (using the `backoff` crate).
     ///
-    /// Backoff strategy:
-    /// - Starts at 1s, doubles each retry (with ±25% jitter), caps at 60s.
-    /// - Resets to 1s after a connection survives 30s (considered stable).
-    ///
-    /// Example progression (without jitter):
-    ///   attempt 1: fail immediately  → wait ~1s
-    ///   attempt 2: fail immediately  → wait ~2s
-    ///   attempt 3: fail immediately  → wait ~4s
-    ///   attempt 4: fail immediately  → wait ~8s
-    ///   ...
-    ///   attempt N: fail immediately  → wait 60s (cap)
-    ///   attempt M: connected 45s    → next backoff resets to 1s
+    /// Resets to initial interval after a connection survives 30s (considered stable).
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
-        const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-        const MAX_BACKOFF: Duration = Duration::from_secs(60);
+        use backoff::backoff::Backoff as _;
+
+        const RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
+        const RETRY_MAX_INTERVAL: Duration = Duration::from_secs(60);
+        const RETRY_MULTIPLIER: f64 = 2.0;
         const CONNECTED_THRESHOLD: Duration = Duration::from_secs(30);
 
         info!("Starting QUIC agent tunnel (with auto-reconnect)");
 
-        let mut backoff = INITIAL_BACKOFF;
+        let mut backoff = backoff::ExponentialBackoffBuilder::default()
+            .with_initial_interval(RETRY_INITIAL_INTERVAL)
+            .with_max_interval(RETRY_MAX_INTERVAL)
+            .with_multiplier(RETRY_MULTIPLIER)
+            .with_max_elapsed_time(None) // retry forever
+            .build();
 
         loop {
             let start = std::time::Instant::now();
@@ -144,23 +141,25 @@ impl Task for TunnelTask {
 
             // Reset backoff if the connection was stable long enough.
             if start.elapsed() > CONNECTED_THRESHOLD {
-                backoff = INITIAL_BACKOFF;
+                backoff.reset();
             }
 
-            info!(?backoff, "Reconnecting after backoff");
+            let Some(wait) = backoff.next_backoff() else {
+                // Should never happen with max_elapsed_time(None), but just in case.
+                warn!("Backoff exhausted, resetting");
+                backoff.reset();
+                continue;
+            };
+
+            info!(?wait, "Reconnecting after backoff");
 
             tokio::select! {
                 _ = shutdown_signal.wait() => {
                     info!("Shutdown during reconnect backoff");
                     return Ok(());
                 }
-                _ = tokio::time::sleep(backoff) => {}
+                _ = tokio::time::sleep(wait) => {}
             }
-
-            // Exponential backoff with ±25% jitter to avoid thundering herd.
-            let jitter_factor = rand::Rng::gen_range(&mut rand::thread_rng(), 0.75..1.25);
-            backoff =
-                Duration::from_secs_f64((backoff.as_secs_f64() * 2.0 * jitter_factor).min(MAX_BACKOFF.as_secs_f64()));
         }
     }
 }
@@ -290,7 +289,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         .with_client_auth_cert(certs, key)
         .context("build rustls client config with client auth")?;
 
-    client_crypto.alpn_protocols = vec![b"devolutions-agent-tunnel".to_vec()];
+    client_crypto.alpn_protocols = vec![b"gw-agent-tunnel/1".to_vec()];
 
     let mut transport = quinn::TransportConfig::default();
     transport

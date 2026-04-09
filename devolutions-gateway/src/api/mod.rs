@@ -1,4 +1,3 @@
-pub mod agent_enrollment;
 pub mod ai;
 pub mod config;
 pub mod diagnostics;
@@ -16,6 +15,7 @@ pub mod rdp;
 pub mod session;
 pub mod sessions;
 pub mod traffic;
+pub mod tunnel;
 pub mod update;
 pub mod webapp;
 
@@ -36,7 +36,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/webapp", webapp::make_router(state.clone()))
         .nest("/jet/net", net::make_router(state.clone()))
         .nest("/jet/traffic", traffic::make_router(state.clone()))
-        .nest("/jet/tunnel", agent_enrollment::make_router(state.clone()))
+        .nest("/jet/tunnel", tunnel::make_router(state.clone()))
         .nest("/jet/update", update::make_router(state.clone()));
 
     if state.conf_handle.get_conf().web_app.enabled {

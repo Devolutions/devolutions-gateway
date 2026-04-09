@@ -299,7 +299,7 @@ impl CaManager {
             .with_single_cert(server_cert_chain, server_private_key)
             .context("build rustls ServerConfig")?;
 
-        tls_config.alpn_protocols = vec![b"devolutions-agent-tunnel".to_vec()];
+        tls_config.alpn_protocols = vec![b"gw-agent-tunnel/1".to_vec()];
 
         Ok(tls_config)
     }

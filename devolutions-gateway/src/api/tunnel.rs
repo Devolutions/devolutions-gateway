@@ -22,6 +22,8 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 #[derive(Deserialize)]
 pub struct EnrollRequest {
+    /// Agent-generated UUID (the agent owns its identity).
+    pub agent_id: Uuid,
     /// Friendly name for the agent.
     pub agent_name: String,
     /// PEM-encoded Certificate Signing Request from the agent.
@@ -35,8 +37,6 @@ pub struct EnrollRequest {
 pub struct EnrollResponse {
     /// Assigned agent ID.
     pub agent_id: Uuid,
-    /// Agent name.
-    pub agent_name: String,
     /// PEM-encoded client certificate (signed by the gateway CA).
     pub client_cert_pem: String,
     /// PEM-encoded gateway CA certificate (for server verification).
@@ -112,7 +112,7 @@ async fn enroll_agent(
         }
     }
 
-    let agent_id = Uuid::new_v4();
+    let agent_id = req.agent_id;
 
     let signed = handle
         .ca_manager()
@@ -134,7 +134,6 @@ async fn enroll_agent(
 
     Ok(Json(EnrollResponse {
         agent_id,
-        agent_name: req.agent_name,
         client_cert_pem: signed.client_cert_pem,
         gateway_ca_cert_pem: signed.ca_cert_pem,
         quic_endpoint,

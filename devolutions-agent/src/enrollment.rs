@@ -13,6 +13,8 @@ use crate::config;
 /// Request body for enrollment API
 #[derive(Serialize)]
 struct EnrollRequest {
+    /// Agent-generated UUID (the agent owns its identity)
+    agent_id: Uuid,
     /// Friendly name for the agent
     agent_name: String,
     /// PEM-encoded Certificate Signing Request
@@ -26,7 +28,6 @@ struct EnrollRequest {
 #[derive(Deserialize)]
 struct EnrollResponse {
     agent_id: Uuid,
-    agent_name: String,
     client_cert_pem: String,
     gateway_ca_cert_pem: String,
     quic_endpoint: String,
@@ -70,7 +71,7 @@ pub async fn bootstrap_and_persist(
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
-    persist_enrollment_response(advertise_subnets, enroll_response, &key_pem)
+    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -103,6 +104,7 @@ async fn request_enrollment(
         .post(&enroll_url)
         .bearer_auth(enrollment_token)
         .json(&EnrollRequest {
+            agent_id: Uuid::new_v4(),
             agent_name: agent_name.to_owned(),
             csr_pem: csr_pem.to_owned(),
             agent_hostname: hostname::get()
@@ -124,6 +126,7 @@ async fn request_enrollment(
 }
 
 fn persist_enrollment_response(
+    agent_name: &str,
     advertise_subnets: Vec<String>,
     enroll_response: EnrollResponse,
     key_pem: &str,
@@ -192,7 +195,7 @@ fn persist_enrollment_response(
 
     Ok(PersistedEnrollment {
         agent_id: enroll_response.agent_id,
-        agent_name: enroll_response.agent_name,
+        agent_name: agent_name.to_owned(),
         client_cert_path,
         client_key_path,
         gateway_ca_path,
