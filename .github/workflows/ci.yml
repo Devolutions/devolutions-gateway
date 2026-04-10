@@ -1,4 +1,5 @@
 name: CI
+run-name: CI [${{ inputs.runner_backend || 'github-hosted' }}]
 
 on:
   push:
@@ -8,6 +9,14 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
+      runner_backend:
+        description: Runner backend to use for this run
+        required: false
+        type: choice
+        default: github-hosted
+        options:
+          - github-hosted
+          - warpbuild
       sccache:
         description: Enable sccache for Rust compilation caching
         required: false
@@ -19,6 +28,11 @@ on:
         description: The commit SHA to build
         required: false
         type: string
+      runner_backend:
+        description: Runner backend to use for this run
+        required: false
+        type: string
+        default: github-hosted
       sccache:
         description: Enable sccache for Rust compilation caching
         required: false
@@ -28,14 +42,19 @@ on:
 jobs:
   preflight:
     name: preflight
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson((inputs.runner_backend || 'github-hosted') == 'warpbuild' && '{"group":"warpbuild","labels":"warp-ubuntu-latest-x64-4x"}' || '"ubuntu-latest"') }}
     outputs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
       sccache: ${{ steps.sccache.outputs.enabled }}
+      runner-backend: ${{ steps.setup-matrix.outputs.runner-backend }}
+      runner-ubuntu-latest: ${{ steps.setup-matrix.outputs.runner-ubuntu-latest }}
+      runner-ubuntu-2204: ${{ steps.setup-matrix.outputs.runner-ubuntu-2204 }}
+      runner-ubuntu-2404: ${{ steps.setup-matrix.outputs.runner-ubuntu-2404 }}
+      runner-windows-latest: ${{ steps.setup-matrix.outputs.runner-windows-latest }}
+      runner-windows-2022: ${{ steps.setup-matrix.outputs.runner-windows-2022 }}
+      runner-macos-14: ${{ steps.setup-matrix.outputs.runner-macos-14 }}
       jetsocat-build-matrix: ${{ steps.setup-matrix.outputs.jetsocat-build-matrix }}
       gateway-build-matrix: ${{ steps.setup-matrix.outputs.gateway-build-matrix }}
       agent-build-matrix: ${{ steps.setup-matrix.outputs.agent-build-matrix }}
@@ -44,12 +63,40 @@ jobs:
       - name: Setup matrix
         id: setup-matrix
         run: |
+          $Backend = '${{ inputs.runner_backend || 'github-hosted' }}'
+          echo "runner-backend=$Backend" >> $Env:GITHUB_OUTPUT
+
+          function Set-RunnerOutput {
+            param(
+              [string] $Name,
+              [string] $GitHubRunner,
+              [string] $WarpRunner
+            )
+
+            $RunnerConfig = if ($Backend -eq 'warpbuild') {
+              @{ group = 'warpbuild'; labels = $WarpRunner } | ConvertTo-Json -Compress
+            } else {
+              $GitHubRunner | ConvertTo-Json -Compress
+            }
+
+            echo "$Name=$RunnerConfig" >> $Env:GITHUB_OUTPUT
+
+            return $RunnerConfig
+          }
+
+          $UbuntuLatestRunner = Set-RunnerOutput -Name 'runner-ubuntu-latest' -GitHubRunner 'ubuntu-latest' -WarpRunner 'warp-ubuntu-latest-x64-4x'
+          $Ubuntu2204Runner = Set-RunnerOutput -Name 'runner-ubuntu-2204' -GitHubRunner 'ubuntu-22.04' -WarpRunner 'warp-ubuntu-2204-x64-4x'
+          $Ubuntu2404Runner = Set-RunnerOutput -Name 'runner-ubuntu-2404' -GitHubRunner 'ubuntu-24.04' -WarpRunner 'warp-ubuntu-latest-x64-4x'
+          $WindowsLatestRunner = Set-RunnerOutput -Name 'runner-windows-latest' -GitHubRunner 'windows-latest' -WarpRunner 'warp-windows-latest-x64-4x'
+          $Windows2022Runner = Set-RunnerOutput -Name 'runner-windows-2022' -GitHubRunner 'windows-2022' -WarpRunner 'warp-windows-latest-x64-4x'
+          $Macos14Runner = Set-RunnerOutput -Name 'runner-macos-14' -GitHubRunner 'macos-14' -WarpRunner 'warp-macos-14-arm64-6x'
+
           $Jobs = @()
           $Archs = @( 'x86_64', 'arm64' )
           $Platforms = @( 'linux', 'windows' )
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'warp-windows-latest-x64-4x' } 'linux' { 'warp-ubuntu-2204-x64-4x' } }
+            $Runner = switch ($_) { 'windows' { $Windows2022Runner } 'linux' { $Ubuntu2204Runner } }
               foreach ($Arch in $Archs) {
                   if ($Arch -Eq 'arm64' -And $_ -Eq 'windows') {
                     continue
@@ -68,7 +115,7 @@ jobs:
           $Jobs = @()
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'warp-windows-latest-x64-4x' } 'linux' { 'warp-ubuntu-2204-x64-4x' } }
+              $Runner = switch ($_) { 'windows' { $Windows2022Runner } 'linux' { $Ubuntu2204Runner } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -84,7 +131,7 @@ jobs:
           $Platforms += 'macos'
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'warp-windows-latest-x64-4x' } 'macos' { 'warp-macos-14-arm64-6x' } 'linux' { 'warp-ubuntu-2204-x64-4x' } }
+              $Runner = switch ($_) { 'windows' { $Windows2022Runner } 'macos' { $Macos14Runner } 'linux' { $Ubuntu2204Runner } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -164,17 +211,15 @@ jobs:
   lints:
     name: lints [${{ matrix.os }}]
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: ${{ matrix.runner }}
+    runs-on: ${{ fromJson(matrix.runner) }}
     strategy:
       matrix:
         os: [windows, linux]
         include:
           - os: windows
-            runner: warp-windows-latest-x64-4x
+            runner: ${{ needs.preflight.outputs.runner-windows-2022 }}
           - os: linux
-            runner: warp-ubuntu-latest-x64-4x
+            runner: ${{ needs.preflight.outputs.runner-ubuntu-latest }}
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -204,18 +249,16 @@ jobs:
   tests:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: ${{ matrix.runner }}
+    runs-on: ${{ fromJson(matrix.runner) }}
     strategy:
       matrix:
         arch: [x86_64]
         os: [windows, linux]
         include:
           - os: windows
-            runner: warp-windows-latest-x64-4x
+            runner: ${{ needs.preflight.outputs.runner-windows-2022 }}
           - os: linux
-            runner: warp-ubuntu-latest-x64-4x
+            runner: ${{ needs.preflight.outputs.runner-ubuntu-latest }}
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -248,9 +291,7 @@ jobs:
   check-dependencies:
     name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
     strategy:
       fail-fast: false
       matrix:
@@ -271,9 +312,7 @@ jobs:
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: ${{ matrix.runner }}
+    runs-on: ${{ fromJson(matrix.runner) }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.jetsocat-build-matrix) }}
@@ -384,9 +423,7 @@ jobs:
 
   jetsocat-merge:
     name: jetsocat merge artifacts
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
     needs: [preflight, jetsocat]
 
     steps:
@@ -399,9 +436,7 @@ jobs:
 
   jetsocat-lipo:
     name: jetsocat macos universal
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-2404) }}
     needs: [preflight, jetsocat, jetsocat-merge]
 
     steps:
@@ -434,9 +469,7 @@ jobs:
     # DEVOLUTIONSBOT_TOKEN is a repository secret, and it can't be used by PRs originating from forks.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -506,9 +539,7 @@ jobs:
   devolutions-gateway-powershell:
     name: devolutions-gateway-powershell
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -555,9 +586,7 @@ jobs:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     if: ${{ always() }}
     needs: [preflight, devolutions-gateway-powershell, devolutions-gateway-webapp]
-    runs-on:
-      group: warpbuild
-      labels: ${{ matrix.runner }}
+    runs-on: ${{ fromJson(matrix.runner) }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
@@ -746,9 +775,7 @@ jobs:
     # The job is skipped for PRs coming from forks because the devolutions-gateway job would have been skipped (if always() wasn’t used). Another GitHub action oddity.
     if: ${{ always() }}
     needs: [preflight, devolutions-gateway]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
 
     steps:
       - name: Merge Artifacts
@@ -760,9 +787,7 @@ jobs:
 
   devolutions-pedm-desktop:
     name: devolutions-pedm-desktop
-    runs-on:
-      group: warpbuild
-      labels: warp-windows-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-windows-latest) }}
     needs: [preflight]
 
     steps:
@@ -787,9 +812,7 @@ jobs:
   devolutions-agent:
     name: devolutions-agent [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight, devolutions-pedm-desktop]
-    runs-on:
-      group: warpbuild
-      labels: ${{ matrix.runner }}
+    runs-on: ${{ fromJson(matrix.runner) }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.agent-build-matrix) }}
@@ -1004,9 +1027,7 @@ jobs:
 
   devolutions-agent-merge:
     name: devolutions agent merge artifacts
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
     needs: [preflight, devolutions-agent]
 
     steps:
@@ -1019,9 +1040,7 @@ jobs:
 
   devolutions-pedm-client:
     name: devolutions-pedm-client
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
     needs: [preflight]
 
     steps:
@@ -1042,9 +1061,7 @@ jobs:
 
   dotnet-utils-tests:
     name: .NET utils tests
-    runs-on:
-      group: warpbuild
-      labels: warp-windows-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-windows-2022) }}
     needs: [preflight]
 
     steps:
@@ -1062,9 +1079,7 @@ jobs:
 
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests
-    runs-on:
-      group: warpbuild
-      labels: warp-windows-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-windows-2022) }}
     needs: [preflight]
 
     steps:
@@ -1116,9 +1131,7 @@ jobs:
   winapi-miri:
     name: Windows API miri tests [${{ matrix.os }}][${{ matrix.mode }}]
     needs: [preflight]
-    runs-on:
-      group: warpbuild
-      labels: ${{ matrix.runner }}
+    runs-on: ${{ fromJson(matrix.runner) }}
     strategy:
       fail-fast: false
       matrix:
@@ -1130,9 +1143,9 @@ jobs:
           - tree-borrows
         include:
           - os: windows
-            runner: warp-windows-latest-x64-4x
+            runner: ${{ needs.preflight.outputs.runner-windows-latest }}
           - os: linux
-            runner: warp-ubuntu-latest-x64-4x
+            runner: ${{ needs.preflight.outputs.runner-ubuntu-latest }}
           - mode: tree-borrows
             miriflags: -Zmiri-tree-borrows
 
@@ -1166,9 +1179,7 @@ jobs:
 
   pedm-simulator:
     name: PEDM simulator
-    runs-on:
-      group: warpbuild
-      labels: warp-windows-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-windows-2022) }}
     needs: [preflight]
 
     steps:
@@ -1207,9 +1218,7 @@ jobs:
 
   secure-memory-verifier:
     name: secure-memory-verifier
-    runs-on:
-      group: warpbuild
-      labels: warp-windows-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-windows-2022) }}
     needs: [preflight]
 
     steps:
@@ -1232,13 +1241,131 @@ jobs:
         shell: pwsh
         run: sccache --show-stats
 
+  metrics:
+    name: Metrics
+    if: ${{ always() }}
+    needs: [preflight, tests, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Collect run metrics
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $Headers = @{
+            Authorization = "Bearer $Env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          $RunUrl = "${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $JobsUrl = "$RunUrl/jobs?per_page=100"
+          $Run = Invoke-RestMethod -Headers $Headers -Uri $RunUrl
+          $Jobs = (Invoke-RestMethod -Headers $Headers -Uri $JobsUrl).jobs
+
+          function Get-Rate([string] $Label) {
+            switch -Regex ($Label) {
+              '^ubuntu-(latest|22\.04|24\.04)$' { return 0.006 }
+              '^windows-(latest|2022)$' { return 0.010 }
+              '^macos-14$' { return 0.062 }
+              '^warp-ubuntu-(latest|2204)-x64-4x$' { return 0.008 }
+              '^warp-windows-latest-x64-4x$' { return 0.016 }
+              '^warp-macos-14-arm64-6x$' { return 0.080 }
+              default { return $null }
+            }
+          }
+
+          $Rows = foreach ($Job in $Jobs) {
+            $Label = if ($Job.labels -and $Job.labels.Count -gt 0) { $Job.labels[0] } else { '' }
+            $StartedAt = if ($Job.started_at) { [datetimeoffset]$Job.started_at } else { $null }
+            $CompletedAt = if ($Job.completed_at) { [datetimeoffset]$Job.completed_at } else { $null }
+            $Seconds = if ($StartedAt -and $CompletedAt) { [math]::Round(($CompletedAt - $StartedAt).TotalSeconds) } else { $null }
+            $Minutes = if ($Seconds -ne $null) { [math]::Round($Seconds / 60.0, 2) } else { $null }
+            $RoundedMinutes = if ($Seconds -ne $null) { [math]::Ceiling($Seconds / 60.0) } else { $null }
+            $Rate = Get-Rate $Label
+
+            [pscustomobject]@{
+              name = $Job.name
+              status = $Job.status
+              conclusion = $Job.conclusion
+              label = $Label
+              runner_group = $Job.runner_group_name
+              runner_name = $Job.runner_name
+              started_at = $Job.started_at
+              completed_at = $Job.completed_at
+              seconds = $Seconds
+              minutes = $Minutes
+              billed_minutes = $RoundedMinutes
+              rate_per_minute = $Rate
+              estimated_cost = if ($Minutes -ne $null -and $Rate -ne $null) { [math]::Round($Minutes * $Rate, 4) } else { $null }
+              estimated_billed_cost = if ($RoundedMinutes -ne $null -and $Rate -ne $null) { [math]::Round($RoundedMinutes * $Rate, 4) } else { $null }
+            }
+          }
+
+          $Backend = if ($Rows | Where-Object { $_.runner_group -eq 'warpbuild' -or $_.label -like 'warp-*' }) { 'warpbuild' } else { 'github-hosted' }
+          $WallClockMinutes = [math]::Round((([datetimeoffset]$Run.updated_at) - ([datetimeoffset]$Run.created_at)).TotalMinutes, 2)
+          $TotalComputeMinutes = [math]::Round((($Rows | Measure-Object -Property minutes -Sum).Sum), 2)
+          $TotalBilledMinutes = [int](($Rows | Measure-Object -Property billed_minutes -Sum).Sum)
+          $TotalEstimatedCost = [math]::Round((($Rows | Measure-Object -Property estimated_cost -Sum).Sum), 4)
+          $TotalEstimatedBilledCost = [math]::Round((($Rows | Measure-Object -Property estimated_billed_cost -Sum).Sum), 4)
+
+          New-Item -ItemType Directory -Path '.ci-metrics' -Force | Out-Null
+
+          $Summary = [pscustomobject]@{
+            run_id = $Run.id
+            run_attempt = $Run.run_attempt
+            backend = $Backend
+            event = $Run.event
+            head_branch = $Run.head_branch
+            head_sha = $Run.head_sha
+            created_at = $Run.created_at
+            updated_at = $Run.updated_at
+            wall_clock_minutes = $WallClockMinutes
+            total_compute_minutes = $TotalComputeMinutes
+            total_billed_minutes = $TotalBilledMinutes
+            estimated_cost = $TotalEstimatedCost
+            estimated_billed_cost = $TotalEstimatedBilledCost
+            compute_minutes_per_dollar = if ($TotalEstimatedCost -gt 0) { [math]::Round($TotalComputeMinutes / $TotalEstimatedCost, 2) } else { $null }
+            wall_clock_minutes_per_dollar = if ($TotalEstimatedCost -gt 0) { [math]::Round($WallClockMinutes / $TotalEstimatedCost, 2) } else { $null }
+          }
+
+          $Rows | ConvertTo-Json -Depth 5 | Set-Content '.ci-metrics/jobs.json'
+          $Rows | Export-Csv -NoTypeInformation -Path '.ci-metrics/jobs.csv'
+          $Summary | ConvertTo-Json -Depth 5 | Set-Content '.ci-metrics/summary.json'
+
+          $Markdown = @(
+            '# CI Metrics'
+            ''
+            "- backend: $($Summary.backend)"
+            "- run id: $($Summary.run_id)"
+            "- head sha: $($Summary.head_sha)"
+            "- wall clock minutes: $($Summary.wall_clock_minutes)"
+            "- total compute minutes: $($Summary.total_compute_minutes)"
+            "- total billed minutes: $($Summary.total_billed_minutes)"
+            "- estimated cost: `$$($Summary.estimated_cost)"
+            "- estimated billed cost: `$$($Summary.estimated_billed_cost)"
+            "- compute minutes per dollar: $($Summary.compute_minutes_per_dollar)"
+            "- wall clock minutes per dollar: $($Summary.wall_clock_minutes_per_dollar)"
+          ) -join [Environment]::NewLine
+
+          $Markdown | Set-Content '.ci-metrics/summary.md'
+          $Markdown >> $Env:GITHUB_STEP_SUMMARY
+
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-metrics-${{ needs.preflight.outputs.runner-backend }}-${{ github.run_id }}
+          path: .ci-metrics
+
   success:
     name: Success
     if: ${{ always() }}
     needs: [tests, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
 
     steps:
       - name: Check success
@@ -1252,9 +1379,7 @@ jobs:
     name: Upload git-log output
     if: ${{ github.ref == 'refs/heads/master' }}
     needs: [preflight, success]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -1278,9 +1403,7 @@ jobs:
     environment: onedrive-upload
     if: ${{ github.ref == 'refs/heads/master' }}
     needs: [preflight, upload-git-log]
-    runs-on:
-      group: warpbuild
-      labels: warp-ubuntu-latest-x64-4x
+    runs-on: ${{ fromJson(needs.preflight.outputs.runner-ubuntu-latest) }}
 
     steps:
       - name: Check out Devolutions/actions
