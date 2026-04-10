@@ -118,7 +118,13 @@ async fn request_enrollment(
 fn persist_enrollment_response(
     agent_name: &str,
     advertise_subnets: Vec<String>,
-    enroll_response: EnrollResponse,
+    EnrollResponse {
+        agent_id,
+        client_cert_pem,
+        gateway_ca_cert_pem,
+        quic_endpoint,
+        server_spki_sha256,
+    }: EnrollResponse,
     key_pem: &str,
 ) -> anyhow::Result<PersistedEnrollment> {
     let config_path = config::get_conf_file_path();
@@ -132,19 +138,19 @@ fn persist_enrollment_response(
     std::fs::create_dir_all(&cert_dir)
         .with_context(|| format!("failed to create certificate directory: {}", cert_dir))?;
 
-    let client_cert_path = cert_dir.join(format!("{}-cert.pem", enroll_response.agent_id));
-    let client_key_path = cert_dir.join(format!("{}-key.pem", enroll_response.agent_id));
+    let client_cert_path = cert_dir.join(format!("{agent_id}-cert.pem"));
+    let client_key_path = cert_dir.join(format!("{agent_id}-key.pem"));
     let gateway_ca_path = cert_dir.join("gateway-ca.pem");
 
     // Write the locally-generated private key first (before cert/CA from the network).
     std::fs::write(&client_key_path, key_pem)
-        .with_context(|| format!("failed to write client private key: {}", client_key_path))?;
+        .with_context(|| format!("failed to write client private key: {client_key_path}"))?;
 
-    std::fs::write(&client_cert_path, &enroll_response.client_cert_pem)
-        .with_context(|| format!("failed to write client certificate: {}", client_cert_path))?;
+    std::fs::write(&client_cert_path, &client_cert_pem)
+        .with_context(|| format!("failed to write client certificate: {client_cert_path}"))?;
 
-    std::fs::write(&gateway_ca_path, &enroll_response.gateway_ca_cert_pem)
-        .with_context(|| format!("failed to write gateway CA certificate: {}", gateway_ca_path))?;
+    std::fs::write(&gateway_ca_path, &gateway_ca_cert_pem)
+        .with_context(|| format!("failed to write gateway CA certificate: {gateway_ca_path}"))?;
 
     // Restrict permissions on cert/key files (owner-only on Unix).
     #[cfg(unix)]
@@ -167,7 +173,7 @@ fn persist_enrollment_response(
 
     let tunnel_conf = config::dto::TunnelConf {
         enabled: true,
-        gateway_endpoint: enroll_response.quic_endpoint.clone(),
+        gateway_endpoint: quic_endpoint.clone(),
         client_cert_path: Some(client_cert_path.clone()),
         client_key_path: Some(client_key_path.clone()),
         gateway_ca_cert_path: Some(gateway_ca_path.clone()),
@@ -176,7 +182,7 @@ fn persist_enrollment_response(
         auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
         heartbeat_interval_secs: Some(60),
         route_advertise_interval_secs: Some(30),
-        server_spki_sha256: Some(enroll_response.server_spki_sha256.clone()),
+        server_spki_sha256: Some(server_spki_sha256),
     };
 
     conf_file.tunnel = Some(tunnel_conf);
@@ -184,11 +190,11 @@ fn persist_enrollment_response(
     config::save_config(&conf_file)?;
 
     Ok(PersistedEnrollment {
-        agent_id: enroll_response.agent_id,
+        agent_id,
         agent_name: agent_name.to_owned(),
         client_cert_path,
         client_key_path,
         gateway_ca_path,
-        quic_endpoint: enroll_response.quic_endpoint,
+        quic_endpoint,
     })
 }

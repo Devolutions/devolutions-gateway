@@ -1,3 +1,6 @@
+/// ALPN protocol identifier for the QUIC agent tunnel, including version suffix.
+pub const ALPN_PROTOCOL: &[u8] = b"gw-agent-tunnel/1";
+
 /// Current protocol version.
 pub const CURRENT_PROTOCOL_VERSION: u16 = 1;
 

@@ -181,18 +181,9 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
     let agent_conf = conf_handle.get_conf();
     let tunnel_conf = &agent_conf.tunnel;
 
-    let cert_path = tunnel_conf
-        .client_cert_path
-        .as_ref()
-        .context("client_cert_path not configured")?;
-    let key_path = tunnel_conf
-        .client_key_path
-        .as_ref()
-        .context("client_key_path not configured")?;
-    let ca_path = tunnel_conf
-        .gateway_ca_cert_path
-        .as_ref()
-        .context("gateway_ca_cert_path not configured")?;
+    let cert_path = &tunnel_conf.client_cert_path;
+    let key_path = &tunnel_conf.client_key_path;
+    let ca_path = &tunnel_conf.gateway_ca_cert_path;
 
     let advertise_subnets: Vec<Ipv4Network> = tunnel_conf
         .advertise_subnets
@@ -291,7 +282,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         .with_client_auth_cert(certs, key)
         .context("build rustls client config with client auth")?;
 
-    client_crypto.alpn_protocols = vec![b"gw-agent-tunnel/1".to_vec()];
+    client_crypto.alpn_protocols = vec![agent_tunnel_proto::ALPN_PROTOCOL.to_vec()];
 
     let mut transport = quinn::TransportConfig::default();
     transport
@@ -356,8 +347,8 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     // -- Main loop: accept incoming session streams + periodic tasks --
 
-    let route_interval = tunnel_conf.route_advertise_interval_secs.unwrap_or(30);
-    let heartbeat_interval_secs = tunnel_conf.heartbeat_interval_secs.unwrap_or(60);
+    let route_interval = tunnel_conf.route_advertise_interval_secs;
+    let heartbeat_interval_secs = tunnel_conf.heartbeat_interval_secs;
     let mut route_tick = tokio::time::interval(Duration::from_secs(route_interval));
     let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(heartbeat_interval_secs));
     // Skip the first immediate tick (we already sent the initial RouteAdvertise).
@@ -414,15 +405,16 @@ async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: ControlRe
         loop {
             let message = ctrl.recv().await.context("recv control message")?;
 
+            let protocol_version = message.protocol_version();
+            if agent_tunnel_proto::validate_protocol_version(protocol_version)
+                .inspect_err(|e| warn!(%protocol_version, %e, "Ignoring control message: unsupported version"))
+                .is_err()
+            {
+                continue;
+            }
+
             match message {
-                ControlMessage::HeartbeatAck {
-                    protocol_version,
-                    timestamp_ms,
-                } => {
-                    if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
-                        warn!(%protocol_version, %e, "Ignoring HeartbeatAck: unsupported protocol version");
-                        continue;
-                    }
+                ControlMessage::HeartbeatAck { timestamp_ms, .. } => {
                     let rtt = current_time_millis().saturating_sub(timestamp_ms);
                     debug!(rtt_ms = rtt, "Received HeartbeatAck");
                 }
@@ -494,6 +486,9 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
         );
         r1.inspect_err(|e| debug!(%e, "QUIC->TCP copy ended"))?;
         r2.inspect_err(|e| debug!(%e, "TCP->QUIC copy ended"))?;
+
+        // Gracefully finish the QUIC send stream (signals EOF to peer).
+        let _ = send.finish();
 
         Ok(())
     }

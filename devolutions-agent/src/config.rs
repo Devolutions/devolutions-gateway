@@ -20,9 +20,82 @@ pub struct Conf {
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
-    pub tunnel: dto::TunnelConf,
+    pub tunnel: TunnelConf,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
+}
+
+/// Validated tunnel configuration — required fields are guaranteed present.
+///
+/// Constructed from `dto::TunnelConf` via `TryFrom`. If the tunnel is disabled
+/// or not yet enrolled, the `enabled` field is `false` and path fields are empty
+/// (but the struct is always constructible).
+#[derive(Debug, Clone)]
+pub struct TunnelConf {
+    pub enabled: bool,
+    pub gateway_endpoint: String,
+    pub client_cert_path: Utf8PathBuf,
+    pub client_key_path: Utf8PathBuf,
+    pub gateway_ca_cert_path: Utf8PathBuf,
+    pub advertise_subnets: Vec<String>,
+    pub advertise_domains: Vec<String>,
+    pub auto_detect_domain: bool,
+    pub heartbeat_interval_secs: u64,
+    pub route_advertise_interval_secs: u64,
+    pub server_spki_sha256: Option<String>,
+}
+
+impl TryFrom<dto::TunnelConf> for TunnelConf {
+    type Error = anyhow::Error;
+
+    fn try_from(conf: dto::TunnelConf) -> anyhow::Result<Self> {
+        if !conf.enabled {
+            // Disabled tunnel — return a placeholder with defaults.
+            return Ok(Self {
+                enabled: false,
+                gateway_endpoint: String::new(),
+                client_cert_path: Utf8PathBuf::new(),
+                client_key_path: Utf8PathBuf::new(),
+                gateway_ca_cert_path: Utf8PathBuf::new(),
+                advertise_subnets: Vec::new(),
+                advertise_domains: Vec::new(),
+                auto_detect_domain: true,
+                heartbeat_interval_secs: 60,
+                route_advertise_interval_secs: 30,
+                server_spki_sha256: None,
+            });
+        }
+
+        // Enabled tunnel — all required fields must be present.
+        let client_cert_path = conf
+            .client_cert_path
+            .context("tunnel enabled but client_cert_path not configured")?;
+        let client_key_path = conf
+            .client_key_path
+            .context("tunnel enabled but client_key_path not configured")?;
+        let gateway_ca_cert_path = conf
+            .gateway_ca_cert_path
+            .context("tunnel enabled but gateway_ca_cert_path not configured")?;
+
+        anyhow::ensure!(
+            !conf.gateway_endpoint.is_empty(),
+            "tunnel enabled but gateway_endpoint is empty"
+        );
+
+        Ok(Self {
+            enabled: true,
+            gateway_endpoint: conf.gateway_endpoint,
+            client_cert_path,
+            client_key_path,
+            gateway_ca_cert_path,
+            advertise_subnets: conf.advertise_subnets,
+            advertise_domains: conf.advertise_domains,
+            auto_detect_domain: conf.auto_detect_domain,
+            heartbeat_interval_secs: conf.heartbeat_interval_secs.unwrap_or(60),
+            route_advertise_interval_secs: conf.route_advertise_interval_secs.unwrap_or(30),
+            server_spki_sha256: conf.server_spki_sha256,
+        })
+    }
 }
 
 impl Conf {
@@ -49,7 +122,12 @@ impl Conf {
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
             session: conf_file.session.clone().unwrap_or_default(),
-            tunnel: conf_file.tunnel.clone().unwrap_or_default(),
+            tunnel: conf_file
+                .tunnel
+                .clone()
+                .unwrap_or_default()
+                .pipe(TunnelConf::try_from)
+                .context("invalid tunnel config")?,
             proxy: conf_file.proxy.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })

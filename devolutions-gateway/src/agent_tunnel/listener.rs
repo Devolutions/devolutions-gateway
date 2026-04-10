@@ -81,6 +81,9 @@ impl AgentTunnelHandle {
             .map_err(|_| anyhow::anyhow!("session handshake timeout (30s)"))?
             .context("recv ConnectResponse")?;
 
+        agent_tunnel_proto::validate_protocol_version(response.protocol_version())
+            .map_err(|e| anyhow::anyhow!("ConnectResponse: {e}"))?;
+
         if let ConnectResponse::Error { reason, .. } = &response {
             anyhow::bail!("agent refused connection: {reason}");
         }
@@ -304,18 +307,21 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
     ctrl: &mut ControlStream<S, R>,
     msg: ControlMessage,
 ) {
+    let protocol_version = msg.protocol_version();
+    if agent_tunnel_proto::validate_protocol_version(protocol_version)
+        .inspect_err(|e| warn!(%agent_id, %protocol_version, %e, "Ignoring control message: unsupported version"))
+        .is_err()
+    {
+        return;
+    }
+
     match msg {
         ControlMessage::RouteAdvertise {
-            protocol_version,
             epoch,
             subnets,
             domains,
             ..
         } => {
-            if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
-                warn!(%agent_id, %protocol_version, %e, "Rejecting route advertisement: unsupported protocol version");
-                return;
-            }
             info!(
                 %agent_id,
                 epoch,
@@ -323,6 +329,7 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
                 domain_count = domains.len(),
                 "Received route advertisement"
             );
+
             if let Some(peer) = registry.get(&agent_id) {
                 peer.update_routes(epoch, subnets, domains);
                 peer.touch();
@@ -334,14 +341,16 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
             ..
         } => {
             debug!(%agent_id, timestamp_ms, active_stream_count, "Received heartbeat");
+
             if let Some(peer) = registry.get(&agent_id) {
                 peer.touch();
             }
 
             let ack = ControlMessage::heartbeat_ack(timestamp_ms);
-            if let Err(e) = ctrl.send(&ack).await {
+
+            let _ = ctrl.send(&ack).await.inspect_err(|e| {
                 warn!(%agent_id, error = %e, "Failed to send heartbeat ack");
-            }
+            });
         }
         ControlMessage::HeartbeatAck { .. } => {
             debug!(%agent_id, "Unexpected HeartbeatAck from agent");

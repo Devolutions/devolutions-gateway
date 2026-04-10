@@ -179,10 +179,14 @@ impl CaManager {
         let cert_path = self.data_dir.join(SERVER_CERT_FILENAME);
         let key_path = self.data_dir.join(SERVER_KEY_FILENAME);
 
-        if cert_path.exists() && key_path.exists() {
-            // TODO: check cert expiry and regenerate if near/past expiration (365-day validity).
-            info!(%cert_path, "Using existing agent tunnel server certificate");
-            return Ok((cert_path, key_path));
+        match check_server_cert(&cert_path, &key_path, hostname) {
+            ServerCertStatus::Valid => {
+                info!(%cert_path, "Using existing agent tunnel server certificate");
+                return Ok((cert_path, key_path));
+            }
+            status => {
+                info!(%cert_path, ?status, "Generating server certificate");
+            }
         }
 
         info!(%hostname, "Generating agent tunnel server certificate");
@@ -301,7 +305,7 @@ impl CaManager {
             .with_single_cert(server_cert_chain, server_private_key)
             .context("build rustls ServerConfig")?;
 
-        tls_config.alpn_protocols = vec![b"gw-agent-tunnel/1".to_vec()];
+        tls_config.alpn_protocols = vec![agent_tunnel_proto::ALPN_PROTOCOL.to_vec()];
 
         Ok(tls_config)
     }
@@ -376,6 +380,65 @@ pub fn extract_agent_id_from_der(der_bytes: &[u8]) -> anyhow::Result<Uuid> {
     }
 
     anyhow::bail!("no urn:uuid: SAN found in certificate")
+}
+
+// ---------------------------------------------------------------------------
+// Server certificate validation
+// ---------------------------------------------------------------------------
+
+/// Why an existing server certificate cannot be reused.
+#[derive(Debug)]
+enum ServerCertStatus {
+    /// Certificate is valid and matches the configured hostname.
+    Valid,
+    /// Certificate or key file does not exist yet.
+    NotFound,
+    /// Certificate expires within 7 days.
+    ExpiringSoon,
+    /// Certificate's DNS SAN does not match the configured hostname.
+    HostnameMismatch,
+    /// Certificate file is corrupt or unparseable.
+    Unreadable,
+}
+
+fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) -> ServerCertStatus {
+    if !cert_path.exists() || !key_path.exists() {
+        return ServerCertStatus::NotFound;
+    }
+
+    let Ok(pem_str) = std::fs::read_to_string(cert_path) else {
+        return ServerCertStatus::Unreadable;
+    };
+    let Ok(parsed) = pem::parse(&pem_str) else {
+        return ServerCertStatus::Unreadable;
+    };
+    let Ok((_, cert)) = x509_parser::parse_x509_certificate(parsed.contents()) else {
+        return ServerCertStatus::Unreadable;
+    };
+
+    // Expiry: reject if < 7 days remaining.
+    let not_after = cert.validity().not_after.to_datetime();
+    let threshold = time::OffsetDateTime::now_utc() + Duration::from_secs(7 * SECS_PER_DAY);
+    if not_after <= threshold {
+        return ServerCertStatus::ExpiringSoon;
+    }
+
+    // Hostname: reject if DNS SAN doesn't match the configured hostname.
+    let san_matches = cert.extensions().iter().any(|ext| {
+        if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) = ext.parsed_extension() {
+            san.general_names
+                .iter()
+                .any(|name| matches!(name, x509_parser::extensions::GeneralName::DNSName(h) if *h == hostname))
+        } else {
+            false
+        }
+    });
+
+    if !san_matches {
+        return ServerCertStatus::HostnameMismatch;
+    }
+
+    ServerCertStatus::Valid
 }
 
 #[cfg(test)]

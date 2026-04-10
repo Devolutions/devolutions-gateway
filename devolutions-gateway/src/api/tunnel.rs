@@ -11,8 +11,7 @@ use crate::http::HttpError;
 ///
 /// Both inputs are hashed with SHA-256 first, producing fixed 32-byte digests.
 /// The digest comparison runs in constant time (fixed-length XOR fold).
-/// SHA-256 itself runs in time proportional to input length, but this only
-/// reveals the length of the attacker's guess — not the secret's length or content.
+/// Note: the hashing step itself runs in time proportional to input length.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     use sha2::{Digest, Sha256};
     let da = Sha256::digest(a);

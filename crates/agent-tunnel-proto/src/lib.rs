@@ -23,7 +23,7 @@ pub use control::{ControlMessage, DomainAdvertisement, MAX_CONTROL_MESSAGE_SIZE}
 pub use error::ProtoError;
 pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
 pub use stream::{ControlRecvStream, ControlSendStream, ControlStream, SessionStream};
-pub use version::{CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_VERSION, validate_protocol_version};
+pub use version::{ALPN_PROTOCOL, CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_VERSION, validate_protocol_version};
 
 /// Current wall-clock time in milliseconds since UNIX epoch.
 pub fn current_time_millis() -> u64 {
