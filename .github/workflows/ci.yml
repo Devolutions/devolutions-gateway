@@ -28,7 +28,9 @@ on:
 jobs:
   preflight:
     name: preflight
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
     outputs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
@@ -47,7 +49,7 @@ jobs:
           $Platforms = @( 'linux', 'windows' )
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'linux' { 'ubuntu-22.04' } }
+              $Runner = switch ($_) { 'windows' { 'warp-windows-latest-x64-4x' } 'linux' { 'warp-ubuntu-2204-x64-4x' } }
               foreach ($Arch in $Archs) {
                   if ($Arch -Eq 'arm64' -And $_ -Eq 'windows') {
                     continue
@@ -66,7 +68,7 @@ jobs:
           $Jobs = @()
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'linux' { 'ubuntu-22.04' } }
+              $Runner = switch ($_) { 'windows' { 'warp-windows-latest-x64-4x' } 'linux' { 'warp-ubuntu-2204-x64-4x' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -82,7 +84,7 @@ jobs:
           $Platforms += 'macos'
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-14' } 'linux' { 'ubuntu-22.04' } }
+              $Runner = switch ($_) { 'windows' { 'warp-windows-latest-x64-4x' } 'macos' { 'warp-macos-14-arm64-6x' } 'linux' { 'warp-ubuntu-2204-x64-4x' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -162,15 +164,17 @@ jobs:
   lints:
     name: lints [${{ matrix.os }}]
     needs: [preflight]
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: warpbuild
+      labels: ${{ matrix.runner }}
     strategy:
       matrix:
         os: [windows, linux]
         include:
           - os: windows
-            runner: windows-2022
+            runner: warp-windows-latest-x64-4x
           - os: linux
-            runner: ubuntu-latest
+            runner: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -200,16 +204,18 @@ jobs:
   tests:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: warpbuild
+      labels: ${{ matrix.runner }}
     strategy:
       matrix:
         arch: [x86_64]
         os: [windows, linux]
         include:
           - os: windows
-            runner: windows-2022
+            runner: warp-windows-latest-x64-4x
           - os: linux
-            runner: ubuntu-latest
+            runner: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -242,7 +248,9 @@ jobs:
   check-dependencies:
     name: Check no ${{ matrix.banned }} in ${{ matrix.package }} [${{ matrix.target }}]
     needs: [preflight]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
     strategy:
       fail-fast: false
       matrix:
@@ -263,7 +271,9 @@ jobs:
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: warpbuild
+      labels: ${{ matrix.runner }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.jetsocat-build-matrix) }}
@@ -374,7 +384,9 @@ jobs:
 
   jetsocat-merge:
     name: jetsocat merge artifacts
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
     needs: [preflight, jetsocat]
 
     steps:
@@ -387,7 +399,9 @@ jobs:
 
   jetsocat-lipo:
     name: jetsocat macos universal
-    runs-on: ubuntu-24.04
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
     needs: [preflight, jetsocat, jetsocat-merge]
 
     steps:
@@ -420,7 +434,9 @@ jobs:
     # DEVOLUTIONSBOT_TOKEN is a repository secret, and it can't be used by PRs originating from forks.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     needs: [preflight]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -490,7 +506,9 @@ jobs:
   devolutions-gateway-powershell:
     name: devolutions-gateway-powershell
     needs: [preflight]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -537,7 +555,9 @@ jobs:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     if: ${{ always() }}
     needs: [preflight, devolutions-gateway-powershell, devolutions-gateway-webapp]
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: warpbuild
+      labels: ${{ matrix.runner }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
@@ -726,7 +746,9 @@ jobs:
     # The job is skipped for PRs coming from forks because the devolutions-gateway job would have been skipped (if always() wasn’t used). Another GitHub action oddity.
     if: ${{ always() }}
     needs: [preflight, devolutions-gateway]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Merge Artifacts
@@ -738,7 +760,9 @@ jobs:
 
   devolutions-pedm-desktop:
     name: devolutions-pedm-desktop
-    runs-on: windows-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-windows-latest-x64-4x
     needs: [preflight]
 
     steps:
@@ -763,7 +787,9 @@ jobs:
   devolutions-agent:
     name: devolutions-agent [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight, devolutions-pedm-desktop]
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: warpbuild
+      labels: ${{ matrix.runner }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.agent-build-matrix) }}
@@ -978,7 +1004,9 @@ jobs:
 
   devolutions-agent-merge:
     name: devolutions agent merge artifacts
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
     needs: [preflight, devolutions-agent]
 
     steps:
@@ -991,7 +1019,9 @@ jobs:
 
   devolutions-pedm-client:
     name: devolutions-pedm-client
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
     needs: [preflight]
 
     steps:
@@ -1012,7 +1042,9 @@ jobs:
 
   dotnet-utils-tests:
     name: .NET utils tests
-    runs-on: windows-2022
+    runs-on:
+      group: warpbuild
+      labels: warp-windows-latest-x64-4x
     needs: [preflight]
 
     steps:
@@ -1030,7 +1062,9 @@ jobs:
 
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests
-    runs-on: windows-2022
+    runs-on:
+      group: warpbuild
+      labels: warp-windows-latest-x64-4x
     needs: [preflight]
 
     steps:
@@ -1082,7 +1116,9 @@ jobs:
   winapi-miri:
     name: Windows API miri tests [${{ matrix.os }}][${{ matrix.mode }}]
     needs: [preflight]
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      group: warpbuild
+      labels: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -1094,9 +1130,9 @@ jobs:
           - tree-borrows
         include:
           - os: windows
-            runner: windows-latest
+            runner: warp-windows-latest-x64-4x
           - os: linux
-            runner: ubuntu-latest
+            runner: warp-ubuntu-latest-x64-4x
           - mode: tree-borrows
             miriflags: -Zmiri-tree-borrows
 
@@ -1130,7 +1166,9 @@ jobs:
 
   pedm-simulator:
     name: PEDM simulator
-    runs-on: windows-2022
+    runs-on:
+      group: warpbuild
+      labels: warp-windows-latest-x64-4x
     needs: [preflight]
 
     steps:
@@ -1169,7 +1207,9 @@ jobs:
 
   secure-memory-verifier:
     name: secure-memory-verifier
-    runs-on: windows-2022
+    runs-on:
+      group: warpbuild
+      labels: warp-windows-latest-x64-4x
     needs: [preflight]
 
     steps:
@@ -1196,7 +1236,9 @@ jobs:
     name: Success
     if: ${{ always() }}
     needs: [tests, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Check success
@@ -1210,7 +1252,9 @@ jobs:
     name: Upload git-log output
     if: ${{ github.ref == 'refs/heads/master' }}
     needs: [preflight, success]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -1234,7 +1278,9 @@ jobs:
     environment: onedrive-upload
     if: ${{ github.ref == 'refs/heads/master' }}
     needs: [preflight, upload-git-log]
-    runs-on: ubuntu-latest
+    runs-on:
+      group: warpbuild
+      labels: warp-ubuntu-latest-x64-4x
 
     steps:
       - name: Check out Devolutions/actions
