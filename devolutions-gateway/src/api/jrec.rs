@@ -538,18 +538,22 @@ async fn shadow_recording(
     };
 
     if !xmf::is_init() {
+        warn!(%id, "Shadow recording rejected: XMF native library is not loaded");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     }
 
     let Ok(notify) = recordings.subscribe_to_recording_finish(id).await else {
+        warn!(%id, "Shadow recording rejected: failed to subscribe to recording finish");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
     let Ok(recording_files) = recordings.list_files(id).await else {
+        warn!(%id, "Shadow recording rejected: failed to list recording files");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
     let Some(recording_path) = recording_files.last() else {
+        warn!(%id, "Shadow recording rejected: no recording files found");
         return close_with_error(ws, StreamerCloseCode::InternalError);
     };
 
