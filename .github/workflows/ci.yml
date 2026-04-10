@@ -48,6 +48,36 @@ on:
         required: false
         type: string
         default: macos-14-xlarge
+      warpbuild_ubuntu_latest_runner:
+        description: WarpBuild runner label for ubuntu-latest equivalent
+        required: false
+        type: string
+        default: warp-ubuntu-latest-x64-4x
+      warpbuild_ubuntu_2204_runner:
+        description: WarpBuild runner label for ubuntu-22.04 equivalent
+        required: false
+        type: string
+        default: warp-ubuntu-2204-x64-4x
+      warpbuild_ubuntu_2404_runner:
+        description: WarpBuild runner label for ubuntu-24.04 equivalent
+        required: false
+        type: string
+        default: warp-ubuntu-latest-x64-4x
+      warpbuild_windows_latest_runner:
+        description: WarpBuild runner label for windows-latest equivalent
+        required: false
+        type: string
+        default: warp-windows-latest-x64-4x
+      warpbuild_windows_2022_runner:
+        description: WarpBuild runner label for windows-2022 equivalent
+        required: false
+        type: string
+        default: warp-windows-latest-x64-4x
+      warpbuild_macos_14_runner:
+        description: WarpBuild runner label for macos-14 equivalent
+        required: false
+        type: string
+        default: warp-macos-14-arm64-6x
       sccache:
         description: Enable sccache for Rust compilation caching
         required: false
@@ -94,6 +124,36 @@ on:
         required: false
         type: string
         default: macos-14-xlarge
+      warpbuild_ubuntu_latest_runner:
+        description: WarpBuild runner label for ubuntu-latest equivalent
+        required: false
+        type: string
+        default: warp-ubuntu-latest-x64-4x
+      warpbuild_ubuntu_2204_runner:
+        description: WarpBuild runner label for ubuntu-22.04 equivalent
+        required: false
+        type: string
+        default: warp-ubuntu-2204-x64-4x
+      warpbuild_ubuntu_2404_runner:
+        description: WarpBuild runner label for ubuntu-24.04 equivalent
+        required: false
+        type: string
+        default: warp-ubuntu-latest-x64-4x
+      warpbuild_windows_latest_runner:
+        description: WarpBuild runner label for windows-latest equivalent
+        required: false
+        type: string
+        default: warp-windows-latest-x64-4x
+      warpbuild_windows_2022_runner:
+        description: WarpBuild runner label for windows-2022 equivalent
+        required: false
+        type: string
+        default: warp-windows-latest-x64-4x
+      warpbuild_macos_14_runner:
+        description: WarpBuild runner label for macos-14 equivalent
+        required: false
+        type: string
+        default: warp-macos-14-arm64-6x
       sccache:
         description: Enable sccache for Rust compilation caching
         required: false
@@ -103,7 +163,7 @@ on:
 jobs:
   preflight:
     name: preflight
-    runs-on: ${{ fromJson((inputs.runner_backend || 'github-hosted') == 'warpbuild' && '{"group":"warpbuild","labels":"warp-ubuntu-latest-x64-4x"}' || ((inputs.runner_backend || 'github-hosted') == 'github-larger' && format('"{0}"', inputs.github_larger_ubuntu_latest_runner || 'ubuntu-24.04-4core') || '"ubuntu-latest"')) }}
+    runs-on: ${{ fromJson((inputs.runner_backend || 'github-hosted') == 'warpbuild' && format('{{"group":"warpbuild","labels":"{0}"}}', inputs.warpbuild_ubuntu_latest_runner || 'warp-ubuntu-latest-x64-4x') || ((inputs.runner_backend || 'github-hosted') == 'github-larger' && format('"{0}"', inputs.github_larger_ubuntu_latest_runner || 'ubuntu-24.04-4core') || '"ubuntu-latest"')) }}
     outputs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
@@ -146,12 +206,12 @@ jobs:
             return $RunnerConfig
           }
 
-          $UbuntuLatestRunner = Set-RunnerOutput -Name 'runner-ubuntu-latest' -GitHubRunner 'ubuntu-latest' -GitHubLargerRunner '${{ inputs.github_larger_ubuntu_latest_runner || 'ubuntu-24.04-4core' }}' -WarpRunner 'warp-ubuntu-latest-x64-4x'
-          $Ubuntu2204Runner = Set-RunnerOutput -Name 'runner-ubuntu-2204' -GitHubRunner 'ubuntu-22.04' -GitHubLargerRunner '${{ inputs.github_larger_ubuntu_2204_runner || 'ubuntu-22.04-4core' }}' -WarpRunner 'warp-ubuntu-2204-x64-4x'
-          $Ubuntu2404Runner = Set-RunnerOutput -Name 'runner-ubuntu-2404' -GitHubRunner 'ubuntu-24.04' -GitHubLargerRunner '${{ inputs.github_larger_ubuntu_2404_runner || 'ubuntu-24.04-4core' }}' -WarpRunner 'warp-ubuntu-latest-x64-4x'
-          $WindowsLatestRunner = Set-RunnerOutput -Name 'runner-windows-latest' -GitHubRunner 'windows-latest' -GitHubLargerRunner '${{ inputs.github_larger_windows_latest_runner || 'windows-2025-4core' }}' -WarpRunner 'warp-windows-latest-x64-4x'
-          $Windows2022Runner = Set-RunnerOutput -Name 'runner-windows-2022' -GitHubRunner 'windows-2022' -GitHubLargerRunner '${{ inputs.github_larger_windows_2022_runner || 'windows-2025-4core' }}' -WarpRunner 'warp-windows-latest-x64-4x'
-          $Macos14Runner = Set-RunnerOutput -Name 'runner-macos-14' -GitHubRunner 'macos-14' -GitHubLargerRunner '${{ inputs.github_larger_macos_14_runner || 'macos-14-xlarge' }}' -WarpRunner 'warp-macos-14-arm64-6x'
+          $UbuntuLatestRunner = Set-RunnerOutput -Name 'runner-ubuntu-latest' -GitHubRunner 'ubuntu-latest' -GitHubLargerRunner '${{ inputs.github_larger_ubuntu_latest_runner || 'ubuntu-24.04-4core' }}' -WarpRunner '${{ inputs.warpbuild_ubuntu_latest_runner || 'warp-ubuntu-latest-x64-4x' }}'
+          $Ubuntu2204Runner = Set-RunnerOutput -Name 'runner-ubuntu-2204' -GitHubRunner 'ubuntu-22.04' -GitHubLargerRunner '${{ inputs.github_larger_ubuntu_2204_runner || 'ubuntu-22.04-4core' }}' -WarpRunner '${{ inputs.warpbuild_ubuntu_2204_runner || 'warp-ubuntu-2204-x64-4x' }}'
+          $Ubuntu2404Runner = Set-RunnerOutput -Name 'runner-ubuntu-2404' -GitHubRunner 'ubuntu-24.04' -GitHubLargerRunner '${{ inputs.github_larger_ubuntu_2404_runner || 'ubuntu-24.04-4core' }}' -WarpRunner '${{ inputs.warpbuild_ubuntu_2404_runner || 'warp-ubuntu-latest-x64-4x' }}'
+          $WindowsLatestRunner = Set-RunnerOutput -Name 'runner-windows-latest' -GitHubRunner 'windows-latest' -GitHubLargerRunner '${{ inputs.github_larger_windows_latest_runner || 'windows-2025-4core' }}' -WarpRunner '${{ inputs.warpbuild_windows_latest_runner || 'warp-windows-latest-x64-4x' }}'
+          $Windows2022Runner = Set-RunnerOutput -Name 'runner-windows-2022' -GitHubRunner 'windows-2022' -GitHubLargerRunner '${{ inputs.github_larger_windows_2022_runner || 'windows-2025-4core' }}' -WarpRunner '${{ inputs.warpbuild_windows_2022_runner || 'warp-windows-latest-x64-4x' }}'
+          $Macos14Runner = Set-RunnerOutput -Name 'runner-macos-14' -GitHubRunner 'macos-14' -GitHubLargerRunner '${{ inputs.github_larger_macos_14_runner || 'macos-14-xlarge' }}' -WarpRunner '${{ inputs.warpbuild_macos_14_runner || 'warp-macos-14-arm64-6x' }}'
 
           $Jobs = @()
           $Archs = @( 'x86_64', 'arm64' )
@@ -1324,6 +1384,12 @@ jobs:
           GH_LARGER_WINDOWS_LATEST_RUNNER: ${{ inputs.github_larger_windows_latest_runner || 'windows-2025-4core' }}
           GH_LARGER_WINDOWS_2022_RUNNER: ${{ inputs.github_larger_windows_2022_runner || 'windows-2025-4core' }}
           GH_LARGER_MACOS_14_RUNNER: ${{ inputs.github_larger_macos_14_runner || 'macos-14-xlarge' }}
+          WARPBUILD_UBUNTU_LATEST_RUNNER: ${{ inputs.warpbuild_ubuntu_latest_runner || 'warp-ubuntu-latest-x64-4x' }}
+          WARPBUILD_UBUNTU_2204_RUNNER: ${{ inputs.warpbuild_ubuntu_2204_runner || 'warp-ubuntu-2204-x64-4x' }}
+          WARPBUILD_UBUNTU_2404_RUNNER: ${{ inputs.warpbuild_ubuntu_2404_runner || 'warp-ubuntu-latest-x64-4x' }}
+          WARPBUILD_WINDOWS_LATEST_RUNNER: ${{ inputs.warpbuild_windows_latest_runner || 'warp-windows-latest-x64-4x' }}
+          WARPBUILD_WINDOWS_2022_RUNNER: ${{ inputs.warpbuild_windows_2022_runner || 'warp-windows-latest-x64-4x' }}
+          WARPBUILD_MACOS_14_RUNNER: ${{ inputs.warpbuild_macos_14_runner || 'warp-macos-14-arm64-6x' }}
         run: |
           $Headers = @{
             Authorization = "Bearer $Env:GITHUB_TOKEN"
@@ -1341,9 +1407,18 @@ jobs:
               '^ubuntu-(latest|22\.04|24\.04)$' { return 0.006 }
               '^windows-(latest|2022)$' { return 0.010 }
               '^macos-14$' { return 0.062 }
+              '^warp-ubuntu-(latest|2204)-x64-2x$' { return 0.004 }
               '^warp-ubuntu-(latest|2204)-x64-4x$' { return 0.008 }
+              '^warp-ubuntu-(latest|2204)-x64-8x$' { return 0.016 }
+              '^warp-ubuntu-(latest|2204)-x64-16x$' { return 0.032 }
+              '^warp-ubuntu-(latest|2204)-x64-32x$' { return 0.064 }
+              '^warp-windows-latest-x64-2x$' { return 0.008 }
               '^warp-windows-latest-x64-4x$' { return 0.016 }
+              '^warp-windows-latest-x64-8x$' { return 0.032 }
+              '^warp-windows-latest-x64-16x$' { return 0.064 }
+              '^warp-windows-latest-x64-32x$' { return 0.128 }
               '^warp-macos-14-arm64-6x$' { return 0.080 }
+              '^warp-macos-14-arm64-12x$' { return 0.160 }
             }
 
             if ($Label -eq $Env:GH_LARGER_UBUNTU_LATEST_RUNNER -or $Label -eq $Env:GH_LARGER_UBUNTU_2204_RUNNER -or $Label -eq $Env:GH_LARGER_UBUNTU_2404_RUNNER) {
