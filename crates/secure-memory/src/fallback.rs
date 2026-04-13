@@ -24,6 +24,7 @@ impl<const N: usize> SecureAlloc<N> {
             locked: false,
             guard_pages: false,
             dump_excluded: false,
+            write_protected: false,
             fallback_backend: true,
         };
         (Self { inner: b }, status)

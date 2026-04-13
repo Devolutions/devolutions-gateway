@@ -148,7 +148,8 @@ impl<const N: usize> SecureAlloc<N> {
         // Removing write access prevents accidental overwrites.
         // SAFETY: `data` is page-aligned; `ps` bytes are within the allocation.
         let r_readonly = unsafe { libc::mprotect(data as *mut libc::c_void, ps, libc::PROT_READ) };
-        if r_readonly != 0 {
+        let write_protected = r_readonly == 0;
+        if !write_protected {
             tracing::debug!(
                 "secure-memory: mprotect(PROT_READ) for data page failed ({}); \
                  data page remains writable",
@@ -166,6 +167,7 @@ impl<const N: usize> SecureAlloc<N> {
             locked,
             guard_pages,
             dump_excluded,
+            write_protected,
             fallback_backend: false,
         };
 

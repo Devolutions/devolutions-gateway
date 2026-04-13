@@ -22,6 +22,9 @@ use windows as platform;
 ///
 /// All fields are `false` when the platform backend is not available
 /// (`fallback_backend == true`).
+///
+/// For a quick pass/fail check, call [`ProtectionStatus::level`] instead of
+/// inspecting individual fields.
 #[derive(Debug, Clone, Copy)]
 pub struct ProtectionStatus {
     /// The pages are locked in RAM (`mlock` / `VirtualLock`).
@@ -48,11 +51,61 @@ pub struct ProtectionStatus {
     /// - **macOS**: always `false`; no equivalent API exists.
     pub dump_excluded: bool,
 
+    /// The data page was successfully demoted to read-only after construction
+    /// (`mprotect(PROT_READ)` / `VirtualProtect(PAGE_READONLY)`).
+    ///
+    /// When `false` the page remains writable, which means the "Removing write
+    /// access prevents accidental overwrites" guarantee does not hold.
+    pub write_protected: bool,
+
     /// No OS-level hardening is available; using plain heap allocation.
     ///
     /// The secret is still zeroized on drop but none of the other protections
     /// are active. A debug message is logged once at construction time.
     pub fallback_backend: bool,
+}
+
+impl ProtectionStatus {
+    /// Return the overall protection level as a single summary value.
+    ///
+    /// Prefer this over checking individual fields when you only need to know
+    /// whether the allocation is adequately protected. See [`ProtectionLevel`]
+    /// for the exact definition of each variant.
+    #[must_use]
+    pub fn level(&self) -> ProtectionLevel {
+        if self.fallback_backend {
+            ProtectionLevel::Unprotected
+        } else if self.guard_pages && self.locked && self.write_protected && self.dump_excluded {
+            ProtectionLevel::Full
+        } else {
+            ProtectionLevel::Partial
+        }
+    }
+}
+
+/// Overall memory-protection level for a [`ProtectedBytes`] allocation.
+///
+/// Returned by [`ProtectionStatus::level`].
+/// Individual protection flags are still accessible via [`ProtectionStatus`]
+/// when finer-grained diagnostics are needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectionLevel {
+    /// All core OS hardening is active: guard pages, RAM lock, read-only page
+    /// protection, and crash-dump exclusion all succeeded.
+    ///
+    /// Note: on macOS `dump_excluded` is always `false` (no platform API
+    /// exists), so `Full` is never reached on macOS — `Partial` is the best
+    /// achievable level there.
+    Full,
+
+    /// The OS backend is active but at least one protection (`guard_pages`,
+    /// `locked`, `write_protected`, or `dump_excluded`) failed at runtime
+    /// (e.g. due to `ulimit` restrictions or platform limitations).
+    Partial,
+
+    /// No OS-level hardening is available. The allocation falls back to a plain
+    /// heap allocation with zeroize-on-drop only.
+    Unprotected,
 }
 
 /// A fixed-size, protected in-memory secret.
@@ -63,8 +116,9 @@ pub struct ProtectionStatus {
 /// platforms the bytes are zeroized before the backing allocation is released.
 ///
 /// - `Debug` emits `[REDACTED]`; `Display` is absent; not `Clone` or `Copy`.
-/// - One unavoidable stack copy in `new`: the `[u8; N]` argument is zeroized
-///   immediately after being transferred into secure storage.
+/// - The caller's array is moved (and may be physically copied) into `new`.
+///   The local parameter `bytes` is zeroized immediately after the transfer;
+///   earlier stack residuals in the caller's frame are not zeroed by this crate.
 /// - `mlock` / `VirtualLock` prevent paging to disk but do not prevent transient
 ///   exposure in registers or on the call stack during `expose_secret`.
 pub struct ProtectedBytes<const N: usize> {
@@ -75,8 +129,10 @@ pub struct ProtectedBytes<const N: usize> {
 impl<const N: usize> ProtectedBytes<N> {
     /// Move `bytes` into a new protected allocation.
     ///
-    /// The local copy of `bytes` is zeroized immediately after it has been
-    /// transferred into secure storage.
+    /// The `bytes` parameter is zeroized immediately after the secret has been
+    /// transferred into secure storage. Any copies that Rust or the compiler
+    /// placed in the caller's stack frame before the call are **not** zeroized
+    /// by this crate.
     ///
     /// # Panics
     ///
@@ -149,6 +205,7 @@ mod tests {
             assert!(!st.locked);
             assert!(!st.guard_pages);
             assert!(!st.dump_excluded);
+            assert!(!st.write_protected);
         }
 
         // dump_excluded without locked would be unusual; at minimum, if
@@ -176,6 +233,14 @@ mod tests {
         assert!(st.guard_pages, "guard pages should be active");
     }
 
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn write_protected_active() {
+        let secret = ProtectedBytes::new([4u8; 32]);
+        let st = secret.protection_status();
+        assert!(st.write_protected, "data page should be write-protected");
+    }
+
     // Test the fallback backend directly on all platforms.
     #[test]
     fn fallback_backend_constructs_correctly() {
@@ -185,5 +250,18 @@ mod tests {
         assert!(!status.locked);
         assert!(!status.guard_pages);
         assert!(!status.dump_excluded);
+        assert!(!status.write_protected);
+        assert_eq!(status.level(), ProtectionLevel::Unprotected);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn os_backend_is_full_protection() {
+        let secret = ProtectedBytes::new([5u8; 32]);
+        assert_eq!(
+            secret.protection_status().level(),
+            ProtectionLevel::Full,
+            "expected Full protection on this platform"
+        );
     }
 }
