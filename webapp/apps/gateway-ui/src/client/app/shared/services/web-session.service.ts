@@ -105,6 +105,12 @@ export class WebSessionService {
     const index: number = currentSessions.findIndex((webSession) => webSession.id === updatedWebSession.id);
 
     if (index !== -1) {
+      // Do NOT explicitly destroy the old componentRef here.
+      // createComponent() now creates the new component first and removes the
+      // old view after, keeping Angular's style reference count above 0 the
+      // whole time.  Destroying here would drop the count to 0 and cause the
+      // :host <style> element to be removed before the new component is ready.
+
       updatedWebSession.tabIndex = currentSessions[index].tabIndex;
       const updatedSessions = [...currentSessions];
       updatedSessions[index] = updatedWebSession;
@@ -203,6 +209,9 @@ export class WebSessionService {
   }
 
   setWebSessionCurrentIndex(index: number): void {
+    if (this.webSessionCurrentTabIndexSubject.getValue() === index) {
+      return;
+    }
     this.webSessionCurrentTabIndexSubject.next(index);
   }
 

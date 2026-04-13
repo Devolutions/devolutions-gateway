@@ -1,8 +1,11 @@
-<div id="gateway-loading" *ngIf="!autoLoginAttempted">
-  <i class="dvl-icon dvl-icon-logo-gateway"></i>
-</div>
+@if (!autoLoginAttempted) {
+  <div id="gateway-loading">
+    <i class="dvl-icon dvl-icon-logo-gateway"></i>
+  </div>
+}
 
-<div *ngIf="autoLoginAttempted" class="login-background">
+@if (autoLoginAttempted) {
+<div class="login-background">
 
   <div class="login-box">
     <div class="login-box-header">
@@ -22,9 +25,14 @@
         Login to Continue
       </span>
       <div class="login-form-message">
-        <p-messages *ngIf="messages.length > 0"
-                    [closable]="false"
-                    [value]="messages"></p-messages>
+        @for (msg of messages; track msg.summary) {
+          <p-message [severity]="$any(msg.severity)" [escape]="false" [closable]="false">
+            <span class="msg-summary">{{ msg.summary }}</span>
+            @if (msg.detail) {
+              <div class="msg-detail" [innerHTML]="msg.detail"></div>
+            }
+          </p-message>
+        }
       </div>
       <form name="login-form" [formGroup]="loginForm" autocomplete="on">
         <div class="login-form-content grid nomargin nopad">
@@ -39,11 +47,11 @@
                      formControlName="username"
                      required/>
             </div>
-            <div class="form-helper-text"
-                 *ngIf="loginForm.get('username').hasError('required') &&
-                    loginForm.get('username').touched">
-              Username is required.
-            </div>
+            @if (loginForm.get('username').hasError('required') && loginForm.get('username').touched) {
+              <div class="form-helper-text">
+                Username is required.
+              </div>
+            }
           </div>
 
           <div class="col-12 login-form-group">
@@ -61,11 +69,11 @@
                   <i (click)="toggleShowPassword()" class="dvl-icon dvl-icon-view"></i>
                 </span>
               </div>
-            <div class="form-helper-text"
-                 *ngIf="loginForm.get('password').hasError('required') &&
-                    loginForm.get('password').touched">
-              Password is required.
-            </div>
+            @if (loginForm.get('password').hasError('required') && loginForm.get('password').touched) {
+              <div class="form-helper-text">
+                Password is required.
+              </div>
+            }
           </div>
 
           <div class="col-12 login-form-group">
@@ -82,3 +90,4 @@
     </div>
   </div>
 </div>
+}

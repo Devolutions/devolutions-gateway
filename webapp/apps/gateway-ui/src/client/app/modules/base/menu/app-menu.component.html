@@ -12,10 +12,12 @@
       </svg>
 
     </div>
-    <div class="title" *ngIf="!isMenuSlim">
-      <span class="header">Devolutions</span>
-      <span class="sub-header">Gateway</span>
-    </div>
+    @if (!isMenuSlim) {
+      <div class="title">
+        <span class="header">Devolutions</span>
+        <span class="sub-header">Gateway</span>
+      </div>
+    }
 
     <div class="menu-mode-toggler" (click)="onMenuModeTogglerClick()">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -31,10 +33,12 @@
 
   <!-- Primary -->
   <gateway-menu-group-list-item class="primary-menu-group-list" [accordion]="false">
-    <gateway-menu-list-item *ngFor="let menuKVP of mainMenus | keyvalue: asIsOrder"
-                            [label]="menuKVP.value.label"
-                            [icon]="menuKVP.value.icon"
-                            [iconOnly]="isMenuSlim"></gateway-menu-list-item>
+    @for (menuKVP of mainMenus | keyvalue: asIsOrder; track menuKVP.key) {
+      <gateway-menu-list-item
+                              [label]="menuKVP.value.label"
+                              [icon]="menuKVP.value.icon"
+                              [iconOnly]="isMenuSlim"></gateway-menu-list-item>
+    }
 
     <gateway-menu-list-active-sessions [isMenuSlim]="isMenuSlim">
     </gateway-menu-list-active-sessions>
@@ -50,34 +54,40 @@
   </gateway-menu-group-list-item>
 
   <!-- Logout -->
-  <gateway-menu-group-list-item
-    *ngIf="!isAutoLoginOn"
-    class="primary-menu-group-list"
-    [accordion]="false">
+  @if (!isAutoLoginOn) {
+    <gateway-menu-group-list-item
+      class="primary-menu-group-list"
+      [accordion]="false">
 
-    <div class="footer-group-list">
-      <div class="menu-list-item footer-menu-list"
-           [pTooltip]="isMenuSlim ? 'Logout' : ''"
-           [tooltipDisabled]="!isMenuSlim"
-           (click)="logout()">
-        <i class="dvl-icon dvl-icon-logout"></i>
-        <span *ngIf="!isMenuSlim" class="menu-list-item-label">Logout</span>
+      <div class="footer-group-list">
+        <div class="menu-list-item footer-menu-list"
+             [pTooltip]="isMenuSlim ? 'Logout' : ''"
+             [tooltipDisabled]="!isMenuSlim"
+             (click)="logout()">
+          <i class="dvl-icon dvl-icon-logout"></i>
+          @if (!isMenuSlim) {
+            <span class="menu-list-item-label">Logout</span>
+          }
+        </div>
       </div>
-    </div>
-  </gateway-menu-group-list-item>
+    </gateway-menu-group-list-item>
+  }
 
     <div class="dgw-version">
       <label for="version">
         {{ version }}
       </label>
         <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
-          <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion()"></i>
+          @if (hasNewVersion()) {
+            <i class="dvl-icon dvl-icon-download download-icon"></i>
+          }
         </a>
     </div>
-  
+
   <!-- Resize Handle -->
-  <div class="resize-handle" 
-    *ngIf="!isMenuSlim"
-    (mousedown)="onResizeStart($event)"></div>
+  @if (!isMenuSlim) {
+    <div class="resize-handle"
+      (mousedown)="onResizeStart($event)"></div>
+  }
 
 </div>

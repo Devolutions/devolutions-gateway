@@ -11,8 +11,8 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { IronError, SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
+import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
@@ -23,7 +23,6 @@ import { DesktopSize } from '@shared/models/desktop-size';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultVncPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import type { ToastMessageOptions } from 'primeng/api';
 import { MessageService } from 'primeng/api';
 import { debounceTime, EMPTY, from, Observable, of, Subject, Subscription } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
@@ -62,7 +61,7 @@ enum UserIronRdpErrorKind {
   styleUrls: ['web-client-vnc.component.scss'],
   providers: [MessageService],
 })
-export class WebClientVncComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientVncComponent extends DesktopWebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;
   @Input() sessionsContainerElement: ElementRef;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
@@ -74,14 +73,11 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
   backendRef = Backend;
 
   formData: VncFormDataInput;
-  sessionTerminationMessage: ToastMessageOptions;
   isFullScreenMode = false;
   cursorOverrideActive = false;
 
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
-
-  saveRemoteClipboardButtonEnabled = false;
 
   leftToolbarButtons = [
     {
@@ -152,47 +148,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
-  clipboardActionButtons: {
-    label: string;
-    tooltip: string;
-    icon: string;
-    action: () => Promise<void>;
-    enabled: () => boolean;
-  }[] = [];
-
-  private setupClipboardHandling(): void {
-    // Clipboard API is available only in secure contexts (HTTPS).
-    if (!window.isSecureContext) {
-      return;
-    }
-
-    if (this.formData.autoClipboard === true) {
-      return;
-    }
-
-    // We don't check for clipboard write support, as all recent browser versions support it.
-    this.clipboardActionButtons.push({
-      label: 'Save Clipboard',
-      tooltip: 'Copy received clipboard content to your local clipboard.',
-      icon: 'dvl-icon dvl-icon-save',
-      action: () => this.saveRemoteClipboard(),
-      enabled: () => this.saveRemoteClipboardButtonEnabled,
-    });
-
-    // Check if the browser supports reading local clipboard.
-    if (navigator.clipboard.readText) {
-      this.clipboardActionButtons.push({
-        label: 'Send Clipboard',
-        tooltip: 'Send your local clipboard content to the remote server.',
-        icon: 'dvl-icon dvl-icon-send',
-        action: () => this.sendClipboard(),
-        enabled: () => true,
-      });
-    }
-  }
-
   protected removeElement: Subject<unknown> = new Subject();
-  private remoteClient: UserInteraction;
   private remoteClientEventListener: (event: Event) => void;
 
   private componentResizeObserverDisconnect?: () => void;
@@ -217,7 +173,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-    this.setupClipboardHandling();
+    this.setupClipboardHandling(this.formData?.autoClipboard);
   }
 
   ngAfterViewInit(): void {
@@ -263,27 +219,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {
     this.remoteClient.setKeyboardUnicodeMode(useUnicode);
-  }
-
-  async saveRemoteClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.saveRemoteClipboardData();
-
-      super.webClientSuccess('Clipboard content has been copied to your clipboard!');
-      this.saveRemoteClipboardButtonEnabled = false;
-    } catch (err) {
-      this.handleSessionError(err);
-    }
-  }
-
-  async sendClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.sendClipboardData();
-
-      super.webClientSuccess('Clipboard content has been sent to the remote server!');
-    } catch (err) {
-      this.handleSessionError(err);
-    }
   }
 
   toggleCursorKind(): void {
@@ -348,6 +283,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
   private disableComponentStatus(): void {
     this.currentStatus.isDisabled = true;
+    this.currentStatus.terminationMessage = this.sessionTerminationMessage;
     this.componentStatus.emit(this.currentStatus);
   }
 
@@ -414,7 +350,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
     const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
-    if (this.formData.autoClipboard !== true) {
+    if (this.formData?.autoClipboard !== true) {
       this.remoteClient.setEnableAutoClipboard(false);
     }
 
@@ -612,23 +548,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
 
     this.disableComponentStatus();
     super.webClientConnectionClosed();
-  }
-
-  private handleSessionError(err: unknown): void {
-    if (this.isIronError(err)) {
-      this.webClientError(err.backtrace());
-    } else {
-      this.webClientError(`${err}`);
-    }
-  }
-
-  private isIronError(error: unknown): error is IronError {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      typeof (error as IronError).backtrace === 'function' &&
-      typeof (error as IronError).kind === 'function'
-    );
   }
 
   private handleError(error: string): void {

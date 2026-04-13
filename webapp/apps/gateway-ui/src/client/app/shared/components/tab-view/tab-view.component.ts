@@ -28,7 +28,16 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
   @ViewChild('sessionsContainer') sessionsContainerRef: ElementRef;
 
   webSessionTabs: WebSession<SessionType>[] = [];
-  currentTabIndex = 0;
+
+  private _currentTabIndex = 0;
+
+  get currentTabIndex(): number {
+    return this._currentTabIndex;
+  }
+
+  set currentTabIndex(value: number | string) {
+    this._currentTabIndex = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+  }
 
   constructor(
     private webSessionService: WebSessionService,
@@ -71,11 +80,17 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
     this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 
-  onTabChange(event: unknown): void {
+  onTabChange(event: string | number): void {
     // PrimeNG 20 Tabs onChange event provides the new value in event.value
-    const value = (event as { value: unknown })?.value;
-    const newIndex = typeof value === 'number' ? value : Number.parseInt(value as string, 10);
+    const newIndex = typeof event === 'number' ? event : Number.parseInt(event as string, 10);
     this.webSessionService.setWebSessionCurrentIndex(newIndex);
+  }
+
+  /** Stable identity for *ngFor — keeps the same DynamicTabComponent alive
+   *  when a session object is replaced (e.g. on reconnect), so Angular's
+   *  style reference count never drops to 0 and `:host` rules stay injected. */
+  trackBySessionId(_index: number, tab: WebSession<SessionType>): string {
+    return tab.id;
   }
 
   private changeTabIndex(): void {

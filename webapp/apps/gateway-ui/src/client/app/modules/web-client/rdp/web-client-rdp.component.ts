@@ -11,9 +11,9 @@ import {
   Renderer2,
   ViewChild,
 } from '@angular/core';
-import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
+import { IronError, SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
 import { Backend, displayControl, kdcProxyUrl, preConnectionBlob, RdpFile } from '@devolutions/iron-remote-desktop-rdp';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
 import { ScreenSize } from '@shared/enums/screen-size.enum';
@@ -25,7 +25,6 @@ import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import type { ToastMessageOptions } from 'primeng/api';
 import { MessageService } from 'primeng/api';
 import { debounceTime, EMPTY, from, noop, Observable, of, Subject, Subscription, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
@@ -36,7 +35,6 @@ import { AnalyticService, ProtocolString } from '@gateway/shared/services/analyt
 import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { NavigationService } from '@shared/services/navigation.service';
-import { UAParser } from 'ua-parser-js';
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -53,7 +51,7 @@ enum UserIronRdpErrorKind {
   styleUrls: ['web-client-rdp.component.scss'],
   providers: [MessageService],
 })
-export class WebClientRdpComponent extends WebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientRdpComponent extends DesktopWebClientBaseComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() webSessionId: string;
   @Input() sessionsContainerElement: ElementRef;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
@@ -65,15 +63,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
   backendRef = Backend;
 
   formData: RdpFormDataInput;
-  sessionTerminationMessage: ToastMessageOptions;
   isFullScreenMode = false;
   useUnicodeKeyboard = false;
   cursorOverrideActive = false;
 
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
-
-  saveRemoteClipboardButtonEnabled = false;
 
   rdpConfig: string | null;
 
@@ -145,55 +140,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
     },
   ];
 
-  clipboardActionButtons: {
-    label: string;
-    tooltip: string;
-    icon: string;
-    action: () => Promise<void>;
-    enabled: () => boolean;
-  }[] = [];
-
-  private setupClipboardHandling(): void {
-    // Clipboard API is available only in secure contexts (HTTPS).
-    if (!window.isSecureContext) {
-      return;
-    }
-
-    let autoClipboardMode: boolean;
-
-    // If the user connects to the session via URL.
-    if (this.formData === undefined) {
-      autoClipboardMode = new UAParser().getEngine().name === 'Blink';
-    } else autoClipboardMode = this.formData.autoClipboard;
-
-    if (autoClipboardMode) {
-      return;
-    }
-
-    // We don't check for clipboard write support, as all recent browser versions support it.
-    this.clipboardActionButtons.push({
-      label: 'Save Clipboard',
-      tooltip: 'Copy received clipboard content to your local clipboard.',
-      icon: 'dvl-icon dvl-icon-save',
-      action: () => this.saveRemoteClipboard(),
-      enabled: () => this.saveRemoteClipboardButtonEnabled,
-    });
-
-    // Check if the browser supports reading local clipboard.
-    if (navigator.clipboard.readText) {
-      this.clipboardActionButtons.push({
-        label: 'Send Clipboard',
-        tooltip: 'Send your local clipboard content to the remote server.',
-        icon: 'dvl-icon dvl-icon-send',
-        action: () => this.sendClipboard(),
-        enabled: () => true,
-      });
-    }
-  }
-
   protected removeElement = new Subject();
   private remoteClientEventListener: (event: Event) => void;
-  private remoteClient: UserInteraction;
 
   private componentResizeObserverDisconnect?: () => void;
   private dynamicComponentResizeSubscription?: Subscription;
@@ -219,7 +167,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-    this.setupClipboardHandling();
+    this.setupClipboardHandling(this.formData?.autoClipboard);
     this.setRdpConfig();
     // Navigate to /session route to clear query params.
     this.navigation.navigateToNewSession().then(noop);
@@ -273,27 +221,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {
     this.remoteClient.setKeyboardUnicodeMode(useUnicode);
-  }
-
-  async saveRemoteClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.saveRemoteClipboardData();
-
-      super.webClientSuccess('Clipboard content has been copied to your clipboard!');
-      this.saveRemoteClipboardButtonEnabled = false;
-    } catch (err) {
-      this.handleSessionError(err);
-    }
-  }
-
-  async sendClipboard(): Promise<void> {
-    try {
-      await this.remoteClient.sendClipboardData();
-
-      super.webClientSuccess('Clipboard content has been sent to the remote server!');
-    } catch (err) {
-      this.handleSessionError(err);
-    }
   }
 
   toggleCursorKind(): void {
@@ -354,6 +281,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
   private disableComponentStatus(): void {
     this.currentStatus.isDisabled = true;
+    this.currentStatus.terminationMessage = this.sessionTerminationMessage;
     this.componentStatus.emit(this.currentStatus);
   }
 
@@ -421,7 +349,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
     // If the user connects to the session via URL.
     if (this.formData === undefined) {
-      const autoClipboardMode = new UAParser().getEngine().name === 'Blink';
+      const autoClipboardMode = this.isAutoClipboardMode();
       this.remoteClient.setEnableAutoClipboard(autoClipboardMode);
     } else if (this.formData.autoClipboard !== true) {
       this.remoteClient.setEnableAutoClipboard(false);
@@ -643,23 +571,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
 
     this.disableComponentStatus();
     super.webClientConnectionClosed();
-  }
-
-  private handleSessionError(err: unknown): void {
-    if (this.isIronError(err)) {
-      this.webClientError(err.backtrace());
-    } else {
-      this.webClientError(`${err}`);
-    }
-  }
-
-  private isIronError(error: unknown): error is IronError {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      typeof (error as IronError).backtrace === 'function' &&
-      typeof (error as IronError).kind === 'function'
-    );
   }
 
   private handleError(error: string): void {

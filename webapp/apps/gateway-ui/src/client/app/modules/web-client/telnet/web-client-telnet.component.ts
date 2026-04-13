@@ -1,14 +1,12 @@
-import { Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
-import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { Component, ElementRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { TelnetFormDataInput } from '@shared/interfaces/forms.interfaces';
-import { ComponentStatus } from '@shared/models/component-status.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultTelnetPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { EMPTY, from, Observable, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 import '@devolutions/web-telnet-gui/dist/web-telnet-gui.js';
@@ -18,8 +16,9 @@ import {
   TerminalConnectionStatus,
   loggingService as telnetLoggingService,
 } from '@devolutions/web-telnet-gui';
-import { DVL_TELNET_ICON, DVL_WARNING_ICON, JET_TELNET_URL } from '@gateway/app.constants';
+import { DVL_TELNET_ICON, JET_TELNET_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { TerminalWebClientBaseComponent } from '@shared/bases/terminal-web-client-base.component';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 
 @Component({
@@ -28,33 +27,29 @@ import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],
 })
-export class WebClientTelnetComponent extends WebClientBaseComponent implements OnInit, OnDestroy {
+export class WebClientTelnetComponent extends TerminalWebClientBaseComponent implements OnInit, OnDestroy {
   @Input() webSessionId: string;
-  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
-  @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   @ViewChild('sessionTelnetContainer') sessionContainerElement: ElementRef;
   @ViewChild('webTelnetGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: TelnetFormDataInput;
-  clientError: string;
 
   rightToolbarButtons = [
     { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
   ];
 
-  protected removeElement = new Subject();
   private remoteTerminal: TelnetTerminal;
   private unsubscribeTerminalEvent: () => void;
 
   constructor(
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
-    private webSessionService: WebSessionService,
-    private webClientService: WebClientService,
+    protected webSessionService: WebSessionService,
+    protected webClientService: WebClientService,
     protected analyticService: AnalyticService,
   ) {
-    super(gatewayAlertMessageService, analyticService);
+    super(gatewayAlertMessageService, webSessionService, analyticService);
   }
 
   ngOnInit(): void {
@@ -86,7 +81,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   startTerminationProcess(): void {
     this.currentStatus.isDisabledByUser = true;
     this.sendTerminateSessionCmd();
-    this.handleSessionEndedOrError(TerminalConnectionStatus.closed);
+    this.handleSessionEnded(this.getMessage(TerminalConnectionStatus.closed), false);
   }
 
   sendTerminateSessionCmd(): void {
@@ -110,26 +105,12 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
     });
   }
 
+  protected getSuccessIcon(): string {
+    return DVL_TELNET_ICON;
+  }
+
   private removeRemoteTerminalListener(): void {
-    this.unsubscribeTerminalEvent();
-  }
-
-  private initializeStatus(): void {
-    this.currentStatus = {
-      id: this.webSessionId,
-      isInitialized: true,
-      isDisabled: false,
-      isDisabledByUser: false,
-    };
-  }
-
-  private disableComponentStatus(): void {
-    if (this.currentStatus.isDisabled) {
-      return;
-    }
-
-    this.currentStatus.isDisabled = true;
-    this.componentStatus.emit(this.currentStatus);
+    this.unsubscribeTerminalEvent?.();
   }
 
   private startConnectionProcess(): void {
@@ -139,7 +120,6 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
     this.remoteTerminal.onStatusChange((v) => {
       if (v === TerminalConnectionStatus.connected) {
-        // connected only indicates connection to Gateway is successful
         this.remoteTerminal.writeToTerminal('connecting... \r\n');
       }
     });
@@ -151,7 +131,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
         switchMap((params) => this.webClientService.fetchTelnetToken(params)),
         switchMap((params) => this.callConnect(params)),
         catchError((error) => {
-          this.handleTelnetError(error.message);
+          this.handleConnectionError(error.message);
           return EMPTY;
         }),
       )
@@ -159,15 +139,21 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   }
 
   private callConnect(connectionParameters: TelnetConnectionParameters) {
+    const gatewayUrl = new URL(connectionParameters.gatewayAddress);
+    if (connectionParameters.token && !gatewayUrl.searchParams.has('token')) {
+      gatewayUrl.searchParams.set('token', connectionParameters.token);
+    }
+    const gatewayAddress: string = gatewayUrl.toString();
+
     return from(
-      this.remoteTerminal.connect(
-        connectionParameters.host,
-        connectionParameters.port,
-        null,
-        connectionParameters.gatewayAddress + `?token=${connectionParameters.token}`,
-        null,
-      ),
-    ).pipe(catchError((error) => throwError(error)));
+      this.remoteTerminal.connect({
+        hostname: connectionParameters.host,
+        port: connectionParameters.port,
+        username: null,
+        password: null,
+        proxyUrl: gatewayAddress,
+      }),
+    ).pipe(catchError((error) => throwError(() => error)));
   }
 
   private getFormData() {
@@ -201,60 +187,21 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       return;
     }
 
-    // Store the listener function for cleanup
     this.unsubscribeTerminalEvent = this.remoteTerminal.onStatusChange((status) => {
       switch (status) {
         case TerminalConnectionStatus.connected:
-          this.handleSessionStarted();
+          this.handleClientConnectStarted();
+          this.initializeStatus();
           break;
         case TerminalConnectionStatus.failed:
         case TerminalConnectionStatus.closed:
         case TerminalConnectionStatus.timeout:
-          this.handleSessionEndedOrError(status);
+          this.handleSessionEnded(this.getMessage(status));
           break;
         default:
           break;
       }
     });
-  }
-
-  private handleSessionStarted(): void {
-    this.handleClientConnectStarted();
-    this.initializeStatus();
-  }
-
-  private handleSessionEndedOrError(status: TerminalConnectionStatus): void {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch((err) => {
-        console.error(`Error attempting to exit fullscreen: ${err}`);
-      });
-    }
-
-    this.notifyUser(status);
-    this.disableComponentStatus();
-    super.webClientConnectionClosed();
-  }
-
-  private notifyUser(status: TerminalConnectionStatus): void {
-    this.clientError = this.getMessage(status);
-
-    const icon: string = status !== TerminalConnectionStatus.connected ? DVL_WARNING_ICON : DVL_TELNET_ICON;
-
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
-  }
-
-  private handleClientConnectStarted(): void {
-    this.loading = false;
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_TELNET_ICON);
-    super.webClientConnectionSuccess();
-  }
-
-  private handleTelnetError(error: string): void {
-    this.clientError = typeof error === 'string' ? error : this.getMessage(error);
-    console.error(error);
-    this.disableComponentStatus();
-
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
   private getMessage(status: TerminalConnectionStatus): string {
