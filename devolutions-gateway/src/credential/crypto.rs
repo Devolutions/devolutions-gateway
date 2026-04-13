@@ -53,7 +53,9 @@ impl MasterKeyManager {
     fn new() -> Self {
         let mut raw = [0u8; 32];
         OsRng.fill_bytes(&mut raw);
-        let key_material = ProtectedBytes::new(raw);
+        // new_zeroing copies `raw` into secure storage and then zeroizes it,
+        // covering the caller-frame residual without requiring a zeroize dep here.
+        let key_material = ProtectedBytes::new(&mut raw);
 
         let st = key_material.protection_status();
         match st.level() {

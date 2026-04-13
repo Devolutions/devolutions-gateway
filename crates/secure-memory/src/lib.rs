@@ -116,9 +116,8 @@ pub enum ProtectionLevel {
 /// platforms the bytes are zeroized before the backing allocation is released.
 ///
 /// - `Debug` emits `[REDACTED]`; `Display` is absent; not `Clone` or `Copy`.
-/// - The caller's array is moved (and may be physically copied) into `new`.
-///   The local parameter `bytes` is zeroized immediately after the transfer;
-///   earlier stack residuals in the caller's frame are not zeroed by this crate.
+/// - `new` takes a mutable reference and zeroizes the source buffer after
+///   copying the secret into secure storage, covering caller-frame residuals.
 /// - `mlock` / `VirtualLock` prevent paging to disk but do not prevent transient
 ///   exposure in registers or on the call stack during `expose_secret`.
 pub struct ProtectedBytes<const N: usize> {
@@ -127,12 +126,10 @@ pub struct ProtectedBytes<const N: usize> {
 }
 
 impl<const N: usize> ProtectedBytes<N> {
-    /// Move `bytes` into a new protected allocation.
+    /// Copy `bytes` into a new protected allocation and zeroize the source.
     ///
-    /// The `bytes` parameter is zeroized immediately after the secret has been
-    /// transferred into secure storage. Any copies that Rust or the compiler
-    /// placed in the caller's stack frame before the call are **not** zeroized
-    /// by this crate.
+    /// The source buffer is zeroized immediately after the secret has been
+    /// transferred into secure storage, covering caller-frame residuals.
     ///
     /// # Panics
     ///
@@ -141,17 +138,14 @@ impl<const N: usize> ProtectedBytes<N> {
     /// unavailable `madvise` flags, …) do **not** panic; they are downgraded
     /// and reported via [`ProtectedBytes::protection_status`] and a
     /// `tracing::debug!`.
-    pub fn new(mut bytes: [u8; N]) -> Self {
-        let (inner, status) = platform::SecureAlloc::new(&bytes);
-        // Zeroize the stack copy now that the secret lives in secure storage.
-        zeroize::Zeroize::zeroize(&mut bytes);
+    pub fn new(bytes: &mut [u8; N]) -> Self {
+        let (inner, status) = platform::SecureAlloc::new(bytes);
+        // Zeroize the source buffer now that the secret lives in secure storage.
+        zeroize::Zeroize::zeroize(bytes);
         Self { inner, status }
     }
 
     /// Borrow the secret bytes.
-    ///
-    /// Keep the returned reference as short-lived as possible.
-    /// The CPU may hold the value in registers or on the stack during use.
     #[must_use]
     pub fn expose_secret(&self) -> &[u8; N] {
         self.inner.expose()
@@ -178,13 +172,13 @@ mod tests {
 
     #[test]
     fn construction_and_expose() {
-        let secret = ProtectedBytes::new([0x42u8; 32]);
+        let secret = ProtectedBytes::new(&mut [0x42u8; 32]);
         assert_eq!(secret.expose_secret(), &[0x42u8; 32]);
     }
 
     #[test]
     fn redacted_debug_does_not_leak_bytes() {
-        let secret = ProtectedBytes::new([0xFFu8; 32]);
+        let secret = ProtectedBytes::new(&mut [0xFFu8; 32]);
         let s = format!("{secret:?}");
         assert!(s.contains("REDACTED"), "debug must say REDACTED, got: {s}");
         // Must not contain the byte value in decimal or hex.
@@ -197,7 +191,7 @@ mod tests {
     /// for the current platform.
     #[test]
     fn protection_status_coherent() {
-        let secret = ProtectedBytes::new([1u8; 32]);
+        let secret = ProtectedBytes::new(&mut [1u8; 32]);
         let st = secret.protection_status();
 
         // fallback_backend is mutually exclusive with OS hardening.
@@ -218,7 +212,7 @@ mod tests {
     #[cfg(any(unix, windows))]
     #[test]
     fn os_backend_is_not_fallback() {
-        let secret = ProtectedBytes::new([2u8; 32]);
+        let secret = ProtectedBytes::new(&mut [2u8; 32]);
         assert!(
             !secret.protection_status().fallback_backend,
             "expected OS backend on this platform"
@@ -228,7 +222,7 @@ mod tests {
     #[cfg(any(unix, windows))]
     #[test]
     fn guard_pages_active() {
-        let secret = ProtectedBytes::new([3u8; 32]);
+        let secret = ProtectedBytes::new(&mut [3u8; 32]);
         let st = secret.protection_status();
         assert!(st.guard_pages, "guard pages should be active");
     }
@@ -236,9 +230,17 @@ mod tests {
     #[cfg(any(unix, windows))]
     #[test]
     fn write_protected_active() {
-        let secret = ProtectedBytes::new([4u8; 32]);
+        let secret = ProtectedBytes::new(&mut [4u8; 32]);
         let st = secret.protection_status();
         assert!(st.write_protected, "data page should be write-protected");
+    }
+
+    #[test]
+    fn new_clears_source() {
+        let mut raw = [0xABu8; 32];
+        let secret = ProtectedBytes::new(&mut raw);
+        assert_eq!(secret.expose_secret(), &[0xABu8; 32]);
+        assert_eq!(raw, [0u8; 32], "source buffer must be zeroed after new");
     }
 
     // Test the fallback backend directly on all platforms.
@@ -257,7 +259,7 @@ mod tests {
     #[cfg(any(unix, windows))]
     #[test]
     fn os_backend_is_full_protection() {
-        let secret = ProtectedBytes::new([5u8; 32]);
+        let secret = ProtectedBytes::new(&mut [5u8; 32]);
         assert_eq!(
             secret.protection_status().level(),
             ProtectionLevel::Full,

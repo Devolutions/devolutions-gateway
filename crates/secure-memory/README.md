@@ -26,9 +26,9 @@ It is intentionally **not** a general-purpose secret library.
 - Transient register / stack copies during `expose_secret` calls — memory
   locking does **not** prevent the CPU from holding secret bytes in registers
   or on the call stack while the caller uses them.
-- Stack residuals from passing the `[u8; N]` to `new` — the compiler may copy
-  the array into `new`'s stack frame; only that local copy is zeroized.
-  Any residual bytes in the caller's frame are not zeroed by this crate.
+- Stack residuals in the caller's frame before `new` is called — `new` zeroes
+  the buffer it receives, but any earlier copies on the caller's stack are not
+  covered.
 - Attackers with `ptrace` or equivalent capability.
 - SGX / TPM / hardware-backed enclaves.
 
@@ -67,7 +67,10 @@ and runs.
 ```rust
 use secure_memory::{ProtectedBytes, ProtectionLevel};
 
-let key = ProtectedBytes::new([0u8; 32]);
+let mut key_bytes = [0u8; 32];
+// ... fill key_bytes ...
+let key = ProtectedBytes::new(&mut key_bytes);
+// key_bytes is now zeroed
 
 // Recommended: check the overall level first.
 match key.protection_status().level() {
