@@ -116,8 +116,10 @@ pub enum ProtectionLevel {
 /// platforms the bytes are zeroized before the backing allocation is released.
 ///
 /// - `Debug` emits `[REDACTED]`; `Display` is absent; not `Clone` or `Copy`.
-/// - `new` takes a mutable reference and zeroizes the source buffer after
-///   copying the secret into secure storage, covering caller-frame residuals.
+/// - `new` takes a mutable reference and zeroizes exactly that buffer after
+///   copying the secret into secure storage. Any earlier copies of the same
+///   bytes elsewhere in the caller's frame (or in intermediate buffers) are
+///   **not** zeroed by this crate.
 /// - `mlock` / `VirtualLock` prevent paging to disk but do not prevent transient
 ///   exposure in registers or on the call stack during `expose_secret`.
 pub struct ProtectedBytes<const N: usize> {
@@ -128,8 +130,10 @@ pub struct ProtectedBytes<const N: usize> {
 impl<const N: usize> ProtectedBytes<N> {
     /// Copy `bytes` into a new protected allocation and zeroize the source.
     ///
-    /// The source buffer is zeroized immediately after the secret has been
-    /// transferred into secure storage, covering caller-frame residuals.
+    /// The buffer pointed to by `bytes` is zeroized immediately after the
+    /// secret has been transferred into secure storage. Any other copies of
+    /// the same bytes — in earlier stack frames, intermediate buffers, or
+    /// registers — are **not** zeroed by this crate.
     ///
     /// # Panics
     ///
