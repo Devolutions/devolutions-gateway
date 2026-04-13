@@ -14,7 +14,7 @@ Run it manually on a Windows machine to confirm the OS hardening is active.
 | `guard-overflow` | Guard pages (trailing) | Child process crashes on access after data |
 
 > **Note on WER dump exclusion:** `WerRegisterExcludedMemoryBlock` is called by
-> `ProtectedBytes::new` but is not verified here. It registers the data page for
+> `ProtectedBytes::new` (during construction) but is not verified here. It registers the data page for
 > exclusion from WER crash reports sent to Microsoft Watson only. Full-memory
 > dumps (`MiniDumpWithFullMemory`, ProcDump `-ma`, LocalDumps `DumpType=2`,
 > kernel dumps) capture all committed read/write pages regardless. No public

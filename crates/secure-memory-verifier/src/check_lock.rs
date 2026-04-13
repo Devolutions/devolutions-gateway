@@ -38,7 +38,7 @@ const LOCKED_BIT: usize = 22;
 pub(crate) fn run() -> bool {
     print_check("lock: verifying data page is locked in RAM via QueryWorkingSetEx");
 
-    let secret = ProtectedBytes::<32>::new([0x5Au8; 32]);
+    let secret = ProtectedBytes::<32>::new(&mut [0x5Au8; 32]);
     let status = secret.protection_status();
 
     if !status.locked {

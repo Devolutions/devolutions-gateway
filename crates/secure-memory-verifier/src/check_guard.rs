@@ -82,7 +82,7 @@ pub(crate) fn run(side: Side) -> bool {
     {
         // Check the protection status in order for information.
 
-        let probe = ProtectedBytes::<32>::new([0xAAu8; 32]);
+        let probe = ProtectedBytes::<32>::new(&mut [0xAAu8; 32]);
         let status = probe.protection_status();
 
         if !status.guard_pages {
@@ -141,7 +141,7 @@ pub(crate) fn run(side: Side) -> bool {
 /// Run inside the child process. Intentionally accesses a guard page, which
 /// crashes with `STATUS_ACCESS_VIOLATION`. Never returns.
 pub(crate) fn child(side: Side) -> ! {
-    let secret = ProtectedBytes::<32>::new([0x42u8; 32]);
+    let secret = ProtectedBytes::<32>::new(&mut [0x42u8; 32]);
     let data_ptr = secret.expose_secret().as_ptr();
 
     let access_ptr: *const u8 = match side {

@@ -171,7 +171,8 @@ impl<const N: usize> SecureAlloc<N> {
         // Removing write access prevents accidental overwrites.
         // SAFETY: `data` is page-aligned; `ps` committed bytes in our region.
         let r_readonly = unsafe { VirtualProtect(data as *const c_void, ps, PAGE_READONLY, &mut old_prot) };
-        if r_readonly.is_err() {
+        let write_protected = r_readonly.is_ok();
+        if !write_protected {
             tracing::debug!(
                 "secure-memory: VirtualProtect(PAGE_READONLY) for data page failed ({}); \
                  data page remains writable",
@@ -192,6 +193,7 @@ impl<const N: usize> SecureAlloc<N> {
             // On Windows, dump_excluded reflects WER exclusion only.
             // See module-level documentation for scope and limitations.
             dump_excluded: wer_excluded,
+            write_protected,
             fallback_backend: false,
         };
 
