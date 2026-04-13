@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(status.level(), ProtectionLevel::Unprotected);
     }
 
-    #[cfg(any(unix, windows))]
+    #[cfg(any(windows, target_os = "linux"))]
     #[test]
     fn os_backend_is_full_protection() {
         let secret = ProtectedBytes::new(&mut [5u8; 32]);
