@@ -1,0 +1,11 @@
+{
+  "name": "agent-tunnel-e2e",
+  "private": true,
+  "scripts": {
+    "test": "npx playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^25.5.2"
+  }
+}

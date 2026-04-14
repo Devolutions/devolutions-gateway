@@ -1,0 +1,57 @@
+# documentation: https://docs.devolutions.net/gateway/standalone/
+# slogan: Protocol-aware relay server with QUIC agent tunnel for private network access (RDP, SSH, VNC, Telnet, ARD)
+# tags: devolutions,gateway,rdp,ssh,vnc,telnet,remote-access,relay,quic,agent-tunnel
+# port: 7171
+
+services:
+  gateway:
+    image: irvingou/devolutions-gateway:quic-tunnel-v6
+    # To build from source instead of using the pre-built image, comment out
+    # "image:" above and uncomment the line below:
+    # build: .
+    environment:
+      # -- Coolify Magic Variables --
+      # SERVICE_FQDN_GATEWAY_7171 tells Traefik to route traffic to port 7171 inside the container.
+      - SERVICE_FQDN_GATEWAY_7171
+      # Auto-generated credentials — visible in Coolify's environment variables UI.
+      - WEB_APP_USERNAME=${SERVICE_USER_GATEWAY}
+      - WEB_APP_PASSWORD=${SERVICE_PASSWORD_GATEWAY}
+
+      # -- Gateway Standalone Configuration --
+      # Enable the built-in web application (admin UI + web-based remote access).
+      - WEB_APP_ENABLED=true
+      # Internal scheme is HTTP; Coolify's Traefik reverse proxy terminates TLS.
+      - WEB_SCHEME=http
+      # Tell the gateway that clients reach it over HTTPS (via Traefik).
+      - EXTERNAL_WEB_SCHEME=https
+      # Session recording storage path inside the container.
+      - RECORDING_PATH=/recordings
+      # Logging verbosity: Default, Debug, Tls, All, Quiet
+      - VERBOSITY_PROFILE=${VERBOSITY_PROFILE:-Debug}
+
+      # -- QUIC Agent Tunnel --
+      # Enable QUIC listener for agent-based private network routing.
+      - AGENT_TUNNEL_ENABLED=true
+      # QUIC listener port (UDP). Agents connect to this port.
+      - AGENT_TUNNEL_PORT=${AGENT_TUNNEL_PORT:-4433}
+
+    volumes:
+      # Persist session recordings across redeployments.
+      - gateway-recordings:/recordings
+      # Persist gateway configuration (provisioner keys, config files, agent certs).
+      - gateway-config:/tmp/devolutions-gateway
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7171/jet/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+    ports:
+      # QUIC agent tunnel — UDP, must bypass Traefik, exposed directly on host
+      - "${AGENT_TUNNEL_PORT:-4433}:${AGENT_TUNNEL_PORT:-4433}/udp"
+
+volumes:
+  gateway-recordings:
+  gateway-config:
