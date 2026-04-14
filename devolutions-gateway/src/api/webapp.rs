@@ -29,6 +29,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
             .route("/client/{*path}", get(get_client))
             .route("/app-token", post(sign_app_token))
             .route("/session-token", post(sign_session_token))
+            .route("/agent-management-token", post(sign_agent_management_token))
     } else {
         Router::new()
     }
@@ -232,6 +233,9 @@ pub(crate) enum SessionTokenContentType {
         destination: TargetAddr,
         /// Unique ID for this session
         session_id: Uuid,
+        /// Optional agent ID for routing through an enrolled agent tunnel.
+        #[serde(default)]
+        agent_id: Option<Uuid>,
     },
     Jmux {
         /// Protocol for the session (e.g.: "tunnel")
@@ -328,6 +332,7 @@ pub(crate) async fn sign_session_token(
             protocol,
             destination,
             session_id,
+            agent_id,
         } => (
             AssociationTokenClaims {
                 jet_aid: session_id,
@@ -342,7 +347,7 @@ pub(crate) async fn sign_session_token(
                 exp,
                 jti,
                 cert_thumb256: None,
-                jet_agent_id: None,
+                jet_agent_id: agent_id,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {
@@ -456,6 +461,63 @@ pub(crate) async fn sign_session_token(
     Ok(response)
 }
 
+/// Exchange a WebApp token for an agent management scope token.
+///
+/// This mirrors the DVLS pattern: DVLS signs scope tokens with its RSA key,
+/// while the standalone webapp exchanges its WebApp token for a scope token here.
+/// Both paths produce the same token type, so agent tunnel endpoints have
+/// a single auth model (scope tokens only).
+async fn sign_agent_management_token(
+    State(DgwState { conf_handle, .. }): State<DgwState>,
+    WebAppToken(web_app_token): WebAppToken,
+) -> Result<Response, HttpError> {
+    use picky::jose::jws::JwsAlg;
+    use picky::jose::jwt::CheckedJwtSig;
+
+    use crate::token::{AccessScope, ScopeTokenClaims};
+
+    const LIFETIME_SECS: i64 = 300; // 5 minutes, same as DVLS scope tokens
+
+    let conf = conf_handle.get_conf();
+
+    let provisioner_key = conf
+        .provisioner_private_key
+        .as_ref()
+        .ok_or_else(|| HttpError::internal().msg("provisioner private key is missing"))?;
+
+    ensure_enabled(&conf)?;
+
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
+    let claims = ScopeTokenClaims {
+        scope: AccessScope::ConfigWrite,
+        exp: now + LIFETIME_SECS,
+        jti: Uuid::new_v4(),
+    }
+    .pipe(serde_json::to_value)
+    .map(|mut claims| {
+        if let Some(claims) = claims.as_object_mut() {
+            claims.insert("iat".to_owned(), serde_json::json!(now));
+            claims.insert("nbf".to_owned(), serde_json::json!(now));
+        }
+        claims
+    })
+    .map_err(HttpError::internal().with_msg("scope claims").err())?;
+
+    let jwt_sig = CheckedJwtSig::new_with_cty(JwsAlg::RS256, "SCOPE".to_owned(), claims);
+
+    let token = jwt_sig
+        .encode(provisioner_key)
+        .map_err(HttpError::internal().with_msg("sign agent management token").err())?;
+
+    info!(user = web_app_token.sub, "Granted agent management scope token");
+
+    let cache_control = TypedHeader(headers::CacheControl::new().with_no_cache().with_no_store());
+    let response = (cache_control, token).into_response();
+
+    Ok(response)
+}
+
 async fn get_client<ReqBody>(
     State(DgwState { conf_handle, .. }): State<DgwState>,
     path: Option<extract::Path<String>>,
@@ -502,6 +564,106 @@ fn extract_conf(conf: &crate::config::Conf) -> Result<&WebAppConf, HttpError> {
 
 fn ensure_enabled(conf: &crate::config::Conf) -> Result<(), HttpError> {
     extract_conf(conf).map(|_| ())
+}
+
+// -- Agent enrollment string generation -- //
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AgentEnrollmentStringRequest {
+    /// Base URL for the gateway API (e.g. `https://gateway.example.com`).
+    api_base_url: String,
+    /// Optional QUIC host override. Defaults to the gateway hostname.
+    quic_host: Option<String>,
+    /// Optional agent name hint.
+    name: Option<String>,
+    /// Token lifetime in seconds (default: 3600).
+    lifetime: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct AgentEnrollmentStringResponse {
+    enrollment_string: String,
+    enrollment_command: String,
+    quic_endpoint: String,
+    expires_at_unix: u64,
+}
+
+/// Generate a one-time enrollment string for agent enrollment.
+///
+/// Accepts scope tokens with `ConfigWrite` scope only. Both the standalone
+/// webapp (via `/jet/webapp/agent-management-token` exchange) and DVLS
+/// (via direct RSA-signed scope tokens) produce the same token type.
+pub(crate) async fn create_agent_enrollment_string(
+    State(DgwState {
+        conf_handle,
+        agent_tunnel_handle,
+        ..
+    }): State<DgwState>,
+    _access: crate::extract::AgentManagementWriteAccess,
+    Json(req): Json<AgentEnrollmentStringRequest>,
+) -> Result<Json<AgentEnrollmentStringResponse>, HttpError> {
+    use base64::Engine as _;
+
+    let conf = conf_handle.get_conf();
+
+    let handle = agent_tunnel_handle
+        .as_ref()
+        .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
+
+    let lifetime_secs = req.lifetime.unwrap_or(3600);
+
+    // Generate a one-time enrollment token.
+    let enrollment_token = Uuid::new_v4().to_string();
+    handle
+        .enrollment_token_store()
+        .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs));
+
+    // Determine QUIC host: explicit override > extract from api_base_url > gateway hostname config.
+    // The gateway hostname config is often a container ID in Docker, so we prefer
+    // extracting the host from the api_base_url which the caller already knows is reachable.
+    let quic_host = match req.quic_host.as_deref().filter(|h| !h.is_empty()) {
+        Some(host) => host.to_owned(),
+        None => url::Url::parse(&req.api_base_url)
+            .ok()
+            .and_then(|u| u.host_str().map(ToOwned::to_owned))
+            .unwrap_or_else(|| conf.hostname.clone()),
+    };
+    let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
+
+    // Build the enrollment payload.
+    let payload = serde_json::json!({
+        "version": 1,
+        "api_base_url": req.api_base_url,
+        "quic_endpoint": quic_endpoint,
+        "enrollment_token": enrollment_token,
+        "name": req.name,
+    });
+
+    let payload_json = serde_json::to_string(&payload)
+        .map_err(HttpError::internal().with_msg("serialize enrollment payload").err())?;
+
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+    let enrollment_string = format!("dgw-enroll:v1:{encoded}");
+    let enrollment_command = format!("devolutions-agent up --enrollment-string \"{enrollment_string}\"");
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expires_at_unix = now_secs + lifetime_secs;
+
+    info!(
+        agent_name = ?req.name,
+        lifetime_secs,
+        "Generated agent enrollment string"
+    );
+
+    Ok(Json(AgentEnrollmentStringResponse {
+        enrollment_string,
+        enrollment_command,
+        quic_endpoint,
+        expires_at_unix,
+    }))
 }
 
 mod login_rate_limit {

@@ -389,6 +389,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements OnI
       ardQualityMode,
       wheelSpeedFactor,
       sessionId,
+      agentId: (formData as { agentId?: string }).agentId || undefined,
     };
     return of(connectionParameters);
   }

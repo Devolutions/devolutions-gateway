@@ -493,6 +493,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements OnI
       enableExtendedClipboard: enableExtendedClipboard ?? false,
       ultraVirtualDisplay,
       wheelSpeedFactor,
+      agentId: (formData as { agentId?: string }).agentId || undefined,
     };
     return of(connectionParameters);
   }

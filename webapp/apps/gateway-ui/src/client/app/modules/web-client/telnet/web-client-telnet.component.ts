@@ -191,6 +191,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       port: extractedData.port,
       gatewayAddress: gatewayAddress,
       sessionId: sessionId,
+      agentId: (formData as { agentId?: string }).agentId || undefined,
     };
     return of(connectionParameters);
   }

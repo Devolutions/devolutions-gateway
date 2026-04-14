@@ -487,6 +487,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements OnI
       enableDisplayControl,
       preConnectionBlob,
       kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88'),
+      agentId: (formData as { agentId?: string }).agentId || undefined,
     };
     return of(connectionParameters);
   }

@@ -408,7 +408,8 @@ where
 
 /// Grants read access to agent management endpoints.
 ///
-/// Accepts a scope token with `DiagnosticsRead`, `ConfigWrite`, or `Wildcard` scope.
+/// Accepts either a scope token with `DiagnosticsRead` (or `Wildcard`) scope,
+/// or a valid `WebApp` token.
 #[derive(Clone, Copy)]
 pub struct AgentManagementReadAccess;
 
@@ -439,6 +440,8 @@ where
 /// Grants write access to agent management endpoints (e.g. enrollment, delete).
 ///
 /// Accepts scope tokens with `ConfigWrite` (or `Wildcard`) scope only.
+/// The standalone webapp exchanges its WebApp token for a scope token via
+/// `/jet/webapp/agent-management-token` first — no direct WebApp token bypass.
 #[derive(Clone, Copy)]
 pub struct AgentManagementWriteAccess;
 

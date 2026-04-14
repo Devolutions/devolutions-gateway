@@ -118,6 +118,7 @@ export class WebClientService extends BaseComponent {
       destination: `tcp://${connectionParameters.host}:${connectionParameters.port ?? this.getDefaultPort(protocol)}`,
       lifetime: 60,
       session_id: connectionParameters.sessionId || uuidv4(),
+      agent_id: (connectionParameters as { agentId?: string }).agentId || undefined,
     };
 
     return this.fetchToken(data).pipe(
