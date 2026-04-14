@@ -55,10 +55,6 @@ export class WebClientSshComponent
     this.removeWebClientGuiElement();
   }
 
-  ngOnDestroy(): void {
-    super.ngOnDestroy();
-  }
-
   protected teardownTerminalClient(): void {
     this.remoteTerminal = null;
   }
@@ -104,7 +100,6 @@ export class WebClientSshComponent
     return DVL_SSH_ICON;
   }
 
-
   private startConnectionProcess(): void {
     if (!this.remoteTerminal) {
       return;
@@ -137,7 +132,7 @@ export class WebClientSshComponent
         port: connectionParameters.port,
         username: connectionParameters.username,
         proxyUrl: connectionParameters.gatewayAddress + `?token=${connectionParameters.token}`,
-        passpharse: connectionParameters.privateKeyPassphrase ?? '',
+        passphrase: connectionParameters.privateKeyPassphrase ?? '',
         privateKey: connectionParameters.privateKey ?? '',
         password: connectionParameters.password ?? '',
       }),
@@ -158,8 +153,7 @@ export class WebClientSshComponent
 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
-    const gatewayHttpAddress: URL = new URL(JET_SSH_URL + `/${sessionId}`, window.location.href);
-    const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
+    const gatewayAddress = this.getGatewayWebSocketUrl(JET_SSH_URL, sessionId);
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
     const privateKeyPassphrase: string = formData.passphrase || null;
 
@@ -182,7 +176,8 @@ export class WebClientSshComponent
       return;
     }
 
-    this.unsubscribeTerminalEvent = this.remoteTerminal.onStatusChange((status) => {      switch (status) {
+    this.unsubscribeTerminalEvent = this.remoteTerminal.onStatusChange((status) => {
+      switch (status) {
         case TerminalConnectionStatus.connected:
           this.handleClientConnectStarted();
           this.initializeStatus();

@@ -31,7 +31,6 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     super();
   }
 
-
   // ── Session lifecycle helpers ──────────────────────────────────────────────
 
   //For translation 'ConnectionSuccessful

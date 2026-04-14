@@ -28,7 +28,10 @@ import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],
 })
-export class WebClientTelnetComponent extends TerminalWebClientBaseComponent implements CanSendTerminateSessionCmd, OnInit, OnDestroy {
+export class WebClientTelnetComponent
+  extends TerminalWebClientBaseComponent
+  implements CanSendTerminateSessionCmd, OnInit, OnDestroy
+{
   @Input() webSessionId: string;
 
   @ViewChild('sessionTelnetContainer') sessionContainerElement: ElementRef;
@@ -57,10 +60,6 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
   ngOnInit(): void {
     telnetLoggingService.setLevel(LoggingLevel.FATAL);
     this.removeWebClientGuiElement();
-  }
-
-  ngOnDestroy(): void {
-    super.ngOnDestroy();
   }
 
   protected teardownTerminalClient(): void {
@@ -107,7 +106,6 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
   protected getSuccessIcon(): string {
     return DVL_TELNET_ICON;
   }
-
 
   private startConnectionProcess(): void {
     if (!this.remoteTerminal) {
@@ -162,11 +160,9 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
 
   private fetchParameters(formData: TelnetFormDataInput): Observable<TelnetConnectionParameters> {
     const { hostname } = formData;
-
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultTelnetPort);
-    const gatewayHttpAddress: URL = new URL(JET_TELNET_URL + `/${sessionId}`, window.location.href);
-    const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
+    const gatewayAddress = this.getGatewayWebSocketUrl(JET_TELNET_URL, sessionId);
 
     const connectionParameters: TelnetConnectionParameters = {
       host: extractedData.hostname,

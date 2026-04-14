@@ -34,6 +34,17 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
     super(gatewayAlertMessageService, analyticService);
   }
 
+  ngOnDestroy(): void {
+    this.removeRemoteTerminalListener();
+    this.removeWebClientGuiElement();
+    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
+      this.startTerminationProcess();
+    }
+    // Break the reference cycle: component → remoteTerminal → onStatusChange closures → component
+    this.teardownTerminalClient();
+    super.ngOnDestroy();
+  }
+
   /** Icon shown on the session tab when the terminal connects successfully. */
   protected abstract getSuccessIcon(): string;
   protected abstract startTerminationProcess(): void;
@@ -127,16 +138,5 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
       severity: 'error',
     } as ToastMessageOptions;
     this.disableComponentStatus();
-  }
-
-  ngOnDestroy(): void {
-    this.removeRemoteTerminalListener();
-    this.removeWebClientGuiElement();
-    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
-      this.startTerminationProcess();
-    }
-    // Break the reference cycle: component → remoteTerminal → onStatusChange closures → component
-    this.teardownTerminalClient();
-    super.ngOnDestroy();
   }
 }

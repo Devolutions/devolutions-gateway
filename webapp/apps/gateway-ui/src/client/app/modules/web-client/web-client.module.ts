@@ -19,13 +19,13 @@ import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-clien
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { WasmInitResolver } from '@gateway/shared/resolvers/wasm-init.resolver';
-import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { DynamicTabComponent } from '@shared/components/dynamic-tab/dynamic-tab.component';
 import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
 import { SessionToolbarComponent } from '@shared/components/session-toolbar/session-toolbar.component';
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
-import { SharedModule } from '@shared/shared.module';
+import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
 import { KeyFilterModule } from 'primeng/keyfilter';
 import { ArdQualityModeControlComponent } from './form/form-controls/ard-quality-mode-control/ard-quality-mode-control.component';

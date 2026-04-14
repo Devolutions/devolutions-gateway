@@ -1,12 +1,4 @@
-import {
-  AfterViewInit,
-  Component,
-  ElementRef,
-  OnDestroy,
-  OnInit,
-  Renderer2,
-  ViewChild,
-} from '@angular/core';
+import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
 import { Backend, displayControl, kdcProxyUrl, preConnectionBlob, RdpFile } from '@devolutions/iron-remote-desktop-rdp';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
@@ -24,6 +16,7 @@ import { debounceTime, EMPTY, from, noop, Observable, of, Subscription, throwErr
 import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { ActivatedRoute } from '@angular/router';
+import { SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
 import { DVL_RDP_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebSession } from '@shared/models/web-session.model';
@@ -36,7 +29,10 @@ import { NavigationService } from '@shared/services/navigation.service';
   styleUrls: ['web-client-rdp.component.scss'],
   providers: [MessageService],
 })
-export class WebClientRdpComponent extends DesktopWebClientBaseComponent<RdpFormDataInput> implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientRdpComponent
+  extends DesktopWebClientBaseComponent<RdpFormDataInput>
+  implements OnInit, AfterViewInit, OnDestroy
+{
   @ViewChild('sessionRdpContainer') sessionContainerElement: ElementRef;
 
   backendRef = Backend;
@@ -237,6 +233,7 @@ export class WebClientRdpComponent extends DesktopWebClientBaseComponent<RdpForm
     const { hostname, password, enableDisplayControl, preConnectionBlob, kdcUrl } = formData;
 
     const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.formData.username);
+    const gatewayAddress = this.getGatewayWebSocketUrl(JET_RDP_URL);
 
     const desktopScreenSize: DesktopSize =
       this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
@@ -246,7 +243,7 @@ export class WebClientRdpComponent extends DesktopWebClientBaseComponent<RdpForm
       password,
       host: hostname,
       domain: extractedData.domain,
-      gatewayAddress: this.getWebSocketUrl(),
+      gatewayAddress: gatewayAddress,
       screenSize: desktopScreenSize,
       enableDisplayControl,
       preConnectionBlob,
@@ -348,20 +345,30 @@ export class WebClientRdpComponent extends DesktopWebClientBaseComponent<RdpForm
 
     const config = configBuilder.build();
 
-    from(this.remoteClient.connect(config))
+    // Guard against synchronous throws from the underlying WASM library before
+    // the promise is even returned (observed in some auth-failure edge cases).
+    let connectPromise: Promise<unknown>;
+    try {
+      connectPromise = this.remoteClient.connect(config);
+    } catch (syncErr) {
+      this.handleSessionTerminatedWithError(syncErr);
+      return;
+    }
+
+    from(connectPromise)
       .pipe(
         takeUntil(this.destroyed$),
         switchMap((newSessionInfo) => {
           this.handleSessionStarted();
-          return from(newSessionInfo.run());
+          return from((newSessionInfo as { run(): Promise<unknown> }).run());
         }),
       )
       .subscribe({
-        next: (sessionTerminationInfo) => this.handleSessionTerminatedGracefully(sessionTerminationInfo),
+        next: (sessionTerminationInfo) =>
+          this.handleSessionTerminatedGracefully(sessionTerminationInfo as SessionTerminationInfo),
         error: (err) => this.handleSessionTerminatedWithError(err),
       });
   }
-
 
   protected getProtocol(): ProtocolString {
     return 'RDP';

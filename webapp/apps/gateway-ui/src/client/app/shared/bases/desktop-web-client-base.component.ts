@@ -37,7 +37,10 @@ enum IronErrorKind {
 }
 
 @Directive()
-export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFormDataInput> extends WebClientBaseComponent implements OnDestroy {
+export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFormDataInput>
+  extends WebClientBaseComponent
+  implements OnDestroy
+{
   // ── Clipboard state — shared by desktop protocol components only ──────────
   formData: TFormData;
 
@@ -74,7 +77,9 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
 
   protected abstract startConnectionProcess(): void;
   protected abstract handleExitFullScreenEvent(): void;
-  protected abstract callConnect(connectionParameters: IronVNCConnectionParameters | IronARDConnectionParameters | IronRDPConnectionParameters): void;
+  protected abstract callConnect(
+    connectionParameters: IronVNCConnectionParameters | IronARDConnectionParameters | IronRDPConnectionParameters,
+  ): void;
 
   protected constructor(
     protected renderer: Renderer2,
@@ -278,7 +283,11 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
 
   protected initiateRemoteClientListener(): void {
     this.remoteClientEventListener = (event: Event) => this.readyRemoteClientEventListener(event);
-    this.unlistenRemoteClient = this.renderer.listen(this.ironRemoteDesktopElement.nativeElement, 'ready', this.remoteClientEventListener);
+    this.unlistenRemoteClient = this.renderer.listen(
+      this.ironRemoteDesktopElement.nativeElement,
+      'ready',
+      this.remoteClientEventListener,
+    );
   }
 
   protected startTerminationProcess(): void {
@@ -317,14 +326,7 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
     const customEvent = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
-
-    // If the user connects to the session via URL.
-    if (this.formData === undefined) {
-      const autoClipboardMode = this.isAutoClipboardMode();
-      this.remoteClient.setEnableAutoClipboard(autoClipboardMode);
-    } else if (this.formData.autoClipboard !== true) {
-      this.remoteClient.setEnableAutoClipboard(false);
-    }
+    this.remoteClient.setEnableAutoClipboard(this.isAutoClipboardMode(this.formData?.autoClipboard));
 
     // Register callbacks for events.
     this.remoteClient.onWarningCallback((data: string) => {
@@ -366,11 +368,13 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
   }
 
   protected handleError(error: string): void {
+    this.loading = false;
     this.sessionTerminationMessage = {
       summary: 'Unexpected error occurred',
       detail: error,
       severity: 'error',
     };
+
     this.disableComponentStatus();
   }
 
@@ -385,6 +389,7 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
   }
 
   protected handleSessionTerminated(): void {
+    this.loading = false;
     if (document.fullscreenElement) {
       this.exitFullScreen();
     }

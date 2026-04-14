@@ -1,12 +1,4 @@
-import {
-  AfterViewInit,
-  Component,
-  ElementRef,
-  OnDestroy,
-  OnInit,
-  Renderer2,
-  ViewChild,
-} from '@angular/core';
+import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -40,14 +32,16 @@ import { ComponentResizeObserverService } from '@shared/services/component-resiz
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
 
-
 @Component({
   standalone: false,
   templateUrl: 'web-client-vnc.component.html',
   styleUrls: ['web-client-vnc.component.scss'],
   providers: [MessageService],
 })
-export class WebClientVncComponent extends DesktopWebClientBaseComponent<VncFormDataInput> implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientVncComponent
+  extends DesktopWebClientBaseComponent<VncFormDataInput>
+  implements OnInit, AfterViewInit, OnDestroy
+{
   @ViewChild('sessionVncContainer') sessionContainerElement: ElementRef;
 
   backendRef = Backend;
@@ -337,7 +331,6 @@ export class WebClientVncComponent extends DesktopWebClientBaseComponent<VncForm
         error: (err) => this.handleSessionTerminatedWithError(err),
       });
   }
-
 
   protected getProtocol(): ProtocolString {
     return 'VNC';

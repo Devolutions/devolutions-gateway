@@ -1,12 +1,4 @@
-import {
-  AfterViewInit,
-  Component,
-  ElementRef,
-  OnDestroy,
-  OnInit,
-  Renderer2,
-  ViewChild,
-} from '@angular/core';
+import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -19,12 +11,11 @@ import { MessageService } from 'primeng/api';
 import { EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
-import { Backend, ardQualityMode, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
-import {DVL_ARD_ICON, JET_ARD_URL} from '@gateway/app.constants';
+import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
+import { DVL_ARD_ICON, JET_ARD_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
-
 
 @Component({
   standalone: false,
@@ -32,7 +23,10 @@ import { v4 as uuidv4 } from 'uuid';
   styleUrls: ['web-client-ard.component.scss'],
   providers: [MessageService],
 })
-export class WebClientArdComponent extends DesktopWebClientBaseComponent<ArdFormDataInput> implements OnInit, AfterViewInit, OnDestroy {
+export class WebClientArdComponent
+  extends DesktopWebClientBaseComponent<ArdFormDataInput>
+  implements OnInit, AfterViewInit, OnDestroy
+{
   @ViewChild('sessionArdContainer') sessionContainerElement: ElementRef;
 
   backendRef = Backend;
@@ -147,8 +141,7 @@ export class WebClientArdComponent extends DesktopWebClientBaseComponent<ArdForm
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultArdPort);
 
     const sessionId: string = uuidv4();
-    const gatewayHttpAddress: URL = new URL(JET_ARD_URL + `/${sessionId}`, window.location.href);
-    const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
+    const gatewayAddress = this.getGatewayWebSocketUrl(JET_ARD_URL, sessionId);
 
     const connectionParameters: IronARDConnectionParameters = {
       username,
@@ -202,7 +195,6 @@ export class WebClientArdComponent extends DesktopWebClientBaseComponent<ArdForm
         error: (err) => this.handleSessionTerminatedWithError(err),
       });
   }
-
 
   protected getProtocol(): ProtocolString {
     return 'ARD';
