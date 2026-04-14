@@ -2,6 +2,7 @@ import { Component, ElementRef, Input, OnDestroy, OnInit, ViewChild } from '@ang
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { TelnetFormDataInput } from '@shared/interfaces/forms.interfaces';
+import { CanSendTerminateSessionCmd } from '@shared/models/web-session.model';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultTelnetPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
@@ -27,7 +28,7 @@ import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
   styleUrls: ['web-client-telnet.component.scss'],
   providers: [MessageService],
 })
-export class WebClientTelnetComponent extends TerminalWebClientBaseComponent implements OnInit, OnDestroy {
+export class WebClientTelnetComponent extends TerminalWebClientBaseComponent implements CanSendTerminateSessionCmd, OnInit, OnDestroy {
   @Input() webSessionId: string;
 
   @ViewChild('sessionTelnetContainer') sessionContainerElement: ElementRef;
@@ -40,7 +41,8 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
   ];
 
   private remoteTerminal: TelnetTerminal;
-  private unsubscribeTerminalEvent: () => void;
+  // unsubscribeTerminalEvent, unsubscribeConnectionListener, removeRemoteTerminalListener()
+  // and ngOnDestroy live in TerminalWebClientBaseComponent
 
   constructor(
     protected utils: UtilsService,
@@ -58,14 +60,11 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
   }
 
   ngOnDestroy(): void {
-    this.removeRemoteTerminalListener();
-    this.removeWebClientGuiElement();
-
-    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
-      this.startTerminationProcess();
-    }
-
     super.ngOnDestroy();
+  }
+
+  protected teardownTerminalClient(): void {
+    this.remoteTerminal = null;
   }
 
   webComponentReady(event: CustomEvent, webSessionId: string): void {
@@ -85,14 +84,14 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
   }
 
   sendTerminateSessionCmd(): void {
-    if (!this.currentStatus.isInitialized) {
+    if (!this.currentStatus.isInitialized || !this.remoteTerminal) {
       return;
     }
     this.currentStatus.isInitialized = false;
     this.remoteTerminal.close();
   }
 
-  removeWebClientGuiElement(): void {
+  protected removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
         if (this.webGuiTerminal?.nativeElement) {
@@ -109,16 +108,13 @@ export class WebClientTelnetComponent extends TerminalWebClientBaseComponent imp
     return DVL_TELNET_ICON;
   }
 
-  private removeRemoteTerminalListener(): void {
-    this.unsubscribeTerminalEvent?.();
-  }
 
   private startConnectionProcess(): void {
     if (!this.remoteTerminal) {
       return;
     }
 
-    this.remoteTerminal.onStatusChange((v) => {
+    this.unsubscribeConnectionListener = this.remoteTerminal.onStatusChange((v) => {
       if (v === TerminalConnectionStatus.connected) {
         this.remoteTerminal.writeToTerminal('connecting... \r\n');
       }

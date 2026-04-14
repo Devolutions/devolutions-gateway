@@ -8,6 +8,7 @@ import { TerminalWebClientBaseComponent } from '@shared/bases/terminal-web-clien
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
+import { CanSendTerminateSessionCmd } from '@shared/models/web-session.model';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultSshPort, WebClientService } from '@shared/services/web-client.service';
@@ -26,7 +27,7 @@ import { v4 as uuidv4 } from 'uuid';
 })
 export class WebClientSshComponent
   extends TerminalWebClientBaseComponent
-  implements WebComponentReady, OnInit, OnDestroy
+  implements WebComponentReady, CanSendTerminateSessionCmd, OnInit, OnDestroy
 {
   @Input() webSessionId: string;
 
@@ -36,7 +37,8 @@ export class WebClientSshComponent
   formData: SSHFormDataInput;
 
   private remoteTerminal: SSHTerminal;
-  private remoteTerminalEventListener: () => void;
+  // unsubscribeTerminalEvent, unsubscribeConnectionListener, removeRemoteTerminalListener()
+  // and ngOnDestroy live in TerminalWebClientBaseComponent
 
   constructor(
     protected utils: UtilsService,
@@ -54,14 +56,11 @@ export class WebClientSshComponent
   }
 
   ngOnDestroy(): void {
-    this.removeRemoteTerminalListener();
-    this.removeWebClientGuiElement();
-
-    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
-      this.startTerminationProcess();
-    }
-
     super.ngOnDestroy();
+  }
+
+  protected teardownTerminalClient(): void {
+    this.remoteTerminal = null;
   }
 
   webComponentReady(event: CustomEvent, webSessionId: string): void {
@@ -82,13 +81,13 @@ export class WebClientSshComponent
   }
 
   sendTerminateSessionCmd(): void {
-    if (!this.currentStatus.isInitialized) {
+    if (!this.currentStatus.isInitialized || !this.remoteTerminal) {
       return;
     }
     void this.remoteTerminal.close();
   }
 
-  removeWebClientGuiElement(): void {
+  protected removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
         if (this.webGuiTerminal?.nativeElement) {
@@ -105,18 +104,13 @@ export class WebClientSshComponent
     return DVL_SSH_ICON;
   }
 
-  private removeRemoteTerminalListener(): void {
-    if (this.remoteTerminalEventListener) {
-      this.remoteTerminalEventListener();
-    }
-  }
 
   private startConnectionProcess(): void {
     if (!this.remoteTerminal) {
       return;
     }
 
-    this.remoteTerminal.onStatusChange((v) => {
+    this.unsubscribeConnectionListener = this.remoteTerminal.onStatusChange((v) => {
       if (v === TerminalConnectionStatus.connected) {
         this.remoteTerminal.writeToTerminal('connecting... \r\n');
       }
@@ -188,8 +182,7 @@ export class WebClientSshComponent
       return;
     }
 
-    this.remoteTerminal.onStatusChange((status) => {
-      switch (status) {
+    this.unsubscribeTerminalEvent = this.remoteTerminal.onStatusChange((status) => {      switch (status) {
         case TerminalConnectionStatus.connected:
           this.handleClientConnectStarted();
           this.initializeStatus();

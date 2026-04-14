@@ -12,8 +12,8 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          @for (msg of messages; track msg.summary) {
-            <p-message [severity]="$any(msg.severity)" [escape]="false" [closable]="false">
+          @for (msg of messages; track $index) {
+            <p-message [severity]="$any(msg.severity)" [closable]="false">
               <span class="msg-summary">{{ msg.summary }}</span>
               @if (msg.detail) {
                 <div class="msg-detail" [innerHTML]="msg.detail"></div>

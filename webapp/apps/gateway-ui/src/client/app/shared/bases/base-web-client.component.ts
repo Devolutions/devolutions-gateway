@@ -31,7 +31,6 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     super();
   }
 
-  abstract removeWebClientGuiElement(): void;
 
   // ── Session lifecycle helpers ──────────────────────────────────────────────
 

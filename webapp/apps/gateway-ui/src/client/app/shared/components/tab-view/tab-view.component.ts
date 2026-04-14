@@ -36,7 +36,12 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
   }
 
   set currentTabIndex(value: number | string) {
-    this._currentTabIndex = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value, 10);
+      this._currentTabIndex = Number.isNaN(parsed) ? 0 : parsed;
+    } else {
+      this._currentTabIndex = value;
+    }
   }
 
   constructor(
@@ -80,9 +85,14 @@ export class TabViewComponent extends BaseComponent implements OnDestroy, AfterV
     this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 
-  onTabChange(event: string | number): void {
-    // PrimeNG 20 Tabs onChange event provides the new value in event.value
-    const newIndex = typeof event === 'number' ? event : Number.parseInt(event as string, 10);
+  onTabChange(newTabValue: string | number): void {
+    // PrimeNG 20 Tabs emits the new tab value directly via (valueChange).
+    const newIndex =
+      typeof newTabValue === 'number'
+        ? newTabValue
+        : Number.isNaN(Number.parseInt(newTabValue, 10))
+          ? 0
+          : Number.parseInt(newTabValue, 10);
     this.webSessionService.setWebSessionCurrentIndex(newIndex);
   }
 

@@ -1,4 +1,4 @@
-import { Directive, EventEmitter, Output } from '@angular/core';
+import { Directive, EventEmitter, OnDestroy, Output } from '@angular/core';
 import { DVL_WARNING_ICON } from '@gateway/app.constants';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ComponentStatus } from '@shared/models/component-status.model';
@@ -9,7 +9,7 @@ import { WebSessionService } from '../services/web-session.service';
 import { WebClientBaseComponent } from './base-web-client.component';
 
 @Directive()
-export abstract class TerminalWebClientBaseComponent extends WebClientBaseComponent {
+export abstract class TerminalWebClientBaseComponent extends WebClientBaseComponent implements OnDestroy {
   rightToolbarButtons = [
     { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
   ];
@@ -17,6 +17,11 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
   // ── Terminal session state ──────────────────────────────────────────────
   clientError: string;
   protected removeElement = new Subject<unknown>();
+
+  /** Unsubscribe function for the lifecycle onStatusChange handler. */
+  protected unsubscribeTerminalEvent: (() => void) | null = null;
+  /** Unsubscribe function for the connecting-message onStatusChange handler. */
+  protected unsubscribeConnectionListener: (() => void) | null = null;
 
   @Output() readonly componentStatus = new EventEmitter<ComponentStatus>();
   @Output() readonly sizeChange = new EventEmitter<void>();
@@ -32,6 +37,22 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
   /** Icon shown on the session tab when the terminal connects successfully. */
   protected abstract getSuccessIcon(): string;
   protected abstract startTerminationProcess(): void;
+  abstract sendTerminateSessionCmd(): void;
+  protected abstract removeWebClientGuiElement(): void;
+  /**
+   * Null out the terminal client reference to break the reference cycle that
+   * would prevent GC of the component tree after the session is closed.
+   * Called by the base ngOnDestroy after the terminal has been closed.
+   */
+  protected abstract teardownTerminalClient(): void;
+
+  /** Cancels all onStatusChange subscriptions registered by the subclass. */
+  protected removeRemoteTerminalListener(): void {
+    this.unsubscribeTerminalEvent?.();
+    this.unsubscribeTerminalEvent = null;
+    this.unsubscribeConnectionListener?.();
+    this.unsubscribeConnectionListener = null;
+  }
 
   protected initializeStatus(): void {
     this.currentStatus = {
@@ -47,7 +68,13 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
       return;
     }
 
+    // Pre-connect close/error paths can run before initializeStatus().
+    // Backfill id so dynamic tab removal receives a valid session id.
+    this.currentStatus.id ??= this.webSessionId;
     this.currentStatus.isDisabled = true;
+    if (!this.currentStatus.id) {
+      return;
+    }
     this.componentStatus.emit(this.currentStatus);
   }
 
@@ -100,5 +127,16 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
       severity: 'error',
     } as ToastMessageOptions;
     this.disableComponentStatus();
+  }
+
+  ngOnDestroy(): void {
+    this.removeRemoteTerminalListener();
+    this.removeWebClientGuiElement();
+    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
+      this.startTerminationProcess();
+    }
+    // Break the reference cycle: component → remoteTerminal → onStatusChange closures → component
+    this.teardownTerminalClient();
+    super.ngOnDestroy();
   }
 }

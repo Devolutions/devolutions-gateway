@@ -12,6 +12,8 @@ export interface AutoCompleteInput {
   hostname: string;
 }
 
+export type DesktopFormDataInput = RdpFormDataInput | VncFormDataInput | ArdFormDataInput;
+
 export type FormDataUnion =
   | RdpFormDataInput
   | VncFormDataInput

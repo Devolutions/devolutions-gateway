@@ -53,7 +53,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   constructor(
     private fb: FormBuilder,
     private formService: WebFormService,
-    private webSessionService: WebSessionService,
+    protected webSessionService: WebSessionService,
     private storageService: StorageService,
     private netscanService: NetScanService,
     protected utils: UtilsService,

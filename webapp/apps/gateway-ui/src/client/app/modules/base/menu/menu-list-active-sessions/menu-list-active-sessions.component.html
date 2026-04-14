@@ -1,4 +1,4 @@
-@for (activeWebSession of activeWebSessions; track activeWebSession.tabIndex) {
+@for (activeWebSession of activeWebSessions; track activeWebSession.id) {
   <div class="menu-list-item-container">
     <div class="menu-list-item"
          [class.selected]="activeWebSessionIndex === activeWebSession.tabIndex"

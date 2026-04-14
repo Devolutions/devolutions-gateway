@@ -24,6 +24,7 @@ import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { ComponentListenerService } from '@shared/services/component-listener.service';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 import { WebSessionService } from '@shared/services/web-session.service';
+import { Subject } from 'rxjs';
 import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 
 @Component({
@@ -45,6 +46,11 @@ export class DynamicTabComponent<T extends SessionType>
   /** Non-null while the reconnect form occupies the container slot. */
   private formRef: ComponentRef<WebClientFormComponent> | null = null;
 
+  /** Cancelled and re-created on every initializeDynamicComponent() call to
+   *  ensure subscriptions to the previous component instance are torn down
+   *  before subscribing to the replacement. */
+  private componentInstanceDestroyed$ = new Subject<void>();
+
   constructor(
     private cdr: ChangeDetectorRef,
     private webSessionService: WebSessionService,
@@ -59,6 +65,8 @@ export class DynamicTabComponent<T extends SessionType>
   }
 
   ngOnDestroy(): void {
+    this.componentInstanceDestroyed$.next();
+    this.componentInstanceDestroyed$.complete();
     super.ngOnDestroy();
   }
 
@@ -87,6 +95,10 @@ export class DynamicTabComponent<T extends SessionType>
       return;
     }
 
+    // Cancel any subscriptions bound to the previous component instance before
+    // creating a replacement (e.g. on reconnect after a disconnect).
+    this.componentInstanceDestroyed$.next();
+
     const componentRef = this.dynamicComponentService.createComponent(
       this.container,
       this.sessionsContainerElement,
@@ -97,14 +109,14 @@ export class DynamicTabComponent<T extends SessionType>
       if (componentRef.instance instanceof WebClientTelnetComponent) {
         this.componentListenerService
           .onTelnetInitialized()
-          .pipe(takeUntil(this.destroyed$), take(1))
+          .pipe(takeUntil(this.componentInstanceDestroyed$), take(1))
           .subscribe((event) => {
             (componentRef.instance as WebComponentReady).webComponentReady(event as CustomEvent, this.webSessionTab.id);
           });
       } else if (componentRef.instance instanceof WebClientSshComponent) {
         this.componentListenerService
           .onSshInitialized()
-          .pipe(takeUntil(this.destroyed$), take(1))
+          .pipe(takeUntil(this.componentInstanceDestroyed$), take(1))
           .subscribe((event) => {
             (componentRef.instance as WebComponentReady).webComponentReady(event as CustomEvent, this.webSessionTab.id);
           });
@@ -114,7 +126,7 @@ export class DynamicTabComponent<T extends SessionType>
     this.cdr.detectChanges();
 
     componentRef.instance.componentStatus
-      .pipe(takeUntil(this.destroyed$), distinctUntilChanged())
+      .pipe(takeUntil(this.componentInstanceDestroyed$), distinctUntilChanged())
       .subscribe((status: ComponentStatus) => {
         this.webSessionTab.status = status;
         if (status.isDisabled) {
@@ -123,7 +135,7 @@ export class DynamicTabComponent<T extends SessionType>
       });
 
     componentRef.instance?.sizeChange
-      ?.pipe(takeUntil(this.destroyed$))
+      ?.pipe(takeUntil(this.componentInstanceDestroyed$))
       .subscribe(() => this.componentRefSizeChange.emit());
 
     this.webSessionTab.componentRef = componentRef;
