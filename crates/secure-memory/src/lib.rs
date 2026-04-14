@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(status.level(), ProtectionLevel::Unprotected);
     }
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     #[test]
     fn os_backend_is_full_protection() {
         let secret = ProtectedBytes::new(&mut [5u8; 32]);
@@ -269,5 +269,19 @@ mod tests {
             ProtectionLevel::Full,
             "expected Full protection on this platform"
         );
+    }
+
+    // On Windows, `WerRegisterExcludedMemoryBlock` is absent on some Windows Server 2016
+    // (NT 10.0.14393) builds, so `dump_excluded` is best-effort and `Full` is not
+    // guaranteed. `VirtualLock` is also best-effort (can fail under working-set limits).
+    // Assert only the protections that are reliably available.
+    #[cfg(windows)]
+    #[test]
+    fn os_backend_is_full_protection() {
+        let secret = ProtectedBytes::new(&mut [5u8; 32]);
+        let st = secret.protection_status();
+        assert!(!st.fallback_backend, "OS backend should be active");
+        assert!(st.guard_pages, "guard pages should be active");
+        assert!(st.write_protected, "data page should be write-protected");
     }
 }

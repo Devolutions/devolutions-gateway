@@ -45,7 +45,7 @@ use std::ffi::c_void;
 use std::ptr;
 use std::sync::OnceLock;
 
-use windows::Win32::System::ErrorReporting::{WerRegisterExcludedMemoryBlock, WerUnregisterExcludedMemoryBlock};
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW};
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READONLY, PAGE_READWRITE,
     VirtualAlloc, VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock,
@@ -53,6 +53,49 @@ use windows::Win32::System::Memory::{
 use windows::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 
 use crate::ProtectionStatus;
+
+/// Function pointer type for `WerRegisterExcludedMemoryBlock`.
+type WerRegisterFn = unsafe extern "system" fn(*const c_void, u32) -> windows::core::HRESULT;
+
+/// Function pointer type for `WerUnregisterExcludedMemoryBlock`.
+type WerUnregisterFn = unsafe extern "system" fn(*const c_void) -> windows::core::HRESULT;
+
+/// Returns the `WerRegisterExcludedMemoryBlock` function pointer if available on this OS.
+///
+/// `WerRegisterExcludedMemoryBlock` is not available on all Windows Server 2016 builds
+/// (NT 10.0.14393) — it was only backported via later servicing updates.
+/// We resolve it dynamically at runtime so the binary loads on any Windows 10/Server 2016
+/// build, gracefully degrading to no WER exclusion when the function is absent.
+fn wer_register_fn() -> Option<WerRegisterFn> {
+    static FN: OnceLock<Option<WerRegisterFn>> = OnceLock::new();
+    *FN.get_or_init(|| {
+        // SAFETY: `LoadLibraryExW` with `LOAD_LIBRARY_SEARCH_SYSTEM32` is always safe to call.
+        //         The handle is intentionally not freed: `wer.dll` is a system DLL that must
+        //         remain loaded for as long as the cached function pointer is in use.
+        let hmod = unsafe { LoadLibraryExW(windows::core::w!("wer.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }.ok()?;
+        // SAFETY: `hmod` is a valid module handle; the function name is a null-terminated C string.
+        let proc = unsafe { GetProcAddress(hmod, windows::core::s!("WerRegisterExcludedMemoryBlock")) }?;
+        // SAFETY: `proc` is the function pointer for `WerRegisterExcludedMemoryBlock`,
+        //         which has signature `fn(*const c_void, u32) -> HRESULT`.
+        Some(unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, WerRegisterFn>(proc) })
+    })
+}
+
+/// Returns the `WerUnregisterExcludedMemoryBlock` function pointer if available on this OS.
+fn wer_unregister_fn() -> Option<WerUnregisterFn> {
+    static FN: OnceLock<Option<WerUnregisterFn>> = OnceLock::new();
+    *FN.get_or_init(|| {
+        // SAFETY: `LoadLibraryExW` with `LOAD_LIBRARY_SEARCH_SYSTEM32` is always safe to call.
+        //         The handle is intentionally not freed: `wer.dll` is a system DLL that must
+        //         remain loaded for as long as the cached function pointer is in use.
+        let hmod = unsafe { LoadLibraryExW(windows::core::w!("wer.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }.ok()?;
+        // SAFETY: `hmod` is a valid module handle; the function name is a null-terminated C string.
+        let proc = unsafe { GetProcAddress(hmod, windows::core::s!("WerUnregisterExcludedMemoryBlock")) }?;
+        // SAFETY: `proc` is the function pointer for `WerUnregisterExcludedMemoryBlock`,
+        //         which has signature `fn(*const c_void) -> HRESULT`.
+        Some(unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, WerUnregisterFn>(proc) })
+    })
+}
 
 /// Page-based secure allocation for Windows.
 pub(crate) struct SecureAlloc<const N: usize> {
@@ -148,18 +191,30 @@ impl<const N: usize> SecureAlloc<N> {
         // Registration covers the full page, not just N bytes, because the
         // allocation model is page-based.
         //
-        // SAFETY: `data` is a valid, committed, page-aligned pointer; `ps` is
-        //         exactly one page — the size passed to `VirtualAlloc`.
-        let wer_hr = unsafe {
-            WerRegisterExcludedMemoryBlock(data.cast::<c_void>(), u32::try_from(ps).expect("page size fits in u32"))
+        // `WerRegisterExcludedMemoryBlock` is resolved dynamically: it is absent on
+        // some Windows Server 2016 (NT 10.0.14393) builds, and loading it statically
+        // would prevent the binary from starting on those hosts.
+        let wer_excluded = match wer_register_fn() {
+            Some(func) => {
+                // SAFETY: `data` is a valid, committed, page-aligned pointer; `ps` is
+                //         exactly one page — the size passed to `VirtualAlloc`.
+                let wer_hr = unsafe { func(data.cast::<c_void>(), u32::try_from(ps).expect("page size fits in u32")) };
+                if wer_hr.is_err() {
+                    tracing::debug!(
+                        "secure-memory: WerRegisterExcludedMemoryBlock failed ({wer_hr:?}); \
+                         the data page will not be excluded from WER crash reports"
+                    );
+                }
+                wer_hr.is_ok()
+            }
+            None => {
+                tracing::debug!(
+                    "secure-memory: WerRegisterExcludedMemoryBlock not available on this Windows version; \
+                     the data page will not be excluded from WER crash reports"
+                );
+                false
+            }
         };
-        let wer_excluded = wer_hr.is_ok();
-        if !wer_excluded {
-            tracing::debug!(
-                "secure-memory: WerRegisterExcludedMemoryBlock failed ({wer_hr:?}); \
-                 the data page will not be excluded from WER crash reports"
-            );
-        }
 
         // ── Copy secret into the data page ──────────────────────────────────
         // SAFETY: `src` (caller stack) and `data` (VirtualAlloc region) are
@@ -229,10 +284,12 @@ impl<const N: usize> Drop for SecureAlloc<N> {
 
         // Unregister WER exclusion before freeing the page.
         // Must happen before `VirtualFree` to avoid a dangling registration.
-        if self.wer_excluded {
+        if self.wer_excluded
+            && let Some(func) = wer_unregister_fn()
+        {
             // SAFETY: `self.data` is the same pointer passed to
             //         `WerRegisterExcludedMemoryBlock`; still valid here.
-            let _ = unsafe { WerUnregisterExcludedMemoryBlock(self.data.cast::<c_void>()) };
+            let _ = unsafe { func(self.data.cast::<c_void>()) };
         }
 
         // Release the entire three-page region.
