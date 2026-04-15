@@ -23,6 +23,8 @@ import { DynamicTabComponent } from '@shared/components/dynamic-tab/dynamic-tab.
 import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
 import { SessionToolbarComponent } from '@shared/components/session-toolbar/session-toolbar.component';
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
+import { Protocol } from '@shared/enums/web-client-protocol.enum';
+import { WebSessionService } from '@shared/services/web-session.service';
 import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
 import { KeyFilterModule } from 'primeng/keyfilter';
@@ -108,4 +110,14 @@ const routes: Routes = [
   exports: [DynamicTabComponent, WebClientFormComponent, NetScanComponent],
   providers: [],
 })
-export class WebClientModule {}
+export class WebClientModule {
+  constructor(webSessionService: WebSessionService) {
+    webSessionService.registerProtocolComponentMap({
+      [Protocol.RDP]: WebClientRdpComponent,
+      [Protocol.Telnet]: WebClientTelnetComponent,
+      [Protocol.SSH]: WebClientSshComponent,
+      [Protocol.VNC]: WebClientVncComponent,
+      [Protocol.ARD]: WebClientArdComponent,
+    });
+  }
+}

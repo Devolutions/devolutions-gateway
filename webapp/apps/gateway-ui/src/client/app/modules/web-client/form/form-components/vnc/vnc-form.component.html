@@ -30,9 +30,13 @@
 
   <div class="col-12 gateway-form-group">
     <a href="#" (click)="toggleMoreSettings($event)"
-      >More Settings
-      <span *ngIf="!showMoreSettings">+</span>
-      <span *ngIf="showMoreSettings">-</span>
+    >More Settings
+      @if (!showMoreSettings) {
+        <span>+</span>
+      }
+      @if (showMoreSettings) {
+        <span>-</span>
+      }
     </a>
   </div>
 
@@ -76,21 +80,24 @@
       ></web-client-enable-cursor-control>
     </div>
 
-    <div
-      *ngIf="showExtendedClipboardCheckbox"
-      class="col-12 gateway-form-group"
-    >
-      <web-client-extended-clipboard-control
-        [parentForm]="form"
-        [inputFormData]="inputFormData"
-      ></web-client-extended-clipboard-control>
-    </div>
+    @if (showExtendedClipboardCheckbox) {
+      <div
+        class="col-12 gateway-form-group"
+      >
+        <web-client-extended-clipboard-control
+          [parentForm]="form"
+          [inputFormData]="inputFormData"
+        ></web-client-extended-clipboard-control>
+      </div>
+    }
 
-    <div *ngIf="showAutoClipboardCheckbox" class="col-12 gateway-form-group">
-      <web-client-auto-clipboard-control
-        [parentForm]="form"
-        [inputFormData]="inputFormData"
-      ></web-client-auto-clipboard-control>
-    </div>
+    @if (showAutoClipboardCheckbox) {
+      <div class="col-12 gateway-form-group">
+        <web-client-auto-clipboard-control
+          [parentForm]="form"
+          [inputFormData]="inputFormData"
+        ></web-client-auto-clipboard-control>
+      </div>
+    }
   </div>
 </div>

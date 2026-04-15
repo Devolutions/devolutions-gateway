@@ -38,10 +38,9 @@
     </div>
 </div>
 <div class="gateway-form-input password-container">
-    <div
-        class="form-helper-text"
-        *ngIf="privateKeyContent !== '' && !isValidFile()"
-    >
-        {{ getErrorMessage() }}
-    </div>
+    @if (privateKeyContent !== '' && !isValidFile()) {
+      <div class="form-helper-text">
+          {{ getErrorMessage() }}
+      </div>
+    }
 </div>

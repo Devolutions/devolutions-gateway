@@ -1,6 +1,7 @@
 import { Directive } from '@angular/core';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ComponentStatus } from '@shared/models/component-status.model';
+import { ToastMessageOptions } from 'primeng/api';
 import { BaseSessionComponent } from '../models/web-session.model';
 import { AnalyticService, ConnectionIdentifier, ProtocolString } from '../services/analytic.service';
 
@@ -13,6 +14,7 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
   hideSpinnerOnly = false;
   error: string;
   loading = true;
+  sessionTerminationMessage: ToastMessageOptions;
 
   analyticHandle: ConnectionIdentifier;
 
@@ -22,7 +24,6 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     isDisabled: false,
     isDisabledByUser: false,
   };
-
   protected constructor(
     protected gatewayAlertMessageService: GatewayAlertMessageService,
     protected analyticService: AnalyticService,
@@ -30,7 +31,7 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     super();
   }
 
-  abstract removeWebClientGuiElement(): void;
+  // ── Session lifecycle helpers ──────────────────────────────────────────────
 
   //For translation 'ConnectionSuccessful
   protected webClientConnectionSuccess(message = 'Connection successful'): void {
@@ -57,6 +58,15 @@ export abstract class WebClientBaseComponent extends BaseSessionComponent {
     if (this.analyticHandle) {
       this.analyticService.sendCloseEvent(this.analyticHandle);
     }
+  }
+
+  protected getGatewayWebSocketUrl(baseUrl: string, sessionId?: string): string {
+    const normalizedBasePath = baseUrl.replace(/\/+$/, '');
+    const path = sessionId ? `${normalizedBasePath}/${sessionId}` : normalizedBasePath;
+    const gatewayUrl: URL = new URL(path, window.location.href);
+
+    gatewayUrl.protocol = gatewayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    return gatewayUrl.toString();
   }
 
   protected abstract getProtocol(): ProtocolString;

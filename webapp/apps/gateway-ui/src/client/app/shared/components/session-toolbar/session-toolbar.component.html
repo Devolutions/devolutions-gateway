@@ -6,9 +6,7 @@
   class="session-toolbar"
 >
   <div class="session-toolbar-left-group" *ngIf="leftButtons.length > 0">
-    <ng-container
-      *ngFor="let button of leftButtons; let i = index; let last = last"
-    >
+    @for (button of leftButtons; track $index; let last = $last) {
       <p-button
         (click)="button.action()"
         [label]="button.label"
@@ -17,13 +15,11 @@
       ></p-button>
 
       <div class="separator" *ngIf="!last"></div>
-    </ng-container>
+    }
   </div>
 
   <div class="session-toolbar-middle-group">
-    <ng-container
-      *ngFor="let button of middleButtons; let i = index; let last = last"
-    >
+    @for (button of middleButtons; track $index; let last = $last) {
       <p-button
         (click)="button.action()"
         [label]="button.label"
@@ -32,13 +28,11 @@
       ></p-button>
 
       <div class="separator" *ngIf="!last"></div>
-    </ng-container>
+    }
 
     <div class="separator" *ngIf="middleToggleButtons.length > 0"></div>
 
-    <ng-container
-      *ngFor="let button of middleToggleButtons; let i = index; let last = last"
-    >
+    @for (button of middleToggleButtons; track $index; let last = $last) {
       <p-button
         (click)="button.action()"
         [label]="button.label"
@@ -49,11 +43,11 @@
       </p-button>
 
       <div class="separator" *ngIf="!last"></div>
-    </ng-container>
+    }
   </div>
 
   <div class="session-toolbar-middle-group" *ngIf="checkboxes.length > 0">
-    <ng-container *ngFor="let checkbox of checkboxes; let last = last">
+    @for (checkbox of checkboxes; track checkbox.inputId; let last = $last) {
       <p-checkbox
         [inputId]="checkbox.inputId"
         (onChange)="checkbox.onChange($event.checked)"
@@ -64,11 +58,11 @@
       <label [for]="checkbox.inputId">{{ checkbox.label }}</label>
 
       <div class="separator" *ngIf="!last"></div>
-    </ng-container>
+    }
   </div>
 
   <div class="session-toolbar-middle-group" *ngIf="sliders.length > 0">
-    <ng-container *ngFor="let slider of sliders; let last = last">
+    @for (slider of sliders; track $index; let last = $last) {
       <label>{{ slider.label }}</label>
       <p-slider
         [(ngModel)]="slider.value"
@@ -80,20 +74,14 @@
       <span>{{ slider.value }}</span>
 
       <div class="separator" *ngIf="!last"></div>
-    </ng-container>
+    }
   </div>
 
   <div
     class="session-toolbar-right-group"
     *ngIf="clipboardActionButtons.length > 0"
   >
-    <ng-container
-      *ngFor="
-        let button of clipboardActionButtons;
-        let i = index;
-        let last = last
-      "
-    >
+    @for (button of clipboardActionButtons; track $index; let last = $last) {
       <p-button
         (click)="button.action()"
         [label]="button.label"
@@ -104,13 +92,11 @@
       ></p-button>
 
       <div class="separator" *ngIf="!last"></div>
-    </ng-container>
+    }
   </div>
 
   <div class="session-toolbar-right-group" *ngIf="rightButtons.length > 0">
-    <ng-container
-      *ngFor="let button of rightButtons; let i = index; let last = last"
-    >
+    @for (button of rightButtons; track $index; let last = $last) {
       <p-button
         (click)="button.action()"
         [label]="button.label"
@@ -119,6 +105,6 @@
       ></p-button>
 
       <div class="separator" *ngIf="rightButtons.length > 1 && !last"></div>
-    </ng-container>
+    }
   </div>
 </div>

@@ -1,19 +1,20 @@
-import { Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { Component, ElementRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { LoggingLevel } from '@devolutions/terminal-shared';
 import { SSHTerminal, loggingService as sshLoggingService, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
-import { DVL_SSH_ICON, DVL_WARNING_ICON, JET_SSH_URL } from '@gateway/app.constants';
+import { DVL_SSH_ICON, JET_SSH_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { WebClientBaseComponent, WebComponentReady } from '@shared/bases/base-web-client.component';
+import { WebComponentReady } from '@shared/bases/base-web-client.component';
+import { TerminalWebClientBaseComponent } from '@shared/bases/terminal-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
-import { ComponentStatus } from '@shared/models/component-status.model';
+import { CanSendTerminateSessionCmd } from '@shared/models/web-session.model';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
 import { DefaultSshPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
-import { EMPTY, from, Observable, of, Subject, throwError } from 'rxjs';
+import { EMPTY, from, Observable, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, takeUntil } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -24,33 +25,29 @@ import { v4 as uuidv4 } from 'uuid';
   styleUrls: ['web-client-ssh.component.scss'],
   providers: [MessageService],
 })
-export class WebClientSshComponent extends WebClientBaseComponent implements WebComponentReady, OnInit, OnDestroy {
+export class WebClientSshComponent
+  extends TerminalWebClientBaseComponent
+  implements WebComponentReady, CanSendTerminateSessionCmd, OnInit, OnDestroy
+{
   @Input() webSessionId: string;
-  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
-  @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   @ViewChild('sessionSshContainer') sessionContainerElement: ElementRef;
   @ViewChild('webSSHGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: SSHFormDataInput;
-  clientError: string;
 
-  rightToolbarButtons = [
-    { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
-  ];
-
-  protected removeElement = new Subject();
   private remoteTerminal: SSHTerminal;
-  private remoteTerminalEventListener: () => void;
+  // unsubscribeTerminalEvent, unsubscribeConnectionListener, removeRemoteTerminalListener()
+  // and ngOnDestroy live in TerminalWebClientBaseComponent
 
   constructor(
     protected utils: UtilsService,
     protected gatewayAlertMessageService: GatewayAlertMessageService,
-    private webSessionService: WebSessionService,
-    private webClientService: WebClientService,
+    protected webSessionService: WebSessionService,
+    protected webClientService: WebClientService,
     protected analyticService: AnalyticService,
   ) {
-    super(gatewayAlertMessageService, analyticService);
+    super(gatewayAlertMessageService, webSessionService, analyticService);
   }
 
   ngOnInit(): void {
@@ -58,15 +55,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
     this.removeWebClientGuiElement();
   }
 
-  ngOnDestroy(): void {
-    this.removeRemoteTerminalListener();
-    this.removeWebClientGuiElement();
-
-    if (this.currentStatus.isInitialized && !this.currentStatus.isDisabled) {
-      this.startTerminationProcess();
-    }
-
-    super.ngOnDestroy();
+  protected teardownTerminalClient(): void {
+    this.remoteTerminal = null;
   }
 
   webComponentReady(event: CustomEvent, webSessionId: string): void {
@@ -81,19 +71,19 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
 
   startTerminationProcess(): void {
     this.currentStatus.isDisabledByUser = true;
-    this.handleSessionEndedOrError(TerminalConnectionStatus.failed);
+    this.handleSessionEnded(this.getMessage(TerminalConnectionStatus.failed));
     this.sendTerminateSessionCmd();
     this.disableComponentStatus();
   }
 
   sendTerminateSessionCmd(): void {
-    if (!this.currentStatus.isInitialized) {
+    if (!this.currentStatus.isInitialized || !this.remoteTerminal) {
       return;
     }
     void this.remoteTerminal.close();
   }
 
-  removeWebClientGuiElement(): void {
+  protected removeWebClientGuiElement(): void {
     this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
       next: (): void => {
         if (this.webGuiTerminal?.nativeElement) {
@@ -106,28 +96,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
     });
   }
 
-  private removeRemoteTerminalListener(): void {
-    if (this.remoteTerminalEventListener) {
-      this.remoteTerminalEventListener();
-    }
-  }
-
-  private initializeStatus(): void {
-    this.currentStatus = {
-      id: this.webSessionId,
-      isInitialized: true,
-      isDisabled: false,
-      isDisabledByUser: false,
-    };
-  }
-
-  private disableComponentStatus(): void {
-    if (this.currentStatus.isDisabled) {
-      return;
-    }
-
-    this.currentStatus.isDisabled = true;
-    this.componentStatus.emit(this.currentStatus);
+  protected getSuccessIcon(): string {
+    return DVL_SSH_ICON;
   }
 
   private startConnectionProcess(): void {
@@ -135,9 +105,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
       return;
     }
 
-    this.remoteTerminal.onStatusChange((v) => {
+    this.unsubscribeConnectionListener = this.remoteTerminal.onStatusChange((v) => {
       if (v === TerminalConnectionStatus.connected) {
-        // connected only indicates connection to Gateway is successful
         this.remoteTerminal.writeToTerminal('connecting... \r\n');
       }
     });
@@ -149,7 +118,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
         switchMap((params) => this.webClientService.fetchSshToken(params)),
         switchMap((params) => this.callConnect(params)),
         catchError((error) => {
-          this.handleSshError(error.message);
+          this.handleConnectionError(error.message);
           return EMPTY;
         }),
       )
@@ -163,7 +132,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
         port: connectionParameters.port,
         username: connectionParameters.username,
         proxyUrl: connectionParameters.gatewayAddress + `?token=${connectionParameters.token}`,
-        passpharse: connectionParameters.privateKeyPassphrase ?? '',
+        passphrase: connectionParameters.privateKeyPassphrase ?? '',
         privateKey: connectionParameters.privateKey ?? '',
         password: connectionParameters.password ?? '',
       }),
@@ -184,10 +153,10 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
-    const gatewayHttpAddress: URL = new URL(JET_SSH_URL + `/${sessionId}`, window.location.href);
-    const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
+    const gatewayAddress = this.getGatewayWebSocketUrl(JET_SSH_URL, sessionId);
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
     const privateKeyPassphrase: string = formData.passphrase || null;
+
     const connectionParameters: SshConnectionParameters = {
       host: extractedData.hostname,
       username: username,
@@ -207,56 +176,20 @@ export class WebClientSshComponent extends WebClientBaseComponent implements Web
       return;
     }
 
-    this.remoteTerminal.onStatusChange((status) => {
+    this.unsubscribeTerminalEvent = this.remoteTerminal.onStatusChange((status) => {
       switch (status) {
         case TerminalConnectionStatus.connected:
-          this.handleSessionStarted();
+          this.handleClientConnectStarted();
+          this.initializeStatus();
           break;
         case TerminalConnectionStatus.failed:
         case TerminalConnectionStatus.closed:
-          this.handleSessionEndedOrError(status);
+          this.handleSessionEnded(this.getMessage(status));
           break;
         default:
           break;
       }
     });
-  }
-
-  private handleSessionStarted(): void {
-    this.handleClientConnectStarted();
-    this.initializeStatus();
-  }
-
-  private handleSessionEndedOrError(status: TerminalConnectionStatus): void {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch((err) => {
-        console.error(`Error attempting to exit fullscreen: ${err}`);
-      });
-    }
-
-    this.notifyUser(status);
-    this.disableComponentStatus();
-    super.webClientConnectionClosed();
-  }
-
-  private notifyUser(status: TerminalConnectionStatus): void {
-    this.clientError = this.getMessage(status);
-
-    const icon: string = status !== TerminalConnectionStatus.connected ? DVL_WARNING_ICON : DVL_SSH_ICON;
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
-  }
-
-  private handleClientConnectStarted(): void {
-    this.loading = false;
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_SSH_ICON);
-    super.webClientConnectionSuccess();
-  }
-
-  private handleSshError(error: string): void {
-    this.clientError = typeof error === 'string' ? error : this.getMessage(error);
-    console.error(error);
-    this.disableComponentStatus();
-    void this.webSessionService.updateWebSessionIcon(this.webSessionId, DVL_WARNING_ICON);
   }
 
   private getMessage(status: TerminalConnectionStatus): string {
