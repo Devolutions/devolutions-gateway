@@ -1,0 +1,11 @@
+// floating-session-toolbar.component.scss
+// ── Entry point — imports partials in dependency order ────────────────────────
+// Edit individual partials in ./styles/ rather than this file.
+
+@use 'styles/tokens';     // :host layout + all CSS custom property color tokens
+@use 'styles/floating-session-toolbar-theme'; // all .theme-light overrides in one place
+@use 'styles/toolbar';    // container, dock-position variants, vertical layout
+@use 'styles/buttons';    // base button, variants, divider
+@use 'styles/dropdown';   // overlay menu, dock buttons, toggle switches
+@use 'styles/indicator';  // auto-hide edge pill
+@use 'styles/dropzones';  // drag dock targets

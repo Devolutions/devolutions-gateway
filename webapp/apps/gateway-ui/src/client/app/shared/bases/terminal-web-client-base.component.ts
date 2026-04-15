@@ -10,10 +10,6 @@ import { WebClientBaseComponent } from './base-web-client.component';
 
 @Directive()
 export abstract class TerminalWebClientBaseComponent extends WebClientBaseComponent implements OnDestroy {
-  rightToolbarButtons = [
-    { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
-  ];
-
   // ── Terminal session state ──────────────────────────────────────────────
   clientError: string;
   protected removeElement = new Subject<unknown>();
@@ -138,5 +134,10 @@ export abstract class TerminalWebClientBaseComponent extends WebClientBaseCompon
       severity: 'error',
     } as ToastMessageOptions;
     this.disableComponentStatus();
+  }
+
+  /** Default behavior for the toolbar Session info button in terminal sessions. */
+  onSessionInfoPress(): void {
+    this.gatewayAlertMessageService.addInfo(`Session ID: ${this.webSessionId}`);
   }
 }

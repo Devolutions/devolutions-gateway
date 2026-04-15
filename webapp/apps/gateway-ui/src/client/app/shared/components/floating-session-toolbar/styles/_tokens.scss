@@ -1,0 +1,63 @@
+// _tokens.scss
+// ── Host layout + all CSS custom property color tokens ────────────────────────
+// This is the single source of truth for every color in the component.
+// To re-theme from a parent project, override any --* variable on the
+// floating-session-toolbar element or any ancestor.
+
+:host {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none; // host is transparent; children opt-in below
+  z-index: 20;
+
+  // Shared shadow applied to the toolbar, indicator, and dropzones
+  --toolbar-shadow:              0 2px 10px rgba(0, 0, 0, 0.06);
+
+  // Font used across all toolbar text elements (CAD button, dropdown labels, etc.)
+  --toolbar-font-family:         'Open Sans', sans-serif;
+
+  // ── Toolbar pill (dark default) ───────────────────────────────────────────
+  // .theme-light on the element re-assigns these same variables — no -light- duplicates needed.
+  --toolbar-bg:                  rgba(0, 104, 195, 0.55);
+  --toolbar-icon-color:          #ffffff;
+  --toolbar-divider-color:       rgba(255, 255, 255, 0.45);
+  --toolbar-btn-hover-bg:        rgba(255, 255, 255, 0.2);
+  --toolbar-btn-active-bg:       rgba(255, 255, 255, 0.35);
+  --toolbar-btn-active-hover-bg: rgba(255, 255, 255, 0.45);
+  --toolbar-btn-group-bg:        rgba(255, 255, 255, 0.14);
+  --toolbar-cad-bg:              rgba(255, 255, 255, 0.14);
+  --toolbar-cad-hover-bg:        rgba(255, 255, 255, 0.2);
+  --toolbar-cad-border-color:    rgba(58, 163, 255, 0.35);
+  --toolbar-cad-text-color:      #ffffff;
+  --toolbar-close-bg:            #f85454;
+  --toolbar-close-color:         #ffe0e0;
+  --toolbar-close-hover-bg:      #e94444;
+
+  // ── Dropdown menu (always light — no dark variant) ─────────────────────────
+  --dropdown-bg:                 #ffffff;
+  --dropdown-border-color:       #f2f2f2;
+  --dropdown-label-color:        #0d0d0d;
+  --dropdown-splitter-color:     #f2f2f2;
+  --dropdown-section-title-color: #999999;
+  --dropdown-dock-btn-hover-bg:  #f5f5f5;
+  --dropdown-dock-btn-active-bg: #eaf5ff;
+  --dropdown-toggle-off-bg:      #d9d9d9;
+  --dropdown-toggle-on-bg:       #0068c3;
+  --dropdown-toggle-thumb-color: #ffffff;
+  --dropdown-toggle-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+
+  // ── Auto-hide indicator (dark default) ────────────────────────────────────
+  --indicator-bg:                rgba(0, 104, 195, 0.55);
+  --indicator-hover-bg:          rgba(0, 104, 195, 0.75);
+  --indicator-border-color:      rgba(58, 163, 255, 0.35);
+
+  // ── Drag dropzones (dark default) ─────────────────────────────────────────
+  --dropzone-bg:                 rgba(0, 104, 195, 0.55);
+  --dropzone-active-bg:          rgba(0, 104, 195, 0.75);
+  --dropzone-inner-border-color: rgba(255, 255, 255, 0.7);
+  --dropzone-overlay-border-color: rgba(0, 104, 195, 0.35);
+  --dropzone-active-overlay-color: rgba(255, 255, 255, 0.8);
+  --dropzone-label-color:        #ffffff;
+}
+

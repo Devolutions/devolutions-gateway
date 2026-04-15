@@ -1,0 +1,50 @@
+// _floating-session-toolbar-theme.scss
+// ── Single source of truth for all .theme-light CSS variable overrides ────────
+// The dark defaults live in _tokens.scss. Every .theme-light override is here
+// so re-theming for a different app only requires touching this one file.
+
+// ── Toolbar pill ──────────────────────────────────────────────────────────────
+.floating-session-toolbar.theme-light {
+  --toolbar-bg:                  #ffffff;
+  --toolbar-shadow:              0 2px 10px rgba(0, 0, 0, 0.06), inset 0 0 0 1px #d9d9d9;
+  --toolbar-icon-color:          #0068c3;
+  --toolbar-divider-color:       rgba(0, 104, 195, 0.2);
+  --toolbar-btn-hover-bg:        #f2f2f2;
+  --toolbar-btn-active-bg:       #e1f0ff;
+  --toolbar-btn-active-hover-bg: #d0e8ff;
+  --toolbar-btn-group-bg:        #f2f2f2;
+  --toolbar-cad-bg:              #f2f2f2;
+  --toolbar-cad-hover-bg:        #e6f2ff;
+  --toolbar-cad-border-color:    #d9d9d9;
+  --toolbar-cad-text-color:      #0068c3;
+  --toolbar-close-bg:            #ffe0e0;
+  --toolbar-close-color:         #f04438;
+  --toolbar-close-hover-bg:      #ffd0d0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+// ── Auto-hide indicator pill ──────────────────────────────────────────────────
+.autohide-indicator.theme-light {
+  --indicator-bg:           #ffffff;
+  --indicator-hover-bg:     #e6f2ff;
+  --indicator-border-color: #f2f2f2;
+  // Override the shared shadow token so the indicator's lighter inset border
+  // is picked up via the existing box-shadow: var(--toolbar-shadow) in _indicator.scss
+  --toolbar-shadow: 0 2px 10px rgba(0, 0, 0, 0.06), inset 0 0 0 1px #f2f2f2;
+}
+
+// ── Drag dropzone targets ─────────────────────────────────────────────────────
+.drag-dropzone.theme-light {
+  --dropzone-bg:                   #ffffff;
+  --dropzone-inner-border-color:   #b2b2b2;
+  --dropzone-label-color:          #0068c3;
+  --dropzone-overlay-border-color: #f2f2f2;
+
+  &.drag-dropzone-active {
+    --dropzone-active-bg:            #e6f2ff;
+    --dropzone-inner-border-color:   #0068c3;
+    --dropzone-active-overlay-color: #0068c3;
+  }
+}
+

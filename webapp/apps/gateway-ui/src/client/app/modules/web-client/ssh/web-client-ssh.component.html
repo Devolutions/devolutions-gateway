@@ -1,9 +1,4 @@
 <div #sessionSshContainer id="web-ssh-terminal-app">
-  <session-toolbar
-    [sessionContainerParent]="sessionContainerElement"
-    [rightButtons]="rightToolbarButtons">
-  </session-toolbar>
-
   @if (loading) {
     <div class="loading-info-container">
       <div class="loading-info">
@@ -15,4 +10,14 @@
   }
 
   <web-ssh-gui [class.hide-from-view]="loading" #webSSHGuiTerminal></web-ssh-gui>
+
+  @if (!loading && !currentStatus.isDisabled) {
+    <div class="toolbar-overlay-anchor">
+      <floating-session-toolbar
+        [features]="{ sessionInfo: true }"
+        [sessionInfo]="sessionInfo"
+        (sessionClose)="startTerminationProcess()">
+      </floating-session-toolbar>
+    </div>
+  }
 </div>

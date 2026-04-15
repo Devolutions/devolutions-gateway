@@ -1,0 +1,123 @@
+// _buttons.scss
+// ── All toolbar button styles and light-theme overrides ───────────────────────
+
+// ── Base button ──────────────────────────────────────────────────────────────
+// Full reset: defeats browser UA and any PrimeNG global button rules.
+.toolbar-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  box-sizing: border-box;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+
+  color: var(--toolbar-icon-color);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+
+  &:hover {
+    background: var(--toolbar-btn-hover-bg);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    fill: currentColor;
+  }
+
+  // dvl-icon font icons
+  i {
+    display: block;
+    font-size: 18px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+}
+
+// ── Toolbar group divider ─────────────────────────────────────────────────────
+// 1px × 16px vertical line; flips to 16px × 1px in vertical dock positions.
+.toolbar-divider {
+  flex-shrink: 0;
+  background: var(--toolbar-divider-color);
+  width: 1px;
+  height: 16px;
+  border-radius: 1px;
+}
+
+// ── Button variants ───────────────────────────────────────────────────────────
+
+// Drag handle — dimmed icon, grab cursor, no-scroll on touch
+.toolbar-button-dim {
+  cursor: grab;
+  touch-action: none; // prevents browser scroll from intercepting pointer drag
+
+  &:active { cursor: grabbing; }
+
+  svg { opacity: 0.42; }
+}
+
+// Active/selected tint (e.g. current screen mode button)
+.toolbar-button-active {
+  background: var(--toolbar-btn-active-bg);
+
+  &:hover { background: var(--toolbar-btn-active-hover-bg); }
+}
+
+// Ctrl+Alt+Del pill — natural width, inset border
+// height comes from .toolbar-button (always co-applied); only width/padding differ
+.toolbar-button-cad {
+  width: auto;
+  padding: 0 10px;
+  background: var(--toolbar-cad-bg);
+  box-shadow: inset 0 0 0 1px var(--toolbar-cad-border-color);
+
+  &:hover { background: var(--toolbar-cad-hover-bg); }
+
+  span {
+    font-family: var(--toolbar-font-family);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--toolbar-cad-text-color);
+    white-space: nowrap;
+  }
+}
+
+// Grouped section container (Minimize / Fullscreen / Fit)
+.toolbar-btn-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  background: var(--toolbar-btn-group-bg);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+// Close button — solid danger background
+.toolbar-button-close {
+  background: var(--toolbar-close-bg);
+  color: var(--toolbar-close-color);
+
+  &:hover { background: var(--toolbar-close-hover-bg); }
+}
+
+

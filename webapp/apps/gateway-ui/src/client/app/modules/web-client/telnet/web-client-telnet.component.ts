@@ -1,4 +1,4 @@
-import { Component, ElementRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { Component, ElementRef, Input, OnInit, ViewChild } from '@angular/core';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { TelnetConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { TelnetFormDataInput } from '@shared/interfaces/forms.interfaces';
@@ -19,7 +19,9 @@ import {
 } from '@devolutions/web-telnet-gui';
 import { DVL_TELNET_ICON, JET_TELNET_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { TerminalWebClientBaseComponent } from '@shared/bases/terminal-web-client-base.component';
+import { ToolbarSessionInfo } from '@shared/components/floating-session-toolbar/models/session-info.model';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 
 @Component({
@@ -30,7 +32,7 @@ import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 })
 export class WebClientTelnetComponent
   extends TerminalWebClientBaseComponent
-  implements CanSendTerminateSessionCmd, OnInit, OnDestroy
+  implements WebComponentReady, CanSendTerminateSessionCmd, OnInit
 {
   @Input() webSessionId: string;
 
@@ -38,10 +40,10 @@ export class WebClientTelnetComponent
   @ViewChild('webTelnetGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: TelnetFormDataInput;
-
-  rightToolbarButtons = [
-    { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
-  ];
+  sessionInfo: ToolbarSessionInfo = { rows: [], emptyValueText: 'N/A' };
+  private sessionInfoUrl: string | null = null;
+  private sessionInfoUsername: string | null = null;
+  private lastSessionInfoKey = '';
 
   private remoteTerminal: TelnetTerminal;
   // unsubscribeTerminalEvent, unsubscribeConnectionListener, removeRemoteTerminalListener()
@@ -60,6 +62,7 @@ export class WebClientTelnetComponent
   ngOnInit(): void {
     telnetLoggingService.setLevel(LoggingLevel.FATAL);
     this.removeWebClientGuiElement();
+    this.refreshSessionInfo();
   }
 
   protected teardownTerminalClient(): void {
@@ -154,15 +157,20 @@ export class WebClientTelnetComponent
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
       map((currentWebSession) => {
         this.formData = currentWebSession.data as TelnetFormDataInput;
+        this.sessionInfoUsername = this.formData.username ?? null;
+        this.refreshSessionInfo();
       }),
     );
   }
 
   private fetchParameters(formData: TelnetFormDataInput): Observable<TelnetConnectionParameters> {
-    const { hostname } = formData;
+    const { hostname, username } = formData;
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultTelnetPort);
     const gatewayAddress = this.getGatewayWebSocketUrl(JET_TELNET_URL, sessionId);
+    this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
+    this.sessionInfoUsername = username ?? null;
+    this.refreshSessionInfo();
 
     const connectionParameters: TelnetConnectionParameters = {
       host: extractedData.hostname,
@@ -219,5 +227,61 @@ export class WebClientTelnetComponent
 
   protected getProtocol(): ProtocolString {
     return 'Telnet';
+  }
+
+  private buildSessionInfo(): ToolbarSessionInfo {
+    return {
+      rows: [
+        { id: 'sessionId', label: 'Session ID', value: this.webSessionId, monospace: true, order: 1 },
+        { id: 'url', label: 'URL', value: this.sessionInfoUrl, monospace: true, order: 2 },
+        {
+          id: 'username',
+          label: 'Username',
+          value: this.sessionInfoUsername,
+          hidden: !this.sessionInfoUsername,
+          order: 3,
+        },
+      ],
+      emptyValueText: 'N/A',
+    };
+  }
+
+  private refreshSessionInfo(): void {
+    const next = this.buildSessionInfo();
+    const nextKey = this.buildSessionInfoKey(next);
+    if (nextKey === this.lastSessionInfoKey) {
+      return;
+    }
+
+    this.lastSessionInfoKey = nextKey;
+    this.sessionInfo = next;
+  }
+
+  private buildSessionInfoKey(info: ToolbarSessionInfo): string {
+    const rows = [...info.rows].sort(
+      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
+    );
+
+    return JSON.stringify({
+      title: info.title ?? null,
+      emptyValueText: info.emptyValueText ?? null,
+      rows,
+    });
+  }
+
+  private toUserFacingUrl(url: string | null | undefined): string | null {
+    if (!url) {
+      return null;
+    }
+
+    try {
+      const normalized = new URL(url, window.location.href);
+      normalized.protocol = normalized.protocol === 'wss:' ? 'https:' : 'http:';
+      normalized.search = '';
+      normalized.hash = '';
+      return normalized.toString();
+    } catch {
+      return url;
+    }
   }
 }
