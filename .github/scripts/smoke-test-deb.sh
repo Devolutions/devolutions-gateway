@@ -62,30 +62,13 @@ diagnostics() {
     echo "── Diagnostics ──────────────────────────────────────────────"
     echo ""
     echo "Package metadata:"
-    dpkg -s "$PACKAGE_NAME" 2>/dev/null || echo "  (not installed)"
+    dpkg-deb -I "$PACKAGE_FILE" 2>/dev/null || echo "  (dpkg-deb query failed)"
     echo ""
     echo "Package file list:"
-    dpkg -L "$PACKAGE_NAME" 2>/dev/null || echo "  (not installed)"
+    dpkg-deb -c "$PACKAGE_FILE" 2>/dev/null || echo "  (dpkg-deb query failed)"
     echo ""
     echo "Config directory:"
     ls -la "$CONFIG_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "Binary info:"
-    ls -la "$BINARY" 2>/dev/null || echo "  (not found)"
-    file "$BINARY" 2>/dev/null || true
-    echo ""
-    echo "Dynamic library dependencies (ldd):"
-    ldd "$BINARY" 2>/dev/null || echo "  (ldd failed or binary not found)"
-    echo ""
-    echo "Webapp directory:"
-    ls -laR "$WEBAPP_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "Library directory:"
-    ls -la "$LIB_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "systemd unit files:"
-    UNIT_FILES=$(find /lib/systemd /usr/lib/systemd /etc/systemd -name '*devolutions*' 2>/dev/null || true)
-    if [ -n "$UNIT_FILES" ]; then echo "$UNIT_FILES"; else echo "  (none found)"; fi
     echo "────────────────────────────────────────────────────────────"
 }
 

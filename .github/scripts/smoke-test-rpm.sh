@@ -62,30 +62,13 @@ diagnostics() {
     echo "── Diagnostics ──────────────────────────────────────────────"
     echo ""
     echo "Package metadata:"
-    rpm -qi "$PACKAGE_NAME" 2>/dev/null || echo "  (not installed)"
+    rpm -qip "$PACKAGE_FILE" 2>/dev/null || echo "  (rpm query failed)"
     echo ""
     echo "Package file list:"
-    rpm -ql "$PACKAGE_NAME" 2>/dev/null || echo "  (not installed)"
+    rpm -qlp "$PACKAGE_FILE" 2>/dev/null || echo "  (rpm query failed)"
     echo ""
     echo "Config directory:"
     ls -la "$CONFIG_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "Binary info:"
-    ls -la "$BINARY" 2>/dev/null || echo "  (not found)"
-    file "$BINARY" 2>/dev/null || true
-    echo ""
-    echo "Dynamic library dependencies (ldd):"
-    ldd "$BINARY" 2>/dev/null || echo "  (ldd failed or binary not found)"
-    echo ""
-    echo "Webapp directory:"
-    ls -laR "$WEBAPP_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "Library directory:"
-    ls -la "$LIB_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "systemd unit files:"
-    UNIT_FILES=$(find /lib/systemd /usr/lib/systemd /etc/systemd -name '*devolutions*' 2>/dev/null || true)
-    if [ -n "$UNIT_FILES" ]; then echo "$UNIT_FILES"; else echo "  (none found)"; fi
     echo "────────────────────────────────────────────────────────────"
 }
 
@@ -100,6 +83,11 @@ echo "════════════════════════�
 echo ""
 
 # ── Install ───────────────────────────────────────────────────────────────────
+
+# Rocky Linux 8 minimal images set tsflags=nodocs in dnf.conf, which causes
+# RPM to skip %doc-tagged files (including webapp assets). Clear it so the
+# full package contents are installed, matching a real deployment.
+sed -i 's/^tsflags=.*/tsflags=/' /etc/dnf/dnf.conf 2>/dev/null || true
 
 info "Installing prerequisites…"
 PREREQ_LOG=$(mktemp)
