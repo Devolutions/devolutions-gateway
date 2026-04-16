@@ -107,22 +107,6 @@ container without consuming layout space.
 > **`initial*` inputs** write exactly **once** — on the first binding call at component creation. Later parent expression re-evaluations are ignored so user changes made after mount are never clobbered.
 
 ---
-//TODO move this to proper spot in doc
-### sessionInfoTemplate (optional)
-
-Allows a protocol or host component to override the default session info popover layout.
-
-- Type: TemplateRef<ToolbarSessionInfoTemplateContext>
-- Optional: Yes
-
-By default, the toolbar renders session info using a standard key/value layout based on the provided `sessionInfo` model.
-
-This input is reserved for cases where a protocol requires a custom layout or richer presentation that cannot be achieved using the default row-based model.
-
-Note:
-- This is an advanced override mechanism.
-- It is not currently used by built-in protocols.
-- Prefer the default renderer unless a real customization need exists.
 
 ## Session-scoped preferences
 
@@ -224,6 +208,22 @@ Optional custom template override:
   }
 </ng-template>
 ```
+
+### sessionInfoTemplate (optional)
+
+Allows a protocol or host component to override the default session info popover layout.
+
+- **Type:** `TemplateRef<ToolbarSessionInfoTemplateContext>`
+- **Optional:** Yes
+
+By default, the toolbar renders session info using a standard key/value layout based on the provided `sessionInfo` model.
+
+This input is reserved for cases where a protocol requires a custom layout or richer presentation that cannot be achieved using the default row-based model.
+
+> **Note:**
+> This is an advanced override mechanism.
+> It is not currently used by built-in protocols.
+> Prefer the default renderer unless a real customisation need exists.
 
 ---
 
@@ -626,21 +626,38 @@ floating-session-toolbar/
 
 Do **not** copy the wrappers (`rdp-toolbar-wrapper`, etc.) — you will write new, app-tailored ones in Step 4.
 
-### Step 2 — Fix the `@shared/...` import alias
+### Step 2 — Update host-side imports
 
-Every `import` inside the copied files uses the `gateway-ui`-specific path alias `@shared/...`.
-After copying, do a find-and-replace **inside the copied folder only**:
+The **copied folder itself requires no import changes.** Every file inside
+`floating-session-toolbar/` uses only relative paths (`./models/...`,
+`./utils/...`) and framework imports (`@angular/common`). There are zero
+`@shared/...` references inside the folder.
 
+What *does* need updating are the **host-side files outside the folder** that
+import the toolbar — your wrappers, protocol components, and any file that
+references a toolbar type:
+
+```typescript
+// Before (gateway-ui alias)
+import { FloatingSessionToolbarComponent }
+  from '@shared/components/floating-session-toolbar/floating-session-toolbar.component';
+
+import { ToolbarFeatures, WheelSpeedControl }
+  from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
+
+// After (replace with your app's alias or a relative path)
+import { FloatingSessionToolbarComponent }
+  from '<your-path>/floating-session-toolbar.component';
+
+import { ToolbarFeatures, WheelSpeedControl }
+  from '<your-path>/models/floating-session-toolbar-config.model';
 ```
-Before: @shared/components/floating-session-toolbar/
-After:  <your app's equivalent path or relative path>
-```
 
-For example, if your app places the folder at
-`src/app/shared/components/floating-session-toolbar/` and exposes a `@shared` alias in `tsconfig.json`:
+If your app exposes a `@shared` path alias that resolves to the same location
+you copied the folder into, no changes at all are needed.
 
 ```json
-// tsconfig.json
+// tsconfig.json — example alias that requires no import changes
 {
   "compilerOptions": {
     "paths": {
@@ -650,8 +667,6 @@ For example, if your app places the folder at
 }
 ```
 
-If you prefer relative paths, replace every `@shared/components/floating-session-toolbar/` with the correct relative reference.
-There are **no barrel files** — every import points directly to its source file.
 
 ### Step 3 — Register the font
 
@@ -770,7 +785,7 @@ the rest:
 ```typescript
 // Inside your protocol component, after the remote client is ready:
 this.setupClipboardHandling(this.formData?.autoClipboard);
-// this.clipboardActionButtons is now ready to pass to the wrapper.
+// this.clipboardActionButtons is now ready to pass to `[actions]`
 ```
 
 **If your app does NOT use `DesktopWebClientBaseComponent`**, replicate the method in your own base or

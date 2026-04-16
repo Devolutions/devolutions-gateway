@@ -35,7 +35,6 @@ export class WebClientTelnetComponent
 {
   @Input() webSessionId: string;
 
-  @ViewChild('sessionTelnetContainer') sessionContainerElement: ElementRef;
   @ViewChild('webTelnetGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: TelnetFormDataInput;

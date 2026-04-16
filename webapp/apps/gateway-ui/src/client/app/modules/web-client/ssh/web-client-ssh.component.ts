@@ -31,7 +31,6 @@ export class WebClientSshComponent
 {
   @Input() webSessionId: string;
 
-  @ViewChild('sessionSshContainer') sessionContainerElement: ElementRef;
   @ViewChild('webSSHGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: SSHFormDataInput;

@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
+import { Component, OnDestroy, OnInit, Renderer2 } from '@angular/core';
 import { Backend, displayControl, kdcProxyUrl, preConnectionBlob, RdpFile } from '@devolutions/iron-remote-desktop-rdp';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
@@ -32,8 +32,6 @@ export class WebClientRdpComponent
   extends DesktopWebClientBaseComponent<RdpFormDataInput>
   implements OnInit, OnDestroy
 {
-  @ViewChild('sessionRdpContainer') sessionContainerElement: ElementRef;
-
   backendRef = Backend;
   rdpConfig: string | null;
 
@@ -119,13 +117,6 @@ export class WebClientRdpComponent
 
   protected handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
-
-    const sessionContainerElement = this.sessionContainerElement.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
-    }
 
     this.scaleTo(ScreenScale.Fit);
   }
