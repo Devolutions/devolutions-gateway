@@ -104,9 +104,11 @@ fn run() -> anyhow::Result<()> {
             cfg_if! { if #[cfg(target_os = "linux")] {
                 controller.config = Some(r#"
                         [Unit]
+                        Description=Devolutions Gateway
                         After=network-online.target
 
                         [Service]
+                        ExecStart=
                         ExecStart=/usr/bin/devolutions-gateway --service
                         Restart=on-failure
 

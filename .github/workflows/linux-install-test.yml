@@ -12,9 +12,8 @@ name: Linux Install Tests
 #   - Consumes the merged `devolutions-gateway` artifact from ci.yml.
 #   - Runs package installation tests inside Docker containers on
 #     GitHub-hosted runners (x86_64 only).
-#   - DEB lane: Ubuntu 18.04 container (minimum supported distro; the binary
-#     is built against an Ubuntu 18.04 sysroot / glibc 2.27).
-#   - RPM lane: Rocky Linux 9 container (RHEL 9-compatible).
+#   - DEB lane: Ubuntu 18.04, 20.04, 22.04, 24.04 containers.
+#   - RPM lane: Rocky Linux 8, 9 containers (RHEL-compatible).
 #   - Tests are split into:
 #       1. Mandatory package smoke tests (must pass).
 #       2. Best-effort systemd service tests (informational only).
@@ -26,8 +25,7 @@ name: Linux Install Tests
 #     infrastructure required.
 #   - Container-based: Close enough to real distros for catching packaging
 #     regressions, though not a perfect replica of production systems.
-#   - RHEL 9-compatible (Rocky Linux 9): Free, widely-used RHEL 9 rebuild;
-#     no exact RHEL version matching is required.
+#   - Rocky Linux (8, 9): Free, widely-used RHEL-compatible rebuilds.
 #   - x86_64 only: GitHub-hosted runners are x86_64; ARM64 packages would
 #     require QEMU or ARM runners, not worth the complexity for v1.
 #   - Service testing is best-effort: systemd inside Docker containers is
@@ -152,7 +150,27 @@ jobs:
             container-image: "ubuntu:18.04"
             test-script: ".github/scripts/smoke-test-deb.sh"
             package-pattern: "*.deb"
-          # RPM lane: Rocky Linux 9 (RHEL 9-compatible)
+          - package-type: deb
+            display-name: "DEB Install Test (Ubuntu 20.04)"
+            container-image: "ubuntu:20.04"
+            test-script: ".github/scripts/smoke-test-deb.sh"
+            package-pattern: "*.deb"
+          - package-type: deb
+            display-name: "DEB Install Test (Ubuntu 22.04)"
+            container-image: "ubuntu:22.04"
+            test-script: ".github/scripts/smoke-test-deb.sh"
+            package-pattern: "*.deb"
+          - package-type: deb
+            display-name: "DEB Install Test (Ubuntu 24.04)"
+            container-image: "ubuntu:24.04"
+            test-script: ".github/scripts/smoke-test-deb.sh"
+            package-pattern: "*.deb"
+          # RPM lane: Rocky Linux 8, 9 (RHEL-compatible)
+          - package-type: rpm
+            display-name: "RPM Install Test (Rocky Linux 8)"
+            container-image: "rockylinux:8"
+            test-script: ".github/scripts/smoke-test-rpm.sh"
+            package-pattern: "*.rpm"
           - package-type: rpm
             display-name: "RPM Install Test (Rocky Linux 9)"
             container-image: "rockylinux:9"

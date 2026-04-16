@@ -867,7 +867,7 @@ class TlkRecipe
         $s = New-Changelog -Format 'RpmPackaging' -InputFile $UpstreamChangelogFile -Packager $Packager -Email $Email
         Set-Content -Path $RpmPackagingChangelogFile -Value $s
 
-        $FpmArgs = @(
+        $FpmOptions = @(
             '--force'
             '--verbose'
             '-s', 'dir'
@@ -882,24 +882,30 @@ class TlkRecipe
             '--license', 'Apache-2.0 OR MIT'
             '--rpm-attr', "755,root,root:/usr/bin/$PkgName"
             '--rpm-changelog', $RpmPackagingChangelogFile
-             '--after-install', "$InputPackagePath/$($this.Product)/rpm/postinst"
+            '--after-install', "$InputPackagePath/$($this.Product)/rpm/postinst"
             '--before-remove', "$InputPackagePath/$($this.Product)/rpm/prerm"
             '--after-remove', "$InputPackagePath/$($this.Product)/rpm/postrm"
-            '--'
+        )
+
+        $FpmFiles = @(
             "$Executable=/usr/bin/$PkgName"
             "$RpmUpstreamChangelogFile=/usr/share/doc/$PkgName/ChangeLog"
             "$CopyrightFile=/usr/share/doc/$PkgName/copyright"
         )
 
         if ($this.Product -eq "gateway") {
-            $FpmArgs += @(
-                "$DGatewayWebClient=/usr/share/devolutions-gateway/webapp/client",
-                "$DGatewayWebPlayer=/usr/share/devolutions-gateway/webapp/player",
+            $FpmOptions += '--rpm-attr', '644,root,root:/usr/lib/systemd/system/devolutions-gateway.service'
+            $FpmOptions += '--rpm-attr', '644,root,root:/usr/lib/systemd/system-preset/85-devolutions-gateway.preset'
+            $FpmFiles += @(
+                "$InputPackagePath/gateway/rpm/service=/usr/lib/systemd/system/devolutions-gateway.service",
+                "$InputPackagePath/gateway/rpm/preset=/usr/lib/systemd/system-preset/85-devolutions-gateway.preset",
+                "$DGatewayWebClient/=/usr/share/devolutions-gateway/webapp/client",
+                "$DGatewayWebPlayer/=/usr/share/devolutions-gateway/webapp/player",
                 "$DGatewayLibXmf=/usr/lib/devolutions-gateway/libxmf.so"
             )
         }
 
-        & 'fpm' @FpmArgs | Out-Host
+        & 'fpm' @FpmOptions '--' @FpmFiles | Out-Host
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
             $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
