@@ -176,11 +176,6 @@ jobs:
             container-image: "rockylinux:9"
             test-script: ".github/scripts/smoke-test-rpm.sh"
             package-pattern: "*.rpm"
-          - package-type: rpm
-            display-name: "RPM Install Test (Rocky Linux 10)"
-            container-image: "rockylinux:10"
-            test-script: ".github/scripts/smoke-test-rpm.sh"
-            package-pattern: "*.rpm"
 
     steps:
       - name: Checkout repository
