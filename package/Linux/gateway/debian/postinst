@@ -8,6 +8,7 @@ fi
 /bin/chmod 750 /etc/devolutions-gateway
 
 /usr/bin/devolutions-gateway --config-init-only >/dev/null
+/bin/chmod 600 /etc/devolutions-gateway/gateway.json
 
 # Automatically added by dh_installsystemd/13.18ubuntu2.1
 if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then

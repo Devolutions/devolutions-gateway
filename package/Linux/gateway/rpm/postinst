@@ -8,6 +8,7 @@ fi
 /bin/chmod 750 /etc/devolutions-gateway
 
 /usr/bin/devolutions-gateway --config-init-only >/dev/null
+/bin/chmod 600 /etc/devolutions-gateway/gateway.json
 
 # Equivalent to %systemd_post: reload units, then preset (enable) on fresh install only.
 if [ -d /run/systemd/system ]; then

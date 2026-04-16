@@ -168,12 +168,27 @@ check_single_execstart() {
     fi
 }
 
+check_config_file_permissions() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        fail "Config file not found, cannot check permissions: $CONFIG_FILE"
+        return
+    fi
+    local perms
+    perms=$(stat -c '%a' "$CONFIG_FILE" 2>/dev/null)
+    if [ "$perms" = "600" ]; then
+        pass "Config file has secure permissions ($perms): $CONFIG_FILE"
+    else
+        fail "Config file has insecure permissions ($perms, expected 600): $CONFIG_FILE"
+    fi
+}
+
 check_provisioner_key() {
     info "Generating RSA-2048 provisioner key pair with openssl…"
     KEY_LOG=$(mktemp)
     if openssl genrsa -out "$CONFIG_DIR/provisioner.key" 2048 >"$KEY_LOG" 2>&1 \
         && openssl rsa -in "$CONFIG_DIR/provisioner.key" \
                -pubout -out "$CONFIG_DIR/provisioner.pem" >>"$KEY_LOG" 2>&1; then
+        chmod 600 "$CONFIG_DIR/provisioner.key"
         pass "Provisioner key pair generated: $CONFIG_DIR/provisioner.pem"
     else
         echo "openssl output:"
@@ -184,32 +199,35 @@ check_provisioner_key() {
 }
 
 check_service_health() {
-    info "Checking service health…"
-
     local health_url="http://localhost:7171/jet/health"
     local gateway_pid=""
+    local gateway_log=""
 
     if systemd_and_unit_available; then
         info "systemd available — using systemctl start/stop"
         if ! systemctl start devolutions-gateway >/dev/null 2>&1; then
             fail "systemctl start devolutions-gateway failed"
+            echo "Service logs:"
+            journalctl -u devolutions-gateway --no-pager -n 50 2>/dev/null || true
             return
         fi
     else
         info "systemd not available — starting binary directly"
-        "$BINARY" &
+        gateway_log=$(mktemp)
+        "$BINARY" 2>"$gateway_log" &
         gateway_pid=$!
     fi
 
     # Wait for the service to be ready (up to 10 s).
     local i=0
     while [ "$i" -lt 10 ]; do
-        curl -sf "$health_url" >/dev/null 2>&1 && break
+        curl -sf -H 'Accept: application/json' "$health_url" >/dev/null 2>&1 && break
         sleep 1
         i=$((i + 1))
     done
 
-    HEALTH_OUTPUT=$(curl -sf "$health_url" 2>/dev/null) && HEALTH_RC=$? || HEALTH_RC=$?
+    local health_output health_rc
+    health_output=$(curl -sf -H 'Accept: application/json' "$health_url" 2>/dev/null) && health_rc=$? || health_rc=$?
 
     # Stop the service.
     if systemd_and_unit_available; then
@@ -219,11 +237,30 @@ check_service_health() {
         wait "$gateway_pid" 2>/dev/null || true
     fi
 
-    if [ "$HEALTH_RC" -eq 0 ]; then
-        pass "Health endpoint responded: $HEALTH_OUTPUT"
+    if [ "$health_rc" -eq 0 ]; then
+        pass "Health endpoint responded: $health_output"
+        # Verify the version field in the health response matches expected.
+        local health_version
+        health_version=$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('version',''))" <<< "$health_output" 2>/dev/null) || health_version=""
+        if [ -n "$health_version" ] && echo "$health_version" | grep -qF "$VERSION"; then
+            pass "Health response version ($health_version) matches expected ($VERSION)"
+        elif [ -n "$health_version" ]; then
+            fail "Health response version ($health_version) does not match expected ($VERSION)"
+        else
+            warn "Could not extract version from health response"
+        fi
     else
-        fail "Health endpoint did not respond at $health_url"
+        fail "Health endpoint did not respond at $health_url after 10 s"
+        if systemd_and_unit_available; then
+            echo "Service logs:"
+            journalctl -u devolutions-gateway --no-pager -n 50 2>/dev/null || true
+        elif [ -n "$gateway_log" ] && [ -f "$gateway_log" ]; then
+            echo "Gateway process output:"
+            cat "$gateway_log"
+        fi
     fi
+
+    [ -n "$gateway_log" ] && rm -f "$gateway_log"
 }
 
 check_post_uninstall() {

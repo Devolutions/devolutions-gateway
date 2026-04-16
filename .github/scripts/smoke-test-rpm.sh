@@ -113,6 +113,13 @@ else
     diagnostics
     summary
 fi
+# Rocky Linux ships curl-minimal which conflicts with the full curl package.
+# Verify the binary is available (provided by curl-minimal) rather than
+# installing curl explicitly.
+if ! command -v curl >/dev/null 2>&1; then
+    fail "curl binary not found; expected curl-minimal to be present on Rocky Linux"
+    summary
+fi
 
 info "Installing package: $(basename "$PACKAGE_FILE")"
 # Use dnf to resolve and satisfy dependencies automatically.
@@ -163,6 +170,11 @@ check_binary_help
 info "Checking config initialization…"
 check_config_init
 
+# ── Config file permissions ───────────────────────────────────────────────────
+
+info "Checking config file permissions…"
+check_config_file_permissions
+
 # ── systemd unit file ─────────────────────────────────────────────────────────
 # The .rpm package bundles the unit file directly, so it must be present
 # after installation regardless of whether systemd is running.
@@ -175,6 +187,35 @@ check_unit_file "fail"
 
 info "Checking service file has exactly one ExecStart directive…"
 check_single_execstart
+
+# ── Preset file ───────────────────────────────────────────────────────────────
+# The .rpm package bundles a preset file so systemctl preset enables the service.
+
+info "Checking systemd preset file…"
+PRESET_FILE=/usr/lib/systemd/system-preset/85-devolutions-gateway.preset
+if [ -f "$PRESET_FILE" ]; then
+    pass "Preset file exists: $PRESET_FILE"
+    if grep -q 'enable devolutions-gateway.service' "$PRESET_FILE"; then
+        pass "Preset file enables devolutions-gateway.service"
+    else
+        fail "Preset file does not contain 'enable devolutions-gateway.service': $PRESET_FILE"
+    fi
+else
+    fail "Preset file not found: $PRESET_FILE"
+fi
+
+# ── Service enabled via systemd ───────────────────────────────────────────────
+# Verify that systemctl preset (run by postinst) actually enabled the service.
+
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    info "Checking service is enabled via systemd…"
+    ENABLED_STATUS=$(systemctl is-enabled devolutions-gateway 2>/dev/null || echo "disabled")
+    if [ "$ENABLED_STATUS" = "enabled" ]; then
+        pass "Service is enabled after install: $ENABLED_STATUS"
+    else
+        fail "Service is not enabled after install ($ENABLED_STATUS, expected 'enabled')"
+    fi
+fi
 
 # ── Provisioner key ───────────────────────────────────────────────────────────
 # The gateway requires a provisioner public key to start.

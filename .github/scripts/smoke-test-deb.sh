@@ -165,6 +165,11 @@ check_binary_help
 info "Checking config initialization…"
 check_config_init
 
+# ── Config file permissions ───────────────────────────────────────────────────
+
+info "Checking config file permissions…"
+check_config_file_permissions
+
 # ── systemd unit file ─────────────────────────────────────────────────────────
 # The .deb package installs the unit file via dh_installsystemd,
 # so it must be present regardless of whether systemd is running.
