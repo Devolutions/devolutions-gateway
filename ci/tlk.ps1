@@ -842,9 +842,9 @@ class TlkRecipe
             # Copy to output/gateway/debian
             Copy-Item "$ScriptPath/service" $OutputDebianPath -Force
 
-            # Copy to output/gateway (copy contents, not the directory itself)
-            Copy-Item "$DGatewayWebClient/*" "$OutputPackagePath/client" -Recurse -Force
-            Copy-Item "$DGatewayWebPlayer/*" "$OutputPackagePath/player" -Recurse -Force
+            # Copy to output/gateway
+            Copy-Item $DGatewayWebClient "$OutputPackagePath/client" -Recurse -Force
+            Copy-Item $DGatewayWebPlayer "$OutputPackagePath/player" -Recurse -Force
             Copy-Item $DGatewayLibXmf "$OutputPackagePath/libxmf.so" -Force
         }
 
