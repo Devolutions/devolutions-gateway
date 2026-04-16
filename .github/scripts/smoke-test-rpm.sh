@@ -84,11 +84,6 @@ echo ""
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
-# Rocky Linux 8 minimal images set tsflags=nodocs in dnf.conf, which causes
-# RPM to skip %doc-tagged files (including webapp assets). Clear it so the
-# full package contents are installed, matching a real deployment.
-sed -i 's/^tsflags=.*/tsflags=/' /etc/dnf/dnf.conf 2>/dev/null || true
-
 info "Installing prerequisites…"
 PREREQ_LOG=$(mktemp)
 if dnf install -y -q file python3 openssl > "$PREREQ_LOG" 2>&1; then

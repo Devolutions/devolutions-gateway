@@ -36,9 +36,11 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
 	if [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
 		systemctl --system daemon-reload >/dev/null || true
 		if [ -n "$2" ]; then
-			# Upgrade: restart only if already running.
-			deb-systemd-invoke try-restart 'devolutions-gateway.service' >/dev/null || true
+			_dh_action=restart
+		else
+			_dh_action=start
 		fi
+		deb-systemd-invoke $_dh_action 'devolutions-gateway.service' >/dev/null || true
 	fi
 fi
 # End automatically added section
