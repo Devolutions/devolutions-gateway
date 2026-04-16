@@ -4,14 +4,17 @@ set -e
 
 if [ ! -d /etc/devolutions-gateway ]; then
 	/bin/mkdir /etc/devolutions-gateway
-	/bin/chmod 750 /etc/devolutions-gateway
 fi
+/bin/chmod 750 /etc/devolutions-gateway
 
 /usr/bin/devolutions-gateway --config-init-only >/dev/null
 
-# Equivalent to %systemd_post: preset (enable) on fresh install only.
-if [ -d /run/systemd/system ] && [ "$1" -eq 1 ]; then
-	systemctl preset devolutions-gateway.service >/dev/null 2>&1 || true
+# Equivalent to %systemd_post: reload units, then preset (enable) on fresh install only.
+if [ -d /run/systemd/system ]; then
+	systemctl daemon-reload >/dev/null 2>&1 || true
+	if [ "$1" -eq 1 ]; then
+		systemctl preset devolutions-gateway.service >/dev/null 2>&1 || true
+	fi
 fi
 
 if [ "$1" -eq 1 ]; then

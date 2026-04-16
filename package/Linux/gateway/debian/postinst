@@ -4,8 +4,8 @@ set -e
 
 if [ ! -d /etc/devolutions-gateway ]; then
 	/bin/mkdir /etc/devolutions-gateway
-	/bin/chmod 750 /etc/devolutions-gateway
 fi
+/bin/chmod 750 /etc/devolutions-gateway
 
 /usr/bin/devolutions-gateway --config-init-only >/dev/null
 
