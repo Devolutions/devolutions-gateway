@@ -21,7 +21,6 @@ import { DVL_TELNET_ICON, JET_TELNET_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WebComponentReady } from '@shared/bases/base-web-client.component';
 import { TerminalWebClientBaseComponent } from '@shared/bases/terminal-web-client-base.component';
-import { ToolbarSessionInfo } from '@shared/components/floating-session-toolbar/models/session-info.model';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 
 @Component({
@@ -40,10 +39,6 @@ export class WebClientTelnetComponent
   @ViewChild('webTelnetGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: TelnetFormDataInput;
-  sessionInfo: ToolbarSessionInfo = { rows: [], emptyValueText: 'N/A' };
-  private sessionInfoUrl: string | null = null;
-  private sessionInfoUsername: string | null = null;
-  private lastSessionInfoKey = '';
 
   private remoteTerminal: TelnetTerminal;
   // unsubscribeTerminalEvent, unsubscribeConnectionListener, removeRemoteTerminalListener()
@@ -227,61 +222,5 @@ export class WebClientTelnetComponent
 
   protected getProtocol(): ProtocolString {
     return 'Telnet';
-  }
-
-  private buildSessionInfo(): ToolbarSessionInfo {
-    return {
-      rows: [
-        { id: 'sessionId', label: 'Session ID', value: this.webSessionId, monospace: true, order: 1 },
-        { id: 'url', label: 'URL', value: this.sessionInfoUrl, monospace: true, order: 2 },
-        {
-          id: 'username',
-          label: 'Username',
-          value: this.sessionInfoUsername,
-          hidden: !this.sessionInfoUsername,
-          order: 3,
-        },
-      ],
-      emptyValueText: 'N/A',
-    };
-  }
-
-  private refreshSessionInfo(): void {
-    const next = this.buildSessionInfo();
-    const nextKey = this.buildSessionInfoKey(next);
-    if (nextKey === this.lastSessionInfoKey) {
-      return;
-    }
-
-    this.lastSessionInfoKey = nextKey;
-    this.sessionInfo = next;
-  }
-
-  private buildSessionInfoKey(info: ToolbarSessionInfo): string {
-    const rows = [...info.rows].sort(
-      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
-    );
-
-    return JSON.stringify({
-      title: info.title ?? null,
-      emptyValueText: info.emptyValueText ?? null,
-      rows,
-    });
-  }
-
-  private toUserFacingUrl(url: string | null | undefined): string | null {
-    if (!url) {
-      return null;
-    }
-
-    try {
-      const normalized = new URL(url, window.location.href);
-      normalized.protocol = normalized.protocol === 'wss:' ? 'https:' : 'http:';
-      normalized.search = '';
-      normalized.hash = '';
-      return normalized.toString();
-    } catch {
-      return url;
-    }
   }
 }

@@ -19,7 +19,6 @@ import { ActivatedRoute } from '@angular/router';
 import { SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
 import { DVL_RDP_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { ToolbarSessionInfo } from '@shared/components/floating-session-toolbar/models/session-info.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { NavigationService } from '@shared/services/navigation.service';
 
@@ -42,10 +41,7 @@ export class WebClientRdpComponent
   useUnicodeKeyboard = false;
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
-  sessionInfo: ToolbarSessionInfo = { rows: [], emptyValueText: 'N/A' };
-  private sessionInfoUrl: string | null = null;
-  private sessionInfoUsername: string | null = null;
-  private lastSessionInfoKey = '';
+  // sessionInfo / sessionInfoUrl / sessionInfoUsername / refreshSessionInfo() inherited from WebClientBaseComponent
   // ──
 
   private componentResizeObserverDisconnect?: () => void;
@@ -256,22 +252,6 @@ export class WebClientRdpComponent
     return gatewayHttpAddress.toString().replace('http', 'ws');
   }
 
-  private toUserFacingUrl(url: string | null | undefined): string | null {
-    if (!url) {
-      return null;
-    }
-
-    try {
-      const normalized = new URL(url, window.location.href);
-      normalized.protocol = normalized.protocol === 'wss:' ? 'https:' : 'http:';
-      normalized.search = '';
-      normalized.hash = '';
-      return normalized.toString();
-    } catch {
-      return url;
-    }
-  }
-
   private setScreenSizeScale(screenSize: ScreenSize): Observable<void> {
     if (screenSize === ScreenSize.FullScreen) {
       this.scaleTo(ScreenScale.Full);
@@ -338,45 +318,5 @@ export class WebClientRdpComponent
 
   protected getProtocol(): ProtocolString {
     return 'RDP';
-  }
-
-  private buildSessionInfo(): ToolbarSessionInfo {
-    return {
-      rows: [
-        { id: 'sessionId', label: 'Session ID', value: this.webSessionId, monospace: true, order: 1 },
-        { id: 'url', label: 'URL', value: this.sessionInfoUrl, monospace: true, order: 2 },
-        {
-          id: 'username',
-          label: 'Username',
-          value: this.sessionInfoUsername,
-          hidden: !this.sessionInfoUsername,
-          order: 3,
-        },
-      ],
-      emptyValueText: 'N/A',
-    };
-  }
-
-  private refreshSessionInfo(): void {
-    const next = this.buildSessionInfo();
-    const nextKey = this.buildSessionInfoKey(next);
-    if (nextKey === this.lastSessionInfoKey) {
-      return;
-    }
-
-    this.lastSessionInfoKey = nextKey;
-    this.sessionInfo = next;
-  }
-
-  private buildSessionInfoKey(info: ToolbarSessionInfo): string {
-    const rows = [...info.rows].sort(
-      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
-    );
-
-    return JSON.stringify({
-      title: info.title ?? null,
-      emptyValueText: info.emptyValueText ?? null,
-      rows,
-    });
   }
 }

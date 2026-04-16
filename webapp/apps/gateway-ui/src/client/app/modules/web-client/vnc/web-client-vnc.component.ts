@@ -27,7 +27,6 @@ import {
 import { DVL_VNC_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 import { WheelSpeedControl } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
-import { ToolbarSessionInfo } from '@shared/components/floating-session-toolbar/models/session-info.model';
 import { Encoding } from '@shared/enums/encoding.enum';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
@@ -50,10 +49,7 @@ export class WebClientVncComponent
   // ── Floating toolbar state ─────────────────────────────────────────────────
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
-  sessionInfo: ToolbarSessionInfo = { rows: [], emptyValueText: 'N/A' };
-  private sessionInfoUrl: string | null = null;
-  private sessionInfoUsername: string | null = null;
-  private lastSessionInfoKey = '';
+  // sessionInfo / sessionInfoUrl / sessionInfoUsername / refreshSessionInfo() inherited from WebClientBaseComponent
 
   wheelSpeed = 1;
   readonly wheelSpeedControl: WheelSpeedControl = {
@@ -297,61 +293,5 @@ export class WebClientVncComponent
 
   protected getProtocol(): ProtocolString {
     return 'VNC';
-  }
-
-  private buildSessionInfo(): ToolbarSessionInfo {
-    return {
-      rows: [
-        { id: 'sessionId', label: 'Session ID', value: this.webSessionId, monospace: true, order: 1 },
-        { id: 'url', label: 'URL', value: this.sessionInfoUrl, monospace: true, order: 2 },
-        {
-          id: 'username',
-          label: 'Username',
-          value: this.sessionInfoUsername,
-          hidden: !this.sessionInfoUsername,
-          order: 3,
-        },
-      ],
-      emptyValueText: 'N/A',
-    };
-  }
-
-  private refreshSessionInfo(): void {
-    const next = this.buildSessionInfo();
-    const nextKey = this.buildSessionInfoKey(next);
-    if (nextKey === this.lastSessionInfoKey) {
-      return;
-    }
-
-    this.lastSessionInfoKey = nextKey;
-    this.sessionInfo = next;
-  }
-
-  private buildSessionInfoKey(info: ToolbarSessionInfo): string {
-    const rows = [...info.rows].sort(
-      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
-    );
-
-    return JSON.stringify({
-      title: info.title ?? null,
-      emptyValueText: info.emptyValueText ?? null,
-      rows,
-    });
-  }
-
-  private toUserFacingUrl(url: string | null | undefined): string | null {
-    if (!url) {
-      return null;
-    }
-
-    try {
-      const normalized = new URL(url, window.location.href);
-      normalized.protocol = normalized.protocol === 'wss:' ? 'https:' : 'http:';
-      normalized.search = '';
-      normalized.hash = '';
-      return normalized.toString();
-    } catch {
-      return url;
-    }
   }
 }

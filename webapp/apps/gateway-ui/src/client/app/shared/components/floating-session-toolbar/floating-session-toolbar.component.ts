@@ -1,4 +1,4 @@
-import { NgTemplateOutlet } from '@angular/common';
+import { NgClass, NgTemplateOutlet } from '@angular/common';
 import {
   Component,
   ElementRef,
@@ -30,7 +30,7 @@ import { clampPosition, getDropzoneRects, isNearToolbar } from './utils/floating
 @Component({
   selector: 'floating-session-toolbar',
   standalone: true,
-  imports: [NgTemplateOutlet],
+  imports: [NgClass, NgTemplateOutlet],
   templateUrl: './floating-session-toolbar.component.html',
   styleUrls: ['./floating-session-toolbar.component.scss'],
 })
@@ -63,7 +63,10 @@ export class FloatingSessionToolbarComponent implements OnDestroy {
   @Input() set initialAutoHide(value: boolean) {
     if (this._initFlags.autoHide) return;
     this._initFlags.autoHide = true;
-    this.autoHide = value;
+
+    if (value) {
+      this.enableAutoHide();
+    }
   }
   @Input() set initialDynamicResize(value: boolean) {
     if (this._initFlags.dynamicResize) return;
@@ -487,7 +490,7 @@ export class FloatingSessionToolbarComponent implements OnDestroy {
     if (!event.isPrimary) return; // ignore non-primary touch points (multi-touch)
     event.preventDefault();
     event.stopPropagation();
-    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+    (event.currentTarget as HTMLElement | null)?.setPointerCapture(event.pointerId);
     this.showMenu = false; // close menu if open before drag captures all input
     this.showSessionInfoPopover = false;
 

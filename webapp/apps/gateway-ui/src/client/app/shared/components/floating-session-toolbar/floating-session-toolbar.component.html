@@ -1,7 +1,7 @@
 <div
   #toolbarEl
   class="floating-session-toolbar"
-  [class]="dockClass"
+  [ngClass]="dockClass"
   [class.is-dragging]="isDragging"
   [class.theme-light]="themeIsSet ? theme === 'light' : whiteBackground"
   [class.is-hidden]="isHidden"
@@ -110,6 +110,7 @@
             [class.dropdown-item-label-disabled]="toolbarMode === 'free'">Auto-hide toolbar</span>
           <button
             class="toggle-switch"
+            role="switch"
             [class.is-on]="autoHide"
             type="button"
             [attr.aria-checked]="autoHide"
@@ -125,6 +126,7 @@
             <span class="dropdown-item-label">White background</span>
             <button
               class="toggle-switch"
+              role="switch"
               [class.is-on]="whiteBackground"
               type="button"
               [attr.aria-checked]="whiteBackground"
@@ -179,7 +181,7 @@
             <div class="dropdown-row">
               <span class="dropdown-item-label"
                 [class.dropdown-item-label-disabled]="!dynamicResizeSupported">Dynamic resize</span>
-              <button class="toggle-switch" [class.is-on]="dynamicResize"
+              <button class="toggle-switch" role="switch" [class.is-on]="dynamicResize"
                 type="button" [attr.aria-checked]="dynamicResize"
                 [disabled]="!dynamicResizeSupported"
                 (click)="toggleDynamicResize()">
@@ -191,7 +193,7 @@
           @if (features.unicodeKeyboard) {
             <div class="dropdown-row">
               <span class="dropdown-item-label">Unicode keyboard mode</span>
-              <button class="toggle-switch" [class.is-on]="unicodeKeyboard"
+              <button class="toggle-switch" role="switch" [class.is-on]="unicodeKeyboard"
                 type="button" [attr.aria-checked]="unicodeKeyboard"
                 (click)="toggleUnicodeKeyboard()">
                 <span class="toggle-thumb"></span>
@@ -202,7 +204,7 @@
           @if (features.cursorCrosshair) {
             <div class="dropdown-row">
               <span class="dropdown-item-label">Show cursor as crosshair</span>
-              <button class="toggle-switch" [class.is-on]="cursorCrosshair"
+              <button class="toggle-switch" role="switch" [class.is-on]="cursorCrosshair"
                 type="button" [attr.aria-checked]="cursorCrosshair"
                 (click)="toggleCursorCrosshair()">
                 <span class="toggle-thumb"></span>
@@ -285,7 +287,7 @@
               <div
                 class="session-info-value"
                 [class.session-info-value-monospace]="entry.row.monospace"
-                [class]="entry.toneClass ?? ''"
+                [ngClass]="entry.toneClass"
               >
                 {{ entry.displayValue }}
               </div>
