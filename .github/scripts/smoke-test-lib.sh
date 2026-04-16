@@ -72,10 +72,10 @@ check_webapp() {
         fail "Webapp directory missing: $WEBAPP_DIR"
     fi
     for app in client player; do
-        if find "$WEBAPP_DIR/$app" -name 'index.html' 2>/dev/null | grep -q .; then
-            pass "Webapp $app contains index.html"
+        if [ -f "$WEBAPP_DIR/$app/index.html" ]; then
+            pass "Webapp $app entry point exists: $WEBAPP_DIR/$app/index.html"
         else
-            fail "Webapp $app missing index.html"
+            fail "Webapp $app entry point missing: $WEBAPP_DIR/$app/index.html"
         fi
     done
 }

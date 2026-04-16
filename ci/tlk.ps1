@@ -842,9 +842,9 @@ class TlkRecipe
             # Copy to output/gateway/debian
             Copy-Item "$ScriptPath/service" $OutputDebianPath -Force
 
-            # Copy to output/gateway
-            Copy-Item $DGatewayWebClient "$OutputPackagePath/client" -Recurse -Force
-            Copy-Item $DGatewayWebPlayer "$OutputPackagePath/player" -Recurse -Force
+            # Copy to output/gateway (copy contents, not the directory itself)
+            Copy-Item "$DGatewayWebClient/*" "$OutputPackagePath/client" -Recurse -Force
+            Copy-Item "$DGatewayWebPlayer/*" "$OutputPackagePath/player" -Recurse -Force
             Copy-Item $DGatewayLibXmf "$OutputPackagePath/libxmf.so" -Force
         }
 
@@ -899,8 +899,8 @@ class TlkRecipe
             $FpmFiles += @(
                 "$InputPackagePath/gateway/rpm/service=/usr/lib/systemd/system/devolutions-gateway.service",
                 "$InputPackagePath/gateway/rpm/preset=/usr/lib/systemd/system-preset/85-devolutions-gateway.preset",
-                "$DGatewayWebClient=/usr/share/devolutions-gateway/webapp/client",
-                "$DGatewayWebPlayer=/usr/share/devolutions-gateway/webapp/player",
+                "$DGatewayWebClient/=/usr/share/devolutions-gateway/webapp/client",
+                "$DGatewayWebPlayer/=/usr/share/devolutions-gateway/webapp/player",
                 "$DGatewayLibXmf=/usr/lib/devolutions-gateway/libxmf.so"
             )
         }
