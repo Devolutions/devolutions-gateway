@@ -78,7 +78,7 @@ diagnostics() {
     ldd "$BINARY" 2>/dev/null || echo "  (ldd failed or binary not found)"
     echo ""
     echo "Webapp directory:"
-    ls -laR "$WEBAPP_DIR/" 2>/dev/null | head -40 || echo "  (not found)"
+    ls -laR "$WEBAPP_DIR/" 2>/dev/null || echo "  (not found)"
     echo ""
     echo "Library directory:"
     ls -la "$LIB_DIR/" 2>/dev/null || echo "  (not found)"
