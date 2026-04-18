@@ -1,5 +1,16 @@
 # Packaging changelog
 
+## 2026.1.2 (2026-04-18)
+
+- RPM: bundles the systemd unit file directly in the package, eliminating the `service register` post-install call that caused a systemd startup failure on RHEL/Rocky Linux.
+- RPM: ships a systemd preset file (`85-devolutions-gateway.preset`) so the service is enabled on fresh install on RHEL/Rocky Linux (which defaults to `disable *` for unknown units).
+- RPM: rewrites `%post`, `%preun`, and `%postun` scripts with correct systemd lifecycle semantics (enable on fresh install; try-restart on upgrade; disable on erase).
+- RPM: fixes `%preun`/`%postun` scripts to use RPM numeric arguments (`$1`) instead of Debian-style strings.
+- RPM: preserves config on removal (RPM has no purge concept).
+- DEB: mirrors RPM service lifecycle — enable on fresh install but do not start; try-restart on upgrade.
+- Both: config directory permissions hardened to 750.
+- Both: print a post-install message directing the admin to configure `gateway.json` and start the service.
+
 ## 2026.1.1 (2026-04-01)
 
 - Fixes the minimum glibc version declared in the Debian package manifest (was 2.31, now correctly 2.27), allowing installation on older distributions such as Ubuntu 18.04.
