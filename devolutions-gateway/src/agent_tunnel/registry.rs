@@ -1,12 +1,13 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use agent_tunnel_proto::DomainAdvertisement;
-use dashmap::DashMap;
 use ipnetwork::Ipv4Network;
 use parking_lot::RwLock;
 use serde::Serialize;
+use tokio::sync::RwLock as TokioRwLock;
 use uuid::Uuid;
 
 /// Duration after which an agent is considered offline if no heartbeat has been received.
@@ -151,33 +152,33 @@ impl AgentPeer {
 /// Thread-safe registry of online QUIC-connected agents.
 ///
 /// Agents are indexed by their `Uuid`. The registry supports concurrent reads and writes
-/// through `DashMap`, and provides route-based agent lookup for proxy target resolution.
+/// through a `tokio::sync::RwLock<HashMap>`, and provides route-based agent lookup for proxy target resolution.
 #[derive(Debug, Clone)]
 pub struct AgentRegistry {
-    agents: Arc<DashMap<Uuid, Arc<AgentPeer>>>,
+    agents: Arc<TokioRwLock<HashMap<Uuid, Arc<AgentPeer>>>>,
 }
 
 impl AgentRegistry {
     /// Creates a new, empty agent registry.
     pub fn new() -> Self {
         Self {
-            agents: Arc::new(DashMap::new()),
+            agents: Arc::new(TokioRwLock::new(HashMap::new())),
         }
     }
 
     /// Registers a new agent peer. If an agent with the same ID already exists, it is replaced.
-    pub fn register(&self, peer: Arc<AgentPeer>) {
+    pub async fn register(&self, peer: Arc<AgentPeer>) {
         info!(
             agent_id = %peer.agent_id,
             name = %peer.name,
             "Agent registered"
         );
-        self.agents.insert(peer.agent_id, peer);
+        self.agents.write().await.insert(peer.agent_id, peer);
     }
 
     /// Removes an agent from the registry by ID.
-    pub fn unregister(&self, agent_id: &Uuid) -> Option<Arc<AgentPeer>> {
-        let removed = self.agents.remove(agent_id).map(|(_, peer)| peer);
+    pub async fn unregister(&self, agent_id: &Uuid) -> Option<Arc<AgentPeer>> {
+        let removed = self.agents.write().await.remove(agent_id);
         if let Some(ref peer) = removed {
             info!(
                 agent_id = %peer.agent_id,
@@ -189,36 +190,47 @@ impl AgentRegistry {
     }
 
     /// Looks up an agent by ID.
-    pub fn get(&self, agent_id: &Uuid) -> Option<Arc<AgentPeer>> {
-        self.agents.get(agent_id).map(|entry| Arc::clone(entry.value()))
+    pub async fn get(&self, agent_id: &Uuid) -> Option<Arc<AgentPeer>> {
+        self.agents.read().await.get(agent_id).map(Arc::clone)
     }
 
     /// Returns the number of agents currently in the registry (including offline ones).
-    pub fn len(&self) -> usize {
-        self.agents.len()
+    pub async fn len(&self) -> usize {
+        self.agents.read().await.len()
     }
 
     /// Returns `true` when no agent is registered.
-    pub fn is_empty(&self) -> bool {
-        self.agents.is_empty()
+    pub async fn is_empty(&self) -> bool {
+        self.agents.read().await.is_empty()
     }
 
     /// Returns the number of agents considered online.
-    pub fn online_count(&self) -> usize {
+    pub async fn online_count(&self) -> usize {
         self.agents
-            .iter()
-            .filter(|entry| entry.value().is_online(AGENT_OFFLINE_TIMEOUT))
+            .read()
+            .await
+            .values()
+            .filter(|agent| agent.is_online(AGENT_OFFLINE_TIMEOUT))
             .count()
     }
 
     /// Returns information about a single agent by ID.
-    pub fn agent_info(&self, agent_id: &Uuid) -> Option<AgentInfo> {
-        self.agents.get(agent_id).map(|entry| AgentInfo::from(entry.value()))
+    pub async fn agent_info(&self, agent_id: &Uuid) -> Option<AgentInfo> {
+        self.agents
+            .read()
+            .await
+            .get(agent_id)
+            .map(AgentInfo::from)
     }
 
     /// Collects information about all registered agents for API responses.
-    pub fn agent_infos(&self) -> Vec<AgentInfo> {
-        self.agents.iter().map(|entry| AgentInfo::from(entry.value())).collect()
+    pub async fn agent_infos(&self) -> Vec<AgentInfo> {
+        self.agents
+            .read()
+            .await
+            .values()
+            .map(AgentInfo::from)
+            .collect()
     }
 }
 

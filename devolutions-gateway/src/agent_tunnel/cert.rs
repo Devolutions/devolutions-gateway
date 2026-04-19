@@ -12,6 +12,20 @@ use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, K
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Extract DER bytes from a PEM-encoded certificate string.
+///
+/// Uses `rustls_pemfile` to avoid pulling in the separate `pem` crate.
+fn cert_pem_to_der(pem_str: &str) -> anyhow::Result<Vec<u8>> {
+    use std::io::BufReader;
+
+    let mut reader = BufReader::new(pem_str.as_bytes());
+    let cert = rustls_pemfile::certs(&mut reader)
+        .next()
+        .context("empty PEM input")?
+        .context("invalid certificate PEM")?;
+    Ok(cert.to_vec())
+}
+
 const CA_CERT_FILENAME: &str = "agent-tunnel-ca-cert.pem";
 const CA_KEY_FILENAME: &str = "agent-tunnel-ca-key.pem";
 const SERVER_CERT_FILENAME: &str = "agent-tunnel-server-cert.pem";
@@ -317,8 +331,8 @@ impl CaManager {
         let (server_cert_path, _) = self.ensure_server_cert(hostname)?;
         let pem_str = std::fs::read_to_string(&server_cert_path)
             .with_context(|| format!("read server cert from {server_cert_path}"))?;
-        let parsed = pem::parse(&pem_str).context("parse server cert PEM")?;
-        spki_sha256_from_der(parsed.contents())
+        let der = cert_pem_to_der(&pem_str).context("parse server cert PEM")?;
+        spki_sha256_from_der(&der)
     }
 }
 
@@ -332,8 +346,8 @@ pub fn spki_sha256_from_der(der_bytes: &[u8]) -> anyhow::Result<String> {
 
 /// Compute SHA-256 fingerprint of a PEM-encoded certificate (hex string).
 pub fn cert_fingerprint_from_pem(pem_str: &str) -> anyhow::Result<String> {
-    let pem = pem::parse(pem_str).context("parse PEM for fingerprint")?;
-    let digest = Sha256::digest(pem.contents());
+    let der = cert_pem_to_der(pem_str).context("parse PEM for fingerprint")?;
+    let digest = Sha256::digest(&der);
     Ok(hex::encode(digest))
 }
 
@@ -345,8 +359,8 @@ pub fn cert_fingerprint_from_der(der_bytes: &[u8]) -> String {
 
 /// Extract agent_id from a PEM-encoded certificate's SAN (urn:uuid:{id}).
 pub fn extract_agent_id_from_pem(pem_str: &str) -> anyhow::Result<Uuid> {
-    let pem = pem::parse(pem_str).context("parse PEM for agent ID extraction")?;
-    extract_agent_id_from_der(pem.contents())
+    let der = cert_pem_to_der(pem_str).context("parse PEM for agent ID extraction")?;
+    extract_agent_id_from_der(&der)
 }
 
 /// Extract the Common Name (CN) from a DER-encoded certificate.
@@ -409,10 +423,10 @@ fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) 
     let Ok(pem_str) = std::fs::read_to_string(cert_path) else {
         return ServerCertStatus::Unreadable;
     };
-    let Ok(parsed) = pem::parse(&pem_str) else {
+    let Ok(der) = cert_pem_to_der(&pem_str) else {
         return ServerCertStatus::Unreadable;
     };
-    let Ok((_, cert)) = x509_parser::parse_x509_certificate(parsed.contents()) else {
+    let Ok((_, cert)) = x509_parser::parse_x509_certificate(&der) else {
         return ServerCertStatus::Unreadable;
     };
 
@@ -443,6 +457,8 @@ fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) 
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
+
     use super::*;
 
     /// Helper: generate a CSR PEM for testing.
@@ -533,12 +549,20 @@ mod tests {
         let (_key_pair, csr_pem) = generate_test_csr("tampered-agent");
 
         // Decode PEM, flip a byte in the DER, re-encode.
-        let parsed = pem::parse(&csr_pem).expect("parse CSR PEM");
-        let mut der_bytes = parsed.contents().to_vec();
+        let csr_b64: String = csr_pem
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect();
+        let mut der_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&csr_b64)
+            .expect("decode CSR base64");
         // Flip a byte near the end (in the signature area).
         let len = der_bytes.len();
         der_bytes[len - 2] ^= 0xFF;
-        let tampered_pem = pem::encode(&pem::Pem::new("CERTIFICATE REQUEST", der_bytes));
+        let tampered_b64 = base64::engine::general_purpose::STANDARD.encode(&der_bytes);
+        let tampered_pem = format!(
+            "-----BEGIN CERTIFICATE REQUEST-----\n{tampered_b64}\n-----END CERTIFICATE REQUEST-----\n"
+        );
 
         let result = ca.sign_agent_csr(Uuid::new_v4(), "tampered-agent", &tampered_pem, None);
         assert!(result.is_err(), "tampered CSR should be rejected");

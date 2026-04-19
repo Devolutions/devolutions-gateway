@@ -96,7 +96,7 @@ async fn enroll_agent(
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
     // Try one-time enrollment token from the store first.
-    let token_valid = handle.enrollment_token_store().redeem(provided_token);
+    let token_valid = handle.enrollment_token_store().redeem(provided_token).await;
 
     if !token_valid {
         // Fall back to the static enrollment secret.
@@ -114,7 +114,7 @@ async fn enroll_agent(
     let agent_id = req.agent_id;
 
     // Reject duplicate agent IDs to prevent identity shadowing.
-    if handle.registry().get(&agent_id).is_some() {
+    if handle.registry().get(&agent_id).await.is_some() {
         return Err(
             crate::http::HttpErrorBuilder::new(axum::http::StatusCode::CONFLICT).msg("agent ID already registered")
         );
@@ -158,7 +158,7 @@ async fn list_agents(
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
 
-    let agents = handle.registry().agent_infos();
+    let agents = handle.registry().agent_infos().await;
 
     Ok(Json(agents))
 }
@@ -178,6 +178,7 @@ async fn get_agent(
     let info = handle
         .registry()
         .agent_info(&agent_id)
+        .await
         .ok_or_else(|| HttpError::not_found().msg("agent not found"))?;
 
     Ok(Json(info))
@@ -198,6 +199,7 @@ async fn delete_agent(
     handle
         .registry()
         .unregister(&agent_id)
+        .await
         .ok_or_else(|| HttpError::not_found().msg("agent not found"))?;
 
     info!(%agent_id, "Agent deleted via API");

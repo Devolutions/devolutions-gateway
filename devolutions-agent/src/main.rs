@@ -5,7 +5,6 @@
 use agent_tunnel_proto as _;
 use anyhow as _;
 use async_trait as _;
-use bincode as _;
 use camino as _;
 use devolutions_agent_shared as _;
 use devolutions_gateway_task as _;

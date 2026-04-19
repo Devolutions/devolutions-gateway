@@ -1,8 +1,9 @@
 //! Protocol definitions for the QUIC-based agent tunnel.
 //!
 //! This crate defines the binary protocol exchanged between Gateway and Agent
-//! over QUIC streams. All messages use length-prefixed bincode encoding and
-//! carry a `protocol_version` field for forward compatibility.
+//! over QUIC streams. All messages use length-prefixed binary encoding with
+//! explicit field layout (no serde) and carry a `protocol_version` field for
+//! forward compatibility.
 //!
 //! ## Stream model
 //!
@@ -13,16 +14,17 @@
 //!   followed by a [`ConnectResponse`] from Agent. After a successful
 //!   response, raw TCP bytes flow bidirectionally.
 
+pub(crate) mod codec;
 pub mod control;
 pub mod error;
 pub mod session;
 pub mod stream;
 pub mod version;
 
-pub use control::{ControlMessage, DomainAdvertisement, MAX_CONTROL_MESSAGE_SIZE};
+pub use control::{ControlMessage, DomainAdvertisement, DomainName, MAX_CONTROL_MESSAGE_SIZE};
 pub use error::ProtoError;
 pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
-pub use stream::{ControlRecvStream, ControlSendStream, ControlStream, SessionStream};
+pub use stream::{ControlStream, FramedRecv, FramedSend, SessionStream};
 pub use version::{ALPN_PROTOCOL, CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_VERSION, validate_protocol_version};
 
 /// Current wall-clock time in milliseconds since UNIX epoch.

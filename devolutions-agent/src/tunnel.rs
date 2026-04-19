@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_tunnel_proto::{
-    ConnectResponse, ControlMessage, ControlRecvStream, ControlStream, SessionStream, current_time_millis,
+    ConnectResponse, ControlMessage, ControlStream, FramedRecv, SessionStream, current_time_millis,
 };
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
@@ -201,7 +201,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         .advertise_domains
         .iter()
         .map(|d| agent_tunnel_proto::DomainAdvertisement {
-            domain: d.clone(),
+            domain: agent_tunnel_proto::DomainName::new(d),
             auto_detected: false,
         })
         .collect();
@@ -210,11 +210,11 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
         if let Some(detected) = crate::domain_detect::detect_domain() {
             if !advertise_domains
                 .iter()
-                .any(|d| d.domain.eq_ignore_ascii_case(&detected))
+                .any(|d| d.domain.as_str().eq_ignore_ascii_case(&detected))
             {
                 info!(domain = %detected, "Auto-detected DNS domain");
                 advertise_domains.push(agent_tunnel_proto::DomainAdvertisement {
-                    domain: detected,
+                    domain: agent_tunnel_proto::DomainName::new(detected),
                     auto_detected: true,
                 });
             }
@@ -400,10 +400,10 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 // Control stream reader
 // ---------------------------------------------------------------------------
 
-async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: ControlRecvStream<R>) {
+async fn run_control_reader<R: tokio::io::AsyncRead + Unpin>(mut ctrl: FramedRecv<R>) {
     let _ = async move {
         loop {
-            let message = ctrl.recv().await.context("recv control message")?;
+            let message: ControlMessage = ctrl.recv().await.context("recv control message")?;
 
             let protocol_version = message.protocol_version();
             if agent_tunnel_proto::validate_protocol_version(protocol_version)

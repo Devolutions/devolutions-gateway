@@ -4,6 +4,7 @@
 //! processes control messages (route advertisements, heartbeats), and
 //! creates proxy streams on demand.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +12,7 @@ use std::time::Duration;
 use agent_tunnel_proto::{ConnectRequest, ConnectResponse, ControlMessage, ControlStream, SessionStream};
 use anyhow::Context as _;
 use async_trait::async_trait;
-use dashmap::DashMap;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::cert::CaManager;
@@ -30,7 +31,7 @@ use super::stream::TunnelStream;
 pub struct AgentTunnelHandle {
     registry: Arc<AgentRegistry>,
     /// Map of agent_id → live Quinn connection, used for opening new streams.
-    agent_connections: Arc<DashMap<Uuid, quinn::Connection>>,
+    agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
     ca_manager: Arc<CaManager>,
     enrollment_token_store: Arc<EnrollmentTokenStore>,
 }
@@ -58,8 +59,10 @@ impl AgentTunnelHandle {
     ) -> anyhow::Result<TunnelStream> {
         let conn = self
             .agent_connections
+            .read()
+            .await
             .get(&agent_id)
-            .map(|entry| entry.value().clone())
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!("agent {} not connected", agent_id))?;
 
         let mut session: SessionStream<_, _> = conn
@@ -107,7 +110,7 @@ impl AgentTunnelHandle {
 pub struct AgentTunnelListener {
     endpoint: quinn::Endpoint,
     registry: Arc<AgentRegistry>,
-    agent_connections: Arc<DashMap<Uuid, quinn::Connection>>,
+    agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
 }
 
 impl AgentTunnelListener {
@@ -144,7 +147,7 @@ impl AgentTunnelListener {
         info!(%listen_addr, "Agent tunnel QUIC endpoint bound");
 
         let registry = Arc::new(AgentRegistry::new());
-        let agent_connections: Arc<DashMap<Uuid, quinn::Connection>> = Arc::new(DashMap::new());
+        let agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>> = Arc::new(RwLock::new(HashMap::new()));
         let enrollment_token_store = Arc::new(EnrollmentTokenStore::new());
 
         let handle = AgentTunnelHandle {
@@ -216,7 +219,7 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
 
 async fn run_agent_connection(
     registry: Arc<AgentRegistry>,
-    agent_connections: Arc<DashMap<Uuid, quinn::Connection>>,
+    agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
     incoming: quinn::Incoming,
 ) {
     let peer_addr = incoming.remote_address();
@@ -246,16 +249,16 @@ async fn run_agent_connection(
         info!(%agent_id, %agent_name, %peer_addr, "Agent authenticated via mTLS");
 
         let peer = Arc::new(AgentPeer::new(agent_id, agent_name, fingerprint));
-        registry.register(Arc::clone(&peer));
-        agent_connections.insert(agent_id, conn.clone());
+        registry.register(Arc::clone(&peer)).await;
+        agent_connections.write().await.insert(agent_id, conn.clone());
 
         // Accept the first bidirectional stream as the control stream.
         let control_result = run_control_loop(&conn, agent_id, &registry).await;
 
         // Agent disconnected — clean up.
         info!(%agent_id, "Agent QUIC connection closed");
-        registry.unregister(&agent_id);
-        agent_connections.remove(&agent_id);
+        registry.unregister(&agent_id).await;
+        agent_connections.write().await.remove(&agent_id);
 
         control_result
     }
@@ -330,7 +333,7 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
                 "Received route advertisement"
             );
 
-            if let Some(peer) = registry.get(&agent_id) {
+            if let Some(peer) = registry.get(&agent_id).await {
                 peer.update_routes(epoch, subnets, domains);
                 peer.touch();
             }
@@ -342,7 +345,7 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
         } => {
             debug!(%agent_id, timestamp_ms, active_stream_count, "Received heartbeat");
 
-            if let Some(peer) = registry.get(&agent_id) {
+            if let Some(peer) = registry.get(&agent_id).await {
                 peer.touch();
             }
 
@@ -354,6 +357,9 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
         }
         ControlMessage::HeartbeatAck { .. } => {
             debug!(%agent_id, "Unexpected HeartbeatAck from agent");
+        }
+        ControlMessage::CertRenewalRequest { .. } | ControlMessage::CertRenewalResponse { .. } => {
+            debug!(%agent_id, "Certificate renewal not supported in this build");
         }
     }
 }
