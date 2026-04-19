@@ -61,13 +61,20 @@ struct UpCommand {
     advertise_subnets: Vec<String>,
 }
 
+/// Subset of the enrollment JWT claims needed by the agent.
+///
+/// The agent does *not* verify the signature — it trusts whoever handed over
+/// the JWT (the operator). The Gateway verifies the signature when the JWT is
+/// presented as the Bearer token on `/jet/tunnel/enroll`.
+///
+/// Additional standard claims (`exp`, `jti`, `scope`, ...) are ignored here.
 #[derive(Debug, serde::Deserialize)]
-struct EnrollmentStringPayload {
-    version: u64,
-    api_base_url: String,
-    enrollment_token: String,
+struct EnrollmentJwtClaims {
+    /// Gateway URL to connect to for enrollment.
+    jet_gw_url: String,
+    /// Suggested agent display name (optional hint).
     #[serde(default)]
-    name: Option<String>,
+    jet_agent_name: Option<String>,
 }
 
 fn agent_service_main(
@@ -154,23 +161,29 @@ fn parse_advertise_subnets(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn parse_enrollment_string(value: &str) -> Result<EnrollmentStringPayload> {
-    const PREFIX: &str = "dgw-enroll:v1:";
+/// Decode an enrollment JWT to extract agent-side configuration claims.
+///
+/// The JWT format is `<header>.<payload>.<signature>`, each part base64url-encoded.
+/// This parser reads the payload only; signature verification is the Gateway's job
+/// once the JWT is presented as a Bearer token.
+fn parse_enrollment_jwt(jwt: &str) -> Result<EnrollmentJwtClaims> {
+    let mut parts = jwt.split('.');
+    let _header = parts.next().context("enrollment JWT missing header")?;
+    let payload = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .context("enrollment JWT missing payload")?;
+    let _signature = parts.next().context("enrollment JWT missing signature")?;
 
-    let encoded = value.strip_prefix(PREFIX).context("invalid enrollment string prefix")?;
-
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(encoded)
-        .context("invalid base64 enrollment string")?;
-
-    let payload: EnrollmentStringPayload =
-        serde_json::from_slice(&decoded).context("invalid enrollment string payload")?;
-
-    if payload.version != 1 {
-        bail!("unsupported enrollment string version: {}", payload.version);
+    if parts.next().is_some() {
+        bail!("enrollment JWT has too many segments");
     }
 
-    Ok(payload)
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .context("enrollment JWT payload is not valid base64url")?;
+
+    serde_json::from_slice(&decoded).context("enrollment JWT payload is not valid JSON or missing required claims")
 }
 
 fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
@@ -199,13 +212,14 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     }
 
     if let Some(enrollment_string) = enrollment_string {
-        let payload = parse_enrollment_string(&enrollment_string)?;
+        let claims = parse_enrollment_jwt(&enrollment_string)?;
 
-        gateway_url.get_or_insert(payload.api_base_url);
-        enrollment_token.get_or_insert(payload.enrollment_token);
+        // The JWT itself is the Bearer token; the Gateway verifies the signature.
+        gateway_url.get_or_insert(claims.jet_gw_url);
+        enrollment_token.get_or_insert(enrollment_string);
 
         if agent_name.is_none() {
-            agent_name = payload.name;
+            agent_name = claims.jet_agent_name;
         }
     }
 
@@ -371,24 +385,51 @@ mod tests {
         assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
     }
 
+    /// Build a JWT with the given payload. The header and signature are placeholders —
+    /// the agent does not verify them; only the Gateway does.
+    fn make_jwt(payload: serde_json::Value) -> String {
+        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.{}",
+            b64.encode(header.to_string()),
+            b64.encode(payload.to_string()),
+            b64.encode("signature-placeholder"),
+        )
+    }
+
     #[test]
     fn parse_up_command_args_accepts_enrollment_string() {
-        let payload = serde_json::json!({
-            "version": 1,
-            "api_base_url": "https://gateway.example.com:7171",
-            "enrollment_token": "bootstrap-token",
-            "name": "site-a-agent",
-        });
-        let enrollment_string = format!(
-            "dgw-enroll:v1:{}",
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string())
-        );
-        let args = vec!["--enrollment-string".to_owned(), enrollment_string];
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+        }));
+        let args = vec!["--enrollment-string".to_owned(), jwt.clone()];
 
         let parsed = parse_up_command_args(&args).expect("parse up args");
 
         assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
-        assert_eq!(parsed.enrollment_token, "bootstrap-token");
+        // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
+        assert_eq!(parsed.enrollment_token, jwt);
         assert_eq!(parsed.agent_name, "site-a-agent");
+    }
+
+    #[test]
+    fn parse_enrollment_jwt_rejects_malformed() {
+        assert!(parse_enrollment_jwt("not-a-jwt").is_err());
+        assert!(parse_enrollment_jwt("only.two").is_err());
+        assert!(parse_enrollment_jwt("four.parts.here.bad").is_err());
+    }
+
+    #[test]
+    fn parse_enrollment_jwt_requires_gw_url() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "jet_agent_name": "agent-a",
+        }));
+        assert!(parse_enrollment_jwt(&jwt).is_err());
     }
 }

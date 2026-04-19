@@ -283,30 +283,30 @@ mod tests {
         ))
     }
 
-    #[test]
-    fn register_and_lookup() {
+    #[tokio::test]
+    async fn register_and_lookup() {
         let registry = AgentRegistry::new();
         let peer = make_peer("test-agent");
         let agent_id = peer.agent_id;
 
-        registry.register(Arc::clone(&peer));
-        assert_eq!(registry.len(), 1);
+        registry.register(Arc::clone(&peer)).await;
+        assert_eq!(registry.len().await, 1);
 
-        let found = registry.get(&agent_id).expect("agent should be found");
+        let found = registry.get(&agent_id).await.expect("agent should be found");
         assert_eq!(found.agent_id, agent_id);
     }
 
-    #[test]
-    fn unregister_removes_agent() {
+    #[tokio::test]
+    async fn unregister_removes_agent() {
         let registry = AgentRegistry::new();
         let peer = make_peer("test-agent");
         let agent_id = peer.agent_id;
 
-        registry.register(Arc::clone(&peer));
-        let removed = registry.unregister(&agent_id);
+        registry.register(Arc::clone(&peer)).await;
+        let removed = registry.unregister(&agent_id).await;
         assert!(removed.is_some());
-        assert_eq!(registry.len(), 0);
-        assert!(registry.get(&agent_id).is_none());
+        assert_eq!(registry.len().await, 0);
+        assert!(registry.get(&agent_id).await.is_none());
     }
 
     #[test]
@@ -383,15 +383,15 @@ mod tests {
         assert_eq!(state.subnets[0], subnet);
     }
 
-    #[test]
-    fn agent_infos_snapshot() {
+    #[tokio::test]
+    async fn agent_infos_snapshot() {
         let registry = AgentRegistry::new();
         let peer = make_peer("info-agent");
         let subnet: Ipv4Network = "10.0.0.0/8".parse().expect("valid CIDR");
         peer.update_routes(1, vec![subnet], vec![]);
-        registry.register(peer);
+        registry.register(peer).await;
 
-        let infos = registry.agent_infos();
+        let infos = registry.agent_infos().await;
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].name, "info-agent");
         assert!(infos[0].is_online);
@@ -399,32 +399,32 @@ mod tests {
         assert_eq!(infos[0].route_epoch, 1);
     }
 
-    #[test]
-    fn online_count_accuracy() {
+    #[tokio::test]
+    async fn online_count_accuracy() {
         let registry = AgentRegistry::new();
 
         let online_agent = make_peer("online");
-        registry.register(Arc::clone(&online_agent));
+        registry.register(Arc::clone(&online_agent)).await;
 
         let offline_agent = make_peer("offline");
         offline_agent.last_seen.store(0, Ordering::Release);
-        registry.register(offline_agent);
+        registry.register(offline_agent).await;
 
-        assert_eq!(registry.len(), 2);
-        assert_eq!(registry.online_count(), 1);
+        assert_eq!(registry.len().await, 2);
+        assert_eq!(registry.online_count().await, 1);
     }
 
-    #[test]
-    fn default_trait_creates_empty_registry() {
+    #[tokio::test]
+    async fn default_trait_creates_empty_registry() {
         let registry = AgentRegistry::default();
-        assert_eq!(registry.len(), 0);
+        assert_eq!(registry.len().await, 0);
     }
 
     // ── Domain advertisement tests ─────────────────────────────────────
 
     fn domain(name: &str, auto: bool) -> DomainAdvertisement {
         DomainAdvertisement {
-            domain: name.to_owned(),
+            domain: agent_tunnel_proto::DomainName::new(name),
             auto_detected: auto,
         }
     }
@@ -437,7 +437,7 @@ mod tests {
         peer.update_routes(1, vec![subnet], vec![domain("contoso.local", false)]);
         let state = peer.route_state();
         assert_eq!(state.domains.len(), 1);
-        assert_eq!(state.domains[0].domain, "contoso.local");
+        assert_eq!(state.domains[0].domain.as_str(), "contoso.local");
         assert!(!state.domains[0].auto_detected);
     }
 
@@ -451,7 +451,7 @@ mod tests {
 
         let state = peer.route_state();
         assert_eq!(state.epoch, 2);
-        assert_eq!(state.domains[0].domain, "new.local");
+        assert_eq!(state.domains[0].domain.as_str(), "new.local");
         assert!(state.domains[0].auto_detected);
     }
 
@@ -464,7 +464,7 @@ mod tests {
         peer.update_routes(1, vec![subnet], vec![domain("different.local", true)]);
 
         let state = peer.route_state();
-        assert_eq!(state.domains[0].domain, "contoso.local");
+        assert_eq!(state.domains[0].domain.as_str(), "contoso.local");
         assert!(!state.domains[0].auto_detected);
     }
 }

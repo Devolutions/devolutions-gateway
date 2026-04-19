@@ -7,6 +7,42 @@ use crate::DgwState;
 use crate::extract::{AgentManagementReadAccess, AgentManagementWriteAccess};
 use crate::http::HttpError;
 
+/// Validate a Bearer token as an enrollment JWT signed by the provisioner key.
+///
+/// Returns `true` if the token is a well-formed JWT whose signature verifies
+/// against `provisioner_key`, whose `exp` has not passed, and whose `scope`
+/// is `TunnelEnroll` (or `Wildcard`). Returns `false` for any failure.
+///
+/// The enrollment JWT carries extra claims (`jet_gw_url`, `jet_agent_name`)
+/// that the *agent* reads locally from its own copy of the token — the Gateway
+/// does not consume them here, it only authenticates the bearer.
+fn validate_enrollment_jwt(token: &str, provisioner_key: &picky::key::PublicKey) -> bool {
+    use picky::jose::jws::RawJws;
+    use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
+
+    use crate::token::{AccessScope, EnrollmentTokenClaims};
+
+    let Ok(raw_jws) = RawJws::decode(token) else {
+        return false;
+    };
+
+    let Ok(jwt) = raw_jws.verify(provisioner_key).map(JwtSig::from) else {
+        return false;
+    };
+
+    let now = JwtDate::new_with_leeway(time::OffsetDateTime::now_utc().unix_timestamp(), 60);
+    let validator = JwtValidator::strict(now);
+
+    let Ok(validated) = jwt.validate::<EnrollmentTokenClaims>(&validator) else {
+        return false;
+    };
+
+    matches!(
+        validated.state.claims.scope,
+        AccessScope::TunnelEnroll | AccessScope::Wildcard
+    )
+}
+
 /// Timing-safe byte comparison to prevent side-channel attacks on secret comparison.
 ///
 /// Both inputs are hashed with SHA-256 first, producing fixed 32-byte digests.
@@ -95,19 +131,25 @@ async fn enroll_agent(
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-    // Try one-time enrollment token from the store first.
-    let token_valid = handle.enrollment_token_store().redeem(provided_token).await;
+    // Token validation order:
+    // 1. JWT signed by the configured provisioner key (scope == TunnelEnroll)
+    // 2. One-time enrollment token from the in-memory store
+    // 3. Static enrollment secret from configuration (constant-time comparison)
+    let jwt_valid = validate_enrollment_jwt(provided_token, &conf.provisioner_public_key);
 
-    if !token_valid {
-        // Fall back to the static enrollment secret.
-        let enrollment_secret = conf
-            .agent_tunnel
-            .enrollment_secret
-            .as_deref()
-            .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
+    if !jwt_valid {
+        let token_valid = handle.enrollment_token_store().redeem(provided_token).await;
 
-        if !constant_time_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
-            return Err(HttpError::forbidden().msg("invalid enrollment token"));
+        if !token_valid {
+            let enrollment_secret = conf
+                .agent_tunnel
+                .enrollment_secret
+                .as_deref()
+                .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
+
+            if !constant_time_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
+                return Err(HttpError::forbidden().msg("invalid enrollment token"));
+            }
         }
     }
 
@@ -205,4 +247,142 @@ async fn delete_agent(
     info!(%agent_id, "Agent deleted via API");
 
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use picky::jose::jws::JwsAlg;
+    use picky::jose::jwt::CheckedJwtSig;
+    use picky::key::{PrivateKey, PublicKey};
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::validate_enrollment_jwt;
+
+    fn keypair() -> (PrivateKey, PublicKey) {
+        let private_key = PrivateKey::generate_rsa(2048).expect("generate RSA private key");
+        let public_key = private_key.to_public_key().expect("derive public key");
+        (private_key, public_key)
+    }
+
+    /// `strict` validation requires both `nbf` and `exp`.
+    fn now_ts() -> i64 {
+        time::OffsetDateTime::now_utc().unix_timestamp()
+    }
+
+    fn sign(claims: serde_json::Value, key: &PrivateKey) -> String {
+        CheckedJwtSig::new(JwsAlg::RS256, claims).encode(key).expect("sign JWT")
+    }
+
+    #[test]
+    fn accepts_well_formed_enrollment_jwt() {
+        let (priv_key, pub_key) = keypair();
+        let token = sign(
+            json!({
+                "scope": "gateway.tunnel.enroll",
+                "nbf": now_ts() - 60,
+                "exp": now_ts() + 3600,
+                "jti": Uuid::new_v4(),
+                "jet_gw_url": "https://gw.example.com:7171",
+                "jet_agent_name": "site-a-agent",
+            }),
+            &priv_key,
+        );
+
+        assert!(validate_enrollment_jwt(&token, &pub_key));
+    }
+
+    #[test]
+    fn accepts_wildcard_scope() {
+        let (priv_key, pub_key) = keypair();
+        let token = sign(
+            json!({
+                "scope": "*",
+                "nbf": now_ts() - 60,
+                "exp": now_ts() + 3600,
+                "jti": Uuid::new_v4(),
+                "jet_gw_url": "https://gw.example.com",
+            }),
+            &priv_key,
+        );
+
+        assert!(validate_enrollment_jwt(&token, &pub_key));
+    }
+
+    #[test]
+    fn rejects_wrong_scope() {
+        let (priv_key, pub_key) = keypair();
+        let token = sign(
+            json!({
+                "scope": "gateway.sessions.read",
+                "nbf": now_ts() - 60,
+                "exp": now_ts() + 3600,
+                "jti": Uuid::new_v4(),
+                "jet_gw_url": "https://gw.example.com",
+            }),
+            &priv_key,
+        );
+
+        assert!(!validate_enrollment_jwt(&token, &pub_key));
+    }
+
+    #[test]
+    fn rejects_expired_token() {
+        let (priv_key, pub_key) = keypair();
+        let token = sign(
+            json!({
+                "scope": "gateway.tunnel.enroll",
+                "nbf": now_ts() - 7200,
+                "exp": now_ts() - 3600,
+                "jti": Uuid::new_v4(),
+                "jet_gw_url": "https://gw.example.com",
+            }),
+            &priv_key,
+        );
+
+        assert!(!validate_enrollment_jwt(&token, &pub_key));
+    }
+
+    #[test]
+    fn rejects_signature_from_different_key() {
+        let (attacker_priv, _) = keypair();
+        let (_, gateway_pub) = keypair();
+        let token = sign(
+            json!({
+                "scope": "gateway.tunnel.enroll",
+                "nbf": now_ts() - 60,
+                "exp": now_ts() + 3600,
+                "jti": Uuid::new_v4(),
+                "jet_gw_url": "https://gw.example.com",
+            }),
+            &attacker_priv,
+        );
+
+        assert!(!validate_enrollment_jwt(&token, &gateway_pub));
+    }
+
+    #[test]
+    fn rejects_missing_jet_gw_url() {
+        let (priv_key, pub_key) = keypair();
+        let token = sign(
+            json!({
+                "scope": "gateway.tunnel.enroll",
+                "nbf": now_ts() - 60,
+                "exp": now_ts() + 3600,
+                "jti": Uuid::new_v4(),
+                // jet_gw_url missing
+            }),
+            &priv_key,
+        );
+
+        assert!(!validate_enrollment_jwt(&token, &pub_key));
+    }
+
+    #[test]
+    fn rejects_non_jwt_strings() {
+        let (_, pub_key) = keypair();
+        assert!(!validate_enrollment_jwt("not-a-jwt", &pub_key));
+        assert!(!validate_enrollment_jwt("", &pub_key));
+        assert!(!validate_enrollment_jwt("only.two", &pub_key));
+    }
 }

@@ -472,6 +472,8 @@ pub enum AccessScope {
     NetMonitorConfig,
     #[serde(rename = "gateway.net.monitor.drain")]
     NetMonitorDrain,
+    #[serde(rename = "gateway.tunnel.enroll")]
+    TunnelEnroll,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -483,6 +485,35 @@ pub struct ScopeTokenClaims {
 
     /// JWT "JWT ID" claim, the unique ID for this token
     pub jti: Uuid,
+}
+
+// ----- enrollment claims ----- //
+
+/// Claims carried by an agent-tunnel enrollment JWT.
+///
+/// The JWT itself is copy-pasted by the operator into the agent's
+/// `--enrollment-string` argument. Agent reads `jet_gw_url` and
+/// `jet_agent_name` locally (without verifying the signature, since it is
+/// the intended recipient), then sends the JWT as the Bearer token to
+/// `/jet/tunnel/enroll`, where the Gateway verifies the signature, scope,
+/// and expiry against the configured provisioner key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollmentTokenClaims {
+    /// Must be `AccessScope::TunnelEnroll` (or `Wildcard`).
+    pub scope: AccessScope,
+
+    /// JWT expiration time claim.
+    pub exp: i64,
+
+    /// JWT "JWT ID" claim, the unique ID for this token.
+    pub jti: Uuid,
+
+    /// Gateway URL the agent should connect to for enrollment.
+    pub jet_gw_url: String,
+
+    /// Suggested agent display name (optional hint).
+    #[serde(default)]
+    pub jet_agent_name: Option<String>,
 }
 
 // ----- bridge claims ----- //
