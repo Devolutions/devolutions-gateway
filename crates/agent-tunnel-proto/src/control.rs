@@ -178,8 +178,10 @@ impl ControlMessage {
         }
     }
 
-    /// Encode this message into a binary payload.
-    pub fn encode(&self, buf: &mut BytesMut) {
+}
+
+impl Encode for ControlMessage {
+    fn encode(&self, buf: &mut BytesMut) {
         match self {
             Self::RouteAdvertise {
                 protocol_version,
@@ -229,9 +231,10 @@ impl ControlMessage {
             }
         }
     }
+}
 
-    /// Decode a binary payload into a `ControlMessage`.
-    pub fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
+impl Decode for ControlMessage {
+    fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
         codec::ensure_remaining(buf.remaining(), 1, "control message tag")?;
         let tag = buf.get_u8();
 
@@ -292,23 +295,14 @@ impl ControlMessage {
     }
 }
 
-impl Encode for ControlMessage {
-    fn encode(&self, buf: &mut BytesMut) {
-        self.encode(buf);
-    }
-}
-
-impl Decode for ControlMessage {
-    fn decode(buf: Bytes) -> Result<Self, ProtoError> {
-        Self::decode(buf)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Subnet encode/decode
 // ---------------------------------------------------------------------------
 
-#[expect(clippy::cast_possible_truncation, reason = "count bounded by MAX_CONTROL_MESSAGE_SIZE")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "count bounded by MAX_CONTROL_MESSAGE_SIZE"
+)]
 fn encode_subnets(buf: &mut BytesMut, subnets: &[Ipv4Network]) {
     buf.put_u32(subnets.len() as u32);
     for subnet in subnets {
@@ -350,7 +344,10 @@ fn decode_subnets(buf: &mut Bytes) -> Result<Vec<Ipv4Network>, ProtoError> {
 // Domain encode/decode
 // ---------------------------------------------------------------------------
 
-#[expect(clippy::cast_possible_truncation, reason = "count bounded by MAX_CONTROL_MESSAGE_SIZE")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "count bounded by MAX_CONTROL_MESSAGE_SIZE"
+)]
 fn encode_domains(buf: &mut BytesMut, domains: &[DomainAdvertisement]) {
     buf.put_u32(domains.len() as u32);
     for adv in domains {
@@ -544,9 +541,7 @@ mod proptests {
             let ip = std::net::Ipv4Addr::from(octets);
             Ipv4Network::new(ip, prefix)
                 .map(|n| Ipv4Network::new(n.network(), prefix).expect("normalized"))
-                .unwrap_or_else(|_| {
-                    Ipv4Network::new(std::net::Ipv4Addr::UNSPECIFIED, 0).expect("0.0.0.0/0")
-                })
+                .unwrap_or_else(|_| Ipv4Network::new(std::net::Ipv4Addr::UNSPECIFIED, 0).expect("0.0.0.0/0"))
         })
     }
 

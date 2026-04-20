@@ -15,7 +15,10 @@ pub trait Decode: Sized {
 }
 
 /// Write a length-prefixed UTF-8 string (u32 big-endian length + bytes).
-#[expect(clippy::cast_possible_truncation, reason = "string length bounded by frame size limit")]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "string length bounded by frame size limit"
+)]
 pub(crate) fn put_string(buf: &mut BytesMut, s: &str) {
     buf.put_u32(s.len() as u32);
     buf.put_slice(s.as_bytes());
@@ -34,11 +37,7 @@ pub(crate) fn get_string(buf: &mut Bytes) -> Result<String, ProtoError> {
 }
 
 /// Check that the buffer has at least `expected` bytes remaining.
-pub(crate) fn ensure_remaining(
-    remaining: usize,
-    expected: usize,
-    context: &'static str,
-) -> Result<(), ProtoError> {
+pub(crate) fn ensure_remaining(remaining: usize, expected: usize, context: &'static str) -> Result<(), ProtoError> {
     if remaining < expected {
         Err(ProtoError::Truncated { expected: context })
     } else {

@@ -166,6 +166,10 @@ fn parse_advertise_subnets(value: &str) -> Vec<String> {
 /// The JWT format is `<header>.<payload>.<signature>`, each part base64url-encoded.
 /// This parser reads the payload only; signature verification is the Gateway's job
 /// once the JWT is presented as a Bearer token.
+///
+/// We keep the split/decode inline instead of pulling in `picky` just for
+/// unverified payload decoding — the dependency cost isn't worth saving a
+/// dozen lines of straightforward parsing, and agent binary size matters.
 fn parse_enrollment_jwt(jwt: &str) -> Result<EnrollmentJwtClaims> {
     let mut parts = jwt.split('.');
     let _header = parts.next().context("enrollment JWT missing header")?;

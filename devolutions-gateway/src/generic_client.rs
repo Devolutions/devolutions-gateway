@@ -6,7 +6,6 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tracing::field;
 use typed_builder::TypedBuilder;
 
-use agent_tunnel::AgentTunnelHandle;
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
 use crate::proxy::Proxy;
@@ -16,6 +15,7 @@ use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, Ses
 use crate::subscriber::SubscriberSender;
 use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::utils;
+use agent_tunnel::AgentTunnelHandle;
 
 #[derive(TypedBuilder)]
 pub struct GenericClient<S> {

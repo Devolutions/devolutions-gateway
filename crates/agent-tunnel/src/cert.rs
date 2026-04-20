@@ -549,10 +549,7 @@ mod tests {
         let (_key_pair, csr_pem) = generate_test_csr("tampered-agent");
 
         // Decode PEM, flip a byte in the DER, re-encode.
-        let csr_b64: String = csr_pem
-            .lines()
-            .filter(|l| !l.starts_with("-----"))
-            .collect();
+        let csr_b64: String = csr_pem.lines().filter(|l| !l.starts_with("-----")).collect();
         let mut der_bytes = base64::engine::general_purpose::STANDARD
             .decode(&csr_b64)
             .expect("decode CSR base64");
@@ -560,9 +557,8 @@ mod tests {
         let len = der_bytes.len();
         der_bytes[len - 2] ^= 0xFF;
         let tampered_b64 = base64::engine::general_purpose::STANDARD.encode(&der_bytes);
-        let tampered_pem = format!(
-            "-----BEGIN CERTIFICATE REQUEST-----\n{tampered_b64}\n-----END CERTIFICATE REQUEST-----\n"
-        );
+        let tampered_pem =
+            format!("-----BEGIN CERTIFICATE REQUEST-----\n{tampered_b64}\n-----END CERTIFICATE REQUEST-----\n");
 
         let result = ca.sign_agent_csr(Uuid::new_v4(), "tampered-agent", &tampered_pem, None);
         assert!(result.is_err(), "tampered CSR should be rejected");

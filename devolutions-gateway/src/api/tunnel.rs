@@ -43,12 +43,15 @@ fn validate_enrollment_jwt(token: &str, provisioner_key: &picky::key::PublicKey)
     )
 }
 
-/// Timing-safe byte comparison to prevent side-channel attacks on secret comparison.
+/// Timing-safe byte comparison for secret values.
 ///
-/// Both inputs are hashed with SHA-256 first, producing fixed 32-byte digests.
-/// The digest comparison runs in constant time (fixed-length XOR fold).
-/// Note: the hashing step itself runs in time proportional to input length.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+/// Both inputs are first hashed with SHA-256 to produce fixed 32-byte digests;
+/// the digest comparison then runs in constant time (fixed-length XOR fold).
+/// Hashing normalizes length so a leaked hash duration cannot reveal the
+/// secret's length; and the constant-time fold prevents leaking which byte
+/// differed. The function is *not* constant-time over input length, which is
+/// why it is named after its intent (timing-safe) rather than its mechanism.
+fn timing_safe_eq(a: &[u8], b: &[u8]) -> bool {
     use sha2::{Digest, Sha256};
     let da = Sha256::digest(a);
     let db = Sha256::digest(b);
@@ -147,7 +150,7 @@ async fn enroll_agent(
                 .as_deref()
                 .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-            if !constant_time_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
+            if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
                 return Err(HttpError::forbidden().msg("invalid enrollment token"));
             }
         }

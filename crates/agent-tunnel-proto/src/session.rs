@@ -15,6 +15,7 @@ const TAG_RESPONSE_ERROR: u8 = 0x01;
 /// Request from Gateway to Agent to open a TCP connection to a target.
 ///
 /// Sent as the first message on a newly opened QUIC bidirectional stream.
+/// Wire layout: `[2B version][16B uuid][4B target_len][target bytes]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectRequest {
     pub protocol_version: u16,
@@ -25,6 +26,10 @@ pub struct ConnectRequest {
 }
 
 /// Agent's response to a ConnectRequest.
+///
+/// Wire layout:
+/// - Success: `[1B tag=0x00][2B version]`
+/// - Error:   `[1B tag=0x01][2B version][4B reason_len][reason bytes]`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectResponse {
     Success { protocol_version: u16 },
@@ -39,18 +44,18 @@ impl ConnectRequest {
             target,
         }
     }
+}
 
-    /// Encode this request into a binary payload.
-    ///
-    /// Wire layout: `[2B version][16B uuid][4B target_len][target bytes]`
-    pub fn encode(&self, buf: &mut BytesMut) {
+impl Encode for ConnectRequest {
+    fn encode(&self, buf: &mut BytesMut) {
         buf.put_u16(self.protocol_version);
         buf.put_slice(self.session_id.as_bytes());
         codec::put_string(buf, &self.target);
     }
+}
 
-    /// Decode a binary payload into a `ConnectRequest`.
-    pub fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
+impl Decode for ConnectRequest {
+    fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
         codec::ensure_remaining(buf.remaining(), 2 + 16, "ConnectRequest header")?;
         let protocol_version = buf.get_u16();
         let mut uuid_bytes = [0u8; 16];
@@ -62,18 +67,6 @@ impl ConnectRequest {
             session_id,
             target,
         })
-    }
-}
-
-impl Encode for ConnectRequest {
-    fn encode(&self, buf: &mut BytesMut) {
-        self.encode(buf);
-    }
-}
-
-impl Decode for ConnectRequest {
-    fn decode(buf: Bytes) -> Result<Self, ProtoError> {
-        Self::decode(buf)
     }
 }
 
@@ -101,13 +94,10 @@ impl ConnectResponse {
             Self::Success { protocol_version } | Self::Error { protocol_version, .. } => *protocol_version,
         }
     }
+}
 
-    /// Encode this response into a binary payload.
-    ///
-    /// Wire layout:
-    /// - Success: `[1B tag=0x00][2B version]`
-    /// - Error:   `[1B tag=0x01][2B version][4B reason_len][reason bytes]`
-    pub fn encode(&self, buf: &mut BytesMut) {
+impl Encode for ConnectResponse {
+    fn encode(&self, buf: &mut BytesMut) {
         match self {
             Self::Success { protocol_version } => {
                 buf.put_u8(TAG_RESPONSE_SUCCESS);
@@ -123,9 +113,10 @@ impl ConnectResponse {
             }
         }
     }
+}
 
-    /// Decode a binary payload into a `ConnectResponse`.
-    pub fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
+impl Decode for ConnectResponse {
+    fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
         codec::ensure_remaining(buf.remaining(), 1 + 2, "ConnectResponse header")?;
         let tag = buf.get_u8();
         let protocol_version = buf.get_u16();
@@ -141,17 +132,5 @@ impl ConnectResponse {
             }
             _ => Err(ProtoError::UnknownTag { tag }),
         }
-    }
-}
-
-impl Encode for ConnectResponse {
-    fn encode(&self, buf: &mut BytesMut) {
-        self.encode(buf);
-    }
-}
-
-impl Decode for ConnectResponse {
-    fn decode(buf: Bytes) -> Result<Self, ProtoError> {
-        Self::decode(buf)
     }
 }

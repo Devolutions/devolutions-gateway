@@ -85,8 +85,14 @@ pub struct ControlStream<S, R> {
 impl<S, R> From<(S, R)> for ControlStream<S, R> {
     fn from((send, recv): (S, R)) -> Self {
         Self {
-            send: FramedSend { inner: send, max_size: MAX_CONTROL_MESSAGE_SIZE },
-            recv: FramedRecv { inner: recv, max_size: MAX_CONTROL_MESSAGE_SIZE },
+            send: FramedSend {
+                inner: send,
+                max_size: MAX_CONTROL_MESSAGE_SIZE,
+            },
+            recv: FramedRecv {
+                inner: recv,
+                max_size: MAX_CONTROL_MESSAGE_SIZE,
+            },
         }
     }
 }
@@ -126,8 +132,14 @@ pub struct SessionStream<S, R> {
 impl<S, R> From<(S, R)> for SessionStream<S, R> {
     fn from((send, recv): (S, R)) -> Self {
         Self {
-            send: FramedSend { inner: send, max_size: MAX_SESSION_MESSAGE_SIZE },
-            recv: FramedRecv { inner: recv, max_size: MAX_SESSION_MESSAGE_SIZE },
+            send: FramedSend {
+                inner: send,
+                max_size: MAX_SESSION_MESSAGE_SIZE,
+            },
+            recv: FramedRecv {
+                inner: recv,
+                max_size: MAX_SESSION_MESSAGE_SIZE,
+            },
         }
     }
 }

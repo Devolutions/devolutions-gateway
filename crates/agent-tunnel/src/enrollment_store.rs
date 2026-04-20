@@ -57,6 +57,10 @@ impl EnrollmentTokenStore {
     ///
     /// Returns `true` if the token was valid and has been redeemed (removed).
     /// Returns `false` if the token doesn't exist or is expired.
+    ///
+    /// Note: an expired token is still removed from the store as a side-effect,
+    /// so a caller cannot distinguish "didn't exist" from "existed-but-expired"
+    /// (and shouldn't — both are authentication failures).
     #[must_use = "check whether the token was valid"]
     pub async fn redeem(&self, token: &str) -> bool {
         let now = current_time_secs();
@@ -73,10 +77,7 @@ impl EnrollmentTokenStore {
     /// Removes all expired tokens from the store.
     pub async fn cleanup_expired(&self) {
         let now = current_time_secs();
-        self.tokens
-            .write()
-            .await
-            .retain(|_, entry| entry.expires_at > now);
+        self.tokens.write().await.retain(|_, entry| entry.expires_at > now);
     }
 }
 
@@ -100,7 +101,9 @@ mod tests {
     #[tokio::test]
     async fn insert_and_redeem() {
         let store = EnrollmentTokenStore::new();
-        store.insert("tok-123".to_owned(), Some("my-agent".to_owned()), Some(3600)).await;
+        store
+            .insert("tok-123".to_owned(), Some("my-agent".to_owned()), Some(3600))
+            .await;
 
         assert!(store.redeem("tok-123").await);
         // Second redeem should fail (one-time use).

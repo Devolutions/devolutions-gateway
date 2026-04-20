@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use agent_tunnel_proto::DomainAdvertisement;
+use agent_tunnel_proto::{DomainAdvertisement, current_time_millis};
 use ipnetwork::Ipv4Network;
 use parking_lot::RwLock;
 use serde::Serialize;
@@ -124,9 +124,9 @@ impl AgentPeer {
             debug!(
                 agent_id = %self.agent_id,
                 epoch,
-                subnet_count = subnets.len(),
-                domain_count = state.domains.len(),
-                "Refreshing route advertisement (same epoch)"
+                incoming_subnets = subnets.len(),
+                incoming_domains = domains.len(),
+                "Refreshing route advertisement (same epoch, incoming routes ignored)"
             );
             state.updated_at = now;
         } else {
@@ -216,21 +216,12 @@ impl AgentRegistry {
 
     /// Returns information about a single agent by ID.
     pub async fn agent_info(&self, agent_id: &Uuid) -> Option<AgentInfo> {
-        self.agents
-            .read()
-            .await
-            .get(agent_id)
-            .map(AgentInfo::from)
+        self.agents.read().await.get(agent_id).map(AgentInfo::from)
     }
 
     /// Collects information about all registered agents for API responses.
     pub async fn agent_infos(&self) -> Vec<AgentInfo> {
-        self.agents
-            .read()
-            .await
-            .values()
-            .map(AgentInfo::from)
-            .collect()
+        self.agents.read().await.values().map(AgentInfo::from).collect()
     }
 }
 
@@ -268,8 +259,6 @@ impl From<&Arc<AgentPeer>> for AgentInfo {
         }
     }
 }
-
-use agent_tunnel_proto::current_time_millis;
 
 #[cfg(test)]
 mod tests {

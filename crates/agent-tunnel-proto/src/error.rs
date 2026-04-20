@@ -14,10 +14,7 @@ pub enum ProtoError {
     UnknownTag { tag: u8 },
 
     #[error("invalid field `{field}`: {reason}")]
-    InvalidField {
-        field: &'static str,
-        reason: &'static str,
-    },
+    InvalidField { field: &'static str, reason: &'static str },
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
