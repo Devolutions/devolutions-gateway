@@ -1,14 +1,4 @@
-<div #sessionRdpContainer class="session-rdp-container">
-  <session-toolbar
-    [sessionContainerParent]="sessionContainerElement"
-    [leftButtons]="leftToolbarButtons"
-    [middleButtons]="middleToolbarButtons"
-    [middleToggleButtons]="middleToolbarToggleButtons"
-    [rightButtons]="rightToolbarButtons"
-    [checkboxes]="checkboxes"
-    [clipboardActionButtons]="clipboardActionButtons">
-  </session-toolbar>
-
+<div class="session-rdp-container">
   @if (loading) {
     <div class="loading-info-container">
       <div class="loading-info">
@@ -21,4 +11,24 @@
 
   <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true" [module]="backendRef"></iron-remote-desktop>
 
+  <!-- Floating toolbar — only rendered once the session is live.
+   Keeping it out of the DOM during the initial connect and any
+   reconnect cycle prevents the toolbar from being positioned
+   against a wider ancestor while the tab panel is still being
+   laid out (which caused it to jump to the viewport center). -->
+  @if (!loading && !currentStatus.isDisabled) {
+    <div class="toolbar-overlay-anchor">
+      <rdp-toolbar-wrapper
+        [remoteClient]="remoteClient"
+        [actions]="clipboardActionButtons"
+        [sessionInfo]="sessionInfo"
+        [dynamicResizeSupported]="dynamicResizeSupported"
+        [initialState]="{ dynamicResize: dynamicResizeEnabled, unicodeKeyboard: useUnicodeKeyboard, cursorCrosshair: cursorOverrideActive }"
+        (sessionClose)="startTerminationProcess()"
+        (screenModeChange)="handleScreenModeChange($event)"
+        (dynamicResizeChange)="onDynamicResizeChange($event)"
+        (cursorCrosshairChange)="onCursorCrosshairChange($event)">
+      </rdp-toolbar-wrapper>
+    </div>
+  }
 </div>

@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
+import { Component, OnDestroy, OnInit, Renderer2 } from '@angular/core';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -14,6 +14,7 @@ import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import { ardQualityMode, Backend, resolutionQuality, wheelSpeedFactor } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, JET_ARD_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { WheelSpeedControl } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -25,57 +26,20 @@ import { v4 as uuidv4 } from 'uuid';
 })
 export class WebClientArdComponent
   extends DesktopWebClientBaseComponent<ArdFormDataInput>
-  implements OnInit, AfterViewInit, OnDestroy
+  implements OnInit, OnDestroy
 {
-  @ViewChild('sessionArdContainer') sessionContainerElement: ElementRef;
-
   backendRef = Backend;
 
-  middleToolbarButtons = [
-    {
-      label: 'Full Screen',
-      icon: 'dvl-icon dvl-icon-fullscreen',
-      action: () => this.toggleFullscreen(),
-    },
-    {
-      label: 'Fit to Screen',
-      icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(ScreenScale.Fit),
-    },
-    {
-      label: 'Actual Size',
-      icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(ScreenScale.Real),
-    },
-  ];
-
-  middleToolbarToggleButtons = [
-    {
-      label: 'Toggle Cursor Kind',
-      icon: 'dvl-icon dvl-icon-cursor',
-      action: () => this.toggleCursorKind(),
-      isActive: () => !this.cursorOverrideActive,
-    },
-  ];
-
-  rightToolbarButtons = [
-    {
-      label: 'Close Session',
-      icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess(),
-    },
-  ];
-
-  sliders = [
-    {
-      label: 'Wheel Speed',
-      value: 1,
-      onChange: (value: number) => this.setWheelSpeedFactor(value),
-      min: 0.1,
-      max: 3,
-      step: 0.1,
-    },
-  ];
+  // ── Floating toolbar state ─────────────────────────────────────────────────
+  wheelSpeed = 1;
+  // sessionInfo / sessionInfoUrl / sessionInfoUsername / refreshSessionInfo() inherited from WebClientBaseComponent
+  readonly wheelSpeedControl: WheelSpeedControl = {
+    label: 'Wheel speed',
+    min: 0.1,
+    max: 3,
+    step: 0.1,
+  };
+  // ──
 
   constructor(
     protected renderer: Renderer2,
@@ -90,26 +54,35 @@ export class WebClientArdComponent
 
   ngOnInit(): void {
     this.webSessionIcon = DVL_ARD_ICON;
+    this.refreshSessionInfo();
 
     super.ngOnInit();
   }
 
-  setWheelSpeedFactor(factor: number): void {
-    this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+  // ── Floating toolbar handlers ─────────────────────────────────────────────
+  onCursorCrosshairChange(enabled: boolean): void {
+    if (enabled !== this.cursorOverrideActive) {
+      this.toggleCursorKind();
+    }
+  }
+
+  onWheelSpeedChange(factor: number): void {
+    this.setWheelSpeedFactor(factor);
+  }
+
+  private setWheelSpeedFactor(factor: number): void {
+    this.wheelSpeed = factor;
+    if (this.remoteClient) {
+      this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+    }
   }
 
   protected handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
 
-    const sessionContainerElement = this.sessionContainerElement.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
-    }
-
     this.scaleTo(ScreenScale.Fit);
   }
+  // ──
 
   protected startConnectionProcess(): void {
     this.getFormData()
@@ -132,6 +105,9 @@ export class WebClientArdComponent
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
       map((currentWebSession) => {
         this.formData = currentWebSession.data as ArdFormDataInput;
+        this.wheelSpeed = this.formData.wheelSpeedFactor ?? 1;
+        this.sessionInfoUsername = this.formData.username || null;
+        this.refreshSessionInfo();
       }),
     );
   }
@@ -142,6 +118,9 @@ export class WebClientArdComponent
 
     const sessionId: string = uuidv4();
     const gatewayAddress = this.getGatewayWebSocketUrl(JET_ARD_URL, sessionId);
+    this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
+    this.sessionInfoUsername = username || null;
+    this.refreshSessionInfo();
 
     const connectionParameters: IronARDConnectionParameters = {
       username,
@@ -177,6 +156,8 @@ export class WebClientArdComponent
     if (connectionParameters.ardQualityMode != null) {
       configBuilder.withExtension(ardQualityMode(connectionParameters.ardQualityMode));
     }
+
+    configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
 
     const config = configBuilder.build();
 

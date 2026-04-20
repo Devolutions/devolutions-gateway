@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
+import { Component, OnDestroy, OnInit, Renderer2 } from '@angular/core';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
@@ -26,8 +26,8 @@ import {
 } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_VNC_ICON, JET_VNC_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { WheelSpeedControl } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
 import { Encoding } from '@shared/enums/encoding.enum';
-import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,82 +40,23 @@ import { v4 as uuidv4 } from 'uuid';
 })
 export class WebClientVncComponent
   extends DesktopWebClientBaseComponent<VncFormDataInput>
-  implements OnInit, AfterViewInit, OnDestroy
+  implements OnInit, OnDestroy
 {
-  @ViewChild('sessionVncContainer') sessionContainerElement: ElementRef;
-
   backendRef = Backend;
+
+  // ── Floating toolbar state ─────────────────────────────────────────────────
   dynamicResizeSupported = false;
   dynamicResizeEnabled = false;
+  // sessionInfo / sessionInfoUrl / sessionInfoUsername / refreshSessionInfo() inherited from WebClientBaseComponent
 
-  leftToolbarButtons = [
-    {
-      label: 'Start',
-      icon: 'dvl-icon dvl-icon-windows',
-      action: () => this.sendWindowsKey(),
-    },
-    {
-      label: 'Ctrl+Alt+Del',
-      icon: 'dvl-icon dvl-icon-admin',
-      action: () => this.sendCtrlAltDel(),
-    },
-  ];
-
-  middleToolbarButtons = [
-    {
-      label: 'Full Screen',
-      icon: 'dvl-icon dvl-icon-fullscreen',
-      action: () => this.toggleFullscreen(),
-    },
-    {
-      label: 'Fit to Screen',
-      icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(ScreenScale.Fit),
-    },
-    {
-      label: 'Actual Size',
-      icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(ScreenScale.Real),
-    },
-  ];
-
-  middleToolbarToggleButtons = [
-    {
-      label: 'Toggle Cursor Kind',
-      icon: 'dvl-icon dvl-icon-cursor',
-      action: () => this.toggleCursorKind(),
-      isActive: () => !this.cursorOverrideActive,
-    },
-  ];
-
-  checkboxes = [
-    {
-      inputId: 'dynamicResize',
-      label: 'Dynamic Resize',
-      value: this.dynamicResizeEnabled,
-      onChange: () => this.toggleDynamicResize(),
-      enabled: () => this.dynamicResizeSupported,
-    },
-  ];
-
-  rightToolbarButtons = [
-    {
-      label: 'Close Session',
-      icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess(),
-    },
-  ];
-
-  sliders = [
-    {
-      label: 'Wheel Speed',
-      value: 1,
-      onChange: (value: number) => this.setWheelSpeedFactor(value),
-      min: 0.1,
-      max: 3,
-      step: 0.1,
-    },
-  ];
+  wheelSpeed = 1;
+  readonly wheelSpeedControl: WheelSpeedControl = {
+    label: 'Wheel speed',
+    min: 0.1,
+    max: 3,
+    step: 0.1,
+  };
+  // ──
 
   private componentResizeObserverDisconnect?: () => void;
   private dynamicComponentResizeSubscription?: Subscription;
@@ -134,6 +75,7 @@ export class WebClientVncComponent
 
   ngOnInit(): void {
     this.webSessionIcon = DVL_VNC_ICON;
+    this.refreshSessionInfo();
 
     super.ngOnInit();
   }
@@ -144,19 +86,31 @@ export class WebClientVncComponent
     super.ngOnDestroy();
   }
 
-  sendWindowsKey(): void {
-    this.remoteClient.metaKey();
+  // ── Floating toolbar handlers ─────────────────────────────────────────────
+  onDynamicResizeChange(enabled: boolean): void {
+    if (enabled !== this.dynamicResizeEnabled) {
+      this.toggleDynamicResize();
+    }
   }
 
-  sendCtrlAltDel(): void {
-    this.remoteClient.ctrlAltDel();
+  onCursorCrosshairChange(enabled: boolean): void {
+    if (enabled !== this.cursorOverrideActive) {
+      this.toggleCursorKind();
+    }
   }
 
-  setWheelSpeedFactor(factor: number): void {
-    this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+  onWheelSpeedChange(factor: number): void {
+    this.setWheelSpeedFactor(factor);
   }
 
-  toggleDynamicResize(): void {
+  private setWheelSpeedFactor(factor: number): void {
+    this.wheelSpeed = factor;
+    if (this.remoteClient) {
+      this.remoteClient.invokeExtension(wheelSpeedFactor(factor));
+    }
+  }
+
+  private toggleDynamicResize(): void {
     const RESIZE_DEBOUNCE_TIME = 100;
 
     this.dynamicResizeEnabled = !this.dynamicResizeEnabled;
@@ -169,9 +123,6 @@ export class WebClientVncComponent
       this.dynamicComponentResizeSubscription = this.componentResizeService.resize$
         .pipe(debounceTime(RESIZE_DEBOUNCE_TIME))
         .subscribe(({ width, height }) => {
-          if (!this.isFullScreenMode) {
-            height -= WebSession.TOOLBAR_SIZE;
-          }
           this.remoteClient.resize(width, height);
         });
     } else {
@@ -183,15 +134,9 @@ export class WebClientVncComponent
   protected handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
 
-    const sessionContainerElement = this.sessionContainerElement.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
-    }
-
     this.scaleTo(ScreenScale.Fit);
   }
+  // ──
 
   protected startConnectionProcess(): void {
     this.getFormData()
@@ -216,6 +161,8 @@ export class WebClientVncComponent
       map((currentWebSession) => {
         // It's not possibe to infer the type of currentWebSession.data, we case it on the fly
         this.formData = currentWebSession.data as unknown as VncFormDataInput;
+        this.sessionInfoUsername = this.formData.username ?? null;
+        this.refreshSessionInfo();
       }),
     );
   }
@@ -239,6 +186,9 @@ export class WebClientVncComponent
     const sessionId: string = uuidv4();
     const gatewayHttpAddress: URL = new URL(JET_VNC_URL + `/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
+    this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
+    this.sessionInfoUsername = username ?? null;
+    this.refreshSessionInfo();
 
     const desktopScreenSize: DesktopSize =
       this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();

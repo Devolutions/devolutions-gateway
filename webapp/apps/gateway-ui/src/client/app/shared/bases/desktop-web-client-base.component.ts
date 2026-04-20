@@ -1,4 +1,5 @@
 import {
+  AfterViewInit,
   Directive,
   ElementRef,
   EventEmitter,
@@ -11,6 +12,8 @@ import {
 } from '@angular/core';
 import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
 import { DVL_WARNING_ICON } from '@gateway/app.constants';
+import { ClipboardActionButton } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-action.model';
+import { ScreenMode } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
 import { ScreenScale } from '@shared/enums/screen-scale.enum';
 import {
@@ -39,7 +42,7 @@ enum IronErrorKind {
 @Directive()
 export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFormDataInput>
   extends WebClientBaseComponent
-  implements OnDestroy
+  implements AfterViewInit, OnDestroy
 {
   // ── Clipboard state — shared by desktop protocol components only ──────────
   formData: TFormData;
@@ -53,13 +56,7 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
 
   protected webSessionIcon: string;
 
-  clipboardActionButtons: {
-    label: string;
-    tooltip: string;
-    icon: string;
-    action: () => Promise<void>;
-    enabled: () => boolean;
-  }[] = [];
+  clipboardActionButtons: ClipboardActionButton[] = [];
 
   isFullScreenMode = false;
   cursorOverrideActive = false;
@@ -158,24 +155,36 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
 
   /** Populates clipboardActionButtons for manual clipboard workflows.
    *  Call after the component knows whether auto-clipboard is enabled.
-   *  No-ops when in a non-secure context or when auto-clipboard is active. */
+   *  This intentionally lives in the shared desktop base instead of the thin
+   *  protocol wrappers: the Blink/manual clipboard actions are stable across
+   *  apps, while Hub, DVLS, and this webapp differ substantially in service
+   *  wiring. Keeping the setup here prevents duplicate actions without turning
+   *  wrappers into app-specific service containers.
+   *  Assigns a deterministic action list so repeated calls are idempotent and
+   *  cannot duplicate menu entries.
+   *  Clears the list when in a non-secure context or when auto-clipboard is active. */
   protected setupClipboardHandling(autoClipboard?: boolean): void {
     if (!window.isSecureContext || this.isAutoClipboardMode(autoClipboard)) {
+      this.clipboardActionButtons = [];
       return;
     }
 
-    // We don't check for clipboard write support, as all recent browser versions support it.
-    this.clipboardActionButtons.push({
-      label: 'Save Clipboard',
-      tooltip: 'Copy received clipboard content to your local clipboard.',
-      icon: 'dvl-icon dvl-icon-save',
-      action: () => this.saveRemoteClipboard(),
-      enabled: () => this.saveRemoteClipboardButtonEnabled,
-    });
+    const actions: ClipboardActionButton[] = [
+      {
+        id: 'save-clipboard',
+        label: 'Save Clipboard',
+        tooltip: 'Copy received clipboard content to your local clipboard.',
+        icon: 'dvl-icon dvl-icon-save',
+        action: () => this.saveRemoteClipboard(),
+        enabled: () => this.saveRemoteClipboardButtonEnabled,
+      },
+    ];
 
+    // We don't check for clipboard write support, as all recent browser versions support it.
     // Check if the browser supports reading local clipboard.
     if (typeof navigator.clipboard?.readText === 'function') {
-      this.clipboardActionButtons.push({
+      actions.push({
+        id: 'send-clipboard',
         label: 'Send Clipboard',
         tooltip: 'Send your local clipboard content to the remote server.',
         icon: 'dvl-icon dvl-icon-send',
@@ -183,6 +192,8 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
         enabled: () => true,
       });
     }
+
+    this.clipboardActionButtons = actions;
   }
 
   async saveRemoteClipboard(): Promise<void> {
@@ -306,6 +317,27 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
 
   scaleTo(scale: ScreenScale): void {
     this.remoteClient.setScale(scale.valueOf());
+  }
+
+  /** Shared handler for the toolbar's screenModeChange output.
+   *  Identical in RDP, VNC, and ARD — lives here to avoid duplication. */
+  handleScreenModeChange(mode: ScreenMode): void {
+    switch (mode) {
+      case 'fullscreen':
+        this.toggleFullscreen();
+        break;
+      case 'fit':
+        this.scaleTo(ScreenScale.Fit);
+        break;
+      case 'minimize':
+        this.scaleTo(ScreenScale.Real);
+        break;
+    }
+  }
+
+  /** Default behavior for the toolbar Session info button. */
+  onSessionInfoPress(): void {
+    this.gatewayAlertMessageService.addInfo(`Session ID: ${this.webSessionId}`);
   }
 
   setKeyboardUnicodeMode(useUnicode: boolean): void {

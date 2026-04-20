@@ -1,4 +1,4 @@
-import { Component, ElementRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { Component, ElementRef, Input, OnInit, ViewChild } from '@angular/core';
 import { LoggingLevel } from '@devolutions/terminal-shared';
 import { SSHTerminal, loggingService as sshLoggingService, TerminalConnectionStatus } from '@devolutions/web-ssh-gui';
 import { DVL_SSH_ICON, JET_SSH_URL } from '@gateway/app.constants';
@@ -27,11 +27,10 @@ import { v4 as uuidv4 } from 'uuid';
 })
 export class WebClientSshComponent
   extends TerminalWebClientBaseComponent
-  implements WebComponentReady, CanSendTerminateSessionCmd, OnInit, OnDestroy
+  implements WebComponentReady, CanSendTerminateSessionCmd, OnInit
 {
   @Input() webSessionId: string;
 
-  @ViewChild('sessionSshContainer') sessionContainerElement: ElementRef;
   @ViewChild('webSSHGuiTerminal') webGuiTerminal: ElementRef;
 
   formData: SSHFormDataInput;
@@ -53,6 +52,7 @@ export class WebClientSshComponent
   ngOnInit(): void {
     sshLoggingService.setLevel(LoggingLevel.DEBUG);
     this.removeWebClientGuiElement();
+    this.refreshSessionInfo();
   }
 
   protected teardownTerminalClient(): void {
@@ -71,9 +71,8 @@ export class WebClientSshComponent
 
   startTerminationProcess(): void {
     this.currentStatus.isDisabledByUser = true;
-    this.handleSessionEnded(this.getMessage(TerminalConnectionStatus.failed));
     this.sendTerminateSessionCmd();
-    this.disableComponentStatus();
+    this.handleSessionEnded(this.getMessage(TerminalConnectionStatus.closed), false);
   }
 
   sendTerminateSessionCmd(): void {
@@ -144,6 +143,8 @@ export class WebClientSshComponent
       takeUntil(this.destroyed$),
       map((currentWebSession) => {
         this.formData = currentWebSession.data as SSHFormDataInput;
+        this.sessionInfoUsername = this.formData.username ?? null;
+        this.refreshSessionInfo();
       }),
     );
   }
@@ -154,6 +155,9 @@ export class WebClientSshComponent
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
     const gatewayAddress = this.getGatewayWebSocketUrl(JET_SSH_URL, sessionId);
+    this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
+    this.sessionInfoUsername = username ?? null;
+    this.refreshSessionInfo();
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
     const privateKeyPassphrase: string = formData.passphrase || null;
 

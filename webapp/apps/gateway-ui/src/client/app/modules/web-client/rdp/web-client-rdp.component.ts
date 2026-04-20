@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
+import { Component, OnDestroy, OnInit, Renderer2 } from '@angular/core';
 import { Backend, displayControl, kdcProxyUrl, preConnectionBlob, RdpFile } from '@devolutions/iron-remote-desktop-rdp';
 import { DesktopWebClientBaseComponent } from '@shared/bases/desktop-web-client-base.component';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
@@ -19,7 +19,6 @@ import { ActivatedRoute } from '@angular/router';
 import { SessionTerminationInfo } from '@devolutions/iron-remote-desktop';
 import { DVL_RDP_ICON, JET_RDP_URL } from '@gateway/app.constants';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { WebSession } from '@shared/models/web-session.model';
 import { ComponentResizeObserverService } from '@shared/services/component-resize-observer.service';
 import { NavigationService } from '@shared/services/navigation.service';
 
@@ -31,85 +30,17 @@ import { NavigationService } from '@shared/services/navigation.service';
 })
 export class WebClientRdpComponent
   extends DesktopWebClientBaseComponent<RdpFormDataInput>
-  implements OnInit, AfterViewInit, OnDestroy
+  implements OnInit, OnDestroy
 {
-  @ViewChild('sessionRdpContainer') sessionContainerElement: ElementRef;
-
   backendRef = Backend;
-  useUnicodeKeyboard = false;
-
-  dynamicResizeSupported = false;
-  dynamicResizeEnabled = false;
-
   rdpConfig: string | null;
 
-  leftToolbarButtons = [
-    {
-      label: 'Start',
-      icon: 'dvl-icon dvl-icon-windows',
-      action: () => this.sendWindowsKey(),
-    },
-    {
-      label: 'Ctrl+Alt+Del',
-      icon: 'dvl-icon dvl-icon-admin',
-      action: () => this.sendCtrlAltDel(),
-    },
-  ];
-
-  middleToolbarButtons = [
-    {
-      label: 'Full Screen',
-      icon: 'dvl-icon dvl-icon-fullscreen',
-      action: () => this.toggleFullscreen(),
-    },
-    {
-      label: 'Fit to Screen',
-      icon: 'dvl-icon dvl-icon-minimize',
-      action: () => this.scaleTo(ScreenScale.Fit),
-    },
-    {
-      label: 'Actual Size',
-      icon: 'dvl-icon dvl-icon-screen',
-      action: () => this.scaleTo(ScreenScale.Real),
-    },
-  ];
-
-  middleToolbarToggleButtons = [
-    {
-      label: 'Toggle Cursor Kind',
-      icon: 'dvl-icon dvl-icon-cursor',
-      action: () => this.toggleCursorKind(),
-      isActive: () => !this.cursorOverrideActive,
-    },
-  ];
-
-  rightToolbarButtons = [
-    {
-      label: 'Close Session',
-      icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess(),
-    },
-  ];
-
-  checkboxes = [
-    {
-      inputId: 'unicodeKeyboardMode',
-      label: 'Unicode Keyboard Mode',
-      value: this.useUnicodeKeyboard,
-      onChange: () => {
-        this.useUnicodeKeyboard = !this.useUnicodeKeyboard;
-        this.setKeyboardUnicodeMode(this.useUnicodeKeyboard);
-      },
-      enabled: () => true,
-    },
-    {
-      inputId: 'dynamicResize',
-      label: 'Dynamic Resize',
-      value: this.dynamicResizeEnabled,
-      onChange: () => this.toggleDynamicResize(),
-      enabled: () => this.dynamicResizeSupported,
-    },
-  ];
+  // ── Floating toolbar state ─────────────────────────────────────────────────
+  useUnicodeKeyboard = false;
+  dynamicResizeSupported = false;
+  dynamicResizeEnabled = false;
+  // sessionInfo / sessionInfoUrl / sessionInfoUsername / refreshSessionInfo() inherited from WebClientBaseComponent
+  // ──
 
   private componentResizeObserverDisconnect?: () => void;
   private dynamicComponentResizeSubscription?: Subscription;
@@ -130,6 +61,7 @@ export class WebClientRdpComponent
 
   ngOnInit(): void {
     this.webSessionIcon = DVL_RDP_ICON;
+    this.refreshSessionInfo();
     this.setRdpConfig();
     // Navigate to /session route to clear query params.
     this.navigation.navigateToNewSession().then(noop);
@@ -148,15 +80,21 @@ export class WebClientRdpComponent
     this.rdpConfig = queryParams.config ?? null;
   }
 
-  sendWindowsKey(): void {
-    this.remoteClient.metaKey();
+  // ── Floating toolbar handlers ─────────────────────────────────────────────
+  onDynamicResizeChange(enabled: boolean): void {
+    if (enabled !== this.dynamicResizeEnabled) {
+      this.toggleDynamicResize();
+    }
   }
 
-  sendCtrlAltDel(): void {
-    this.remoteClient.ctrlAltDel();
+  onCursorCrosshairChange(enabled: boolean): void {
+    // cursorCrosshair (toolbar) === cursorOverrideActive (RDP): both true = crosshair on
+    if (enabled !== this.cursorOverrideActive) {
+      this.toggleCursorKind();
+    }
   }
 
-  toggleDynamicResize(): void {
+  private toggleDynamicResize(): void {
     const RESIZE_DEBOUNCE_TIME = 100;
 
     this.dynamicResizeEnabled = !this.dynamicResizeEnabled;
@@ -169,9 +107,6 @@ export class WebClientRdpComponent
       this.dynamicComponentResizeSubscription = this.componentResizeService.resize$
         .pipe(debounceTime(RESIZE_DEBOUNCE_TIME))
         .subscribe(({ width, height }) => {
-          if (!this.isFullScreenMode) {
-            height -= WebSession.TOOLBAR_SIZE;
-          }
           this.remoteClient.resize(width, height);
         });
     } else {
@@ -183,15 +118,9 @@ export class WebClientRdpComponent
   protected handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
 
-    const sessionContainerElement = this.sessionContainerElement.nativeElement;
-    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
-
-    if (sessionToolbarElement) {
-      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
-    }
-
     this.scaleTo(ScreenScale.Fit);
   }
+  // ──
 
   protected startConnectionProcess(): void {
     let parameters: Observable<IronRDPConnectionParameters>;
@@ -225,6 +154,8 @@ export class WebClientRdpComponent
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
       map((currentWebSession) => {
         this.formData = currentWebSession.data as RdpFormDataInput;
+        this.sessionInfoUsername = this.formData.username;
+        this.refreshSessionInfo();
       }),
     );
   }
@@ -234,6 +165,9 @@ export class WebClientRdpComponent
 
     const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.formData.username);
     const gatewayAddress = this.getGatewayWebSocketUrl(JET_RDP_URL);
+    this.sessionInfoUsername = extractedData.username;
+    this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
+    this.refreshSessionInfo();
 
     const desktopScreenSize: DesktopSize =
       this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
@@ -275,6 +209,9 @@ export class WebClientRdpComponent
     }
 
     const extractedUsernameDomain: ExtractedUsernameDomain = this.utils.string.extractDomain(username);
+    this.sessionInfoUsername = extractedUsernameDomain.username;
+    this.sessionInfoUrl = this.toUserFacingUrl(this.getWebSocketUrl());
+    this.refreshSessionInfo();
 
     // TODO: Parse `DesktopSize` from config.
     const screenSize: DesktopSize = this.webSessionService.getWebSessionScreenSizeSnapshot();

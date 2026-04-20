@@ -1,0 +1,293 @@
+// _dropdown.scss
+// ── Overlay dropdown menu, dock-position buttons, and toggle switches ──────────
+
+// ── Dropdown container ────────────────────────────────────────────────────────
+.toolbar-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 205px;
+  overflow: hidden;
+}
+
+.toolbar-dropdown,
+.toolbar-session-info-popover {
+  background: var(--dropdown-bg);
+  border-radius: 12px;
+  box-shadow: var(--toolbar-shadow);
+}
+
+// Inset border overlay (matches demo's double-border pattern)
+// Shared by .dropdown-border-overlay and .session-info-popover-border
+.dropdown-border-overlay,
+.session-info-popover-border {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--dropdown-border-color);
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.dropdown-border-overlay { z-index: 1; }
+
+.dropdown-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 0;
+  width: 100%;
+}
+
+// ── Rows ──────────────────────────────────────────────────────────────────────
+
+// Label + toggle row
+.dropdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
+.dropdown-item-label {
+  font-family: var(--toolbar-font-family);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 12px;
+  color: var(--dropdown-label-color);
+  flex: 1;
+}
+
+// Disabled label — paired with a disabled toggle
+.dropdown-item-label-disabled {
+  opacity: 0.4;
+}
+
+// Thin horizontal rule between sections
+.dropdown-splitter {
+  width: 100%;
+  height: 8px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 3px,
+    var(--dropdown-splitter-color) 3px,
+    var(--dropdown-splitter-color) 4px,
+    transparent 4px
+  );
+}
+
+// Section heading (uppercase, small, muted)
+.dropdown-section-title {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 8px 4px;
+  box-sizing: border-box;
+
+  font-family: var(--toolbar-font-family);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 10px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  color: var(--dropdown-section-title-color);
+  white-space: nowrap;
+}
+
+// ── Dock-position buttons ──────────────────────────────────────────────────────
+
+.dropdown-dock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 8px 4px;
+  box-sizing: border-box;
+}
+
+.dock-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+
+  svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  &:hover   { background: var(--dropdown-dock-btn-hover-bg); }
+  &.is-active { background: var(--dropdown-dock-btn-active-bg); }
+}
+
+// ── Toggle switch ─────────────────────────────────────────────────────────────
+// 21×12px pill matching the demo design exactly.
+
+.toggle-switch {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 21px;
+  height: 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--dropdown-toggle-off-bg);
+  cursor: pointer;
+  transition: background-color 200ms ease;
+
+  .toggle-thumb {
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--dropdown-toggle-thumb-color);
+    box-shadow: var(--dropdown-toggle-thumb-shadow);
+    transition: left 200ms ease, right 200ms ease;
+  }
+
+  &.is-on {
+    background: var(--dropdown-toggle-on-bg);
+
+    .toggle-thumb {
+      left: auto;
+      right: 2px;
+    }
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.dropdown-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
+.dropdown-slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.dropdown-slider-value {
+  font-family: var(--toolbar-font-family);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 12px;
+  color: var(--dropdown-section-title-color);
+}
+
+.dropdown-slider-input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--dropdown-toggle-on-bg);
+}
+
+// ── Clipboard / generic action button ─────────────────────────────────────────
+// Full-width menu-item style button used for clipboard actions in the dropdown.
+.dropdown-action-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--toolbar-font-family);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 12px;
+  color: var(--dropdown-label-color);
+  text-align: left;
+  transition: background-color 150ms ease;
+
+  &:hover:not(:disabled) { background: var(--dropdown-dock-btn-hover-bg); }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+// ── Session info popover ─────────────────────────────────────────────────────
+.toolbar-session-info-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 360px;
+}
+
+.session-info-popover-content {
+  padding: 8px 12px;
+}
+
+.session-info-popover-title {
+  padding: 4px 0 8px;
+  font-family: var(--toolbar-font-family);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dropdown-section-title-color);
+}
+
+.session-info-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--dropdown-splitter-color);
+}
+
+.session-info-label,
+.session-info-value {
+  font-family: var(--toolbar-font-family);
+  font-size: 12px;
+  color: var(--dropdown-label-color);
+}
+
+.session-info-label {
+  font-weight: 600;
+}
+
+.session-info-value {
+  text-align: right;
+}
+
+.session-info-value-monospace {
+  font-family: Consolas, 'Courier New', monospace;
+}
+
+.session-info-value-success { color: #0f8a46; }
+.session-info-value-warning { color: #b06a00; }
+.session-info-value-danger { color: #b42318; }
