@@ -7,31 +7,50 @@ use crate::codec::{self, Decode, Encode};
 use crate::error::ProtoError;
 use crate::session::{ConnectRequest, ConnectResponse};
 
-// ConnectResponse sub-tags.
+// ConnectRequest variant tags.
+const TAG_REQUEST_TCP: u8 = 0x01;
+
+// ConnectResponse variant tags.
 const TAG_RESPONSE_SUCCESS: u8 = 0x00;
 const TAG_RESPONSE_ERROR: u8 = 0x01;
 
 impl Encode for ConnectRequest {
     fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u16(self.protocol_version);
-        buf.put_slice(self.session_id.as_bytes());
-        codec::put_string(buf, &self.target);
+        match self {
+            Self::Tcp {
+                protocol_version,
+                session_id,
+                target,
+            } => {
+                buf.put_u8(TAG_REQUEST_TCP);
+                buf.put_u16(*protocol_version);
+                buf.put_slice(session_id.as_bytes());
+                codec::put_string(buf, target);
+            }
+        }
     }
 }
 
 impl Decode for ConnectRequest {
     fn decode(mut buf: Bytes) -> Result<Self, ProtoError> {
-        codec::ensure_remaining(buf.remaining(), 2 + 16, "ConnectRequest header")?;
-        let protocol_version = buf.get_u16();
-        let mut uuid_bytes = [0u8; 16];
-        buf.copy_to_slice(&mut uuid_bytes);
-        let session_id = Uuid::from_bytes(uuid_bytes);
-        let target = codec::get_string(&mut buf)?;
-        Ok(Self {
-            protocol_version,
-            session_id,
-            target,
-        })
+        codec::ensure_remaining(buf.remaining(), 1 + 2 + 16, "ConnectRequest header")?;
+        let tag = buf.get_u8();
+
+        match tag {
+            TAG_REQUEST_TCP => {
+                let protocol_version = buf.get_u16();
+                let mut uuid_bytes = [0u8; 16];
+                buf.copy_to_slice(&mut uuid_bytes);
+                let session_id = Uuid::from_bytes(uuid_bytes);
+                let target = codec::get_string(&mut buf)?;
+                Ok(Self::Tcp {
+                    protocol_version,
+                    session_id,
+                    target,
+                })
+            }
+            _ => Err(ProtoError::UnknownTag { tag }),
+        }
     }
 }
 

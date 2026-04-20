@@ -72,7 +72,7 @@ impl AgentTunnelHandle {
             .into();
 
         // Send ConnectRequest.
-        let connect_msg = ConnectRequest::new(session_id, target.to_owned());
+        let connect_msg = ConnectRequest::tcp(session_id, target.to_owned());
         session
             .send_request(&connect_msg)
             .await

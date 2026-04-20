@@ -449,14 +449,15 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
             .context("recv ConnectRequest")?;
 
         info!(
-            session_id = %connect_msg.session_id,
-            target = %connect_msg.target,
+            session_id = %connect_msg.session_id(),
+            target = %connect_msg.target(),
             "Received ConnectRequest"
         );
 
-        if let Err(e) = agent_tunnel_proto::validate_protocol_version(connect_msg.protocol_version) {
+        let protocol_version = connect_msg.protocol_version();
+        if let Err(e) = agent_tunnel_proto::validate_protocol_version(protocol_version) {
             warn!(
-                protocol_version = %connect_msg.protocol_version,
+                %protocol_version,
                 %e,
                 "Rejecting ConnectRequest: unsupported protocol version"
             );
@@ -468,7 +469,7 @@ async fn run_session_proxy(advertise_subnets: Vec<Ipv4Network>, send: quinn::Sen
             bail!("unsupported protocol version in ConnectRequest");
         }
 
-        let target = Target::parse(&connect_msg.target).context("parse connect target")?;
+        let target = Target::parse(connect_msg.target()).context("parse connect target")?;
         let candidates = resolve_target(&target, &advertise_subnets).await?;
         let (tcp_stream, selected_target) = connect_to_target(&candidates).await?;
         info!(target = %selected_target, "TCP connection established");
