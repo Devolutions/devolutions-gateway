@@ -19,9 +19,6 @@ const TAG_CERT_RENEWAL_RESPONSE: u8 = 0x05;
 const TAG_CERT_SUCCESS: u8 = 0x00;
 const TAG_CERT_ERROR: u8 = 0x01;
 
-// IP network family tag.
-const IP_V4: u8 = 4;
-
 /// A normalized DNS domain name (lowercase).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -177,7 +174,6 @@ impl ControlMessage {
             | Self::CertRenewalResponse { protocol_version, .. } => *protocol_version,
         }
     }
-
 }
 
 impl Encode for ControlMessage {
@@ -299,6 +295,9 @@ impl Decode for ControlMessage {
 // Subnet encode/decode
 // ---------------------------------------------------------------------------
 
+// Each subnet is encoded as `[4B ipv4_octets][1B prefix]`. No family tag —
+// if IPv6 is ever added, `protocol_version` bumps and the format can
+// reintroduce a tag cleanly.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "count bounded by MAX_CONTROL_MESSAGE_SIZE"
@@ -306,7 +305,6 @@ impl Decode for ControlMessage {
 fn encode_subnets(buf: &mut BytesMut, subnets: &[Ipv4Network]) {
     buf.put_u32(subnets.len() as u32);
     for subnet in subnets {
-        buf.put_u8(IP_V4);
         buf.put_slice(&subnet.ip().octets());
         buf.put_u8(subnet.prefix());
     }
@@ -318,14 +316,7 @@ fn decode_subnets(buf: &mut Bytes) -> Result<Vec<Ipv4Network>, ProtoError> {
     let mut subnets = Vec::with_capacity(count);
 
     for _ in 0..count {
-        codec::ensure_remaining(buf.remaining(), 1 + 4 + 1, "IPv4 subnet")?;
-        let family = buf.get_u8();
-        if family != IP_V4 {
-            return Err(ProtoError::InvalidField {
-                field: "subnet_family",
-                reason: "expected 4 (IPv4)",
-            });
-        }
+        codec::ensure_remaining(buf.remaining(), 4 + 1, "IPv4 subnet")?;
         let mut octets = [0u8; 4];
         buf.copy_to_slice(&mut octets);
         let prefix = buf.get_u8();
@@ -419,6 +410,54 @@ fn decode_cert_renewal_result(buf: &mut Bytes) -> Result<CertRenewalResult, Prot
 mod tests {
     use super::*;
     use crate::stream::ControlStream;
+
+    // ── DomainName::matches_hostname ──────────────────────────────────
+
+    #[test]
+    fn matches_hostname_exact_match() {
+        assert!(DomainName::new("contoso.local").matches_hostname("contoso.local"));
+    }
+
+    #[test]
+    fn matches_hostname_is_case_insensitive() {
+        let d = DomainName::new("Contoso.LOCAL");
+        assert!(d.matches_hostname("contoso.local"));
+        assert!(d.matches_hostname("CONTOSO.LOCAL"));
+        assert!(d.matches_hostname("Contoso.Local"));
+    }
+
+    #[test]
+    fn matches_hostname_suffix_match() {
+        let d = DomainName::new("contoso.local");
+        assert!(d.matches_hostname("dc01.contoso.local"));
+        assert!(d.matches_hostname("finance.branch.contoso.local"));
+    }
+
+    #[test]
+    fn matches_hostname_rejects_partial_label() {
+        // "fakecontoso.local" ends with "contoso.local" as a string, but the
+        // preceding character isn't '.', so it's a different domain.
+        let d = DomainName::new("contoso.local");
+        assert!(!d.matches_hostname("fakecontoso.local"));
+    }
+
+    #[test]
+    fn matches_hostname_rejects_different_domain() {
+        let d = DomainName::new("contoso.local");
+        assert!(!d.matches_hostname("example.com"));
+        assert!(!d.matches_hostname("local"));
+        assert!(!d.matches_hostname(""));
+    }
+
+    #[test]
+    fn matches_hostname_rejects_parent_domain() {
+        // The domain "finance.contoso.local" should not match the bare "contoso.local"
+        // (bare name lacks the finance. prefix).
+        let d = DomainName::new("finance.contoso.local");
+        assert!(!d.matches_hostname("contoso.local"));
+    }
+
+    // ── Message roundtrips ────────────────────────────────────────────
 
     async fn roundtrip(msg: &ControlMessage) -> ControlMessage {
         let mut buf = Vec::new();

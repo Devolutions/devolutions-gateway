@@ -146,11 +146,15 @@ impl Task for TunnelTask {
                 backoff.reset();
             }
 
-            let Some(wait) = backoff.next_backoff() else {
-                // Should never happen with max_elapsed_time(None), but just in case.
-                warn!("Backoff exhausted, resetting");
-                backoff.reset();
-                continue;
+            let wait = match backoff.next_backoff() {
+                Some(w) => w,
+                None => {
+                    // Should never happen with max_elapsed_time(None); fall through
+                    // with a 1s floor to guarantee no hot-spin on adversarial clocks.
+                    warn!("Backoff exhausted, resetting");
+                    backoff.reset();
+                    Duration::from_secs(1)
+                }
             };
 
             info!(?wait, "Reconnecting after backoff");
