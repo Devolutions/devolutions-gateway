@@ -568,6 +568,8 @@ jobs:
           Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_x86_64.rpm"
+          Move-Item -Path "./linux/arm64/devolutions-gateway_${version}-1_arm64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_arm64.deb"
+          Move-Item -Path "./linux/arm64/devolutions-gateway_${version}-1_arm64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_arm64.rpm"
         shell: pwsh
 
       - name: Attest build provenance
