@@ -361,6 +361,9 @@ jobs:
           # Do not upload tun2socks.exe by itself.
           Remove-Item -Path (Join-Path devolutions-agent tun2socks) -Recurse
 
+          # DevolutionsAgentUpdater is an internal MSI update helper, not a standalone download.
+          Get-ChildItem -Path devolutions-agent -Recurse -Filter 'DevolutionsAgentUpdater_*' -File | Remove-Item
+
           # For the PowerShell module, only upload the nupkg.
           Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar)
         shell: pwsh
