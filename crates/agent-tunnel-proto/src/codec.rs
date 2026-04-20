@@ -5,12 +5,12 @@ use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use crate::error::ProtoError;
 
 /// Trait for types that can encode themselves into a binary payload.
-pub(crate) trait Encode {
+pub trait Encode {
     fn encode(&self, buf: &mut BytesMut);
 }
 
 /// Trait for types that can decode themselves from a binary payload.
-pub(crate) trait Decode: Sized {
+pub trait Decode: Sized {
     fn decode(buf: Bytes) -> Result<Self, ProtoError>;
 }
 

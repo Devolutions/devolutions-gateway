@@ -12,7 +12,6 @@ extern crate tracing;
 #[cfg(feature = "openapi")]
 pub mod openapi;
 
-pub mod agent_tunnel;
 pub mod ai;
 pub mod api;
 pub mod cli;

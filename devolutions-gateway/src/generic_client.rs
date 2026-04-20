@@ -6,7 +6,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tracing::field;
 use typed_builder::TypedBuilder;
 
-use crate::agent_tunnel::AgentTunnelHandle;
+use agent_tunnel::AgentTunnelHandle;
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
 use crate::proxy::Proxy;

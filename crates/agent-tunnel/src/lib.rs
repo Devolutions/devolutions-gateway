@@ -3,6 +3,9 @@
 //! Provides a reliable, multiplexed tunnel between the gateway and remote agents
 //! using QUIC with mutual TLS authentication.
 
+#[macro_use]
+extern crate tracing;
+
 pub mod cert;
 pub mod enrollment_store;
 pub mod listener;

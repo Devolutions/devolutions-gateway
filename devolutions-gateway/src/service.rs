@@ -10,7 +10,7 @@ use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
-use devolutions_gateway::{DgwState, SYSTEM_LOGGER, agent_tunnel, config};
+use devolutions_gateway::{DgwState, SYSTEM_LOGGER, config};
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;

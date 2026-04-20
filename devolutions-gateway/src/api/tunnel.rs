@@ -195,7 +195,7 @@ async fn list_agents(
         agent_tunnel_handle, ..
     }): State<DgwState>,
     _access: AgentManagementReadAccess,
-) -> Result<Json<Vec<crate::agent_tunnel::registry::AgentInfo>>, HttpError> {
+) -> Result<Json<Vec<agent_tunnel::registry::AgentInfo>>, HttpError> {
     let handle = agent_tunnel_handle
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
@@ -212,7 +212,7 @@ async fn get_agent(
     }): State<DgwState>,
     _access: AgentManagementReadAccess,
     Path(agent_id): Path<Uuid>,
-) -> Result<Json<crate::agent_tunnel::registry::AgentInfo>, HttpError> {
+) -> Result<Json<agent_tunnel::registry::AgentInfo>, HttpError> {
     let handle = agent_tunnel_handle
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;

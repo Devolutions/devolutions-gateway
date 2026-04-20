@@ -36,6 +36,7 @@ network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
+agent-tunnel = { path = "../crates/agent-tunnel" }
 ironrdp-pdu = { version = "0.7", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
