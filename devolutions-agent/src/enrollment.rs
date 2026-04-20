@@ -3,12 +3,58 @@
 //! This module handles the enrollment process where an agent registers with
 //! the Gateway and receives its client certificate and configuration.
 
-use anyhow::Context as _;
+use anyhow::{Context as _, Result, bail};
+use base64::Engine as _;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::config;
+
+/// Subset of the enrollment JWT claims needed by the agent.
+///
+/// The agent does *not* verify the signature — it trusts whoever handed over
+/// the JWT (the operator). The Gateway verifies the signature when the JWT is
+/// presented as the Bearer token on `/jet/tunnel/enroll`.
+///
+/// Additional standard claims (`exp`, `jti`, `scope`, ...) are ignored here.
+#[derive(Debug, serde::Deserialize)]
+pub struct EnrollmentJwtClaims {
+    /// Gateway URL to connect to for enrollment.
+    pub jet_gw_url: String,
+    /// Suggested agent display name (optional hint).
+    #[serde(default)]
+    pub jet_agent_name: Option<String>,
+}
+
+/// Decode an enrollment JWT to extract agent-side configuration claims.
+///
+/// The JWT format is `<header>.<payload>.<signature>`, each part base64url-encoded.
+/// This parser reads the payload only; signature verification is the Gateway's job
+/// once the JWT is presented as a Bearer token.
+///
+/// We keep the split/decode inline instead of pulling in `picky` just for
+/// unverified payload decoding — the dependency cost isn't worth saving a
+/// dozen lines of straightforward parsing, and agent binary size matters.
+pub fn parse_enrollment_jwt(jwt: &str) -> Result<EnrollmentJwtClaims> {
+    let mut parts = jwt.split('.');
+    let _header = parts.next().context("enrollment JWT missing header")?;
+    let payload = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .context("enrollment JWT missing payload")?;
+    let _signature = parts.next().context("enrollment JWT missing signature")?;
+
+    if parts.next().is_some() {
+        bail!("enrollment JWT has too many segments");
+    }
+
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .context("enrollment JWT payload is not valid base64url")?;
+
+    serde_json::from_slice(&decoded).context("enrollment JWT payload is not valid JSON or missing required claims")
+}
 
 /// Request body for enrollment API
 #[derive(Serialize)]
@@ -56,7 +102,7 @@ pub async fn enroll_agent(
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
-) -> anyhow::Result<PersistedEnrollment> {
+) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
@@ -68,7 +114,7 @@ pub async fn enroll_agent(
 ///
 /// Returns `(key_pem, csr_pem)`. The private key stays on the agent; only the
 /// CSR is sent to the gateway.
-fn generate_key_and_csr(agent_name: &str) -> anyhow::Result<(String, String)> {
+fn generate_key_and_csr(agent_name: &str) -> Result<(String, String)> {
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context("generate agent key pair")?;
     let key_pem = key_pair.serialize_pem();
 
@@ -86,7 +132,7 @@ async fn request_enrollment(
     enrollment_token: &str,
     agent_name: &str,
     csr_pem: &str,
-) -> anyhow::Result<EnrollResponse> {
+) -> Result<EnrollResponse> {
     let client = reqwest::Client::new();
     let enroll_url = format!("{}/jet/tunnel/enroll", gateway_url.trim_end_matches('/'));
 
@@ -109,7 +155,7 @@ async fn request_enrollment(
     let status = response.status();
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        anyhow::bail!("enrollment failed with status {}: {}", status, error_text);
+        bail!("enrollment failed with status {}: {}", status, error_text);
     }
 
     response.json().await.context("failed to parse enrollment response")
@@ -126,7 +172,7 @@ fn persist_enrollment_response(
         server_spki_sha256,
     }: EnrollResponse,
     key_pem: &str,
-) -> anyhow::Result<PersistedEnrollment> {
+) -> Result<PersistedEnrollment> {
     let config_path = config::get_conf_file_path();
     let config_dir = config_path
         .parent()
@@ -197,4 +243,38 @@ fn persist_enrollment_response(
         gateway_ca_path,
         quic_endpoint,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a JWT with arbitrary header/signature placeholders. The parser never
+    /// verifies the signature, so the content of those two segments is irrelevant.
+    fn make_jwt(payload: serde_json::Value) -> String {
+        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.{}",
+            b64.encode(header.to_string()),
+            b64.encode(payload.to_string()),
+            b64.encode("signature-placeholder"),
+        )
+    }
+
+    #[test]
+    fn parse_enrollment_jwt_rejects_malformed() {
+        assert!(parse_enrollment_jwt("not-a-jwt").is_err());
+        assert!(parse_enrollment_jwt("only.two").is_err());
+        assert!(parse_enrollment_jwt("four.parts.here.bad").is_err());
+    }
+
+    #[test]
+    fn parse_enrollment_jwt_requires_gw_url() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "jet_agent_name": "agent-a",
+        }));
+        assert!(parse_enrollment_jwt(&jwt).is_err());
+    }
 }
