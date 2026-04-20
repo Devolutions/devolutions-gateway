@@ -253,7 +253,12 @@ jobs:
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
           choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
-          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+          echo $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # WixSharp reads WIXSHARP_WIXDIR as a fallback when WixSharpBinPath MSBuild property
+          # is empty (happens when /t:restore,build runs on a fresh runner without cached NuGet
+          # packages — the WixSharp.bin .props file isn't evaluated before restore completes).
+          echo "WIXSHARP_WIXDIR=$WixBinPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         shell: pwsh
 
       - name: Delete PowerShell module archive
