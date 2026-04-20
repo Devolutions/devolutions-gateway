@@ -16,12 +16,14 @@
 
 pub(crate) mod codec;
 pub mod control;
+pub(crate) mod control_codec;
 pub mod error;
 pub mod session;
+pub(crate) mod session_codec;
 pub mod stream;
 pub mod version;
 
-pub use control::{ControlMessage, DomainAdvertisement, DomainName, MAX_CONTROL_MESSAGE_SIZE};
+pub use control::{CertRenewalResult, ControlMessage, DomainAdvertisement, DomainName, MAX_CONTROL_MESSAGE_SIZE};
 pub use error::ProtoError;
 pub use session::{ConnectRequest, ConnectResponse, MAX_SESSION_MESSAGE_SIZE};
 pub use stream::{ControlStream, FramedRecv, FramedSend, SessionStream};
