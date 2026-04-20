@@ -87,10 +87,11 @@ dependencies = [
  "hex",
  "ipnetwork",
  "parking_lot",
+ "picky",
+ "picky-asn1-x509",
  "quinn",
  "rcgen",
  "rustls 0.23.37",
- "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
  "sha2 0.10.9",
@@ -98,7 +99,6 @@ dependencies = [
  "tokio 1.49.0",
  "tracing",
  "uuid",
- "x509-parser",
 ]
 
 [[package]]

@@ -6,24 +6,79 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context as _;
+use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
+use picky::pem::parse_pem;
+use picky::x509::Cert;
+use picky_asn1_x509::{ExtensionView, GeneralName};
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-/// Extract DER bytes from a PEM-encoded certificate string.
-///
-/// Uses `rustls_pemfile` to avoid pulling in the separate `pem` crate.
-fn cert_pem_to_der(pem_str: &str) -> anyhow::Result<Vec<u8>> {
-    use std::io::BufReader;
+const PEM_LABEL_CERTIFICATE: &str = "CERTIFICATE";
+const PEM_LABEL_PRIVATE_KEY_PKCS8: &str = "PRIVATE KEY";
+const PEM_LABEL_PRIVATE_KEY_PKCS1: &str = "RSA PRIVATE KEY";
+const PEM_LABEL_PRIVATE_KEY_SEC1: &str = "EC PRIVATE KEY";
 
-    let mut reader = BufReader::new(pem_str.as_bytes());
-    let cert = rustls_pemfile::certs(&mut reader)
-        .next()
-        .context("empty PEM input")?
-        .context("invalid certificate PEM")?;
-    Ok(cert.to_vec())
+/// Extract DER bytes from a PEM-encoded certificate string, checking the label.
+fn cert_pem_to_der(pem_str: &str) -> anyhow::Result<Vec<u8>> {
+    let pem = parse_pem(pem_str).context("parse certificate PEM")?;
+    if pem.label() != PEM_LABEL_CERTIFICATE {
+        bail!("expected {PEM_LABEL_CERTIFICATE} PEM, got {}", pem.label());
+    }
+    Ok(pem.data().to_vec())
+}
+
+/// Parse one or more PEM-encoded certificates into `rustls` certificate types.
+///
+/// A PEM file can carry multiple concatenated CERTIFICATE blocks (chain). We
+/// iterate block-by-block with [`parse_pem`], check each label, and wrap the
+/// DER bytes in [`rustls_pki_types::CertificateDer`] — the only type the
+/// rustls/quinn TLS builders accept.
+fn read_cert_chain(pem_str: &str) -> anyhow::Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
+    let mut chain = Vec::new();
+    let mut remaining = pem_str;
+    while let Some(start) = remaining.find("-----BEGIN ") {
+        let block_end = remaining[start..]
+            .find("-----END ")
+            .and_then(|e| {
+                remaining[start + e..]
+                    .find("-----\n")
+                    .map(|n| start + e + n + "-----\n".len())
+            })
+            .context("malformed PEM block (no END tag)")?;
+
+        let block = &remaining[start..block_end];
+        let pem = parse_pem(block).context("parse PEM block")?;
+        if pem.label() != PEM_LABEL_CERTIFICATE {
+            bail!("expected {PEM_LABEL_CERTIFICATE} PEM, got {}", pem.label());
+        }
+        chain.push(rustls::pki_types::CertificateDer::from(pem.data().to_vec()));
+        remaining = &remaining[block_end..];
+    }
+
+    if chain.is_empty() {
+        bail!("no {PEM_LABEL_CERTIFICATE} blocks found in PEM input");
+    }
+    Ok(chain)
+}
+
+/// Parse a PEM-encoded private key into `rustls`'s tagged [`PrivateKeyDer`].
+///
+/// Supports PKCS#8 (`PRIVATE KEY`), PKCS#1 (`RSA PRIVATE KEY`) and SEC1
+/// (`EC PRIVATE KEY`) — same label set as `rustls_pemfile::private_key`.
+/// rcgen produces PKCS#8 by default; we accept the others for flexibility.
+fn read_private_key(pem_str: &str) -> anyhow::Result<rustls::pki_types::PrivateKeyDer<'static>> {
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, PrivateSec1KeyDer};
+
+    let pem = parse_pem(pem_str).context("parse private key PEM")?;
+    let data = pem.data().to_vec();
+    match pem.label() {
+        PEM_LABEL_PRIVATE_KEY_PKCS8 => Ok(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(data))),
+        PEM_LABEL_PRIVATE_KEY_PKCS1 => Ok(PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(data))),
+        PEM_LABEL_PRIVATE_KEY_SEC1 => Ok(PrivateKeyDer::Sec1(PrivateSec1KeyDer::from(data))),
+        other => bail!("unexpected PEM label for private key: {other}"),
+    }
 }
 
 const CA_CERT_FILENAME: &str = "agent-tunnel-ca-cert.pem";
@@ -260,9 +315,7 @@ impl CaManager {
     /// The server certificate is signed by our CA; clients must present a certificate
     /// also signed by our CA (mutual TLS).
     pub fn build_server_tls_config(&self, hostname: &str) -> anyhow::Result<rustls::ServerConfig> {
-        use std::io::BufReader;
-
-        use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use rustls::pki_types::PrivateKeyDer;
 
         // Ensure rustls crypto provider is installed (ring).
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -270,35 +323,23 @@ impl CaManager {
         let (server_cert_path, server_key_path) = self.ensure_server_cert(hostname)?;
 
         // Load server certificate.
-        let server_cert_file = std::fs::File::open(server_cert_path.as_std_path())
-            .with_context(|| format!("open server cert file {server_cert_path}"))?;
-
-        let mut server_cert_chain: Vec<CertificateDer<'static>> =
-            rustls_pemfile::certs(&mut BufReader::new(server_cert_file))
-                .collect::<Result<Vec<_>, _>>()
-                .context("parse server certificate PEM")?;
+        let server_cert_pem =
+            std::fs::read_to_string(&server_cert_path).with_context(|| format!("read {server_cert_path}"))?;
+        let mut server_cert_chain = read_cert_chain(&server_cert_pem).context("parse server certificate PEM")?;
 
         // Load CA certificate.
         let ca_cert_path = self.ca_cert_path();
-
-        let ca_cert_file = std::fs::File::open(ca_cert_path.as_std_path())
-            .with_context(|| format!("open CA cert file {ca_cert_path}"))?;
-
-        let ca_certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut BufReader::new(ca_cert_file))
-            .collect::<Result<Vec<_>, _>>()
-            .context("parse CA certificate PEM")?;
+        let ca_cert_pem = std::fs::read_to_string(&ca_cert_path).with_context(|| format!("read {ca_cert_path}"))?;
+        let ca_certs = read_cert_chain(&ca_cert_pem).context("parse CA certificate PEM")?;
 
         // Build cert chain: [server_cert, ca_cert].
         server_cert_chain.extend(ca_certs.clone());
 
         // Load server private key.
-        let server_key_file = std::fs::File::open(server_key_path.as_std_path())
-            .with_context(|| format!("open server key file {server_key_path}"))?;
-
+        let server_key_pem =
+            std::fs::read_to_string(&server_key_path).with_context(|| format!("read {server_key_path}"))?;
         let server_private_key: PrivateKeyDer<'static> =
-            rustls_pemfile::private_key(&mut BufReader::new(server_key_file))
-                .context("parse server private key PEM")?
-                .context("no private key found in PEM file")?;
+            read_private_key(&server_key_pem).context("parse server private key PEM")?;
 
         // Build root cert store with our CA for client (agent) verification.
         let ca_roots =
@@ -338,9 +379,9 @@ impl CaManager {
 
 /// SHA-256 hash of a DER certificate's Subject Public Key Info (hex string).
 pub fn spki_sha256_from_der(der_bytes: &[u8]) -> anyhow::Result<String> {
-    let (_, cert) = x509_parser::parse_x509_certificate(der_bytes)
-        .map_err(|e| anyhow::anyhow!("parse certificate for SPKI: {e}"))?;
-    let digest = Sha256::digest(cert.public_key().raw);
+    let cert = Cert::from_der(der_bytes).context("parse certificate for SPKI")?;
+    let spki_der = cert.public_key().to_der().context("encode SPKI for hashing")?;
+    let digest = Sha256::digest(&spki_der);
     Ok(hex::encode(digest))
 }
 
@@ -365,27 +406,23 @@ pub fn extract_agent_id_from_pem(pem_str: &str) -> anyhow::Result<Uuid> {
 
 /// Extract the Common Name (CN) from a DER-encoded certificate.
 pub fn extract_agent_name_from_der(cert_der: &[u8]) -> anyhow::Result<String> {
-    let (_, cert) =
-        x509_parser::parse_x509_certificate(cert_der).map_err(|e| anyhow::anyhow!("parse certificate: {e}"))?;
-
-    for attr in cert.subject().iter_common_name() {
-        if let Ok(cn) = attr.as_str() {
-            return Ok(cn.to_owned());
-        }
-    }
-
-    anyhow::bail!("no Common Name found in certificate")
+    let cert = Cert::from_der(cert_der).context("parse certificate")?;
+    let subject = cert.subject_name();
+    let cn = subject
+        .find_common_name()
+        .context("no Common Name found in certificate")?;
+    Ok(cn.to_string())
 }
 
 /// Extract agent_id from a DER-encoded certificate's SAN (urn:uuid:{id}).
 pub fn extract_agent_id_from_der(der_bytes: &[u8]) -> anyhow::Result<Uuid> {
-    let (_, cert) = x509_parser::parse_x509_certificate(der_bytes).context("parse X.509 certificate")?;
+    let cert = Cert::from_der(der_bytes).context("parse X.509 certificate")?;
 
     for ext in cert.extensions() {
-        if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) = ext.parsed_extension() {
-            for name in &san.general_names {
-                if let x509_parser::extensions::GeneralName::URI(val) = name
-                    && let Some(uuid_str) = val.strip_prefix("urn:uuid:")
+        if let ExtensionView::SubjectAltName(names) = ext.extn_value() {
+            for name in &names.0 {
+                if let GeneralName::Uri(uri) = name
+                    && let Some(uuid_str) = uri.as_utf8().strip_prefix("urn:uuid:")
                 {
                     return uuid_str.parse().context("parse UUID from SAN");
                 }
@@ -393,7 +430,7 @@ pub fn extract_agent_id_from_der(der_bytes: &[u8]) -> anyhow::Result<Uuid> {
         }
     }
 
-    anyhow::bail!("no urn:uuid: SAN found in certificate")
+    bail!("no urn:uuid: SAN found in certificate")
 }
 
 // ---------------------------------------------------------------------------
@@ -426,12 +463,14 @@ fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) 
     let Ok(der) = cert_pem_to_der(&pem_str) else {
         return ServerCertStatus::Unreadable;
     };
-    let Ok((_, cert)) = x509_parser::parse_x509_certificate(&der) else {
+    let Ok(cert) = Cert::from_der(&der) else {
         return ServerCertStatus::Unreadable;
     };
 
     // Expiry: reject if < 7 days remaining.
-    let not_after = cert.validity().not_after.to_datetime();
+    let Ok(not_after) = time::OffsetDateTime::try_from(cert.valid_not_after()) else {
+        return ServerCertStatus::Unreadable;
+    };
     let threshold = time::OffsetDateTime::now_utc() + Duration::from_secs(7 * SECS_PER_DAY);
     if not_after <= threshold {
         return ServerCertStatus::ExpiringSoon;
@@ -439,10 +478,11 @@ fn check_server_cert(cert_path: &Utf8Path, key_path: &Utf8Path, hostname: &str) 
 
     // Hostname: reject if DNS SAN doesn't match the configured hostname.
     let san_matches = cert.extensions().iter().any(|ext| {
-        if let x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) = ext.parsed_extension() {
-            san.general_names
+        if let ExtensionView::SubjectAltName(names) = ext.extn_value() {
+            names
+                .0
                 .iter()
-                .any(|name| matches!(name, x509_parser::extensions::GeneralName::DNSName(h) if *h == hostname))
+                .any(|name| matches!(name, GeneralName::DnsName(h) if h.as_utf8() == hostname))
         } else {
             false
         }
