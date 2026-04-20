@@ -805,7 +805,7 @@ jobs:
             $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
             echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
 
-            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater.exe"
+            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}.exe"
             echo "dagent-updater-executable=$DAgentUpdaterExecutable" >> $Env:GITHUB_OUTPUT
           }
 
@@ -1297,14 +1297,12 @@ jobs:
             'DevolutionsPedmShellExt.dll',
             'DevolutionsPedmShellExt.msix',
             'DevolutionsSession.exe',
-            'DevolutionsAgentUpdater.exe',
             # NOTE: We may want to include that in the future, but needs to be renamed per platform.
             # TODO(@awakecoding): We could create a zip with the same name as
             # the package except ".symbols" at the end, so we'd end up with arch-specific zips
             # containing the debug symbols. I've done this for MsRdpEx.
             'DevolutionsPedmShellExt.pdb',
-            'DevolutionsSession.pdb',
-            'DevolutionsAgentUpdater.pdb'
+            'DevolutionsSession.pdb'
           )
 
           Write-Host

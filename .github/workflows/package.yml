@@ -319,7 +319,7 @@ jobs:
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
-            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsAgentUpdater_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
             'jetsocat' { @('jetsocat_*') }
           })
           $ExcludePattern = "*.pdb"
@@ -474,7 +474,7 @@ jobs:
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent_*.exe' | Select -First 1
-          $Env:DAGENT_UPDATER_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsAgentUpdater.exe' | Select -First 1
+          $Env:DAGENT_UPDATER_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsAgentUpdater_*.exe' | Select -First 1
           $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
           $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
           $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
