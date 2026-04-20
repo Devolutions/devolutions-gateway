@@ -166,7 +166,6 @@ jobs:
             test-script: ".github/scripts/smoke-test-deb.sh"
             package-pattern: "*.deb"
           # RPM lane: Rocky Linux 8, 9, 10 (RHEL-compatible)
-          # Uses rockylinux/rockylinux (official Rocky Linux images on Docker Hub).
           - package-type: rpm
             display-name: "RPM Install Test (Rocky Linux 8)"
             container-image: "rockylinux/rockylinux:8"
