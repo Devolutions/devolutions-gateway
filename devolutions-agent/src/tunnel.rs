@@ -344,6 +344,57 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     info!(epoch, "Sent initial RouteAdvertise");
 
+    // -- Certificate renewal (before entering main loop) --
+
+    {
+        match crate::enrollment::is_cert_expiring(cert_path, 15) {
+            Ok(true) => {
+                info!("Certificate expiring within 15 days, initiating renewal");
+
+                let csr_pem =
+                    crate::enrollment::generate_csr_from_existing_key(key_path, &tunnel_conf.gateway_endpoint)
+                        .context("generate renewal CSR")?;
+
+                ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+                    .await
+                    .context("send CertRenewalRequest")?;
+
+                match ctrl.recv().await.context("receive CertRenewalResponse")? {
+                    ControlMessage::CertRenewalResponse {
+                        result:
+                            agent_tunnel_proto::CertRenewalResult::Success {
+                                client_cert_pem,
+                                gateway_ca_cert_pem,
+                            },
+                        ..
+                    } => {
+                        std::fs::write(cert_path.as_str(), &client_cert_pem).context("write renewed certificate")?;
+                        std::fs::write(ca_path.as_str(), &gateway_ca_cert_pem)
+                            .context("write renewed CA certificate")?;
+                        info!("Certificate renewed successfully, reconnecting with new cert");
+                        connection.close(0u32.into(), b"cert-renewed");
+                        return Ok(());
+                    }
+                    ControlMessage::CertRenewalResponse {
+                        result: agent_tunnel_proto::CertRenewalResult::Error { reason },
+                        ..
+                    } => {
+                        warn!(%reason, "Certificate renewal failed, continuing with existing cert");
+                    }
+                    other => {
+                        warn!(?other, "Unexpected response to renewal request");
+                    }
+                }
+            }
+            Ok(false) => {
+                debug!("Certificate not expiring soon, no renewal needed");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to check certificate expiry");
+            }
+        }
+    }
+
     // Split: recv half goes to a reader task, send half stays for periodic messages.
     let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
     let mut task_handles = tokio::task::JoinSet::new();
