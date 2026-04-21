@@ -32,6 +32,35 @@ pub struct RouteAdvertisementState {
     pub updated_at: SystemTime,
 }
 
+impl RouteAdvertisementState {
+    /// Match this route set against a target host (IP or domain name).
+    ///
+    /// Returns a specificity score if matched, or `None` if no match.
+    /// IP subnet matches return `usize::MAX` (always highest priority).
+    /// Domain matches return the matched domain length (longer = more specific).
+    pub fn matches_target(&self, target_host: &str) -> Option<usize> {
+        use std::net::IpAddr;
+
+        if let Ok(ip) = target_host.parse::<IpAddr>() {
+            // Only IPv4 subnets are currently tracked; only match IPv4 target IPs.
+            if let IpAddr::V4(ipv4) = ip {
+                return self
+                    .subnets
+                    .iter()
+                    .any(|subnet| subnet.contains(ipv4))
+                    .then_some(usize::MAX);
+            }
+            return None;
+        }
+
+        self.domains
+            .iter()
+            .filter(|adv| adv.domain.matches_hostname(target_host))
+            .map(|adv| adv.domain.as_str().len())
+            .max()
+    }
+}
+
 impl Default for RouteAdvertisementState {
     fn default() -> Self {
         let now = SystemTime::now();
@@ -77,6 +106,15 @@ impl AgentPeer {
     pub fn touch(&self) {
         let now_ms = current_time_millis();
         self.last_seen.store(now_ms, Ordering::Release);
+    }
+
+    /// Set `last_seen` to an explicit timestamp (milliseconds since UNIX epoch).
+    ///
+    /// Intended for tests that need to force an agent into the "offline" state
+    /// without waiting for the real timeout to elapse. Production code should use
+    /// [`touch`](Self::touch) instead.
+    pub fn set_last_seen_for_test(&self, last_seen_ms: u64) {
+        self.last_seen.store(last_seen_ms, Ordering::Release);
     }
 
     /// Returns the last-seen timestamp as milliseconds since UNIX epoch.
@@ -222,6 +260,39 @@ impl AgentRegistry {
     /// Collects information about all registered agents for API responses.
     pub async fn agent_infos(&self) -> Vec<AgentInfo> {
         self.agents.read().await.values().map(AgentInfo::from).collect()
+    }
+
+    /// Find all online agents that can route to the given target host (IP or domain).
+    ///
+    /// For IP targets: matches against advertised subnets.
+    /// For domain targets: uses longest suffix match (more specific domain wins).
+    ///
+    /// Results with equal specificity are sorted by `received_at` descending (most recent first).
+    pub async fn find_agents_for(&self, target_host: &str) -> Vec<Arc<AgentPeer>> {
+        let mut best_specificity: usize = 0;
+        let mut candidates: Vec<(SystemTime, Arc<AgentPeer>)> = Vec::new();
+
+        let agents = self.agents.read().await;
+        for agent in agents.values() {
+            if !agent.is_online(AGENT_OFFLINE_TIMEOUT) {
+                continue;
+            }
+
+            let route_state = agent.route_state();
+
+            if let Some(specificity) = route_state.matches_target(target_host) {
+                if specificity > best_specificity {
+                    best_specificity = specificity;
+                    candidates.clear();
+                    candidates.push((route_state.received_at, Arc::clone(agent)));
+                } else if specificity == best_specificity {
+                    candidates.push((route_state.received_at, Arc::clone(agent)));
+                }
+            }
+        }
+
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        candidates.into_iter().map(|(_, agent)| agent).collect()
     }
 }
 

@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 
 use anyhow::{Context as _, bail};
 use ipnetwork::Ipv4Network;
@@ -7,19 +7,16 @@ use tokio::net::TcpStream;
 /// Parsed connection target — either a raw IP or a domain name.
 #[derive(Debug)]
 pub(crate) enum Target {
-    Ip(Ipv4Addr, u16),
+    Ip(IpAddr, u16),
     Domain(String, u16),
 }
 
 impl Target {
     /// Parse a `host:port` string into a typed target.
     pub(crate) fn parse(target: &str) -> anyhow::Result<Self> {
-        // Try IP:port first.
+        // Try IP:port first (handles both IPv4 and IPv6).
         if let Ok(addr) = target.parse::<SocketAddr>() {
-            return match addr.ip() {
-                IpAddr::V4(ip) => Ok(Self::Ip(ip, addr.port())),
-                IpAddr::V6(_) => bail!("IPv6 targets are not supported: {target}"),
-            };
+            return Ok(Self::Ip(addr.ip(), addr.port()));
         }
 
         // Otherwise it's domain:port — split on last ':'.
@@ -35,26 +32,33 @@ impl Target {
 }
 
 /// Resolve a target to candidate socket addresses within the advertised subnets.
+///
+/// Only IPv4 subnets are supported right now, matching the wire protocol. IPv6 targets
+/// never match.
 pub(crate) async fn resolve_target(
     target: &Target,
     advertise_subnets: &[Ipv4Network],
 ) -> anyhow::Result<Vec<SocketAddr>> {
+    fn matches(advertise_subnets: &[Ipv4Network], ip: IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(ipv4) => advertise_subnets.iter().any(|subnet| subnet.contains(ipv4)),
+            IpAddr::V6(_) => false,
+        }
+    }
+
     match target {
         Target::Ip(ip, port) => {
-            if !advertise_subnets.iter().any(|subnet| subnet.contains(*ip)) {
+            if !matches(advertise_subnets, *ip) {
                 bail!("target {ip}:{port} is not in advertised subnets");
             }
-            Ok(vec![SocketAddr::new(IpAddr::V4(*ip), *port)])
+            Ok(vec![SocketAddr::new(*ip, *port)])
         }
         Target::Domain(host, port) => {
             let lookup = format!("{host}:{port}");
             let resolved: Vec<SocketAddr> = tokio::net::lookup_host(&lookup)
                 .await
                 .with_context(|| format!("resolve target {lookup}"))?
-                .filter(|addr| match addr.ip() {
-                    IpAddr::V4(ipv4) => advertise_subnets.iter().any(|subnet| subnet.contains(ipv4)),
-                    IpAddr::V6(_) => false,
-                })
+                .filter(|addr| matches(advertise_subnets, addr.ip()))
                 .collect();
 
             if resolved.is_empty() {
