@@ -2,6 +2,54 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.1.2 (2026-04-18)
+
+### Features
+
+- _dgw,agent_: agent self update and scheduled updates ([#1726](https://github.com/Devolutions/devolutions-gateway/issues/1726)) ([541abfeed2](https://github.com/Devolutions/devolutions-gateway/commit/541abfeed2982540365a99df47980959acb53e8a)) ([ARC-447](https://devolutions.atlassian.net/browse/ARC-447)) ([DGW-371](https://devolutions.atlassian.net/browse/DGW-371))
+
+  - Devolutions Agent self-update using shim executable.
+  - Scheduled updates.
+  - `/jet/update` endpoint improvements (moved params to request body, deprecated query param).
+  - New `/jet/update/schedule` endpoint for controlling on-machine update scheduling.
+  - New GET endpoints for both `/jet/update` and `/jet/update/schedule`. Agent now provides new `update_status.json` for querying product update and schedule status.
+
+### Bug Fixes
+
+- _jetsocat_: `--log-term` was logging to stdout instead of stderr ([48242abb7e](https://github.com/Devolutions/devolutions-gateway/commit/48242abb7edaea757f46b3b7c23b905997fa00be))
+
+  The `--log-term` flag was routing log output through stdout, polluting the MCP stdio JSON-RPC channel and any other stdout-based protocol. Fixed to use stderr, which is the correct descriptor for diagnostic output.
+
+- _jetsocat_: always send JSON-RPC message on MCP proxy backend disconnect ([5a124c6c4b](https://github.com/Devolutions/devolutions-gateway/commit/5a124c6c4ba1ecd6c52fb90b7ba38288459a4860))
+
+  When the backend MCP process disconnects, the proxy now always sends a protocol-level message to the client before exiting, instead of silently closing the stdio channel:
+
+  - `SendError::Fatal` (write to broken backend): JSON-RPC error response (-32099) with the pending request id.
+  - `ReadError::Fatal` with a pending request: JSON-RPC error response (-32099) so the client can correlate it with the outstanding request.
+  - `ReadError::Fatal` with no pending request: a `$/proxy/serverDisconnected` notification so the client is informed even without an active request.
+
+- _jetsocat_: properly JSON-escape error details in MCP proxy JSON-RPC error responses ([e4052b2709](https://github.com/Devolutions/devolutions-gateway/commit/e4052b27098e96e605cf6706c9e46bed2451f7c7))
+
+- _dgw_: report disk space when recording dir does not exist yet ([#1746](https://github.com/Devolutions/devolutions-gateway/issues/1746)) ([10c9cd0d77](https://github.com/Devolutions/devolutions-gateway/commit/10c9cd0d7798adf3c0a2551dd593bcfe4faea0c3)) ([DGW-372](https://devolutions.atlassian.net/browse/DGW-372))
+
+  When the recording folder has not been created yet, `GetDiskFreeSpaceExW` / `statvfs` failed with OS error 3 because the path did not exist, causing `recording_storage_total_space` and `recording_storage_available_space` to be absent from the heartbeat response. Fix by walking up to the nearest existing ancestor before querying disk space.
+
+- _dgw_: add warn logs to shadow recording error paths ([#1749](https://github.com/Devolutions/devolutions-gateway/issues/1749)) ([773104086f](https://github.com/Devolutions/devolutions-gateway/commit/773104086f9a672469d03b7b0d3334cc8ce44884)) ([DGW-373](https://devolutions.atlassian.net/browse/DGW-373))
+
+  Added `warn!` logs to all 4 `InternalError` (close code 4002) branches in the `shadow_recording` handler. Previously, these error paths silently closed the WebSocket with no diagnostic output, making production debugging nearly impossible.
+
+- _dgw_: resolve WER APIs dynamically to support Windows Server 2016 ([#1751](https://github.com/Devolutions/devolutions-gateway/issues/1751)) ([7fe1038225](https://github.com/Devolutions/devolutions-gateway/commit/7fe10382252b578ce4e4969eb9322c7f1b191072)) ([DGW-368](https://devolutions.atlassian.net/browse/DGW-368))
+
+  `WerRegisterExcludedMemoryBlock` is absent from `wer.dll` on Windows Server 2016 RTM (NT 10.0.14393). The static import introduced in v2026.1.1 caused the Windows loader to refuse starting `DevolutionsGateway.exe` on those hosts. Replaced with runtime resolution via `GetModuleHandleW` / `GetProcAddress`, cached in a `OnceLock`. The binary now starts on any Windows 10/Server 2016 build and silently skips WER dump exclusion when the API is unavailable.
+
+- _agent_: configure features correctly during silent install by passing feature states via CustomActionData ([108d2efdfb](https://github.com/Devolutions/devolutions-gateway/commit/108d2efdfba6a8720d9661d58f8e683397886637)) ([DGW-374](https://devolutions.atlassian.net/browse/DGW-374))
+
+- _agent_: propagate registry open errors during agent install detection ([14295159](https://github.com/Devolutions/devolutions-gateway/commit/14295159060c025c388d6fbdab7c5040d08bcff6)) ([DGW-375](https://devolutions.atlassian.net/browse/DGW-375))
+
+- _dgw_: overhaul Linux RPM/DEB packaging ([#1747](https://github.com/Devolutions/devolutions-gateway/issues/1747)) ([a18e6b92d2](https://github.com/Devolutions/devolutions-gateway/commit/a18e6b92d2284e371a0d17866259cbba67d706aa)) ([DGW-366](https://devolutions.atlassian.net/browse/DGW-366))
+
+  RPM: bundle the systemd unit file directly (eliminating the `service register` call), ship a systemd preset file so the service is enabled on fresh RHEL/Rocky install, use `systemd-rpm-macros` for correct lifecycle semantics, fix `prerm`/`postrm` scripts, harden config directory permissions to 750. DEB: mirror RPM service lifecycle semantics (enable on fresh install but do not start; try-restart on upgrade), harden config directory permissions to 750, add `Description=` to unit file. Both packages print a post-install message directing the admin to configure and start the service.
+
 ## 2026.1.1 (2026-04-01)
 
 ### Features

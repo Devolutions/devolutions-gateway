@@ -26,6 +26,9 @@ It is intentionally **not** a general-purpose secret library.
 - Transient register / stack copies during `expose_secret` calls — memory
   locking does **not** prevent the CPU from holding secret bytes in registers
   or on the call stack while the caller uses them.
+- Stack residuals in the caller's frame before `new` is called — `new` zeroes
+  the buffer it receives, but any earlier copies on the caller's stack are not
+  covered.
 - Attackers with `ptrace` or equivalent capability.
 - SGX / TPM / hardware-backed enclaves.
 
@@ -62,12 +65,24 @@ and runs.
 ## Usage
 
 ```rust
-use secure_memory::ProtectedBytes;
+use secure_memory::{ProtectedBytes, ProtectionLevel};
 
-let key = ProtectedBytes::new([0u8; 32]);
+let mut key_bytes = [0u8; 32];
+// ... fill key_bytes ...
+let key = ProtectedBytes::new(&mut key_bytes);
+// key_bytes is now zeroed
+
+// Recommended: check the overall level first.
+match key.protection_status().level() {
+    ProtectionLevel::Full => {}
+    ProtectionLevel::Partial => tracing::warn!("master key: some memory protections are inactive"),
+    ProtectionLevel::Unprotected => tracing::warn!("master key: no OS memory hardening available"),
+}
+
+// Individual flags are still accessible for fine-grained diagnostics.
 let status = key.protection_status();
 if !status.locked {
-    tracing::warn!("master key is not mlock'd");
+    tracing::warn!("master key: mlock/VirtualLock failed; key may be paged to disk");
 }
 
 // Short-lived borrow:

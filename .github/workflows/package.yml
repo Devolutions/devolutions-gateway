@@ -253,7 +253,12 @@ jobs:
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
           choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
-          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+          echo $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # WixSharp reads WIXSHARP_WIXDIR as a fallback when WixSharpBinPath MSBuild property
+          # is empty (happens when /t:restore,build runs on a fresh runner without cached NuGet
+          # packages — the WixSharp.bin .props file isn't evaluated before restore completes).
+          echo "WIXSHARP_WIXDIR=$WixBinPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         shell: pwsh
 
       - name: Delete PowerShell module archive
@@ -319,7 +324,7 @@ jobs:
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
-            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsAgentUpdater_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
             'jetsocat' { @('jetsocat_*') }
           })
           $ExcludePattern = "*.pdb"
@@ -472,15 +477,16 @@ jobs:
         if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+          $x64Root = Join-Path $PackageRoot windows x86_64
 
-          $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent_*.exe' | Select -First 1
-          $Env:DAGENT_UPDATER_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsAgentUpdater.exe' | Select -First 1
+          $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $x64Root -Filter '*DevolutionsAgent_*.exe' -File | Select -First 1
+          $Env:DAGENT_UPDATER_EXECUTABLE = Get-ChildItem -Path $x64Root -Filter 'DevolutionsAgentUpdater_*.exe' -File | Select -First 1
           $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
-          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
-          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
-          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
-          $Env:DAGENT_TUN2SOCKS_EXE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'tun2socks.exe' | Select -First 1
-          $Env:DAGENT_WINTUN_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'wintun.dll' | Select -First 1
+          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $x64Root -Filter 'DevolutionsPedmShellExt.dll' -File | Select -First 1
+          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $x64Root -Filter 'DevolutionsPedmShellExt.msix' -File | Select -First 1
+          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $x64Root -Filter 'DevolutionsSession.exe' -File | Select -First 1
+          $Env:DAGENT_TUN2SOCKS_EXE = Get-ChildItem -Path $PackageRoot -Recurse -Filter 'tun2socks.exe' -File | Select -First 1
+          $Env:DAGENT_WINTUN_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Filter 'wintun.dll' -File | Select -First 1
 
           Write-Host "DAGENT_EXECUTABLE = ${Env:DAGENT_EXECUTABLE}"
           Write-Host "DAGENT_UPDATER_EXECUTABLE = ${Env:DAGENT_UPDATER_EXECUTABLE}"

@@ -1,0 +1,156 @@
+// _toolbar.scss
+// ── Toolbar container, all dock-position variants, and vertical layout ─────────
+
+// ── Container ────────────────────────────────────────────────────────────────
+.floating-session-toolbar {
+  position: absolute;
+  z-index: 20;
+  pointer-events: auto;
+
+  display: inline-flex;
+  flex-direction: row; // default; dock-left/right override to column
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+
+  height: 52px;
+  padding: 0 18px;
+  border-radius: 18px;
+
+  background: var(--toolbar-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--toolbar-shadow);
+
+  transition: transform 300ms ease, opacity 300ms ease;
+
+  // ── Common hidden state — each dock position adds its slide transform ─────
+  &.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  // ── dock-top: horizontal pill, centered near top edge ────────────────────
+  &.dock-top {
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+
+    &.is-hidden { transform: translateX(-50%) translateY(-200%); }
+  }
+
+  // ── dock-bottom: horizontal pill, centered near bottom edge ──────────────
+  &.dock-bottom {
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+
+    &.is-hidden { transform: translateX(-50%) translateY(200%); }
+
+    // Overlay panels open upward when docked at bottom
+    .toolbar-dropdown,
+    .toolbar-session-info-popover {
+      top: auto;
+      bottom: calc(100% + 8px);
+    }
+  }
+
+  // ── dock-free: position driven entirely by inline [style] bindings ────────
+  // No CSS position rules — left/top/transform come from the component.
+  // Transitions are suppressed while dragging via .is-dragging.
+  &.dock-free {
+    // No top/left/right/bottom/transform — all set as inline styles
+  }
+
+  // ── is-dragging: disable transitions so position tracks the mouse exactly ─
+  &.is-dragging {
+    transition: none;
+    cursor: grabbing;
+    user-select: none;
+  }
+}
+
+// ── Shared overrides for vertically-oriented dock positions ───────────────────
+// Placeholder used by dock-free-vertical, dock-left, and dock-right.
+// Must be declared before the selectors that @extend it.
+%dock-vertical-layout {
+  .toolbar-divider {
+    width: 16px;
+    height: 1px;
+  }
+
+  .toolbar-btn-section {
+    flex-direction: column;
+    width: 36px;
+    height: auto;
+  }
+
+  // CAD: explicit <br> separators produce one word per line in the narrow pill
+  .toolbar-button-cad {
+    width: 36px;
+    height: auto;
+    padding: 6px 4px;
+    overflow: visible;
+  }
+
+  .cad-text-vertical {
+    display: block;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.4;
+  }
+}
+
+// Re-open to define vertical variants after the placeholder is declared.
+.floating-session-toolbar {
+  // ── dock-free-vertical: dragged from a left/right dock — keeps column layout
+  &.dock-free-vertical {
+    flex-direction: column;
+    width: 52px;
+    height: auto;
+    padding: 18px 0;
+    @extend %dock-vertical-layout;
+  }
+
+  // ── dock-left + dock-right: shared vertical centering ────────────────────
+  &.dock-left,
+  &.dock-right {
+    top: 50%;
+    flex-direction: column;
+    width: 52px;
+    height: auto;
+    padding: 18px 0;
+    transform: translateY(-50%);
+    @extend %dock-vertical-layout;
+  }
+
+  // ── dock-left: vertical pill, centered on left edge ───────────────────────
+  &.dock-left {
+    left: 16px;
+
+    &.is-hidden { transform: translateY(-50%) translateX(-200%); }
+
+    .toolbar-dropdown,
+    .toolbar-session-info-popover {
+      top: 0;
+      left: calc(100% + 8px);
+      right: auto;
+      bottom: auto;
+    }
+  }
+
+  // ── dock-right: vertical pill, centered on right edge ────────────────────
+  &.dock-right {
+    right: 16px;
+
+    &.is-hidden { transform: translateY(-50%) translateX(200%); }
+
+    .toolbar-dropdown,
+    .toolbar-session-info-popover {
+      top: 0;
+      right: calc(100% + 8px);
+      left: auto;
+      bottom: auto;
+    }
+  }
+}

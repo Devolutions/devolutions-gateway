@@ -2,13 +2,14 @@
 
 set -e
 
-action="$1"
-
-# Only do complete clean-up on purge.
-if [ "$action" != "purge" ] ; then
-  exit 0
+# Equivalent to %systemd_postun_with_restart: daemon-reload always,
+# try-restart on upgrade ($1 >= 1).
+if [ -d /run/systemd/system ]; then
+	systemctl daemon-reload >/dev/null 2>&1 || true
+	if [ "$1" -ge 1 ]; then
+		systemctl try-restart devolutions-gateway.service >/dev/null 2>&1 || true
+	fi
 fi
 
-if [ -d /etc/devolutions-gateway ]; then
-  rm -rf /etc/devolutions-gateway
-fi
+# Configuration in /etc/devolutions-gateway is intentionally preserved on removal.
+# RPM has no purge concept; admins can remove the directory manually if desired.

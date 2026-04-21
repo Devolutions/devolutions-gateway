@@ -1,9 +1,14 @@
 use uuid::Uuid;
+use windows_result::HRESULT;
 
 use crate::DateVersion;
 use crate::windows::reversed_hex_uuid::{InvalidReversedHexUuid, reversed_hex_to_uuid, uuid_to_reversed_hex};
 
 const REG_CURRENT_VERSION: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion";
+
+// HRESULT equivalent of Win32 ERROR_FILE_NOT_FOUND (error code 2), returned by the registry API
+// when a key does not exist.
+const HRESULT_ERROR_FILE_NOT_FOUND: HRESULT = HRESULT::from_win32(2);
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
@@ -27,12 +32,11 @@ pub fn get_product_code(update_code: Uuid) -> Result<Option<Uuid>, RegistryError
 
     let key_path = format!("{REG_CURRENT_VERSION}\\Installer\\UpgradeCodes\\{reversed_hex_uuid}");
 
-    let update_code_key = windows_registry::LOCAL_MACHINE.open(&key_path);
-
-    // Product not installed if no key found.
-    let update_code_key = match update_code_key {
+    // Product not installed if no key found; propagate any other error (e.g. access denied).
+    let update_code_key = match windows_registry::LOCAL_MACHINE.open(&key_path) {
         Ok(key) => key,
-        Err(_) => return Ok(None),
+        Err(error) if error.code() == HRESULT_ERROR_FILE_NOT_FOUND => return Ok(None),
+        Err(source) => return Err(RegistryError::OpenKey { key: key_path, source }),
     };
 
     // Product code is the name of the only value in the registry key.

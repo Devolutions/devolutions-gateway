@@ -291,13 +291,55 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult SetFeaturesToConfigure(Session session)
+        {
+            // session.Features is only accessible from immediate custom actions (DTF restriction).
+            // Encode the requested feature states into a session property so the deferred
+            // ConfigureFeatures action can read them via CustomActionData.
+            (string featureId, string jsonId)[] features =
+            [
+                (Features.SESSION_FEATURE.Id, Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+                (Features.AGENT_UPDATER_FEATURE.Id, Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+                (Features.PEDM_FEATURE.Id, Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+            ];
+
+            List<string> toEnable = [];
+
+            foreach ((string featureId, string jsonId) in features)
+            {
+                if (session.Features[featureId].RequestState == InstallState.Local)
+                {
+                    toEnable.Add(jsonId);
+                }
+            }
+
+            session[AgentProperties.featuresToConfigure.Id] = string.Join(",", toEnable);
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
         public static ActionResult ConfigureFeatures(Session session)
         {
-            foreach (Feature feature in (Feature[]) [Features.SESSION_FEATURE, Features.PEDM_FEATURE, Features.AGENT_UPDATER_FEATURE])
+            string featuresToConfigure = session.Property(AgentProperties.featuresToConfigure.Id);
+            HashSet<string> enabledFeatures = new HashSet<string>(
+                featuresToConfigure.Split([','], StringSplitOptions.RemoveEmptyEntries));
+
+            string[] allFeatureJsonIds =
+            [
+                Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+                Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+                Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+            ];
+
+            foreach (string featureJsonId in allFeatureJsonIds)
             {
-                bool enable = session.IsFeatureEnabled(feature.Id);
-                string jsonId = feature.Id.Substring(Features.FEATURE_ID_PREFIX.Length);
-                ToggleAgentFeature(session, jsonId, enable);
+                ActionResult result = ToggleAgentFeature(session, featureJsonId, enabledFeatures.Contains(featureJsonId));
+
+                if (result != ActionResult.Success)
+                {
+                    return result;
+                }
             }
 
             return ActionResult.Success;

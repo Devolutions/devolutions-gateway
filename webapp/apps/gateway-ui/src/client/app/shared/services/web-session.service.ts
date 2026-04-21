@@ -1,11 +1,6 @@
 import { Injectable, Type } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { DVL_WARNING_ICON, ProtocolIconMap } from '@gateway/app.constants';
-import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
-import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
-import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
-import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
-import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { Protocol } from '@shared/enums/web-client-protocol.enum';
 import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
 import { DesktopSize } from '@shared/models/desktop-size';
@@ -42,13 +37,11 @@ export class WebSessionService {
   private webSessionScreenSizeSubject: BehaviorSubject<DesktopSize>;
   private webSessionScreenSizeIndex$: Observable<DesktopSize>;
 
-  private protocolComponentMap = {
-    [Protocol.RDP]: WebClientRdpComponent,
-    [Protocol.Telnet]: WebClientTelnetComponent,
-    [Protocol.SSH]: WebClientSshComponent,
-    [Protocol.VNC]: WebClientVncComponent,
-    [Protocol.ARD]: WebClientArdComponent,
-  };
+  private protocolComponentMap: Partial<Record<Protocol, Type<unknown>>> = {};
+
+  registerProtocolComponentMap(map: Partial<Record<Protocol, Type<unknown>>>): void {
+    this.protocolComponentMap = { ...map };
+  }
 
   constructor(private dynamicComponentService: DynamicComponentService) {
     this.initializeWebSessionService();
@@ -105,6 +98,12 @@ export class WebSessionService {
     const index: number = currentSessions.findIndex((webSession) => webSession.id === updatedWebSession.id);
 
     if (index !== -1) {
+      // Do NOT explicitly destroy the old componentRef here.
+      // createComponent() now creates the new component first and removes the
+      // old view after, keeping Angular's style reference count above 0 the
+      // whole time.  Destroying here would drop the count to 0 and cause the
+      // :host <style> element to be removed before the new component is ready.
+
       updatedWebSession.tabIndex = currentSessions[index].tabIndex;
       const updatedSessions = [...currentSessions];
       updatedSessions[index] = updatedWebSession;
@@ -120,9 +119,14 @@ export class WebSessionService {
     await this.destroyWebSessionComponentRef(webSessionIdToRemove);
 
     const currentSessions = this.webSessionDataSubject.value;
-    const filteredSessions = currentSessions.filter((webSession) => webSession.id !== webSessionIdToRemove);
+    const sessionToRemove = currentSessions.find((webSession) => webSession.id === webSessionIdToRemove);
 
-    const sessionToRemove = await this.getWebSession(webSessionIdToRemove);
+    if (!sessionToRemove) {
+      // Already removed by a concurrent call — nothing left to do.
+      return;
+    }
+
+    const filteredSessions = currentSessions.filter((webSession) => webSession.id !== webSessionIdToRemove);
     const updatedSessions = filteredSessions.map((session) => {
       if (session.tabIndex && session.tabIndex > sessionToRemove.tabIndex) {
         return session.updatedTabIndex(session.tabIndex - 1);
@@ -203,6 +207,9 @@ export class WebSessionService {
   }
 
   setWebSessionCurrentIndex(index: number): void {
+    if (this.webSessionCurrentTabIndexSubject.getValue() === index) {
+      return;
+    }
     this.webSessionCurrentTabIndexSubject.next(index);
   }
 

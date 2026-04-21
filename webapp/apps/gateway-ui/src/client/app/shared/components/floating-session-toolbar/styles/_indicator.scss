@@ -1,0 +1,75 @@
+// _indicator.scss
+// ── Auto-hide indicator pill ──────────────────────────────────────────────────
+// Small edge-anchored pill shown when the toolbar is hidden (auto-hide mode).
+// Hovering it calls onToolbarMouseEnter() to bring the toolbar back.
+
+.autohide-indicator {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 21;
+  background: var(--indicator-bg);
+  box-shadow: var(--toolbar-shadow);
+  transition: background-color 150ms ease;
+
+  &:hover {
+    background: var(--indicator-hover-bg);
+  }
+
+  // Inset border overlay
+  .autohide-indicator-border {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 1px solid var(--indicator-border-color);
+  }
+
+  // ── Position variants ───────────────────────────────────────────────────
+
+  // Horizontal (top / bottom): centered on the edge, pill is wide & short
+  &.autohide-indicator-top,
+  &.autohide-indicator-bottom {
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 6px;
+  }
+
+  // Vertical (left / right): centered on the edge, pill is narrow & tall
+  &.autohide-indicator-left,
+  &.autohide-indicator-right {
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 80px;
+  }
+
+  &.autohide-indicator-top {
+    top: 0;
+    border-radius: 0 0 8px 8px;
+
+    .autohide-indicator-border { border-radius: 0 0 8px 8px; }
+  }
+
+  &.autohide-indicator-bottom {
+    bottom: 0;
+    border-radius: 8px 8px 0 0;
+
+    .autohide-indicator-border { border-radius: 8px 8px 0 0; }
+  }
+
+  &.autohide-indicator-left {
+    left: 0;
+    border-radius: 0 8px 8px 0;
+
+    .autohide-indicator-border { border-radius: 0 8px 8px 0; }
+  }
+
+  &.autohide-indicator-right {
+    right: 0;
+    border-radius: 8px 0 0 8px;
+
+    .autohide-indicator-border { border-radius: 8px 0 0 8px; }
+  }
+
+}

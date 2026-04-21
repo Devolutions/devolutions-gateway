@@ -683,8 +683,6 @@ jobs:
       - name: Package
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          Set-PSDebug -Trace 1
-
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
             $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
@@ -807,7 +805,7 @@ jobs:
             $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
             echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
 
-            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater.exe"
+            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}.exe"
             echo "dagent-updater-executable=$DAgentUpdaterExecutable" >> $Env:GITHUB_OUTPUT
           }
 

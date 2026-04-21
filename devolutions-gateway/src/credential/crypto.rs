@@ -22,7 +22,7 @@ use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
 use secrecy::SecretString;
-use secure_memory::ProtectedBytes;
+use secure_memory::{ProtectedBytes, ProtectionLevel};
 
 /// Global master key for credential encryption.
 ///
@@ -53,27 +53,45 @@ impl MasterKeyManager {
     fn new() -> Self {
         let mut raw = [0u8; 32];
         OsRng.fill_bytes(&mut raw);
-        let key_material = ProtectedBytes::new(raw);
+        // `ProtectedBytes::new` copies `raw` into secure storage and then zeroizes it,
+        // covering the caller-frame residual without requiring a zeroize dep here.
+        let key_material = ProtectedBytes::new(&mut raw);
 
         let st = key_material.protection_status();
-        if st.fallback_backend {
-            tracing::warn!(
-                "master key: advanced memory protection is unavailable on this platform; \
-                 the key is protected only by zeroize-on-drop"
-            );
-        } else {
-            if !st.locked {
+        match st.level() {
+            ProtectionLevel::Unprotected => {
                 tracing::warn!(
-                    "master key: mlock/VirtualLock failed; \
-                     the key may be paged to disk under memory pressure"
+                    "master key: advanced memory protection is unavailable on this platform; \
+                     the key is protected only by zeroize-on-drop"
                 );
             }
-            if !st.dump_excluded {
-                tracing::warn!(
-                    "master key: core-dump exclusion is not active \
-                     (unavailable on this platform or kernel)"
-                );
+            ProtectionLevel::Partial => {
+                if !st.locked {
+                    tracing::warn!(
+                        "master key: mlock/VirtualLock failed; \
+                         the key may be paged to disk under memory pressure"
+                    );
+                }
+                if !st.write_protected {
+                    tracing::warn!(
+                        "master key: data page could not be demoted to read-only; \
+                         accidental overwrites are not prevented"
+                    );
+                }
+                if !st.guard_pages {
+                    tracing::warn!(
+                        "master key: guard pages could not be established; \
+                         adjacent out-of-bounds accesses will not fault"
+                    );
+                }
+                if !st.dump_excluded {
+                    tracing::warn!(
+                        "master key: core-dump exclusion is not active \
+                         (unavailable on this platform or kernel)"
+                    );
+                }
             }
+            ProtectionLevel::Full => {}
         }
 
         Self { key_material }

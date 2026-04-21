@@ -2,19 +2,8 @@
 
 set -e
 
-action="$1"
-if [ "$2" = "in-favour" ]; then
-  # Treat conflict remove as an upgrade.
-  action="upgrade"
-fi
-
-# Don't clean-up just for an upgrade.
-if [ "$action" = "upgrade" ] ; then
-  exit 0
-fi
-
-if [ -d /run/systemd/system ]; then
-  systemctl stop devolutions-gateway >/dev/null 2>&1
-  /usr/bin/devolutions-gateway service unregister >/dev/null
-  systemctl daemon-reload
+# $1 == 1 during upgrades; $1 == 0 on final erase. Skip shutdown for upgrades.
+# Equivalent to %systemd_preun: disable --now on erase only.
+if [ "$1" -eq 0 ] && [ -d /run/systemd/system ]; then
+	systemctl --no-reload disable --now devolutions-gateway.service >/dev/null 2>&1 || true
 fi

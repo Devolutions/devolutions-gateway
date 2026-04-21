@@ -8,6 +8,9 @@
 #   - Binary is functional (--help, --config-init-only)
 #   - systemd unit file is installed (part of the .deb package)
 #   - Default configuration file is generated
+#   - Config directory has secure permissions
+#   - Service starts, responds to health check, and stops cleanly
+#   - Package uninstall removes files but preserves config
 #
 # Environment variables (required):
 #   PACKAGE_FILE   Absolute path to the .deb file inside the container.
@@ -15,11 +18,9 @@
 #   PACKAGE_NAME   Package name (e.g. devolutions-gateway).
 #
 # LIMITATION — systemd in containers:
-#   Docker containers do not normally run systemd, so the postinst script
-#   skips config initialization and service enablement (both gated on
-#   /run/systemd/system). This script compensates by running
-#   --config-init-only manually. Full service start/stop validation is
-#   best-effort and only attempted when systemd is detected.
+#   Docker containers do not normally run systemd. The postinst gates
+#   service enable/start on /run/systemd/system. When systemd is not
+#   detected, the service is started directly for the health check.
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -61,30 +62,13 @@ diagnostics() {
     echo "── Diagnostics ──────────────────────────────────────────────"
     echo ""
     echo "Package metadata:"
-    dpkg -s "$PACKAGE_NAME" 2>/dev/null || echo "  (not installed)"
+    dpkg-deb -I "$PACKAGE_FILE" 2>/dev/null || echo "  (dpkg-deb query failed)"
     echo ""
     echo "Package file list:"
-    dpkg -L "$PACKAGE_NAME" 2>/dev/null || echo "  (not installed)"
+    dpkg-deb -c "$PACKAGE_FILE" 2>/dev/null || echo "  (dpkg-deb query failed)"
     echo ""
     echo "Config directory:"
     ls -la "$CONFIG_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "Binary info:"
-    ls -la "$BINARY" 2>/dev/null || echo "  (not found)"
-    file "$BINARY" 2>/dev/null || true
-    echo ""
-    echo "Dynamic library dependencies (ldd):"
-    ldd "$BINARY" 2>/dev/null || echo "  (ldd failed or binary not found)"
-    echo ""
-    echo "Webapp directory:"
-    ls -laR "$WEBAPP_DIR/" 2>/dev/null | head -40 || echo "  (not found)"
-    echo ""
-    echo "Library directory:"
-    ls -la "$LIB_DIR/" 2>/dev/null || echo "  (not found)"
-    echo ""
-    echo "systemd unit files:"
-    UNIT_FILES=$(find /lib/systemd /usr/lib/systemd /etc/systemd -name '*devolutions*' 2>/dev/null || true)
-    if [ -n "$UNIT_FILES" ]; then echo "$UNIT_FILES"; else echo "  (none found)"; fi
     echo "────────────────────────────────────────────────────────────"
 }
 
@@ -104,13 +88,13 @@ info "Updating apt and installing prerequisites…"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 PREREQ_LOG=$(mktemp)
-if apt-get install -y -qq file python3 > "$PREREQ_LOG" 2>&1; then
+if apt-get install -y -qq file python3 curl openssl > "$PREREQ_LOG" 2>&1; then
     rm -f "$PREREQ_LOG"
 else
     echo "Prerequisites installation output:"
     cat "$PREREQ_LOG"
     rm -f "$PREREQ_LOG"
-    fail "Prerequisites installation failed (file, python3)"
+    fail "Prerequisites installation failed (file, python3, curl, openssl)"
     diagnostics
     summary
 fi
@@ -148,17 +132,26 @@ check_native_library
 check_webapp
 check_config_dir
 
+# ── Config directory permissions ──────────────────────────────────────────────
+
+info "Checking config directory permissions…"
+check_config_dir_permissions
+
 # ── Binary functionality ──────────────────────────────────────────────────────
 
 info "Checking binary functionality…"
 check_binary_help
 
 # ── Config initialization ─────────────────────────────────────────────────────
-# The postinst runs --config-init-only only when systemd is present.
-# In a container without systemd we run it manually.
+# The postinst always runs --config-init-only regardless of systemd presence.
 
 info "Checking config initialization…"
 check_config_init
+
+# ── Config file permissions ───────────────────────────────────────────────────
+
+info "Checking config file permissions…"
+check_config_file_permissions
 
 # ── systemd unit file ─────────────────────────────────────────────────────────
 # The .deb package installs the unit file via dh_installsystemd,
@@ -167,9 +160,34 @@ check_config_init
 info "Checking systemd unit file…"
 check_unit_file "fail"
 
-# ── Service startup (best-effort) ─────────────────────────────────────────────
+info "Checking service file has exactly one ExecStart directive…"
+check_single_execstart
 
-check_service_startup
+# ── Provisioner key ───────────────────────────────────────────────────────────
+# The gateway requires a provisioner public key to start.
+# Generate a key pair and place the public key where gateway.json points.
+
+info "Generating provisioner key…"
+check_provisioner_key
+
+# ── Service health ────────────────────────────────────────────────────────────
+
+info "Checking service health…"
+check_service_health
+
+# ── Uninstall ─────────────────────────────────────────────────────────────────
+
+info "Checking package uninstall…"
+REMOVE_LOG=$(mktemp)
+if apt-get remove -y "$PACKAGE_NAME" >"$REMOVE_LOG" 2>&1; then
+    pass "Package removal succeeded"
+else
+    echo "Removal output:"
+    cat "$REMOVE_LOG"
+    fail "Package removal failed"
+fi
+rm -f "$REMOVE_LOG"
+check_post_uninstall
 
 # ── Final output ──────────────────────────────────────────────────────────────
 
