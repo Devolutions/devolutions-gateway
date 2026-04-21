@@ -132,9 +132,14 @@ impl Task for TunnelTask {
             let start = std::time::Instant::now();
 
             match run_single_connection(&self.conf_handle, &mut shutdown_signal).await {
-                Ok(()) => {
+                Ok(ConnectionOutcome::Shutdown) => {
                     info!("Tunnel task stopped");
                     return Ok(());
+                }
+                Ok(ConnectionOutcome::CertRenewed) => {
+                    info!("Certificate renewed; reconnecting with new cert immediately");
+                    // Skip backoff — renewal is a successful "completion", not a failure.
+                    continue;
                 }
                 Err(error) => {
                     warn!(error = %format!("{error:#}"), "Tunnel connection lost");
@@ -174,11 +179,23 @@ impl Task for TunnelTask {
 // Single connection lifetime
 // ---------------------------------------------------------------------------
 
+/// Outcome of a single connection lifetime, telling the outer loop what to do next.
+enum ConnectionOutcome {
+    /// Shutdown signal received — exit the tunnel task cleanly.
+    Shutdown,
+    /// Certificate was renewed successfully; reconnect immediately with the new cert.
+    CertRenewed,
+}
+
 /// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
 ///
-/// Returns `Ok(())` on graceful shutdown (shutdown signal received).
-/// Returns `Err(...)` on any failure — the caller should retry with backoff.
-async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
+/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
+/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
+/// - `Err(...)`: connection lost or handshake failed — caller should retry with backoff.
+async fn run_single_connection(
+    conf_handle: &ConfHandle,
+    shutdown_signal: &mut ShutdownSignal,
+) -> anyhow::Result<ConnectionOutcome> {
     // Ensure rustls crypto provider is installed (ring).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -359,7 +376,12 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
                     .await
                     .context("send CertRenewalRequest")?;
 
-                match ctrl.recv().await.context("receive CertRenewalResponse")? {
+                let response = tokio::time::timeout(Duration::from_secs(30), ctrl.recv())
+                    .await
+                    .context("timeout waiting for CertRenewalResponse")?
+                    .context("receive CertRenewalResponse")?;
+
+                match response {
                     ControlMessage::CertRenewalResponse {
                         result:
                             agent_tunnel_proto::CertRenewalResult::Success {
@@ -373,7 +395,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
                             .context("write renewed CA certificate")?;
                         info!("Certificate renewed successfully, reconnecting with new cert");
                         connection.close(0u32.into(), b"cert-renewed");
-                        return Ok(());
+                        return Ok(ConnectionOutcome::CertRenewed);
                     }
                     ControlMessage::CertRenewalResponse {
                         result: agent_tunnel_proto::CertRenewalResult::Error { reason },
@@ -448,7 +470,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     task_handles.shutdown().await;
 
-    Ok(())
+    Ok(ConnectionOutcome::Shutdown)
 }
 
 // ---------------------------------------------------------------------------
