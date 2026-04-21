@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use agent_tunnel::AgentTunnelHandle;
 use anyhow::Context as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tracing::field;
@@ -15,7 +16,6 @@ use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, Ses
 use crate::subscriber::SubscriberSender;
 use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::utils;
-use agent_tunnel::AgentTunnelHandle;
 
 #[derive(TypedBuilder)]
 pub struct GenericClient<S> {
