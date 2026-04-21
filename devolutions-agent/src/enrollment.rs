@@ -25,6 +25,14 @@ pub struct EnrollmentJwtClaims {
     /// Suggested agent display name (optional hint).
     #[serde(default)]
     pub jet_agent_name: Option<String>,
+    /// Optional QUIC endpoint to use instead of the one returned by the enroll API.
+    ///
+    /// The gateway's enroll API derives `quic_endpoint` from `conf.hostname` + the
+    /// agent-tunnel listen port. In Docker, that hostname is often the container ID,
+    /// which is not reachable from other hosts. When the admin issues an enrollment
+    /// JWT, they can pin the QUIC endpoint the agent should connect to.
+    #[serde(default)]
+    pub jet_quic_endpoint: Option<String>,
 }
 
 /// Decode an enrollment JWT to extract agent-side configuration claims.
@@ -97,16 +105,28 @@ pub struct PersistedEnrollment {
 /// * `enrollment_token` - JWT token for enrollment
 /// * `agent_name` - Friendly name for this agent
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
+/// * `quic_endpoint_override` - Optional override for the QUIC endpoint advertised by the gateway
+///   (the admin knows the reachable address; the enroll API response often uses `conf.hostname`,
+///   which can be a container ID in Docker).
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
+    quic_endpoint_override: Option<String>,
 ) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
-    let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
+    let mut enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
+
+    // Prefer the QUIC endpoint from the enrollment string (set by the admin who knows
+    // the reachable address) over the enroll API response (which uses conf.hostname,
+    // often a container ID in Docker).
+    if let Some(endpoint) = quic_endpoint_override {
+        enroll_response.quic_endpoint = endpoint;
+    }
+
     persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
 }
 
@@ -243,6 +263,44 @@ fn persist_enrollment_response(
         gateway_ca_path,
         quic_endpoint,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Certificate renewal helpers
+// ---------------------------------------------------------------------------
+
+/// Check if a PEM certificate expires within `threshold_days`.
+pub fn is_cert_expiring(cert_path: &Utf8Path, threshold_days: u32) -> Result<bool> {
+    use std::io::BufReader;
+
+    let pem_str = std::fs::read_to_string(cert_path).with_context(|| format!("read certificate from {cert_path}"))?;
+    let der = rustls_pemfile::certs(&mut BufReader::new(pem_str.as_bytes()))
+        .next()
+        .context("empty PEM input")?
+        .context("parse certificate PEM")?;
+    let (_, cert) =
+        x509_parser::parse_x509_certificate(&der).map_err(|e| anyhow::anyhow!("parse X.509 certificate: {e}"))?;
+
+    let not_after = cert.validity().not_after.to_datetime();
+
+    let threshold_secs = i64::from(threshold_days) * 86400;
+    let now_epoch = time::OffsetDateTime::now_utc().unix_timestamp();
+    let not_after_epoch = not_after.unix_timestamp();
+
+    Ok(not_after_epoch - now_epoch <= threshold_secs)
+}
+
+/// Generate a CSR using an existing private key (for renewal — key never changes).
+pub fn generate_csr_from_existing_key(key_path: &Utf8Path, agent_name: &str) -> Result<String> {
+    let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read private key from {key_path}"))?;
+    let key_pair = rcgen::KeyPair::from_pem(&key_pem).context("parse private key PEM")?;
+
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name.push(rcgen::DnType::CommonName, agent_name);
+
+    let csr = params.serialize_request(&key_pair).context("serialize renewal CSR")?;
+
+    csr.pem().context("encode CSR to PEM")
 }
 
 #[cfg(test)]

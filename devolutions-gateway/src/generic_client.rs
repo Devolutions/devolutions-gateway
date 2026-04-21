@@ -113,58 +113,33 @@ where
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 
-                // Route via agent tunnel if jet_agent_id is specified.
-                if let Some(agent_id) = claims.jet_agent_id {
-                    let handle = agent_tunnel_handle.context("agent tunnel not configured on this gateway")?;
+                // Route via agent tunnel: explicit agent_id → subnet → domain → direct
+                let first_target = targets.first();
+                let target_str = format!("{}:{}", first_target.host(), first_target.port());
 
-                    let mut selected_target = None;
-                    let mut server_stream = None;
-                    let mut last_error = None;
-
-                    for candidate in targets.iter() {
-                        let target_str = format!("{}:{}", candidate.host(), candidate.port());
-
-                        info!(%agent_id, %target_str, "Routing via agent tunnel");
-
-                        match handle.connect_via_agent(agent_id, claims.jet_aid, &target_str).await {
-                            Ok(stream) => {
-                                selected_target = Some(candidate.clone());
-                                server_stream = Some(stream);
-                                break;
-                            }
-                            Err(error) => {
-                                warn!(
-                                    %agent_id,
-                                    %target_str,
-                                    error = format!("{error:#}"),
-                                    "Agent tunnel target failed"
-                                );
-                                last_error = Some(error);
-                            }
-                        }
-                    }
-
-                    let selected_target = selected_target.ok_or_else(|| {
-                        last_error.unwrap_or_else(|| anyhow::anyhow!("agent tunnel target selection failed"))
-                    })?;
+                if let Some((server_stream, _agent)) = agent_tunnel::routing::try_route(
+                    agent_tunnel_handle.as_deref(),
+                    claims.jet_agent_id,
+                    first_target.host(),
+                    claims.jet_aid,
+                    &target_str,
+                )
+                .await?
+                {
+                    let selected_target = first_target.clone();
                     span.record("target", selected_target.to_string());
-                    let server_stream = server_stream.expect("server stream should be present when target is selected");
 
                     let info = SessionInfo::builder()
                         .id(claims.jet_aid)
                         .application_protocol(claims.jet_ap)
                         .details(ConnectionModeDetails::Fwd {
-                            destination_host: selected_target.clone(),
+                            destination_host: selected_target,
                         })
                         .time_to_live(claims.jet_ttl)
                         .recording_policy(claims.jet_rec)
                         .filtering_policy(claims.jet_flt)
                         .build();
 
-                    let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
-
-                    // Agent handles the TCP connection; no leftover bytes to forward.
-                    // Use a placeholder server address since the actual target is behind the agent.
                     let server_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
 
                     return Proxy::builder()
@@ -176,7 +151,7 @@ where
                         .transport_b(server_stream)
                         .sessions(sessions)
                         .subscriber_tx(subscriber_tx)
-                        .disconnect_interest(disconnect_interest)
+                        .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
                         .build()
                         .select_dissector_and_forward()
                         .await

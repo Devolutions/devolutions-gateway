@@ -13,3 +13,11 @@ dist/
 # Downloaded build dependencies
 tun2socks.exe
 wintun.dll
+PROTOCOL.md
+TECHNICAL_SPEC.md
+
+# E2E test artifacts
+tests/e2e/test-results/
+tests/e2e/node_modules/
+# Dev artifacts
+devolutions-agent-linux

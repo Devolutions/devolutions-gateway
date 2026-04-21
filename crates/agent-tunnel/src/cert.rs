@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use picky::pem::parse_pem;
+use picky::pem::{PemError, parse_pem, read_pem};
 use picky::x509::Cert;
 use picky_asn1_x509::{ExtensionView, GeneralName};
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType};
@@ -32,29 +32,28 @@ fn cert_pem_to_der(pem_str: &str) -> anyhow::Result<Vec<u8>> {
 /// Parse one or more PEM-encoded certificates into `rustls` certificate types.
 ///
 /// A PEM file can carry multiple concatenated CERTIFICATE blocks (chain). We
-/// iterate block-by-block with [`parse_pem`], check each label, and wrap the
-/// DER bytes in [`rustls_pki_types::CertificateDer`] — the only type the
-/// rustls/quinn TLS builders accept.
+/// use [`read_pem`] in a loop — each call consumes one block; `HeaderNotFound`
+/// signals "no more blocks left", which is the termination condition. Each
+/// block's label is verified, then the DER bytes are wrapped in
+/// [`rustls_pki_types::CertificateDer`] — the type the rustls/quinn TLS
+/// builders accept.
 fn read_cert_chain(pem_str: &str) -> anyhow::Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    let mut chain = Vec::new();
-    let mut remaining = pem_str;
-    while let Some(start) = remaining.find("-----BEGIN ") {
-        let block_end = remaining[start..]
-            .find("-----END ")
-            .and_then(|e| {
-                remaining[start + e..]
-                    .find("-----\n")
-                    .map(|n| start + e + n + "-----\n".len())
-            })
-            .context("malformed PEM block (no END tag)")?;
+    use std::io::BufReader;
 
-        let block = &remaining[start..block_end];
-        let pem = parse_pem(block).context("parse PEM block")?;
-        if pem.label() != PEM_LABEL_CERTIFICATE {
-            bail!("expected {PEM_LABEL_CERTIFICATE} PEM, got {}", pem.label());
+    let mut reader = BufReader::new(pem_str.as_bytes());
+    let mut chain = Vec::new();
+
+    loop {
+        match read_pem(&mut reader) {
+            Ok(pem) => {
+                if pem.label() != PEM_LABEL_CERTIFICATE {
+                    bail!("expected {PEM_LABEL_CERTIFICATE} PEM, got {}", pem.label());
+                }
+                chain.push(rustls::pki_types::CertificateDer::from(pem.data().to_vec()));
+            }
+            Err(PemError::HeaderNotFound) => break,
+            Err(e) => return Err(anyhow::Error::new(e).context("parse PEM block")),
         }
-        chain.push(rustls::pki_types::CertificateDer::from(pem.data().to_vec()));
-        remaining = &remaining[block_end..];
     }
 
     if chain.is_empty() {
@@ -87,7 +86,7 @@ const SERVER_CERT_FILENAME: &str = "agent-tunnel-server-cert.pem";
 const SERVER_KEY_FILENAME: &str = "agent-tunnel-server-key.pem";
 const CA_VALIDITY_DAYS: u32 = 3650; // ~10 years
 const SERVER_CERT_VALIDITY_DAYS: u32 = 365; // 1 year
-const AGENT_CERT_VALIDITY_DAYS: u32 = 365; // 1 year
+const AGENT_CERT_VALIDITY_DAYS: u32 = 30; // 30 days (short-lived, auto-renewed)
 
 const SECS_PER_DAY: u64 = 86_400;
 const CA_COMMON_NAME: &str = "Devolutions Gateway Agent Tunnel CA";

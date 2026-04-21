@@ -59,6 +59,9 @@ struct UpCommand {
     enrollment_token: String,
     agent_name: String,
     advertise_subnets: Vec<String>,
+    /// Optional override for the QUIC endpoint. Order of precedence:
+    /// CLI `--quic-endpoint` flag > JWT `jet_quic_endpoint` claim > enroll-API response.
+    quic_endpoint_override: Option<String>,
 }
 
 fn agent_service_main(
@@ -151,6 +154,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     let mut agent_name = None;
     let mut enrollment_string = None;
     let mut advertise_subnets = Vec::new();
+    let mut cli_quic_endpoint: Option<String> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -161,6 +165,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
             "--token" | "--enrollment-token" => enrollment_token = Some(parse_required_value(args, &mut index, arg)?),
             "--name" | "--agent-name" => agent_name = Some(parse_required_value(args, &mut index, arg)?),
             "--enrollment-string" => enrollment_string = Some(parse_required_value(args, &mut index, arg)?),
+            "--quic-endpoint" => cli_quic_endpoint = Some(parse_required_value(args, &mut index, "--quic-endpoint")?),
             "--advertise-routes" | "--advertise-subnets" => {
                 advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
             }
@@ -170,7 +175,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         index += 1;
     }
 
-    if let Some(enrollment_string) = enrollment_string {
+    let jwt_quic_endpoint = if let Some(enrollment_string) = enrollment_string {
         let claims = parse_enrollment_jwt(&enrollment_string)?;
 
         // The JWT itself is the Bearer token; the Gateway verifies the signature.
@@ -180,13 +185,21 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         if agent_name.is_none() {
             agent_name = claims.jet_agent_name;
         }
-    }
+
+        claims.jet_quic_endpoint
+    } else {
+        None
+    };
+
+    // CLI flag wins over JWT claim.
+    let quic_endpoint_override = cli_quic_endpoint.or(jwt_quic_endpoint);
 
     Ok(UpCommand {
         gateway_url: gateway_url.context("missing required --gateway")?,
         enrollment_token: enrollment_token.context("missing required --token")?,
         agent_name: agent_name.context("missing required --name")?,
         advertise_subnets,
+        quic_endpoint_override,
     })
 }
 
@@ -253,6 +266,7 @@ fn main() {
                         &enrollment_token,
                         &agent_name,
                         advertise_subnets,
+                        None,
                     )
                     .await
                     {
@@ -278,6 +292,7 @@ fn main() {
                         &command.enrollment_token,
                         &command.agent_name,
                         command.advertise_subnets,
+                        command.quic_endpoint_override,
                     )
                     .await
                 });
@@ -324,6 +339,7 @@ mod tests {
                 enrollment_token: "bootstrap-token".to_owned(),
                 agent_name: "site-a-agent".to_owned(),
                 advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
+                quic_endpoint_override: None,
             }
         );
     }
@@ -376,5 +392,51 @@ mod tests {
         // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
         assert_eq!(parsed.enrollment_token, jwt);
         assert_eq!(parsed.agent_name, "site-a-agent");
+        assert_eq!(parsed.quic_endpoint_override, None);
+    }
+
+    #[test]
+    fn parse_up_command_args_jwt_quic_endpoint_claim() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+            "jet_quic_endpoint": "gateway.example.com:7172",
+        }));
+        let args = vec!["--enrollment-string".to_owned(), jwt];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(
+            parsed.quic_endpoint_override,
+            Some("gateway.example.com:7172".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_up_command_args_cli_quic_endpoint_wins_over_jwt() {
+        let jwt = make_jwt(serde_json::json!({
+            "scope": "gateway.tunnel.enroll",
+            "exp": 1_999_999_999i64,
+            "jti": "00000000-0000-0000-0000-000000000000",
+            "jet_gw_url": "https://gateway.example.com:7171",
+            "jet_agent_name": "site-a-agent",
+            "jet_quic_endpoint": "from-jwt.example.com:7172",
+        }));
+        let args = vec![
+            "--enrollment-string".to_owned(),
+            jwt,
+            "--quic-endpoint".to_owned(),
+            "from-cli.example.com:7172".to_owned(),
+        ];
+
+        let parsed = parse_up_command_args(&args).expect("parse up args");
+
+        assert_eq!(
+            parsed.quic_endpoint_override,
+            Some("from-cli.example.com:7172".to_owned())
+        );
     }
 }
