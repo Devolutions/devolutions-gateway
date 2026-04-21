@@ -139,6 +139,5 @@ namespace DevolutionsAgent.Properties
     new PropertyDefinition<bool>("RemovingForUpgrade", false, isPublic: false, secure: false),
     new PropertyDefinition<bool>("Uninstalling", false, isPublic: false, secure: false),
     new PropertyDefinition<bool>("Maintenance", false, isPublic: false, secure: false),
-    new PropertyDefinition<string>("FeaturesToConfigure", "", isPublic: false, secure: false),
   };             
 #>

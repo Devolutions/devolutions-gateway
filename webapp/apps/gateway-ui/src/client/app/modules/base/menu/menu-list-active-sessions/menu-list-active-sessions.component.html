@@ -1,15 +1,14 @@
-@for (activeWebSession of activeWebSessions; track activeWebSession.id) {
+<ng-container *ngFor="let activeWebSession of activeWebSessions;">
   <div class="menu-list-item-container">
     <div class="menu-list-item"
          [class.selected]="activeWebSessionIndex === activeWebSession.tabIndex"
          (click)="onMenuListItemClick($event, activeWebSession)">
 
       <div class="left-content">
-        @if (activeWebSession.icon) {
-          <i class="dvl-icon"
-             [pTooltip]="activeWebSession.iconTooltip"
-             [ngClass]="activeWebSession.icon"></i>
-        }
+        <i *ngIf="activeWebSession.icon"
+           class="dvl-icon"
+           [pTooltip]="activeWebSession.iconTooltip"
+           [ngClass]="activeWebSession.icon"></i>
         <span class="menu-list-item-label" tooltipEllipsis>{{activeWebSession.name}}</span>
       </div>
       <p-button (onClick)="onCloseButtonClick($event, activeWebSession)"
@@ -19,4 +18,4 @@
                 iconPos="left"></p-button>
     </div>
   </div>
-}
+</ng-container>

@@ -2,19 +2,15 @@ import {
   AfterViewInit,
   ChangeDetectorRef,
   Component,
-  ComponentRef,
   ElementRef,
   EventEmitter,
   Input,
-  OnChanges,
   OnDestroy,
   Output,
-  SimpleChanges,
   ViewChild,
   ViewContainerRef,
 } from '@angular/core';
 
-import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
 import { BaseComponent } from '@shared/bases/base.component';
@@ -24,7 +20,6 @@ import { SessionType, WebSession } from '@shared/models/web-session.model';
 import { ComponentListenerService } from '@shared/services/component-listener.service';
 import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 import { WebSessionService } from '@shared/services/web-session.service';
-import { Subject } from 'rxjs';
 import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
 
 @Component({
@@ -33,23 +28,12 @@ import { distinctUntilChanged, take, takeUntil } from 'rxjs/operators';
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss'],
 })
-export class DynamicTabComponent<T extends SessionType>
-  extends BaseComponent
-  implements OnChanges, AfterViewInit, OnDestroy
-{
+export class DynamicTabComponent<T extends SessionType> extends BaseComponent implements AfterViewInit, OnDestroy {
   @Input() webSessionTab: WebSession<T>;
   @Input() sessionsContainerElement: ElementRef;
 
   @ViewChild('dynamicComponentContainer', { read: ViewContainerRef }) container: ViewContainerRef;
   @Output() componentRefSizeChange: EventEmitter<void> = new EventEmitter<void>();
-
-  /** Non-null while the reconnect form occupies the container slot. */
-  private formRef: ComponentRef<WebClientFormComponent> | null = null;
-
-  /** Cancelled and re-created on every initializeDynamicComponent() call to
-   *  ensure subscriptions to the previous component instance are torn down
-   *  before subscribing to the replacement. */
-  private componentInstanceDestroyed$ = new Subject<void>();
 
   constructor(
     private cdr: ChangeDetectorRef,
@@ -65,25 +49,15 @@ export class DynamicTabComponent<T extends SessionType>
   }
 
   ngOnDestroy(): void {
-    this.componentInstanceDestroyed$.next();
-    this.componentInstanceDestroyed$.complete();
+    // Clear the stale componentRef so that if this tab's WebSession survives
+    // (e.g. the singleton WebSessionService keeps it while the view is torn
+    // down during route changes), re-entering the route will recreate the
+    // dynamic component into the fresh ViewContainerRef.
+    if (this.webSessionTab?.componentRef) {
+      this.dynamicComponentService.destroyComponent(this.webSessionTab.componentRef);
+      this.webSessionTab.componentRef = null;
+    }
     super.ngOnDestroy();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (!changes.webSessionTab || !this.container) {
-      return;
-    }
-
-    // If the reconnect form was showing, the user submitted it and a new
-    // session arrived via updateSession().  Clear the tracking ref so
-    // initializeDynamicComponent() proceeds to create the protocol component
-    // (which replaces the form inside createComponent's create-before-remove).
-    if (this.formRef) {
-      this.formRef = null;
-    }
-
-    this.initializeDynamicComponent();
   }
 
   initializeDynamicComponent(): void {
@@ -95,10 +69,6 @@ export class DynamicTabComponent<T extends SessionType>
       return;
     }
 
-    // Cancel any subscriptions bound to the previous component instance before
-    // creating a replacement (e.g. on reconnect after a disconnect).
-    this.componentInstanceDestroyed$.next();
-
     const componentRef = this.dynamicComponentService.createComponent(
       this.container,
       this.sessionsContainerElement,
@@ -109,14 +79,14 @@ export class DynamicTabComponent<T extends SessionType>
       if (componentRef.instance instanceof WebClientTelnetComponent) {
         this.componentListenerService
           .onTelnetInitialized()
-          .pipe(takeUntil(this.componentInstanceDestroyed$), take(1))
+          .pipe(takeUntil(this.destroyed$), take(1))
           .subscribe((event) => {
             (componentRef.instance as WebComponentReady).webComponentReady(event as CustomEvent, this.webSessionTab.id);
           });
       } else if (componentRef.instance instanceof WebClientSshComponent) {
         this.componentListenerService
           .onSshInitialized()
-          .pipe(takeUntil(this.componentInstanceDestroyed$), take(1))
+          .pipe(takeUntil(this.destroyed$), take(1))
           .subscribe((event) => {
             (componentRef.instance as WebComponentReady).webComponentReady(event as CustomEvent, this.webSessionTab.id);
           });
@@ -126,7 +96,7 @@ export class DynamicTabComponent<T extends SessionType>
     this.cdr.detectChanges();
 
     componentRef.instance.componentStatus
-      .pipe(takeUntil(this.componentInstanceDestroyed$), distinctUntilChanged())
+      .pipe(takeUntil(this.destroyed$), distinctUntilChanged())
       .subscribe((status: ComponentStatus) => {
         this.webSessionTab.status = status;
         if (status.isDisabled) {
@@ -135,46 +105,15 @@ export class DynamicTabComponent<T extends SessionType>
       });
 
     componentRef.instance?.sizeChange
-      ?.pipe(takeUntil(this.componentInstanceDestroyed$))
+      ?.pipe(takeUntil(this.destroyed$))
       .subscribe(() => this.componentRefSizeChange.emit());
 
     this.webSessionTab.componentRef = componentRef;
   }
 
-  /**
-   * Swap the protocol component out and put the reconnect form in its place.
-   * Creates the form FIRST so the container slot is never empty, then removes
-   * the old protocol component (mirrors the create-before-remove pattern used
-   * in DynamicComponentService).
-   */
-  private swapToForm(status: ComponentStatus): void {
-    const formRef = this.container.createComponent(WebClientFormComponent);
-    formRef.instance.isFormExists = true;
-    formRef.instance.webSessionId = this.webSessionTab.id;
-    formRef.instance.inputFormData = this.webSessionTab.data;
-    formRef.instance.sessionTerminationMessage = status.terminationMessage;
-
-    // Remove the protocol component after the form is live.
-    const previousCount = this.container.length - 1;
-    for (let i = 0; i < previousCount; i++) {
-      this.container.remove(0);
-    }
-
-    this.formRef = formRef;
-    // Clear componentRef so initializeDynamicComponent() will recreate the
-    // protocol component once the form is submitted.
-    this.webSessionTab.componentRef = null;
-    this.cdr.detectChanges();
-  }
-
   private onComponentDisabled(status: ComponentStatus): void {
     if (status.isDisabledByUser) {
-      // User clicked Disconnect — close the tab entirely.
       void this.webSessionService.removeSession(status.id);
-      return;
     }
-
-    // Connection failed or dropped — swap to the reconnect form.
-    this.swapToForm(status);
   }
 }

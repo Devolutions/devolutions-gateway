@@ -1,18 +1,8 @@
-:host {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  flex-direction: column;
-}
 
 .container {
   display: flex;
-  flex-direction: row;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  background-color: #ECECEC;
   justify-content: center;
   align-items: center;
+  height: 100vh;
+  background-color: #ECECEC;
 }

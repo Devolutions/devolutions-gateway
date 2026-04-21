@@ -3,7 +3,6 @@
 @use '../../../../../assets/css/theme/theme-mode-variables' as *;
 
 :host {
-  display: flex;
   --box-background-color: white;
   --box-text-color: rgb(var(--base-color-rgb));
 }

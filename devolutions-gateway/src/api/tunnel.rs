@@ -91,6 +91,10 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/enroll", axum::routing::post(enroll_agent))
         .route("/agents", axum::routing::get(list_agents))
         .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
+        .route(
+            "/enrollment-string",
+            axum::routing::post(super::webapp::create_agent_enrollment_string),
+        )
         .with_state(state)
 }
 

@@ -246,26 +246,6 @@ internal static class AgentActions
         Execute = Execute.rollback,
     };
 
-    /// <summary>
-    /// Read the requested feature states into a session property for use by the deferred <see cref="configureFeatures"/> action.
-    /// </summary>
-    /// <remarks>
-    /// <c>session.Features</c> is only accessible from immediate custom actions (DTF restriction).
-    /// This action runs immediately in the execute sequence after <c>InstallInitialize</c>, at which point
-    /// <c>MigrateFeatures</c> has already run and feature <c>RequestState</c> is authoritative for all
-    /// scenarios (fresh install, upgrade, maintenance, silent or interactive).
-    /// </remarks>
-    private static readonly ManagedAction setFeaturesToConfigure = new(
-        new Id($"CA.{nameof(setFeaturesToConfigure)}"),
-        CustomActions.SetFeaturesToConfigure,
-        Return.check,
-        When.After, Step.InstallInitialize,
-        Condition.NOT_BeingRemoved,
-        Sequence.InstallExecuteSequence)
-    {
-        Execute = Execute.immediate,
-    };
-
     private static readonly ElevatedManagedAction configureFeatures = new(
         CustomActions.ConfigureFeatures
     )
@@ -275,8 +255,19 @@ internal static class AgentActions
         Return = Return.check,
         Step = Step.StartServices,
         When = When.Before,
-        Condition = Condition.NOT_BeingRemoved,
-        UsesProperties = UseProperties(new[] { AgentProperties.featuresToConfigure })
+        Condition = Condition.NOT_BeingRemoved & new Condition("(UILevel >= 3 OR WIXSHARP_MANAGED_UI_HANDLE <> \"\")")
+    };
+
+    private static readonly ElevatedManagedAction enrollAgentTunnel = new(
+        new Id($"CA.{nameof(enrollAgentTunnel)}"),
+        CustomActions.EnrollAgentTunnel,
+        Return.check,
+        When.Before, Step.StartServices,
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
     };
 
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
@@ -350,8 +341,8 @@ internal static class AgentActions
         checkNetFxInstalledVersion,
         getInstallDirFromRegistry,
         setArpInstallLocation,
-        setFeaturesToConfigure,
         configureFeatures,
+        enrollAgentTunnel,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

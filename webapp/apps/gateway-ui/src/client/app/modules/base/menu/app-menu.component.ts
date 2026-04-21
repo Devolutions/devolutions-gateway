@@ -85,13 +85,33 @@ export class AppMenuComponent extends BaseComponent implements OnInit {
       'Sessions',
       '',
       (): void => {
-        this.navigationService.navigateToRoot().then(noop);
+        // If already on the session route, just ensure a new tab exists.
+        // If on another page (e.g. Agents), navigate back first.
+        if (this.navigationService.isCurrentRouteUrl(this.WEB_APP_CLIENT_URL)) {
+          this.webSessionService.setupNewWebSession();
+        } else {
+          this.navigationService.navigateToRoot().then(() => {
+            this.webSessionService.setupNewWebSession();
+          });
+        }
       },
       (_url: string) => false,
       true,
     );
 
     this.mainMenus.set('Sessions', sessionsMenuItem);
+
+    const agentsMenuItem: RouterMenuItem = this.createMenuItem(
+      'Agents',
+      '',
+      (): void => {
+        this.navigationService.navigateToPath('/session/agents').then(noop);
+      },
+      (url: string) => url.startsWith('/session/agents'),
+      true,
+    );
+
+    this.mainMenus.set('Agents', agentsMenuItem);
   }
 
   private createMenuItem(

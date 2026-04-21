@@ -2,12 +2,13 @@ import { NgOptimizedImage } from '@angular/common';
 import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
-import { ArdToolbarWrapperComponent } from '@gateway/modules/web-client/ard/ard-toolbar-wrapper.component';
+import { AgentEnrollmentComponent } from '@gateway/modules/web-client/agent-enrollment/agent-enrollment.component';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
 import { ArdFormComponent } from '@gateway/modules/web-client/form/form-components/ard/ard-form.component';
 import { RdpFormComponent } from '@gateway/modules/web-client/form/form-components/rdp/rdp-form.component';
 import { SshFormComponent } from '@gateway/modules/web-client/form/form-components/ssh/ssh-form.component';
 import { VncFormComponent } from '@gateway/modules/web-client/form/form-components/vnc/vnc-form.component';
+import { AgentSelectorControlComponent } from './form/form-controls/agent-selector-control/agent-selector-control.component';
 import { EnableCursorControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-cursor-control/enable-cursor-control.component';
 import { EnableDisplayConfigurationControlComponent } from '@gateway/modules/web-client/form/form-controls/enable-display-configuration-control/enable-display-configuration-control.component';
 import { KdcUrlControlComponent } from '@gateway/modules/web-client/form/form-controls/kdc-url-control/kdc-url-control.component';
@@ -16,18 +17,14 @@ import { PreConnectionBlobControlComponent } from '@gateway/modules/web-client/f
 import { ScreenSizeControlComponent } from '@gateway/modules/web-client/form/form-controls/screen-size-control/screen-size-control.component';
 import { UsernameControlComponent } from '@gateway/modules/web-client/form/form-controls/username-control/username-control.component';
 import { WebClientFormComponent } from '@gateway/modules/web-client/form/web-client-form.component';
-import { RdpToolbarWrapperComponent } from '@gateway/modules/web-client/rdp/rdp-toolbar-wrapper.component';
 import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
 import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
-import { VncToolbarWrapperComponent } from '@gateway/modules/web-client/vnc/vnc-toolbar-wrapper.component';
 import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
 import { WasmInitResolver } from '@gateway/shared/resolvers/wasm-init.resolver';
 import { DynamicTabComponent } from '@shared/components/dynamic-tab/dynamic-tab.component';
-import { FloatingSessionToolbarComponent } from '@shared/components/floating-session-toolbar/floating-session-toolbar.component';
 import { MainPanelComponent } from '@shared/components/main-panel/main-panel.component';
+import { SessionToolbarComponent } from '@shared/components/session-toolbar/session-toolbar.component';
 import { TabViewComponent } from '@shared/components/tab-view/tab-view.component';
-import { Protocol } from '@shared/enums/web-client-protocol.enum';
-import { WebSessionService } from '@shared/services/web-session.service';
 import { SharedModule } from '@shared/shared.module';
 import { CheckboxModule } from 'primeng/checkbox';
 import { KeyFilterModule } from 'primeng/keyfilter';
@@ -68,10 +65,6 @@ const routes: Routes = [
     FormsModule,
     NgOptimizedImage,
     CheckboxModule,
-    FloatingSessionToolbarComponent,
-    ArdToolbarWrapperComponent,
-    RdpToolbarWrapperComponent,
-    VncToolbarWrapperComponent,
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   declarations: [
@@ -110,20 +103,13 @@ const routes: Routes = [
     ArdQualityModeControlComponent,
     TabViewComponent,
     DynamicTabComponent,
+    SessionToolbarComponent,
     FileControlComponent,
     NetScanComponent,
+    AgentEnrollmentComponent,
+    AgentSelectorControlComponent,
   ],
   exports: [DynamicTabComponent, WebClientFormComponent, NetScanComponent],
   providers: [],
 })
-export class WebClientModule {
-  constructor(webSessionService: WebSessionService) {
-    webSessionService.registerProtocolComponentMap({
-      [Protocol.RDP]: WebClientRdpComponent,
-      [Protocol.Telnet]: WebClientTelnetComponent,
-      [Protocol.SSH]: WebClientSshComponent,
-      [Protocol.VNC]: WebClientVncComponent,
-      [Protocol.ARD]: WebClientArdComponent,
-    });
-  }
-}
+export class WebClientModule {}

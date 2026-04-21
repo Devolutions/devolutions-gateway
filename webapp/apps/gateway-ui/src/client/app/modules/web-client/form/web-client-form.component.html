@@ -12,14 +12,12 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          @for (msg of messages; track $index) {
-            <p-message [severity]="$any(msg.severity)" [closable]="false">
-              <span class="msg-summary">{{ msg.summary }}</span>
-              @if (msg.detail) {
-                <div class="msg-detail" [innerHTML]="msg.detail"></div>
-              }
-            </p-message>
-          }
+          <p-messages
+            *ngIf="messages.length > 0"
+            [escape]="false"
+            [closable]="false"
+            [value]="messages"
+          ></p-messages>
         </div>
         <div class="box-content grid nomargin nopad">
           <div class="col-4 gateway-form-group">
@@ -66,46 +64,50 @@
                 ></p-autoComplete>
               </span>
             </div>
-            @if (connectSessionForm.get('autoComplete').hasError('required') && connectSessionForm.get('autoComplete').touched) {
-              <div class="form-helper-text">
-                Hostname is required.
-              </div>
-            }
+            <div
+              class="form-helper-text"
+              *ngIf="
+                connectSessionForm.get('autoComplete').hasError('required') &&
+                connectSessionForm.get('autoComplete').touched
+              "
+            >
+              Hostname is required.
+            </div>
           </div>
 
-          @if (isSelectedProtocolRdp()) {
-            <rdp-form
-              class="col-12"
-              [form]="connectSessionForm"
-              [inputFormData]="inputFormData"
-            ></rdp-form>
-          }
+          <rdp-form
+            class="col-12"
+            *ngIf="isSelectedProtocolRdp()"
+            [form]="connectSessionForm"
+            [inputFormData]="inputFormData"
+          ></rdp-form>
 
-          <!--// No telnet component required. KAH March 8, 2024 -->
+          <!--// No telnet component required, but we show the agent selector for telnet here. -->
+          <div class="col-12 gateway-form-group" *ngIf="isSelectedProtocolTelnet()">
+            <web-client-agent-selector-control [parentForm]="connectSessionForm"
+                                               [inputFormData]="inputFormData"></web-client-agent-selector-control>
+          </div>
 
-          @if (isSelectedProtocolSsh()) {
-            <ssh-form
-              class="col-12"
-              [form]="connectSessionForm"
-              [inputFormData]="inputFormData"
-            ></ssh-form>
-          }
+          <ssh-form
+            class="col-12"
+            *ngIf="isSelectedProtocolSsh()"
+            [form]="connectSessionForm"
+            [inputFormData]="inputFormData"
+          ></ssh-form>
 
-          @if (isSelectedProtocolVnc()) {
-            <vnc-form
-              class="col-12"
-              [form]="connectSessionForm"
-              [inputFormData]="inputFormData"
-            ></vnc-form>
-          }
+          <vnc-form
+            class="col-12"
+            *ngIf="isSelectedProtocolVnc()"
+            [form]="connectSessionForm"
+            [inputFormData]="inputFormData"
+          ></vnc-form>
 
-          @if (isSelectedProtocolArd()) {
-            <ard-form
-              class="col-12"
-              [form]="connectSessionForm"
-              [inputFormData]="inputFormData"
-            ></ard-form>
-          }
+          <ard-form
+            class="col-12"
+            *ngIf="isSelectedProtocolArd()"
+            [form]="connectSessionForm"
+            [inputFormData]="inputFormData"
+          ></ard-form>
 
           <div class="col-12 gateway-form-group">
             <p-button

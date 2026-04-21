@@ -9,5 +9,5 @@ export default defineConfig({
       '/jet': 'http://localhost:3000',
     },
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(),tailwindcss()],
 });

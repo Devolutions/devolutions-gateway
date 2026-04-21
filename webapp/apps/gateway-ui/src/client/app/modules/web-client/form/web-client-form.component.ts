@@ -53,7 +53,7 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   constructor(
     private fb: FormBuilder,
     private formService: WebFormService,
-    protected webSessionService: WebSessionService,
+    private webSessionService: WebSessionService,
     private storageService: StorageService,
     private netscanService: NetScanService,
     protected utils: UtilsService,
@@ -65,13 +65,6 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   ngOnInit(): void {
     this.initializeFormAndOptions();
     this.subscribeToNetscanFillEvent();
-
-    // When created dynamically (via DynamicTabComponent.swapToForm), Angular
-    // does not call ngOnChanges for programmatically-set inputs, so we
-    // display the termination message here if one was already provided.
-    if (this.sessionTerminationMessage) {
-      this.displayMessage();
-    }
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -247,6 +240,10 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
     return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
+  isSelectedProtocolTelnet(): boolean {
+    return this.getSelectedProtocol() === Protocol.Telnet;
+  }
+
   private addMessages(newMessages: ToastMessageOptions[]): void {
     const areThereNewMessages: boolean = newMessages.some(
       (newMsg) =>
@@ -265,16 +262,12 @@ export class WebClientFormComponent extends BaseSessionComponent implements OnIn
   }
 
   private displayMessage(): void {
-    if (this.sessionTerminationMessage.summary) {
-      this.sessionTerminationMessage.summary = this.utils.string.replaceNewlinesWithBR(
-        this.sessionTerminationMessage.summary,
-      );
-    }
-    if (this.sessionTerminationMessage.detail) {
-      this.sessionTerminationMessage.detail = this.utils.string.replaceNewlinesWithBR(
-        this.sessionTerminationMessage.detail,
-      );
-    }
+    this.sessionTerminationMessage.summary = this.utils.string.replaceNewlinesWithBR(
+      this.sessionTerminationMessage.summary,
+    );
+    this.sessionTerminationMessage.detail = this.utils.string.replaceNewlinesWithBR(
+      this.sessionTerminationMessage.detail,
+    );
 
     setTimeout(() => {
       this.addMessages([this.sessionTerminationMessage]);

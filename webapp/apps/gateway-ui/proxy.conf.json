@@ -1,33 +1,41 @@
 {
   "/jet/webapp/app-token": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
     "secure": false
   },
   "/jet/webapp/session-token": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
+    "secure": false
+  },
+  "/jet/webapp/agent-management-token": {
+    "target": "http://127.0.0.1:7272",
     "secure": false
   },
   "/jet/rdp": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
     "secure": false,
     "ws": true
   },
   "/jet/fwd/tcp": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
     "secure": false,
     "ws": true
   },
   "/jet/KdcProxy": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
     "secure": false
   },
   "/jet/health": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
     "secure": false
   },
   "/jet/net/scan": {
-    "target": "http://localhost:7171",
+    "target": "http://127.0.0.1:7272",
     "secure": false,
     "ws": true
+  },
+  "/jet/agent-tunnel": {
+    "target": "http://127.0.0.1:7272",
+    "secure": false
   }
 }

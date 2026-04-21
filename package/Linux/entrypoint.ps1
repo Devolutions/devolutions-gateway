@@ -211,5 +211,31 @@ if ($WebScheme -eq 'https' -and
     Remove-Item @($TlsCertificateFile, $TlsPrivateKeyFile) -ErrorAction SilentlyContinue | Out-Null
 }
 
+# -- QUIC Agent Tunnel --
+$AgentTunnelEnabled = $false
+if ($Env:AGENT_TUNNEL_ENABLED) {
+    try {
+        $AgentTunnelEnabled = [bool]::Parse($Env:AGENT_TUNNEL_ENABLED)
+    } catch {
+        $AgentTunnelEnabled = $false
+    }
+}
+
+if ($AgentTunnelEnabled) {
+    $TunnelPort = if ($Env:AGENT_TUNNEL_PORT) { [int]$Env:AGENT_TUNNEL_PORT } else { 4433 }
+
+    # Patch gateway.json with agent tunnel config
+    $ConfigFile = "$Env:DGATEWAY_CONFIG_PATH/gateway.json"
+    if (Test-Path $ConfigFile) {
+        $json = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+        $json | Add-Member -NotePropertyName 'AgentTunnel' -NotePropertyValue @{
+            Enabled   = $true
+            ListenPort = $TunnelPort
+        } -Force
+        $json | ConvertTo-Json -Depth 10 | Set-Content $ConfigFile
+        Write-Host "QUIC Agent Tunnel enabled on UDP port $TunnelPort"
+    }
+}
+
 & "$Env:DGATEWAY_EXECUTABLE_PATH"
 [System.Environment]::ExitCode = $LASTEXITCODE

@@ -291,55 +291,107 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
-        public static ActionResult SetFeaturesToConfigure(Session session)
+        public static ActionResult EnrollAgentTunnel(Session session)
         {
-            // session.Features is only accessible from immediate custom actions (DTF restriction).
-            // Encode the requested feature states into a session property so the deferred
-            // ConfigureFeatures action can read them via CustomActionData.
-            (string featureId, string jsonId)[] features =
-            [
-                (Features.SESSION_FEATURE.Id, Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
-                (Features.AGENT_UPDATER_FEATURE.Id, Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
-                (Features.PEDM_FEATURE.Id, Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
-            ];
+            string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString);
+            string subnetsRaw = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets);
 
-            List<string> toEnable = [];
-
-            foreach ((string featureId, string jsonId) in features)
+            if (string.IsNullOrWhiteSpace(enrollmentString))
             {
-                if (session.Features[featureId].RequestState == InstallState.Local)
-                {
-                    toEnable.Add(jsonId);
-                }
+                session.Log("Agent tunnel enrollment string not provided, skipping tunnel setup");
+                return ActionResult.Success;
             }
 
-            session[AgentProperties.featuresToConfigure.Id] = string.Join(",", toEnable);
+            try
+            {
+                // Parse enrollment string to extract gateway URL, token, and name.
+                // Format: dgw-enroll:v1:<base64 JSON payload>
+                const string prefix = "dgw-enroll:v1:";
+                if (!enrollmentString.StartsWith(prefix))
+                {
+                    session.Log("Invalid enrollment string prefix");
+                    return ActionResult.Failure;
+                }
 
-            return ActionResult.Success;
+                string base64 = enrollmentString.Substring(prefix.Length);
+                byte[] decoded = Convert.FromBase64String(base64.Replace('-', '+').Replace('_', '/'));
+                string json = System.Text.Encoding.UTF8.GetString(decoded);
+
+                var payload = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+                string apiBaseUrl = payload["api_base_url"]?.ToString();
+                string enrollmentToken = payload["enrollment_token"]?.ToString();
+                string agentName = payload.ContainsKey("name") && payload["name"] != null
+                    ? payload["name"].ToString()
+                    : Environment.MachineName;
+
+                if (string.IsNullOrEmpty(agentName))
+                {
+                    agentName = Environment.MachineName;
+                }
+
+                // Build CLI arguments for: devolutions-agent.exe enroll <url> <token> <name> <config> [subnets]
+                string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+                string installDir = session.Property(AgentProperties.InstallDir);
+                string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
+
+                string subnetsArg = string.IsNullOrWhiteSpace(subnetsRaw) ? "" : subnetsRaw.Trim();
+
+                string arguments = $"enroll \"{apiBaseUrl}\" \"{enrollmentToken}\" \"{agentName}\" \"{configPath}\"";
+                if (!string.IsNullOrEmpty(subnetsArg))
+                {
+                    arguments += $" \"{subnetsArg}\"";
+                }
+
+                session.Log($"Running enrollment: {exePath} {arguments.Replace(enrollmentToken, "***")}");
+
+                ProcessStartInfo startInfo = new ProcessStartInfo(exePath, arguments)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    WorkingDirectory = ProgramDataDirectory,
+                };
+
+                using Process process = Process.Start(startInfo);
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+                process.WaitForExit(60_000); // 60 second timeout
+
+                if (!string.IsNullOrEmpty(stdout))
+                {
+                    session.Log($"enrollment stdout: {stdout}");
+                }
+
+                if (!string.IsNullOrEmpty(stderr))
+                {
+                    session.Log($"enrollment stderr: {stderr}");
+                }
+
+                if (process.ExitCode != 0)
+                {
+                    session.Log($"Enrollment failed with exit code {process.ExitCode}");
+                    return ActionResult.Failure;
+                }
+
+                session.Log("Agent tunnel enrollment completed successfully");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"Agent tunnel enrollment failed: {e}");
+                return ActionResult.Failure;
+            }
         }
 
         [CustomAction]
         public static ActionResult ConfigureFeatures(Session session)
         {
-            string featuresToConfigure = session.Property(AgentProperties.featuresToConfigure.Id);
-            HashSet<string> enabledFeatures = new HashSet<string>(
-                featuresToConfigure.Split([','], StringSplitOptions.RemoveEmptyEntries));
-
-            string[] allFeatureJsonIds =
-            [
-                Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
-                Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
-                Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
-            ];
-
-            foreach (string featureJsonId in allFeatureJsonIds)
+            foreach (Feature feature in (Feature[]) [Features.SESSION_FEATURE, Features.PEDM_FEATURE, Features.AGENT_UPDATER_FEATURE])
             {
-                ActionResult result = ToggleAgentFeature(session, featureJsonId, enabledFeatures.Contains(featureJsonId));
-
-                if (result != ActionResult.Success)
-                {
-                    return result;
-                }
+                bool enable = session.IsFeatureEnabled(feature.Id);
+                string jsonId = feature.Id.Substring(Features.FEATURE_ID_PREFIX.Length);
+                ToggleAgentFeature(session, jsonId, enable);
             }
 
             return ActionResult.Success;

@@ -5,13 +5,6 @@
 :host {
   --box-background-color: white;
   --box-text-color: rgb(var(--base-color-rgb));
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  max-width: 560px;
-  align-self: center;
-  min-width: 0;
-  min-height: 0;
 }
 
 :host ::ng-deep .p-dropdown {
@@ -23,29 +16,36 @@
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
 }
 
 :host ::ng-deep .p-message-icon {
-  flex-shrink: 0;
+  flex-shrink: 0; /* Prevent icon from shrinking */
   margin-right: 10px;
 }
 
-.msg-summary {
-  font-weight: 600;
-  display: block;
+/* Control the summary's growth and ensure it doesn't push the detail to break */
+:host ::ng-deep .p-message-summary {
+  flex-grow: 1; /* Allow summary to fill available space next to the icon */
+  flex-basis: 0; /* Ensure it doesn't base its size on the content, allowing it to grow */
+  min-width: 0; /* Prevent it from maintaining an intrinsic minimum width */
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
-.msg-detail {
-  margin-top: 6px;
-  font-size: 12px;
-  word-break: break-word;
-  white-space: pre-wrap;
+/* Make detail take the full width of the container, ensuring it wraps */
+:host ::ng-deep .p-message-detail {
+  width: 100%; /* Force it to a new line */
+  order: 3; /* Ensure it's placed below all other flex items */
+}
+
+:host ::ng-deep .p-message .p-message-detail {
+  margin-top: 10px;
+  flex-basis: 100%;
 }
 
 :host ::ng-deep .p-message.p-message-error {
   margin-bottom: 10px;
-  width: 100%;
 
   timescircleicon {
     display: inline !important;
@@ -67,12 +67,9 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  width: 100%;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
+  height: 100vh;
 }
+
 .form-message {
   margin-bottom: 10px;
 }
@@ -84,9 +81,9 @@
   padding: 24px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin: 3vw;
-  max-height: calc(100% - 6vw);
+  max-height: calc(100vh - 6vw);
   overflow-y: auto;
-
+  
   // Force border-radius to work with flex
   &.flex {
     border-radius: 8px;

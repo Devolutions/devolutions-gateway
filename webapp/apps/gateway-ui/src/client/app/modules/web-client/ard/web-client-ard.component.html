@@ -1,28 +1,27 @@
-<div class="session-ard-container">
-  @if (loading) {
-    <div class="loading-info-container">
-      <div class="loading-info">
-        @if (!hideSpinnerOnly) {
-          <p-progressSpinner></p-progressSpinner>
-        }
-      </div>
+<div #sessionArdContainer>
+  <div *ngIf="currentStatus.isDisabled" class="session-form">
+    <web-client-form
+      [webSessionId]="webSessionId"
+      [inputFormData]="formData"
+      [sessionTerminationMessage]="sessionTerminationMessage"
+      [isFormExists]="true"></web-client-form>
+  </div>
+
+  <session-toolbar
+    [sessionContainerParent]="sessionContainerElement"
+    [middleButtons]="middleToolbarButtons"
+    [middleToggleButtons]="middleToolbarToggleButtons"
+    [rightButtons]="rightToolbarButtons"
+    [sliders]="sliders"
+    [clipboardActionButtons]="clipboardActionButtons">
+  </session-toolbar>
+
+  <div class="loading-info-container" *ngIf="loading">
+    <div class="loading-info">
+      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
     </div>
-  }
+  </div>
 
   <iron-remote-desktop #ironRemoteDesktopElement targetplatform="web" verbose="true" scale="fit" flexcenter="true" [module]="backendRef"></iron-remote-desktop>
 
-  @if (!loading && !currentStatus.isDisabled) {
-    <div class="toolbar-overlay-anchor">
-      <ard-toolbar-wrapper
-        [actions]="clipboardActionButtons"
-        [sessionInfo]="sessionInfo"
-        [initialState]="{ cursorCrosshair: cursorOverrideActive, wheelSpeed: wheelSpeed }"
-        [wheelSpeedControl]="wheelSpeedControl"
-        (sessionClose)="startTerminationProcess()"
-        (screenModeChange)="handleScreenModeChange($event)"
-        (cursorCrosshairChange)="onCursorCrosshairChange($event)"
-        (wheelSpeedChange)="onWheelSpeedChange($event)">
-      </ard-toolbar-wrapper>
-    </div>
-  }
 </div>

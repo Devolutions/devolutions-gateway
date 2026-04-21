@@ -21,6 +21,7 @@ internal static class Wizard
         {
             typeof(WelcomeDialog),
             typeof(FeaturesDialog),
+            typeof(AgentTunnelDialog),
             typeof(InstallDirDialog),
         };
 

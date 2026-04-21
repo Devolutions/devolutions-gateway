@@ -235,65 +235,37 @@ namespace DevolutionsAgent.Properties
                 string stringValue = this.FnGetPropValue(maintenance.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set
-            {
+            set 
+            { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(maintenance, value);
+                    this.runtimeSession.Set(maintenance, value); 
                 }
             }
         }
-
-        internal static readonly WixProperty<String> featuresToConfigure = new()
-        {
-            Id = "P.FeaturesToConfigure",
-            Default = "",
-            Name = "FeaturesToConfigure",
-            Secure = false,
-            Hidden = false,
-            Public = false
-        };
-
-        public String FeaturesToConfigure
-        {
-            get
-            {
-                string stringValue = this.FnGetPropValue(featuresToConfigure.Id);
-                return WixProperties.GetPropertyValue<String>(stringValue);
-            }
-            set
-            {
-                if (this.runtimeSession is not null)
-                {
-                    this.runtimeSession.Set(featuresToConfigure, value);
-                }
-            }
-        }
-
+ 
 
         public static IWixProperty[] Properties =
         {
-
+ 
             configureAgent,
-
+ 
             debugPowerShell,
-
+ 
             installId,
-
+ 
             netFx45Version,
-
+ 
             firstInstall,
-
+ 
             upgrading,
-
+ 
             removingForUpgrade,
-
+ 
             uninstalling,
-
+ 
             maintenance,
-
-            featuresToConfigure,
-
+ 
         };
     }
 }

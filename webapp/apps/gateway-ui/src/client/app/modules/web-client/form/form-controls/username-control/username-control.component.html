@@ -9,9 +9,8 @@
            formControlName="username"
            required/>
   </div>
-  @if (parentForm.get('username').hasError('required') && parentForm.get('username').touched) {
-    <div class="form-helper-text">
-      Username is required.
-    </div>
-  }
+  <div class="form-helper-text"
+       *ngIf="parentForm.get('username').hasError('required') && parentForm.get('username').touched">
+    Username is required.
+  </div>
 </div>

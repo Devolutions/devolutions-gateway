@@ -11,12 +11,8 @@
 
     <div class="col-12 gateway-form-group">
       <a href="#" (click)="toggleMoreSettings($event)">More Settings
-        @if (!isMoreSettingsOpened()) {
-          <span>+</span>
-        }
-        @if (isMoreSettingsOpened()) {
-          <span>-</span>
-        }
+        <span *ngIf="!isMoreSettingsOpened()" >+</span>
+        <span *ngIf="isMoreSettingsOpened()">-</span>
       </a>
     </div>
 
@@ -40,13 +36,16 @@
                                                 [inputFormData]="inputFormData"></web-client-pre-connection-blob-control>
       </div>
 
-    @if (showAutoClipboardCheckbox) {
-      <div class="col-12 gateway-form-group">
-        <web-client-auto-clipboard-control [parentForm]="form"
-                                           [inputFormData]="inputFormData"></web-client-auto-clipboard-control>
-      </div>
-    }
+    <div *ngIf="showAutoClipboardCheckbox" class="col-12 gateway-form-group">
+      <web-client-auto-clipboard-control [parentForm]="form"
+                                         [inputFormData]="inputFormData"></web-client-auto-clipboard-control>
+    </div>
 
+  </div>
+
+  <div class="col-12 gateway-form-group">
+    <web-client-agent-selector-control [parentForm]="form"
+                                       [inputFormData]="inputFormData"></web-client-agent-selector-control>
   </div>
 
 </div>
