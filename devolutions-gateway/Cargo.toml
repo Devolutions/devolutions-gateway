@@ -35,6 +35,8 @@ terminal-streamer.path = "../crates/terminal-streamer"
 network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
+agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
+agent-tunnel = { path = "../crates/agent-tunnel" }
 ironrdp-pdu = { version = "0.7", features = ["std"] }
 ironrdp-core = { version = "0.1", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
@@ -69,6 +71,9 @@ thiserror = "2"
 typed-builder = "0.21"
 backoff = "0.4"
 bitflags = "2.9"
+base64 = "0.22"
+ipnetwork = "0.20"
+rand = "0.8"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.15", default-features = false, features = ["jose", "x509", "pkcs12", "time_conversion"] }
@@ -81,6 +86,14 @@ x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 sha2 = "0.10"
 hex = "0.4"
 rustls-native-certs = "0.8"
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+x509-parser = "0.16"
+
+# QUIC (agent tunnel)
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pki-types = "1"
+rustls-pemfile = "2"
 
 # Logging
 tracing = "0.1"

@@ -15,6 +15,7 @@ pub mod rdp;
 pub mod session;
 pub mod sessions;
 pub mod traffic;
+pub mod tunnel;
 pub mod update;
 pub mod webapp;
 
@@ -45,6 +46,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
     }
 
     if state.conf_handle.get_conf().debug.enable_unstable {
+        router = router.nest("/jet/tunnel", tunnel::make_router(state.clone()));
         router = router.nest("/jet/net/monitor", monitoring::make_router(state.clone()));
 
         if state.conf_handle.get_conf().ai_gateway.enabled {

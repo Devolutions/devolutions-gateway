@@ -406,6 +406,64 @@ where
     }
 }
 
+/// Grants read access to agent management endpoints.
+///
+/// Accepts a scope token with `DiagnosticsRead`, `ConfigWrite`, or `Wildcard` scope.
+#[derive(Clone, Copy)]
+pub struct AgentManagementReadAccess;
+
+impl<S> FromRequestParts<S> for AgentManagementReadAccess
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let claims = Extension::<AccessTokenClaims>::from_request_parts(parts, state)
+            .await
+            .map_err(HttpError::internal().err())?
+            .0;
+
+        // DiagnosticsRead is accepted because DVLS maps its AgentRead scope
+        // to GatewayDiagnosticsRead, which serializes as "gateway.diagnostics.read".
+        match claims {
+            AccessTokenClaims::Scope(scope) => match scope.scope {
+                AccessScope::Wildcard | AccessScope::DiagnosticsRead | AccessScope::ConfigWrite => Ok(Self),
+                _ => Err(HttpError::forbidden().msg("invalid scope for agent management read")),
+            },
+            _ => Err(HttpError::forbidden().msg("scope token required for agent management read")),
+        }
+    }
+}
+
+/// Grants write access to agent management endpoints (e.g. enrollment, delete).
+///
+/// Accepts scope tokens with `ConfigWrite` (or `Wildcard`) scope only.
+#[derive(Clone, Copy)]
+pub struct AgentManagementWriteAccess;
+
+impl<S> FromRequestParts<S> for AgentManagementWriteAccess
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let claims = Extension::<AccessTokenClaims>::from_request_parts(parts, state)
+            .await
+            .map_err(HttpError::internal().err())?
+            .0;
+
+        match claims {
+            AccessTokenClaims::Scope(scope) => match scope.scope {
+                AccessScope::Wildcard | AccessScope::ConfigWrite => Ok(Self),
+                _ => Err(HttpError::forbidden().msg("invalid scope for agent management write")),
+            },
+            _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WebAppToken(pub WebAppTokenClaims);
 

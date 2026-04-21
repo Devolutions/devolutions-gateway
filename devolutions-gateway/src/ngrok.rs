@@ -238,6 +238,7 @@ async fn run_tcp_tunnel(mut tunnel: ngrok::tunnel::TcpTunnel, state: DgwState) {
                         .subscriber_tx(state.subscriber_tx)
                         .active_recordings(state.recordings.active_recordings)
                         .credential_store(state.credential_store)
+                        .agent_tunnel_handle(state.agent_tunnel_handle)
                         .build()
                         .serve()
                         .await

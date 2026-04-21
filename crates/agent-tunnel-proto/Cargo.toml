@@ -1,0 +1,25 @@
+[package]
+name = "agent-tunnel-proto"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+bytes = "1.10"
+ipnetwork = "0.20"
+serde = { version = "1", features = ["derive"], optional = true }
+thiserror = "2.0"
+tokio = { version = "1.45", features = ["io-util"] }
+uuid = { version = "1.17", features = ["v4"] }
+
+[dev-dependencies]
+proptest = "1.7"
+tokio = { version = "1.45", features = ["rt", "macros"] }

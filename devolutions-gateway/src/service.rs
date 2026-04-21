@@ -275,6 +275,33 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
+    // Initialize agent tunnel if configured.
+    let agent_tunnel_handle = if conf.agent_tunnel.enabled {
+        let data_dir = config::get_data_dir();
+        let hostname = &conf.hostname;
+
+        let ca_manager = agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
+            .context("failed to initialize agent tunnel CA")?;
+
+        let listen_addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
+
+        let (listener, handle) =
+            agent_tunnel::AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), hostname)
+                .await
+                .context("failed to bind agent tunnel listener")?;
+
+        tasks.register(listener);
+
+        info!(
+            port = conf.agent_tunnel.listen_port,
+            "Agent tunnel QUIC listener started",
+        );
+
+        Some(Arc::new(handle))
+    } else {
+        None
+    };
+
     let state = DgwState {
         conf_handle: conf_handle.clone(),
         token_cache: Arc::clone(&token_cache),
@@ -287,6 +314,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         credential_store: credential_store.clone(),
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
+        agent_tunnel_handle,
     };
 
     for listener in &conf.listeners {

@@ -95,6 +95,14 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         path: "/jet/ai",
         exact_match: false,
     },
+    // Agent Tunnel: only /enroll skips auth (it uses its own bearer token).
+    // TODO: add rate limiting on this endpoint (tokens are 122-bit UUIDs so brute-force
+    // is infeasible, but rate limiting is good defense-in-depth).
+    AuthException {
+        method: Method::POST,
+        path: "/jet/tunnel/enroll",
+        exact_match: true,
+    },
 ];
 
 pub async fn auth_middleware(
