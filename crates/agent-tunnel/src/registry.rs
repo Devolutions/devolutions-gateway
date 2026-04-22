@@ -117,6 +117,16 @@ impl AgentPeer {
         self.last_seen.store(last_seen_ms, Ordering::Release);
     }
 
+    /// Overwrite `received_at` on the current route state.
+    ///
+    /// Intended for tests that need to assert ordering by arrival time without
+    /// relying on wall-clock `thread::sleep` — which is flaky on platforms with
+    /// coarse timer resolution (e.g. Windows ~16 ms).
+    pub fn set_received_at_for_test(&self, received_at: SystemTime) {
+        let mut state = self.route_state.write();
+        state.received_at = received_at;
+    }
+
     /// Returns the last-seen timestamp as milliseconds since UNIX epoch.
     pub fn last_seen_ms(&self) -> u64 {
         self.last_seen.load(Ordering::Acquire)

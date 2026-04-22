@@ -67,7 +67,15 @@ pub async fn try_route(
     target_addr: &str,
 ) -> Result<Option<(TunnelStream, Arc<AgentPeer>)>> {
     let Some(handle) = handle else {
-        return Ok(None);
+        // An explicit `jet_agent_id` claim means the token requires routing via that
+        // specific agent; silently falling back to a direct connect would bypass the
+        // intended network boundary. Reject instead.
+        return match explicit_agent_id {
+            Some(id) => Err(anyhow!(
+                "agent {id} specified in token requires agent tunnel routing, but no tunnel handle is configured"
+            )),
+            None => Ok(None),
+        };
     };
 
     match resolve_route(handle.registry(), explicit_agent_id, target_host).await {
