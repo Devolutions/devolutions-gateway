@@ -1,16 +1,7 @@
 ---
 name: changelog-to-jira
 description: Creates missing DGW Jira tickets from CHANGELOG.md entries and updates the file with the new ticket links.
-compatibility:
-  tools:
-    - Bash
-    - Read
-    - Edit
-    - mcp__claude_ai_Atlassian__lookupJiraAccountId
-    - mcp__claude_ai_Atlassian__getJiraIssue
-    - mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql
-    - mcp__claude_ai_Atlassian__getIssueLinkTypes
-    - mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata
+compatibility: Requires Bash, Read, Edit, and Atlassian MCP Jira tools
 ---
 
 # Changelog to Jira Skill

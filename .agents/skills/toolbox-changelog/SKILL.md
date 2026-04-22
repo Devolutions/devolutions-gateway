@@ -1,10 +1,7 @@
 ---
 name: toolbox-changelog
 description: Generates user-facing changelogs for Devolutions Gateway and Devolutions Agent in Devolutions ToolBox format from CHANGELOG.md.
-compatibility:
-  tools:
-    - Bash
-    - Read
+compatibility: Requires Bash and Read
 ---
 
 # ToolBox Changelog Generator
