@@ -25,21 +25,15 @@ pub struct EnrollmentJwtClaims {
     /// Suggested agent display name (optional hint).
     #[serde(default)]
     pub jet_agent_name: Option<String>,
-    /// Optional QUIC endpoint (`host:port`) for the agent tunnel — overrides the
-    /// endpoint returned by the enroll API.
+    /// QUIC endpoint (`host:port`) the agent should connect to for the tunnel.
     ///
-    /// # Why this override exists
+    /// # Why the operator must supply this
     ///
-    /// The enroll API response contains a `quic_endpoint` field that the gateway
-    /// builds as `format!("{}:{}", conf.hostname, agent_tunnel.listen_port)`. That
-    /// value is the gateway's *self-reported* address — whatever `conf.hostname`
-    /// was configured to be.
-    ///
-    /// A running process has no way to discover the address its clients actually
+    /// A running gateway has no way to discover the address its clients actually
     /// route to: that is a view from outside the host, not from inside. The moment
-    /// there is any translation layer between the gateway and the agent, the
-    /// self-report will differ from what the agent needs. Common cases where this
-    /// breaks without an override:
+    /// there is any translation layer between the gateway and the agent, a
+    /// self-reported `conf.hostname:listen_port` will differ from what the agent
+    /// needs. Common cases:
     ///
     /// 1. **Docker / Kubernetes**: `conf.hostname` defaults to the container ID or
     ///    pod name, which is not resolvable outside the bridge/cluster network.
@@ -49,10 +43,13 @@ pub struct EnrollmentJwtClaims {
     /// 3. **HA behind a load balancer**: individual gateway nodes have per-node
     ///    hostnames, but agents must connect to the LB VIP or a stable DNS name.
     ///
-    /// Only the operator who designed the network knows the correct externally-
-    /// reachable address, so they encode it into the enrollment JWT at mint time.
-    /// This claim is that encoded value; the CLI flag `--quic-endpoint` takes
-    /// precedence over it for last-minute corrections without re-issuing a JWT.
+    /// Rather than silently shipping a wrong self-report and hoping the operator
+    /// notices when tunnels fail, the gateway deliberately does NOT return a QUIC
+    /// endpoint from its enroll API. The operator — who designed the network —
+    /// supplies the correct address here when minting the enrollment JWT.
+    ///
+    /// Optional at the JWT level only because the `--quic-endpoint` CLI flag can
+    /// provide it instead. The agent refuses to start if neither is given.
     #[serde(default)]
     pub jet_quic_endpoint: Option<String>,
 }
@@ -106,7 +103,6 @@ struct EnrollResponse {
     agent_id: Uuid,
     client_cert_pem: String,
     gateway_ca_cert_pem: String,
-    quic_endpoint: String,
     server_spki_sha256: String,
 }
 
@@ -127,33 +123,24 @@ pub struct PersistedEnrollment {
 /// * `enrollment_token` - JWT token for enrollment
 /// * `agent_name` - Friendly name for this agent
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
-/// * `quic_endpoint_override` - Optional override for the QUIC endpoint the agent should connect
-///   to. The gateway's enroll API reports its own `conf.hostname:agent_tunnel.listen_port`, but
-///   that self-report is frequently not what the agent can actually route to (Docker/K8s, NAT,
-///   split-horizon DNS, LB VIP in HA). See [`EnrollmentJwtClaims::jet_quic_endpoint`] for details.
+/// * `quic_endpoint` - QUIC endpoint (`host:port`) the agent should connect to for the
+///   tunnel. The gateway does not report this: a running process cannot know the address
+///   its clients actually route to (Docker/K8s, NAT, split-horizon DNS, LB VIP). The
+///   operator supplies it via the `jet_quic_endpoint` JWT claim or the `--quic-endpoint`
+///   CLI flag. See [`EnrollmentJwtClaims::jet_quic_endpoint`] for the full rationale.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
-    quic_endpoint_override: Option<String>,
+    quic_endpoint: String,
 ) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
-    let mut enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
+    let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
 
-    // Prefer the override (from `--quic-endpoint` CLI or `jet_quic_endpoint` JWT claim)
-    // over what the gateway reports. The enroll API's `quic_endpoint` is the gateway's
-    // self-report — it does not know the address agents actually route to, because that
-    // information only exists outside the host (Docker bridge NAT, K8s service FQDN,
-    // split-horizon DNS, LB VIP, etc). See `EnrollmentJwtClaims::jet_quic_endpoint`
-    // for the full rationale.
-    if let Some(endpoint) = quic_endpoint_override {
-        enroll_response.quic_endpoint = endpoint;
-    }
-
-    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
+    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, quic_endpoint, &key_pem)
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -214,9 +201,9 @@ fn persist_enrollment_response(
         agent_id,
         client_cert_pem,
         gateway_ca_cert_pem,
-        quic_endpoint,
         server_spki_sha256,
     }: EnrollResponse,
+    quic_endpoint: String,
     key_pem: &str,
 ) -> Result<PersistedEnrollment> {
     let config_path = config::get_conf_file_path();

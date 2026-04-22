@@ -79,8 +79,6 @@ pub struct EnrollResponse {
     pub client_cert_pem: String,
     /// PEM-encoded gateway CA certificate (for server verification).
     pub gateway_ca_cert_pem: String,
-    /// QUIC endpoint to connect to (`host:port`).
-    pub quic_endpoint: String,
     /// SHA-256 hash of the server certificate's SPKI (hex-encoded).
     /// Used by the agent to pin the server's public key.
     pub server_spki_sha256: String,
@@ -91,10 +89,6 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/enroll", axum::routing::post(enroll_agent))
         .route("/agents", axum::routing::get(list_agents))
         .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
-        .route(
-            "/enrollment-string",
-            axum::routing::post(super::webapp::create_agent_enrollment_string),
-        )
         .with_state(state)
 }
 
@@ -174,8 +168,6 @@ async fn enroll_agent(
         .sign_agent_csr(agent_id, &req.agent_name, &req.csr_pem, req.agent_hostname.as_deref())
         .map_err(HttpError::bad_request().with_msg("invalid CSR").err())?;
 
-    let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
-
     let server_spki_sha256 = handle
         .ca_manager()
         .server_spki_sha256(&conf.hostname)
@@ -187,11 +179,15 @@ async fn enroll_agent(
         "Agent enrolled successfully",
     );
 
+    // The QUIC endpoint that the agent should connect to is deliberately NOT returned here.
+    // A running gateway has no way to know the address its agents can actually route to
+    // (Docker bridge NAT, K8s service FQDN, split-horizon DNS, LB VIP) — that knowledge
+    // only exists with the operator at deployment time. They supply it on the agent side
+    // via the `jet_quic_endpoint` JWT claim or the `--quic-endpoint` CLI flag.
     Ok(Json(EnrollResponse {
         agent_id,
         client_cert_pem: signed.client_cert_pem,
         gateway_ca_cert_pem: signed.ca_cert_pem,
-        quic_endpoint,
         server_spki_sha256,
     }))
 }
