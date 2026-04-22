@@ -233,16 +233,16 @@ where
 
         let span = tracing::Span::current();
 
-        // Route via agent tunnel: explicit agent_id → subnet → domain → direct
+        // Route via agent tunnel: explicit agent_id → subnet → domain → direct.
+        // `as_addr()` is IPv6-safe (bracketed); `format!("{host}:{port}")` is not.
         let first_target = targets.first();
-        let target_str = format!("{}:{}", first_target.host(), first_target.port());
 
         if let Some((server_stream, _agent)) = agent_tunnel::routing::try_route(
             agent_tunnel_handle.as_deref(),
             claims.jet_agent_id,
             first_target.host(),
             claims.jet_aid,
-            &target_str,
+            first_target.as_addr(),
         )
         .await
         .map_err(ForwardError::BadGateway)?

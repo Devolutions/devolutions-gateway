@@ -302,8 +302,9 @@ async fn connect_rdp_server(
     trace!(?targets, "Connecting to destination server");
 
     // Route through agent tunnel if available, otherwise connect directly.
+    // `as_addr()` is IPv6-safe (bracketed); `format!("{host}:{port}")` is not.
     let first_target = targets.first();
-    let target_str = format!("{}:{}", first_target.host(), first_target.port());
+    let target_addr = first_target.as_addr();
 
     let (mut server_stream, server_addr, selected_target): (ServerTransport, SocketAddr, &TargetAddr) =
         match agent_tunnel::routing::try_route(
@@ -311,12 +312,12 @@ async fn connect_rdp_server(
             claims.jet_agent_id,
             first_target.host(),
             claims.jet_aid,
-            &target_str,
+            target_addr,
         )
         .await
         {
             Ok(Some((quic_stream, _agent))) => {
-                info!(target = %target_str, "Routing RDP via agent tunnel");
+                info!(target = %target_addr, "Routing RDP via agent tunnel");
                 let placeholder_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
                 (ServerTransport::Quic(quic_stream), placeholder_addr, first_target)
             }

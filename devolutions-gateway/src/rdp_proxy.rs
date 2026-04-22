@@ -637,6 +637,12 @@ where
 async fn send_network_request(request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
     let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
 
+    // TODO(agent-tunnel): plumb `agent_tunnel_handle` through `RdpProxy` and pass it here
+    // so CredSSP-originated Kerberos network requests can traverse the agent tunnel when
+    // the KDC is only reachable from an enrolled agent's network. Currently these requests
+    // always go out direct from the gateway host, which bypasses the transparent routing
+    // pipeline used by every other proxy path (fwd / rd_clean_path / generic_client /
+    // kdc_proxy). Edge case: KDC behind a NAT'd site with no direct path from the gateway.
     send_krb_message(&target_addr, &request.data, None)
         .await
         .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
