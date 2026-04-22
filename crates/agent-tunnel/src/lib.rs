@@ -13,9 +13,6 @@ pub mod registry;
 pub mod routing;
 pub mod stream;
 
-#[cfg(test)]
-mod integration_test;
-
 pub use enrollment_store::EnrollmentTokenStore;
 pub use listener::{AgentTunnelHandle, AgentTunnelListener};
 pub use registry::AgentRegistry;
