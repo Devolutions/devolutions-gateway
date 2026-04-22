@@ -164,14 +164,16 @@ pub async fn send_krb_message(
     agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
 ) -> Result<Vec<u8>, HttpError> {
     // Route through agent tunnel using the SAME pipeline as connection forwarding.
-    let kdc_target = kdc_addr.to_string();
+    // `as_addr()` returns `host:port` (with IPv6 brackets), which is what the agent
+    // tunnel target parser expects — unlike `to_string()` which includes the scheme.
+    let kdc_target = kdc_addr.as_addr();
 
     if let Some((mut stream, _agent)) = agent_tunnel::routing::try_route(
         agent_tunnel_handle,
         None,
         kdc_addr.host(),
         uuid::Uuid::new_v4(),
-        &kdc_target,
+        kdc_target,
     )
     .await
     .map_err(|e| HttpError::bad_gateway().build(format!("KDC routing through agent tunnel failed: {e:#}")))?
