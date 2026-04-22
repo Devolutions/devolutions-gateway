@@ -59,9 +59,10 @@ struct UpCommand {
     enrollment_token: String,
     agent_name: String,
     advertise_subnets: Vec<String>,
-    /// Optional override for the QUIC endpoint. Order of precedence:
-    /// CLI `--quic-endpoint` flag > JWT `jet_quic_endpoint` claim > enroll-API response.
-    quic_endpoint_override: Option<String>,
+    /// QUIC endpoint (`host:port`) the agent will connect to for the tunnel.
+    /// Source precedence: CLI `--quic-endpoint` > JWT `jet_quic_endpoint` claim.
+    /// The gateway does not report this — see `EnrollmentJwtClaims::jet_quic_endpoint`.
+    quic_endpoint: String,
 }
 
 fn agent_service_main(
@@ -191,15 +192,18 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         None
     };
 
-    // CLI flag wins over JWT claim.
-    let quic_endpoint_override = cli_quic_endpoint.or(jwt_quic_endpoint);
+    // CLI flag wins over JWT claim. At least one must be provided — the gateway does
+    // not self-report a QUIC endpoint (see `EnrollmentJwtClaims::jet_quic_endpoint`).
+    let quic_endpoint = cli_quic_endpoint.or(jwt_quic_endpoint).context(
+        "missing QUIC endpoint: pass --quic-endpoint or include `jet_quic_endpoint` in the enrollment JWT",
+    )?;
 
     Ok(UpCommand {
         gateway_url: gateway_url.context("missing required --gateway")?,
         enrollment_token: enrollment_token.context("missing required --token")?,
         agent_name: agent_name.context("missing required --name")?,
         advertise_subnets,
-        quic_endpoint_override,
+        quic_endpoint,
     })
 }
 
@@ -251,7 +255,10 @@ fn main() {
                     .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
                 let enrollment_token = env::args().nth(3).expect("missing enrollment token");
                 let agent_name = env::args().nth(4).expect("missing agent name");
-                let subnets_arg = env::args().nth(5).unwrap_or_default();
+                let quic_endpoint = env::args()
+                    .nth(5)
+                    .expect("missing QUIC endpoint (host:port) — required; gateway does not self-report it");
+                let subnets_arg = env::args().nth(6).unwrap_or_default();
 
                 let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
                     Vec::new()
@@ -266,7 +273,7 @@ fn main() {
                         &enrollment_token,
                         &agent_name,
                         advertise_subnets,
-                        None,
+                        quic_endpoint,
                     )
                     .await
                     {
@@ -292,7 +299,7 @@ fn main() {
                         &command.enrollment_token,
                         &command.agent_name,
                         command.advertise_subnets,
-                        command.quic_endpoint_override,
+                        command.quic_endpoint,
                     )
                     .await
                 });
