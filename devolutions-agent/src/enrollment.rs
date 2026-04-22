@@ -25,12 +25,34 @@ pub struct EnrollmentJwtClaims {
     /// Suggested agent display name (optional hint).
     #[serde(default)]
     pub jet_agent_name: Option<String>,
-    /// Optional QUIC endpoint to use instead of the one returned by the enroll API.
+    /// Optional QUIC endpoint (`host:port`) for the agent tunnel — overrides the
+    /// endpoint returned by the enroll API.
     ///
-    /// The gateway's enroll API derives `quic_endpoint` from `conf.hostname` + the
-    /// agent-tunnel listen port. In Docker, that hostname is often the container ID,
-    /// which is not reachable from other hosts. When the admin issues an enrollment
-    /// JWT, they can pin the QUIC endpoint the agent should connect to.
+    /// # Why this override exists
+    ///
+    /// The enroll API response contains a `quic_endpoint` field that the gateway
+    /// builds as `format!("{}:{}", conf.hostname, agent_tunnel.listen_port)`. That
+    /// value is the gateway's *self-reported* address — whatever `conf.hostname`
+    /// was configured to be.
+    ///
+    /// A running process has no way to discover the address its clients actually
+    /// route to: that is a view from outside the host, not from inside. The moment
+    /// there is any translation layer between the gateway and the agent, the
+    /// self-report will differ from what the agent needs. Common cases where this
+    /// breaks without an override:
+    ///
+    /// 1. **Docker / Kubernetes**: `conf.hostname` defaults to the container ID or
+    ///    pod name, which is not resolvable outside the bridge/cluster network.
+    /// 2. **Split-horizon DNS / NAT**: the gateway knows itself by an internal
+    ///    name that does not resolve (or resolves to a different IP) from the
+    ///    agent's network.
+    /// 3. **HA behind a load balancer**: individual gateway nodes have per-node
+    ///    hostnames, but agents must connect to the LB VIP or a stable DNS name.
+    ///
+    /// Only the operator who designed the network knows the correct externally-
+    /// reachable address, so they encode it into the enrollment JWT at mint time.
+    /// This claim is that encoded value; the CLI flag `--quic-endpoint` takes
+    /// precedence over it for last-minute corrections without re-issuing a JWT.
     #[serde(default)]
     pub jet_quic_endpoint: Option<String>,
 }
@@ -105,9 +127,10 @@ pub struct PersistedEnrollment {
 /// * `enrollment_token` - JWT token for enrollment
 /// * `agent_name` - Friendly name for this agent
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
-/// * `quic_endpoint_override` - Optional override for the QUIC endpoint advertised by the gateway
-///   (the admin knows the reachable address; the enroll API response often uses `conf.hostname`,
-///   which can be a container ID in Docker).
+/// * `quic_endpoint_override` - Optional override for the QUIC endpoint the agent should connect
+///   to. The gateway's enroll API reports its own `conf.hostname:agent_tunnel.listen_port`, but
+///   that self-report is frequently not what the agent can actually route to (Docker/K8s, NAT,
+///   split-horizon DNS, LB VIP in HA). See [`EnrollmentJwtClaims::jet_quic_endpoint`] for details.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
@@ -120,9 +143,12 @@ pub async fn enroll_agent(
 
     let mut enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
 
-    // Prefer the QUIC endpoint from the enrollment string (set by the admin who knows
-    // the reachable address) over the enroll API response (which uses conf.hostname,
-    // often a container ID in Docker).
+    // Prefer the override (from `--quic-endpoint` CLI or `jet_quic_endpoint` JWT claim)
+    // over what the gateway reports. The enroll API's `quic_endpoint` is the gateway's
+    // self-report — it does not know the address agents actually route to, because that
+    // information only exists outside the host (Docker bridge NAT, K8s service FQDN,
+    // split-horizon DNS, LB VIP, etc). See `EnrollmentJwtClaims::jet_quic_endpoint`
+    // for the full rationale.
     if let Some(endpoint) = quic_endpoint_override {
         enroll_response.quic_endpoint = endpoint;
     }
@@ -284,7 +310,11 @@ pub fn is_cert_expiring(cert_path: &Utf8Path, threshold_days: u32) -> Result<boo
     let not_after = cert.validity().not_after.to_datetime();
 
     let threshold_secs = i64::from(threshold_days) * 86400;
-    let now_epoch = time::OffsetDateTime::now_utc().unix_timestamp();
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock before UNIX epoch")?
+        .as_secs();
+    let now_epoch = i64::try_from(now_secs).context("unix timestamp exceeds i64::MAX")?;
     let not_after_epoch = not_after.unix_timestamp();
 
     Ok(not_after_epoch - now_epoch <= threshold_secs)

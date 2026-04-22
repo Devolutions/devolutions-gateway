@@ -1,25 +1,25 @@
-//! Integration test for the QUIC agent tunnel (Quinn).
+#![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
+
+//! Full-stack integration test for the QUIC agent tunnel (Quinn).
 //!
 //! Verifies the full data path:
 //!   TCP echo server ← Agent (Quinn client) ← QUIC mTLS ← Gateway listener ← TunnelStream
 //!
 //! This test runs entirely in-process with real UDP sockets on localhost.
 
-#![allow(clippy::unwrap_used)]
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use agent_tunnel::AgentTunnelListener;
+use agent_tunnel::cert::CaManager;
 use agent_tunnel_proto::{ConnectResponse, ControlMessage, ControlStream, DomainAdvertisement, SessionStream};
 use camino::Utf8PathBuf;
 use ipnetwork::Ipv4Network;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
-
-use super::cert::CaManager;
-use super::listener::AgentTunnelListener;
 
 /// Start a TCP echo server that echoes back whatever it receives.
 async fn start_echo_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
