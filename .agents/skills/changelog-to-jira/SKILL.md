@@ -1,7 +1,6 @@
 ---
 name: changelog-to-jira
 description: Creates missing DGW Jira tickets from CHANGELOG.md entries and updates the file with the new ticket links.
-compatibility: Requires Bash, Read, Edit, and Atlassian MCP Jira tools
 ---
 
 # Changelog to Jira Skill

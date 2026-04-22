@@ -1,7 +1,6 @@
 ---
 name: prepare-release
 description: "Prepares a Devolutions Gateway / Devolutions Agent release commit: bumps the version, generates and inserts the changelog, creates Jira tickets, generates the ToolBox changelog, and produces the final release commit."
-compatibility: Requires Bash, Read, Edit, and Atlassian MCP Jira tools
 ---
 
 # Prepare Release Skill
