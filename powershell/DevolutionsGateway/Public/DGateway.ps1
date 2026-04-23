@@ -1219,11 +1219,9 @@ function Get-DGatewayPackage {
     $GitHubDownloadUrl = 'https://github.com/Devolutions/devolutions-gateway/releases/download/'
 
     if ($Platform -eq 'Windows') {
-        $Architecture = 'x86_64'
-        $PackageFileName = "DevolutionsGateway-${Architecture}-${Version}.msi"
+        $PackageFileName = "DevolutionsGateway-${Version}-x64.msi"
     } elseif ($Platform -eq 'Linux') {
-        $Architecture = 'amd64'
-        $PackageFileName = "devolutions-gateway_${Version}.0_${Architecture}.deb"
+        $PackageFileName = "devolutions-gateway-${Version}-x64.deb"
     }
 
     $DownloadUrl = "${GitHubDownloadUrl}v${Version}/$PackageFileName"

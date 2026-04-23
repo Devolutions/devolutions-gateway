@@ -43,7 +43,7 @@ jobs:
         id: setup-matrix
         run: |
           $Jobs = @()
-          $Archs = @( 'x86_64', 'arm64' )
+          $Archs = @( 'x64', 'arm64' )
           $Platforms = @( 'linux', 'windows' )
 
           $Platforms | ForEach-Object {
@@ -203,7 +203,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [x86_64]
+        arch: [x64]
         os: [windows, linux]
         include:
           - os: windows
@@ -325,7 +325,7 @@ jobs:
         shell: pwsh
 
       - name: Configure macOS (intel) runner
-        if: ${{ matrix.os == 'macos' && matrix.arch == 'x86_64' }}
+        if: ${{ matrix.os == 'macos' && matrix.arch == 'x64' }}
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add x86_64-apple-darwin
@@ -335,7 +335,7 @@ jobs:
         run: |
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = 'jetsocat_${{ runner.os }}_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}'
+          $ExecutableFileName = 'jetsocat'
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"
@@ -344,8 +344,8 @@ jobs:
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
-            $LinuxArch = @{'x86_64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
-            $RustArch = @{'x86_64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
+            $LinuxArch = @{'x64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
+            $RustArch = @{'x64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
             $RustTarget = "$RustArch-unknown-linux-gnu"
             $Env:SYSROOT_NAME = "ubuntu-18.04-$LinuxArch"
             . "$HOME/.cargo/cbake/${RustTarget}-enter.ps1"
@@ -402,8 +402,8 @@ jobs:
         run: |
           $OutputPath = Join-Path "macos" "universal"
           New-Item -ItemType Directory -Path $OutputPath | Out-Null
-          $Binaries = Get-ChildItem -Recurse -Path "macos" -Filter "jetsocat_*" | Foreach-Object { $_.FullName } | Select -Unique
-          $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath "jetsocat_macOS_${{ needs.preflight.outputs.version }}_universal")) + $Binaries) -Join ' '
+          $Binaries = Get-ChildItem -Recurse -Path "macos" -Filter "jetsocat" -File | Foreach-Object { $_.FullName } | Select -Unique
+          $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath "jetsocat")) + $Binaries) -Join ' '
           Write-Host $LipoCmd
           Invoke-Expression $LipoCmd
         shell: pwsh
@@ -576,7 +576,7 @@ jobs:
       - name: Download Cadeau
         run: |
           $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
-          $Arch = @{'x86_64'='x64';'arm64'='arm64'}['${{ matrix.arch }}']
+          $Arch = '${{ matrix.arch }}'
           ./ci/download-cadeau.ps1 -Platform $Platform -Architecture $Arch
         shell: pwsh
 
@@ -586,11 +586,10 @@ jobs:
           $PackageVersion = "${{ needs.preflight.outputs.version }}"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+          $ExecutableFileName = if ($Env:RUNNER_OS -eq "Windows") { "DevolutionsGateway.exe" } else { "devolutions-gateway" }
 
           if ($Env:RUNNER_OS -eq "Windows") {
-            $ExecutableFileName = "$($ExecutableFileName).exe"
-            $PackageFileName = "DevolutionsGateway-${{ matrix.arch }}-${PackageVersion}.msi"
+            $PackageFileName = "DevolutionsGateway.msi"
             $DGatewayPackage = Join-Path $TargetOutputPath $PackageFileName
             echo "dgateway-package=$DGatewayPackage" >> $Env:GITHUB_OUTPUT
           }
@@ -657,8 +656,8 @@ jobs:
       - name: Build
         run: |
           if ($Env:RUNNER_OS -eq "Linux") {
-            $LinuxArch = @{'x86_64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
-            $RustArch = @{'x86_64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
+            $LinuxArch = @{'x64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
+            $RustArch = @{'x64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
             $RustTarget = "$RustArch-unknown-linux-gnu"
             $Env:SYSROOT_NAME = "ubuntu-18.04-$LinuxArch"
             . "$HOME/.cargo/cbake/${RustTarget}-enter.ps1"
@@ -703,6 +702,14 @@ jobs:
           $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "dist" "recording-player" | Resolve-Path
 
           ./ci/tlk.ps1 package -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+          # Rename versioned fpm output to simple basenames for consistent folder-based addressing.
+          if ($Env:RUNNER_OS -eq "Linux") {
+            $OutputPath = "${{ steps.load-variables.outputs.target-output-path }}"
+            Get-ChildItem "$OutputPath/*.deb"     | Rename-Item -NewName "devolutions-gateway.deb"
+            Get-ChildItem "$OutputPath/*.changes" | Rename-Item -NewName "devolutions-gateway.changes"
+            Get-ChildItem "$OutputPath/*.rpm"     | Rename-Item -NewName "devolutions-gateway.rpm"
+          }
         shell: pwsh
         env:
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
@@ -787,11 +794,10 @@ jobs:
           New-Item -ItemType Directory $SymbolsPath
 
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "DevolutionsAgent_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+          $ExecutableFileName = if ($Env:RUNNER_OS -eq "Windows") { "DevolutionsAgent.exe" } else { "devolutions-agent" }
 
           if ($Env:RUNNER_OS -eq "Windows") {
-            $ExecutableFileName = "$($ExecutableFileName).exe"
-            $PackageFileName = "DevolutionsAgent-${{ matrix.arch }}-${PackageVersion}.msi"
+            $PackageFileName = "DevolutionsAgent.msi"
             $DAgentPackage = Join-Path $TargetOutputPath $PackageFileName
 
             echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
@@ -805,7 +811,7 @@ jobs:
             $DAgentSessionExecutable = Join-Path $TargetOutputPath "DevolutionsSession.exe"
             echo "dagent-session-executable=$DAgentSessionExecutable" >> $Env:GITHUB_OUTPUT
 
-            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}.exe"
+            $DAgentUpdaterExecutable = Join-Path $TargetOutputPath "DevolutionsAgentUpdater.exe"
             echo "dagent-updater-executable=$DAgentUpdaterExecutable" >> $Env:GITHUB_OUTPUT
           }
 
@@ -827,8 +833,8 @@ jobs:
         id: tun2socks
         if: ${{ matrix.os == 'windows' }}
         run: |
-          $Arch = @{'x86_64'='x64';'arm64'='arm64'}['${{ matrix.arch }}']
-          $Destination = Join-Path $PWD "tun2socks"
+          $Arch = '${{ matrix.arch }}'
+          $Destination = Join-Path $PWD "tun2socks" $Arch
           ./ci/download-tun2socks.ps1 -Architecture $Arch -Destination $Destination
           $Tun2SocksExecutablePath = Join-Path $Destination "tun2socks.exe"
           $WintunLibraryPath = Join-Path $Destination "wintun.dll"
@@ -843,7 +849,7 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         uses: actions/upload-artifact@v7
         with:
-          name: tun2socks-${{ matrix.os }}-${{ matrix.arch }}
+          name: tun2socks-windows-${{ matrix.arch }}
           path: tun2socks/
 
       - name: Setup LLVM
@@ -911,8 +917,8 @@ jobs:
           }
 
           if ($Env:RUNNER_OS -eq "Linux") {
-            $LinuxArch = @{'x86_64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
-            $RustArch = @{'x86_64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
+            $LinuxArch = @{'x64'='amd64';'arm64'='arm64'}['${{ matrix.arch }}']
+            $RustArch = @{'x64'='x86_64';'arm64'='aarch64'}['${{ matrix.arch }}']
             $RustTarget = "$RustArch-unknown-linux-gnu"
             $Env:SYSROOT_NAME = "ubuntu-18.04-$LinuxArch"
             . "$HOME/.cargo/cbake/${RustTarget}-enter.ps1"
@@ -944,6 +950,14 @@ jobs:
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+          # Rename versioned fpm output to simple basenames for consistent folder-based addressing.
+          if ($Env:RUNNER_OS -eq "Linux") {
+            $OutputPath = "${{ steps.load-variables.outputs.target-output-path }}"
+            Get-ChildItem "$OutputPath/*.deb"     | Rename-Item -NewName "devolutions-agent.deb"
+            Get-ChildItem "$OutputPath/*.changes" | Rename-Item -NewName "devolutions-agent.changes"
+            Get-ChildItem "$OutputPath/*.rpm"     | Rename-Item -NewName "devolutions-agent.rpm"
+          }
         shell: pwsh
         env:
           DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
@@ -987,6 +1001,19 @@ jobs:
           pattern: devolutions-agent-*
           delete-merged: true
 
+  tun2socks-windows-merge:
+    name: tun2socks windows merge artifacts
+    runs-on: ubuntu-latest
+    needs: [preflight, devolutions-agent]
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v7
+        with:
+          name: tun2socks-windows
+          pattern: tun2socks-windows-*
+          delete-merged: true
+
   devolutions-pedm-client:
     name: devolutions-pedm-client
     runs-on: ubuntu-latest
@@ -1020,9 +1047,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Tests
-        run: |
-          Set-PSDebug -Trace 1
-          dotnet test utils/dotnet/GatewayUtils.sln
+        run: dotnet test utils/dotnet/GatewayUtils.sln
         shell: pwsh
 
 
@@ -1290,39 +1315,98 @@ jobs:
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
 
-          $allFiles = Get-ChildItem -Path "$sourceFolder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
+          function MoveArtifact([string]$RelSource, [string]$DestName) {
+            $src = Join-Path $sourceFolder $RelSource
+            $dst = Join-Path $destinationFolder $DestName
+            Write-Host "$src --> $dst"
+            Move-Item -Path $src -Destination $dst
+          }
 
-          # Exclude some files that are already bundled in installers
-          $excludeFiles = @(
-            'DevolutionsPedmShellExt.dll',
-            'DevolutionsPedmShellExt.msix',
-            'DevolutionsSession.exe',
-            # NOTE: We may want to include that in the future, but needs to be renamed per platform.
-            # TODO(@awakecoding): We could create a zip with the same name as
-            # the package except ".symbols" at the end, so we'd end up with arch-specific zips
-            # containing the debug symbols. I've done this for MsRdpEx.
-            'DevolutionsPedmShellExt.pdb',
-            'DevolutionsSession.pdb'
+          # Create symbols ZIPs from individual PDBs (package.yml signing hasn't run yet).
+          $SymbolProducts = @(
+            @{ Dir = 'devolutions-gateway'; Name = 'DevolutionsGateway'; Arches = @('x64') },
+            @{ Dir = 'devolutions-agent';   Name = 'DevolutionsAgent';   Arches = @('x64', 'arm64') },
+            @{ Dir = 'jetsocat';            Name = 'jetsocat';           Arches = @('x64', 'arm64') }
+          )
+          foreach ($P in $SymbolProducts) {
+            foreach ($Arch in $P.Arches) {
+              $ArchDir = Join-Path $sourceFolder $P.Dir windows $Arch
+              $Pdbs = Get-ChildItem -Path $ArchDir -Filter '*.pdb' -File -ErrorAction SilentlyContinue
+              if ($Pdbs) {
+                $Pdbs | Compress-Archive -DestinationPath (Join-Path $ArchDir "$($P.Name).symbols.zip") -CompressionLevel Optimal
+              }
+            }
+          }
+
+          # Gateway Windows MSI + symbols
+          MoveArtifact "devolutions-gateway/windows/x64/DevolutionsGateway.msi" "DevolutionsGateway-${version}-x64.msi"
+          MoveArtifact "devolutions-gateway/windows/x64/DevolutionsGateway.symbols.zip" "DevolutionsGateway-${version}-x64.symbols.zip"
+
+          # Gateway Linux DEB/RPM/changes
+          foreach ($Arch in @('x64', 'arm64')) {
+            MoveArtifact "devolutions-gateway/linux/${Arch}/devolutions-gateway.deb" "devolutions-gateway_${version}_${Arch}.deb"
+            MoveArtifact "devolutions-gateway/linux/${Arch}/devolutions-gateway.rpm" "devolutions-gateway_${version}_${Arch}.rpm"
+            MoveArtifact "devolutions-gateway/linux/${Arch}/devolutions-gateway.changes" "devolutions-gateway_${version}_${Arch}.changes"
+          }
+
+          # Agent Windows MSI + symbols.zip
+          foreach ($Arch in @('x64', 'arm64')) {
+            MoveArtifact "devolutions-agent/windows/${Arch}/DevolutionsAgent.msi" "DevolutionsAgent-${version}-${Arch}.msi"
+            MoveArtifact "devolutions-agent/windows/${Arch}/DevolutionsAgent.symbols.zip" "DevolutionsAgent-${version}-${Arch}.symbols.zip"
+          }
+
+          # Agent Linux DEB/RPM/changes
+          foreach ($Arch in @('x64', 'arm64')) {
+            MoveArtifact "devolutions-agent/linux/${Arch}/devolutions-agent.deb" "devolutions-agent_${version}_${Arch}.deb"
+            MoveArtifact "devolutions-agent/linux/${Arch}/devolutions-agent.rpm" "devolutions-agent_${version}_${Arch}.rpm"
+            MoveArtifact "devolutions-agent/linux/${Arch}/devolutions-agent.changes" "devolutions-agent_${version}_${Arch}.changes"
+          }
+
+          # Jetsocat archives: .tar.xz for Linux, .zip for Windows and macOS
+          $Platforms = @(
+            @{ OS = "windows"; Arch = "x64";       Ext = ".exe"; Archive = "zip" },
+            @{ OS = "windows"; Arch = "arm64";     Ext = ".exe"; Archive = "zip" },
+            @{ OS = "linux";   Arch = "x64";       Ext = "";     Archive = "tar.xz" },
+            @{ OS = "linux";   Arch = "arm64";     Ext = "";     Archive = "tar.xz" },
+            @{ OS = "macos";   Arch = "x64";       Ext = "";     Archive = "tar.xz" },
+            @{ OS = "macos";   Arch = "arm64";     Ext = "";     Archive = "tar.xz" },
+            @{ OS = "macos";   Arch = "universal"; Ext = "";     Archive = "tar.xz" }
           )
 
-          Write-Host
-
-          foreach ($file in $allFiles) {
-            $dir = $file.Directory
-            $name = $file.Name
-            $source = "$dir/$name"
-            $destination = "$destinationFolder/$name"
-
-            # Skip architecture-specific files that are part of installers
-            if ($name -in $excludeFiles) {
-              Write-Host "Skipping $source"
-              continue
+          foreach ($P in $Platforms) {
+            $BinaryPath = Join-Path $sourceFolder jetsocat $P.OS $P.Arch "jetsocat$($P.Ext)"
+            if (Test-Path $BinaryPath) {
+              $ArchiveDst = Join-Path $destinationFolder "jetsocat-${version}-$($P.OS)-$($P.Arch).$($P.Archive)"
+              $BinaryName = Split-Path $BinaryPath -Leaf
+              $StageDir = Join-Path $Env:RUNNER_TEMP "jetsocat-stage-$($P.OS)-$($P.Arch)"
+              New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
+              Copy-Item -Path $BinaryPath -Destination (Join-Path $StageDir $BinaryName) -Force
+              if ($P.Archive -eq 'tar.xz') {
+                tar -cJf $ArchiveDst -C $StageDir .
+              } else {
+                # Compress-Archive preserves the source path structure inside the ZIP.
+                # Staging to a flat temp dir ensures the binary lands at the ZIP root.
+                Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath $ArchiveDst -Force
+              }
+              Remove-Item -Path $StageDir -Recurse -Force
+              Write-Host "$BinaryPath --> $ArchiveDst"
+            } else {
+              throw "Jetsocat binary not found: $BinaryPath"
             }
-
-            Write-Host "$source --> $destination"
-
-            Move-Item -Path "$source" -Destination "$destination"
           }
+
+          # Jetsocat Windows symbols
+          foreach ($Arch in @('x64', 'arm64')) {
+            $SymPath = Join-Path $sourceFolder jetsocat windows $Arch jetsocat.symbols.zip
+            if (Test-Path $SymPath) {
+              MoveArtifact "jetsocat/windows/${Arch}/jetsocat.symbols.zip" "jetsocat-${version}-windows-${Arch}.symbols.zip"
+            } else {
+              throw "Jetsocat Windows symbols not found: $SymPath"
+            }
+          }
+
+          # git-log
+          MoveArtifact "git-log/git-log.txt" "git-log.txt"
         shell: pwsh
 
       - name: Upload to OneDrive

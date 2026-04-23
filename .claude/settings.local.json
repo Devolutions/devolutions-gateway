@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwsh .claude/skills/prepare-release/scripts/resolve-version.ps1 -Arg \"\")",
+      "Bash(pwsh .claude/skills/prepare-release/scripts/resolve-version.ps1 -Arg \"hotfix\")",
+      "Bash(pwsh ./tools/bump-version.ps1 -NewVersion 2026.1.2 2>&1)",
+      "Bash(git cliff:*)",
+      "mcp__claude_ai_Atlassian__transitionJiraIssue",
+      "mcp__claude_ai_Atlassian__getTransitionsForJiraIssue",
+      "mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql"
+    ]
+  }
+}

@@ -70,8 +70,6 @@ jobs:
       - name: Get commit
         id: get-commit
         run: |
-          Set-PSDebug -Trace 1
-
           $Ref = '${{ inputs.ref }}'
           if (-Not $Ref) {
             $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
@@ -273,10 +271,9 @@ jobs:
       - name: Sign PowerShell module contents
         if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-gateway' }}
         run: |
-          Set-PSDebug -Trace 1
-
           . .\ci\PSModuleHelpers.ps1
           $PSModuleOutputPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} "PowerShell"
+          Write-Host "Signing PowerShell module in $PSModuleOutputPath"
           $PSModuleTarFilePath = Get-ChildItem -Path $PSModuleOutputPath "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
           tar -xvf "$PSModuleTarFilePath" -C "$PSModuleOutputPath"
           $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
@@ -323,9 +320,9 @@ jobs:
         if: ${{ matrix.os == 'windows' || matrix.os == 'macos' }}
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
-            'devolutions-gateway' { @('DevolutionsGateway_*.exe') }
-            'devolutions-agent' { @('DevolutionsAgent_*.exe', 'DevolutionsAgentUpdater_*.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
-            'jetsocat' { @('jetsocat_*') }
+            'devolutions-gateway' { @('DevolutionsGateway.exe') }
+            'devolutions-agent' { @('DevolutionsAgent.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'jetsocat' { @('jetsocat.exe', 'jetsocat') }
           })
           $ExcludePattern = "*.pdb"
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
@@ -407,12 +404,22 @@ jobs:
           path: native-libs
 
       - name: Zip debug symbol files
-        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
+        if: ${{ matrix.os == 'windows' }}
         run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
+          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project }}
+          $ProductName = switch ('${{ matrix.project }}') {
+            'devolutions-gateway' { 'DevolutionsGateway' }
+            'devolutions-agent'   { 'DevolutionsAgent' }
+            'jetsocat'            { 'jetsocat' }
+          }
 
-          Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Compress-Archive -DestinationPath "$PackageRoot\windows\x86_64\DevolutionsAgent-x86_64-${{ needs.preflight.outputs.version }}.symbols.zip" -CompressionLevel Optimal
-          Get-ChildItem "$PackageRoot\windows\x86_64\*.pdb" -Recurse | Remove-Item | Out-Null
+          Get-ChildItem (Join-Path $PackageRoot windows) -Directory | ForEach-Object {
+            $Pdbs = Get-ChildItem -Path $_.FullName -Filter '*.pdb' -File -Recurse
+            if ($Pdbs) {
+              $Pdbs | Compress-Archive -DestinationPath "$($_.FullName)\${ProductName}.symbols.zip" -CompressionLevel Optimal
+              $Pdbs | Remove-Item | Out-Null
+            }
+          }
         shell: pwsh
 
       - name: Regenerate Gateway MSI
@@ -420,7 +427,7 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
 
-          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
+          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Filter 'DevolutionsGateway.exe' -File | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
           $Env:DGATEWAY_WEBPLAYER_PATH = Join-Path "webapp" "player" | Resolve-Path
@@ -468,36 +475,64 @@ jobs:
         if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-agent' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-          gh run download ${{ needs.preflight.outputs.run }} -n tun2socks-windows-x86_64 -D "$PackageRoot\tun2socks"
+          gh run download ${{ needs.preflight.outputs.run }} -n tun2socks-windows -D (Join-Path $PackageRoot windows)
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Regenerate Agent MSI
+      - name: Regenerate and Repackage Agent MSI
         if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
         run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-          $x64Root = Join-Path $PackageRoot windows x86_64
+          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent
 
-          $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $x64Root -Filter '*DevolutionsAgent_*.exe' -File | Select -First 1
-          $Env:DAGENT_UPDATER_EXECUTABLE = Get-ChildItem -Path $x64Root -Filter 'DevolutionsAgentUpdater_*.exe' -File | Select -First 1
-          $Env:DAGENT_DESKTOP_AGENT_PATH = Resolve-Path -Path "devolutions-pedm-desktop"
-          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $x64Root -Filter 'DevolutionsPedmShellExt.dll' -File | Select -First 1
-          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $x64Root -Filter 'DevolutionsPedmShellExt.msix' -File | Select -First 1
-          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $x64Root -Filter 'DevolutionsSession.exe' -File | Select -First 1
-          $Env:DAGENT_TUN2SOCKS_EXE = Get-ChildItem -Path $PackageRoot -Recurse -Filter 'tun2socks.exe' -File | Select -First 1
-          $Env:DAGENT_WINTUN_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Filter 'wintun.dll' -File | Select -First 1
+          foreach ($Arch in @('x64', 'arm64')) {
+            $ArchRoot = Join-Path $PackageRoot windows $Arch
 
-          Write-Host "DAGENT_EXECUTABLE = ${Env:DAGENT_EXECUTABLE}"
-          Write-Host "DAGENT_UPDATER_EXECUTABLE = ${Env:DAGENT_UPDATER_EXECUTABLE}"
-          Write-Host "DAGENT_DESKTOP_AGENT_PATH = ${Env:DAGENT_DESKTOP_AGENT_PATH}"
-          Write-Host "DAGENT_PEDM_SHELL_EXT_DLL = ${Env:DAGENT_PEDM_SHELL_EXT_DLL}"
-          Write-Host "DAGENT_PEDM_SHELL_EXT_MSIX = ${Env:DAGENT_PEDM_SHELL_EXT_MSIX}"
-          Write-Host "DAGENT_SESSION_EXECUTABLE = ${Env:DAGENT_SESSION_EXECUTABLE}"
-          Write-Host "DAGENT_TUN2SOCKS_EXE = ${Env:DAGENT_TUN2SOCKS_EXE}"
-          Write-Host "DAGENT_WINTUN_DLL = ${Env:DAGENT_WINTUN_DLL}"
+            $Env:DAGENT_EXECUTABLE          = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsAgent.exe'         -File | Select-Object -First 1
+            $Env:DAGENT_UPDATER_EXECUTABLE  = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsAgentUpdater.exe'  -File | Select-Object -First 1
+            $Env:DAGENT_DESKTOP_AGENT_PATH  = Resolve-Path -Path "devolutions-pedm-desktop"
+            $Env:DAGENT_PEDM_SHELL_EXT_DLL  = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.dll'  -File | Select-Object -First 1
+            $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.msix' -File | Select-Object -First 1
+            $Env:DAGENT_SESSION_EXECUTABLE  = Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsSession.exe'       -File | Select-Object -First 1
+            $Env:DAGENT_TUN2SOCKS_EXE       = Join-Path $ArchRoot 'tun2socks.exe'
+            $Env:DAGENT_WINTUN_DLL          = Join-Path $ArchRoot 'wintun.dll'
 
-          ./ci/tlk.ps1 package -Product agent -PackageOption generate
+            Write-Host "=== Regenerate Agent MSI ($Arch) ==="
+            Write-Host "DAGENT_EXECUTABLE          = ${Env:DAGENT_EXECUTABLE}"
+            Write-Host "DAGENT_UPDATER_EXECUTABLE  = ${Env:DAGENT_UPDATER_EXECUTABLE}"
+            Write-Host "DAGENT_DESKTOP_AGENT_PATH  = ${Env:DAGENT_DESKTOP_AGENT_PATH}"
+            Write-Host "DAGENT_PEDM_SHELL_EXT_DLL  = ${Env:DAGENT_PEDM_SHELL_EXT_DLL}"
+            Write-Host "DAGENT_PEDM_SHELL_EXT_MSIX = ${Env:DAGENT_PEDM_SHELL_EXT_MSIX}"
+            Write-Host "DAGENT_SESSION_EXECUTABLE  = ${Env:DAGENT_SESSION_EXECUTABLE}"
+            Write-Host "DAGENT_TUN2SOCKS_EXE       = ${Env:DAGENT_TUN2SOCKS_EXE}"
+            Write-Host "DAGENT_WINTUN_DLL          = ${Env:DAGENT_WINTUN_DLL}"
+
+            ./ci/tlk.ps1 package -Product agent -PackageOption generate -Architecture $Arch
+
+            # Sign the generated runtime EXEs before assembling the MSI
+            Get-ChildItem -Path "package/AgentWindowsManaged/Release" -Filter "*.exe" | ForEach-Object {
+              $Params = @('sign',
+                '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+                '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+                '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+                '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+                '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+                '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+                '-v')
+              AzureSignTool @Params $_.FullName
+            }
+
+            $Env:DAGENT_PACKAGE = Join-Path $ArchRoot 'DevolutionsAgent.msi'
+            ./ci/tlk.ps1 package -Product agent -PackageOption assemble
+
+            # Remove arch-specific files that should not appear in the signed artifact
+            @((Join-Path $ArchRoot DesktopAgent),
+              (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.dll'  | Select-Object -First 1),
+              (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsPedmShellExt.msix' | Select-Object -First 1),
+              (Get-ChildItem -Path $ArchRoot -Filter 'DevolutionsSession.exe'       | Select-Object -First 1)) | ForEach-Object {
+              Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
+            }
+          }
         shell: pwsh
 
       - name: Sign Gateway MSI runtime
@@ -517,53 +552,16 @@ jobs:
         shell: pwsh
         working-directory: package/WindowsManaged/Release
 
-      - name: Sign Agent MSI runtime
-        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
-        run: |
-          Get-ChildItem -Path .\* -Include "*.exe" | % {
-            $Params = @('sign',
-              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
-              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
-              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
-              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
-              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
-              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
-              '-v')
-            AzureSignTool @Params $_.FullName
-          }
-        shell: pwsh
-        working-directory: package/AgentWindowsManaged/Release
-
       - name: Repackage Gateway
         if: ${{ matrix.project == 'devolutions-gateway' && matrix.os == 'windows' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
-          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
+          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Filter 'DevolutionsGateway.msi' -File | Select -First 1
 
           ./ci/tlk.ps1 package -Product gateway -PackageOption assemble
 
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           Remove-Item $Env:DGATEWAY_PSMODULE_PATH -Recurse -ErrorAction SilentlyContinue | Out-Null
-        shell: pwsh
-
-      - name: Repackage Agent
-        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'windows' }}
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent
-          $Env:DAGENT_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.msi' | Select -First 1
-
-          ./ci/tlk.ps1 package -Product agent -PackageOption assemble
-
-          $Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH = Join-Path $PackageRoot ${{ matrix.os }} x86_64 DesktopAgent
-          $Env:DAGENT_PEDM_SHELL_EXT_DLL = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.dll' | Select -First 1
-          $Env:DAGENT_PEDM_SHELL_EXT_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmShellExt.msix' | Select -First 1
-          $Env:DAGENT_SESSION_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsSession.exe' | Select -First 1
-
-          @($Env:DAGENT_DESKTOP_AGENT_OUTPUT_PATH,
-            $Env:DAGENT_PEDM_SHELL_EXT_DLL, $Env:DAGENT_PEDM_SHELL_EXT_MSIX,
-            $Env:DAGENT_SESSION_EXECUTABLE) | ForEach-Object {
-            Remove-Item $_ -Recurse -ErrorAction SilentlyContinue | Out-Null
-          }
         shell: pwsh
 
       - name: Sign packages
@@ -601,7 +599,7 @@ jobs:
               }
             }
           } elseif ('${{ matrix.os }}' -Eq 'macos') {
-            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % {
+            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat' | % {
               codesign -dvvv "$($_.FullName)"
               if ($LastExitCode -Ne 0) {
                 echo "::error::failed to verify the signature of $($_.FullName)"
@@ -658,26 +656,33 @@ jobs:
           pattern: jetsocat-*-signed
           delete-merged: false
 
-  web-app:
+  webapp:
     name: Web App
     needs: [preflight, codesign]
     runs-on: ubuntu-latest
 
     steps:
       - name: Download artifacts
-        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -R $Env:GITHUB_REPOSITORY -D webapp-client
+        run: |
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -R $Env:GITHUB_REPOSITORY -D webapp-client
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-player -R $Env:GITHUB_REPOSITORY -D webapp-player
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create tarball
-        run: tar -czvf devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz webapp-client
-
-      - name: Upload artifacts
+      - name: Upload webapp-client artifact
         uses: actions/upload-artifact@v7
         with:
           name: webapp-client
-          path: devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz
+          path: webapp-client
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Upload webapp-player artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: webapp-player
+          path: webapp-player
           if-no-files-found: error
           overwrite: true
 
@@ -698,26 +703,20 @@ jobs:
           name: jetsocat-signed
           path: jetsocat/nuget/bin
 
-      - name: Rename artifacts
+      - name: Prepare artifacts
         run: |
-          # Backward compatibility with prior nuspec versions
-          Get-ChildItem -Directory -Recurse "x86_64" | Rename-Item -NewName "x64"
-
-          # Remove version number and architecture from binary name
-          Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat"
-          cd windows
-          Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat.exe"
+          # Remove symbols archives; only the binaries belong in the NuGet package.
+          Get-ChildItem -File -Recurse -Filter "*.symbols.zip" | Remove-Item -Force
         shell: pwsh
         working-directory: jetsocat/nuget/bin
 
       - name: Set package metadata
         run: |
-          Set-PSDebug -Trace 1
-
           $Version = '${{ github.event.inputs.jetsocat-nuget-version }}'
           if ([string]::IsNullOrWhitespace($Version)) {
             $Version = Get-Date -Format "yyyy.M.d"
           }
+          Write-Host "NuGet version: $Version"
 
           $Nuspec = (Resolve-Path "Devolutions.Jetsocat.nuspec")
           $Xml = [xml] (Get-Content $Nuspec)
@@ -729,8 +728,6 @@ jobs:
 
       - name: Build package
         run: |
-          Set-PSDebug -Trace 1
-
           Install-Module -Name ZipIt -Force
           & 'nuget' 'pack' 'Devolutions.Jetsocat.nuspec'
           $NugetPackage = (Get-Item ".\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative

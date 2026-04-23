@@ -81,8 +81,6 @@ jobs:
       - name: Check GitHub releases
         id: check-release
         run: |
-          Set-PSDebug -Trace 1
-
           $Output = (gh release list --repo $Env:GITHUB_REPOSITORY) | Out-String
           $Releases = ( $Output -split '\r?\n' ).Trim()
           $Versions = ForEach($Release in $Releases) {
@@ -122,7 +120,7 @@ jobs:
     steps:
       - name: Download artifacts
         run: |
-          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n webapp-player -n docker -n devolutions-gateway-signed -n native-libs --repo $Env:GITHUB_REPOSITORY
           Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
         shell: pwsh
         env:
@@ -133,96 +131,34 @@ jobs:
       # needs its own pre-compiled binary and architecture-specific native libraries (libxmf.so).
       # This approach is more reliable than trying to use COPY --platform in the Dockerfile,
       # which would require the binaries to be organized in a specific directory structure.
-      - name: Prepare artifacts (amd64)
-        id: prepare-artifacts-amd64
+      - name: Prepare artifacts
+        id: prepare-artifacts
         run: |
-          Set-PSDebug -Trace 1
+          $PowerShellArchive = Get-ChildItem -Recurse -Filter 'DevolutionsGateway-ps-*.tar' | Select-Object -First 1
 
-          $PkgDir = Join-Path docker $Env:RUNNER_OS "amd64"
-          echo "package-path-amd64=$PkgDir" >> $Env:GITHUB_OUTPUT
-          Write-Host "PkgDir = $PkgDir"
-          New-Item -ItemType Directory -Path $PkgDir -Force
+          foreach ($Arch in @(@{Ci='x64'; Docker='amd64'}, @{Ci='arm64'; Docker='arm64'})) {
+            $PkgDir = Join-Path docker $Env:RUNNER_OS $Arch.Docker
+            New-Item -ItemType Directory -Path $PkgDir -Force | Out-Null
+            echo "package-path-$($Arch.Docker)=$PkgDir" >> $Env:GITHUB_OUTPUT
 
-          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_x86_64"
-          $TargetFileName = "devolutions-gateway"
-          Write-Host "SourceFileName = $SourceFileName"
-          Write-Host "TargetFileName = $TargetFileName"
+            Copy-Item -Path (Join-Path devolutions-gateway linux $Arch.Ci devolutions-gateway) -Destination $PkgDir
+            chmod +x (Join-Path $PkgDir devolutions-gateway)
 
-          $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path devolutions-gateway
-          $TargetPath = Join-Path $PkgDir $TargetFileName
-          Write-Host "SourcePath = $SourcePath"
-          Write-Host "TargetPath = $TargetPath"
-          Copy-Item -Path $SourcePath -Destination $TargetPath
-          chmod +x $TargetPath
+            Copy-Item -Path (Join-Path native-libs linux $Arch.Ci libxmf.so) -Destination $PkgDir
 
-          $XmfFileName = "libxmf.so"
-          $XmfSourcePath = Join-Path "native-libs" "linux" "x64" $XmfFileName | Resolve-Path
-          $XmfTargetPath = Join-Path $PkgDir $XmfFileName
-          Write-Host "XmfSourcePath = $XmfSourcePath"
-          Write-Host "XmfTargetPath = $XmfTargetPath"
-          Copy-Item -Path $XmfSourcePath -Destination $XmfTargetPath
+            $ClientTarget = Join-Path $PkgDir webapp client
+            New-Item -ItemType Directory -Path $ClientTarget -Force | Out-Null
+            Copy-Item -Path webapp-client/* -Destination $ClientTarget -Recurse
 
-          $WebAppArchive = Get-ChildItem -Recurse -Filter "devolutions_gateway_webapp_*.tar.gz" | Select-Object -First 1
-          $TargetPath = Join-Path $PkgDir "webapp" "client"
-          Write-Host "WebAppArchive = $WebAppArchive"
-          Write-Host "TargetPath = $TargetPath"
-          New-Item -ItemType Directory -Path $TargetPath
-          tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
+            $PlayerTarget = Join-Path $PkgDir webapp player
+            New-Item -ItemType Directory -Path $PlayerTarget -Force | Out-Null
+            Copy-Item -Path webapp-player/* -Destination $PlayerTarget -Recurse
 
-          $PowerShellArchive = Get-ChildItem -Recurse -Filter "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
-          $psModuleArchiveHash = (Get-FileHash -Path "$PowerShellArchive").Hash
-          Write-Host "PS module archive hash: $psModuleArchiveHash"
-          tar -xvf "$PowerShellArchive" -C "$PkgDir"
+            tar -xf $PowerShellArchive.FullName -C $PkgDir
 
-          # Copy Dockerfile and entrypoint
-          Copy-Item -Path "docker/Linux/Dockerfile" -Destination $PkgDir
-          Copy-Item -Path "docker/Linux/entrypoint.ps1" -Destination $PkgDir
-        shell: pwsh
-
-      - name: Prepare artifacts (arm64)
-        id: prepare-artifacts-arm64
-        run: |
-          Set-PSDebug -Trace 1
-
-          $PkgDir = Join-Path docker $Env:RUNNER_OS "arm64"
-          echo "package-path-arm64=$PkgDir" >> $Env:GITHUB_OUTPUT
-          Write-Host "PkgDir = $PkgDir"
-          New-Item -ItemType Directory -Path $PkgDir -Force
-
-          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_arm64"
-          $TargetFileName = "devolutions-gateway"
-          Write-Host "SourceFileName = $SourceFileName"
-          Write-Host "TargetFileName = $TargetFileName"
-
-          $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path devolutions-gateway
-          $TargetPath = Join-Path $PkgDir $TargetFileName
-          Write-Host "SourcePath = $SourcePath"
-          Write-Host "TargetPath = $TargetPath"
-          Copy-Item -Path $SourcePath -Destination $TargetPath
-          chmod +x $TargetPath
-
-          $XmfFileName = "libxmf.so"
-          $XmfSourcePath = Join-Path "native-libs" "linux" "arm64" $XmfFileName | Resolve-Path
-          $XmfTargetPath = Join-Path $PkgDir $XmfFileName
-          Write-Host "XmfSourcePath = $XmfSourcePath"
-          Write-Host "XmfTargetPath = $XmfTargetPath"
-          Copy-Item -Path $XmfSourcePath -Destination $XmfTargetPath
-
-          $WebAppArchive = Get-ChildItem -Recurse -Filter "devolutions_gateway_webapp_*.tar.gz" | Select-Object -First 1
-          $TargetPath = Join-Path $PkgDir "webapp" "client"
-          Write-Host "WebAppArchive = $WebAppArchive"
-          Write-Host "TargetPath = $TargetPath"
-          New-Item -ItemType Directory -Path $TargetPath
-          tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
-
-          $PowerShellArchive = Get-ChildItem -Recurse -Filter "DevolutionsGateway-ps-*.tar" | Select-Object -First 1
-          $psModuleArchiveHash = (Get-FileHash -Path "$PowerShellArchive").Hash
-          Write-Host "PS module archive hash: $psModuleArchiveHash"
-          tar -xvf "$PowerShellArchive" -C "$PkgDir"
-
-          # Copy Dockerfile and entrypoint
-          Copy-Item -Path "docker/Linux/Dockerfile" -Destination $PkgDir
-          Copy-Item -Path "docker/Linux/entrypoint.ps1" -Destination $PkgDir
+            Copy-Item -Path docker/Linux/Dockerfile     -Destination $PkgDir
+            Copy-Item -Path docker/Linux/entrypoint.ps1 -Destination $PkgDir
+          }
         shell: pwsh
 
       # QEMU is required for cross-platform Docker builds on x86_64 runners.
@@ -264,56 +200,26 @@ jobs:
       - name: Build and push multi-arch container
         id: build-container
         run: |
-          Set-PSDebug -Trace 1
-
           $Version = "${{ needs.preflight.outputs.version }}"
           $ImageName = "devolutions/devolutions-gateway"
-
-          $Amd64Context = "${{ steps.prepare-artifacts-amd64.outputs.package-path-amd64 }}"
-          $Arm64Context = "${{ steps.prepare-artifacts-arm64.outputs.package-path-arm64 }}"
-
           $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
 
-          # Build and push amd64 image
-          Write-Host "Building amd64 image..."
-          if (-Not $DryRun) {
-            docker buildx build --platform linux/amd64 `
-              --tag "${ImageName}:${Version}-amd64" `
-              --push `
-              $Amd64Context
-          } else {
-            docker buildx build --platform linux/amd64 `
-              --tag "${ImageName}:${Version}-amd64" `
-              $Amd64Context
-          }
+          $Amd64Context = "${{ steps.prepare-artifacts.outputs.package-path-amd64 }}"
+          $Arm64Context = "${{ steps.prepare-artifacts.outputs.package-path-arm64 }}"
 
-          # Build and push arm64 image (cross-compiled on x86_64 runner using QEMU)
-          Write-Host "Building arm64 image..."
-          if (-Not $DryRun) {
-            docker buildx build --platform linux/arm64 `
-              --tag "${ImageName}:${Version}-arm64" `
-              --push `
-              $Arm64Context
-          } else {
-            docker buildx build --platform linux/arm64 `
-              --tag "${ImageName}:${Version}-arm64" `
-              $Arm64Context
+          foreach ($P in @(@{Platform='linux/amd64'; Tag='amd64'; Context=$Amd64Context}, @{Platform='linux/arm64'; Tag='arm64'; Context=$Arm64Context})) {
+            $Args = @('buildx', 'build', "--platform=$($P.Platform)", "--tag=${ImageName}:${Version}-$($P.Tag)", $P.Context)
+            if (-Not $DryRun) { $Args += '--push' }
+            docker @Args
           }
 
           if (-Not $DryRun) {
-            # Create multi-arch manifests that reference both architecture-specific images.
-            # This enables Docker to automatically select the correct image based on the user's platform.
-            Write-Host "Creating multi-arch manifest for version ${Version}..."
-            docker buildx imagetools create `
-              --tag "${ImageName}:${Version}" `
-              "${ImageName}:${Version}-amd64" `
-              "${ImageName}:${Version}-arm64"
-
-            Write-Host "Creating multi-arch manifest for latest..."
-            docker buildx imagetools create `
-              --tag "${ImageName}:latest" `
-              "${ImageName}:${Version}-amd64" `
-              "${ImageName}:${Version}-arm64"
+            foreach ($Tag in @($Version, 'latest')) {
+              docker buildx imagetools create `
+                --tag "${ImageName}:${Tag}" `
+                "${ImageName}:${Version}-amd64" `
+                "${ImageName}:${Version}-arm64"
+            }
           } else {
             Write-Host "Dry run: skipping manifest creation and push"
           }
@@ -345,109 +251,123 @@ jobs:
 
       - name: Download artifacts
         run: |
-          gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-signed -n devolutions-gateway-signed -n devolutions-agent-signed -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
-          Move-Item -Path jetsocat-signed -Destination jetsocat
-          Move-Item -Path devolutions-gateway-signed -Destination devolutions-gateway
-          Move-Item -Path devolutions-agent-signed -Destination devolutions-agent
+          gh run download ${{ needs.preflight.outputs.run }} -n jetsocat-signed -n devolutions-gateway-signed -n devolutions-agent-signed -n webapp-client -n webapp-player -n native-libs -n changelog -D downloads --repo $Env:GITHUB_REPOSITORY
+          Move-Item downloads/jetsocat-signed          downloads/jetsocat
+          Move-Item downloads/devolutions-gateway-signed downloads/devolutions-gateway
+          Move-Item downloads/devolutions-agent-signed   downloads/devolutions-agent
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Manage artifacts
-        run: |
-          # Devolutions Agent on Linux does not have any useful feature yet, so we filter out the Linux artifacts.
-          Remove-Item -Path (Join-Path devolutions-agent linux) -Recurse
-
-          # Do not upload tun2socks.exe by itself.
-          Remove-Item -Path (Join-Path devolutions-agent tun2socks) -Recurse
-
-          # DevolutionsAgentUpdater is an internal MSI update helper, not a standalone download.
-          Get-ChildItem -Path devolutions-agent -Recurse -Filter 'DevolutionsAgentUpdater_*' -File | Remove-Item
-
-          # For the PowerShell module, only upload the nupkg.
-          Remove-Item -Path (Join-Path devolutions-gateway PowerShell DevolutionsGateway-ps-*.tar)
-        shell: pwsh
-
-      - name: Create jetsocat ZIP files for winget
+      - name: Prepare release assets
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
-          $ZipFolder = "jetsocat-zips"
-          New-Item -ItemType Directory -Path $ZipFolder -Force
+          $Dl = "downloads"
+          $Release = New-Item -Path "release" -ItemType Directory
 
-          # Define the platforms and architectures.
-          $Platforms = @(
-            @{ OS = "windows"; Arch = "x86_64"; Extension = ".exe" },
-            @{ OS = "windows"; Arch = "arm64"; Extension = ".exe" },
-            @{ OS = "linux"; Arch = "x86_64"; Extension = "" },
-            @{ OS = "linux"; Arch = "arm64"; Extension = "" },
-            @{ OS = "macos"; Arch = "x86_64"; Extension = "" },
-            @{ OS = "macos"; Arch = "arm64"; Extension = "" }
-          )
+          # Gateway Windows MSI + symbols + self-contained ZIP (binary + xmf.dll + webapp)
+          Move-Item "$Dl/devolutions-gateway/windows/x64/DevolutionsGateway.msi" "$Release/DevolutionsGateway-${Version}-x64.msi"
+          Move-Item "$Dl/devolutions-gateway/windows/x64/DevolutionsGateway.symbols.zip" "$Release/DevolutionsGateway-${Version}-x64.symbols.zip"
 
-          foreach ($Platform in $Platforms) {
-            $OS = $Platform.OS
-            $Arch = $Platform.Arch
-            $Ext = $Platform.Extension
+          $StageDir = Join-Path $Env:RUNNER_TEMP "dgw-windows-x64"
+          New-Item -Path $StageDir -ItemType Directory -Force | Out-Null
+          Copy-Item "$Dl/devolutions-gateway/windows/x64/DevolutionsGateway.exe" (Join-Path $StageDir 'DevolutionsGateway.exe')
+          Copy-Item "$Dl/native-libs/windows/x64/xmf.dll" (Join-Path $StageDir 'xmf.dll')
+          $ClientTarget = Join-Path $StageDir "webapp" "client"
+          New-Item -Path $ClientTarget -ItemType Directory -Force | Out-Null
+          Copy-Item -Path "$Dl/webapp-client/*" -Destination $ClientTarget -Recurse
+          $PlayerTarget = Join-Path $StageDir "webapp" "player"
+          New-Item -Path $PlayerTarget -ItemType Directory -Force | Out-Null
+          Copy-Item -Path "$Dl/webapp-player/*" -Destination $PlayerTarget -Recurse
+          Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath "$Release/DevolutionsGateway-${Version}-windows-x64.zip" -Force
+          Write-Host "Created DevolutionsGateway-${Version}-windows-x64.zip"
+          Remove-Item -Path $StageDir -Recurse -Force
 
-            # Find the original binary.
-            $BinaryPattern = "jetsocat_*_${Version}_${Arch}${Ext}"
-            $OriginalBinary = Get-ChildItem -Recurse -Filter $BinaryPattern -File | Select-Object -First 1
+          # Gateway PowerShell nupkg
+          Get-ChildItem "$Dl/devolutions-gateway/PowerShell" -Filter "*.nupkg" | Move-Item -Destination $Release
 
-            if ($OriginalBinary) {
-              # Create temporary folder for this zip.
-              $TempFolder = Join-Path $ZipFolder "temp-$OS-$Arch"
-              New-Item -ItemType Directory -Path $TempFolder -Force
+          # Gateway Linux DEB/RPM/changes + self-contained tar.xz (binary + libxmf.so + webapp)
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item "$Dl/devolutions-gateway/linux/${Arch}/devolutions-gateway.deb"     "$Release/devolutions-gateway-${Version}-${Arch}.deb"
+            Move-Item "$Dl/devolutions-gateway/linux/${Arch}/devolutions-gateway.rpm"     "$Release/devolutions-gateway-${Version}-${Arch}.rpm"
+            Move-Item "$Dl/devolutions-gateway/linux/${Arch}/devolutions-gateway.changes" "$Release/devolutions-gateway-${Version}-${Arch}.changes"
 
-              # Copy binary with standard name.
-              $TargetName = "jetsocat${Ext}"
-              $TargetPath = Join-Path $TempFolder $TargetName
-              Copy-Item -Path $OriginalBinary.FullName -Destination $TargetPath
+            # Stage into a temp dir so the tar.xz root contains the files directly,
+            # not embedded under the download path.
+            $StageDir = Join-Path $Env:RUNNER_TEMP "dgw-linux-$Arch"
+            New-Item -Path $StageDir -ItemType Directory -Force | Out-Null
+            Copy-Item "$Dl/devolutions-gateway/linux/${Arch}/devolutions-gateway" (Join-Path $StageDir 'devolutions-gateway')
+            chmod +x (Join-Path $StageDir 'devolutions-gateway')
+            Copy-Item "$Dl/native-libs/linux/${Arch}/libxmf.so" (Join-Path $StageDir 'libxmf.so')
+            $ClientTarget = Join-Path $StageDir "webapp" "client"
+            New-Item -Path $ClientTarget -ItemType Directory -Force | Out-Null
+            Copy-Item -Path "$Dl/webapp-client/*" -Destination $ClientTarget -Recurse
+            $PlayerTarget = Join-Path $StageDir "webapp" "player"
+            New-Item -Path $PlayerTarget -ItemType Directory -Force | Out-Null
+            Copy-Item -Path "$Dl/webapp-player/*" -Destination $PlayerTarget -Recurse
+            tar -cJf "$Release/devolutions-gateway-${Version}-linux-${Arch}.tar.xz" -C $StageDir .
+            Write-Host "Created devolutions-gateway-${Version}-linux-${Arch}.tar.xz"
+            Remove-Item -Path $StageDir -Recurse -Force
+          }
 
-              # Create ZIP file.
-              $ZipName = "jetsocat-$OS-$Arch.zip"
-              $ZipPath = Join-Path $ZipFolder $ZipName
-              Compress-Archive -Path $TargetPath -DestinationPath $ZipPath -Force
+          # Agent Windows MSI + symbols; Linux Agent artifacts are not yet published.
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item "$Dl/devolutions-agent/windows/${Arch}/DevolutionsAgent.msi"         "$Release/DevolutionsAgent-${Version}-${Arch}.msi"
+            Move-Item "$Dl/devolutions-agent/windows/${Arch}/DevolutionsAgent.symbols.zip" "$Release/DevolutionsAgent-${Version}-${Arch}.symbols.zip"
+          }
 
-              Write-Host "Created $ZipName"
-
-              # Clean up temp folder.
-              Remove-Item -Path $TempFolder -Recurse -Force
-
-              # Remove the original binary to avoid uploading it.
-              Remove-Item -Path $OriginalBinary.FullName
+          # Jetsocat archives: .tar.xz for Linux, .zip for Windows and macOS
+          foreach ($P in @(
+            @{ OS = "windows"; Arch = "x64";       Ext = ".exe"; Archive = "zip" },
+            @{ OS = "windows"; Arch = "arm64";     Ext = ".exe"; Archive = "zip" },
+            @{ OS = "linux";   Arch = "x64";       Ext = "";     Archive = "tar.xz" },
+            @{ OS = "linux";   Arch = "arm64";     Ext = "";     Archive = "tar.xz" },
+            @{ OS = "macos";   Arch = "x64";       Ext = "";     Archive = "tar.xz" },
+            @{ OS = "macos";   Arch = "arm64";     Ext = "";     Archive = "tar.xz" },
+            @{ OS = "macos";   Arch = "universal"; Ext = "";     Archive = "tar.xz" }
+          )) {
+            $BinaryPath = Join-Path $Dl jetsocat $P.OS $P.Arch "jetsocat$($P.Ext)"
+            if (Test-Path $BinaryPath) {
+              $ArchivePath = "$Release/jetsocat-${Version}-$($P.OS)-$($P.Arch).$($P.Archive)"
+              $StageDir = Join-Path $Env:RUNNER_TEMP "jetsocat-$($P.OS)-$($P.Arch)"
+              New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
+              Copy-Item $BinaryPath (Join-Path $StageDir (Split-Path $BinaryPath -Leaf)) -Force
+              if ($P.Archive -eq 'tar.xz') {
+                tar -cJf $ArchivePath -C $StageDir .
+              } else {
+                # Compress-Archive preserves the source path structure inside the ZIP.
+                # Staging to a flat temp dir ensures the binary lands at the ZIP root.
+                Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath $ArchivePath -Force
+              }
+              Remove-Item -Path $StageDir -Recurse -Force
+              Write-Host "Created jetsocat-${Version}-$($P.OS)-$($P.Arch).$($P.Archive)"
             } else {
-              Write-Warning "Could not find binary for $OS $Arch"
+              throw "Jetsocat binary not found: $BinaryPath"
             }
           }
-
-          # Rename macOS universal binary to follow the naming convention (without version).
-          Get-ChildItem -Recurse -Filter "jetsocat_*_${Version}_universal" -File | ForEach-Object {
-            Rename-Item -Path $_.FullName -NewName "jetsocat-macos-universal"
-          }
-
-          # Rename Windows PDB files to follow the naming convention (without version).
-          Get-ChildItem -Recurse -Filter "jetsocat_Windows_${Version}_*.pdb" -File | ForEach-Object {
-            $Arch = $_.BaseName -replace "jetsocat_Windows_${Version}_", ""
-            Rename-Item -Path $_.FullName -NewName "jetsocat-windows-$Arch.pdb"
+          foreach ($Arch in @('x64', 'arm64')) {
+            $SymbolsPath = Join-Path $Dl jetsocat windows $Arch jetsocat.symbols.zip
+            if (Test-Path $SymbolsPath) {
+              Move-Item $SymbolsPath "$Release/jetsocat-${Version}-windows-${Arch}.symbols.zip"
+            } else {
+              throw "Jetsocat Windows symbols not found: $SymbolsPath"
+            }
           }
         shell: pwsh
 
       - name: Create GitHub release
         run: |
-          Set-PSDebug -Trace 1
-
           $Version = "${{ needs.preflight.outputs.version }}"
-          $HashPath = 'checksums'
-          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md', '*.dll' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
-          $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
+          $Files = Get-ChildItem -Path release -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
 
+          $HashPath = 'checksums'
+          $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
           echo "::group::checksums"
           Get-Content $HashPath
           echo "::endgroup::"
 
           $ChangesPath = 'changes'
-          parse-changelog $(Join-Path changelog CHANGELOG.md) $Version | Out-File -Encoding UTF8NoBOM $ChangesPath
-
+          parse-changelog $(Join-Path downloads changelog CHANGELOG.md) $Version | Out-File -Encoding UTF8NoBOM $ChangesPath
           echo "::group::changes"
           Get-Content $ChangesPath
           echo "::endgroup::"
@@ -455,7 +375,7 @@ jobs:
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", $Env:GITHUB_REPOSITORY, "--notes-file", $ChangesPath, $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
 
-          $DryRun =  [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
+          $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
           if (-Not $DryRun) {
             Invoke-Expression $GhCmd
           }
@@ -544,7 +464,9 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download artifacts
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed --repo $Env:GITHUB_REPOSITORY
+        run: |
+          gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway-signed -n native-libs -n webapp-client -n webapp-player --repo $Env:GITHUB_REPOSITORY
+          Move-Item devolutions-gateway-signed devolutions-gateway
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -552,24 +474,59 @@ jobs:
       - name: Prepare upload
         id: prepare
         run: |
-          Set-PSDebug -Trace 1
-
           $destinationFolder = "${{ runner.temp }}/artifacts"
-          $version="${{ needs.preflight.outputs.version }}"
+          $version = "${{ needs.preflight.outputs.version }}"
           # Note that ".0" is appended here (required by release tooling downstream)
-          $versionFull="$version.0"
+          $versionFull = "$version.0"
+          Write-Host "Preparing Gateway artifacts in $destinationFolder for version $versionFull"
 
           echo "version=${versionFull}" >> $Env:GITHUB_OUTPUT
           echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
-          New-Item -Path "$destinationFolder" -ItemType "directory"
+          New-Item -Path $destinationFolder -ItemType Directory
 
-          Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.msi"
-          Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
-          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
-          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_x86_64.rpm"
-          Move-Item -Path "./linux/arm64/devolutions-gateway_${version}-1_arm64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_arm64.deb"
-          Move-Item -Path "./linux/arm64/devolutions-gateway_${version}-1_arm64.rpm" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_arm64.rpm"
+          Move-Item -Path "./devolutions-gateway/windows/x64/DevolutionsGateway.msi" -Destination "$destinationFolder/DevolutionsGateway-${versionFull}-x64.msi"
+          Move-Item -Path "./devolutions-gateway/windows/x64/DevolutionsGateway.symbols.zip" -Destination "$destinationFolder/DevolutionsGateway-${versionFull}-x64.symbols.zip"
+
+          $StageDir = Join-Path $Env:RUNNER_TEMP "dgw-windows-x64"
+          New-Item -Path $StageDir -ItemType Directory -Force | Out-Null
+          Copy-Item -Path "./devolutions-gateway/windows/x64/DevolutionsGateway.exe" -Destination (Join-Path $StageDir 'DevolutionsGateway.exe')
+          Copy-Item -Path "./native-libs/windows/x64/xmf.dll" -Destination (Join-Path $StageDir 'xmf.dll')
+          $ClientTarget = Join-Path $StageDir "webapp" "client"
+          New-Item -Path $ClientTarget -ItemType Directory -Force | Out-Null
+          Copy-Item -Path "webapp-client/*" -Destination $ClientTarget -Recurse
+          $PlayerTarget = Join-Path $StageDir "webapp" "player"
+          New-Item -Path $PlayerTarget -ItemType Directory -Force | Out-Null
+          Copy-Item -Path "webapp-player/*" -Destination $PlayerTarget -Recurse
+          Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath "$destinationFolder/DevolutionsGateway-${versionFull}-windows-x64.zip" -Force
+          Write-Host "Created DevolutionsGateway-${versionFull}-windows-x64.zip"
+          Remove-Item -Path $StageDir -Recurse -Force
+
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item -Path "./devolutions-gateway/linux/${Arch}/devolutions-gateway.deb" -Destination "$destinationFolder/devolutions-gateway-${versionFull}-${Arch}.deb"
+            Move-Item -Path "./devolutions-gateway/linux/${Arch}/devolutions-gateway.rpm" -Destination "$destinationFolder/devolutions-gateway-${versionFull}-${Arch}.rpm"
+            Move-Item -Path "./devolutions-gateway/linux/${Arch}/devolutions-gateway.changes" -Destination "$destinationFolder/devolutions-gateway-${versionFull}-${Arch}.changes"
+
+            $BinaryPath = "./devolutions-gateway/linux/${Arch}/devolutions-gateway"
+            $StageDir = Join-Path $Env:RUNNER_TEMP "dgw-linux-$Arch"
+            New-Item -Path $StageDir -ItemType Directory -Force | Out-Null
+            Copy-Item -Path $BinaryPath -Destination (Join-Path $StageDir 'devolutions-gateway')
+            chmod +x (Join-Path $StageDir 'devolutions-gateway')
+            Copy-Item -Path "./native-libs/linux/${Arch}/libxmf.so" -Destination (Join-Path $StageDir 'libxmf.so')
+
+            $ClientTarget = Join-Path $StageDir "webapp" "client"
+            New-Item -Path $ClientTarget -ItemType Directory -Force | Out-Null
+            Copy-Item -Path "webapp-client/*" -Destination $ClientTarget -Recurse
+
+            $PlayerTarget = Join-Path $StageDir "webapp" "player"
+            New-Item -Path $PlayerTarget -ItemType Directory -Force | Out-Null
+            Copy-Item -Path "webapp-player/*" -Destination $PlayerTarget -Recurse
+
+            $TarPath = "$destinationFolder/devolutions-gateway-${versionFull}-linux-${Arch}.tar.xz"
+            tar -cJf $TarPath -C $StageDir .
+            Write-Host "Created devolutions-gateway-${versionFull}-linux-${Arch}.tar.xz"
+            Remove-Item -Path $StageDir -Recurse -Force
+          }
         shell: pwsh
 
       - name: Attest build provenance
@@ -617,7 +574,9 @@ jobs:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download artifacts
-        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed --repo $Env:GITHUB_REPOSITORY
+        run: |
+          gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent-signed --repo $Env:GITHUB_REPOSITORY
+          Move-Item devolutions-agent-signed devolutions-agent
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -625,23 +584,27 @@ jobs:
       - name: Prepare upload
         id: prepare
         run: |
-          Set-PSDebug -Trace 1
-
           $destinationFolder = "${{ runner.temp }}/artifacts"
           $version="${{ needs.preflight.outputs.version }}"
           # Note that ".0" is appended here (required by release tooling downstream)
           $versionFull="$version.0"
+          Write-Host "Preparing Agent artifacts in $destinationFolder for version $versionFull"
 
           echo "version=${versionFull}" >> $Env:GITHUB_OUTPUT
           echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
 
-          Move-Item -Path "./windows/arm64/DevolutionsAgent-arm64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-arm64-${versionFull}.msi"
-          Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.msi"
-          Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.symbols.zip"
-          Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
-          Move-Item -Path "./linux/x86_64/devolutions-agent_${version}-1_x86_64.rpm" -Destination "$destinationFolder/devolutions-agent_${versionFull}_x86_64.rpm"
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item -Path "./devolutions-agent/windows/${Arch}/DevolutionsAgent.msi" -Destination "$destinationFolder/DevolutionsAgent-${versionFull}-${Arch}.msi"
+            Move-Item -Path "./devolutions-agent/windows/${Arch}/DevolutionsAgent.symbols.zip" -Destination "$destinationFolder/DevolutionsAgent-${versionFull}-${Arch}.symbols.zip"
+          }
+
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item -Path "./devolutions-agent/linux/${Arch}/devolutions-agent.deb" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.deb"
+            Move-Item -Path "./devolutions-agent/linux/${Arch}/devolutions-agent.rpm" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.rpm"
+            Move-Item -Path "./devolutions-agent/linux/${Arch}/devolutions-agent.changes" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.changes"
+          }
         shell: pwsh
 
       - name: Attest build provenance
@@ -685,8 +648,6 @@ jobs:
 
       - name: Publish Jetsocat NuGet package
         run: |
-          Set-PSDebug -Trace 1
-
           $Package = Get-ChildItem -Recurse -Filter "Devolutions.Jetsocat.*.nupkg" -File | Select-Object -First 1
           Write-Host "Package = $Package"
 

@@ -97,7 +97,7 @@ function Get-TlkArchitecture {
     )
 
     if (-Not $Architecture) {
-        $Architecture = 'x86_64'
+        $Architecture = 'x64'
     }
 
     $Architecture
@@ -166,7 +166,6 @@ class TlkTarget
         $CargoArchitecture = `
         switch ($this.Architecture) {
             "x86" { "i686" }
-            "x86_64" { "x86_64" }
             "x64" { "x86_64" }
             "aarch64" { "aarch64" }
             "arm64" { "aarch64" }
@@ -189,7 +188,7 @@ class TlkTarget
         $WindowsArchitecture = `
         switch ($this.Architecture) {
             "x86" { "x86" }
-            "x86_64" { "x64" }
+            "x64" { "x64" }
             "aarch64" { "ARM64" }
         }
 
@@ -202,7 +201,7 @@ class TlkTarget
         $DebianArchitecture = `
         switch ($this.Architecture) {
             "x86" { "i386" }
-            "x86_64" { "amd64" }
+            "x64" { "amd64" }
             "arm64" { "arm64" }
         }
 
@@ -979,7 +978,7 @@ function Invoke-TlkStep {
         [string] $PackageOption,
 		[ValidateSet('windows','macos','linux')]
 		[string] $Platform,
-		[ValidateSet('x86','x86_64','arm64')]
+		[ValidateSet('x86','x64','arm64')]
 		[string] $Architecture,
         [ValidateSet('dev', 'release', 'production')]
         [string] $CargoProfile,
