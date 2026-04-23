@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::DgwState;
@@ -87,6 +88,7 @@ pub struct EnrollResponse {
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/enroll", axum::routing::post(enroll_agent))
+        .route("/enrollment-string", axum::routing::post(create_agent_enrollment_string))
         .route("/agents", axum::routing::get(list_agents))
         .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
         .with_state(state)
@@ -250,6 +252,111 @@ async fn delete_agent(
     info!(%agent_id, "Agent deleted via API");
 
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment string generation (one-time token for agent bootstrap).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AgentEnrollmentStringRequest {
+    /// Base URL for the gateway API (e.g. `https://gateway.example.com`).
+    api_base_url: String,
+    /// Optional QUIC host override. Defaults to the host extracted from
+    /// `api_base_url`, falling back to the gateway's configured hostname.
+    quic_host: Option<String>,
+    /// Optional agent name hint.
+    name: Option<String>,
+    /// Token lifetime in seconds (default: 3600).
+    lifetime: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct AgentEnrollmentStringResponse {
+    enrollment_string: String,
+    enrollment_command: String,
+    quic_endpoint: String,
+    expires_at_unix: u64,
+}
+
+/// Generate a one-time enrollment string for agent bootstrap.
+///
+/// Accepts scope tokens with `AgentEnroll`, `ConfigWrite`, or `Wildcard` scope
+/// via [`AgentManagementWriteAccess`]. DVLS signs scope tokens with
+/// `AgentEnroll` specifically; other callers may use the broader
+/// `ConfigWrite` for back-compat.
+async fn create_agent_enrollment_string(
+    State(DgwState {
+        conf_handle,
+        agent_tunnel_handle,
+        ..
+    }): State<DgwState>,
+    _access: AgentManagementWriteAccess,
+    Json(req): Json<AgentEnrollmentStringRequest>,
+) -> Result<Json<AgentEnrollmentStringResponse>, HttpError> {
+    use base64::Engine as _;
+
+    let conf = conf_handle.get_conf();
+
+    let handle = agent_tunnel_handle
+        .as_ref()
+        .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
+
+    let lifetime_secs = req.lifetime.unwrap_or(3600);
+
+    // Generate a one-time enrollment token stored server-side.
+    let enrollment_token = Uuid::new_v4().to_string();
+    handle
+        .enrollment_token_store()
+        .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs))
+        .await;
+
+    // Determine QUIC host: explicit override > extract from api_base_url > gateway hostname config.
+    // The gateway hostname config is often a container ID in Docker, so we prefer
+    // extracting the host from the api_base_url which the caller already knows is reachable.
+    let quic_host = match req.quic_host.as_deref().filter(|h| !h.is_empty()) {
+        Some(host) => host.to_owned(),
+        None => url::Url::parse(&req.api_base_url)
+            .ok()
+            .and_then(|u| u.host_str().map(ToOwned::to_owned))
+            .unwrap_or_else(|| conf.hostname.clone()),
+    };
+    let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
+
+    // Build the enrollment payload.
+    let payload = serde_json::json!({
+        "version": 1,
+        "api_base_url": req.api_base_url,
+        "quic_endpoint": quic_endpoint,
+        "enrollment_token": enrollment_token,
+        "name": req.name,
+    });
+
+    let payload_json = serde_json::to_string(&payload)
+        .map_err(HttpError::internal().with_msg("serialize enrollment payload").err())?;
+
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+    let enrollment_string = format!("dgw-enroll:v1:{encoded}");
+    let enrollment_command = format!("devolutions-agent up --enrollment-string \"{enrollment_string}\"");
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expires_at_unix = now_secs + lifetime_secs;
+
+    info!(
+        agent_name = ?req.name,
+        lifetime_secs,
+        "Generated agent enrollment string"
+    );
+
+    Ok(Json(AgentEnrollmentStringResponse {
+        enrollment_string,
+        enrollment_command,
+        quic_endpoint,
+        expires_at_unix,
+    }))
 }
 
 #[cfg(test)]

@@ -424,11 +424,16 @@ where
             .map_err(HttpError::internal().err())?
             .0;
 
-        // DiagnosticsRead is accepted because DVLS maps its AgentRead scope
-        // to GatewayDiagnosticsRead, which serializes as "gateway.diagnostics.read".
+        // Accepted scopes:
+        // - AgentRead: the canonical scope for this endpoint (DVLS uses this).
+        // - DiagnosticsRead / ConfigWrite: back-compat for older callers that predate
+        //   the dedicated agent scopes; safe because both imply broader privileges.
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard | AccessScope::DiagnosticsRead | AccessScope::ConfigWrite => Ok(Self),
+                AccessScope::Wildcard
+                | AccessScope::AgentRead
+                | AccessScope::DiagnosticsRead
+                | AccessScope::ConfigWrite => Ok(Self),
                 _ => Err(HttpError::forbidden().msg("invalid scope for agent management read")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management read")),
@@ -438,7 +443,7 @@ where
 
 /// Grants write access to agent management endpoints (e.g. enrollment, delete).
 ///
-/// Accepts scope tokens with `ConfigWrite` (or `Wildcard`) scope only.
+/// Accepts scope tokens with `AgentEnroll`, `ConfigWrite`, or `Wildcard` scope.
 #[derive(Clone, Copy)]
 pub struct AgentManagementWriteAccess;
 
@@ -454,9 +459,13 @@ where
             .map_err(HttpError::internal().err())?
             .0;
 
+        // Accepted scopes:
+        // - AgentEnroll: the canonical scope for this endpoint (DVLS uses this).
+        // - ConfigWrite: back-compat for older callers that predate the
+        //   dedicated agent scope.
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard | AccessScope::ConfigWrite => Ok(Self),
+                AccessScope::Wildcard | AccessScope::AgentEnroll | AccessScope::ConfigWrite => Ok(Self),
                 _ => Err(HttpError::forbidden().msg("invalid scope for agent management write")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
