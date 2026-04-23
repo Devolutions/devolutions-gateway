@@ -474,6 +474,10 @@ pub enum AccessScope {
     NetMonitorDrain,
     #[serde(rename = "gateway.tunnel.enroll")]
     TunnelEnroll,
+    #[serde(rename = "gateway.agent.enroll")]
+    AgentEnroll,
+    #[serde(rename = "gateway.agent.read")]
+    AgentRead,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
