@@ -40,6 +40,7 @@ pub mod target_addr;
 pub mod tls;
 pub mod token;
 pub mod traffic_audit;
+pub mod upstream;
 pub mod utils;
 pub mod ws;
 
