@@ -11,21 +11,19 @@ use bytes::Bytes;
 use devolutions_gateway_task::ShutdownSignal;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
 use tracing::{Instrument as _, field};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::extract::{AssociationToken, BridgeToken};
 use crate::http::HttpError;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::target_addr::TargetAddr;
 use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol, RecordingPolicy};
-use crate::{DgwState, utils};
+use crate::upstream::{self, PreparedUpstream, UpstreamMode};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     use axum::routing::{self, MethodFilter, get};
@@ -161,7 +159,7 @@ async fn handle_fwd(
         .claims(claims)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
-        .mode(if with_tls { ForwardMode::Tls } else { ForwardMode::Tcp })
+        .mode(if with_tls { UpstreamMode::Tls } else { UpstreamMode::Tcp })
         .agent_tunnel_handle(agent_tunnel_handle)
         .build()
         .run()
@@ -192,238 +190,9 @@ struct Forward<S> {
     client_addr: SocketAddr,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    mode: ForwardMode,
+    mode: UpstreamMode,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ForwardMode {
-    Tcp,
-    Tls,
-}
-
-enum UpstreamLeg {
-    Tcp(TcpStream),
-    Tunnel(agent_tunnel::stream::TunnelStream),
-}
-
-impl AsyncRead for UpstreamLeg {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_read(cx, buf),
-            Self::Tunnel(stream) => std::pin::Pin::new(stream).poll_read(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for UpstreamLeg {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_write(cx, buf),
-            Self::Tunnel(stream) => std::pin::Pin::new(stream).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_flush(cx),
-            Self::Tunnel(stream) => std::pin::Pin::new(stream).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_shutdown(cx),
-            Self::Tunnel(stream) => std::pin::Pin::new(stream).poll_shutdown(cx),
-        }
-    }
-}
-
-enum UpstreamSession {
-    Tcp(UpstreamLeg),
-    Tls(Box<TlsStream<UpstreamLeg>>),
-}
-
-impl AsyncRead for UpstreamSession {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_read(cx, buf),
-            Self::Tls(stream) => std::pin::Pin::new(stream.as_mut()).poll_read(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for UpstreamSession {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_write(cx, buf),
-            Self::Tls(stream) => std::pin::Pin::new(stream.as_mut()).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_flush(cx),
-            Self::Tls(stream) => std::pin::Pin::new(stream.as_mut()).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_shutdown(cx),
-            Self::Tls(stream) => std::pin::Pin::new(stream.as_mut()).poll_shutdown(cx),
-        }
-    }
-}
-
-enum RoutePlan<'a> {
-    Direct(&'a TargetAddr),
-    ViaAgent {
-        target: &'a TargetAddr,
-        candidates: Vec<Arc<agent_tunnel::registry::AgentPeer>>,
-    },
-}
-
-impl<'a> RoutePlan<'a> {
-    async fn resolve(
-        agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-        explicit_agent_id: Option<Uuid>,
-        target: &'a TargetAddr,
-    ) -> Result<Self, ForwardError> {
-        if let Some(agent_id) = explicit_agent_id {
-            let handle = agent_tunnel_handle.ok_or_else(|| {
-                ForwardError::BadGateway(anyhow::anyhow!(
-                    "agent {agent_id} specified in token requires agent tunnel routing, but no tunnel handle is configured"
-                ))
-            })?;
-
-            let agent = handle.registry().get(&agent_id).await.ok_or_else(|| {
-                ForwardError::BadGateway(anyhow::anyhow!(
-                    "agent {agent_id} specified in token not found in registry"
-                ))
-            })?;
-
-            return Ok(Self::ViaAgent {
-                target,
-                candidates: vec![agent],
-            });
-        }
-
-        let Some(handle) = agent_tunnel_handle else {
-            return Ok(Self::Direct(target));
-        };
-
-        match agent_tunnel::routing::resolve_route(handle.registry(), None, target.host()).await {
-            agent_tunnel::routing::RoutingDecision::ViaAgent(candidates) => Ok(Self::ViaAgent { target, candidates }),
-            agent_tunnel::routing::RoutingDecision::Direct => Ok(Self::Direct(target)),
-            agent_tunnel::routing::RoutingDecision::ExplicitAgentNotFound(_) => {
-                unreachable!("explicit agent IDs are handled before route resolution")
-            }
-        }
-    }
-
-    async fn execute(
-        self,
-        agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-        session_id: Uuid,
-    ) -> anyhow::Result<ConnectedTarget> {
-        match self {
-            Self::Direct(target) => {
-                trace!(%target, "Select and connect to target");
-
-                let (stream, server_addr) = utils::tcp_connect(target).await?;
-
-                trace!(%target, "Connected");
-
-                Ok(ConnectedTarget {
-                    leg: UpstreamLeg::Tcp(stream),
-                    server_addr,
-                    selected_target: target.clone(),
-                })
-            }
-            Self::ViaAgent { target, candidates } => {
-                let handle = agent_tunnel_handle.expect("route plan requires configured agent tunnel");
-                let mut last_error = None;
-
-                for agent in &candidates {
-                    info!(
-                        agent_id = %agent.agent_id,
-                        agent_name = %agent.name,
-                        target = %target.as_addr(),
-                        "Routing via agent tunnel"
-                    );
-
-                    match handle
-                        .connect_via_agent(agent.agent_id, session_id, target.as_addr())
-                        .await
-                    {
-                        Ok(stream) => {
-                            let server_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
-
-                            return Ok(ConnectedTarget {
-                                leg: UpstreamLeg::Tunnel(stream),
-                                server_addr,
-                                selected_target: target.clone(),
-                            });
-                        }
-                        Err(error) => {
-                            warn!(
-                                agent_id = %agent.agent_id,
-                                agent_name = %agent.name,
-                                target = %target.as_addr(),
-                                error = format!("{error:#}"),
-                                "Agent tunnel candidate failed"
-                            );
-                            last_error = Some(error);
-                        }
-                    }
-                }
-
-                Err(last_error.unwrap_or_else(|| anyhow::anyhow!("all agent tunnel candidates failed")))
-            }
-        }
-    }
-}
-
-struct ConnectedTarget {
-    leg: UpstreamLeg,
-    server_addr: SocketAddr,
-    selected_target: TargetAddr,
-}
-
-struct PreparedTarget {
-    session: UpstreamSession,
-    server_addr: SocketAddr,
-    selected_target: TargetAddr,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -464,19 +233,22 @@ where
             None
         };
 
-        let PreparedTarget {
-            session,
-            server_addr,
-            selected_target,
-        } = connect_target(
+        let connected = upstream::connect_upstream(
             targets,
             claims.jet_agent_id,
             claims.jet_aid,
-            mode,
-            claims.cert_thumb256,
             agent_tunnel_handle.as_deref(),
         )
-        .await?;
+        .await
+        .map_err(ForwardError::BadGateway)?;
+
+        let PreparedUpstream {
+            session,
+            server_addr,
+            selected_target,
+        } = upstream::prepare_upstream(connected, mode, claims.cert_thumb256)
+            .await
+            .map_err(ForwardError::BadGateway)?;
 
         tracing::Span::current().record("target", selected_target.to_string());
 
@@ -493,8 +265,8 @@ where
 
         info!(
             mode = match mode {
-                ForwardMode::Tcp => "tcp",
-                ForwardMode::Tls => "tls",
+                UpstreamMode::Tcp => "tcp",
+                UpstreamMode::Tls => "tls",
             },
             "WebSocket forwarding"
         );
@@ -533,65 +305,6 @@ fn validate_forward_request(claims: &AssociationTokenClaims) -> Result<(), Forwa
     }
 
     Ok(())
-}
-
-async fn connect_target(
-    targets: &nonempty::NonEmpty<TargetAddr>,
-    explicit_agent_id: Option<Uuid>,
-    session_id: Uuid,
-    mode: ForwardMode,
-    cert_thumb256: Option<crate::tls::thumbprint::Sha256Thumbprint>,
-    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
-) -> Result<PreparedTarget, ForwardError> {
-    let mut last_error = None;
-
-    for target in targets {
-        match RoutePlan::resolve(agent_tunnel_handle, explicit_agent_id, target)
-            .await?
-            .execute(agent_tunnel_handle, session_id)
-            .await
-        {
-            Err(error) => {
-                last_error = Some(error);
-            }
-            Ok(connected_upstream) => return prepare_target(mode, cert_thumb256, connected_upstream).await,
-        }
-    }
-
-    Err(ForwardError::BadGateway(
-        last_error.unwrap_or_else(|| anyhow::anyhow!("no target candidates available")),
-    ))
-}
-async fn prepare_target(
-    mode: ForwardMode,
-    cert_thumb256: Option<crate::tls::thumbprint::Sha256Thumbprint>,
-    connected_upstream: ConnectedTarget,
-) -> Result<PreparedTarget, ForwardError> {
-    let ConnectedTarget {
-        leg,
-        server_addr,
-        selected_target,
-    } = connected_upstream;
-
-    let session = match mode {
-        ForwardMode::Tcp => UpstreamSession::Tcp(leg),
-        ForwardMode::Tls => {
-            trace!(target = %selected_target, "Establishing TLS connection with server");
-
-            let tls_stream = crate::tls::safe_connect(selected_target.host().to_owned(), leg, cert_thumb256)
-                .await
-                .context("TLS connect")
-                .map_err(ForwardError::BadGateway)?;
-
-            UpstreamSession::Tls(Box::new(tls_stream))
-        }
-    };
-
-    Ok(PreparedTarget {
-        session,
-        server_addr,
-        selected_target,
-    })
 }
 
 async fn fwd_http(

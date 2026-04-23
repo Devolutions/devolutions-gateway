@@ -20,6 +20,7 @@ use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
+use crate::upstream::{self, ConnectedUpstream, UpstreamLeg};
 
 #[derive(Debug, Error)]
 enum AuthorizationError {
@@ -158,61 +159,8 @@ enum CleanPathError {
     Io(#[from] io::Error),
 }
 
-/// Inner transport for the RDP server connection.
-///
-/// An enum is required here because `Box<dyn>` trait objects cause the compiler to
-/// lose `Send` provability for the async future spawned by `ws.on_upgrade()` in the
-/// RDP handler. Generics are also not viable — the type would propagate up through
-/// `handle_with_credential_injection` → `handle` → `handle_socket` → `ws.on_upgrade()`,
-/// which requires a concrete future type. The enum gives the compiler full type
-/// information to prove `Send` while keeping the transport abstraction local.
-enum ServerTransport {
-    Tcp(tokio::net::TcpStream),
-    Quic(agent_tunnel::stream::TunnelStream),
-}
-
-impl AsyncRead for ServerTransport {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(s) => std::pin::Pin::new(s).poll_read(cx, buf),
-            Self::Quic(s) => std::pin::Pin::new(s).poll_read(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for ServerTransport {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<io::Result<usize>> {
-        match self.get_mut() {
-            Self::Tcp(s) => std::pin::Pin::new(s).poll_write(cx, buf),
-            Self::Quic(s) => std::pin::Pin::new(s).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(s) => std::pin::Pin::new(s).poll_flush(cx),
-            Self::Quic(s) => std::pin::Pin::new(s).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
-        match self.get_mut() {
-            Self::Tcp(s) => std::pin::Pin::new(s).poll_shutdown(cx),
-            Self::Quic(s) => std::pin::Pin::new(s).poll_shutdown(cx),
-        }
-    }
-}
+// Upstream transport (TCP or agent-tunnel) comes from `crate::upstream::UpstreamLeg`,
+// which is also used by fwd.rs and generic_client.rs.
 
 struct CleanPathAuth {
     claims: AssociationTokenClaims,
@@ -279,20 +227,22 @@ async fn authorize_cleanpath(
 }
 
 struct ConnectedRdpServer {
-    tls_stream: tokio_rustls::client::TlsStream<ServerTransport>,
+    tls_stream: tokio_rustls::client::TlsStream<UpstreamLeg>,
     server_addr: SocketAddr,
     selected_target: TargetAddr,
     x224_rsp: Vec<u8>,
 }
 
 /// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
+///
+/// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
+/// the WebSocket forwarders in [`crate::upstream`]; here we just do the RDP-specific
+/// PCB + X224 + TLS upgrade on top of whatever leg that returns.
 async fn connect_rdp_server(
     claims: &AssociationTokenClaims,
     cleanpath_pdu: RDCleanPathPdu,
     agent_tunnel_handle: Option<&Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> Result<ConnectedRdpServer, CleanPathError> {
-    use crate::utils;
-
     let crate::token::ConnectionMode::Fwd { ref targets, .. } = claims.jet_cm else {
         return anyhow::Error::msg("unexpected connection mode")
             .pipe(CleanPathError::BadRequest)
@@ -301,36 +251,19 @@ async fn connect_rdp_server(
 
     trace!(?targets, "Connecting to destination server");
 
-    // Route through agent tunnel if available, otherwise connect directly.
-    // `as_addr()` is IPv6-safe (bracketed); `format!("{host}:{port}")` is not.
-    let first_target = targets.first();
-    let target_addr = first_target.as_addr();
-
-    let (mut server_stream, server_addr, selected_target): (ServerTransport, SocketAddr, &TargetAddr) =
-        match agent_tunnel::routing::try_route(
-            agent_tunnel_handle.map(AsRef::as_ref),
-            claims.jet_agent_id,
-            first_target.host(),
-            claims.jet_aid,
-            target_addr,
-        )
-        .await
-        {
-            Ok(Some((quic_stream, _agent))) => {
-                info!(target = %target_addr, "Routing RDP via agent tunnel");
-                let placeholder_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
-                (ServerTransport::Quic(quic_stream), placeholder_addr, first_target)
-            }
-            Ok(None) => {
-                let ((stream, addr), target) = utils::successive_try(targets, utils::tcp_connect)
-                    .await
-                    .context("connect to RDP server")?;
-                (ServerTransport::Tcp(stream), addr, target)
-            }
-            Err(e) => {
-                return Err(CleanPathError::Internal(e));
-            }
-        };
+    let ConnectedUpstream {
+        leg: mut server_stream,
+        server_addr,
+        selected_target,
+    } = upstream::connect_upstream(
+        targets,
+        claims.jet_agent_id,
+        claims.jet_aid,
+        agent_tunnel_handle.map(AsRef::as_ref),
+    )
+    .await
+    .context("connect to RDP server")
+    .map_err(CleanPathError::Internal)?;
 
     debug!(%selected_target, "Connected to destination server");
     tracing::Span::current().record("target", selected_target.to_string());
@@ -360,13 +293,13 @@ async fn connect_rdp_server(
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
             source,
-            target_server: selected_target.to_owned(),
+            target_server: selected_target.clone(),
         })?;
 
     Ok(ConnectedRdpServer {
         tls_stream,
         server_addr,
-        selected_target: selected_target.to_owned(),
+        selected_target,
         x224_rsp,
     })
 }

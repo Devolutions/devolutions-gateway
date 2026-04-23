@@ -194,9 +194,9 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
 
     // CLI flag wins over JWT claim. At least one must be provided — the gateway does
     // not self-report a QUIC endpoint (see `EnrollmentJwtClaims::jet_quic_endpoint`).
-    let quic_endpoint = cli_quic_endpoint.or(jwt_quic_endpoint).context(
-        "missing QUIC endpoint: pass --quic-endpoint or include `jet_quic_endpoint` in the enrollment JWT",
-    )?;
+    let quic_endpoint = cli_quic_endpoint
+        .or(jwt_quic_endpoint)
+        .context("missing QUIC endpoint: pass --quic-endpoint or include `jet_quic_endpoint` in the enrollment JWT")?;
 
     Ok(UpCommand {
         gateway_url: gateway_url.context("missing required --gateway")?,
