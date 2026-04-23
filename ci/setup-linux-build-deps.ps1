@@ -2,7 +2,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('x86_64', 'arm64')]
+    [ValidateSet('x64', 'arm64')]
     [string] $Architecture
 )
 
