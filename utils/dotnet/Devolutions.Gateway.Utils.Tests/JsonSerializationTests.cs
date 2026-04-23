@@ -157,6 +157,26 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void ScopeClaimsAgentEnroll()
+    {
+        const string EXPECTED = """{"scope":"gateway.agent.enroll","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayAgentEnroll);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
+    public void ScopeClaimsAgentRead()
+    {
+        const string EXPECTED = """{"scope":"gateway.agent.read","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayAgentRead);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void NetScanClaims()
     {
         const string EXPECTED = """{"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
