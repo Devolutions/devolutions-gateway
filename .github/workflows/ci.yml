@@ -834,7 +834,7 @@ jobs:
         if: ${{ matrix.os == 'windows' }}
         run: |
           $Arch = '${{ matrix.arch }}'
-          $Destination = Join-Path $PWD "tun2socks" $Arch
+          $Destination = Join-Path $PWD "tun2socks" windows $Arch
           ./ci/download-tun2socks.ps1 -Architecture $Arch -Destination $Destination
           $Tun2SocksExecutablePath = Join-Path $Destination "tun2socks.exe"
           $WintunLibraryPath = Join-Path $Destination "wintun.dll"
@@ -1001,8 +1001,8 @@ jobs:
           pattern: devolutions-agent-*
           delete-merged: true
 
-  tun2socks-windows-merge:
-    name: tun2socks windows merge artifacts
+  tun2socks-merge:
+    name: tun2socks merge artifacts
     runs-on: ubuntu-latest
     needs: [preflight, devolutions-agent]
 
@@ -1010,8 +1010,8 @@ jobs:
       - name: Merge Artifacts
         uses: actions/upload-artifact/merge@v7
         with:
-          name: tun2socks-windows
-          pattern: tun2socks-windows-*
+          name: tun2socks
+          pattern: tun2socks-*
           delete-merged: true
 
   devolutions-pedm-client:

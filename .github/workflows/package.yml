@@ -475,7 +475,7 @@ jobs:
         if: ${{ matrix.os == 'windows' && matrix.project == 'devolutions-agent' }}
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
-          gh run download ${{ needs.preflight.outputs.run }} -n tun2socks-windows -D (Join-Path $PackageRoot windows)
+          gh run download ${{ needs.preflight.outputs.run }} -n tun2socks -D $PackageRoot
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
