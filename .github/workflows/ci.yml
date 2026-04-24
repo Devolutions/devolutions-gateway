@@ -1280,22 +1280,22 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: jetsocat
-          path: ${{ runner.temp }}/artifacts_raw
+          path: ${{ runner.temp }}/artifacts_raw/jetsocat
 
       - uses: actions/download-artifact@v8
         with:
           name: devolutions-gateway
-          path: ${{ runner.temp }}/artifacts_raw
+          path: ${{ runner.temp }}/artifacts_raw/devolutions-gateway
 
       - uses: actions/download-artifact@v8
         with:
           name: devolutions-agent
-          path: ${{ runner.temp }}/artifacts_raw
+          path: ${{ runner.temp }}/artifacts_raw/devolutions-agent
 
       - uses: actions/download-artifact@v8
         with:
           name: git-log
-          path: ${{ runner.temp }}/artifacts_raw
+          path: ${{ runner.temp }}/artifacts_raw/git-log
 
       - name: Prepare upload
         id: prepare
