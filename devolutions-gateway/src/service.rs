@@ -283,7 +283,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         let ca_manager = agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
             .context("failed to initialize agent tunnel CA")?;
 
-        let listen_addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
+        // Bind to the IPv6 unspecified address so the listener is dual-stack and
+        // accepts both IPv4 and IPv6 agent connections (matters when an agent's DNS
+        // resolution returns an IPv6 address for the configured gateway endpoint).
+        let listen_addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, conf.agent_tunnel.listen_port));
 
         let (listener, handle) =
             agent_tunnel::AgentTunnelListener::bind(listen_addr, Arc::clone(&ca_manager), hostname)

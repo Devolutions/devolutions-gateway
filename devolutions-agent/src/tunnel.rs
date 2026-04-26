@@ -337,8 +337,11 @@ async fn run_single_connection(
 
     // -- Connect --
 
+    // Bind to the IPv6 unspecified address so the client socket is dual-stack.
+    // A v4-only socket (0.0.0.0:0) cannot reach a peer resolved to an IPv6 address,
+    // which is the default `localhost`/AAAA-record case on modern systems.
     let mut endpoint =
-        quinn::Endpoint::client("0.0.0.0:0".parse().context("parse bind address")?).context("create QUIC endpoint")?;
+        quinn::Endpoint::client("[::]:0".parse().context("parse bind address")?).context("create QUIC endpoint")?;
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
