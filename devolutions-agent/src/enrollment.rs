@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn parse_enrollment_jwt_requires_gw_url() {
         let jwt = make_jwt(serde_json::json!({
-            "scope": "gateway.tunnel.enroll",
+            "scope": "gateway.agent.enroll",
             "jet_agent_name": "agent-a",
         }));
         assert!(parse_enrollment_jwt(&jwt).is_err());

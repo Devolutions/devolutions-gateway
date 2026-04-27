@@ -88,7 +88,7 @@ fn make_jwt(payload: serde_json::Value) -> String {
 #[test]
 fn parse_up_command_args_accepts_enrollment_string() {
     let jwt = make_jwt(serde_json::json!({
-        "scope": "gateway.tunnel.enroll",
+        "scope": "gateway.agent.enroll",
         "exp": 1_999_999_999i64,
         "jti": "00000000-0000-0000-0000-000000000000",
         "jet_gw_url": "https://gateway.example.com:7171",
@@ -110,7 +110,7 @@ fn parse_up_command_args_accepts_enrollment_string() {
 fn parse_up_command_args_rejects_enrollment_string_missing_quic_endpoint() {
     // JWT lacks `jet_quic_endpoint` AND no CLI `--quic-endpoint` → must fail.
     let jwt = make_jwt(serde_json::json!({
-        "scope": "gateway.tunnel.enroll",
+        "scope": "gateway.agent.enroll",
         "exp": 1_999_999_999i64,
         "jti": "00000000-0000-0000-0000-000000000000",
         "jet_gw_url": "https://gateway.example.com:7171",
@@ -128,7 +128,7 @@ fn parse_up_command_args_rejects_enrollment_string_missing_quic_endpoint() {
 #[test]
 fn parse_up_command_args_cli_quic_endpoint_wins_over_jwt() {
     let jwt = make_jwt(serde_json::json!({
-        "scope": "gateway.tunnel.enroll",
+        "scope": "gateway.agent.enroll",
         "exp": 1_999_999_999i64,
         "jti": "00000000-0000-0000-0000-000000000000",
         "jet_gw_url": "https://gateway.example.com:7171",
