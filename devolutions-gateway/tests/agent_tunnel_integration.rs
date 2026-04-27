@@ -91,7 +91,10 @@ async fn connect_quinn_client(
         roots.add(cert).expect("add CA cert to root store");
     }
 
-    // Build client config — skip hostname verification for test (connect by IP).
+    // Build client config: trust the test CA + present the client cert for mTLS.
+    // The server cert is still validated by `WebPkiServerVerifier` against the
+    // SNI passed to `connect()` (`"localhost"`); we are not skipping hostname
+    // verification, only narrowing the trusted roots.
     let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))
         .build()
         .expect("build verifier");
