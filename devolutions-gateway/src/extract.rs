@@ -434,7 +434,9 @@ where
                 | AccessScope::AgentRead
                 | AccessScope::DiagnosticsRead
                 | AccessScope::ConfigWrite => Ok(Self),
-                _ => Err(HttpError::forbidden().msg("invalid scope for agent management read")),
+                _ => Err(HttpError::forbidden().msg(
+                    "invalid scope for agent management read (require one of: gateway.agent.read, gateway.diagnostics.read, gateway.config.write, *)",
+                )),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management read")),
         }
@@ -466,7 +468,9 @@ where
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
                 AccessScope::Wildcard | AccessScope::AgentEnroll | AccessScope::ConfigWrite => Ok(Self),
-                _ => Err(HttpError::forbidden().msg("invalid scope for agent management write")),
+                _ => Err(HttpError::forbidden().msg(
+                    "invalid scope for agent management write (require one of: gateway.agent.enroll, gateway.config.write, *)",
+                )),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
         }

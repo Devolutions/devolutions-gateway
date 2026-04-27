@@ -135,8 +135,11 @@ pub enum UpstreamMode {
 /// or an agent-tunnel stream; a TLS wrap has not yet been applied.
 pub struct ConnectedUpstream {
     pub leg: UpstreamLeg,
-    /// Remote peer address. For agent-tunnel routing this is a placeholder
-    /// (`0.0.0.0:0`) because the real TCP peer lives on the agent side.
+    /// Remote peer address. For direct routing this is the resolved TCP peer.
+    /// For agent-tunnel routing the real TCP peer lives on the agent side, so
+    /// we surface the target IP:port (when the target is an IP literal) or
+    /// `0.0.0.0:<target_port>` (when the target is a hostname the gateway
+    /// never resolves) — both are more useful in logs/PCAP than a true zero.
     pub server_addr: SocketAddr,
     pub selected_target: TargetAddr,
 }
@@ -154,7 +157,7 @@ pub struct PreparedUpstream {
 // ---------------------------------------------------------------------------
 
 /// A routing decision for a single target.
-pub enum RoutePlan<'a> {
+pub(crate) enum RoutePlan<'a> {
     Direct(&'a TargetAddr),
     ViaAgent {
         target: &'a TargetAddr,
@@ -166,7 +169,7 @@ impl<'a> RoutePlan<'a> {
     /// Pick how to reach `target`:
     /// - Explicit `jet_agent_id` → route via that agent (or error if missing).
     /// - Otherwise registry subnet/domain match → best candidates, else Direct.
-    pub async fn resolve(
+    pub(crate) async fn resolve(
         handle: Option<&AgentTunnelHandle>,
         explicit_agent_id: Option<Uuid>,
         target: &'a TargetAddr,
@@ -197,8 +200,15 @@ impl<'a> RoutePlan<'a> {
         match resolve_route(handle.registry(), None, target.host()).await {
             RoutingDecision::ViaAgent(candidates) => Ok(Self::ViaAgent { target, candidates }),
             RoutingDecision::Direct => Ok(Self::Direct(target)),
-            RoutingDecision::ExplicitAgentNotFound(_) => {
-                unreachable!("explicit agent IDs are handled before route resolution")
+            RoutingDecision::ExplicitAgentNotFound(agent_id) => {
+                // resolve_route only returns this when an explicit agent_id is passed
+                // in; we pass None above. Treat as a soft failure rather than panic
+                // so a future change in the routing crate cannot crash the gateway.
+                warn!(
+                    %agent_id,
+                    "routing crate returned ExplicitAgentNotFound for an implicit lookup; falling back to direct"
+                );
+                Ok(Self::Direct(target))
             }
         }
     }
@@ -207,7 +217,7 @@ impl<'a> RoutePlan<'a> {
     ///
     /// For `Direct`, does a TCP connect. For `ViaAgent`, tries each candidate
     /// in order until one succeeds.
-    pub async fn execute(self, handle: Option<&AgentTunnelHandle>, session_id: Uuid) -> Result<ConnectedUpstream> {
+    pub(crate) async fn execute(self, handle: Option<&AgentTunnelHandle>, session_id: Uuid) -> Result<ConnectedUpstream> {
         match self {
             Self::Direct(target) => {
                 trace!(%target, "Connecting to target directly");
@@ -239,8 +249,14 @@ impl<'a> RoutePlan<'a> {
                         .await
                     {
                         Ok(stream) => {
-                            // Real TCP peer lives on the agent; expose a placeholder.
-                            let server_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
+                            // The TCP peer lives on the agent side; surface the target
+                            // IP:port for logs/PCAP when the target is a literal IP, or
+                            // 0.0.0.0:<port> when it's a hostname the gateway never
+                            // resolved itself. Either is more useful than 0.0.0.0:0.
+                            let server_addr = match target.host_ip() {
+                                Some(ip) => SocketAddr::new(ip, target.port()),
+                                None => SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, target.port())),
+                            };
 
                             return Ok(ConnectedUpstream {
                                 leg: UpstreamLeg::Tunnel(stream),
