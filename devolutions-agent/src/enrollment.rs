@@ -123,6 +123,9 @@ pub struct PersistedEnrollment {
 /// * `enrollment_token` - JWT token for enrollment
 /// * `agent_name` - Friendly name for this agent
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
+/// * `advertise_domains` - List of DNS domains to advertise (e.g., ["corp.example.com"]).
+///   When non-empty, replaces any previously-persisted explicit domains; auto-detected
+///   domains are still added on top at runtime if `auto_detect_domain` is enabled.
 /// * `quic_endpoint` - QUIC endpoint (`host:port`) the agent should connect to for the
 ///   tunnel. The gateway does not report this: a running process cannot know the address
 ///   its clients actually route to (Docker/K8s, NAT, split-horizon DNS, LB VIP). The
@@ -133,6 +136,7 @@ pub async fn enroll_agent(
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
     quic_endpoint: String,
 ) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
@@ -140,7 +144,14 @@ pub async fn enroll_agent(
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
 
-    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, quic_endpoint, &key_pem)
+    persist_enrollment_response(
+        agent_name,
+        advertise_subnets,
+        advertise_domains,
+        enroll_response,
+        quic_endpoint,
+        &key_pem,
+    )
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -197,6 +208,7 @@ async fn request_enrollment(
 fn persist_enrollment_response(
     agent_name: &str,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
     EnrollResponse {
         agent_id,
         client_cert_pem,
@@ -257,7 +269,13 @@ fn persist_enrollment_response(
         client_key_path: Some(client_key_path.clone()),
         gateway_ca_cert_path: Some(gateway_ca_path.clone()),
         advertise_subnets,
-        advertise_domains: existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default(),
+        // CLI-supplied domains win; otherwise preserve any domains previously
+        // configured on disk (manual edit / earlier enrollment).
+        advertise_domains: if advertise_domains.is_empty() {
+            existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default()
+        } else {
+            advertise_domains
+        },
         auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
         heartbeat_interval_secs: Some(60),
         route_advertise_interval_secs: Some(30),

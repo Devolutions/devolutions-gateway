@@ -26,6 +26,7 @@ fn parse_up_command_args_happy_path() {
             enrollment_token: "bootstrap-token".to_owned(),
             agent_name: "site-a-agent".to_owned(),
             advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
+            advertise_domains: vec![],
             quic_endpoint: "gateway.example.com:7172".to_owned(),
         }
     );
@@ -50,6 +51,29 @@ fn parse_up_command_args_accepts_aliases() {
 
     assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
     assert_eq!(parsed.quic_endpoint, "gateway.example.com:7172");
+}
+
+#[test]
+fn parse_up_command_args_accepts_advertise_domains() {
+    let args = vec![
+        "--gateway".to_owned(),
+        "https://gateway.example.com:7171".to_owned(),
+        "--token".to_owned(),
+        "bootstrap-token".to_owned(),
+        "--name".to_owned(),
+        "site-a-agent".to_owned(),
+        "--quic-endpoint".to_owned(),
+        "gateway.example.com:7172".to_owned(),
+        "--advertise-domains".to_owned(),
+        "corp.example.com, lab.example.com".to_owned(),
+    ];
+
+    let parsed = parse_up_command_args(&args).expect("parse up args");
+
+    assert_eq!(
+        parsed.advertise_domains,
+        vec!["corp.example.com".to_owned(), "lab.example.com".to_owned()]
+    );
 }
 
 #[test]
