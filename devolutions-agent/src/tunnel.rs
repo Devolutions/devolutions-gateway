@@ -444,9 +444,19 @@ async fn run_single_connection(
     let heartbeat_interval_secs = tunnel_conf.heartbeat_interval_secs;
     let mut route_tick = tokio::time::interval(Duration::from_secs(route_interval));
     let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(heartbeat_interval_secs));
-    // Skip the first immediate tick (we already sent the initial RouteAdvertise).
+    // Re-check the cert expiry hourly. The pre-loop check above handles startup;
+    // this catches the case where the connection stays up for longer than the
+    // renewal window (15 days) and would otherwise miss its renewal opportunity
+    // entirely. On detection we drop the connection and surface `CertRenewed`,
+    // which sends us back through `run_single_connection` and its pre-loop
+    // renewal block — the renewal itself happens there, where the control
+    // stream has not yet been split into reader/sender halves.
+    let mut cert_expiry_tick = tokio::time::interval(Duration::from_secs(3600));
+    // Skip the first immediate tick (we already sent the initial RouteAdvertise
+    // and just performed the startup cert check).
     route_tick.tick().await;
     heartbeat_tick.tick().await;
+    cert_expiry_tick.tick().await;
 
     loop {
         tokio::select! {
@@ -471,6 +481,22 @@ async fn run_single_connection(
                 let _ = ctrl_send.send(&msg).await
                     .inspect(|_| trace!("Sent Heartbeat"))
                     .inspect_err(|e| error!(%e, "Failed to send Heartbeat"));
+            }
+
+            _ = cert_expiry_tick.tick() => {
+                match crate::enrollment::is_cert_expiring(cert_path, 15) {
+                    Ok(true) => {
+                        info!("Certificate entered renewal window during active session, reconnecting to renew");
+                        connection.close(0u32.into(), b"cert-renewing");
+                        return Ok(ConnectionOutcome::CertRenewed);
+                    }
+                    Ok(false) => {
+                        trace!("Certificate still outside renewal window");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to check certificate expiry in main loop");
+                    }
+                }
             }
 
             result = connection.accept_bi() => {

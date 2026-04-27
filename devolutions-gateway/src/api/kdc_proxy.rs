@@ -163,10 +163,21 @@ pub async fn send_krb_message(
     message: &[u8],
     agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
 ) -> Result<Vec<u8>, HttpError> {
-    // Route through agent tunnel using the SAME pipeline as connection forwarding.
+    // Route through agent tunnel using the SAME pipeline as connection forwarding,
+    // but only for `tcp` KDC targets. The agent tunnel currently has a single
+    // `ConnectRequest::tcp` shape, so a `udp://` KDC routed this way would be
+    // delivered to the agent as a TCP target — wrong protocol semantics that can
+    // silently break UDP Kerberos deployments. Fall through to the direct path
+    // (which honors the scheme) until an explicit UDP tunnel hop exists.
+    //
     // `as_addr()` returns `host:port` (with IPv6 brackets), which is what the agent
     // tunnel target parser expects — unlike `to_string()` which includes the scheme.
     let kdc_target = kdc_addr.as_addr();
+    let agent_tunnel_handle = if kdc_addr.scheme().eq_ignore_ascii_case("tcp") {
+        agent_tunnel_handle
+    } else {
+        None
+    };
 
     if let Some((mut stream, _agent)) = agent_tunnel::routing::try_route(
         agent_tunnel_handle,
