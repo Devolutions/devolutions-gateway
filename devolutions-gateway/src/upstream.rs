@@ -228,7 +228,11 @@ impl<'a> RoutePlan<'a> {
     ///
     /// For `Direct`, does a TCP connect. For `ViaAgent`, tries each candidate
     /// in order until one succeeds.
-    pub(crate) async fn execute(self, handle: Option<&AgentTunnelHandle>, session_id: Uuid) -> Result<ConnectedUpstream> {
+    pub(crate) async fn execute(
+        self,
+        handle: Option<&AgentTunnelHandle>,
+        session_id: Uuid,
+    ) -> Result<ConnectedUpstream> {
         match self {
             Self::Direct(target) => {
                 trace!(%target, "Connecting to target directly");

@@ -88,7 +88,10 @@ pub struct EnrollResponse {
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/enroll", axum::routing::post(enroll_agent))
-        .route("/enrollment-string", axum::routing::post(create_agent_enrollment_string))
+        .route(
+            "/enrollment-string",
+            axum::routing::post(create_agent_enrollment_string),
+        )
         .route("/agents", axum::routing::get(list_agents))
         .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
         .with_state(state)
@@ -316,9 +319,8 @@ async fn create_agent_enrollment_string(
             .ok()
             .and_then(|u| u.host_str().map(ToOwned::to_owned))
             .ok_or_else(|| {
-                HttpError::bad_request().msg(
-                    "could not derive QUIC host: api_base_url has no host component, pass `quic_host` explicitly",
-                )
+                HttpError::bad_request()
+                    .msg("could not derive QUIC host: api_base_url has no host component, pass `quic_host` explicitly")
             })?,
     };
     let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
