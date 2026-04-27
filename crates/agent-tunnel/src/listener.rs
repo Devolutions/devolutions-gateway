@@ -431,8 +431,7 @@ fn bind_dual_stack_endpoint(
     };
 
     let runtime = quinn::default_runtime().context("no quinn-compatible async runtime found")?;
-    quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(server_config), socket, runtime)
-        .map_err(Into::into)
+    quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(server_config), socket, runtime).map_err(Into::into)
 }
 
 fn build_dual_stack_v6_socket(listen_addr: SocketAddr) -> anyhow::Result<UdpSocket> {
