@@ -8,7 +8,7 @@
 # matching the project's smoke-test setup, then starts the agent service in
 # the foreground so the demo can show the QUIC connection log live.
 
-def main [jwt: string] {
+def main [jwt: string, name: string = "demo-agent"] {
     let agent = "D:\\dgw-pr2\\target\\release\\devolutions-agent.exe"
     let agent_dir = "C:\\ProgramData\\Devolutions\\Agent"
     let cert_dir = $"($agent_dir)\\certs"
@@ -24,7 +24,7 @@ def main [jwt: string] {
     }
 
     print "==> Bootstrapping agent (devolutions-agent up)"
-    ^$agent up --enrollment-string $jwt --advertise-routes "10.0.0.0/8,192.168.0.0/16" --advertise-domains "it-help.ninja"
+    ^$agent up --enrollment-string $jwt --name $name --advertise-routes "10.0.0.0/8,192.168.0.0/16" --advertise-domains "it-help.ninja"
 
     print "==> Starting agent service (foreground, Ctrl-C to stop)"
     ^$agent run
