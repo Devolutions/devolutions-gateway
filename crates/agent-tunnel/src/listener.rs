@@ -16,7 +16,6 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::cert::CaManager;
-use super::enrollment_store::EnrollmentTokenStore;
 use super::registry::{AgentPeer, AgentRegistry};
 use super::stream::TunnelStream;
 
@@ -33,7 +32,6 @@ pub struct AgentTunnelHandle {
     /// Map of agent_id → live Quinn connection, used for opening new streams.
     agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
     ca_manager: Arc<CaManager>,
-    enrollment_token_store: Arc<EnrollmentTokenStore>,
 }
 
 impl AgentTunnelHandle {
@@ -43,10 +41,6 @@ impl AgentTunnelHandle {
 
     pub fn ca_manager(&self) -> &CaManager {
         &self.ca_manager
-    }
-
-    pub fn enrollment_token_store(&self) -> &EnrollmentTokenStore {
-        &self.enrollment_token_store
     }
 
     /// Open a proxy stream through a connected agent.
@@ -150,13 +144,11 @@ impl AgentTunnelListener {
 
         let registry = Arc::new(AgentRegistry::new());
         let agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>> = Arc::new(RwLock::new(HashMap::new()));
-        let enrollment_token_store = Arc::new(EnrollmentTokenStore::new());
 
         let handle = AgentTunnelHandle {
             registry: Arc::clone(&registry),
             agent_connections: Arc::clone(&agent_connections),
             ca_manager: Arc::clone(&ca_manager),
-            enrollment_token_store,
         };
 
         let listener = Self {

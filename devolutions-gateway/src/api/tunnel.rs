@@ -88,10 +88,6 @@ pub struct EnrollResponse {
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/enroll", axum::routing::post(enroll_agent))
-        .route(
-            "/enrollment-string",
-            axum::routing::post(create_agent_enrollment_string),
-        )
         .route("/agents", axum::routing::get(list_agents))
         .route("/agents/{agent_id}", axum::routing::get(get_agent).delete(delete_agent))
         .with_state(state)
@@ -99,8 +95,12 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 
 /// Enroll a new agent.
 ///
-/// Requires a Bearer token matching the configured enrollment secret
-/// or a valid one-time enrollment token from the store.
+/// Requires a Bearer token that is either:
+/// - a JWT signed by the configured provisioner key with `TunnelEnroll` /
+///   `Wildcard` scope (issued by DVLS — the only authority for agent
+///   enrollment tokens), or
+/// - the static `enrollment_secret` from the gateway configuration (admin
+///   bootstrap fallback for environments without DVLS).
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
@@ -139,23 +139,18 @@ async fn enroll_agent(
 
     // Token validation order:
     // 1. JWT signed by the configured provisioner key (scope == TunnelEnroll)
-    // 2. One-time enrollment token from the in-memory store
-    // 3. Static enrollment secret from configuration (constant-time comparison)
+    // 2. Static enrollment secret from configuration (constant-time comparison)
     let jwt_valid = validate_enrollment_jwt(provided_token, &conf.provisioner_public_key);
 
     if !jwt_valid {
-        let token_valid = handle.enrollment_token_store().redeem(provided_token).await;
+        let enrollment_secret = conf
+            .agent_tunnel
+            .enrollment_secret
+            .as_deref()
+            .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-        if !token_valid {
-            let enrollment_secret = conf
-                .agent_tunnel
-                .enrollment_secret
-                .as_deref()
-                .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
-
-            if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
-                return Err(HttpError::forbidden().msg("invalid enrollment token"));
-            }
+        if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
+            return Err(HttpError::forbidden().msg("invalid enrollment token"));
         }
     }
 
@@ -255,126 +250,6 @@ async fn delete_agent(
     info!(%agent_id, "Agent deleted via API");
 
     Ok(axum::http::StatusCode::NO_CONTENT)
-}
-
-// ---------------------------------------------------------------------------
-// Enrollment string generation (one-time token for agent bootstrap).
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct AgentEnrollmentStringRequest {
-    /// Base URL for the gateway API (e.g. `https://gateway.example.com`).
-    api_base_url: String,
-    /// Optional QUIC host override. Defaults to the host extracted from
-    /// `api_base_url`. If neither yields a host the request is rejected with
-    /// `400`; the gateway's configured hostname is intentionally not used as
-    /// a fallback because in containerized deployments it is typically a
-    /// container ID the agent cannot dial.
-    quic_host: Option<String>,
-    /// Optional agent name hint.
-    name: Option<String>,
-    /// Token lifetime in seconds (default: 3600).
-    lifetime: Option<u64>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct AgentEnrollmentStringResponse {
-    enrollment_string: String,
-    enrollment_command: String,
-    quic_endpoint: String,
-    expires_at_unix: u64,
-}
-
-/// Generate a one-time enrollment string for agent bootstrap.
-///
-/// Accepts scope tokens with `AgentEnroll`, `ConfigWrite`, or `Wildcard` scope
-/// via [`AgentManagementWriteAccess`]. DVLS signs scope tokens with
-/// `AgentEnroll` specifically; other callers may use the broader
-/// `ConfigWrite` for back-compat.
-async fn create_agent_enrollment_string(
-    State(DgwState {
-        conf_handle,
-        agent_tunnel_handle,
-        ..
-    }): State<DgwState>,
-    _access: AgentManagementWriteAccess,
-    Json(req): Json<AgentEnrollmentStringRequest>,
-) -> Result<Json<AgentEnrollmentStringResponse>, HttpError> {
-    use base64::Engine as _;
-
-    let conf = conf_handle.get_conf();
-
-    let handle = agent_tunnel_handle
-        .as_ref()
-        .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
-
-    let lifetime_secs = req.lifetime.unwrap_or(3600);
-
-    // Reject obviously bogus lifetimes up-front so we never insert a token with
-    // a poisoned expiry. The store and the response both compute
-    // `now + lifetime`, both u64 additions; clamp here to give an early 400.
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let expires_at_unix = now_secs
-        .checked_add(lifetime_secs)
-        .ok_or_else(|| HttpError::bad_request().msg("lifetime is too large"))?;
-
-    // Determine QUIC host: explicit override > host extracted from api_base_url.
-    // We deliberately do NOT fall back to `conf.hostname`: in Docker/K8s that is
-    // typically a container ID or pod name not resolvable by the agent, so a
-    // silent fallback would emit an enrollment string the agent cannot use.
-    // Force the caller to either supply `quic_host` or pass an `api_base_url`
-    // we can parse a host out of.
-    let quic_host = match req.quic_host.as_deref().filter(|h| !h.is_empty()) {
-        Some(host) => host.to_owned(),
-        None => url::Url::parse(&req.api_base_url)
-            .ok()
-            .and_then(|u| u.host_str().map(ToOwned::to_owned))
-            .ok_or_else(|| {
-                HttpError::bad_request()
-                    .msg("could not derive QUIC host: api_base_url has no host component, pass `quic_host` explicitly")
-            })?,
-    };
-    let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
-
-    // Generate a one-time enrollment token stored server-side. Done after the
-    // quic_host validation so a 400 response does not pollute the store.
-    let enrollment_token = Uuid::new_v4().to_string();
-    handle
-        .enrollment_token_store()
-        .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs))
-        .await;
-
-    // Build the enrollment payload.
-    let payload = serde_json::json!({
-        "version": 1,
-        "api_base_url": req.api_base_url,
-        "quic_endpoint": quic_endpoint,
-        "enrollment_token": enrollment_token,
-        "name": req.name,
-    });
-
-    let payload_json = serde_json::to_string(&payload)
-        .map_err(HttpError::internal().with_msg("serialize enrollment payload").err())?;
-
-    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
-    let enrollment_string = format!("dgw-enroll:v1:{encoded}");
-    let enrollment_command = format!("devolutions-agent up --enrollment-string \"{enrollment_string}\"");
-
-    info!(
-        agent_name = ?req.name,
-        lifetime_secs,
-        "Generated agent enrollment string"
-    );
-
-    Ok(Json(AgentEnrollmentStringResponse {
-        enrollment_string,
-        enrollment_command,
-        quic_endpoint,
-        expires_at_unix,
-    }))
 }
 
 #[cfg(test)]
