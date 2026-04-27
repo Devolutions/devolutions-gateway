@@ -200,17 +200,17 @@ jobs:
         id: find-package
         shell: pwsh
         run: |
-          $packageFile = Get-ChildItem -Path "gateway-artifacts/linux/x86_64" `
+          $packageFile = Get-ChildItem -Path "gateway-artifacts/linux/x64" `
             -Filter "${{ matrix.package-pattern }}" -File | Select-Object -First 1
 
           if (-not $packageFile) {
-            Write-Host "::error::No ${{ matrix.package-type }} package found in gateway-artifacts/linux/x86_64"
+            Write-Host "::error::No ${{ matrix.package-type }} package found in gateway-artifacts/linux/x64"
             Write-Host "Available files in gateway-artifacts:"
             Get-ChildItem -Path "gateway-artifacts" -Recurse -File | Sort-Object FullName | ForEach-Object { Write-Host $_.FullName }
             exit 1
           }
 
-          $packageFilePath = "gateway-artifacts/linux/x86_64/$($packageFile.Name)"
+          $packageFilePath = "gateway-artifacts/linux/x64/$($packageFile.Name)"
           Write-Host "Found package: $packageFilePath"
           "package-file=$packageFilePath" >> $env:GITHUB_OUTPUT
           "package-basename=$($packageFile.Name)" >> $env:GITHUB_OUTPUT
