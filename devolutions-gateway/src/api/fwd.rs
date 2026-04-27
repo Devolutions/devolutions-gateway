@@ -263,13 +263,14 @@ where
             .filtering_policy(claims.jet_flt)
             .build();
 
-        info!(
-            mode = match mode {
-                UpstreamMode::Tcp => "tcp",
-                UpstreamMode::Tls => "tls",
-            },
-            "WebSocket forwarding"
-        );
+        // Keep the per-mode message shape that pre-refactor logs and
+        // integration tests grep for ("WebSocket-TCP forwarding" /
+        // "WebSocket-TLS forwarding"); structured `mode` field is for
+        // newer telemetry.
+        match mode {
+            UpstreamMode::Tcp => info!(mode = "tcp", "WebSocket-TCP forwarding"),
+            UpstreamMode::Tls => info!(mode = "tls", "WebSocket-TLS forwarding"),
+        }
 
         Proxy::builder()
             .conf(conf)
