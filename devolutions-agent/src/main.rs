@@ -56,6 +56,7 @@ struct UpCommand {
     enrollment_token: String,
     agent_name: String,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
     /// QUIC endpoint (`host:port`) the agent will connect to for the tunnel.
     /// Source precedence: CLI `--quic-endpoint` > JWT `jet_quic_endpoint` claim.
     /// The gateway does not report this — see `EnrollmentJwtClaims::jet_quic_endpoint`.
@@ -138,10 +139,14 @@ fn parse_required_value(args: &[String], index: &mut usize, flag: &str) -> Resul
 }
 
 fn parse_advertise_subnets(value: &str) -> Vec<String> {
+    parse_comma_separated_list(value)
+}
+
+fn parse_comma_separated_list(value: &str) -> Vec<String> {
     value
         .split(',')
         .map(str::trim)
-        .filter(|subnet| !subnet.is_empty())
+        .filter(|item| !item.is_empty())
         .map(ToOwned::to_owned)
         .collect()
 }
@@ -152,6 +157,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     let mut agent_name = None;
     let mut enrollment_string = None;
     let mut advertise_subnets = Vec::new();
+    let mut advertise_domains = Vec::new();
     let mut cli_quic_endpoint: Option<String> = None;
 
     let mut index = 0;
@@ -167,6 +173,9 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
             "--advertise-routes" | "--advertise-subnets" => {
                 advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
             }
+            "--advertise-domains" => advertise_domains.extend(parse_comma_separated_list(&parse_required_value(
+                args, &mut index, arg,
+            )?)),
             unexpected => bail!("unknown argument for up: {unexpected}"),
         }
 
@@ -200,6 +209,7 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         enrollment_token: enrollment_token.context("missing required --token")?,
         agent_name: agent_name.context("missing required --name")?,
         advertise_subnets,
+        advertise_domains,
         quic_endpoint,
     })
 }
@@ -256,12 +266,10 @@ fn main() {
                     .nth(5)
                     .expect("missing QUIC endpoint (host:port) — required; gateway does not self-report it");
                 let subnets_arg = env::args().nth(6).unwrap_or_default();
+                let domains_arg = env::args().nth(7).unwrap_or_default();
 
-                let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
-                    Vec::new()
-                } else {
-                    subnets_arg.split(',').map(|s| s.trim().to_owned()).collect()
-                };
+                let advertise_subnets: Vec<String> = parse_comma_separated_list(&subnets_arg);
+                let advertise_domains: Vec<String> = parse_comma_separated_list(&domains_arg);
 
                 let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 rt.block_on(async {
@@ -270,6 +278,7 @@ fn main() {
                         &enrollment_token,
                         &agent_name,
                         advertise_subnets,
+                        advertise_domains,
                         quic_endpoint,
                     )
                     .await
@@ -296,6 +305,7 @@ fn main() {
                         &command.enrollment_token,
                         &command.agent_name,
                         command.advertise_subnets,
+                        command.advertise_domains,
                         command.quic_endpoint,
                     )
                     .await
