@@ -197,7 +197,18 @@ impl<'a> RoutePlan<'a> {
             return Ok(Self::Direct(target));
         };
 
-        match resolve_route(handle.registry(), None, target.host()).await {
+        let target_host = target.host();
+        let decision = resolve_route(handle.registry(), None, target_host).await;
+        debug!(
+            target_host,
+            decision = ?match &decision {
+                RoutingDecision::ViaAgent(c) => format!("ViaAgent({} candidates)", c.len()),
+                RoutingDecision::Direct => "Direct".to_owned(),
+                RoutingDecision::ExplicitAgentNotFound(id) => format!("ExplicitAgentNotFound({id})"),
+            },
+            "Routing decision for implicit lookup"
+        );
+        match decision {
             RoutingDecision::ViaAgent(candidates) => Ok(Self::ViaAgent { target, candidates }),
             RoutingDecision::Direct => Ok(Self::Direct(target)),
             RoutingDecision::ExplicitAgentNotFound(agent_id) => {
