@@ -5,7 +5,7 @@
 //! creates proxy streams on demand.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -142,10 +142,11 @@ impl AgentTunnelListener {
 
         server_config.transport_config(Arc::new(transport));
 
-        let endpoint = quinn::Endpoint::server(server_config, listen_addr)
+        let endpoint = bind_dual_stack_endpoint(server_config, listen_addr)
             .with_context(|| format!("bind QUIC endpoint on {listen_addr}"))?;
 
-        info!(%listen_addr, "Agent tunnel QUIC endpoint bound");
+        let bound_addr = endpoint.local_addr().unwrap_or(listen_addr);
+        info!(listen_addr = %bound_addr, "Agent tunnel QUIC endpoint bound");
 
         let registry = Arc::new(AgentRegistry::new());
         let agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -401,4 +402,53 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
             debug!(%agent_id, "Unexpected CertRenewalResponse from agent");
         }
     }
+}
+
+/// Bind a QUIC endpoint, preferring a dual-stack IPv6 socket so the listener
+/// accepts agents whose DNS resolution returns either IPv4 or IPv6.
+///
+/// `quinn::Endpoint::server` would otherwise honor the OS default for
+/// `IPV6_V6ONLY`, which is `0` (dual-stack) on Windows but `1` (v6-only) on
+/// Linux per RFC 3493. We explicitly clear the flag with `socket2`, then hand
+/// the socket to `quinn::Endpoint::new`. If the v6 bind fails entirely
+/// (e.g. IPv6 disabled on the host), we fall back to plain IPv4.
+fn bind_dual_stack_endpoint(
+    server_config: quinn::ServerConfig,
+    listen_addr: SocketAddr,
+) -> anyhow::Result<quinn::Endpoint> {
+    if !listen_addr.is_ipv6() {
+        return quinn::Endpoint::server(server_config, listen_addr).map_err(Into::into);
+    }
+
+    let socket = match build_dual_stack_v6_socket(listen_addr) {
+        Ok(socket) => socket,
+        Err(error) if listen_addr.ip().is_unspecified() => {
+            let v4_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, listen_addr.port()));
+            warn!(%error, fallback = %v4_addr, "IPv6 dual-stack bind failed; falling back to IPv4");
+            return quinn::Endpoint::server(server_config, v4_addr).map_err(Into::into);
+        }
+        Err(error) => return Err(error),
+    };
+
+    let runtime = quinn::default_runtime().context("no quinn-compatible async runtime found")?;
+    quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(server_config), socket, runtime)
+        .map_err(Into::into)
+}
+
+fn build_dual_stack_v6_socket(listen_addr: SocketAddr) -> anyhow::Result<UdpSocket> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV6,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )
+    .context("create IPv6 UDP socket")?;
+
+    if let Err(error) = socket.set_only_v6(false) {
+        warn!(%error, "set_only_v6(false) failed; listener may be IPv6-only");
+    }
+
+    socket.set_nonblocking(true).context("set socket non-blocking")?;
+    socket.bind(&listen_addr.into()).context("bind v6 UDP socket")?;
+
+    Ok(socket.into())
 }
