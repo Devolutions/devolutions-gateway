@@ -380,9 +380,14 @@ async fn run_single_connection(
             Ok(true) => {
                 info!("Certificate expiring within 15 days, initiating renewal");
 
-                let csr_pem =
-                    crate::enrollment::generate_csr_from_existing_key(key_path, &tunnel_conf.gateway_endpoint)
-                        .context("generate renewal CSR")?;
+                // Reuse the agent name from the existing cert as the renewal CSR's
+                // CommonName. `tunnel_conf.gateway_endpoint` (a host:port) is not a
+                // name and would only happen to work today because the gateway
+                // ignores the CSR subject and trusts the mTLS-authenticated name.
+                let agent_name = crate::enrollment::read_agent_name_from_cert(cert_path)
+                    .context("read agent name from existing certificate")?;
+                let csr_pem = crate::enrollment::generate_csr_from_existing_key(key_path, &agent_name)
+                    .context("generate renewal CSR")?;
 
                 ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
                     .await

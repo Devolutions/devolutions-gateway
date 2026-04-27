@@ -307,6 +307,33 @@ pub fn is_cert_expiring(cert_path: &Utf8Path, threshold_days: u32) -> Result<boo
     Ok(not_after_epoch - now_epoch <= threshold_secs)
 }
 
+/// Read the CommonName from an existing PEM certificate.
+///
+/// Used by the renewal path: the agent must reuse its own name across renewals
+/// because the gateway looks it up in the registry, and the most authoritative
+/// source for that name is the cert the gateway itself issued last time.
+pub fn read_agent_name_from_cert(cert_path: &Utf8Path) -> Result<String> {
+    use std::io::BufReader;
+
+    let pem_str = std::fs::read_to_string(cert_path).with_context(|| format!("read certificate from {cert_path}"))?;
+    let der = rustls_pemfile::certs(&mut BufReader::new(pem_str.as_bytes()))
+        .next()
+        .context("empty PEM input")?
+        .context("parse certificate PEM")?;
+    let (_, cert) =
+        x509_parser::parse_x509_certificate(&der).map_err(|e| anyhow::anyhow!("parse X.509 certificate: {e}"))?;
+
+    let cn = cert
+        .subject()
+        .iter_common_name()
+        .next()
+        .context("certificate subject has no Common Name")?
+        .as_str()
+        .context("certificate Common Name is not valid UTF-8")?;
+
+    Ok(cn.to_owned())
+}
+
 /// Generate a CSR using an existing private key (for renewal — key never changes).
 pub fn generate_csr_from_existing_key(key_path: &Utf8Path, agent_name: &str) -> Result<String> {
     let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read private key from {key_path}"))?;
