@@ -121,10 +121,32 @@ async fn kdc_proxy(
     kdc_reply_message.to_vec().map_err(HttpError::internal().err())
 }
 
+/// Hard ceiling on the announced length of a TCP-framed KDC reply.
+///
+/// The KDC TCP transport prefixes its message with a 4-byte big-endian length.
+/// A misbehaving (or malicious) peer can claim up to `u32::MAX` bytes, which
+/// without a cap would have us pre-allocate ~4 GiB on a single reply. 64 KiB
+/// is well above any realistic Kerberos reply size while keeping the worst
+/// case bounded.
+const MAX_KDC_REPLY_MESSAGE_LEN: u32 = 64 * 1024;
+
 async fn read_kdc_reply_message<R: AsyncReadExt + Unpin>(reader: &mut R) -> io::Result<Vec<u8>> {
     let len = reader.read_u32().await?;
-    let mut buf = vec![0; (len + 4).try_into().expect("u32-to-usize")];
-    buf[0..4].copy_from_slice(&(len.to_be_bytes()));
+
+    if len > MAX_KDC_REPLY_MESSAGE_LEN {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("KDC reply too large: announced {len} bytes, maximum is {MAX_KDC_REPLY_MESSAGE_LEN}"),
+        ));
+    }
+
+    let total_len = len
+        .checked_add(4)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "KDC reply length prefix overflowed"))?;
+
+    let mut buf = vec![0; total_len];
+    buf[0..4].copy_from_slice(&len.to_be_bytes());
     reader.read_exact(&mut buf[4..]).await?;
     Ok(buf)
 }

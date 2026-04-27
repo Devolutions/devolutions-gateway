@@ -102,7 +102,9 @@ pub async fn route_and_connect(
     session_id: Uuid,
     target: &str,
 ) -> Result<(TunnelStream, Arc<AgentPeer>)> {
-    assert!(!candidates.is_empty(), "route_and_connect called with empty candidates");
+    if candidates.is_empty() {
+        return Err(anyhow!("route_and_connect called with empty candidates"));
+    }
 
     let mut last_error = None;
 
