@@ -304,24 +304,32 @@ async fn create_agent_enrollment_string(
 
     let lifetime_secs = req.lifetime.unwrap_or(3600);
 
-    // Generate a one-time enrollment token stored server-side.
-    let enrollment_token = Uuid::new_v4().to_string();
-    handle
-        .enrollment_token_store()
-        .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs))
-        .await;
-
-    // Determine QUIC host: explicit override > extract from api_base_url > gateway hostname config.
-    // The gateway hostname config is often a container ID in Docker, so we prefer
-    // extracting the host from the api_base_url which the caller already knows is reachable.
+    // Determine QUIC host: explicit override > host extracted from api_base_url.
+    // We deliberately do NOT fall back to `conf.hostname`: in Docker/K8s that is
+    // typically a container ID or pod name not resolvable by the agent, so a
+    // silent fallback would emit an enrollment string the agent cannot use.
+    // Force the caller to either supply `quic_host` or pass an `api_base_url`
+    // we can parse a host out of.
     let quic_host = match req.quic_host.as_deref().filter(|h| !h.is_empty()) {
         Some(host) => host.to_owned(),
         None => url::Url::parse(&req.api_base_url)
             .ok()
             .and_then(|u| u.host_str().map(ToOwned::to_owned))
-            .unwrap_or_else(|| conf.hostname.clone()),
+            .ok_or_else(|| {
+                HttpError::bad_request().msg(
+                    "could not derive QUIC host: api_base_url has no host component, pass `quic_host` explicitly",
+                )
+            })?,
     };
     let quic_endpoint = format!("{quic_host}:{}", conf.agent_tunnel.listen_port);
+
+    // Generate a one-time enrollment token stored server-side. Done after the
+    // quic_host validation so a 400 response does not pollute the store.
+    let enrollment_token = Uuid::new_v4().to_string();
+    handle
+        .enrollment_token_store()
+        .insert(enrollment_token.clone(), req.name.clone(), Some(lifetime_secs))
+        .await;
 
     // Build the enrollment payload.
     let payload = serde_json::json!({
