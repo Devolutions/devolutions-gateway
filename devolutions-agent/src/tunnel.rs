@@ -337,11 +337,19 @@ async fn run_single_connection(
 
     // -- Connect --
 
-    // Bind to the IPv6 unspecified address so the client socket is dual-stack.
-    // A v4-only socket (0.0.0.0:0) cannot reach a peer resolved to an IPv6 address,
-    // which is the default `localhost`/AAAA-record case on modern systems.
-    let mut endpoint =
-        quinn::Endpoint::client("[::]:0".parse().context("parse bind address")?).context("create QUIC endpoint")?;
+    // Prefer a dual-stack IPv6 client socket so we can reach gateway endpoints
+    // resolved as IPv6 (default for `localhost` and any AAAA-bearing name on
+    // modern systems). If the host has IPv6 disabled (common in stripped-down
+    // Linux containers) the v6 bind fails outright; fall back to plain IPv4
+    // rather than crash the agent with no route to take.
+    let mut endpoint = match quinn::Endpoint::client("[::]:0".parse().expect("static [::]:0 parses")) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            warn!(%error, "IPv6 client bind failed; falling back to IPv4");
+            quinn::Endpoint::client("0.0.0.0:0".parse().expect("static 0.0.0.0:0 parses"))
+                .context("create QUIC endpoint (IPv4 fallback)")?
+        }
+    };
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
@@ -371,9 +379,14 @@ async fn run_single_connection(
             Ok(true) => {
                 info!("Certificate expiring within 15 days, initiating renewal");
 
-                let csr_pem =
-                    crate::enrollment::generate_csr_from_existing_key(key_path, &tunnel_conf.gateway_endpoint)
-                        .context("generate renewal CSR")?;
+                // Reuse the agent name from the existing cert as the renewal CSR's
+                // CommonName. `tunnel_conf.gateway_endpoint` (a host:port) is not a
+                // name and would only happen to work today because the gateway
+                // ignores the CSR subject and trusts the mTLS-authenticated name.
+                let agent_name = crate::enrollment::read_agent_name_from_cert(cert_path)
+                    .context("read agent name from existing certificate")?;
+                let csr_pem = crate::enrollment::generate_csr_from_existing_key(key_path, &agent_name)
+                    .context("generate renewal CSR")?;
 
                 ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
                     .await

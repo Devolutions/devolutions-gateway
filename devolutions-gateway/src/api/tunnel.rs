@@ -266,7 +266,10 @@ pub(crate) struct AgentEnrollmentStringRequest {
     /// Base URL for the gateway API (e.g. `https://gateway.example.com`).
     api_base_url: String,
     /// Optional QUIC host override. Defaults to the host extracted from
-    /// `api_base_url`, falling back to the gateway's configured hostname.
+    /// `api_base_url`. If neither yields a host the request is rejected with
+    /// `400`; the gateway's configured hostname is intentionally not used as
+    /// a fallback because in containerized deployments it is typically a
+    /// container ID the agent cannot dial.
     quic_host: Option<String>,
     /// Optional agent name hint.
     name: Option<String>,
@@ -306,6 +309,17 @@ async fn create_agent_enrollment_string(
         .ok_or_else(|| HttpError::not_found().msg("agent tunnel not configured"))?;
 
     let lifetime_secs = req.lifetime.unwrap_or(3600);
+
+    // Reject obviously bogus lifetimes up-front so we never insert a token with
+    // a poisoned expiry. The store and the response both compute
+    // `now + lifetime`, both u64 additions; clamp here to give an early 400.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expires_at_unix = now_secs
+        .checked_add(lifetime_secs)
+        .ok_or_else(|| HttpError::bad_request().msg("lifetime is too large"))?;
 
     // Determine QUIC host: explicit override > host extracted from api_base_url.
     // We deliberately do NOT fall back to `conf.hostname`: in Docker/K8s that is
@@ -348,12 +362,6 @@ async fn create_agent_enrollment_string(
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
     let enrollment_string = format!("dgw-enroll:v1:{encoded}");
     let enrollment_command = format!("devolutions-agent up --enrollment-string \"{enrollment_string}\"");
-
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let expires_at_unix = now_secs + lifetime_secs;
 
     info!(
         agent_name = ?req.name,
