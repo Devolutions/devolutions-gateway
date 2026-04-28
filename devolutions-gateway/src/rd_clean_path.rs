@@ -3,10 +3,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use ironrdp_connector::sspi;
 use ironrdp_pdu::nego;
 use ironrdp_rdcleanpath::RDCleanPathPdu;
-use secrecy::ExposeSecret as _;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -287,6 +285,7 @@ async fn handle_with_credential_injection(
     active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
     credential_entry: Arc<CredentialEntry>,
+    credential_store: CredentialStoreHandle,
 ) -> anyhow::Result<()> {
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
 
@@ -385,49 +384,11 @@ async fn handle_with_credential_injection(
     let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let krb_server_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server:
-                crate::config::dto::KerberosServer {
-                    max_time_skew,
-                    ticket_decryption_key,
-                    service_user,
-                    ..
-                },
-            kdc_url: _,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        let user = service_user.as_ref().map(|user| {
-            let crate::config::dto::DomainUser {
-                fqdn,
-                password,
-                salt: _,
-            } = user;
-
-            // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
-                fqdn,
-                "",
-                password.expose_secret(),
-            ))
-        });
-
-        Some(sspi::KerberosServerConfig {
-            kerberos_config: sspi::KerberosConfig {
-                // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
-                kdc_url: None,
-                client_computer_name: Some(client_addr.to_string()),
-            },
-            server_properties: sspi::kerberos::ServerProperties::new(
-                &["TERMSRV", &gateway_hostname],
-                user,
-                std::time::Duration::from_secs(*max_time_skew),
-                ticket_decryption_key.clone(),
-            )?,
-        })
-    } else {
-        None
-    };
+    let krb_server_config = crate::rdp_proxy::build_credential_injection_server_kerberos_config(
+        &credential_entry,
+        destination.host(),
+        client_addr,
+    )?;
 
     let client_credssp_fut = crate::rdp_proxy::perform_credssp_with_client(
         &mut client_framed,
@@ -436,6 +397,8 @@ async fn handle_with_credential_injection(
         client_security_protocol,
         &credential_mapping.proxy,
         krb_server_config,
+        credential_store.clone(),
+        gateway_hostname.clone(),
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -550,13 +513,18 @@ pub async fn handle(
     // If a credential mapping has been pushed, we automatically switch to
     // proxy-based credential injection mode. Otherwise, we continue the usual
     // clean path procedure.
-    if let Some(entry) = crate::token::extract_jti(token)
+    if let Some(entry) = crate::token::extract_jet_cred_id(token)
         .ok()
-        .and_then(|token_id| credential_store.get(token_id))
+        .flatten()
+        .and_then(|id| credential_store.get(id))
+        .or_else(|| credential_store.get_by_token(token))
         .filter(|entry| entry.mapping.is_some())
     {
         anyhow::ensure!(token == entry.token, "token mismatch");
-        debug!("Switching to RdpProxy for credential injection (WebSocket)");
+        debug!(
+            cred_injection_id = %entry.cred_injection_id,
+            "Switching to RdpProxy for credential injection (WebSocket)"
+        );
 
         return handle_with_credential_injection(
             client_stream,
@@ -569,6 +537,7 @@ pub async fn handle(
             active_recordings,
             cleanpath_pdu,
             entry,
+            credential_store.clone(),
         )
         .await;
     }

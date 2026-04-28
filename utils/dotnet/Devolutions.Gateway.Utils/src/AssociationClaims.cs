@@ -26,6 +26,9 @@ public class AssociationClaims : IGatewayClaims
     [JsonPropertyName("jet_reuse")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ReusePolicy? ReusePolicy { get; set; }
+    [JsonPropertyName("jet_cred_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? JetCredId { get; set; }
 
     public AssociationClaims(
         Guid scopeGatewayId,

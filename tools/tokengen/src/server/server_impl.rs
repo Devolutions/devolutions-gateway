@@ -142,6 +142,7 @@ pub(crate) async fn rdp_tls_handler(
             dst_usr: request.dst_usr,
             dst_pwd: request.dst_pwd,
             jet_aid: request.jet_aid,
+            jet_cred_id: request.jet_cred_id,
         },
     )
     .await
@@ -212,6 +213,7 @@ pub(crate) async fn kdc_handler(
         SubCommandArgs::Kdc {
             krb_realm: request.krb_realm,
             krb_kdc: request.krb_kdc,
+            jet_cred_id: request.jet_cred_id,
         },
     )
     .await
@@ -305,6 +307,7 @@ pub(crate) struct RdpTlsRequest {
     dst_usr: String,
     dst_pwd: String,
     jet_aid: Option<Uuid>,
+    jet_cred_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -341,6 +344,7 @@ pub(crate) struct KdcRequest {
     common: CommonRequest,
     krb_realm: String,
     krb_kdc: String,
+    jet_cred_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]

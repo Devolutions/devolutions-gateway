@@ -343,6 +343,7 @@ pub(crate) async fn sign_session_token(
                 jti,
                 cert_thumb256: None,
                 jet_agent_id: None,
+                jet_cred_id: None,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {
@@ -388,6 +389,7 @@ pub(crate) async fn sign_session_token(
             KdcTokenClaims {
                 krb_realm: krb_realm.into(),
                 krb_kdc: krb_kdc.clone(),
+                jet_cred_id: None,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

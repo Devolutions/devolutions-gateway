@@ -66,6 +66,13 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
+        /// Reference to a credential-injection record.  Optional for backward compatibility on &quot;provision-credentials&quot; kind.
+        /// </summary>
+        /// <value>Reference to a credential-injection record.  Optional for backward compatibility on &quot;provision-credentials&quot; kind.</value>
+        [DataMember(Name = "cred_injection_id", EmitDefaultValue = true)]
+        public Guid? CredInjectionId { get; set; }
+
+        /// <summary>
         /// The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind.
         /// </summary>
         /// <value>The hostname to perform DNS resolution on.  Required for \&quot;resolve-host\&quot; kind.</value>
@@ -113,6 +120,7 @@ namespace Devolutions.Gateway.Client.Model
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("class PreflightOperation {\n");
+            sb.Append("  CredInjectionId: ").Append(CredInjectionId).Append("\n");
             sb.Append("  HostToResolve: ").Append(HostToResolve).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
             sb.Append("  Kind: ").Append(Kind).Append("\n");

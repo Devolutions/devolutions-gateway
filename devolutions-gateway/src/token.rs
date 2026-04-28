@@ -431,6 +431,9 @@ pub struct AssociationTokenClaims {
     /// When set alongside `ConnectionMode::Fwd`, the Gateway will proxy the connection
     /// through the specified agent instead of connecting directly to the target.
     pub jet_agent_id: Option<Uuid>,
+
+    /// Reference to a credential-injection record provisioned via /jet/preflight.
+    pub jet_cred_id: Option<Uuid>,
 }
 
 // ----- scope claims ----- //
@@ -616,6 +619,9 @@ pub struct KdcTokenClaims {
     /// Default scheme is `tcp`.
     /// Default port is `88`.
     pub krb_kdc: TargetAddr,
+
+    /// Reference to a credential-injection record provisioned via /jet/preflight.
+    pub jet_cred_id: Option<Uuid>,
 }
 
 // ----- jrl claims ----- //
@@ -1216,12 +1222,48 @@ fn extract_uuid(token: &str, field: &str) -> anyhow::Result<Uuid> {
     Ok(uuid)
 }
 
+fn extract_optional_uuid(token: &str, field: &str) -> anyhow::Result<Option<Uuid>> {
+    let jws = RawJws::decode(token)
+        .context("failed to parse the provided JWS")?
+        .discard_signature();
+    let payload = serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")?;
+    let Some(uuid) = payload.get(field) else {
+        return Ok(None);
+    };
+    let uuid = uuid.as_str().context("value is malformed")?;
+    let uuid = Uuid::from_str(uuid).context("value is not a valid UUID string")?;
+
+    Ok(Some(uuid))
+}
+
 pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
     extract_uuid(token, "jti").context("extract jti")
 }
 
 pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {
     extract_uuid(token, "jet_aid").context("extract jet_aid")
+}
+
+pub fn extract_jet_cred_id(token: &str) -> anyhow::Result<Option<Uuid>> {
+    extract_optional_uuid(token, "jet_cred_id").context("extract jet_cred_id")
+}
+
+/// Extract the destination host claim (`dst_hst`) from an association token without verifying its
+/// signature. Returns `None` if the claim is missing.
+///
+/// Used by the credential store to remember the target server's hostname for a credential-injection
+/// session, so that fake-KDC can validate the client's TGS-REQ sname against it (the SPN the client
+/// actually requested is `TERMSRV/<dst_host>`, not Gateway's own hostname).
+pub fn extract_dst_hst(token: &str) -> anyhow::Result<Option<String>> {
+    let jws = RawJws::decode(token)
+        .context("failed to parse the provided JWS")?
+        .discard_signature();
+    let payload = serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")?;
+    let Some(value) = payload.get("dst_hst") else {
+        return Ok(None);
+    };
+    let dst_hst = value.as_str().context("dst_hst is malformed")?;
+    Ok(Some(dst_hst.to_owned()))
 }
 
 #[deprecated = "make sure this is never used without a deliberate action"]
@@ -1353,6 +1395,8 @@ mod serde_impl {
         cert_thumb256: Option<SmolStr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         jet_agent_id: Option<Uuid>,
+        #[serde(default)]
+        jet_cred_id: Option<Uuid>,
     }
 
     #[derive(Deserialize)]
@@ -1391,6 +1435,8 @@ mod serde_impl {
     struct KdcClaimsHelper {
         krb_realm: SmolStr,
         krb_kdc: SmolStr,
+        #[serde(default)]
+        jet_cred_id: Option<Uuid>,
     }
 
     impl ser::Serialize for SessionTtl {
@@ -1462,6 +1508,7 @@ mod serde_impl {
                 jti: self.jti,
                 cert_thumb256: self.cert_thumb256.as_ref().map(|thumb| SmolStr::new(thumb.as_str())),
                 jet_agent_id: self.jet_agent_id,
+                jet_cred_id: self.jet_cred_id,
             }
             .serialize(serializer)
         }
@@ -1512,6 +1559,7 @@ mod serde_impl {
                     .transpose()
                     .map_err(de::Error::custom)?,
                 jet_agent_id: claims.jet_agent_id,
+                jet_cred_id: claims.jet_cred_id,
             })
         }
     }
@@ -1640,6 +1688,7 @@ mod serde_impl {
             KdcClaimsHelper {
                 krb_realm: self.krb_realm.clone(),
                 krb_kdc: SmolStr::new(self.krb_kdc.as_str()),
+                jet_cred_id: self.jet_cred_id,
             }
             .serialize(serializer)
         }
@@ -1675,6 +1724,7 @@ mod serde_impl {
             Ok(Self {
                 krb_realm: claims.krb_realm,
                 krb_kdc,
+                jet_cred_id: claims.jet_cred_id,
             })
         }
     }
