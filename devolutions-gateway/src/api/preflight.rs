@@ -46,6 +46,8 @@ struct ProvisionCredentialsParams {
     token: String,
     #[serde(flatten)]
     mapping: crate::credential::CleartextAppCredentialMapping,
+    #[serde(default)]
+    cred_injection_id: Option<Uuid>,
     time_to_live: Option<u32>,
 }
 
@@ -114,6 +116,11 @@ pub(crate) enum PreflightOutputKind {
     },
     #[serde(rename = "ack")]
     Ack,
+    #[serde(rename = "provisioned-credentials")]
+    ProvisionedCredentials {
+        #[serde(rename = "cred_injection_id")]
+        cred_injection_id: Uuid,
+    },
 }
 
 #[allow(
@@ -310,17 +317,18 @@ async fn handle_operation(
             });
         }
         OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
-            let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
+            let (token, time_to_live, mapping, cred_injection_id) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
                 let ProvisionTokenParams { token, time_to_live } =
                     from_params(operation.params).map_err(PreflightError::invalid_params)?;
-                (token, time_to_live, None)
+                (token, time_to_live, None, None)
             } else {
                 let ProvisionCredentialsParams {
                     token,
                     mapping,
+                    cred_injection_id,
                     time_to_live,
                 } = from_params(operation.params).map_err(PreflightError::invalid_params)?;
-                (token, time_to_live, Some(mapping))
+                (token, time_to_live, Some(mapping), cred_injection_id)
             };
 
             let time_to_live = time_to_live
@@ -337,8 +345,8 @@ async fn handle_operation(
                 });
             }
 
-            let previous_entry = credential_store
-                .insert(token, mapping, time_to_live)
+            let (provisioned_cred_injection_id, previous_entry) = credential_store
+                .insert(token, mapping, cred_injection_id, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|e| match e {
                     InsertError::InvalidToken(_) => {
@@ -362,7 +370,13 @@ async fn handle_operation(
 
             outputs.push(PreflightOutput {
                 operation_id: operation.id,
-                kind: PreflightOutputKind::Ack,
+                kind: if operation.kind.as_str() == OP_PROVISION_CREDENTIALS {
+                    PreflightOutputKind::ProvisionedCredentials {
+                        cred_injection_id: provisioned_cred_injection_id,
+                    }
+                } else {
+                    PreflightOutputKind::Ack
+                },
             });
         }
         OP_RESOLVE_HOST => {

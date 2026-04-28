@@ -33,6 +33,8 @@ pub struct AssociationClaims<'a> {
     pub dst_hst: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cert_thumb256: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_cred_id: Option<Uuid>,
     #[serde(flatten)]
     pub creds: Option<CredsClaims<'a>>,
 }
@@ -103,6 +105,8 @@ pub struct KdcClaims<'a> {
     pub krb_kdc: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jet_gw_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_cred_id: Option<Uuid>,
     pub exp: i64,
     pub nbf: i64,
     pub jti: Uuid,
@@ -232,6 +236,7 @@ pub enum SubCommandArgs {
         dst_usr: String,
         dst_pwd: String,
         jet_aid: Option<Uuid>,
+        jet_cred_id: Option<Uuid>,
     },
     Scope {
         scope: String,
@@ -259,6 +264,7 @@ pub enum SubCommandArgs {
     Kdc {
         krb_realm: String,
         krb_kdc: String,
+        jet_cred_id: Option<Uuid>,
     },
     Jrl {
         revoked_jti_list: Vec<Uuid>,
@@ -311,6 +317,7 @@ pub fn generate_token(
                 jet_gw_id,
                 jet_reuse,
                 cert_thumb256: cert_thumb256.as_deref(),
+                jet_cred_id: None,
                 creds: None,
             };
             ("ASSOCIATION", serde_json::to_value(claims)?)
@@ -322,6 +329,7 @@ pub fn generate_token(
             dst_usr,
             dst_pwd,
             jet_aid,
+            jet_cred_id,
         } => {
             let claims = AssociationClaims {
                 exp,
@@ -336,6 +344,7 @@ pub fn generate_token(
                 jet_gw_id,
                 jet_reuse: None,
                 cert_thumb256: None,
+                jet_cred_id,
                 creds: Some(CredsClaims {
                     prx_usr: &prx_usr,
                     prx_pwd: &prx_pwd,
@@ -367,6 +376,7 @@ pub fn generate_token(
                 jet_gw_id,
                 jet_reuse: None,
                 cert_thumb256: None,
+                jet_cred_id: None,
                 creds: None,
             };
             ("ASSOCIATION", serde_json::to_value(claims)?)
@@ -452,13 +462,18 @@ pub fn generate_token(
             };
             ("JREC", serde_json::to_value(claims)?)
         }
-        SubCommandArgs::Kdc { krb_realm, krb_kdc } => {
+        SubCommandArgs::Kdc {
+            krb_realm,
+            krb_kdc,
+            jet_cred_id,
+        } => {
             let claims = KdcClaims {
                 exp,
                 nbf,
                 krb_realm: &krb_realm,
                 krb_kdc: &krb_kdc,
                 jet_gw_id,
+                jet_cred_id,
                 jti,
             };
             ("KDC", serde_json::to_value(claims)?)

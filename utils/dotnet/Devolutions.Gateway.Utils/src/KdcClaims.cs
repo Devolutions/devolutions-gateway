@@ -10,6 +10,9 @@ public class KdcClaims : IGatewayClaims
     public string KrbRealm { get; set; }
     [JsonPropertyName("jet_gw_id")]
     public Guid ScopeGatewayId { get; set; }
+    [JsonPropertyName("jet_cred_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? JetCredId { get; set; }
 
     public KdcClaims(Guid scopeGatewayId, TargetAddr krbKdc, string krbRealm)
     {

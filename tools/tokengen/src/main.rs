@@ -76,6 +76,7 @@ fn sign(
             dst_usr,
             dst_pwd,
             jet_aid,
+            jet_cred_id,
         } => SubCommandArgs::RdpTls {
             dst_hst,
             prx_usr,
@@ -83,6 +84,7 @@ fn sign(
             dst_usr,
             dst_pwd,
             jet_aid,
+            jet_cred_id,
         },
         SignSubCommand::Scope { scope } => SubCommandArgs::Scope { scope },
         SignSubCommand::Bridge {
@@ -122,7 +124,15 @@ fn sign(
             jet_aid,
             jet_reuse,
         },
-        SignSubCommand::Kdc { krb_realm, krb_kdc } => SubCommandArgs::Kdc { krb_realm, krb_kdc },
+        SignSubCommand::Kdc {
+            krb_realm,
+            krb_kdc,
+            jet_cred_id,
+        } => SubCommandArgs::Kdc {
+            krb_realm,
+            krb_kdc,
+            jet_cred_id,
+        },
         SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
     };
@@ -215,6 +225,8 @@ enum SignSubCommand {
         dst_pwd: String,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_cred_id: Option<Uuid>,
     },
     Scope {
         scope: String,
@@ -258,6 +270,8 @@ enum SignSubCommand {
         krb_realm: String,
         #[clap(long)]
         krb_kdc: String,
+        #[clap(long)]
+        jet_cred_id: Option<Uuid>,
     },
     Jrl {
         #[clap(long)]

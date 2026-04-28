@@ -7,13 +7,16 @@ use ironrdp_connector::credssp::CredsspProcessGenerator as CredsspClientProcessG
 use ironrdp_connector::sspi;
 use ironrdp_connector::sspi::generator::{GeneratorState, NetworkRequest};
 use ironrdp_pdu::{mcs, nego, x224};
+use picky_krb::messages::KdcProxyMessage;
 use secrecy::ExposeSecret as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use typed_builder::TypedBuilder;
+use url::Url;
+use uuid::Uuid;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
-use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
+use crate::credential::{AppCredentialMapping, ArcCredentialEntry, CredentialStoreHandle, build_session_kdc_config};
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
@@ -28,6 +31,7 @@ pub struct RdpProxy<C, S> {
     server_stream: S,
     server_addr: SocketAddr,
     credential_entry: ArcCredentialEntry,
+    credential_store: CredentialStoreHandle,
     client_stream_leftover_bytes: bytes::BytesMut,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
@@ -59,6 +63,7 @@ where
         server_stream,
         server_addr,
         credential_entry,
+        credential_store,
         client_stream_leftover_bytes,
         sessions,
         subscriber_tx,
@@ -112,49 +117,8 @@ where
     let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let krb_server_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server:
-                crate::config::dto::KerberosServer {
-                    max_time_skew,
-                    ticket_decryption_key,
-                    service_user,
-                    ..
-                },
-            kdc_url: _,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        let user = service_user.as_ref().map(|user| {
-            let crate::config::dto::DomainUser {
-                fqdn,
-                password,
-                salt: _,
-            } = user;
-
-            // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
-                fqdn,
-                "",
-                password.expose_secret(),
-            ))
-        });
-
-        Some(sspi::KerberosServerConfig {
-            kerberos_config: sspi::KerberosConfig {
-                // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
-                kdc_url: None,
-                client_computer_name: Some(client_addr.to_string()),
-            },
-            server_properties: sspi::kerberos::ServerProperties::new(
-                &["TERMSRV", &gateway_hostname],
-                user,
-                std::time::Duration::from_secs(*max_time_skew),
-                ticket_decryption_key.clone(),
-            )?,
-        })
-    } else {
-        None
-    };
+    let krb_server_config =
+        build_credential_injection_server_kerberos_config(&credential_entry, &server_dns_name, client_addr)?;
 
     let client_credssp_fut = perform_credssp_with_client(
         &mut client_framed,
@@ -163,6 +127,7 @@ where
         handshake_result.client_security_protocol,
         &credential_mapping.proxy,
         krb_server_config,
+        credential_store.clone(),
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -393,6 +358,43 @@ where
     handshake_result
 }
 
+pub(crate) fn build_credential_injection_server_kerberos_config(
+    credential_entry: &ArcCredentialEntry,
+    target_hostname: &str,
+    client_addr: SocketAddr,
+) -> anyhow::Result<Option<sspi::KerberosServerConfig>> {
+    let Some(kerberos) = credential_entry.kerberos.as_ref() else {
+        return Ok(None);
+    };
+
+    let user = sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
+        &kerberos.service_user_name,
+        &kerberos.realm,
+        &kerberos.service_user_password,
+    ));
+
+    let kdc_url = Url::parse(&format!("http://cred.invalid/{}", credential_entry.cred_injection_id))
+        .context("build in-process KDC URL")?;
+
+    // The SPN that the *client* is going to put on its AP-REQ ticket is the one for the
+    // target RDP server (`TERMSRV/<target>`) — that's the server identity it thinks it is
+    // authenticating against. Gateway-as-CredSSP-server is impersonating that target, so
+    // ServerProperties must claim the same SPN; otherwise sspi-rs rejects the ticket with
+    // `invalid ticket service name`.
+    Ok(Some(sspi::KerberosServerConfig {
+        kerberos_config: sspi::KerberosConfig {
+            kdc_url: Some(kdc_url),
+            client_computer_name: Some(client_addr.to_string()),
+        },
+        server_properties: sspi::kerberos::ServerProperties::new(
+            &["TERMSRV", target_hostname],
+            Some(user),
+            std::time::Duration::from_secs(300),
+            Some(kerberos.service_long_term_key.clone()),
+        )?,
+    }))
+}
+
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
 pub(crate) async fn perform_credssp_with_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
@@ -423,7 +425,7 @@ where
         credentials,
         None,
         security_protocol,
-        ironrdp_connector::ServerName::new(server_name),
+        ironrdp_connector::ServerName::new(server_name.clone()),
         server_public_key,
         kerberos_config,
     )?;
@@ -465,13 +467,14 @@ where
 
 async fn resolve_server_generator(
     generator: &mut CredsspServerProcessGenerator<'_>,
+    credential_store: &CredentialStoreHandle,
 ) -> Result<sspi::credssp::ServerState, sspi::credssp::ServerError> {
     let mut state = generator.start();
 
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = send_network_request(&request)
+                let response = send_network_request(&request, Some(credential_store))
                     .await
                     .map_err(|err| sspi::credssp::ServerError {
                         ts_request: None,
@@ -495,7 +498,7 @@ async fn resolve_client_generator(
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = send_network_request(&request).await?;
+                let response = send_network_request(&request, None).await?;
                 state = generator.resume(Ok(response));
             }
             GeneratorState::Completed(client_state) => {
@@ -515,6 +518,7 @@ pub(crate) async fn perform_credssp_with_client<S>(
     security_protocol: nego::SecurityProtocol,
     credentials: &crate::credential::AppCredential,
     kerberos_server_config: Option<sspi::KerberosServerConfig>,
+    credential_store: CredentialStoreHandle,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -535,6 +539,7 @@ where
         gateway_public_key,
         credentials,
         kerberos_server_config,
+        &credential_store,
     )
     .await;
 
@@ -562,6 +567,7 @@ where
         public_key: Vec<u8>,
         credentials: &crate::credential::AppCredential,
         kerberos_server_config: Option<sspi::KerberosServerConfig>,
+        credential_store: &CredentialStoreHandle,
     ) -> anyhow::Result<()>
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -603,7 +609,7 @@ where
 
             let result = {
                 let mut generator = sequence.process_ts_request(ts_request);
-                resolve_server_generator(&mut generator).await
+                resolve_server_generator(&mut generator, credential_store).await
             }; // drop generator
 
             buf.clear();
@@ -634,10 +640,84 @@ where
     Ok(())
 }
 
-async fn send_network_request(request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
-    let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
+async fn send_network_request(
+    request: &NetworkRequest,
+    credential_store: Option<&CredentialStoreHandle>,
+) -> anyhow::Result<Vec<u8>> {
+    match request.url.scheme() {
+        "tcp" | "udp" => {
+            let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
 
-    send_krb_message(&target_addr, &request.data)
-        .await
-        .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
+            send_krb_message(&target_addr, &request.data)
+                .await
+                .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
+        }
+        "http" | "https" => {
+            if request.url.host_str() == Some("cred.invalid") {
+                return send_in_process_kdc_request(request, credential_store).await;
+            }
+
+            let response = reqwest::Client::new()
+                .post(request.url.clone())
+                .body(request.data.clone())
+                .send()
+                .await
+                .context("failed to send KDC proxy request")?
+                .error_for_status()
+                .context("KDC proxy request failed")?;
+
+            response
+                .bytes()
+                .await
+                .map(Vec::from)
+                .context("failed to read KDC proxy response")
+        }
+        unsupported => anyhow::bail!("unsupported KDC request scheme: {unsupported}"),
+    }
+}
+
+async fn send_in_process_kdc_request(
+    request: &NetworkRequest,
+    credential_store: Option<&CredentialStoreHandle>,
+) -> anyhow::Result<Vec<u8>> {
+    let credential_store = credential_store.context("in-process KDC request without credential store")?;
+    let cred_injection_id = request
+        .url
+        .path()
+        .trim_start_matches('/')
+        .parse::<Uuid>()
+        .context("malformed in-process KDC URL")?;
+
+    let entry = credential_store
+        .get(cred_injection_id)
+        .context("credential entry no longer exists")?;
+    let kerberos = entry.kerberos.as_ref().context("entry without Kerberos state")?;
+    let mapping = entry.mapping.as_ref().context("entry without credential mapping")?;
+
+    debug!(
+        cred_injection_id = %cred_injection_id,
+        scheme = %request.url.scheme(),
+        "In-process KDC dispatch"
+    );
+
+    let kdc_message = KdcProxyMessage::from_raw(&request.data).context("malformed in-process KDC proxy payload")?;
+    let request_realm = kdc_message
+        .target_domain
+        .0
+        .as_ref()
+        .map(|target_domain| target_domain.0.to_string())
+        .unwrap_or_else(|| kerberos.realm.clone());
+
+    let config = build_session_kdc_config(kerberos, mapping, &request_realm)?;
+    // Fake-KDC validates TGS-REQ sname against `TERMSRV/<hostname>`. The in-process loopback
+    // typically carries a Gateway-as-Service self-AS-REQ which has no sname check, but if any
+    // TGS-REQ ever lands here we still need the target hostname — falling back to Gateway's
+    // hostname would silently mask the SPN-mismatch bug. Error out cleanly instead.
+    let kdc_hostname = entry.target_hostname.as_deref().context(
+        "credential-injection session has no target hostname (dst_hst missing or malformed in association token)",
+    )?;
+    let reply =
+        kdc::handle_kdc_proxy_message(kdc_message, &config, kdc_hostname).context("handle in-process KDC message")?;
+
+    reply.to_vec().context("encode in-process KDC reply")
 }

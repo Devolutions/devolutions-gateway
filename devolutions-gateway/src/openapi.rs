@@ -371,6 +371,10 @@ struct PreflightOperation {
     ///
     /// Required for "provision-credentials" kind.
     target_credential: Option<AppCredential>,
+    /// Reference to a credential-injection record.
+    ///
+    /// Optional for backward compatibility on "provision-credentials" kind.
+    cred_injection_id: Option<Uuid>,
     /// The hostname to perform DNS resolution on.
     ///
     /// Required for "resolve-host" kind.
@@ -466,6 +470,10 @@ pub(crate) struct PreflightOutput {
     ///
     /// Set for "alert" kind.
     alert_message: Option<String>,
+    /// Reference to the provisioned credential-injection record.
+    ///
+    /// Set for "provisioned-credentials" kind.
+    cred_injection_id: Option<Uuid>,
 }
 
 #[allow(unused)]
@@ -483,6 +491,8 @@ pub(crate) enum PreflightOutputKind {
     ResolvedHost,
     #[serde(rename = "alert")]
     Alert,
+    #[serde(rename = "provisioned-credentials")]
+    ProvisionedCredentials,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

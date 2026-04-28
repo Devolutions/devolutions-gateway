@@ -1300,6 +1300,14 @@ components:
           allOf:
           - $ref: '#/components/schemas/AppCredential'
           nullable: true
+        cred_injection_id:
+          type: string
+          format: uuid
+          description: |-
+            Reference to a credential-injection record.
+
+            Optional for backward compatibility on "provision-credentials" kind.
+          nullable: true
         time_to_live:
           type: integer
           format: int32
@@ -1349,6 +1357,14 @@ components:
         alert_status:
           allOf:
           - $ref: '#/components/schemas/PreflightAlertStatus'
+          nullable: true
+        cred_injection_id:
+          type: string
+          format: uuid
+          description: |-
+            Reference to the provisioned credential-injection record.
+
+            Set for "provisioned-credentials" kind.
           nullable: true
         kind:
           $ref: '#/components/schemas/PreflightOutputKind'
@@ -1421,6 +1437,7 @@ components:
       - recording-storage-health
       - resolved-host
       - alert
+      - provisioned-credentials
     PubKeyFormat:
       type: string
       enum:
@@ -1721,4 +1738,3 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing usage of the standalone web application
-

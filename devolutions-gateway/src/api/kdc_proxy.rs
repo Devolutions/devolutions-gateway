@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
 use crate::DgwState;
+use crate::credential::build_session_kdc_config;
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::target_addr::TargetAddr;
 use crate::token::AccessTokenClaims;
@@ -25,6 +26,7 @@ async fn kdc_proxy(
         token_cache,
         jrl,
         recordings,
+        credential_store,
         ..
     }): State<DgwState>,
     extract::Path(token): extract::Path<String>,
@@ -58,13 +60,34 @@ async fn kdc_proxy(
         "KDC message",
     );
 
-    let realm = if let Some(realm) = &kdc_proxy_message.target_domain.0 {
-        realm.0.to_string()
-    } else {
-        return Err(HttpError::bad_request().msg("realm is missing from KDC request"));
-    };
+    // The KdcProxyMessage envelope's `target_domain` field is a routing hint for real-KDC-proxy
+    // deployments. iron-remote-desktop's sspi-rs (WASM) sometimes leaves this field empty even
+    // though the inner Kerberos messages carry a real realm. For credential-injection sessions
+    // we know the canonical realm (recorded on `entry.kerberos.realm` at preflight time), so we
+    // fall back to it. Forward-to-real-KDC paths still require the envelope to be set.
+    let request_realm = kdc_proxy_message
+        .target_domain
+        .0
+        .as_ref()
+        .map(|r| r.0.to_string())
+        .filter(|s| !s.is_empty());
 
-    debug!("Request is for realm (target_domain): {realm}");
+    let injection_entry = claims.jet_cred_id.and_then(|id| credential_store.get(id));
+
+    let realm =
+        match (&request_realm, &injection_entry) {
+            (Some(r), _) => r.clone(),
+            (None, Some(entry)) => entry.kerberos.as_ref().map(|k| k.realm.clone()).ok_or_else(|| {
+                HttpError::bad_request().msg("session has no Kerberos state and request has no realm")
+            })?,
+            (None, None) => return Err(HttpError::bad_request().msg("realm is missing from KDC request")),
+        };
+
+    debug!(
+        request_realm = ?request_realm,
+        resolved_realm = %realm,
+        "KDC request realm resolution"
+    );
 
     if !claims.krb_realm.eq_ignore_ascii_case(&realm) {
         if conf.debug.disable_token_validation {
@@ -82,18 +105,31 @@ async fn kdc_proxy(
         }
     }
 
-    let gateway_id = conf
-        .id
-        .ok_or_else(|| HttpError::internal().build("Gateway ID is missing"))?;
-    if let Some(krb_config) = &conf.debug.kerberos
-        && realm.eq_ignore_ascii_case(&krb_config.kerberos_server.realm(gateway_id))
-        && conf.debug.enable_unstable
-    {
-        debug!("Proxy-based credential injection with Kerberos. Processing KdcProxy message internally...");
+    if let Some(entry) = injection_entry {
+        debug!(
+            cred_injection_id = %entry.cred_injection_id,
+            "Proxy-based credential injection with Kerberos. Processing KdcProxy message internally"
+        );
 
-        let config = krb_config.kerberos_server.clone().into_kdc_kerberos_config(gateway_id);
-        let kdc_reply_message = handle_kdc_proxy_message(kdc_proxy_message, &config, &conf.hostname)
-            .map_err(HttpError::internal().err())?;
+        let kerberos = entry
+            .kerberos
+            .as_ref()
+            .ok_or_else(|| HttpError::bad_request().msg("session has no Kerberos state"))?;
+        let mapping = entry
+            .mapping
+            .as_ref()
+            .ok_or_else(|| HttpError::bad_request().msg("session has no credential mapping"))?;
+        let config = build_session_kdc_config(kerberos, mapping, &realm).map_err(HttpError::internal().err())?;
+        // Fake-KDC validates client TGS-REQ sname against `TERMSRV/<hostname>`. The client's
+        // ticket is for the *target* RDP server, so this must be the target hostname captured at
+        // preflight (entry.target_hostname). Falling back to Gateway's hostname would silently
+        // mask the bug this commit fixed, so we error out instead.
+        let kdc_hostname = entry.target_hostname.as_deref().ok_or_else(|| {
+            HttpError::internal()
+                .msg("credential-injection session has no target hostname (dst_hst missing or malformed in association token)")
+        })?;
+        let kdc_reply_message =
+            handle_kdc_proxy_message(kdc_proxy_message, &config, kdc_hostname).map_err(HttpError::internal().err())?;
 
         return kdc_reply_message.to_vec().map_err(HttpError::internal().err());
     }
