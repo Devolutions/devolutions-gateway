@@ -66,7 +66,6 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
 
     let (app, state, _handles) = make_router()?;
 
-    let token_id = Uuid::from_str("5e3e833f-84c7-4541-b676-acc3299e39b8").unwrap();
     let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgifQ.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
 
     let op_id = Uuid::new_v4();
@@ -89,10 +88,20 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
     let body: serde_json::Value = serde_json::from_slice(&body)?;
     assert_eq!(body.as_array().expect("an array").len(), 1);
     assert_eq!(body[0]["operation_id"], op_id.to_string());
-    assert_eq!(body[0]["kind"], "ack", "{:?}", body[1]);
+    // DGW-378: provision-credentials now returns the new `provisioned-credentials` output kind,
+    // which carries the `cred_injection_id` the gateway minted (or received) for this session.
+    assert_eq!(body[0]["kind"], "provisioned-credentials", "{:?}", body[0]);
+    let cred_injection_id_str = body[0]["cred_injection_id"]
+        .as_str()
+        .expect("response carries cred_injection_id");
+    let cred_injection_id = Uuid::from_str(cred_injection_id_str).expect("cred_injection_id is a valid UUID");
 
-    let entry = state.credential_store.get(token_id).expect("the provisioned entry");
+    let entry = state
+        .credential_store
+        .get(cred_injection_id)
+        .expect("the provisioned entry");
     assert_eq!(entry.token, token);
+    assert_eq!(entry.cred_injection_id, cred_injection_id);
 
     let now = time::OffsetDateTime::now_utc();
     assert!(now + time::Duration::seconds(10) < entry.expires_at);
