@@ -398,7 +398,6 @@ async fn handle_with_credential_injection(
         &credential_mapping.proxy,
         krb_server_config,
         credential_store.clone(),
-        gateway_hostname.clone(),
     );
 
     let krb_client_config = if conf.debug.enable_unstable

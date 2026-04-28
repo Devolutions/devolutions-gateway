@@ -128,7 +128,6 @@ where
         &credential_mapping.proxy,
         krb_server_config,
         credential_store.clone(),
-        gateway_hostname.clone(),
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -436,7 +435,7 @@ where
     loop {
         let client_state = {
             let mut generator = sequence.process_ts_request(ts_request);
-            resolve_client_generator(&mut generator, &server_name).await?
+            resolve_client_generator(&mut generator).await?
         }; // drop generator
 
         buf.clear();
@@ -469,14 +468,13 @@ where
 async fn resolve_server_generator(
     generator: &mut CredsspServerProcessGenerator<'_>,
     credential_store: &CredentialStoreHandle,
-    gateway_hostname: &str,
 ) -> Result<sspi::credssp::ServerState, sspi::credssp::ServerError> {
     let mut state = generator.start();
 
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = send_network_request(&request, Some(credential_store), gateway_hostname)
+                let response = send_network_request(&request, Some(credential_store))
                     .await
                     .map_err(|err| sspi::credssp::ServerError {
                         ts_request: None,
@@ -494,14 +492,13 @@ async fn resolve_server_generator(
 
 async fn resolve_client_generator(
     generator: &mut CredsspClientProcessGenerator<'_>,
-    gateway_hostname: &str,
 ) -> anyhow::Result<sspi::credssp::ClientState> {
     let mut state = generator.start();
 
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = send_network_request(&request, None, gateway_hostname).await?;
+                let response = send_network_request(&request, None).await?;
                 state = generator.resume(Ok(response));
             }
             GeneratorState::Completed(client_state) => {
@@ -526,7 +523,6 @@ pub(crate) async fn perform_credssp_with_client<S>(
     credentials: &crate::credential::AppCredential,
     kerberos_server_config: Option<sspi::KerberosServerConfig>,
     credential_store: CredentialStoreHandle,
-    gateway_hostname: String,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -548,7 +544,6 @@ where
         credentials,
         kerberos_server_config,
         &credential_store,
-        &gateway_hostname,
     )
     .await;
 
@@ -569,10 +564,6 @@ where
 
     return result;
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Local loop keeps the outer HYBRID_EX handling separate from CredSSP generator state"
-    )]
     async fn credssp_loop<S>(
         framed: &mut ironrdp_tokio::Framed<S>,
         buf: &mut ironrdp_pdu::WriteBuf,
@@ -581,7 +572,6 @@ where
         credentials: &crate::credential::AppCredential,
         kerberos_server_config: Option<sspi::KerberosServerConfig>,
         credential_store: &CredentialStoreHandle,
-        gateway_hostname: &str,
     ) -> anyhow::Result<()>
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -623,7 +613,7 @@ where
 
             let result = {
                 let mut generator = sequence.process_ts_request(ts_request);
-                resolve_server_generator(&mut generator, credential_store, gateway_hostname).await
+                resolve_server_generator(&mut generator, credential_store).await
             }; // drop generator
 
             buf.clear();
@@ -657,7 +647,6 @@ where
 async fn send_network_request(
     request: &NetworkRequest,
     credential_store: Option<&CredentialStoreHandle>,
-    gateway_hostname: &str,
 ) -> anyhow::Result<Vec<u8>> {
     match request.url.scheme() {
         "tcp" | "udp" => {
@@ -669,7 +658,7 @@ async fn send_network_request(
         }
         "http" | "https" => {
             if request.url.host_str() == Some("cred.invalid") {
-                return send_in_process_kdc_request(request, credential_store, gateway_hostname).await;
+                return send_in_process_kdc_request(request, credential_store).await;
             }
 
             let response = reqwest::Client::new()
@@ -694,7 +683,6 @@ async fn send_network_request(
 async fn send_in_process_kdc_request(
     request: &NetworkRequest,
     credential_store: Option<&CredentialStoreHandle>,
-    gateway_hostname: &str,
 ) -> anyhow::Result<Vec<u8>> {
     let credential_store = credential_store.context("in-process KDC request without credential store")?;
     let cred_injection_id = request
@@ -725,10 +713,13 @@ async fn send_in_process_kdc_request(
         .unwrap_or_else(|| kerberos.realm.clone());
 
     let config = build_session_kdc_config(kerberos, mapping, &request_realm)?;
-    // Fake-KDC validates TGS-REQ sname against `TERMSRV/<hostname>`. For the in-process loopback
-    // path the request is the Gateway-as-Service self-AS-REQ which has no sname check, but for
-    // consistency (and in case the loopback ever carries a TGS-REQ) prefer the target hostname.
-    let kdc_hostname = entry.target_hostname.as_deref().unwrap_or(gateway_hostname);
+    // Fake-KDC validates TGS-REQ sname against `TERMSRV/<hostname>`. The in-process loopback
+    // typically carries a Gateway-as-Service self-AS-REQ which has no sname check, but if any
+    // TGS-REQ ever lands here we still need the target hostname — falling back to Gateway's
+    // hostname would silently mask the SPN-mismatch bug. Error out cleanly instead.
+    let kdc_hostname = entry.target_hostname.as_deref().context(
+        "credential-injection session has no target hostname (dst_hst missing or malformed in association token)",
+    )?;
     let reply = kdc::handle_kdc_proxy_message(kdc_message, &config, kdc_hostname)
         .context("handle in-process KDC message")?;
 

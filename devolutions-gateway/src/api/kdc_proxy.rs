@@ -121,10 +121,14 @@ async fn kdc_proxy(
             .as_ref()
             .ok_or_else(|| HttpError::bad_request().msg("session has no credential mapping"))?;
         let config = build_session_kdc_config(kerberos, mapping, &realm).map_err(HttpError::internal().err())?;
-        // Fake-KDC validates client TGS-REQ sname against `TERMSRV/<hostname>`. The client is
-        // requesting a ticket for the *target* RDP server, so use the target hostname recorded
-        // on the entry, not Gateway's own hostname.
-        let kdc_hostname = entry.target_hostname.as_deref().unwrap_or(&conf.hostname);
+        // Fake-KDC validates client TGS-REQ sname against `TERMSRV/<hostname>`. The client's
+        // ticket is for the *target* RDP server, so this must be the target hostname captured at
+        // preflight (entry.target_hostname). Falling back to Gateway's hostname would silently
+        // mask the bug this commit fixed, so we error out instead.
+        let kdc_hostname = entry.target_hostname.as_deref().ok_or_else(|| {
+            HttpError::internal()
+                .msg("credential-injection session has no target hostname (dst_hst missing or malformed in association token)")
+        })?;
         let kdc_reply_message = handle_kdc_proxy_message(kdc_proxy_message, &config, kdc_hostname)
             .map_err(HttpError::internal().err())?;
 

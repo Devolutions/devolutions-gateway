@@ -284,11 +284,18 @@ impl CredentialStore {
             .map_err(InsertError::InvalidToken)?;
 
         // Best-effort target hostname for fake-KDC sname validation; missing/malformed dst_hst is
-        // not fatal at insert time (only TGS-REQ paths need it, and they fail loudly downstream).
+        // not fatal at insert time (only TGS-REQ paths need it, and they fail loudly downstream
+        // with a clear error rather than silently masking the SPN as Gateway's own hostname).
+        //
+        // We default to RDP's port 3389 because credential injection only fires for RDP today
+        // (see `GenericClient::serve` and `rd_clean_path::handle`). A bare hostname or
+        // `host:port` form is therefore valid; matches how the association-token deserializer
+        // resolves `dst_hst` (token.rs `parse_target_address` for jmux / association claims).
+        const DEFAULT_DST_PORT: u16 = 3389;
         let target_hostname = crate::token::extract_dst_hst(&token)
             .ok()
             .flatten()
-            .and_then(|raw| crate::target_addr::TargetAddr::parse(&raw, None).ok())
+            .and_then(|raw| crate::target_addr::TargetAddr::parse(&raw, DEFAULT_DST_PORT).ok())
             .map(|addr| addr.host().to_owned());
 
         let (mapping, kerberos) = match mapping_and_kerberos {
