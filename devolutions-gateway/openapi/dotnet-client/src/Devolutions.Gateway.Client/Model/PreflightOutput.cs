@@ -56,6 +56,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="agentVersion">Agent service version, if installed.  Set for \&quot;agent-version\&quot; kind..</param>
         /// <param name="alertMessage">Message describing the problem.  Set for \&quot;alert\&quot; kind..</param>
         /// <param name="alertStatus">alertStatus.</param>
+        /// <param name="credInjectionId">Reference to the provisioned credential-injection record.  Set for \&quot;provisioned-credentials\&quot; kind..</param>
         /// <param name="kind">kind (required).</param>
         /// <param name="operationId">The ID of the preflight operation associated to this result. (required).</param>
         /// <param name="recordingStorageAvailableSpace">The remaining available space to store recordings, in bytes.  set for \&quot;recording-storage-health\&quot; kind..</param>
@@ -65,13 +66,14 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="resolvedHost">Hostname that was resolved.  Set for \&quot;resolved-host\&quot; kind..</param>
         /// <param name="runningSessionCount">Number of running sessions.  Set for \&quot;running-session-count\&quot; kind..</param>
         /// <param name="varVersion">Service version.  Set for \&quot;version\&quot; kind..</param>
-        public PreflightOutput(string agentVersion = default(string), string alertMessage = default(string), PreflightAlertStatus? alertStatus = default(PreflightAlertStatus?), PreflightOutputKind kind = default(PreflightOutputKind), Guid operationId = default(Guid), long? recordingStorageAvailableSpace = default(long?), bool? recordingStorageIsWriteable = default(bool?), long? recordingStorageTotalSpace = default(long?), List<string> resolvedAddresses = default(List<string>), string resolvedHost = default(string), int? runningSessionCount = default(int?), string varVersion = default(string))
+        public PreflightOutput(string agentVersion = default(string), string alertMessage = default(string), PreflightAlertStatus? alertStatus = default(PreflightAlertStatus?), Guid? credInjectionId = default(Guid?), PreflightOutputKind kind = default(PreflightOutputKind), Guid operationId = default(Guid), long? recordingStorageAvailableSpace = default(long?), bool? recordingStorageIsWriteable = default(bool?), long? recordingStorageTotalSpace = default(long?), List<string> resolvedAddresses = default(List<string>), string resolvedHost = default(string), int? runningSessionCount = default(int?), string varVersion = default(string))
         {
             this.Kind = kind;
             this.OperationId = operationId;
             this.AgentVersion = agentVersion;
             this.AlertMessage = alertMessage;
             this.AlertStatus = alertStatus;
+            this.CredInjectionId = credInjectionId;
             this.RecordingStorageAvailableSpace = recordingStorageAvailableSpace;
             this.RecordingStorageIsWriteable = recordingStorageIsWriteable;
             this.RecordingStorageTotalSpace = recordingStorageTotalSpace;
@@ -87,6 +89,13 @@ namespace Devolutions.Gateway.Client.Model
         /// <value>Agent service version, if installed.  Set for \&quot;agent-version\&quot; kind.</value>
         [DataMember(Name = "agent_version", EmitDefaultValue = true)]
         public string AgentVersion { get; set; }
+
+        /// <summary>
+        /// Reference to the provisioned credential-injection record.  Set for &quot;provisioned-credentials&quot; kind.
+        /// </summary>
+        /// <value>Reference to the provisioned credential-injection record.  Set for &quot;provisioned-credentials&quot; kind.</value>
+        [DataMember(Name = "cred_injection_id", EmitDefaultValue = true)]
+        public Guid? CredInjectionId { get; set; }
 
         /// <summary>
         /// Message describing the problem.  Set for \&quot;alert\&quot; kind.
@@ -160,6 +169,7 @@ namespace Devolutions.Gateway.Client.Model
             StringBuilder sb = new StringBuilder();
             sb.Append("class PreflightOutput {\n");
             sb.Append("  AgentVersion: ").Append(AgentVersion).Append("\n");
+            sb.Append("  CredInjectionId: ").Append(CredInjectionId).Append("\n");
             sb.Append("  AlertMessage: ").Append(AlertMessage).Append("\n");
             sb.Append("  AlertStatus: ").Append(AlertStatus).Append("\n");
             sb.Append("  Kind: ").Append(Kind).Append("\n");

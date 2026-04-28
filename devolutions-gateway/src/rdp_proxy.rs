@@ -511,10 +511,6 @@ async fn resolve_client_generator(
 }
 
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CredSSP client-side acceptor setup needs stream, protocol, credentials, Kerberos, and callback state"
-)]
 pub(crate) async fn perform_credssp_with_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     client_addr: IpAddr,
@@ -720,8 +716,8 @@ async fn send_in_process_kdc_request(
     let kdc_hostname = entry.target_hostname.as_deref().context(
         "credential-injection session has no target hostname (dst_hst missing or malformed in association token)",
     )?;
-    let reply = kdc::handle_kdc_proxy_message(kdc_message, &config, kdc_hostname)
-        .context("handle in-process KDC message")?;
+    let reply =
+        kdc::handle_kdc_proxy_message(kdc_message, &config, kdc_hostname).context("handle in-process KDC message")?;
 
     reply.to_vec().context("encode in-process KDC reply")
 }

@@ -67,7 +67,13 @@ namespace Devolutions.Gateway.Client.Model
         /// Enum Alert for value: alert
         /// </summary>
         [EnumMember(Value = "alert")]
-        Alert = 6
+        Alert = 6,
+
+        /// <summary>
+        /// Enum ProvisionedCredentials for value: provisioned-credentials
+        /// </summary>
+        [EnumMember(Value = "provisioned-credentials")]
+        ProvisionedCredentials = 7
     }
 
     public static class PreflightOutputKindExtensions
@@ -91,6 +97,8 @@ namespace Devolutions.Gateway.Client.Model
                     return "resolved-host";
                 case PreflightOutputKind.Alert:
                     return "alert";
+                case PreflightOutputKind.ProvisionedCredentials:
+                    return "provisioned-credentials";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }

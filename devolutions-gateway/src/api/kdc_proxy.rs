@@ -74,15 +74,14 @@ async fn kdc_proxy(
 
     let injection_entry = claims.jet_cred_id.and_then(|id| credential_store.get(id));
 
-    let realm = match (&request_realm, &injection_entry) {
-        (Some(r), _) => r.clone(),
-        (None, Some(entry)) => entry
-            .kerberos
-            .as_ref()
-            .map(|k| k.realm.clone())
-            .ok_or_else(|| HttpError::bad_request().msg("session has no Kerberos state and request has no realm"))?,
-        (None, None) => return Err(HttpError::bad_request().msg("realm is missing from KDC request")),
-    };
+    let realm =
+        match (&request_realm, &injection_entry) {
+            (Some(r), _) => r.clone(),
+            (None, Some(entry)) => entry.kerberos.as_ref().map(|k| k.realm.clone()).ok_or_else(|| {
+                HttpError::bad_request().msg("session has no Kerberos state and request has no realm")
+            })?,
+            (None, None) => return Err(HttpError::bad_request().msg("realm is missing from KDC request")),
+        };
 
     debug!(
         request_realm = ?request_realm,
@@ -129,8 +128,8 @@ async fn kdc_proxy(
             HttpError::internal()
                 .msg("credential-injection session has no target hostname (dst_hst missing or malformed in association token)")
         })?;
-        let kdc_reply_message = handle_kdc_proxy_message(kdc_proxy_message, &config, kdc_hostname)
-            .map_err(HttpError::internal().err())?;
+        let kdc_reply_message =
+            handle_kdc_proxy_message(kdc_proxy_message, &config, kdc_hostname).map_err(HttpError::internal().err())?;
 
         return kdc_reply_message.to_vec().map_err(HttpError::internal().err());
     }
