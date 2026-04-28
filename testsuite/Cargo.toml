@@ -31,16 +31,27 @@ typed-builder = "0.21"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 
 [dev-dependencies]
+agent-tunnel = { path = "../crates/agent-tunnel" }
+agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 base64 = "0.22"
-proxy-socks = { path = "../crates/proxy-socks" }
+camino = "1"
+ipnetwork = "0.20"
 libsql = { version = "0.9", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
+proxy-socks = { path = "../crates/proxy-socks" }
+quinn = "0.11"
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 rstest = "0.25"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pemfile = "2"
+rustls-pki-types = "1"
 serde_json = "1"
 sysevent.path = "../crates/sysevent"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
 tokio-rustls = { version = "0.26", features = ["ring"] }
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 sysevent-syslog.path = "../crates/sysevent-syslog"

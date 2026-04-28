@@ -1,6 +1,3 @@
-#![allow(unused_crate_dependencies)]
-#![allow(clippy::unwrap_used)]
-
 //! Full-stack integration test for the QUIC agent tunnel (Quinn).
 //!
 //! Verifies the full data path:

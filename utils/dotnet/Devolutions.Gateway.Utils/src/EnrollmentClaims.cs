@@ -25,7 +25,22 @@ public class EnrollmentClaims : IGatewayClaims
     [JsonPropertyName("jet_gw_url")]
     public string JetGwUrl { get; set; }
 
-    /// <summary>Optional agent display-name hint.</summary>
+    /// <summary>
+    /// Optional agent display-name hint.
+    ///
+    /// The gateway never reads this claim — it only verifies the JWT
+    /// signature, scope, and expiry on <c>POST /jet/tunnel/enroll</c>; the
+    /// authoritative agent name is the one the agent sends in its
+    /// <c>EnrollRequest</c> body (which the gateway also stamps into the
+    /// signed client certificate's CN).
+    ///
+    /// The agent-side CLI parses this claim out of the JWT it receives via
+    /// <c>--enrollment-string</c> and uses it as the default for
+    /// <c>--name</c> when the operator did not pass one explicitly. Setting
+    /// it here lets DVLS pre-fill the name the admin typed in the "Generate
+    /// Enrollment String" dialog so the agent shows up under that name in
+    /// the registry without an extra CLI flag.
+    /// </summary>
     [JsonPropertyName("jet_agent_name")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? JetAgentName { get; set; }
