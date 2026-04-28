@@ -25,6 +25,7 @@ async fn kdc_proxy(
         token_cache,
         jrl,
         recordings,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     extract::Path(token): extract::Path<String>,
@@ -105,7 +106,12 @@ async fn kdc_proxy(
         &claims.krb_kdc
     };
 
-    let kdc_reply_message = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;
+    let kdc_reply_message = send_krb_message(
+        kdc_addr,
+        &kdc_proxy_message.kerb_message.0.0,
+        agent_tunnel_handle.as_deref(),
+    )
+    .await?;
 
     let kdc_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message)
         .map_err(HttpError::internal().with_msg("couldn't create KDC proxy reply").err())?;
@@ -115,11 +121,33 @@ async fn kdc_proxy(
     kdc_reply_message.to_vec().map_err(HttpError::internal().err())
 }
 
-async fn read_kdc_reply_message(connection: &mut TcpStream) -> io::Result<Vec<u8>> {
-    let len = connection.read_u32().await?;
-    let mut buf = vec![0; (len + 4).try_into().expect("u32-to-usize")];
-    buf[0..4].copy_from_slice(&(len.to_be_bytes()));
-    connection.read_exact(&mut buf[4..]).await?;
+/// Hard ceiling on the announced length of a TCP-framed KDC reply.
+///
+/// The KDC TCP transport prefixes its message with a 4-byte big-endian length.
+/// A misbehaving (or malicious) peer can claim up to `u32::MAX` bytes, which
+/// without a cap would have us pre-allocate ~4 GiB on a single reply. 64 KiB
+/// is well above any realistic Kerberos reply size while keeping the worst
+/// case bounded.
+const MAX_KDC_REPLY_MESSAGE_LEN: u32 = 64 * 1024;
+
+async fn read_kdc_reply_message<R: AsyncReadExt + Unpin>(reader: &mut R) -> io::Result<Vec<u8>> {
+    let len = reader.read_u32().await?;
+
+    if len > MAX_KDC_REPLY_MESSAGE_LEN {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("KDC reply too large: announced {len} bytes, maximum is {MAX_KDC_REPLY_MESSAGE_LEN}"),
+        ));
+    }
+
+    let total_len = len
+        .checked_add(4)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "KDC reply length prefix overflowed"))?;
+
+    let mut buf = vec![0; total_len];
+    buf[0..4].copy_from_slice(&len.to_be_bytes());
+    reader.read_exact(&mut buf[4..]).await?;
     Ok(buf)
 }
 
@@ -148,7 +176,54 @@ fn unable_to_reach_kdc_server_err(error: io::Error) -> HttpError {
 }
 
 /// Sends the Kerberos message to the specified KDC address.
-pub async fn send_krb_message(kdc_addr: &TargetAddr, message: &[u8]) -> Result<Vec<u8>, HttpError> {
+///
+/// Uses the same routing pipeline as connection forwarding:
+/// if an agent claims the KDC's domain/subnet, traffic goes through the tunnel.
+/// Falls back to direct connect only when no agent matches.
+pub async fn send_krb_message(
+    kdc_addr: &TargetAddr,
+    message: &[u8],
+    agent_tunnel_handle: Option<&agent_tunnel::AgentTunnelHandle>,
+) -> Result<Vec<u8>, HttpError> {
+    // Route through agent tunnel using the SAME pipeline as connection forwarding,
+    // but only for `tcp` KDC targets. The agent tunnel currently has a single
+    // `ConnectRequest::tcp` shape, so a `udp://` KDC routed this way would be
+    // delivered to the agent as a TCP target — wrong protocol semantics that can
+    // silently break UDP Kerberos deployments. Fall through to the direct path
+    // (which honors the scheme) until an explicit UDP tunnel hop exists.
+    //
+    // `as_addr()` returns `host:port` (with IPv6 brackets), which is what the agent
+    // tunnel target parser expects — unlike `to_string()` which includes the scheme.
+    let kdc_target = kdc_addr.as_addr();
+    let agent_tunnel_handle = if kdc_addr.scheme().eq_ignore_ascii_case("tcp") {
+        agent_tunnel_handle
+    } else {
+        None
+    };
+
+    if let Some((mut stream, _agent)) = agent_tunnel::routing::try_route(
+        agent_tunnel_handle,
+        None,
+        kdc_addr.host(),
+        uuid::Uuid::new_v4(),
+        kdc_target,
+    )
+    .await
+    .map_err(|e| HttpError::bad_gateway().build(format!("KDC routing through agent tunnel failed: {e:#}")))?
+    {
+        stream.write_all(message).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to send KDC message through agent tunnel")
+                .err(),
+        )?;
+
+        return read_kdc_reply_message(&mut stream).await.map_err(
+            HttpError::bad_gateway()
+                .with_msg("unable to read KDC reply through agent tunnel")
+                .err(),
+        );
+    }
+
     let protocol = kdc_addr.scheme();
 
     debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");

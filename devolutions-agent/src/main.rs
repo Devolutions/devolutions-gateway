@@ -59,6 +59,11 @@ struct UpCommand {
     enrollment_token: String,
     agent_name: String,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
+    /// QUIC endpoint (`host:port`) the agent will connect to for the tunnel.
+    /// Source precedence: CLI `--quic-endpoint` > JWT `jet_quic_endpoint` claim.
+    /// The gateway does not report this — see `EnrollmentJwtClaims::jet_quic_endpoint`.
+    quic_endpoint: String,
 }
 
 fn agent_service_main(
@@ -137,10 +142,14 @@ fn parse_required_value(args: &[String], index: &mut usize, flag: &str) -> Resul
 }
 
 fn parse_advertise_subnets(value: &str) -> Vec<String> {
+    parse_comma_separated_list(value)
+}
+
+fn parse_comma_separated_list(value: &str) -> Vec<String> {
     value
         .split(',')
         .map(str::trim)
-        .filter(|subnet| !subnet.is_empty())
+        .filter(|item| !item.is_empty())
         .map(ToOwned::to_owned)
         .collect()
 }
@@ -151,6 +160,8 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
     let mut agent_name = None;
     let mut enrollment_string = None;
     let mut advertise_subnets = Vec::new();
+    let mut advertise_domains = Vec::new();
+    let mut cli_quic_endpoint: Option<String> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -161,16 +172,20 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
             "--token" | "--enrollment-token" => enrollment_token = Some(parse_required_value(args, &mut index, arg)?),
             "--name" | "--agent-name" => agent_name = Some(parse_required_value(args, &mut index, arg)?),
             "--enrollment-string" => enrollment_string = Some(parse_required_value(args, &mut index, arg)?),
+            "--quic-endpoint" => cli_quic_endpoint = Some(parse_required_value(args, &mut index, "--quic-endpoint")?),
             "--advertise-routes" | "--advertise-subnets" => {
                 advertise_subnets.extend(parse_advertise_subnets(&parse_required_value(args, &mut index, arg)?))
             }
+            "--advertise-domains" => advertise_domains.extend(parse_comma_separated_list(&parse_required_value(
+                args, &mut index, arg,
+            )?)),
             unexpected => bail!("unknown argument for up: {unexpected}"),
         }
 
         index += 1;
     }
 
-    if let Some(enrollment_string) = enrollment_string {
+    let jwt_quic_endpoint = if let Some(enrollment_string) = enrollment_string {
         let claims = parse_enrollment_jwt(&enrollment_string)?;
 
         // The JWT itself is the Bearer token; the Gateway verifies the signature.
@@ -180,13 +195,25 @@ fn parse_up_command_args(args: &[String]) -> Result<UpCommand> {
         if agent_name.is_none() {
             agent_name = claims.jet_agent_name;
         }
-    }
+
+        claims.jet_quic_endpoint
+    } else {
+        None
+    };
+
+    // CLI flag wins over JWT claim. At least one must be provided — the gateway does
+    // not self-report a QUIC endpoint (see `EnrollmentJwtClaims::jet_quic_endpoint`).
+    let quic_endpoint = cli_quic_endpoint
+        .or(jwt_quic_endpoint)
+        .context("missing QUIC endpoint: pass --quic-endpoint or include `jet_quic_endpoint` in the enrollment JWT")?;
 
     Ok(UpCommand {
         gateway_url: gateway_url.context("missing required --gateway")?,
         enrollment_token: enrollment_token.context("missing required --token")?,
         agent_name: agent_name.context("missing required --name")?,
         advertise_subnets,
+        advertise_domains,
+        quic_endpoint,
     })
 }
 
@@ -238,13 +265,14 @@ fn main() {
                     .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
                 let enrollment_token = env::args().nth(3).expect("missing enrollment token");
                 let agent_name = env::args().nth(4).expect("missing agent name");
-                let subnets_arg = env::args().nth(5).unwrap_or_default();
+                let quic_endpoint = env::args()
+                    .nth(5)
+                    .expect("missing QUIC endpoint (host:port) — required; gateway does not self-report it");
+                let subnets_arg = env::args().nth(6).unwrap_or_default();
+                let domains_arg = env::args().nth(7).unwrap_or_default();
 
-                let advertise_subnets: Vec<String> = if subnets_arg.is_empty() {
-                    Vec::new()
-                } else {
-                    subnets_arg.split(',').map(|s| s.trim().to_owned()).collect()
-                };
+                let advertise_subnets: Vec<String> = parse_comma_separated_list(&subnets_arg);
+                let advertise_domains: Vec<String> = parse_comma_separated_list(&domains_arg);
 
                 let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
                 rt.block_on(async {
@@ -253,6 +281,8 @@ fn main() {
                         &enrollment_token,
                         &agent_name,
                         advertise_subnets,
+                        advertise_domains,
+                        quic_endpoint,
                     )
                     .await
                     {
@@ -278,6 +308,8 @@ fn main() {
                         &command.enrollment_token,
                         &command.agent_name,
                         command.advertise_subnets,
+                        command.advertise_domains,
+                        command.quic_endpoint,
                     )
                     .await
                 });
@@ -297,84 +329,4 @@ fn main() {
 }
 
 #[cfg(test)]
-mod tests {
-    use base64::Engine as _;
-
-    use super::*;
-
-    #[test]
-    fn parse_up_command_args_uses_default_config_path() {
-        let args = vec![
-            "--gateway".to_owned(),
-            "https://gateway.example.com:7171".to_owned(),
-            "--token".to_owned(),
-            "bootstrap-token".to_owned(),
-            "--name".to_owned(),
-            "site-a-agent".to_owned(),
-            "--advertise-routes".to_owned(),
-            "10.0.0.0/8,192.168.1.0/24".to_owned(),
-        ];
-
-        let parsed = parse_up_command_args(&args).expect("parse up args");
-
-        assert_eq!(
-            parsed,
-            UpCommand {
-                gateway_url: "https://gateway.example.com:7171".to_owned(),
-                enrollment_token: "bootstrap-token".to_owned(),
-                agent_name: "site-a-agent".to_owned(),
-                advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
-            }
-        );
-    }
-
-    #[test]
-    fn parse_up_command_args_accepts_aliases() {
-        let args = vec![
-            "--gateway".to_owned(),
-            "https://gateway.example.com:7171".to_owned(),
-            "--enrollment-token".to_owned(),
-            "bootstrap-token".to_owned(),
-            "--agent-name".to_owned(),
-            "site-a-agent".to_owned(),
-            "--advertise-subnets".to_owned(),
-            "10.0.0.0/8".to_owned(),
-        ];
-
-        let parsed = parse_up_command_args(&args).expect("parse up args");
-
-        assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
-    }
-
-    /// Build a JWT with the given payload. The header and signature are placeholders —
-    /// the agent does not verify them; only the Gateway does.
-    fn make_jwt(payload: serde_json::Value) -> String {
-        let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
-        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        format!(
-            "{}.{}.{}",
-            b64.encode(header.to_string()),
-            b64.encode(payload.to_string()),
-            b64.encode("signature-placeholder"),
-        )
-    }
-
-    #[test]
-    fn parse_up_command_args_accepts_enrollment_string() {
-        let jwt = make_jwt(serde_json::json!({
-            "scope": "gateway.tunnel.enroll",
-            "exp": 1_999_999_999i64,
-            "jti": "00000000-0000-0000-0000-000000000000",
-            "jet_gw_url": "https://gateway.example.com:7171",
-            "jet_agent_name": "site-a-agent",
-        }));
-        let args = vec!["--enrollment-string".to_owned(), jwt.clone()];
-
-        let parsed = parse_up_command_args(&args).expect("parse up args");
-
-        assert_eq!(parsed.gateway_url, "https://gateway.example.com:7171");
-        // The JWT itself is used as the Bearer token for /jet/tunnel/enroll.
-        assert_eq!(parsed.enrollment_token, jwt);
-        assert_eq!(parsed.agent_name, "site-a-agent");
-    }
-}
+mod cli_tests;

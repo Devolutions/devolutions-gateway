@@ -28,6 +28,8 @@ public struct AccessScope
     public static AccessScope GatewayTrafficAck = new AccessScope("gateway.traffic.ack");
     public static AccessScope GatewayNetMonitorConfig = new AccessScope("gateway.net.monitor.config");
     public static AccessScope GatewayNetMonitorDrain = new AccessScope("gateway.net.monitor.drain");
+    public static AccessScope GatewayAgentEnroll = new AccessScope("gateway.agent.enroll");
+    public static AccessScope GatewayAgentRead = new AccessScope("gateway.agent.read");
 
     public override string? ToString()
     {

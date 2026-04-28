@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::DgwState;
@@ -11,7 +12,7 @@ use crate::http::HttpError;
 ///
 /// Returns `true` if the token is a well-formed JWT whose signature verifies
 /// against `provisioner_key`, whose `exp` has not passed, and whose `scope`
-/// is `TunnelEnroll` (or `Wildcard`). Returns `false` for any failure.
+/// is `AgentEnroll` (or `Wildcard`). Returns `false` for any failure.
 ///
 /// The enrollment JWT carries extra claims (`jet_gw_url`, `jet_agent_name`)
 /// that the *agent* reads locally from its own copy of the token — the Gateway
@@ -39,7 +40,7 @@ fn validate_enrollment_jwt(token: &str, provisioner_key: &picky::key::PublicKey)
 
     matches!(
         validated.state.claims.scope,
-        AccessScope::TunnelEnroll | AccessScope::Wildcard
+        AccessScope::AgentEnroll | AccessScope::Wildcard
     )
 }
 
@@ -79,8 +80,6 @@ pub struct EnrollResponse {
     pub client_cert_pem: String,
     /// PEM-encoded gateway CA certificate (for server verification).
     pub gateway_ca_cert_pem: String,
-    /// QUIC endpoint to connect to (`host:port`).
-    pub quic_endpoint: String,
     /// SHA-256 hash of the server certificate's SPKI (hex-encoded).
     /// Used by the agent to pin the server's public key.
     pub server_spki_sha256: String,
@@ -96,8 +95,12 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 
 /// Enroll a new agent.
 ///
-/// Requires a Bearer token matching the configured enrollment secret
-/// or a valid one-time enrollment token from the store.
+/// Requires a Bearer token that is either:
+/// - a JWT signed by the configured provisioner key with `AgentEnroll` /
+///   `Wildcard` scope (issued by DVLS — the only authority for agent
+///   enrollment tokens), or
+/// - the static `enrollment_secret` from the gateway configuration (admin
+///   bootstrap fallback for environments without DVLS).
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
@@ -135,24 +138,19 @@ async fn enroll_agent(
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
     // Token validation order:
-    // 1. JWT signed by the configured provisioner key (scope == TunnelEnroll)
-    // 2. One-time enrollment token from the in-memory store
-    // 3. Static enrollment secret from configuration (constant-time comparison)
+    // 1. JWT signed by the configured provisioner key (scope == AgentEnroll)
+    // 2. Static enrollment secret from configuration (constant-time comparison)
     let jwt_valid = validate_enrollment_jwt(provided_token, &conf.provisioner_public_key);
 
     if !jwt_valid {
-        let token_valid = handle.enrollment_token_store().redeem(provided_token).await;
+        let enrollment_secret = conf
+            .agent_tunnel
+            .enrollment_secret
+            .as_deref()
+            .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-        if !token_valid {
-            let enrollment_secret = conf
-                .agent_tunnel
-                .enrollment_secret
-                .as_deref()
-                .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
-
-            if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
-                return Err(HttpError::forbidden().msg("invalid enrollment token"));
-            }
+        if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
+            return Err(HttpError::forbidden().msg("invalid enrollment token"));
         }
     }
 
@@ -170,8 +168,6 @@ async fn enroll_agent(
         .sign_agent_csr(agent_id, &req.agent_name, &req.csr_pem, req.agent_hostname.as_deref())
         .map_err(HttpError::bad_request().with_msg("invalid CSR").err())?;
 
-    let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
-
     let server_spki_sha256 = handle
         .ca_manager()
         .server_spki_sha256(&conf.hostname)
@@ -183,11 +179,15 @@ async fn enroll_agent(
         "Agent enrolled successfully",
     );
 
+    // The QUIC endpoint that the agent should connect to is deliberately NOT returned here.
+    // A running gateway has no way to know the address its agents can actually route to
+    // (Docker bridge NAT, K8s service FQDN, split-horizon DNS, LB VIP) — that knowledge
+    // only exists with the operator at deployment time. They supply it on the agent side
+    // via the `jet_quic_endpoint` JWT claim or the `--quic-endpoint` CLI flag.
     Ok(Json(EnrollResponse {
         agent_id,
         client_cert_pem: signed.client_cert_pem,
         gateway_ca_cert_pem: signed.ca_cert_pem,
-        quic_endpoint,
         server_spki_sha256,
     }))
 }
@@ -282,7 +282,7 @@ mod tests {
         let (priv_key, pub_key) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 60,
                 "exp": now_ts() + 3600,
                 "jti": Uuid::new_v4(),
@@ -334,7 +334,7 @@ mod tests {
         let (priv_key, pub_key) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 7200,
                 "exp": now_ts() - 3600,
                 "jti": Uuid::new_v4(),
@@ -352,7 +352,7 @@ mod tests {
         let (_, gateway_pub) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 60,
                 "exp": now_ts() + 3600,
                 "jti": Uuid::new_v4(),
@@ -369,7 +369,7 @@ mod tests {
         let (priv_key, pub_key) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 60,
                 "exp": now_ts() + 3600,
                 "jti": Uuid::new_v4(),

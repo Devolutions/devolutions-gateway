@@ -132,9 +132,14 @@ impl Task for TunnelTask {
             let start = std::time::Instant::now();
 
             match run_single_connection(&self.conf_handle, &mut shutdown_signal).await {
-                Ok(()) => {
+                Ok(ConnectionOutcome::Shutdown) => {
                     info!("Tunnel task stopped");
                     return Ok(());
+                }
+                Ok(ConnectionOutcome::CertRenewed) => {
+                    info!("Certificate renewed; reconnecting with new cert immediately");
+                    // Skip backoff — renewal is a successful "completion", not a failure.
+                    continue;
                 }
                 Err(error) => {
                     warn!(error = %format!("{error:#}"), "Tunnel connection lost");
@@ -174,11 +179,23 @@ impl Task for TunnelTask {
 // Single connection lifetime
 // ---------------------------------------------------------------------------
 
+/// Outcome of a single connection lifetime, telling the outer loop what to do next.
+enum ConnectionOutcome {
+    /// Shutdown signal received — exit the tunnel task cleanly.
+    Shutdown,
+    /// Certificate was renewed successfully; reconnect immediately with the new cert.
+    CertRenewed,
+}
+
 /// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
 ///
-/// Returns `Ok(())` on graceful shutdown (shutdown signal received).
-/// Returns `Err(...)` on any failure — the caller should retry with backoff.
-async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
+/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
+/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
+/// - `Err(...)`: connection lost or handshake failed — caller should retry with backoff.
+async fn run_single_connection(
+    conf_handle: &ConfHandle,
+    shutdown_signal: &mut ShutdownSignal,
+) -> anyhow::Result<ConnectionOutcome> {
     // Ensure rustls crypto provider is installed (ring).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -320,8 +337,19 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     // -- Connect --
 
-    let mut endpoint =
-        quinn::Endpoint::client("0.0.0.0:0".parse().context("parse bind address")?).context("create QUIC endpoint")?;
+    // Prefer a dual-stack IPv6 client socket so we can reach gateway endpoints
+    // resolved as IPv6 (default for `localhost` and any AAAA-bearing name on
+    // modern systems). If the host has IPv6 disabled (common in stripped-down
+    // Linux containers) the v6 bind fails outright; fall back to plain IPv4
+    // rather than crash the agent with no route to take.
+    let mut endpoint = match quinn::Endpoint::client("[::]:0".parse().expect("static [::]:0 parses")) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            warn!(%error, "IPv6 client bind failed; falling back to IPv4");
+            quinn::Endpoint::client("0.0.0.0:0".parse().expect("static 0.0.0.0:0 parses"))
+                .context("create QUIC endpoint (IPv4 fallback)")?
+        }
+    };
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
@@ -344,6 +372,67 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     info!(epoch, "Sent initial RouteAdvertise");
 
+    // -- Certificate renewal (before entering main loop) --
+
+    {
+        match crate::enrollment::is_cert_expiring(cert_path, 15) {
+            Ok(true) => {
+                info!("Certificate expiring within 15 days, initiating renewal");
+
+                // Reuse the agent name from the existing cert as the renewal CSR's
+                // CommonName. `tunnel_conf.gateway_endpoint` (a host:port) is not a
+                // name and would only happen to work today because the gateway
+                // ignores the CSR subject and trusts the mTLS-authenticated name.
+                let agent_name = crate::enrollment::read_agent_name_from_cert(cert_path)
+                    .context("read agent name from existing certificate")?;
+                let csr_pem = crate::enrollment::generate_csr_from_existing_key(key_path, &agent_name)
+                    .context("generate renewal CSR")?;
+
+                ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+                    .await
+                    .context("send CertRenewalRequest")?;
+
+                let response = tokio::time::timeout(Duration::from_secs(30), ctrl.recv())
+                    .await
+                    .context("timeout waiting for CertRenewalResponse")?
+                    .context("receive CertRenewalResponse")?;
+
+                match response {
+                    ControlMessage::CertRenewalResponse {
+                        result:
+                            agent_tunnel_proto::CertRenewalResult::Success {
+                                client_cert_pem,
+                                gateway_ca_cert_pem,
+                            },
+                        ..
+                    } => {
+                        std::fs::write(cert_path.as_str(), &client_cert_pem).context("write renewed certificate")?;
+                        std::fs::write(ca_path.as_str(), &gateway_ca_cert_pem)
+                            .context("write renewed CA certificate")?;
+                        info!("Certificate renewed successfully, reconnecting with new cert");
+                        connection.close(0u32.into(), b"cert-renewed");
+                        return Ok(ConnectionOutcome::CertRenewed);
+                    }
+                    ControlMessage::CertRenewalResponse {
+                        result: agent_tunnel_proto::CertRenewalResult::Error { reason },
+                        ..
+                    } => {
+                        warn!(%reason, "Certificate renewal failed, continuing with existing cert");
+                    }
+                    other => {
+                        warn!(?other, "Unexpected response to renewal request");
+                    }
+                }
+            }
+            Ok(false) => {
+                debug!("Certificate not expiring soon, no renewal needed");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to check certificate expiry");
+            }
+        }
+    }
+
     // Split: recv half goes to a reader task, send half stays for periodic messages.
     let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
     let mut task_handles = tokio::task::JoinSet::new();
@@ -355,9 +444,19 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
     let heartbeat_interval_secs = tunnel_conf.heartbeat_interval_secs;
     let mut route_tick = tokio::time::interval(Duration::from_secs(route_interval));
     let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(heartbeat_interval_secs));
-    // Skip the first immediate tick (we already sent the initial RouteAdvertise).
+    // Re-check the cert expiry hourly. The pre-loop check above handles startup;
+    // this catches the case where the connection stays up for longer than the
+    // renewal window (15 days) and would otherwise miss its renewal opportunity
+    // entirely. On detection we drop the connection and surface `CertRenewed`,
+    // which sends us back through `run_single_connection` and its pre-loop
+    // renewal block — the renewal itself happens there, where the control
+    // stream has not yet been split into reader/sender halves.
+    let mut cert_expiry_tick = tokio::time::interval(Duration::from_secs(3600));
+    // Skip the first immediate tick (we already sent the initial RouteAdvertise
+    // and just performed the startup cert check).
     route_tick.tick().await;
     heartbeat_tick.tick().await;
+    cert_expiry_tick.tick().await;
 
     loop {
         tokio::select! {
@@ -384,6 +483,22 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
                     .inspect_err(|e| error!(%e, "Failed to send Heartbeat"));
             }
 
+            _ = cert_expiry_tick.tick() => {
+                match crate::enrollment::is_cert_expiring(cert_path, 15) {
+                    Ok(true) => {
+                        info!("Certificate entered renewal window during active session, reconnecting to renew");
+                        connection.close(0u32.into(), b"cert-renewing");
+                        return Ok(ConnectionOutcome::CertRenewed);
+                    }
+                    Ok(false) => {
+                        trace!("Certificate still outside renewal window");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to check certificate expiry in main loop");
+                    }
+                }
+            }
+
             result = connection.accept_bi() => {
                 let (send, recv) = result.context("accept incoming bidi stream")?;
                 let subnets = advertise_subnets.clone();
@@ -397,7 +512,7 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     task_handles.shutdown().await;
 
-    Ok(())
+    Ok(ConnectionOutcome::Shutdown)
 }
 
 // ---------------------------------------------------------------------------

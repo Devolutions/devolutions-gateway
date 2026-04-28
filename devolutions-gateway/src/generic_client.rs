@@ -15,7 +15,7 @@ use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{self, ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
-use crate::utils;
+use crate::upstream::{self, ConnectedUpstream};
 
 #[derive(TypedBuilder)]
 pub struct GenericClient<S> {
@@ -113,82 +113,19 @@ where
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 
-                // Route via agent tunnel if jet_agent_id is specified.
-                if let Some(agent_id) = claims.jet_agent_id {
-                    let handle = agent_tunnel_handle.context("agent tunnel not configured on this gateway")?;
+                let ConnectedUpstream {
+                    leg: mut server_stream,
+                    server_addr,
+                    selected_target,
+                } = upstream::connect_upstream(
+                    &targets,
+                    claims.jet_agent_id,
+                    claims.jet_aid,
+                    agent_tunnel_handle.as_deref(),
+                )
+                .await
+                .context("connect to upstream")?;
 
-                    let mut selected_target = None;
-                    let mut server_stream = None;
-                    let mut last_error = None;
-
-                    for candidate in targets.iter() {
-                        let target_str = format!("{}:{}", candidate.host(), candidate.port());
-
-                        info!(%agent_id, %target_str, "Routing via agent tunnel");
-
-                        match handle.connect_via_agent(agent_id, claims.jet_aid, &target_str).await {
-                            Ok(stream) => {
-                                selected_target = Some(candidate.clone());
-                                server_stream = Some(stream);
-                                break;
-                            }
-                            Err(error) => {
-                                warn!(
-                                    %agent_id,
-                                    %target_str,
-                                    error = format!("{error:#}"),
-                                    "Agent tunnel target failed"
-                                );
-                                last_error = Some(error);
-                            }
-                        }
-                    }
-
-                    let selected_target = selected_target.ok_or_else(|| {
-                        last_error.unwrap_or_else(|| anyhow::anyhow!("agent tunnel target selection failed"))
-                    })?;
-                    span.record("target", selected_target.to_string());
-                    let server_stream = server_stream.expect("server stream should be present when target is selected");
-
-                    let info = SessionInfo::builder()
-                        .id(claims.jet_aid)
-                        .application_protocol(claims.jet_ap)
-                        .details(ConnectionModeDetails::Fwd {
-                            destination_host: selected_target.clone(),
-                        })
-                        .time_to_live(claims.jet_ttl)
-                        .recording_policy(claims.jet_rec)
-                        .filtering_policy(claims.jet_flt)
-                        .build();
-
-                    let disconnect_interest = DisconnectInterest::from_reconnection_policy(claims.jet_reuse);
-
-                    // Agent handles the TCP connection; no leftover bytes to forward.
-                    // Use a placeholder server address since the actual target is behind the agent.
-                    let server_addr: SocketAddr = "0.0.0.0:0".parse().expect("valid placeholder");
-
-                    return Proxy::builder()
-                        .conf(conf)
-                        .session_info(info)
-                        .address_a(client_addr)
-                        .transport_a(client_stream)
-                        .address_b(server_addr)
-                        .transport_b(server_stream)
-                        .sessions(sessions)
-                        .subscriber_tx(subscriber_tx)
-                        .disconnect_interest(disconnect_interest)
-                        .build()
-                        .select_dissector_and_forward()
-                        .await
-                        .context("encountered a failure during agent tunnel traffic proxying");
-                }
-
-                trace!("Select and connect to target");
-
-                let ((mut server_stream, server_addr), selected_target) =
-                    utils::successive_try(&targets, utils::tcp_connect).await?;
-
-                trace!(%selected_target, "Connected");
                 span.record("target", selected_target.to_string());
 
                 let is_rdp = claims.jet_ap == token::ApplicationProtocol::Known(token::Protocol::Rdp);
@@ -209,6 +146,9 @@ where
                 // We support proxy-based credential injection for RDP.
                 // If a credential mapping has been pushed, we automatically switch to this mode.
                 // Otherwise, we continue the generic procedure.
+                //
+                // RdpProxy is generic over the server stream, so credential injection now works
+                // regardless of whether the upstream is direct TCP or tunnelled via an agent.
                 if is_rdp {
                     let token_id = token::extract_jti(token).context("failed to extract jti claim from token")?;
 
@@ -238,7 +178,7 @@ where
                     }
                 }
 
-                info!("TCP forwarding");
+                info!("Upstream forwarding");
 
                 server_stream
                     .write_buf(&mut leftover_bytes)
@@ -258,7 +198,7 @@ where
                     .build()
                     .select_dissector_and_forward()
                     .await
-                    .context("encountered a failure during plain tcp traffic proxying")
+                    .context("encountered a failure during upstream traffic proxying")
             }
         }
     }

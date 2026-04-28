@@ -32,8 +32,8 @@ pub struct Proxy<A, B> {
 
 impl<A, B> Proxy<A, B>
 where
-    A: AsyncWrite + AsyncRead + Unpin,
-    B: AsyncWrite + AsyncRead + Unpin,
+    A: AsyncWrite + AsyncRead + Unpin + Send,
+    B: AsyncWrite + AsyncRead + Unpin + Send,
 {
     pub async fn select_dissector_and_forward(self) -> anyhow::Result<()> {
         match self.session_info.application_protocol {
