@@ -31,7 +31,6 @@ use pcap_file as _;
 use picky as _;
 use picky_krb as _;
 use pin_project_lite as _;
-use portpicker as _;
 use reqwest as _;
 #[cfg(windows)]
 use rustls_cng as _;

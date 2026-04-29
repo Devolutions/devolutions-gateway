@@ -233,7 +233,7 @@ async fn run_agent_connection(
         let peer_identity = conn.peer_identity().context("no peer identity after handshake")?;
 
         let peer_certs = peer_identity
-            .downcast::<Vec<rustls_pki_types::CertificateDer<'static>>>()
+            .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
             .map_err(|_| anyhow::anyhow!("unexpected peer identity type"))?;
 
         let peer_cert_der = peer_certs.first().context("no peer certificate in chain")?;
