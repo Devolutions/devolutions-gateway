@@ -133,9 +133,16 @@ impl Task for TunnelTask {
             let start = std::time::Instant::now();
 
             match run_single_connection(&self.conf_handle, &mut shutdown_signal).await {
-                Ok(()) => {
+                Ok(ConnectionOutcome::Shutdown) => {
                     info!("Tunnel task stopped");
                     return Ok(());
+                }
+                Ok(ConnectionOutcome::CertRenewed) => {
+                    // Renewal is a successful "completion", not a failure — skip
+                    // the backoff and reconnect immediately with the new cert.
+                    info!("Certificate renewed; reconnecting with new cert immediately");
+                    backoff.reset();
+                    continue;
                 }
                 Err(error) => {
                     warn!(error = %format!("{error:#}"), "Tunnel connection lost");
@@ -175,11 +182,23 @@ impl Task for TunnelTask {
 // Single connection lifetime
 // ---------------------------------------------------------------------------
 
+/// Outcome of a single connection lifetime, telling the outer loop what to do next.
+enum ConnectionOutcome {
+    /// Shutdown signal received — exit the tunnel task cleanly.
+    Shutdown,
+    /// Certificate was renewed successfully; reconnect immediately with the new cert.
+    CertRenewed,
+}
+
 /// Run a single QUIC tunnel connection lifetime: config → connect → event loop.
 ///
-/// Returns `Ok(())` on graceful shutdown (shutdown signal received).
-/// Returns `Err(...)` on any failure — the caller should retry with backoff.
-async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
+/// - `Ok(Shutdown)`: graceful shutdown, exit the task.
+/// - `Ok(CertRenewed)`: certificate renewed; caller should reconnect immediately.
+/// - `Err(...)`: connection lost or handshake failed — caller should retry with backoff.
+async fn run_single_connection(
+    conf_handle: &ConfHandle,
+    shutdown_signal: &mut ShutdownSignal,
+) -> anyhow::Result<ConnectionOutcome> {
     // Ensure rustls crypto provider is installed (ring).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -356,6 +375,18 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     info!(epoch, "Sent initial RouteAdvertise");
 
+    // -- Certificate renewal (post-connect, pre-traffic) --
+    //
+    // Run once per reconnect rather than on a periodic timer: the QUIC session
+    // has a 120s idle timeout and 15s keep-alive, so any blip / VPN reconnect
+    // / host sleep / gateway restart drops the connection within minutes and
+    // sends us back through this path. With a 1-year cert and a 15-day
+    // threshold, the renewal window will be hit on the first reconnect after
+    // T-15d, which is more than often enough in any real deployment.
+    if let Some(outcome) = try_renew_certificate(&mut ctrl, &connection, cert_path, key_path, ca_path).await? {
+        return Ok(outcome);
+    }
+
     // Split: recv half goes to a reader task, send half stays for periodic messages.
     let (mut ctrl_send, ctrl_recv) = ctrl.into_split();
     let mut task_handles = tokio::task::JoinSet::new();
@@ -409,7 +440,102 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     task_handles.shutdown().await;
 
-    Ok(())
+    Ok(ConnectionOutcome::Shutdown)
+}
+
+// ---------------------------------------------------------------------------
+// Certificate renewal
+// ---------------------------------------------------------------------------
+
+/// Check if the client cert is near expiry; if so, renew it via the control
+/// stream before opening real traffic.
+///
+/// Returns:
+/// - `Ok(Some(CertRenewed))` — renewed successfully; outer loop must reconnect
+///   so the new cert takes effect on the next mTLS handshake.
+/// - `Ok(None)` — no renewal needed (or attempted renewal failed in a recoverable
+///   way, e.g. the gateway said no); proceed with the existing cert.
+/// - `Err(_)` — IO / protocol error on the control stream itself; treat as
+///   connection lost.
+async fn try_renew_certificate<S, R>(
+    ctrl: &mut ControlStream<S, R>,
+    connection: &quinn::Connection,
+    cert_path: &camino::Utf8Path,
+    key_path: &camino::Utf8Path,
+    ca_path: &camino::Utf8Path,
+) -> anyhow::Result<Option<ConnectionOutcome>>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+    R: tokio::io::AsyncRead + Unpin,
+{
+    const RENEWAL_THRESHOLD_DAYS: u32 = 15;
+    const RENEWAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+    match crate::enrollment::is_cert_expiring(cert_path, RENEWAL_THRESHOLD_DAYS) {
+        Ok(false) => {
+            debug!("Client certificate not in renewal window");
+            return Ok(None);
+        }
+        Err(error) => {
+            warn!(error = %format!("{error:#}"), "Failed to check certificate expiry; skipping renewal");
+            return Ok(None);
+        }
+        Ok(true) => {}
+    }
+
+    info!(
+        threshold_days = RENEWAL_THRESHOLD_DAYS,
+        "Certificate within renewal window; requesting renewal"
+    );
+
+    // Reuse the agent name from the existing cert as the renewal CSR's
+    // CommonName. The gateway ignores CSR subject and trusts the
+    // mTLS-authenticated identity, but matching the existing CN keeps the
+    // CSR semantically correct in case validation tightens later.
+    let agent_name = crate::enrollment::read_agent_name_from_cert(cert_path)
+        .context("read agent name from existing certificate for renewal")?;
+    let csr_pem =
+        crate::enrollment::generate_csr_from_existing_key(key_path, &agent_name).context("generate renewal CSR")?;
+
+    ctrl.send(&ControlMessage::cert_renewal_request(csr_pem))
+        .await
+        .context("send CertRenewalRequest")?;
+
+    let response = tokio::time::timeout(RENEWAL_TIMEOUT, ctrl.recv())
+        .await
+        .context("timeout waiting for CertRenewalResponse")?
+        .context("receive CertRenewalResponse")?;
+
+    match response {
+        ControlMessage::CertRenewalResponse {
+            result:
+                agent_tunnel_proto::CertRenewalResult::Success {
+                    client_cert_pem,
+                    gateway_ca_cert_pem,
+                },
+            ..
+        } => {
+            std::fs::write(cert_path.as_str(), &client_cert_pem).context("write renewed certificate")?;
+            std::fs::write(ca_path.as_str(), &gateway_ca_cert_pem).context("write renewed CA certificate")?;
+            info!("Certificate renewed; closing connection so new cert takes effect on reconnect");
+            connection.close(0u32.into(), b"cert-renewed");
+            Ok(Some(ConnectionOutcome::CertRenewed))
+        }
+        ControlMessage::CertRenewalResponse {
+            result: agent_tunnel_proto::CertRenewalResult::Error { reason },
+            ..
+        } => {
+            warn!(%reason, "Gateway refused certificate renewal; continuing with existing cert");
+            Ok(None)
+        }
+        other => {
+            warn!(
+                ?other,
+                "Unexpected response to renewal request; continuing with existing cert"
+            );
+            Ok(None)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
