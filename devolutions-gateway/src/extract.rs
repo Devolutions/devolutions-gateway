@@ -408,7 +408,9 @@ where
 
 /// Grants read access to agent management endpoints.
 ///
-/// Accepts a scope token with `DiagnosticsRead`, `ConfigWrite`, or `Wildcard` scope.
+/// Accepts a scope token with `AgentRead`, `DiagnosticsRead`, `ConfigWrite`, or
+/// `Wildcard` scope. `DiagnosticsRead` / `ConfigWrite` are kept for
+/// back-compat with callers that predate the dedicated `AgentRead` scope.
 #[derive(Clone, Copy)]
 pub struct AgentManagementReadAccess;
 

@@ -145,11 +145,16 @@ async fn enroll_agent(
     let jwt_valid = validate_enrollment_jwt(provided_token, &conf.provisioner_public_key);
 
     if !jwt_valid {
+        // The JWT failed to validate against the provisioner key. The static
+        // `enrollment_secret` is only a fallback for environments without DVLS;
+        // when it is not configured, the request is simply unauthenticated, not
+        // a server-config issue — so 403, not 404 (404 is reserved for the agent
+        // tunnel feature itself being disabled).
         let enrollment_secret = conf
             .agent_tunnel
             .enrollment_secret
             .as_deref()
-            .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
+            .ok_or_else(|| HttpError::forbidden().msg("invalid enrollment token"))?;
 
         if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
             return Err(HttpError::forbidden().msg("invalid enrollment token"));

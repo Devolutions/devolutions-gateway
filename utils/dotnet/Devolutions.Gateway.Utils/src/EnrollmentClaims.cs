@@ -55,4 +55,15 @@ public class EnrollmentClaims : IGatewayClaims
     {
         return "ENROLLMENT";
     }
+
+    /// <summary>
+    /// One hour. The operator typically generates the enrollment string in
+    /// the admin UI, copies it, walks to the target machine, installs the
+    /// agent, and pastes it — the 5-minute interface default is too short
+    /// for that flow. Callers can still override via <c>TokenUtils.Sign</c>.
+    /// </summary>
+    public long? GetDefaultLifetime()
+    {
+        return 3600;
+    }
 }
