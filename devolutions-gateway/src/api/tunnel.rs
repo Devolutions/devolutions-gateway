@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::DgwState;
@@ -11,7 +12,7 @@ use crate::http::HttpError;
 ///
 /// Returns `true` if the token is a well-formed JWT whose signature verifies
 /// against `provisioner_key`, whose `exp` has not passed, and whose `scope`
-/// is `TunnelEnroll` (or `Wildcard`). Returns `false` for any failure.
+/// is `AgentEnroll` (or `Wildcard`). Returns `false` for any failure.
 ///
 /// The enrollment JWT carries extra claims (`jet_gw_url`, `jet_agent_name`)
 /// that the *agent* reads locally from its own copy of the token — the Gateway
@@ -39,7 +40,7 @@ fn validate_enrollment_jwt(token: &str, provisioner_key: &picky::key::PublicKey)
 
     matches!(
         validated.state.claims.scope,
-        AccessScope::TunnelEnroll | AccessScope::Wildcard
+        AccessScope::AgentEnroll | AccessScope::Wildcard
     )
 }
 
@@ -96,8 +97,12 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 
 /// Enroll a new agent.
 ///
-/// Requires a Bearer token matching the configured enrollment secret
-/// or a valid one-time enrollment token from the store.
+/// Requires a Bearer token that is either:
+/// - a JWT signed by the configured provisioner key with `AgentEnroll` /
+///   `Wildcard` scope (issued by DVLS — the only authority for agent
+///   enrollment tokens), or
+/// - the static `enrollment_secret` from the gateway configuration (admin
+///   bootstrap fallback for environments without DVLS).
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
@@ -135,24 +140,19 @@ async fn enroll_agent(
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
     // Token validation order:
-    // 1. JWT signed by the configured provisioner key (scope == TunnelEnroll)
-    // 2. One-time enrollment token from the in-memory store
-    // 3. Static enrollment secret from configuration (constant-time comparison)
+    // 1. JWT signed by the configured provisioner key (scope == AgentEnroll)
+    // 2. Static enrollment secret from configuration (constant-time comparison)
     let jwt_valid = validate_enrollment_jwt(provided_token, &conf.provisioner_public_key);
 
     if !jwt_valid {
-        let token_valid = handle.enrollment_token_store().redeem(provided_token).await;
+        let enrollment_secret = conf
+            .agent_tunnel
+            .enrollment_secret
+            .as_deref()
+            .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-        if !token_valid {
-            let enrollment_secret = conf
-                .agent_tunnel
-                .enrollment_secret
-                .as_deref()
-                .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
-
-            if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
-                return Err(HttpError::forbidden().msg("invalid enrollment token"));
-            }
+        if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
+            return Err(HttpError::forbidden().msg("invalid enrollment token"));
         }
     }
 
@@ -282,7 +282,7 @@ mod tests {
         let (priv_key, pub_key) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 60,
                 "exp": now_ts() + 3600,
                 "jti": Uuid::new_v4(),
@@ -334,7 +334,7 @@ mod tests {
         let (priv_key, pub_key) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 7200,
                 "exp": now_ts() - 3600,
                 "jti": Uuid::new_v4(),
@@ -352,7 +352,7 @@ mod tests {
         let (_, gateway_pub) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 60,
                 "exp": now_ts() + 3600,
                 "jti": Uuid::new_v4(),
@@ -369,7 +369,7 @@ mod tests {
         let (priv_key, pub_key) = keypair();
         let token = sign(
             json!({
-                "scope": "gateway.tunnel.enroll",
+                "scope": "gateway.agent.enroll",
                 "nbf": now_ts() - 60,
                 "exp": now_ts() + 3600,
                 "jti": Uuid::new_v4(),
