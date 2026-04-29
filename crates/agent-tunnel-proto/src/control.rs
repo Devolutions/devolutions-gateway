@@ -60,7 +60,7 @@ pub enum ControlMessage {
         protocol_version: u16,
         /// Monotonically increasing epoch within this agent process lifetime.
         epoch: u64,
-        /// Reachable IPv4 subnets.
+        /// Reachable subnets (IPv4 and IPv6).
         subnets: Vec<Ipv4Network>,
         /// DNS domains this agent can resolve, with source tracking.
         domains: Vec<DomainAdvertisement>,

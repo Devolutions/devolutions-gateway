@@ -26,7 +26,6 @@ fn parse_up_command_args_happy_path() {
             enrollment_token: "bootstrap-token".to_owned(),
             agent_name: "site-a-agent".to_owned(),
             advertise_subnets: vec!["10.0.0.0/8".to_owned(), "192.168.1.0/24".to_owned()],
-            advertise_domains: vec![],
             quic_endpoint: "gateway.example.com:7172".to_owned(),
         }
     );
@@ -51,29 +50,6 @@ fn parse_up_command_args_accepts_aliases() {
 
     assert_eq!(parsed.advertise_subnets, vec!["10.0.0.0/8".to_owned()]);
     assert_eq!(parsed.quic_endpoint, "gateway.example.com:7172");
-}
-
-#[test]
-fn parse_up_command_args_accepts_advertise_domains() {
-    let args = vec![
-        "--gateway".to_owned(),
-        "https://gateway.example.com:7171".to_owned(),
-        "--token".to_owned(),
-        "bootstrap-token".to_owned(),
-        "--name".to_owned(),
-        "site-a-agent".to_owned(),
-        "--quic-endpoint".to_owned(),
-        "gateway.example.com:7172".to_owned(),
-        "--advertise-domains".to_owned(),
-        "corp.example.com, lab.example.com".to_owned(),
-    ];
-
-    let parsed = parse_up_command_args(&args).expect("parse up args");
-
-    assert_eq!(
-        parsed.advertise_domains,
-        vec!["corp.example.com".to_owned(), "lab.example.com".to_owned()]
-    );
 }
 
 #[test]
@@ -112,7 +88,7 @@ fn make_jwt(payload: serde_json::Value) -> String {
 #[test]
 fn parse_up_command_args_accepts_enrollment_string() {
     let jwt = make_jwt(serde_json::json!({
-        "scope": "gateway.agent.enroll",
+        "scope": "gateway.tunnel.enroll",
         "exp": 1_999_999_999i64,
         "jti": "00000000-0000-0000-0000-000000000000",
         "jet_gw_url": "https://gateway.example.com:7171",
@@ -134,7 +110,7 @@ fn parse_up_command_args_accepts_enrollment_string() {
 fn parse_up_command_args_rejects_enrollment_string_missing_quic_endpoint() {
     // JWT lacks `jet_quic_endpoint` AND no CLI `--quic-endpoint` → must fail.
     let jwt = make_jwt(serde_json::json!({
-        "scope": "gateway.agent.enroll",
+        "scope": "gateway.tunnel.enroll",
         "exp": 1_999_999_999i64,
         "jti": "00000000-0000-0000-0000-000000000000",
         "jet_gw_url": "https://gateway.example.com:7171",
@@ -152,7 +128,7 @@ fn parse_up_command_args_rejects_enrollment_string_missing_quic_endpoint() {
 #[test]
 fn parse_up_command_args_cli_quic_endpoint_wins_over_jwt() {
     let jwt = make_jwt(serde_json::json!({
-        "scope": "gateway.agent.enroll",
+        "scope": "gateway.tunnel.enroll",
         "exp": 1_999_999_999i64,
         "jti": "00000000-0000-0000-0000-000000000000",
         "jet_gw_url": "https://gateway.example.com:7171",

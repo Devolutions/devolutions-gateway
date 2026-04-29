@@ -472,10 +472,8 @@ pub enum AccessScope {
     NetMonitorConfig,
     #[serde(rename = "gateway.net.monitor.drain")]
     NetMonitorDrain,
-    #[serde(rename = "gateway.agent.enroll")]
-    AgentEnroll,
-    #[serde(rename = "gateway.agent.read")]
-    AgentRead,
+    #[serde(rename = "gateway.tunnel.enroll")]
+    TunnelEnroll,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -501,7 +499,7 @@ pub struct ScopeTokenClaims {
 /// and expiry against the configured provisioner key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrollmentTokenClaims {
-    /// Must be `AccessScope::AgentEnroll` (or `Wildcard`).
+    /// Must be `AccessScope::TunnelEnroll` (or `Wildcard`).
     pub scope: AccessScope,
 
     /// JWT expiration time claim.

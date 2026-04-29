@@ -94,7 +94,7 @@ const SERVER_CERT_FILENAME: &str = "agent-tunnel-server-cert.pem";
 const SERVER_KEY_FILENAME: &str = "agent-tunnel-server-key.pem";
 const CA_VALIDITY_DAYS: u32 = 3650; // ~10 years
 const SERVER_CERT_VALIDITY_DAYS: u32 = 365; // 1 year
-const AGENT_CERT_VALIDITY_DAYS: u32 = 30; // 30 days (short-lived, auto-renewed)
+const AGENT_CERT_VALIDITY_DAYS: u32 = 365; // 1 year
 
 const SECS_PER_DAY: u64 = 86_400;
 const CA_COMMON_NAME: &str = "Devolutions Gateway Agent Tunnel CA";
