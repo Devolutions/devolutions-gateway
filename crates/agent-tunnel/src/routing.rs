@@ -3,14 +3,45 @@
 //! Used by both connection forwarding (`fwd.rs`) and KDC proxy (`kdc_proxy.rs`)
 //! to ensure consistent routing behavior and error messages.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
+use agent_tunnel_proto::DomainName;
 use anyhow::{Result, anyhow};
 use uuid::Uuid;
 
 use super::listener::AgentTunnelHandle;
 use super::registry::{AgentPeer, AgentRegistry};
 use super::stream::TunnelStream;
+
+/// A parsed target host used for route matching.
+///
+/// Routing cares only about the host identity, not the port or scheme used by
+/// the eventual connection attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteTarget {
+    Ip(IpAddr),
+    Hostname(DomainName),
+}
+
+impl RouteTarget {
+    pub fn ip(ip: IpAddr) -> Self {
+        Self::Ip(ip)
+    }
+
+    pub fn hostname(hostname: impl Into<String>) -> Self {
+        Self::Hostname(DomainName::new(hostname))
+    }
+}
+
+impl std::fmt::Display for RouteTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ip(ip) => ip.fmt(f),
+            Self::Hostname(hostname) => hostname.fmt(f),
+        }
+    }
+}
 
 /// Result of the routing pipeline.
 ///
@@ -34,7 +65,7 @@ pub enum RoutingDecision {
 pub async fn resolve_route(
     registry: &AgentRegistry,
     explicit_agent_id: Option<Uuid>,
-    target_host: &str,
+    target: &RouteTarget,
 ) -> RoutingDecision {
     // Step 1: Explicit agent ID (from JWT)
     if let Some(id) = explicit_agent_id {
@@ -45,7 +76,7 @@ pub async fn resolve_route(
     }
 
     // Step 2: Match target against all agents (IP subnet or domain suffix)
-    let agents = registry.find_agents_for(target_host).await;
+    let agents = registry.find_agents_for(target).await;
 
     if agents.is_empty() {
         RoutingDecision::Direct
@@ -62,7 +93,7 @@ pub async fn resolve_route(
 pub async fn try_route(
     handle: Option<&AgentTunnelHandle>,
     explicit_agent_id: Option<Uuid>,
-    target_host: &str,
+    target: &RouteTarget,
     session_id: Uuid,
     target_addr: &str,
 ) -> Result<Option<(TunnelStream, Arc<AgentPeer>)>> {
@@ -78,7 +109,7 @@ pub async fn try_route(
         };
     };
 
-    match resolve_route(handle.registry(), explicit_agent_id, target_host).await {
+    match resolve_route(handle.registry(), explicit_agent_id, target).await {
         RoutingDecision::ExplicitAgentNotFound(id) => {
             Err(anyhow!("agent {id} specified in token not found in registry"))
         }

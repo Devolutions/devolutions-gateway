@@ -20,7 +20,7 @@ use std::task::{Context, Poll};
 
 use agent_tunnel::AgentTunnelHandle;
 use agent_tunnel::registry::AgentPeer;
-use agent_tunnel::routing::{RoutingDecision, resolve_route};
+use agent_tunnel::routing::{RouteTarget, RoutingDecision, resolve_route};
 use agent_tunnel::stream::TunnelStream;
 use anyhow::{Context as _, Result, anyhow};
 use nonempty::NonEmpty;
@@ -197,10 +197,10 @@ impl<'a> RoutePlan<'a> {
             return Ok(Self::Direct(target));
         };
 
-        let target_host = target.host();
-        let decision = resolve_route(handle.registry(), None, target_host).await;
+        let route_target = route_target_from_target_addr(target);
+        let decision = resolve_route(handle.registry(), None, &route_target).await;
         debug!(
-            target_host,
+            target = %route_target,
             decision = ?match &decision {
                 RoutingDecision::ViaAgent(c) => format!("ViaAgent({} candidates)", c.len()),
                 RoutingDecision::Direct => "Direct".to_owned(),
@@ -295,6 +295,13 @@ impl<'a> RoutePlan<'a> {
                 Err(last_error.unwrap_or_else(|| anyhow!("all agent tunnel candidates failed")))
             }
         }
+    }
+}
+
+fn route_target_from_target_addr(target: &TargetAddr) -> RouteTarget {
+    match target.host_ip() {
+        Some(ip) => RouteTarget::ip(ip),
+        None => RouteTarget::hostname(target.host()),
     }
 }
 

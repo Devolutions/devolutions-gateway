@@ -10,6 +10,8 @@ use serde::Serialize;
 use tokio::sync::RwLock as TokioRwLock;
 use uuid::Uuid;
 
+use crate::routing::RouteTarget;
+
 /// Duration after which an agent is considered offline if no heartbeat has been received.
 pub const AGENT_OFFLINE_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -33,31 +35,29 @@ pub struct RouteAdvertisementState {
 }
 
 impl RouteAdvertisementState {
-    /// Match this route set against a target host (IP or domain name).
+    /// Match this route set against a parsed target host.
     ///
     /// Returns a specificity score if matched, or `None` if no match.
     /// IP subnet matches return `usize::MAX` (always highest priority).
     /// Domain matches return the matched domain length (longer = more specific).
-    pub fn matches_target(&self, target_host: &str) -> Option<usize> {
+    pub fn matches_target(&self, target: &RouteTarget) -> Option<usize> {
         use std::net::IpAddr;
 
-        if let Ok(ip) = target_host.parse::<IpAddr>() {
+        match target {
             // Only IPv4 subnets are currently tracked; only match IPv4 target IPs.
-            if let IpAddr::V4(ipv4) = ip {
-                return self
-                    .subnets
-                    .iter()
-                    .any(|subnet| subnet.contains(ipv4))
-                    .then_some(usize::MAX);
-            }
-            return None;
+            RouteTarget::Ip(IpAddr::V4(ipv4)) => self
+                .subnets
+                .iter()
+                .any(|subnet| subnet.contains(*ipv4))
+                .then_some(usize::MAX),
+            RouteTarget::Ip(IpAddr::V6(_)) => None,
+            RouteTarget::Hostname(hostname) => self
+                .domains
+                .iter()
+                .filter(|adv| adv.domain.matches_hostname(hostname.as_str()))
+                .map(|adv| adv.domain.as_str().len())
+                .max(),
         }
-
-        self.domains
-            .iter()
-            .filter(|adv| adv.domain.matches_hostname(target_host))
-            .map(|adv| adv.domain.as_str().len())
-            .max()
     }
 }
 
@@ -281,13 +281,13 @@ impl AgentRegistry {
         self.agents.read().await.values().map(AgentInfo::from).collect()
     }
 
-    /// Find all online agents that can route to the given target host (IP or domain).
+    /// Find all online agents that can route to the given parsed target host.
     ///
     /// For IP targets: matches against advertised subnets.
     /// For domain targets: uses longest suffix match (more specific domain wins).
     ///
     /// Results with equal specificity are sorted by `received_at` descending (most recent first).
-    pub async fn find_agents_for(&self, target_host: &str) -> Vec<Arc<AgentPeer>> {
+    pub async fn find_agents_for(&self, target: &RouteTarget) -> Vec<Arc<AgentPeer>> {
         let mut best_specificity: usize = 0;
         let mut candidates: Vec<(SystemTime, Arc<AgentPeer>)> = Vec::new();
 
@@ -299,7 +299,7 @@ impl AgentRegistry {
 
             let route_state = agent.route_state();
 
-            if let Some(specificity) = route_state.matches_target(target_host) {
+            if let Some(specificity) = route_state.matches_target(target) {
                 if specificity > best_specificity {
                     best_specificity = specificity;
                     candidates.clear();

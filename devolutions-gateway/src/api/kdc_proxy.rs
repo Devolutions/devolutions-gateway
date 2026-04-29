@@ -201,10 +201,15 @@ pub async fn send_krb_message(
         None
     };
 
+    let route_target = match kdc_addr.host_ip() {
+        Some(ip) => agent_tunnel::routing::RouteTarget::ip(ip),
+        None => agent_tunnel::routing::RouteTarget::hostname(kdc_addr.host()),
+    };
+
     if let Some((mut stream, _agent)) = agent_tunnel::routing::try_route(
         agent_tunnel_handle,
         None,
-        kdc_addr.host(),
+        &route_target,
         uuid::Uuid::new_v4(),
         kdc_target,
     )

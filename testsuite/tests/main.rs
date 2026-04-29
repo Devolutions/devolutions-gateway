@@ -2,7 +2,6 @@
 #![allow(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 #![allow(clippy::print_stderr, reason = "test code uses print for diagnostics")]
 
-mod agent_tunnel;
 mod cli;
 mod mcp_proxy;
 mod sysevent;
