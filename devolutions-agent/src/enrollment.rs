@@ -97,17 +97,28 @@ pub struct PersistedEnrollment {
 /// * `enrollment_token` - JWT token for enrollment
 /// * `agent_name` - Friendly name for this agent
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
+/// * `advertise_domains` - List of DNS suffixes to advertise (e.g.,
+///   ["corp.example.com"]). Empty preserves the existing config value so the
+///   admin can manage domains via the config file without losing them on
+///   re-enrollment.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
 ) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
-    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
+    persist_enrollment_response(
+        agent_name,
+        advertise_subnets,
+        advertise_domains,
+        enroll_response,
+        &key_pem,
+    )
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -164,6 +175,7 @@ async fn request_enrollment(
 fn persist_enrollment_response(
     agent_name: &str,
     advertise_subnets: Vec<String>,
+    advertise_domains: Vec<String>,
     EnrollResponse {
         agent_id,
         client_cert_pem,
@@ -214,8 +226,16 @@ fn persist_enrollment_response(
     // configured by the MSI installer or admin.
     let mut conf_file = config::load_conf_file_or_generate_new().context("failed to load existing configuration")?;
 
-    // Preserve existing domain config from previous enrollment/manual configuration.
     let existing_tunnel = conf_file.tunnel.as_ref();
+
+    // An empty `advertise_domains` from the caller means "no override" — fall
+    // back to the value already in the config so re-enrollment from the CLI
+    // does not silently wipe domains the admin set via the config file.
+    let resolved_advertise_domains = if advertise_domains.is_empty() {
+        existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default()
+    } else {
+        advertise_domains
+    };
 
     let tunnel_conf = config::dto::TunnelConf {
         enabled: true,
@@ -224,7 +244,7 @@ fn persist_enrollment_response(
         client_key_path: Some(client_key_path.clone()),
         gateway_ca_cert_path: Some(gateway_ca_path.clone()),
         advertise_subnets,
-        advertise_domains: existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default(),
+        advertise_domains: resolved_advertise_domains,
         auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
         heartbeat_interval_secs: Some(60),
         route_advertise_interval_secs: Some(30),
