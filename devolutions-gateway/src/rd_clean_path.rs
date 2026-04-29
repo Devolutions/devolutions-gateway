@@ -669,7 +669,9 @@ impl From<&CleanPathError> for RDCleanPathPdu {
 }
 
 fn io_to_rdcleanpath_err(err: &io::Error) -> RDCleanPathPdu {
-    if let Some(tokio_rustls::rustls::Error::AlertReceived(tls_alert)) = err.get_ref().and_then(|e| e.downcast_ref::<tokio_rustls::rustls::Error>())
+    if let Some(tokio_rustls::rustls::Error::AlertReceived(tls_alert)) = err
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<tokio_rustls::rustls::Error>())
     {
         RDCleanPathPdu::new_tls_error(u8::from(*tls_alert))
     } else {
