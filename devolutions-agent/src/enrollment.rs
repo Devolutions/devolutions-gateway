@@ -25,33 +25,6 @@ pub struct EnrollmentJwtClaims {
     /// Suggested agent display name (optional hint).
     #[serde(default)]
     pub jet_agent_name: Option<String>,
-    /// QUIC endpoint (`host:port`) the agent should connect to for the tunnel.
-    ///
-    /// # Why the operator must supply this
-    ///
-    /// A running gateway has no way to discover the address its clients actually
-    /// route to: that is a view from outside the host, not from inside. The moment
-    /// there is any translation layer between the gateway and the agent, a
-    /// self-reported `conf.hostname:listen_port` will differ from what the agent
-    /// needs. Common cases:
-    ///
-    /// 1. **Docker / Kubernetes**: `conf.hostname` defaults to the container ID or
-    ///    pod name, which is not resolvable outside the bridge/cluster network.
-    /// 2. **Split-horizon DNS / NAT**: the gateway knows itself by an internal
-    ///    name that does not resolve (or resolves to a different IP) from the
-    ///    agent's network.
-    /// 3. **HA behind a load balancer**: individual gateway nodes have per-node
-    ///    hostnames, but agents must connect to the LB VIP or a stable DNS name.
-    ///
-    /// Rather than silently shipping a wrong self-report and hoping the operator
-    /// notices when tunnels fail, the gateway deliberately does NOT return a QUIC
-    /// endpoint from its enroll API. The operator — who designed the network —
-    /// supplies the correct address here when minting the enrollment JWT.
-    ///
-    /// Optional at the JWT level only because the `--quic-endpoint` CLI flag can
-    /// provide it instead. The agent refuses to start if neither is given.
-    #[serde(default)]
-    pub jet_quic_endpoint: Option<String>,
 }
 
 /// Decode an enrollment JWT to extract agent-side configuration claims.
@@ -103,6 +76,7 @@ struct EnrollResponse {
     agent_id: Uuid,
     client_cert_pem: String,
     gateway_ca_cert_pem: String,
+    quic_endpoint: String,
     server_spki_sha256: String,
 }
 
@@ -123,35 +97,17 @@ pub struct PersistedEnrollment {
 /// * `enrollment_token` - JWT token for enrollment
 /// * `agent_name` - Friendly name for this agent
 /// * `advertise_subnets` - List of subnets to advertise (e.g., ["10.0.0.0/8"])
-/// * `advertise_domains` - List of DNS domains to advertise (e.g., ["corp.example.com"]).
-///   When non-empty, replaces any previously-persisted explicit domains; auto-detected
-///   domains are still added on top at runtime if `auto_detect_domain` is enabled.
-/// * `quic_endpoint` - QUIC endpoint (`host:port`) the agent should connect to for the
-///   tunnel. The gateway does not report this: a running process cannot know the address
-///   its clients actually route to (Docker/K8s, NAT, split-horizon DNS, LB VIP). The
-///   operator supplies it via the `jet_quic_endpoint` JWT claim or the `--quic-endpoint`
-///   CLI flag. See [`EnrollmentJwtClaims::jet_quic_endpoint`] for the full rationale.
 pub async fn enroll_agent(
     gateway_url: &str,
     enrollment_token: &str,
     agent_name: &str,
     advertise_subnets: Vec<String>,
-    advertise_domains: Vec<String>,
-    quic_endpoint: String,
 ) -> Result<PersistedEnrollment> {
     // Generate key pair and CSR locally — the private key never leaves this machine.
     let (key_pem, csr_pem) = generate_key_and_csr(agent_name)?;
 
     let enroll_response = request_enrollment(gateway_url, enrollment_token, agent_name, &csr_pem).await?;
-
-    persist_enrollment_response(
-        agent_name,
-        advertise_subnets,
-        advertise_domains,
-        enroll_response,
-        quic_endpoint,
-        &key_pem,
-    )
+    persist_enrollment_response(agent_name, advertise_subnets, enroll_response, &key_pem)
 }
 
 /// Generate an ECDSA P-256 key pair and a CSR containing the agent name as CN.
@@ -208,14 +164,13 @@ async fn request_enrollment(
 fn persist_enrollment_response(
     agent_name: &str,
     advertise_subnets: Vec<String>,
-    advertise_domains: Vec<String>,
     EnrollResponse {
         agent_id,
         client_cert_pem,
         gateway_ca_cert_pem,
+        quic_endpoint,
         server_spki_sha256,
     }: EnrollResponse,
-    quic_endpoint: String,
     key_pem: &str,
 ) -> Result<PersistedEnrollment> {
     let config_path = config::get_conf_file_path();
@@ -269,13 +224,7 @@ fn persist_enrollment_response(
         client_key_path: Some(client_key_path.clone()),
         gateway_ca_cert_path: Some(gateway_ca_path.clone()),
         advertise_subnets,
-        // CLI-supplied domains win; otherwise preserve any domains previously
-        // configured on disk (manual edit / earlier enrollment).
-        advertise_domains: if advertise_domains.is_empty() {
-            existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default()
-        } else {
-            advertise_domains
-        },
+        advertise_domains: existing_tunnel.map(|t| t.advertise_domains.clone()).unwrap_or_default(),
         auto_detect_domain: existing_tunnel.map(|t| t.auto_detect_domain).unwrap_or(true),
         heartbeat_interval_secs: Some(60),
         route_advertise_interval_secs: Some(30),
