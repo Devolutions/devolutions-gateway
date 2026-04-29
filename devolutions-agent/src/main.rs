@@ -239,11 +239,20 @@ fn main() {
                 }
             }
             "enroll" => {
+                // Positional contract:
+                //   enroll <gateway_url> <enrollment_token> <agent_name> [subnets_csv] [domains_csv]
+                // Example: enroll https://gw.example.com:7171 <token> site-a 10.0.0.0/8 corp.example.com,lab.example.com
+                const ENROLL_USAGE: &str =
+                    "usage: enroll <gateway_url> <enrollment_token> <agent_name> [subnets_csv] [domains_csv]";
                 let gateway_url = env::args()
                     .nth(2)
-                    .expect("missing gateway URL (e.g., https://gateway.example.com:7171)");
-                let enrollment_token = env::args().nth(3).expect("missing enrollment token");
-                let agent_name = env::args().nth(4).expect("missing agent name");
+                    .unwrap_or_else(|| panic!("missing <gateway_url>. {ENROLL_USAGE}"));
+                let enrollment_token = env::args()
+                    .nth(3)
+                    .unwrap_or_else(|| panic!("missing <enrollment_token>. {ENROLL_USAGE}"));
+                let agent_name = env::args()
+                    .nth(4)
+                    .unwrap_or_else(|| panic!("missing <agent_name>. {ENROLL_USAGE}"));
                 let subnets_arg = env::args().nth(5).unwrap_or_default();
                 let domains_arg = env::args().nth(6).unwrap_or_default();
 
