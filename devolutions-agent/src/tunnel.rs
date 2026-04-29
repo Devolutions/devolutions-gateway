@@ -332,8 +332,8 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
     } else {
         (Ipv6Addr::UNSPECIFIED, 0).into()
     };
-    let mut endpoint = quinn::Endpoint::client(bind_addr)
-        .with_context(|| format!("create QUIC endpoint (bind {bind_addr})"))?;
+    let mut endpoint =
+        quinn::Endpoint::client(bind_addr).with_context(|| format!("create QUIC endpoint (bind {bind_addr})"))?;
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
