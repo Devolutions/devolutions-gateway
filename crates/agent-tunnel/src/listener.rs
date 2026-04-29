@@ -145,7 +145,11 @@ impl AgentTunnelListener {
             .with_context(|| format!("bind QUIC endpoint on {listen_addr}"))?;
 
         let bound_addr = endpoint.local_addr().unwrap_or(listen_addr);
-        info!(listen_addr = %bound_addr, "Agent tunnel QUIC endpoint bound");
+        info!(
+            configured_addr = %listen_addr,
+            bound_addr = %bound_addr,
+            "Agent tunnel QUIC endpoint bound"
+        );
 
         let registry = Arc::new(AgentRegistry::new());
         let agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>> = Arc::new(RwLock::new(HashMap::new()));

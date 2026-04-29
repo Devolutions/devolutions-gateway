@@ -3,6 +3,7 @@
 //! This module implements a QUIC client that connects to the Gateway's agent tunnel
 //! endpoint, advertises reachable subnets, and handles incoming TCP proxy requests.
 
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -320,19 +321,19 @@ async fn run_single_connection(conf_handle: &ConfHandle, shutdown_signal: &mut S
 
     // -- Connect --
 
-    // Prefer a dual-stack IPv6 client socket so we can reach gateway endpoints
-    // resolved as IPv6 (default for `localhost` and any AAAA-bearing name on
-    // modern systems). If the host has IPv6 disabled (common in stripped-down
-    // Linux containers) the v6 bind fails outright; fall back to plain IPv4
-    // rather than crash the agent with no route to take.
-    let mut endpoint = match quinn::Endpoint::client("[::]:0".parse().expect("static [::]:0 parses")) {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            warn!(%error, "IPv6 client bind failed; falling back to IPv4");
-            quinn::Endpoint::client("0.0.0.0:0".parse().expect("static 0.0.0.0:0 parses"))
-                .context("create QUIC endpoint (IPv4 fallback)")?
-        }
+    // Match the local bind family to the resolved gateway address. A v4 socket
+    // cannot send to a v6 peer and vice versa, and on Linux the OS default for
+    // `IPV6_V6ONLY` is `1` (RFC 3493) so a `[::]:0` bind is not portably
+    // dual-stack without extra socket-level work. Picking the family that
+    // matches `gateway_addr` sidesteps both issues without needing socket2 on
+    // the client side.
+    let bind_addr: SocketAddr = if gateway_addr.is_ipv4() {
+        (Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (Ipv6Addr::UNSPECIFIED, 0).into()
     };
+    let mut endpoint = quinn::Endpoint::client(bind_addr)
+        .with_context(|| format!("create QUIC endpoint (bind {bind_addr})"))?;
     endpoint.set_default_client_config(client_config);
 
     let connection = endpoint
