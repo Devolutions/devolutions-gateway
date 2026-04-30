@@ -33,7 +33,6 @@ picky = { version = "7.0.0-rc.15", default-features = false, features = ["x509",
 picky-asn1-x509 = "0.15"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-rustls-pki-types = "1"
 sha2 = "0.10"
 hex = "0.4"
 time = { version = "0.3", default-features = false, features = ["std"] }

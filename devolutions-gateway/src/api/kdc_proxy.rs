@@ -179,15 +179,16 @@ pub async fn send_krb_message(kdc_addr: &TargetAddr, message: &[u8]) -> Result<V
         // We assume that ticket length is not bigger than 2048 bytes.
         let mut buf = [0; 2048];
 
-        let port = portpicker::pick_unused_port().ok_or_else(|| HttpError::internal().msg("no free ports"))?;
-
-        trace!("Binding UDP listener to 127.0.0.1:{port}...");
-
-        let udp_socket = UdpSocket::bind(("127.0.0.1", port))
+        let udp_socket = UdpSocket::bind("127.0.0.1:0")
             .await
             .map_err(HttpError::internal().with_msg("unable to bind UDP socket").err())?;
 
-        trace!("Binded! Forwarding KDC message...");
+        let port = udp_socket
+            .local_addr()
+            .map_err(HttpError::internal().with_msg("unable to get UDP socket address").err())?
+            .port();
+
+        trace!("Binded UDP listener to 127.0.0.1:{port}, forwarding KDC message...");
 
         // First 4 bytes contains message length. We don't need it for UDP.
         #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
