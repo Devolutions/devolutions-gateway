@@ -13,8 +13,10 @@ use crate::mdns::{self, MdnsDaemon, MdnsEvent};
 use crate::named_port::MaybeNamedPort;
 use crate::netbios::netbios_query_scan;
 use crate::ping::ping_range;
+use crate::planner::{InterfaceSelector, RangeInterfacePolicy, TargetSelector, plan_scan};
 use crate::port_discovery::{TcpKnockEvent, scan_ports};
-use crate::task_utils::{TaskExecutionContext, TaskExecutionRunner, TaskManager};
+use crate::sources::{NetworkScanSourceProvider, SystemNetworkScanSourceProvider, source_for_address};
+use crate::task_utils::{ContextConfig, TaskExecutionContext, TaskExecutionRunner, TaskManager};
 
 /// Represents a network scanner for discovering devices and their services over a network.
 #[derive(Clone)]
@@ -23,8 +25,8 @@ pub struct NetworkScanner {
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
     /// A daemon for Multicast DNS (mDNS) operations, handling service discovery.
     pub(crate) mdns_daemon: Option<MdnsDaemon>,
-    /// Configuration settings for the network scanner
-    pub(crate) config: ScannerConfig,
+    /// Execution settings resolved from the scanner params and source inventory.
+    pub(crate) configs: ContextConfig,
     /// Toggles for enabling or disabling specific features of the scanner.
     pub(crate) toggle: ScannerToggles,
 }
@@ -41,7 +43,9 @@ impl NetworkScanner {
             start_broadcast(&mut task_executor);
         }
 
-        start_netbios(&mut task_executor);
+        if self.toggle.enable_netbios {
+            start_netbios(&mut task_executor);
+        }
 
         start_ping(&mut task_executor);
 
@@ -50,22 +54,31 @@ impl NetworkScanner {
         }
 
         let TaskExecutionRunner {
-            context: TaskExecutionContext {
-                mdns_daemon, event_bus, ..
-            },
+            context:
+                TaskExecutionContext {
+                    mdns_daemon,
+                    event_bus,
+                    configs,
+                    ..
+                },
             task_manager,
         } = task_executor;
+        let sources = Arc::clone(&configs.sources);
 
         let task_manager_clone = task_manager.clone();
         let mdns_daemon_clone = mdns_daemon.clone();
+        let finished = Arc::new(tokio::sync::Notify::new());
+        let finished_clone = Arc::clone(&finished);
 
         let scanner_stream = NetworkScannerStream {
             event_bus,
             task_manager,
             mdns_daemon,
+            finished,
+            sources,
         };
 
-        let max_wait_time = self.config.max_wait_time;
+        let max_wait_time = self.configs.max_wait_time;
 
         tokio::spawn(async move {
             tokio::time::sleep(max_wait_time).await;
@@ -73,6 +86,11 @@ impl NetworkScanner {
             if let Some(daemon) = &mdns_daemon_clone {
                 daemon.stop();
             }
+            // Wake any consumer waiting on `NetworkScannerStream::finished()`
+            // so it can close cleanly. Without this, the broadcast bus's
+            // `Sender` (held by `NetworkScannerStream`) keeps any subscribed
+            // receiver blocked indefinitely after the scan timed out.
+            finished_clone.notify_waiters();
         });
 
         return Ok(scanner_stream);
@@ -134,13 +152,22 @@ impl NetworkScanner {
                                 event_sender.send(DnsEvent::Start { ip })?;
 
                                 // If the IP address is not in the cache, resolve the DNS
-                                let resolve_dns = tokio::task::spawn_blocking(move || {
+                                let resolved_dns = tokio::task::spawn_blocking(move || {
                                     dns_lookup::lookup_addr(&ip).context("Failed to resolve DNS").ok()
                                 })
                                 .await
                                 .context("Failed to spawn blocking task")?;
 
-                                ip_cache.write().insert(ip, resolve_dns);
+                                match resolved_dns {
+                                    Some(hostname) => {
+                                        ip_cache.write().insert(ip, Some(hostname.clone()));
+                                        event_sender.send(DnsEvent::Success { ip, hostname })?;
+                                    }
+                                    None => {
+                                        ip_cache.write().insert(ip, None);
+                                        event_sender.send(DnsEvent::Failed { ip })?;
+                                    }
+                                }
                             }
 
                             anyhow::Ok(())
@@ -162,6 +189,9 @@ impl NetworkScanner {
                       }: TaskExecutionContext,
                       task_manager| async move {
                     let ports = configs.ports.clone();
+                    if ports.is_empty() {
+                        return anyhow::Ok(());
+                    }
 
                     let (result_sender, mut receiver) = event_bus.split::<_, RawIpEvent>();
 
@@ -170,18 +200,33 @@ impl NetworkScanner {
                             continue;
                         };
 
-                        let (runtime, ports, result_sender, port_scan_timeout) = (
+                        let interface_bind = InterfaceBind {
+                            interface_index: source_for_address(&configs.sources, ip)
+                                .and_then(|source| source.interface_index)
+                                .and_then(std::num::NonZeroU32::new),
+                            strict: configs.interface_bind_strict,
+                        };
+                        let (runtime, ports, result_sender, port_scan_timeout, max_tcp_probe_concurrency) = (
                             Arc::clone(&runtime),
                             ports.clone(),
                             result_sender.clone(),
                             configs.port_scan_timeout,
+                            configs.max_tcp_probe_concurrency,
                         );
 
                         task_manager.spawn(move |task_manager| async move {
-                            debug!(scanning_ip = ?ip);
+                            debug!(scanning_ip = ?ip, ?interface_bind, "Starting TCP probe");
 
-                            let port_scan_receiver =
-                                scan_ports(ip, &ports, runtime, port_scan_timeout, task_manager).await?;
+                            let port_scan_receiver = scan_ports(
+                                ip,
+                                &ports,
+                                runtime,
+                                port_scan_timeout,
+                                max_tcp_probe_concurrency,
+                                interface_bind,
+                                task_manager,
+                            )
+                            .await?;
 
                             result_sender.send_from(port_scan_receiver).await
                         });
@@ -235,16 +280,27 @@ impl NetworkScanner {
                       task_manager| async move {
                     let netbios_timeout = configs.netbios_timeout;
                     let netbios_interval = configs.netbios_interval;
-                    let subnets = configs.broadcast_subnet;
 
-                    let subnet_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
+                    // Scope NetBIOS to whatever the planner already decided
+                    // we should ping. For `TargetSelector::DefaultSubnets`
+                    // that's the selected interfaces' broadcast subnets;
+                    // for explicit `target=`/`range=` it's exactly those
+                    // ranges (with interface intersection if requested).
+                    // Reusing `range_to_ping` keeps NetBIOS from sweeping
+                    // the surrounding subnet when the caller asked for a
+                    // single host.
+                    let nbt_ranges: Vec<IpAddrRange> = configs
+                        .range_to_ping
+                        .iter()
+                        .map(|planned| planned.range.clone())
+                        .collect();
                     let sender = event_bus.sender();
-                    debug!(netbios_query_ip_ranges = ?subnet_ranges);
+                    debug!(netbios_query_ip_ranges = ?nbt_ranges);
 
-                    for subnet_range in subnet_ranges {
+                    for range in nbt_ranges {
                         let (runtime, task_manager) = (Arc::clone(&runtime), task_manager.clone());
 
-                        let IpAddrRange::V4(ip_range) = subnet_range else {
+                        let IpAddrRange::V4(ip_range) = range else {
                             continue;
                         };
 
@@ -272,18 +328,26 @@ impl NetworkScanner {
 
                     let ping_interval = configs.ping_interval;
                     let ping_timeout = configs.ping_timeout;
+                    let max_concurrency = configs.max_ping_concurrency;
+                    let strict = configs.interface_bind_strict;
                     let range_to_ping = configs.range_to_ping;
 
                     let sender = event_bus.sender();
 
-                    for ip_range in range_to_ping {
+                    for planned in range_to_ping {
                         let (task_manager, runtime) = (task_manager.clone(), Arc::clone(&runtime));
                         let should_ping = should_ping.clone();
+                        let interface_bind = InterfaceBind {
+                            interface_index: planned.interface_index,
+                            strict,
+                        };
                         let receiver = ping_range(
                             runtime,
-                            ip_range,
+                            planned.range,
                             ping_interval,
                             ping_timeout,
+                            max_concurrency,
+                            interface_bind,
                             should_ping,
                             task_manager,
                         )?;
@@ -334,8 +398,26 @@ impl NetworkScanner {
         }
     }
 
-    pub fn new(NetworkScannerParams { config, toggle }: NetworkScannerParams) -> anyhow::Result<Self> {
+    pub fn new(params: NetworkScannerParams) -> anyhow::Result<Self> {
+        Self::with_source_provider(params, Arc::new(SystemNetworkScanSourceProvider))
+    }
+
+    pub fn with_source_provider(
+        NetworkScannerParams { config, toggle }: NetworkScannerParams,
+        source_provider: Arc<dyn NetworkScanSourceProvider>,
+    ) -> anyhow::Result<Self> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
+        let source_inventory = source_provider.get_source_inventory()?;
+        let plan = plan_scan(
+            &config.targeting.target_selector,
+            &config.targeting.interface_selector,
+            config.targeting.range_interface_policy,
+            source_inventory,
+            toggle.enable_subnet_scan,
+        )?;
+
+        debug!(?config, ?toggle, "Starting network scanner");
+        let configs = ContextConfig::from_config_and_plan(config, plan);
 
         let mdns_daemon = if toggle.enable_zeroconf {
             Some(MdnsDaemon::new()?)
@@ -343,10 +425,8 @@ impl NetworkScanner {
             None
         };
 
-        debug!(?config, ?toggle, "Starting network scanner");
-
         Ok(Self {
-            config,
+            configs,
             toggle,
             mdns_daemon,
             runtime,
@@ -358,6 +438,12 @@ pub struct NetworkScannerStream {
     event_bus: EventBus,
     task_manager: TaskManager,
     mdns_daemon: Option<MdnsDaemon>,
+    /// Fires once when the scan is finished — either because `max_wait_time`
+    /// elapsed or [`Self::stop`] was called explicitly. Consumers (e.g. the
+    /// websocket handler) can `await` this to close their stream cleanly
+    /// instead of polling the broadcast bus forever.
+    finished: Arc<tokio::sync::Notify>,
+    sources: Arc<Vec<crate::sources::ScannerSource>>,
 }
 
 impl NetworkScannerStream {
@@ -365,11 +451,23 @@ impl NetworkScannerStream {
         self.event_bus.subscribe::<T>()
     }
 
+    /// Scanner-selected sources used for address-to-interface attribution.
+    pub fn sources(&self) -> &[crate::sources::ScannerSource] {
+        &self.sources
+    }
+
+    /// Get a handle that resolves when the scan has finished. The returned
+    /// `Notify` is shared, so multiple consumers can each await independently.
+    pub fn finished(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.finished)
+    }
+
     pub fn stop(&self) {
         self.task_manager.stop();
         if let Some(daemon) = &self.mdns_daemon {
             daemon.stop();
         };
+        self.finished.notify_waiters();
     }
 }
 
@@ -424,17 +522,60 @@ impl Display for ScanMethod {
     }
 }
 
+/// How a ping / TCP-probe socket should be bound to a specific interface.
+///
+/// `interface_index` uses [`NonZeroU32`] so that the "no specific bind, use
+/// default routing" sentinel cannot be confused with a real ifindex of 0
+/// (which is invalid on every supported OS anyway).
+/// `strict` controls whether a bind failure aborts the scan (`true`) or
+/// just logs and falls back to default routing (`false`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InterfaceBind {
+    pub interface_index: Option<std::num::NonZeroU32>,
+    pub strict: bool,
+}
+
+impl InterfaceBind {
+    /// No interface binding; OS default routing decides the egress.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Bind to `interface_index` if `Some`, else default routing. Bind
+    /// failures degrade to default routing with a `warn!` log.
+    pub fn lenient(interface_index: Option<std::num::NonZeroU32>) -> Self {
+        Self {
+            interface_index,
+            strict: false,
+        }
+    }
+
+    /// Bind to `interface_index`; bind failures abort the scan task.
+    pub fn strict(interface_index: std::num::NonZeroU32) -> Self {
+        Self {
+            interface_index: Some(interface_index),
+            strict: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScannerToggles {
     pub enable_broadcast: bool,
     pub enable_subnet_scan: bool,
     pub enable_zeroconf: bool,
     pub enable_resolve_dns: bool,
+    /// NetBIOS name-service queries. Default `true` for backward
+    /// compatibility — historically the gateway always issued them — but
+    /// callers can disable when they only want explicit-target results
+    /// without a side-channel sweep over the surrounding subnet.
+    pub enable_netbios: bool,
 }
 
+/// All time-budget-shaped knobs for one scan: per-probe timeouts, pacing
+/// intervals, and the overall scan budget.
 #[derive(Debug, Clone)]
-pub struct ScannerConfig {
-    pub ports: Vec<MaybeNamedPort>,
+pub struct TimingConfig {
     pub ping_interval: Duration,
     pub ping_timeout: Duration,
     pub broadcast_timeout: Duration,
@@ -443,7 +584,37 @@ pub struct ScannerConfig {
     pub netbios_interval: Duration,
     pub mdns_query_timeout: Duration,
     pub max_wait_time: Duration,
-    pub ip_ranges: Vec<IpAddrRange>,
+}
+
+/// Concurrency caps. `max_concurrency` is the global default; the
+/// per-stage caps override when set, otherwise inherit the default.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LimitsConfig {
+    pub max_concurrency: Option<usize>,
+    pub max_ping_concurrency: Option<usize>,
+    pub max_tcp_probe_concurrency: Option<usize>,
+}
+
+/// What the scanner targets and how it routes to it: which hosts/ranges,
+/// which interfaces, how to reconcile a range that crosses interfaces, and
+/// whether interface-bind failures should fail or warn.
+#[derive(Debug, Clone)]
+pub struct TargetingConfig {
+    pub target_selector: TargetSelector,
+    pub interface_selector: InterfaceSelector,
+    pub range_interface_policy: RangeInterfacePolicy,
+    /// When `true`, fail the scan if a ping/TCP-probe socket cannot be
+    /// bound to the planner-selected interface. When `false`, log a
+    /// warning and proceed with default routing.
+    pub interface_bind_strict: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScannerConfig {
+    pub ports: Vec<MaybeNamedPort>,
+    pub timing: TimingConfig,
+    pub limits: LimitsConfig,
+    pub targeting: TargetingConfig,
 }
 
 /// The parameters for configuring a network scanner. All fields are in milliseconds.

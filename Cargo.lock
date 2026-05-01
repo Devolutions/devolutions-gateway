@@ -4441,12 +4441,15 @@ dependencies = [
  "network-scanner-proto",
  "parking_lot",
  "rtnetlink",
+ "serde",
+ "serde_json",
  "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio 1.52.3",
  "tracing",
  "tracing-subscriber",
  "typed-builder",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4455,6 +4458,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "crossbeam",
+ "libc",
  "parking_lot",
  "polling 3.11.0",
  "socket2 0.5.10",

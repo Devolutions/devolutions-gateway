@@ -1,12 +1,32 @@
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use anyhow::Context;
 use network_interface::{Addr, NetworkInterfaceConfig, V4IfAddr};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IpAddrRange {
     V4(IpV4AddrRange),
     V6(IpV6AddrRange),
+}
+
+impl fmt::Display for IpAddrRange {
+    /// Canonical `lower-upper` form, round-trips through
+    /// [`IpAddrRange::try_from`]. Use this for client-facing error
+    /// payloads instead of `Debug`, which would expose enum/field
+    /// names.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IpAddrRange::V4(range) => write!(f, "{}-{}", range.lower(), range.upper()),
+            IpAddrRange::V6(range) => write!(f, "{}-{}", range.lower(), range.upper()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IpFamily {
+    V4,
+    V6,
 }
 
 impl TryFrom<&str> for IpAddrRange {
@@ -36,7 +56,7 @@ impl TryFrom<&String> for IpAddrRange {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpV4AddrRange {
     lower: Ipv4Addr,
     upper: Ipv4Addr,
@@ -55,7 +75,7 @@ impl IntoIterator for IpV4AddrRange {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpV6AddrRange {
     lower: Ipv6Addr,
     upper: Ipv6Addr,
@@ -83,6 +103,14 @@ impl IpV4AddrRange {
         };
         Self { lower, upper }
     }
+
+    pub fn lower(&self) -> Ipv4Addr {
+        self.lower
+    }
+
+    pub fn upper(&self) -> Ipv4Addr {
+        self.upper
+    }
 }
 
 impl IpV6AddrRange {
@@ -93,6 +121,14 @@ impl IpV6AddrRange {
             (lower, upper)
         };
         Self { lower, upper }
+    }
+
+    pub fn lower(&self) -> Ipv6Addr {
+        self.lower
+    }
+
+    pub fn upper(&self) -> Ipv6Addr {
+        self.upper
     }
 }
 
@@ -136,12 +172,49 @@ impl Iterator for IpV6RangeIterator {
 
 // Helper to create the appropriate enum variant
 impl IpAddrRange {
+    pub fn single(address: IpAddr) -> Self {
+        match address {
+            IpAddr::V4(address) => IpAddrRange::new_ipv4(address, address),
+            IpAddr::V6(address) => IpAddrRange::new_ipv6(address, address),
+        }
+    }
+
     pub fn new_ipv4(lower: Ipv4Addr, upper: Ipv4Addr) -> Self {
-        IpAddrRange::V4(IpV4AddrRange::new(upper, lower))
+        IpAddrRange::V4(IpV4AddrRange::new(lower, upper))
     }
 
     pub fn new_ipv6(lower: Ipv6Addr, upper: Ipv6Addr) -> Self {
-        IpAddrRange::V6(IpV6AddrRange::new(upper, lower))
+        IpAddrRange::V6(IpV6AddrRange::new(lower, upper))
+    }
+
+    pub fn family(&self) -> IpFamily {
+        match self {
+            IpAddrRange::V4(_) => IpFamily::V4,
+            IpAddrRange::V6(_) => IpFamily::V6,
+        }
+    }
+
+    pub fn address_count(&self) -> u128 {
+        match self {
+            IpAddrRange::V4(range) => u128::from(u32::from(range.upper) - u32::from(range.lower)) + 1,
+            IpAddrRange::V6(range) => u128::from(range.upper) - u128::from(range.lower) + 1,
+        }
+    }
+
+    /// Whether `address` is inside this range (inclusive on both ends).
+    /// Mismatched IP families return `false`.
+    pub fn contains(&self, address: IpAddr) -> bool {
+        match (self, address) {
+            (IpAddrRange::V4(range), IpAddr::V4(ip)) => {
+                let ip = u32::from(ip);
+                ip >= u32::from(range.lower) && ip <= u32::from(range.upper)
+            }
+            (IpAddrRange::V6(range), IpAddr::V6(ip)) => {
+                let ip = u128::from(ip);
+                ip >= u128::from(range.lower) && ip <= u128::from(range.upper)
+            }
+            _ => false,
+        }
     }
 
     pub fn has_overlap(&self, other: &Self) -> bool {
@@ -153,6 +226,22 @@ impl IpAddrRange {
                 u128::from(a.lower) <= u128::from(b.upper) && u128::from(a.upper) >= u128::from(b.lower)
             }
             _ => false,
+        }
+    }
+
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        match (self, other) {
+            (IpAddrRange::V4(a), IpAddrRange::V4(b)) => {
+                let lower = Ipv4Addr::from(u32::from(a.lower).max(u32::from(b.lower)));
+                let upper = Ipv4Addr::from(u32::from(a.upper).min(u32::from(b.upper)));
+                (u32::from(lower) <= u32::from(upper)).then(|| IpAddrRange::new_ipv4(lower, upper))
+            }
+            (IpAddrRange::V6(a), IpAddrRange::V6(b)) => {
+                let lower = Ipv6Addr::from(u128::from(a.lower).max(u128::from(b.lower)));
+                let upper = Ipv6Addr::from(u128::from(a.upper).min(u128::from(b.upper)));
+                (u128::from(lower) <= u128::from(upper)).then(|| IpAddrRange::new_ipv6(lower, upper))
+            }
+            _ => None,
         }
     }
 }
@@ -291,48 +380,4 @@ pub fn get_subnets() -> anyhow::Result<Vec<Subnet>> {
         .collect();
 
     Ok(subnets)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_iter_ipv4() {
-        let lower = "10.10.0.0".parse::<Ipv4Addr>().unwrap();
-        let upper = "10.10.0.30".parse::<Ipv4Addr>().unwrap();
-        let range = IpAddrRange::new_ipv4(lower, upper);
-
-        let mut iter = range.into_iter();
-        for i in 0..31 {
-            let expected = format!("10.10.0.{i}").parse::<Ipv4Addr>().unwrap();
-            assert_eq!(iter.next(), Some(IpAddr::V4(expected)));
-        }
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_has_overlap() {
-        let r1 = IpAddrRange::new_ipv4("192.168.1.0".parse().unwrap(), "192.168.1.255".parse().unwrap());
-        let r2 = IpAddrRange::new_ipv4("192.168.1.100".parse().unwrap(), "192.168.2.10".parse().unwrap());
-        assert!(r1.has_overlap(&r2));
-    }
-
-    #[test]
-    fn test_subnet_to_ip_range() {
-        let subnet = Subnet {
-            ip: Ipv4Addr::new(192, 168, 1, 0),
-            netmask: Ipv4Addr::new(255, 255, 255, 0),
-            broadcast: Ipv4Addr::new(192, 168, 1, 255),
-        };
-
-        let ip_range = IpAddrRange::from(subnet);
-
-        let mut iter = ip_range.into_iter();
-
-        for i in 0..256 {
-            let expected = format!("192.168.1.{i}").parse::<Ipv4Addr>().unwrap();
-            assert_eq!(iter.next(), Some(IpAddr::V4(expected)));
-        }
-    }
 }

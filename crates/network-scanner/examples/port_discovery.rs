@@ -23,10 +23,17 @@ pub async fn main() {
         389.into(),
         636.into(),
     ];
-    let mut res =
-        network_scanner::port_discovery::scan_ports(ip, &ports, runtime, Duration::from_secs(5), TaskManager::new())
-            .await
-            .expect("failed to scan ports");
+    let mut res = network_scanner::port_discovery::scan_ports(
+        ip,
+        &ports,
+        runtime,
+        Duration::from_secs(5),
+        None,
+        network_scanner::scanner::InterfaceBind::none(),
+        TaskManager::new(),
+    )
+    .await
+    .expect("failed to scan ports");
 
     while let Some(event) = res.recv().await {
         info!(?event);

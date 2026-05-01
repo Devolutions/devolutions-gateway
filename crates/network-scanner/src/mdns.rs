@@ -81,6 +81,10 @@ pub enum MdnsEvent {
         device_name: String,
         port: u16,
         protocol: Option<ServiceType>,
+        /// Round-trip time in milliseconds, measured from the browse start
+        /// to the resolve callback. Optional because mDNS resolves can
+        /// arrive asynchronously after the initial browse window.
+        time: Option<u128>,
     },
     Start {
         service_type: ServiceType,
@@ -119,6 +123,7 @@ pub fn mdns_query_scan(
             })
             .spawn(move |_| async move {
                 debug!(?service_name, "Starting browse for service");
+                let browse_start = std::time::Instant::now();
 
                 while let Ok(service_event) = receiver.recv_async().await {
                     debug!(?service_event);
@@ -128,6 +133,7 @@ pub fn mdns_query_scan(
                             parse_fullname(fullname).unwrap_or_else(|| (fullname.to_owned(), None));
 
                         let port = msg.get_port();
+                        let time = Some(browse_start.elapsed().as_millis());
 
                         for addr in msg.get_addresses() {
                             let entry = MdnsEvent::ServiceResolved {
@@ -135,6 +141,7 @@ pub fn mdns_query_scan(
                                 device_name: device_name.clone(),
                                 port,
                                 protocol,
+                                time,
                             };
 
                             if let Err(e) = result_sender.send(entry).await {

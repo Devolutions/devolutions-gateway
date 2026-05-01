@@ -31,6 +31,8 @@ pub async fn main() -> anyhow::Result<()> {
         range,
         ping_interval,
         ping_wait_time,
+        Some(64),
+        network_scanner::scanner::InterfaceBind::none(),
         should_ping,
         TaskManager::new(),
     )?;

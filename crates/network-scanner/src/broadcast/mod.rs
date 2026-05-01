@@ -11,8 +11,16 @@ pub use asynchronous::broadcast;
 
 #[derive(Debug, Clone)]
 pub enum BroadcastEvent {
-    Start { broadcast_ip: Ipv4Addr },
-    Entry { ip: Ipv4Addr },
+    Start {
+        broadcast_ip: Ipv4Addr,
+    },
+    Entry {
+        ip: Ipv4Addr,
+        /// Round-trip time in milliseconds, measured from broadcast send to
+        /// reply receipt. Optional because some replies arrive without a
+        /// matching outbound timestamp.
+        time: Option<u128>,
+    },
 }
 
 #[derive(Debug)]
