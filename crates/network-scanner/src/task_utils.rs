@@ -6,15 +6,20 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use crate::event_bus::EventBus;
-use crate::ip_utils::{IpAddrRange, Subnet, get_subnets};
+use crate::ip_utils::Subnet;
 use crate::mdns::MdnsDaemon;
 use crate::named_port::MaybeNamedPort;
-use crate::scanner::{NetworkScanner, ScannerConfig, ScannerToggles};
+use crate::planner::{NetworkScanPlan, PlannedRange, plan_scan};
+use crate::scanner::{LimitsConfig, NetworkScanner, ScannerConfig, ScannerToggles, TargetingConfig, TimingConfig};
+use crate::sources::ScannerSource;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextConfig {
     pub(crate) broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
-    pub(crate) range_to_ping: Vec<IpAddrRange>,
+    pub(crate) range_to_ping: Vec<PlannedRange>,
+    /// The full set of selected scan sources, used for per-IP source lookup
+    /// (e.g. picking a TCP-probe socket's interface bind).
+    pub(crate) sources: Arc<Vec<ScannerSource>>,
     pub ports: Vec<MaybeNamedPort>,
     pub ping_interval: Duration,
     pub ping_timeout: Duration,
@@ -23,33 +28,48 @@ pub(crate) struct ContextConfig {
     pub netbios_timeout: Duration,
     pub netbios_interval: Duration,
     pub mdns_query_timeout: Duration,
+    pub max_ping_concurrency: Option<usize>,
+    pub max_tcp_probe_concurrency: Option<usize>,
+    /// When `true`, a socket-bind failure causes the task to abort instead of
+    /// warning and continuing on default routing.
+    pub interface_bind_strict: bool,
 }
 
 impl ContextConfig {
     pub(crate) fn new(
         ScannerConfig {
-            broadcast_timeout,
-            mdns_query_timeout,
-            netbios_timeout,
-            netbios_interval,
-            ping_timeout,
-            ping_interval,
-            port_scan_timeout,
             ports,
-            ip_ranges,
-            ..
+            timing:
+                TimingConfig {
+                    broadcast_timeout,
+                    mdns_query_timeout,
+                    netbios_timeout,
+                    netbios_interval,
+                    ping_timeout,
+                    ping_interval,
+                    port_scan_timeout,
+                    // max_wait_time is consumed by NetworkScanner::start, not the per-task context.
+                    max_wait_time: _,
+                },
+            limits:
+                LimitsConfig {
+                    max_concurrency,
+                    max_ping_concurrency,
+                    max_tcp_probe_concurrency,
+                },
+            targeting:
+                TargetingConfig {
+                    interface_bind_strict,
+                    // target/interface/policy were consumed by plan_scan upstream.
+                    ..
+                },
         }: ScannerConfig,
-        toggles: &ScannerToggles,
-        subnet: Vec<Subnet>,
+        plan: NetworkScanPlan,
     ) -> Self {
-        let range_to_ping = match ip_ranges.len() {
-            0 if toggles.enable_subnet_scan => subnet.iter().map(IpAddrRange::from).collect::<Vec<IpAddrRange>>(),
-            _ => ip_ranges,
-        };
-
         Self {
-            broadcast_subnet: subnet,
-            range_to_ping,
+            broadcast_subnet: plan.broadcast_subnet,
+            range_to_ping: plan.range_to_ping,
+            sources: Arc::new(plan.sources),
             ports,
             ping_interval,
             ping_timeout,
@@ -58,6 +78,9 @@ impl ContextConfig {
             netbios_timeout,
             netbios_interval,
             mdns_query_timeout,
+            max_ping_concurrency: max_ping_concurrency.or(max_concurrency),
+            max_tcp_probe_concurrency: max_tcp_probe_concurrency.or(max_concurrency),
+            interface_bind_strict,
         }
     }
 }
@@ -88,16 +111,23 @@ impl TaskExecutionContext {
             runtime,
             config: configs,
             toggle: toggles,
+            source_provider,
             ..
         } = network_scanner;
 
-        let broadcast_subnet = get_subnets()?;
+        let plan = plan_scan(
+            &configs.targeting.target_selector,
+            &configs.targeting.interface_selector,
+            configs.targeting.range_interface_policy,
+            source_provider.get_source_inventory()?,
+            toggles.enable_subnet_scan,
+        )?;
         let context = Self {
             event_bus,
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             runtime,
             mdns_daemon,
-            configs: ContextConfig::new(configs, &toggles, broadcast_subnet),
+            configs: ContextConfig::new(configs, plan),
             toggles,
         };
 

@@ -1,7 +1,7 @@
 use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use network_scanner_net::runtime;
@@ -38,11 +38,12 @@ pub async fn broadcast(
             .await
             .context("failed to send broadcast start event")?;
 
+        let send_at = Instant::now();
         socket
             .send_to(&packet.to_bytes(true), &SockAddr::from(SocketAddr::new(ip.into(), 0)))
             .await?;
 
-        tokio::time::timeout(read_time_out, loop_receive(socket, sender)).await??;
+        tokio::time::timeout(read_time_out, loop_receive(socket, sender, send_at)).await??;
         debug!("Broadcast future dropped");
         anyhow::Ok(())
     });
@@ -50,6 +51,7 @@ pub async fn broadcast(
     async fn loop_receive(
         mut socket: network_scanner_net::socket::AsyncRawSocket,
         sender: tokio::sync::mpsc::Sender<BroadcastEvent>,
+        send_at: Instant,
     ) -> anyhow::Result<()> {
         let mut buffer = [MaybeUninit::uninit(); icmp_v4::ICMPV4_MTU];
         loop {
@@ -58,8 +60,9 @@ pub async fn broadcast(
                     .as_socket_ipv4()
                     .context("unreachable: we only use ipv4 for broadcast")?
                     .ip();
+                let time = Some(send_at.elapsed().as_millis());
 
-                sender.send(BroadcastEvent::Entry { ip }).await?;
+                sender.send(BroadcastEvent::Entry { ip, time }).await?;
             };
         }
     }

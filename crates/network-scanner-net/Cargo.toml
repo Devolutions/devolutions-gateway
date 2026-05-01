@@ -17,6 +17,9 @@ socket2 = { version = "0.5", features = ["all"] }
 thiserror = "2"
 tracing = "0.1"
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tracing-cov-mark = { path = "../tracing-cov-mark" }
 tracing-subscriber = "0.3"

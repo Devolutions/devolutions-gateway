@@ -14,7 +14,7 @@ workspace = true
 
 [features]
 default = []
-openapi = ["dep:utoipa"]
+openapi = ["dep:utoipa", "network-scanner/openapi"]
 
 [dependencies]
 

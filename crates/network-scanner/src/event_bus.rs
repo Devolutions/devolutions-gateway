@@ -75,6 +75,17 @@ impl TryFrom<ScannerEvent> for TcpKnockEvent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct AnyScannerEvent(pub ScannerEvent);
+
+impl TryFrom<ScannerEvent> for AnyScannerEvent {
+    type Error = ();
+
+    fn try_from(value: ScannerEvent) -> Result<Self, Self::Error> {
+        Ok(Self(value))
+    }
+}
+
 define_splitable! {RawIpEvent, DnsEvent, TcpKnockEvent }
 define_splitable! {TcpKnockEvent, TcpKnockWithHost}
 
@@ -94,7 +105,7 @@ impl RawIpEvent {
     pub fn success(&self) -> Option<IpAddr> {
         match self {
             RawIpEvent::Ping(PingEvent::Success { ip, .. }) => Some(*ip),
-            RawIpEvent::Broadcast(BroadcastEvent::Entry { ip }) => Some(IpAddr::V4(*ip)),
+            RawIpEvent::Broadcast(BroadcastEvent::Entry { ip, .. }) => Some(IpAddr::V4(*ip)),
             _ => None,
         }
     }

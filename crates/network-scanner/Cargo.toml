@@ -8,6 +8,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = []
+# Adds utoipa::ToSchema derives to the public result/event types so they can
+# be registered in the gateway's OpenAPI document.
+openapi = ["dep:utoipa"]
+
 [dependencies]
 anyhow = "1"
 crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
@@ -17,19 +23,23 @@ network-interface = "2.0"
 network-scanner-net = { path = "../network-scanner-net" }
 network-scanner-proto = { path = "../network-scanner-proto" }
 parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 socket2 = "0.5"
 thiserror = "2"
 tokio = { version = "1.45", features = ["rt", "sync", "time", "fs"] }
 tracing = "0.1"
 typed-builder = "0.21"
+utoipa = { version = "4.2", default-features = false, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 ipconfig = "0.3"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-futures-util = "0.3"
-netlink-packet-route = "0.26"
-rtnetlink = "0.19"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+] }
 
 [dev-dependencies]
 tokio = { version = "1.45", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }

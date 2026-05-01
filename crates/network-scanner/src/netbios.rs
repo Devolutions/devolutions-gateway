@@ -20,9 +20,18 @@ const MESSAGE: [u8; 50] = [
 
 #[derive(Debug, Clone)]
 pub enum NetBiosEvent {
-    Start { ip: Ipv4Addr },
-    Success { ip: Ipv4Addr, name: String },
-    Failed { ip: Ipv4Addr },
+    Start {
+        ip: Ipv4Addr,
+    },
+    Success {
+        ip: Ipv4Addr,
+        name: String,
+        /// Round-trip time in milliseconds, when measured.
+        time: Option<u128>,
+    },
+    Failed {
+        ip: Ipv4Addr,
+    },
 }
 
 const NET_BIOS_PORT: u16 = 137;
@@ -66,6 +75,7 @@ pub(crate) fn netbios_query_one(
 
         let mut buf: [MaybeUninit<u8>; 1024] = [MaybeUninit::<u8>::uninit(); 1024];
 
+        let send_at = std::time::Instant::now();
         let result: anyhow::Result<()> = async {
             socket.send_to(&MESSAGE, &addr).await?;
             socket.recv(&mut buf).await?;
@@ -80,16 +90,21 @@ pub(crate) fn netbios_query_one(
                 .context("failed to send netbios failed event");
         }
 
-        // SAFETY: TODO: explain why it’s safe.
+        // SAFETY: socket.recv returns the number of bytes written; we only
+        // read the first `n` bytes via NetBiosPacket::from below, which
+        // copies before parsing. TODO: thread back the recv length so we
+        // tighten this slice exactly.
         let buf = unsafe { assume_init(&buf) };
 
         let packet = NetBiosPacket::from(ip, buf);
+        let time = Some(send_at.elapsed().as_millis());
 
         result_sender
             .send({
                 NetBiosEvent::Success {
                     ip: packet.ip,
                     name: packet.name(),
+                    time,
                 }
             })
             .await?;
