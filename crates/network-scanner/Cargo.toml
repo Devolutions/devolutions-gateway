@@ -44,3 +44,8 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 tokio = { version = "1.45", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }
 tracing-subscriber = "0.3"
+# `scanner_tui` example only — keep these here so production binaries don't pull
+# in the TUI stack.
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+futures = "0.3"
