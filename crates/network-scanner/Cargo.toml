@@ -19,7 +19,7 @@ network-scanner-proto = { path = "../network-scanner-proto" }
 parking_lot = "0.12"
 socket2 = "0.5"
 thiserror = "2"
-tokio = { version = "1.45", features = ["rt", "sync", "time", "fs"] }
+tokio = { version = "1.52", features = ["rt", "sync", "time", "fs"] }
 tracing = "0.1"
 typed-builder = "0.21"
 
@@ -32,5 +32,5 @@ netlink-packet-route = "0.26"
 rtnetlink = "0.19"
 
 [dev-dependencies]
-tokio = { version = "1.45", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }
+tokio = { version = "1.52", features = ["rt", "macros", "rt-multi-thread", "tracing", "signal"] }
 tracing-subscriber = "0.3"

@@ -17,9 +17,9 @@ bytes = "1.10"
 ipnetwork = "0.20"
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "2.0"
-tokio = { version = "1.45", features = ["io-util"] }
+tokio = { version = "1.52", features = ["io-util"] }
 uuid = { version = "1.17", features = ["v4"] }
 
 [dev-dependencies]
 proptest = "1.7"
-tokio = { version = "1.45", features = ["rt", "macros"] }
+tokio = { version = "1.52", features = ["rt", "macros"] }

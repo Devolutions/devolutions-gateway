@@ -15,7 +15,7 @@ workspace = true
 jmux-proto = { path = "../jmux-proto" }
 
 # async
-tokio = { version = "1.45", features = ["net", "rt", "io-util", "macros", "time"] }
+tokio = { version = "1.52", features = ["net", "rt", "io-util", "macros", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
 
@@ -33,4 +33,4 @@ bitvec = "1.0"
 # Test infrastructure for socket manipulation.
 socket2 = "0.5"
 # Enable extra tokio features.
-tokio = { version = "1.45", features = ["rt-multi-thread"] }
+tokio = { version = "1.52", features = ["rt-multi-thread"] }

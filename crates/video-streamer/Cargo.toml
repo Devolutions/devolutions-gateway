@@ -14,7 +14,7 @@ bench = ["perf-diagnostics"]
 [dependencies]
 anyhow = "1.0"
 futures-util = { version = "0.3", features = ["sink"] }
-tokio = { version = "1.45", features = [
+tokio = { version = "1.52", features = [
     "io-util",
     "rt",
     "rt-multi-thread",
@@ -33,7 +33,7 @@ webm-iterable = "0.6"
 [dev-dependencies]
 criterion = "0.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tokio = { version = "1.45", features = [
+tokio = { version = "1.52", features = [
     "io-util",
     "rt",
     "rt-multi-thread",

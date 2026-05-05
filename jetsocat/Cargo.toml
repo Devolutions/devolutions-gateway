@@ -39,7 +39,7 @@ seahorse = "2.2"
 humantime = "2.2"
 
 # async
-tokio = { version = "1.45", features = ["io-std", "io-util", "net", "fs", "signal", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio = { version = "1.52", features = ["io-std", "io-util", "net", "fs", "signal", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 transport = { path = "../crates/transport" }
