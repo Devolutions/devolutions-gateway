@@ -188,6 +188,7 @@ pub struct Conf {
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<Utf8PathBuf>>,
     pub recording_path: Utf8PathBuf,
+    pub min_recording_storage_free_space: Option<u64>,
     pub jrl_file: Utf8PathBuf,
     pub ngrok: Option<dto::NgrokConf>,
     pub verbosity_profile: dto::VerbosityProfile,
@@ -911,6 +912,7 @@ impl Conf {
             delegation_private_key,
             plugins: conf_file.plugins.clone(),
             recording_path,
+            min_recording_storage_free_space: conf_file.min_recording_storage_free_space,
             jrl_file,
             ngrok: conf_file.ngrok.clone(),
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
@@ -1685,6 +1687,13 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub recording_path: Option<Utf8PathBuf>,
 
+        /// Minimum free space (in bytes) on the recording storage volume below which the
+        /// gateway returns HTTP 507 Insufficient Storage on `/jet/jrec/push/{id}`. Omit to
+        /// skip this threshold check; the gateway can still return 507 independently when
+        /// the recording storage is not writable.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub min_recording_storage_free_space: Option<u64>,
+
         /// Ngrok config (closely maps https://ngrok.com/docs/ngrok-agent/config/)
         #[serde(skip_serializing_if = "Option::is_none")]
         pub ngrok: Option<NgrokConf>,
@@ -1776,6 +1785,7 @@ pub mod dto {
                 jrl_file: None,
                 plugins: None,
                 recording_path: None,
+                min_recording_storage_free_space: None,
                 web_app: None,
                 ai_gateway: None,
                 job_queue_database: None,

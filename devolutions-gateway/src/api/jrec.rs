@@ -17,9 +17,10 @@ use tracing::Instrument as _;
 use uuid::Uuid;
 
 use crate::DgwState;
+use crate::api::heartbeat::recording_storage_health;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::RecordingMessageSender;
+use crate::recording::{PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -63,6 +64,46 @@ async fn jrec_push(
 ) -> Result<Response, HttpError> {
     if claims.jet_rop != RecordingOperation::Push {
         return Err(HttpError::forbidden().msg("expected push operation"));
+    }
+
+    let conf = conf_handle.get_conf();
+
+    // Pre-flight: refuse the upgrade up-front when the recording storage cannot accept
+    // a new stream. Returning HTTP 507 here gives the client a clear, actionable status
+    // before the WebSocket is even established, so it can avoid a doomed session entirely.
+    //
+    // The recording directory is created lazily by design (see #1746) so that disk-space
+    // reporting still works on a not-yet-mounted volume. Ensure it exists for the probe
+    // below; if creation itself fails, surface that as 507.
+    if let Err(error) = tokio::fs::create_dir_all(&conf.recording_path).await {
+        warn!(
+            client = %source_addr,
+            %session_id,
+            %error,
+            "Refusing JREC push: failed to ensure recording storage directory"
+        );
+        return Err(HttpErrorBuilder::new(StatusCode::INSUFFICIENT_STORAGE).msg("recording storage is not accessible"));
+    }
+
+    let storage = recording_storage_health(conf.recording_path.as_std_path());
+    if !storage.recording_storage_is_writeable {
+        warn!(client = %source_addr, %session_id, "Refusing JREC push: recording storage is not writable");
+        return Err(HttpErrorBuilder::new(StatusCode::INSUFFICIENT_STORAGE).msg("recording storage is not writable"));
+    }
+    if let (Some(min), Some(available)) = (
+        conf.min_recording_storage_free_space,
+        storage.recording_storage_available_space,
+    ) && available < min
+    {
+        warn!(
+            client = %source_addr,
+            %session_id,
+            available_bytes = available,
+            min_bytes = min,
+            "Refusing JREC push: free space below configured minimum"
+        );
+        return Err(HttpErrorBuilder::new(StatusCode::INSUFFICIENT_STORAGE)
+            .msg("recording storage below minimum free-space threshold"));
     }
 
     let response = ws.on_upgrade(move |ws| {
@@ -110,13 +151,25 @@ async fn handle_jrec_push(
         .instrument(info_span!("jrec", client = %source_addr))
         .await;
 
-    if let Err(error) = result {
-        close_handle.server_error("forwarding failure".to_owned()).await;
-        error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-JREC failure");
-    } else {
-        close_handle.normal_close().await;
+    match result {
+        Ok(PushOutcome::Done) => close_handle.normal_close().await,
+        Ok(PushOutcome::StorageFull) => {
+            warn!(client = %source_addr, %session_id, "JREC push closed: storage full");
+            close_handle.app_close(STORAGE_FULL_CLOSE_CODE).await;
+        }
+        Err(error) => {
+            close_handle.server_error("forwarding failure".to_owned()).await;
+            error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-JREC failure");
+        }
     }
 }
+
+/// WebSocket close code sent on `/jrec/push/{id}` when the recording storage volume is full
+/// and the stream cannot continue.
+///
+/// Codes in 4000-4999 are reserved for private application use per
+/// <https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code>.
+const STORAGE_FULL_CLOSE_CODE: u16 = 4010;
 
 /// Deletes a recording stored on this instance
 #[cfg_attr(feature = "openapi", utoipa::path(

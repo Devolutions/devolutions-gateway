@@ -170,6 +170,10 @@ Stable options are:
 
 - **RecordingPath** (_FilePath_): Path to the recordings folder.
 
+- **MinRecordingStorageFreeSpace** (_Integer_): Minimum free space (in bytes) on the recording storage volume below which
+    `/jet/jrec/push/{id}` rejects new recording streams with HTTP 507 Insufficient Storage. Omit to skip this threshold
+    check; the gateway can still return 507 independently when the recording storage is not writable.
+
 - **Ngrok** (_Object_): JSON object describing the ngrok configuration for ingress listeners.
 
     * **AuthToken** (_String_): Specifies the authentication token used to connect to the ngrok service.
