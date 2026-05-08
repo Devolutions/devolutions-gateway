@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use picky::pem::parse_pem;
+use picky::pem::{PemError, parse_pem, read_pem};
 use picky::x509::Cert;
 use picky_asn1_x509::{ExtensionView, GeneralName};
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType};
@@ -32,29 +32,36 @@ fn cert_pem_to_der(pem_str: &str) -> anyhow::Result<Vec<u8>> {
 /// Parse one or more PEM-encoded certificates into `rustls` certificate types.
 ///
 /// A PEM file can carry multiple concatenated CERTIFICATE blocks (chain). We
-/// iterate block-by-block with [`parse_pem`], check each label, and wrap the
-/// DER bytes in [`rustls_pki_types::CertificateDer`] — the only type the
-/// rustls/quinn TLS builders accept.
+/// use [`read_pem`] in a loop — each call consumes one block; `HeaderNotFound`
+/// signals "no more blocks left", which is the termination condition. Each
+/// block's label is verified, then the DER bytes are wrapped in
+/// [`rustls_pki_types::CertificateDer`] — the type the rustls/quinn TLS
+/// builders accept.
 fn read_cert_chain(pem_str: &str) -> anyhow::Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    let mut chain = Vec::new();
-    let mut remaining = pem_str;
-    while let Some(start) = remaining.find("-----BEGIN ") {
-        let block_end = remaining[start..]
-            .find("-----END ")
-            .and_then(|e| {
-                remaining[start + e..]
-                    .find("-----\n")
-                    .map(|n| start + e + n + "-----\n".len())
-            })
-            .context("malformed PEM block (no END tag)")?;
+    use std::io::BufReader;
 
-        let block = &remaining[start..block_end];
-        let pem = parse_pem(block).context("parse PEM block")?;
-        if pem.label() != PEM_LABEL_CERTIFICATE {
-            bail!("expected {PEM_LABEL_CERTIFICATE} PEM, got {}", pem.label());
+    let mut reader = BufReader::new(pem_str.as_bytes());
+    let mut chain = Vec::new();
+
+    loop {
+        match read_pem(&mut reader) {
+            Ok(pem) => {
+                if pem.label() != PEM_LABEL_CERTIFICATE {
+                    bail!(
+                        "expected {PEM_LABEL_CERTIFICATE} PEM at index {}, got {}",
+                        chain.len(),
+                        pem.label()
+                    );
+                }
+                // `into_data().into_owned()` consumes the `Pem` and avoids the
+                // copy that `pem.data().to_vec()` would force.
+                chain.push(rustls::pki_types::CertificateDer::from(pem.into_data().into_owned()));
+            }
+            Err(PemError::HeaderNotFound) => break,
+            Err(e) => {
+                return Err(anyhow::Error::new(e).context(format!("parse PEM block at index {}", chain.len())));
+            }
         }
-        chain.push(rustls::pki_types::CertificateDer::from(pem.data().to_vec()));
-        remaining = &remaining[block_end..];
     }
 
     if chain.is_empty() {
@@ -604,5 +611,79 @@ mod tests {
         assert!(result.is_err(), "tampered CSR should be rejected");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ---------------------------------------------------------------------
+    // read_cert_chain — regression coverage for PEM whitespace / multi-block
+    // ---------------------------------------------------------------------
+
+    /// Mint a real CA + signed end-entity cert and return (ca_pem, leaf_pem).
+    /// Uses `CaManager::load_or_generate` so we don't reimplement PEM emission
+    /// in the test — whatever rcgen produces here is what the runtime sees.
+    fn make_cert_pair() -> (String, String) {
+        let temp_dir = std::env::temp_dir().join(format!("dgw-cert-chain-test-{}", Uuid::new_v4()));
+        let data_dir = Utf8PathBuf::from_path_buf(temp_dir.clone()).expect("temp path UTF-8");
+        let ca = CaManager::load_or_generate(&data_dir).expect("CA generation");
+        let (_key_pair, csr_pem) = generate_test_csr("chain-test-agent");
+        let signed = ca
+            .sign_agent_csr(Uuid::new_v4(), "chain-test-agent", &csr_pem, None)
+            .expect("sign CSR");
+        let ca_pem = ca.ca_cert_pem().to_owned();
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        (ca_pem, signed.client_cert_pem)
+    }
+
+    #[test]
+    fn read_cert_chain_single_block() {
+        let (ca_pem, _) = make_cert_pair();
+        let chain = read_cert_chain(&ca_pem).expect("parse single-block chain");
+        assert_eq!(chain.len(), 1);
+    }
+
+    #[test]
+    fn read_cert_chain_multi_block() {
+        let (ca_pem, leaf_pem) = make_cert_pair();
+        let combined = format!("{leaf_pem}{ca_pem}");
+        let chain = read_cert_chain(&combined).expect("parse multi-block chain");
+        assert_eq!(chain.len(), 2, "leaf + CA should both be parsed");
+    }
+
+    #[test]
+    fn read_cert_chain_handles_crlf_line_endings() {
+        let (ca_pem, _) = make_cert_pair();
+        let crlf = ca_pem.replace('\n', "\r\n");
+        let chain = read_cert_chain(&crlf).expect("parse CRLF chain");
+        assert_eq!(chain.len(), 1);
+    }
+
+    #[test]
+    fn read_cert_chain_handles_trailing_whitespace_between_blocks() {
+        let (ca_pem, leaf_pem) = make_cert_pair();
+        // Insert blank lines and trailing spaces between concatenated blocks —
+        // the kind of noise hand-edited or shell-concatenated PEM files end up
+        // with. The original hand-rolled scanner choked on this; `read_pem`
+        // handles it.
+        let combined = format!("{leaf_pem}\n   \n\t\n{ca_pem}\n\n");
+        let chain = read_cert_chain(&combined).expect("parse whitespace-padded chain");
+        assert_eq!(chain.len(), 2);
+    }
+
+    #[test]
+    fn read_cert_chain_rejects_empty_input() {
+        let err = read_cert_chain("").expect_err("empty input should fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("no CERTIFICATE blocks"), "got: {msg}");
+    }
+
+    #[test]
+    fn read_cert_chain_rejects_wrong_label() {
+        let (_, leaf_pem) = make_cert_pair();
+        // Build a 2-block input where the second block has the wrong label.
+        let private_key_block = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg\n-----END PRIVATE KEY-----\n";
+        let combined = format!("{leaf_pem}{private_key_block}");
+        let err = read_cert_chain(&combined).expect_err("wrong label should fail");
+        let msg = format!("{err:#}");
+        // The error context must point at the failing block index, not just say "parse PEM".
+        assert!(msg.contains("index 1"), "error should locate the bad block: {msg}");
     }
 }
