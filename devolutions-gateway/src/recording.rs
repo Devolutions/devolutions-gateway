@@ -58,6 +58,19 @@ impl JrecManifest {
     }
 }
 
+/// Outcome of a successful push session.
+///
+/// `Err` from `ClientPush::run` is reserved for unexpected failures. Conditions that the
+/// caller is expected to surface to the client (e.g. disk full) are reported as variants of
+/// this enum so the caller can choose an appropriate close frame.
+#[derive(Debug)]
+pub enum PushOutcome {
+    /// The recording stream completed normally or was terminated by a shutdown signal.
+    Done,
+    /// The underlying file write failed because the recording storage volume is full.
+    StorageFull,
+}
+
 #[derive(TypedBuilder)]
 pub struct ClientPush<S> {
     recordings: RecordingMessageSender,
@@ -72,7 +85,7 @@ impl<S> ClientPush<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub async fn run(self) -> anyhow::Result<PushOutcome> {
         let Self {
             recordings,
             claims,
@@ -98,7 +111,7 @@ where
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
                 client_stream.shutdown().await.context("shutdown")?;
-                return Ok(());
+                return Ok(PushOutcome::Done);
             }
         };
 
@@ -144,11 +157,18 @@ where
 
                 let res = tokio::select! {
                     res = copy_fut => {
-                        res.context("JREC streaming to file").map(|_| ())
+                        match res {
+                            Ok(_) => Ok(PushOutcome::Done),
+                            Err(e) if is_storage_full(&e) => {
+                                warn!(%session_id, "Recording storage is full; closing push stream");
+                                Ok(PushOutcome::StorageFull)
+                            }
+                            Err(e) => Err(anyhow::Error::new(e).context("JREC streaming to file")),
+                        }
                     },
                     _ = shutdown_signal.wait() => {
                         trace!("Received shutdown signal");
-                        client_stream.shutdown().await.context("shutdown")
+                        client_stream.shutdown().await.context("shutdown").map(|_| PushOutcome::Done)
                     },
                 };
 
@@ -165,6 +185,15 @@ where
 
         res
     }
+}
+
+/// Returns `true` if the I/O error indicates the storage volume is full.
+///
+/// Uses `io::ErrorKind::StorageFull` (stable since Rust 1.83) which the standard library maps
+/// from the platform-specific code: `ENOSPC` on Unix, `ERROR_DISK_FULL` / `ERROR_HANDLE_DISK_FULL`
+/// on Windows.
+fn is_storage_full(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::StorageFull)
 }
 
 /// A set containing IDs of currently active recordings.

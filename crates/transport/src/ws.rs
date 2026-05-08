@@ -173,6 +173,30 @@ impl CloseWebSocketHandle {
             })
             .await;
     }
+
+    /// Sends a close frame with an application-specific code in the private range (4000–4999).
+    ///
+    /// Clients dispatch on `code`; no reason text is sent. If `code` is outside the private
+    /// range (e.g. a typo or a reserved code such as 1005/1006 which RFC 6455 §7.4.1 forbids
+    /// sending on the wire), this falls back to 1011 to keep the protocol valid.
+    pub async fn app_close(self, code: u16) {
+        let safe_code = if (4000..=4999).contains(&code) {
+            code
+        } else {
+            tracing::error!(
+                code,
+                "app_close called with a code outside the private range; falling back to 1011"
+            );
+            1011
+        };
+        let _ = self
+            .sender
+            .send(WsCloseFrame {
+                code: safe_code,
+                message: String::new(),
+            })
+            .await;
+    }
 }
 
 /// A background "sentinel" task responsible for keeping the WebSocket connection alive
