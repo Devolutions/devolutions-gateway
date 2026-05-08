@@ -12,7 +12,7 @@ network-scanner = { path = "../network-scanner" }
 thiserror = "2"
 time = { version = "0.3", features = ["serde"] }
 tokio-util = { version = "0.7" }
-tokio = { version = "1.45", features = ["macros", "sync"] }
+tokio = { version = "1.52", features = ["macros", "sync"] }
 tracing = "0.1"
 
 [lints]
