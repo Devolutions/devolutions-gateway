@@ -408,9 +408,7 @@ where
 
 /// Grants read access to agent management endpoints.
 ///
-/// Accepts a scope token with `AgentRead`, `DiagnosticsRead`, `ConfigWrite`, or
-/// `Wildcard` scope. `DiagnosticsRead` / `ConfigWrite` are kept for
-/// back-compat with callers that predate the dedicated `AgentRead` scope.
+/// Accepts a scope token with `AgentRead` or `Wildcard` scope.
 #[derive(Clone, Copy)]
 pub struct AgentManagementReadAccess;
 
@@ -426,28 +424,21 @@ where
             .map_err(HttpError::internal().err())?
             .0;
 
-        // Accepted scopes:
-        // - AgentRead: the canonical scope for this endpoint (DVLS uses this).
-        // - DiagnosticsRead / ConfigWrite: back-compat for older callers that predate
-        //   the dedicated agent scopes; safe because both imply broader privileges.
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard
-                | AccessScope::AgentRead
-                | AccessScope::DiagnosticsRead
-                | AccessScope::ConfigWrite => Ok(Self),
-                _ => Err(HttpError::forbidden().msg(
-                    "invalid scope for agent management read (require one of: gateway.agent.read, gateway.diagnostics.read, gateway.config.write, *)",
-                )),
+                AccessScope::Wildcard | AccessScope::AgentRead => Ok(Self),
+                _ => Err(HttpError::forbidden()
+                    .msg("invalid scope for agent management read (require one of: gateway.agent.read, *)")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management read")),
         }
     }
 }
 
-/// Grants write access to agent management endpoints (e.g. enrollment, delete).
+/// Grants write access to agent management endpoints.
 ///
-/// Accepts scope tokens with `AgentEnroll`, `ConfigWrite`, or `Wildcard` scope.
+/// Accepts scope tokens with `AgentEnroll` or `Wildcard` scope. A dedicated
+/// `AgentDelete` scope will replace `AgentEnroll` here in a follow-up PR.
 #[derive(Clone, Copy)]
 pub struct AgentManagementWriteAccess;
 
@@ -463,16 +454,11 @@ where
             .map_err(HttpError::internal().err())?
             .0;
 
-        // Accepted scopes:
-        // - AgentEnroll: the canonical scope for this endpoint (DVLS uses this).
-        // - ConfigWrite: back-compat for older callers that predate the
-        //   dedicated agent scope.
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard | AccessScope::AgentEnroll | AccessScope::ConfigWrite => Ok(Self),
-                _ => Err(HttpError::forbidden().msg(
-                    "invalid scope for agent management write (require one of: gateway.agent.enroll, gateway.config.write, *)",
-                )),
+                AccessScope::Wildcard | AccessScope::AgentEnroll => Ok(Self),
+                _ => Err(HttpError::forbidden()
+                    .msg("invalid scope for agent management write (require one of: gateway.agent.enroll, *)")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
         }

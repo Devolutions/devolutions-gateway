@@ -44,21 +44,6 @@ fn validate_enrollment_jwt(token: &str, provisioner_key: &picky::key::PublicKey)
     )
 }
 
-/// Timing-safe byte comparison for secret values.
-///
-/// Both inputs are first hashed with SHA-256 to produce fixed 32-byte digests;
-/// the digest comparison then runs in constant time (fixed-length XOR fold).
-/// Hashing normalizes length so a leaked hash duration cannot reveal the
-/// secret's length; and the constant-time fold prevents leaking which byte
-/// differed. The function is *not* constant-time over input length, which is
-/// why it is named after its intent (timing-safe) rather than its mechanism.
-fn timing_safe_eq(a: &[u8], b: &[u8]) -> bool {
-    use sha2::{Digest, Sha256};
-    let da = Sha256::digest(a);
-    let db = Sha256::digest(b);
-    da.iter().zip(db.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
 #[derive(Deserialize)]
 pub struct EnrollRequest {
     /// Agent-generated UUID (the agent owns its identity).
@@ -97,12 +82,8 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 
 /// Enroll a new agent.
 ///
-/// Requires a Bearer token that is either:
-/// - a JWT signed by the configured provisioner key with `AgentEnroll` /
-///   `Wildcard` scope (issued by DVLS — the only authority for agent
-///   enrollment tokens), or
-/// - the static `enrollment_secret` from the gateway configuration (admin
-///   bootstrap fallback for environments without DVLS).
+/// Requires a Bearer token: a JWT signed by the configured provisioner key
+/// (e.g. DVLS, Hub, or any PEM service) with `AgentEnroll` or `Wildcard` scope.
 ///
 /// The agent generates its own key pair and sends a CSR. The gateway signs it
 /// and returns the certificate. The private key never leaves the agent.
@@ -113,13 +94,15 @@ async fn enroll_agent(
         ..
     }): State<DgwState>,
     headers: HeaderMap,
-    Json(req): Json<EnrollRequest>,
+    Json(EnrollRequest {
+        agent_id,
+        agent_name,
+        csr_pem,
+        agent_hostname,
+    }): Json<EnrollRequest>,
 ) -> Result<Json<EnrollResponse>, HttpError> {
     // Validate agent name: 1-255 printable ASCII characters.
-    if req.agent_name.is_empty()
-        || 255 < req.agent_name.len()
-        || req.agent_name.bytes().any(|b| !(0x20..=0x7E).contains(&b))
-    {
+    if agent_name.is_empty() || 255 < agent_name.len() || agent_name.bytes().any(|b| !(0x20..=0x7E).contains(&b)) {
         return Err(HttpError::bad_request().msg("agent name must be 1-255 printable ASCII characters"));
     }
 
@@ -139,29 +122,9 @@ async fn enroll_agent(
         .as_ref()
         .ok_or_else(|| HttpError::not_found().msg("agent enrollment is not configured"))?;
 
-    // Token validation order:
-    // 1. JWT signed by the configured provisioner key (scope == AgentEnroll)
-    // 2. Static enrollment secret from configuration (constant-time comparison)
-    let jwt_valid = validate_enrollment_jwt(provided_token, &conf.provisioner_public_key);
-
-    if !jwt_valid {
-        // The JWT failed to validate against the provisioner key. The static
-        // `enrollment_secret` is only a fallback for environments without DVLS;
-        // when it is not configured, the request is simply unauthenticated, not
-        // a server-config issue — so 403, not 404 (404 is reserved for the agent
-        // tunnel feature itself being disabled).
-        let enrollment_secret = conf
-            .agent_tunnel
-            .enrollment_secret
-            .as_deref()
-            .ok_or_else(|| HttpError::forbidden().msg("invalid enrollment token"))?;
-
-        if !timing_safe_eq(provided_token.as_bytes(), enrollment_secret.as_bytes()) {
-            return Err(HttpError::forbidden().msg("invalid enrollment token"));
-        }
+    if !validate_enrollment_jwt(provided_token, &conf.provisioner_public_key) {
+        return Err(HttpError::forbidden().msg("invalid enrollment token"));
     }
-
-    let agent_id = req.agent_id;
 
     // Reject duplicate agent IDs to prevent identity shadowing.
     if handle.registry().get(&agent_id).await.is_some() {
@@ -172,7 +135,7 @@ async fn enroll_agent(
 
     let signed = handle
         .ca_manager()
-        .sign_agent_csr(agent_id, &req.agent_name, &req.csr_pem, req.agent_hostname.as_deref())
+        .sign_agent_csr(agent_id, &agent_name, &csr_pem, agent_hostname.as_deref())
         .map_err(HttpError::bad_request().with_msg("invalid CSR").err())?;
 
     let quic_endpoint = format!("{}:{}", conf.hostname, conf.agent_tunnel.listen_port);
@@ -184,7 +147,7 @@ async fn enroll_agent(
 
     info!(
         %agent_id,
-        agent_name = %req.agent_name,
+        agent_name = %agent_name,
         "Agent enrolled successfully",
     );
 
