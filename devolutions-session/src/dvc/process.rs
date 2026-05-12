@@ -22,6 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
 use windows::core::PCWSTR;
 
 use crate::dvc::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_signaled_mpsc_channel};
+use crate::dvc::encoding::{DataEncoding, InputEncoder, OutputDecoder};
 use crate::dvc::env::make_environment_block;
 use crate::dvc::fs::TmpFileGuard;
 use crate::dvc::io::{IoRedirectionPipes, ensure_overlapped_io_result};
@@ -103,6 +104,8 @@ pub struct WinApiProcessCtx {
     stdout_read_pipe: Option<Pipe>,
     stderr_read_pipe: Option<Pipe>,
     stdin_write_pipe: Option<Pipe>,
+
+    encoding: DataEncoding,
 
     pid: u32,
 
@@ -215,7 +218,12 @@ impl WinApiProcessCtx {
     ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
-        info!(session_id, "Process IO redirection loop has started");
+        info!(session_id, ?self.encoding, "Process IO redirection loop has started");
+
+        // Encoding transcoders for stdin/stdout/stderr.
+        let mut stdout_decoder = OutputDecoder::new(self.encoding);
+        let mut stderr_decoder = OutputDecoder::new(self.encoding);
+        let mut stdin_encoder = InputEncoder::new(self.encoding);
 
         // Events for overlapped IO
         let stdout_read_event = Event::new_unnamed()?;
@@ -322,14 +330,47 @@ impl WinApiProcessCtx {
                                 }
                             };
 
-                            let mut bytes_written: u32 = 0;
+                            // Transcode UTF-8 input to the process encoding.
+                            let encoded_data = stdin_encoder.encode(&data);
 
-                            // Send data to stdin pipe in a blocking maner.
-                            // SAFETY: pipe is valid to write to, as long as it is not closed.
-                            unsafe { WriteFile(pipe_handle, Some(&data), Some(&mut bytes_written as *mut _), None) }?;
+                            if !encoded_data.is_empty() {
+                                let mut bytes_written: u32 = 0;
+
+                                // Send data to stdin pipe in a blocking manner.
+                                // SAFETY: pipe and input buffer are ensured to be valid via
+                                // borrowing rules.
+                                unsafe {
+                                    WriteFile(
+                                        pipe_handle,
+                                        Some(&*encoded_data),
+                                        Some(&mut bytes_written as *mut _),
+                                        None,
+                                    )
+                                }?;
+                            }
 
                             if last {
-                                // Close stdin pipe
+                                // Flush any remaining encoder state before closing.
+                                let flushed = stdin_encoder.flush();
+                                if !flushed.is_empty() {
+                                    let mut bytes_written: u32 = 0;
+                                    // SAFETY: pipe and input buffer are ensured to be valid via
+                                    // borrowing rules.
+                                    unsafe {
+                                        WriteFile(
+                                            self.stdin_write_pipe
+                                                .as_ref()
+                                                .expect("BUG: stdin pipe closed unexpectedly")
+                                                .handle
+                                                .raw(),
+                                            Some(&flushed),
+                                            Some(&mut bytes_written as *mut _),
+                                            None,
+                                        )
+                                    }?;
+                                }
+
+                                // Close stdin pipe.
                                 self.stdin_write_pipe = None;
                             }
                         }
@@ -371,6 +412,17 @@ impl WinApiProcessCtx {
                                 // EOF on stdout pipe, close it and send EOF message to message_tx
                                 self.stdout_read_pipe = None;
 
+                                // Flush any remaining decoder state at EOF.
+                                let flushed = stdout_decoder.flush();
+                                if !flushed.is_empty() {
+                                    io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
+                                        session_id,
+                                        stream: NowExecDataStreamKind::Stdout,
+                                        last: false,
+                                        data: flushed,
+                                    })?;
+                                }
+
                                 io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
                                     session_id,
                                     stream: NowExecDataStreamKind::Stdout,
@@ -383,12 +435,18 @@ impl WinApiProcessCtx {
                         continue;
                     }
 
-                    io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                        session_id,
-                        stream: NowExecDataStreamKind::Stdout,
-                        last: false,
-                        data: stdout_buffer[..bytes_read as usize].to_vec(),
-                    })?;
+                    // Transcode stdout from process encoding to UTF-8.
+                    let raw_len = bytes_read as usize;
+                    let decoded_data = stdout_decoder.decode(&stdout_buffer[..raw_len]);
+
+                    if !decoded_data.is_empty() {
+                        io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
+                            session_id,
+                            stream: NowExecDataStreamKind::Stdout,
+                            last: false,
+                            data: decoded_data.into_owned(),
+                        })?;
+                    }
 
                     // Schedule next overlapped read
                     // SAFETY: pipe is valid to read from, as long as it is not closed.
@@ -432,6 +490,18 @@ impl WinApiProcessCtx {
                             ERROR_HANDLE_EOF | ERROR_BROKEN_PIPE => {
                                 // EOF on stderr pipe, close it and send EOF message to message_tx
                                 self.stderr_read_pipe = None;
+
+                                // Flush any remaining decoder state at EOF.
+                                let flushed = stderr_decoder.flush();
+                                if !flushed.is_empty() {
+                                    io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
+                                        session_id,
+                                        stream: NowExecDataStreamKind::Stderr,
+                                        last: false,
+                                        data: flushed,
+                                    })?;
+                                }
+
                                 io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
                                     session_id,
                                     stream: NowExecDataStreamKind::Stderr,
@@ -444,12 +514,17 @@ impl WinApiProcessCtx {
                         continue;
                     }
 
-                    io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
-                        session_id,
-                        stream: NowExecDataStreamKind::Stderr,
-                        last: false,
-                        data: stderr_buffer[..bytes_read as usize].to_vec(),
-                    })?;
+                    // Transcode stderr from process encoding to UTF-8.
+                    let decoded_data = stderr_decoder.decode(&stderr_buffer[..bytes_read as usize]);
+
+                    if !decoded_data.is_empty() {
+                        io_notification_tx.blocking_send(ServerChannelEvent::SessionDataOut {
+                            session_id,
+                            stream: NowExecDataStreamKind::Stderr,
+                            last: false,
+                            data: decoded_data.into_owned(),
+                        })?;
+                    }
 
                     // Schedule next overlapped read
                     // SAFETY: pipe is valid to read from, as long as it is not closed.
@@ -479,6 +554,7 @@ pub struct WinApiProcessBuilder {
     command_line: String,
     current_directory: String,
     enable_io_redirection: bool,
+    encoding: DataEncoding,
     env: HashMap<String, String>,
     temp_files: Vec<TmpFileGuard>,
 }
@@ -490,6 +566,7 @@ impl WinApiProcessBuilder {
             command_line: String::new(),
             current_directory: String::new(),
             enable_io_redirection: false,
+            encoding: DataEncoding::from_oem_codepage(),
             env: HashMap::new(),
             temp_files: Vec::new(),
         }
@@ -525,6 +602,12 @@ impl WinApiProcessBuilder {
         self
     }
 
+    #[must_use]
+    pub fn with_encoding(mut self, encoding: DataEncoding) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
     fn run_impl(
         mut self,
         session_id: u32,
@@ -553,11 +636,12 @@ impl WinApiProcessBuilder {
         let temp_files = std::mem::take(&mut self.temp_files);
 
         let io_redirection = self.enable_io_redirection;
+        let encoding = self.encoding;
 
         let process_ctx = if io_redirection {
-            prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env)?
+            prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env, encoding)?
         } else {
-            prepare_process(session_id, command_line, current_directory, self.env)?
+            prepare_process(session_id, command_line, current_directory, self.env, encoding)?
         };
 
         // For detached mode, spawn a thread that waits for process exit and keeps temp files alive
@@ -636,6 +720,7 @@ fn prepare_process(
     mut command_line: WideString,
     current_directory: WideString,
     env: HashMap<String, String>,
+    encoding: DataEncoding,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
 
@@ -689,6 +774,7 @@ fn prepare_process(
         stdout_read_pipe: None,
         stderr_read_pipe: None,
         stdin_write_pipe: None,
+        encoding,
         pid,
         process: process_handle,
     })
@@ -699,6 +785,7 @@ fn prepare_process_with_io_redirection(
     mut command_line: WideString,
     current_directory: WideString,
     env: HashMap<String, String>,
+    encoding: DataEncoding,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
 
@@ -771,6 +858,7 @@ fn prepare_process_with_io_redirection(
         stdout_read_pipe: Some(stdout_read_pipe),
         stderr_read_pipe: Some(stderr_read_pipe),
         stdin_write_pipe: Some(stdin_write_pipe),
+        encoding,
         pid,
         process: process_handle,
     };

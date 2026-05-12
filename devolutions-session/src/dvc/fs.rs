@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use tracing::error;
 
+use crate::dvc::encoding::DataEncoding;
+
 /// Guard for created temporary file. Associated file is deleted on drop.
 pub struct TmpFileGuard(PathBuf);
 
@@ -19,6 +21,23 @@ impl TmpFileGuard {
 
     pub fn write_content(&self, content: &str) -> anyhow::Result<()> {
         std::fs::write(&self.0, content)?;
+        Ok(())
+    }
+
+    /// Write content transcoded from UTF-8 to the specified encoding.
+    pub fn write_content_encoded(&self, content: &str, encoding: DataEncoding) -> anyhow::Result<()> {
+        let bytes = encoding.encode_str(content);
+        std::fs::write(&self.0, &*bytes)?;
+        Ok(())
+    }
+
+    /// Write content as UTF-8 with a BOM prefix (for Windows PowerShell 5.x script files).
+    pub fn write_content_utf8_bom(&self, content: &str) -> anyhow::Result<()> {
+        use std::io::Write as _;
+
+        let mut file = std::fs::File::create(&self.0)?;
+        file.write_all(b"\xEF\xBB\xBF")?;
+        file.write_all(content.as_bytes())?;
         Ok(())
     }
 
