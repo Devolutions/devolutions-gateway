@@ -1,7 +1,7 @@
 //! Shared routing pipeline for agent tunnel.
 //!
-//! Used by both connection forwarding (`fwd.rs`) and KDC proxy (`kdc_proxy.rs`)
-//! to ensure consistent routing behavior and error messages.
+//! Consumed by the upstream connection paths (forwarding, RDP clean path,
+//! generic client) to ensure consistent routing behavior and error messages.
 
 use std::net::IpAddr;
 use std::sync::Arc;
