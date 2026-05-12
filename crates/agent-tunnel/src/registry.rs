@@ -111,13 +111,15 @@ impl AgentPeer {
     /// Set `last_seen` to an explicit timestamp (milliseconds since UNIX epoch).
     ///
     /// Test-only API — the `_for_test` suffix is the project's signal that
-    /// production code must not call this. Used by integration tests in
-    /// `devolutions-gateway/tests/agent_tunnel_*` to force an agent into the
+    /// production code must not call this. Used by integration tests in other
+    /// crates (e.g. the workspace `testsuite`) to force an agent into the
     /// "offline" state without waiting for the real timeout to elapse;
-    /// production code should use [`touch`](Self::touch) instead. We deliberately
-    /// keep this `pub` instead of `cfg(test)` because the consumer is a
-    /// different crate's tests, and `cfg(test)` is only set within the
-    /// declaring crate's own test build.
+    /// production code should use [`touch`](Self::touch) instead. Gated behind
+    /// `test-utils` (and `cfg(test)` for this crate's own unit tests) so
+    /// production builds cannot link against it; cross-crate consumers must
+    /// opt in via `features = ["test-utils"]` on their `agent-tunnel`
+    /// dev-dependency.
+    #[cfg(any(test, feature = "test-utils"))]
     #[doc(hidden)]
     pub fn set_last_seen_for_test(&self, last_seen_ms: u64) {
         self.last_seen.store(last_seen_ms, Ordering::Release);
@@ -128,8 +130,9 @@ impl AgentPeer {
     /// Test-only API. Intended for tests that need to assert ordering by
     /// arrival time without relying on wall-clock `thread::sleep` — which is
     /// flaky on platforms with coarse timer resolution (e.g. Windows ~16 ms).
-    /// See the note on [`set_last_seen_for_test`](Self::set_last_seen_for_test)
-    /// for why this is `pub` rather than `cfg(test)`.
+    /// See [`set_last_seen_for_test`](Self::set_last_seen_for_test) for the
+    /// gating rationale.
+    #[cfg(any(test, feature = "test-utils"))]
     #[doc(hidden)]
     pub fn set_received_at_for_test(&self, received_at: SystemTime) {
         let mut state = self.route_state.write();
