@@ -1,7 +1,9 @@
 //! Shared routing pipeline for agent tunnel.
 //!
 //! Consumed by the upstream connection paths (forwarding, RDP clean path,
-//! generic client) to ensure consistent routing behavior and error messages.
+//! generic client) and by the KDC proxy (HTTP endpoint plus the CredSSP/NLA
+//! sub-flow inside `rdp_proxy.rs`) to ensure consistent routing behavior and
+//! error messages.
 
 use std::net::IpAddr;
 use std::sync::Arc;
