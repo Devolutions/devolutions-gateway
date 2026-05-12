@@ -1,34 +1,18 @@
-//! Tests extracted from `crate::task_utils`.
-
-#![allow(unused_imports)]
-
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::broadcast::BroadcastEvent;
-use crate::event_bus::ScannerEvent;
-use crate::ip_utils::{IpAddrRange, IpFamily, Subnet};
-use crate::mdns::MdnsEvent;
-use crate::named_port::{MaybeNamedPort, NamedPort};
-use crate::netbios::NetBiosEvent;
-use crate::ping::{PingEvent, PingFailedReason};
-use crate::planner::{
-    DEFAULT_MAX_TARGET_RANGE_ADDRESSES, InterfaceSelector, NetworkScanPlan, NetworkScanPlanError, PlannedRange,
-    RangeInterfacePolicy, ScanSourceSelectionError, TargetSelector, TargetSelectorValidationError, plan_scan,
+use network_scanner::ip_utils::{IpAddrRange, Subnet};
+use network_scanner::planner::{
+    InterfaceSelector, NetworkScanPlan, PlannedRange, RangeInterfacePolicy, TargetSelector,
 };
-use crate::port_discovery::{PortScanFailedReason, TcpKnockEvent};
-use crate::results::{
-    HostScanState, NetworkScanResponseFormat, NetworkScanResultEvent, ScanEventFilter, ScanResultSource,
+use network_scanner::scanner::{
+    LimitsConfig, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, TargetingConfig, TimingConfig,
 };
-use crate::scanner::{
-    DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, ServiceType, TcpKnockWithHost,
+use network_scanner::sources::{
+    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities,
 };
-use crate::sources::{
-    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities, ScannerSourceState,
-    get_system_sources, select_sources, source_for_address, sources_to_broadcast_subnets,
-};
-use crate::task_utils::{ContextConfig, TaskExecutionContext, TaskManager};
+use network_scanner::task_utils::{ContextConfig, TaskExecutionContext};
 
 #[derive(Debug)]
 struct FakeNetworkScanSourceProvider {
@@ -52,7 +36,7 @@ fn scanner_context_uses_injected_source_provider_for_subnet_planning() {
         is_up: Some(true),
         mtu: None,
         speed_mbps: None,
-        link_type: crate::sources::LinkType::Unknown,
+        link_type: LinkType::Unknown,
         address: "192.168.1.25".parse().unwrap(),
         start_address: "192.168.1.0".parse().unwrap(),
         end_address: "192.168.1.255".parse().unwrap(),
@@ -421,7 +405,7 @@ fn context_config_planning_matrix_covers_target_range_and_subnet_permutations() 
 fn scanner_config() -> ScannerConfig {
     ScannerConfig {
         ports: Vec::new(),
-        timing: crate::scanner::TimingConfig {
+        timing: TimingConfig {
             ping_interval: Duration::from_millis(1),
             ping_timeout: Duration::from_millis(1),
             broadcast_timeout: Duration::from_millis(1),
@@ -431,8 +415,8 @@ fn scanner_config() -> ScannerConfig {
             mdns_query_timeout: Duration::from_millis(1),
             max_wait_time: Duration::from_millis(1),
         },
-        limits: crate::scanner::LimitsConfig::default(),
-        targeting: crate::scanner::TargetingConfig {
+        limits: LimitsConfig::default(),
+        targeting: TargetingConfig {
             target_selector: TargetSelector::DefaultSubnets,
             interface_selector: InterfaceSelector::AllEligible,
             range_interface_policy: RangeInterfacePolicy::IntersectSelectedInterfaces,
@@ -458,7 +442,7 @@ fn scanner_source(
         is_up: Some(true),
         mtu: None,
         speed_mbps: None,
-        link_type: crate::sources::LinkType::Unknown,
+        link_type: LinkType::Unknown,
         address: address.parse().unwrap(),
         start_address: start_address.parse().unwrap(),
         end_address: end_address.parse().unwrap(),

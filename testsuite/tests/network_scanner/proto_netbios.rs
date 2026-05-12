@@ -1,12 +1,6 @@
-//! Tests extracted from `crate::netbios`.
+use std::net::Ipv4Addr;
 
-#![allow(unused_imports)]
-
-use std::net::{Ipv4Addr, Ipv6Addr};
-
-use byteorder::{BigEndian, ByteOrder};
-
-use crate::netbios::*;
+use network_scanner_proto::netbios::NetBiosPacket;
 
 #[test]
 fn create_nbt_packet_from_data_slice() {

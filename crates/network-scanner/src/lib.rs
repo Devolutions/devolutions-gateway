@@ -24,9 +24,6 @@ pub mod scanner;
 pub mod sources;
 pub mod task_utils;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug, thiserror::Error)]
 pub enum ScannerError {
     #[error("Ipv6 currently no t supported for this operation: {0}")]

@@ -1,33 +1,11 @@
-//! Tests extracted from `crate::planner`.
+use std::net::Ipv4Addr;
 
-#![allow(unused_imports)]
-
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::Duration;
-
-use crate::broadcast::BroadcastEvent;
-use crate::event_bus::ScannerEvent;
-use crate::ip_utils::{IpAddrRange, IpFamily, Subnet};
-use crate::mdns::MdnsEvent;
-use crate::named_port::{MaybeNamedPort, NamedPort};
-use crate::netbios::NetBiosEvent;
-use crate::ping::{PingEvent, PingFailedReason};
-use crate::planner::{
-    DEFAULT_MAX_TARGET_RANGE_ADDRESSES, InterfaceSelector, NetworkScanPlan, NetworkScanPlanError, PlannedRange,
-    RangeInterfacePolicy, ScanSourceSelectionError, TargetSelector, TargetSelectorValidationError, plan_scan,
+use network_scanner::ip_utils::IpAddrRange;
+use network_scanner::planner::{
+    DEFAULT_MAX_TARGET_RANGE_ADDRESSES, InterfaceSelector, NetworkScanPlanError, RangeInterfacePolicy,
+    ScanSourceSelectionError, TargetSelector, TargetSelectorValidationError, plan_scan,
 };
-use crate::port_discovery::{PortScanFailedReason, TcpKnockEvent};
-use crate::results::{
-    HostScanState, NetworkScanResponseFormat, NetworkScanResultEvent, ScanEventFilter, ScanResultSource,
-};
-use crate::scanner::{
-    DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, ServiceType, TcpKnockWithHost,
-};
-use crate::sources::{
-    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities, ScannerSourceState,
-    get_system_sources, select_sources, source_for_address, sources_to_broadcast_subnets,
-};
-use crate::task_utils::TaskManager;
+use network_scanner::sources::{LinkType, ScannerSource, ScannerSourceCapabilities, ScannerSourceState};
 
 #[test]
 fn default_subnets_with_all_eligible_sources_scans_all_source_ranges() {
@@ -277,7 +255,7 @@ fn eligible_source(interface_id: &str, address: &str, start_address: &str, end_a
         is_up: Some(true),
         mtu: None,
         speed_mbps: None,
-        link_type: crate::sources::LinkType::Unknown,
+        link_type: LinkType::Unknown,
         address: address.parse().unwrap(),
         start_address: start_address.parse().unwrap(),
         end_address: end_address.parse().unwrap(),

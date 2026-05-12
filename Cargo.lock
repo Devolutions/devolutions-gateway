@@ -7090,6 +7090,8 @@ dependencies = [
  "fastrand",
  "libsql",
  "mcp-proxy",
+ "network-scanner",
+ "network-scanner-proto",
  "proxy-socks",
  "rstest",
  "serde",

@@ -13,13 +13,30 @@ use crate::planner::{NetworkScanPlan, PlannedRange};
 use crate::scanner::{LimitsConfig, NetworkScanner, ScannerConfig, ScannerToggles, TargetingConfig, TimingConfig};
 use crate::sources::ScannerSource;
 
+// Promote a `pub(crate)` item to `pub` only when the `test-utils` feature is on.
+// Used to expose `ContextConfig` / `TaskExecutionContext` constructors to the
+// out-of-crate test suite without leaking them into production builds.
+// `struct` and `fn` arms are matched explicitly so the parser doesn't have to
+// guess where attrs end and the item begins.
+#[cfg(feature = "test-utils")]
+macro_rules! maybe_pub_for_test_utils {
+    ($(#[$attr:meta])* struct $($rest:tt)*) => { $(#[$attr])* pub struct $($rest)* };
+    ($(#[$attr:meta])* fn $($rest:tt)*) => { $(#[$attr])* pub fn $($rest)* };
+}
+#[cfg(not(feature = "test-utils"))]
+macro_rules! maybe_pub_for_test_utils {
+    ($(#[$attr:meta])* struct $($rest:tt)*) => { $(#[$attr])* pub(crate) struct $($rest)* };
+    ($(#[$attr:meta])* fn $($rest:tt)*) => { $(#[$attr])* pub(crate) fn $($rest)* };
+}
+
+maybe_pub_for_test_utils! {
 #[derive(Debug, Clone)]
-pub(crate) struct ContextConfig {
-    pub(crate) broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
-    pub(crate) range_to_ping: Vec<PlannedRange>,
+struct ContextConfig {
+    pub broadcast_subnet: Vec<Subnet>, // The subnet that have a broadcast address
+    pub range_to_ping: Vec<PlannedRange>,
     /// The full set of selected scan sources, used for per-IP source lookup
     /// (e.g. picking a TCP-probe socket's interface bind).
-    pub(crate) sources: Arc<Vec<ScannerSource>>,
+    pub sources: Arc<Vec<ScannerSource>>,
     pub ports: Vec<MaybeNamedPort>,
     pub ping_interval: Duration,
     pub ping_timeout: Duration,
@@ -35,9 +52,11 @@ pub(crate) struct ContextConfig {
     /// warning and continuing on default routing.
     pub interface_bind_strict: bool,
 }
+}
 
 impl ContextConfig {
-    pub(crate) fn from_config_and_plan(
+    maybe_pub_for_test_utils! {
+    fn from_config_and_plan(
         ScannerConfig {
             ports,
             timing:
@@ -84,10 +103,12 @@ impl ContextConfig {
             interface_bind_strict,
         }
     }
+    }
 }
 
+maybe_pub_for_test_utils! {
 #[derive(Clone)]
-pub(crate) struct TaskExecutionContext {
+struct TaskExecutionContext {
     pub(crate) event_bus: EventBus,
 
     pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
@@ -95,15 +116,17 @@ pub(crate) struct TaskExecutionContext {
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
     pub(crate) mdns_daemon: Option<MdnsDaemon>,
 
-    pub(crate) configs: ContextConfig,
+    pub configs: ContextConfig,
     pub(crate) toggles: ScannerToggles,
+}
 }
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
 type HandlesSender = crossbeam::channel::Sender<tokio::task::JoinHandle<anyhow::Result<()>>>;
 
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
+    maybe_pub_for_test_utils! {
+    fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
         // Since the boarcast receiver does not implement Clone, we'll subscribe to the channel using the sender when we need it
         let event_bus = EventBus::new();
 
@@ -125,6 +148,7 @@ impl TaskExecutionContext {
         };
 
         Ok(context)
+    }
     }
 }
 

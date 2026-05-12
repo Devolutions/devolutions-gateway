@@ -5,6 +5,12 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[features]
+# Exposes a handful of internal helpers (e.g. `task_utils::ContextConfig`,
+# `task_utils::TaskExecutionContext`) so out-of-crate integration tests under
+# `testsuite/` can construct them directly. Never enable in production builds.
+test-utils = []
+
 [lints]
 workspace = true
 

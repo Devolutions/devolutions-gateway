@@ -1,33 +1,13 @@
-//! Tests extracted from `crate::results`.
-
-#![allow(unused_imports)]
-
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::Duration;
-
-use crate::broadcast::BroadcastEvent;
-use crate::event_bus::ScannerEvent;
-use crate::ip_utils::{IpAddrRange, IpFamily, Subnet};
-use crate::mdns::MdnsEvent;
-use crate::named_port::{MaybeNamedPort, NamedPort};
-use crate::netbios::NetBiosEvent;
-use crate::ping::{PingEvent, PingFailedReason};
-use crate::planner::{
-    DEFAULT_MAX_TARGET_RANGE_ADDRESSES, InterfaceSelector, NetworkScanPlan, NetworkScanPlanError, PlannedRange,
-    RangeInterfacePolicy, ScanSourceSelectionError, TargetSelector, TargetSelectorValidationError, plan_scan,
-};
-use crate::port_discovery::{PortScanFailedReason, TcpKnockEvent};
-use crate::results::{
-    HostScanState, NetworkScanResponseFormat, NetworkScanResultEvent, ScanEventFilter, ScanResultSource,
-};
-use crate::scanner::{
-    DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, ServiceType, TcpKnockWithHost,
-};
-use crate::sources::{
-    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities, ScannerSourceState,
-    get_system_sources, select_sources, source_for_address, sources_to_broadcast_subnets,
-};
-use crate::task_utils::TaskManager;
+use network_scanner::broadcast::BroadcastEvent;
+use network_scanner::event_bus::ScannerEvent;
+use network_scanner::mdns::MdnsEvent;
+use network_scanner::named_port::{MaybeNamedPort, NamedPort};
+use network_scanner::netbios::NetBiosEvent;
+use network_scanner::ping::{PingEvent, PingFailedReason};
+use network_scanner::port_discovery::{PortScanFailedReason, TcpKnockEvent};
+use network_scanner::results::{NetworkScanResponseFormat, ScanEventFilter, ScanEventFilterConfig};
+use network_scanner::scanner::{DnsEvent, ServiceType, TcpKnockWithHost};
+use network_scanner::sources::{LinkType, ScannerSource, ScannerSourceCapabilities};
 
 /// Test helper: build a `ScanEventFilter` from positional bools so the
 /// dozens of filter-matrix tests don't each have to spell out the config
@@ -40,7 +20,7 @@ fn filter_with(
     include_host_results: bool,
     response_format: NetworkScanResponseFormat,
 ) -> ScanEventFilter {
-    ScanEventFilter::new(crate::results::ScanEventFilterConfig {
+    ScanEventFilter::new(ScanEventFilterConfig {
         report_ping_start,
         report_ping_success,
         report_ping_failure,
@@ -546,7 +526,7 @@ fn scanner_source() -> ScannerSource {
         is_up: Some(true),
         mtu: None,
         speed_mbps: None,
-        link_type: crate::sources::LinkType::Unknown,
+        link_type: LinkType::Unknown,
         address: "192.168.1.25".parse().expect("fixture IPv4 address should parse"),
         start_address: "192.168.1.0".parse().expect("fixture IPv4 address should parse"),
         end_address: "192.168.1.255".parse().expect("fixture IPv4 address should parse"),

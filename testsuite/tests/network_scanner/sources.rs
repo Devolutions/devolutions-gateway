@@ -1,33 +1,9 @@
-//! Tests extracted from `crate::sources`.
+use std::net::Ipv4Addr;
 
-#![allow(unused_imports)]
-
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::Duration;
-
-use crate::broadcast::BroadcastEvent;
-use crate::event_bus::ScannerEvent;
-use crate::ip_utils::{IpAddrRange, IpFamily, Subnet};
-use crate::mdns::MdnsEvent;
-use crate::named_port::{MaybeNamedPort, NamedPort};
-use crate::netbios::NetBiosEvent;
-use crate::ping::{PingEvent, PingFailedReason};
-use crate::planner::{
-    DEFAULT_MAX_TARGET_RANGE_ADDRESSES, InterfaceSelector, NetworkScanPlan, NetworkScanPlanError, PlannedRange,
-    RangeInterfacePolicy, ScanSourceSelectionError, TargetSelector, TargetSelectorValidationError, plan_scan,
+use network_scanner::sources::{
+    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities, select_sources, source_for_address,
+    sources_to_broadcast_subnets,
 };
-use crate::port_discovery::{PortScanFailedReason, TcpKnockEvent};
-use crate::results::{
-    HostScanState, NetworkScanResponseFormat, NetworkScanResultEvent, ScanEventFilter, ScanResultSource,
-};
-use crate::scanner::{
-    DnsEvent, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, ServiceType, TcpKnockWithHost,
-};
-use crate::sources::{
-    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities, ScannerSourceState,
-    get_system_sources, select_sources, source_for_address, sources_to_broadcast_subnets,
-};
-use crate::task_utils::TaskManager;
 
 #[derive(Debug)]
 struct FakeNetworkScanSourceProvider {
