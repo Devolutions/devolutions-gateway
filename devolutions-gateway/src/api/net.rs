@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::str::FromStr;
 use std::time::Duration;
 
 use axum::extract::WebSocketUpgrade;
@@ -183,9 +184,13 @@ pub struct NetworkScanQueryParams {
     /// for example: 10.10.0.0-10.10.0.255
     #[serde(default, rename = "range")]
     pub ranges: Vec<String>,
-    /// Explicit single-host targets to scan.
+    /// Explicit single-host targets to scan. Each value must parse as an IPv4
+    /// or IPv6 address; invalid values yield a structured
+    /// `{ error: "invalid_target", value: "<raw>" }` 400 rather than a
+    /// generic serde rejection at extraction time (mirrors the `range=`
+    /// / `probe=` validation path).
     #[serde(default, rename = "target")]
-    pub targets: Vec<IpAddr>,
+    pub targets: Vec<String>,
     /// Gateway network interface IDs to use as scan sources.
     #[serde(default, rename = "interface_id")]
     pub interface_ids: Vec<String>,
@@ -251,8 +256,13 @@ pub struct NetworkScanQueryParams {
     #[serde(default = "default_true")]
     pub enable_tcp_probes: bool,
 
-    /// Policy applied when range and interface_id are both provided.
-    pub range_interface_policy: Option<RangeInterfacePolicy>,
+    /// Policy applied when `range=` and `interface_id=` are both provided.
+    /// Accepted values: `intersect_selected_interfaces` (default) or
+    /// `allow_cross_interface_range`. Invalid values yield a structured
+    /// `{ error: "invalid_range_interface_policy", value: "<raw>" }` 400
+    /// instead of a generic serde rejection (mirrors the `range=` /
+    /// `probe=` / `target=` validation path).
+    pub range_interface_policy: Option<String>,
 
     /// **Legacy alias** for `range_interface_policy=allow_cross_interface_range`.
     /// Prefer the structured policy in new clients.
@@ -260,8 +270,11 @@ pub struct NetworkScanQueryParams {
     #[serde(default)]
     pub allow_cross_interface_range: bool,
 
-    /// Response shape emitted on the websocket.
-    pub response_format: Option<NetworkScanResponseFormat>,
+    /// Response shape emitted on the websocket. Accepted values: `legacy`
+    /// (default) or `network_scan_result_v1`. Invalid values yield a
+    /// structured `{ error: "invalid_response_format", value: "<raw>" }`
+    /// 400 instead of a generic serde rejection.
+    pub response_format: Option<String>,
 
     /// Maximum scanner concurrency.
     pub max_concurrency: Option<usize>,
@@ -368,6 +381,10 @@ pub enum NetworkScanQueryError {
     InvalidTarget { value: String },
     /// A `range=<value>` could not be parsed as a `lower-upper` IP range.
     InvalidRange { value: String, message: String },
+    /// A `range_interface_policy=<value>` did not match any known policy.
+    InvalidRangeInterfacePolicy { value: String },
+    /// A `response_format=<value>` did not match any known wire shape.
+    InvalidResponseFormat { value: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -424,6 +441,20 @@ fn query_validation_error_response(error: NetworkScanQueryError) -> Response {
             address_count: None,
             max_range_addresses: None,
         },
+        NetworkScanQueryError::InvalidRangeInterfacePolicy { value } => QueryValidationErrorResponse {
+            error: "invalid_range_interface_policy",
+            value: Some(value),
+            message: None,
+            address_count: None,
+            max_range_addresses: None,
+        },
+        NetworkScanQueryError::InvalidResponseFormat { value } => QueryValidationErrorResponse {
+            error: "invalid_response_format",
+            value: Some(value),
+            message: None,
+            address_count: None,
+            max_range_addresses: None,
+        },
     };
     (StatusCode::BAD_REQUEST, Json(body)).into_response()
 }
@@ -447,7 +478,11 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
                     })?;
                 ranges.push(parsed);
             }
-            ranges.extend(val.targets.iter().copied().map(IpAddrRange::single));
+            for raw in &val.targets {
+                let ip =
+                    IpAddr::from_str(raw).map_err(|_| NetworkScanQueryError::InvalidTarget { value: raw.clone() })?;
+                ranges.push(IpAddrRange::single(ip));
+            }
             TargetSelector::ExplicitRanges(ranges)
         } else {
             TargetSelector::DefaultSubnets
@@ -482,7 +517,16 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
         } else {
             RangeInterfacePolicy::IntersectSelectedInterfaces
         };
-        let range_interface_policy = val.range_interface_policy.unwrap_or(default_range_interface_policy);
+        let range_interface_policy = match val.range_interface_policy.as_deref() {
+            None => default_range_interface_policy,
+            Some("intersect_selected_interfaces") => RangeInterfacePolicy::IntersectSelectedInterfaces,
+            Some("allow_cross_interface_range") => RangeInterfacePolicy::AllowCrossInterfaceRange,
+            Some(other) => {
+                return Err(NetworkScanQueryError::InvalidRangeInterfacePolicy {
+                    value: other.to_owned(),
+                });
+            }
+        };
         // Probes are validated *unconditionally* — even when
         // `enable_tcp_probes=false` and the parsed list would be ignored —
         // so a typo always lands in the structured 400 instead of getting
@@ -556,13 +600,24 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
             },
         };
 
+        let response_format = match val.response_format.as_deref() {
+            None => NetworkScanResponseFormat::default(),
+            Some("legacy") => NetworkScanResponseFormat::Legacy,
+            Some("network_scan_result_v1") => NetworkScanResponseFormat::NetworkScanResultV1,
+            Some(other) => {
+                return Err(NetworkScanQueryError::InvalidResponseFormat {
+                    value: other.to_owned(),
+                });
+            }
+        };
+
         let event_filter = ScanEventFilter::new(network_scanner::results::ScanEventFilterConfig {
             report_ping_start,
             report_ping_success,
             report_ping_failure,
             report_tcp_failure,
             include_host_results: val.include_host_results,
-            response_format: val.response_format.unwrap_or_default(),
+            response_format,
         });
 
         Ok((scanner_param, event_filter))
@@ -885,10 +940,7 @@ mod tests {
     #[test]
     fn query_mapping_accepts_explicit_targets() {
         let (scanner_params, filter) = NetworkScanQueryParams {
-            targets: vec![
-                "192.168.1.10".parse().expect("fixture IPv4 address should parse"),
-                "192.168.1.20".parse().expect("fixture IPv4 address should parse"),
-            ],
+            targets: vec!["192.168.1.10".to_owned(), "192.168.1.20".to_owned()],
             ..minimal_query()
         }
         .try_into()
@@ -912,7 +964,7 @@ mod tests {
     #[test]
     fn query_mapping_combines_targets_and_ranges() {
         let (scanner_params, _) = NetworkScanQueryParams {
-            targets: vec!["192.168.1.10".parse().expect("fixture IPv4 address should parse")],
+            targets: vec!["192.168.1.10".to_owned()],
             ranges: vec!["192.168.2.0-192.168.2.10".to_owned()],
             ..minimal_query()
         }
@@ -1042,7 +1094,7 @@ mod tests {
         // The combined target/range path still validates IP family
         // consistency: an IPv4 target plus an IPv6 range must error.
         let error = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
-            targets: vec!["192.168.1.10".parse().expect("fixture IPv4 address should parse")],
+            targets: vec!["192.168.1.10".to_owned()],
             ranges: vec!["fd00::1-fd00::2".to_owned()],
             ..minimal_query()
         })
@@ -1089,10 +1141,7 @@ mod tests {
     #[test]
     fn query_mapping_rejects_mixed_ip_family_targets() {
         let error = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
-            targets: vec![
-                "192.168.1.10".parse().expect("fixture IPv4 address should parse"),
-                "fd00::10".parse().expect("fixture IPv6 address should parse"),
-            ],
+            targets: vec!["192.168.1.10".to_owned(), "fd00::10".to_owned()],
             ..minimal_query()
         })
         .expect_err("mixed IP target families should be rejected");
@@ -1126,7 +1175,7 @@ mod tests {
         // must scope the scan to the listed targets without sweeping the
         // surrounding subnet over NetBIOS.
         let (params, _) = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
-            targets: vec!["10.10.0.1".parse().expect("fixture IPv4 address should parse")],
+            targets: vec!["10.10.0.1".to_owned()],
             enable_netbios: false,
             ..minimal_query()
         })
@@ -1166,6 +1215,75 @@ mod tests {
     }
 
     #[test]
+    fn query_mapping_rejects_invalid_target_with_named_value() {
+        // Plan §6: structured 400 must name the offending value, same as
+        // probe/range. Locks the `Vec<String>` + parse-at-validate-time
+        // path so a future refactor to `Vec<IpAddr>` (which would push the
+        // error into the serde extractor and lose the structured body)
+        // breaks this test.
+        let error = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            targets: vec!["192.168.1.10".to_owned(), "not-an-ip".to_owned()],
+            ..minimal_query()
+        })
+        .expect_err("invalid target should be rejected");
+
+        match error {
+            NetworkScanQueryError::InvalidTarget { value } => assert_eq!(value, "not-an-ip"),
+            other => panic!("expected InvalidTarget, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn query_mapping_rejects_invalid_range_interface_policy_with_named_value() {
+        let error = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            range_interface_policy: Some("garbage-value".to_owned()),
+            ..minimal_query()
+        })
+        .expect_err("invalid range_interface_policy should be rejected");
+
+        match error {
+            NetworkScanQueryError::InvalidRangeInterfacePolicy { value } => assert_eq!(value, "garbage-value"),
+            other => panic!("expected InvalidRangeInterfacePolicy, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn query_mapping_accepts_known_range_interface_policy_values() {
+        for (raw, expected) in [
+            (
+                "intersect_selected_interfaces",
+                RangeInterfacePolicy::IntersectSelectedInterfaces,
+            ),
+            (
+                "allow_cross_interface_range",
+                RangeInterfacePolicy::AllowCrossInterfaceRange,
+            ),
+        ] {
+            let (scanner_params, _) = NetworkScanQueryParams {
+                range_interface_policy: Some(raw.to_owned()),
+                ..minimal_query()
+            }
+            .try_into()
+            .expect("known range_interface_policy value should parse");
+            assert_eq!(scanner_params.config.targeting.range_interface_policy, expected);
+        }
+    }
+
+    #[test]
+    fn query_mapping_rejects_invalid_response_format_with_named_value() {
+        let error = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
+            response_format: Some("garbage-value".to_owned()),
+            ..minimal_query()
+        })
+        .expect_err("invalid response_format should be rejected");
+
+        match error {
+            NetworkScanQueryError::InvalidResponseFormat { value } => assert_eq!(value, "garbage-value"),
+            other => panic!("expected InvalidResponseFormat, got {other:?}"),
+        }
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn query_mapping_covers_boolean_toggle_permutations() {
         for enable_ping_start in [false, true] {
@@ -1181,10 +1299,13 @@ mod tests {
                                                 for report_ping_success in [false, true] {
                                                     for report_ping_failure in [false, true] {
                                                         for report_tcp_failure in [false, true] {
-                                                            for response_format in [
-                                                                None,
-                                                                Some(NetworkScanResponseFormat::Legacy),
-                                                                Some(NetworkScanResponseFormat::NetworkScanResultV1),
+                                                            for (response_format, expected_format) in [
+                                                                (None, NetworkScanResponseFormat::Legacy),
+                                                                (Some("legacy"), NetworkScanResponseFormat::Legacy),
+                                                                (
+                                                                    Some("network_scan_result_v1"),
+                                                                    NetworkScanResponseFormat::NetworkScanResultV1,
+                                                                ),
                                                             ] {
                                                                 let (scanner_params, filter) = NetworkScanQueryParams {
                                                     probes: Vec::new(),
@@ -1201,7 +1322,7 @@ mod tests {
                                                     enable_tcp_probes,
                                                     enable_failure,
                                                     report_tcp_failure,
-                                                    response_format,
+                                                    response_format: response_format.map(str::to_owned),
                                                     ..minimal_query()
                                                 }
                                                 .try_into()
@@ -1261,10 +1382,7 @@ mod tests {
                                                                     filter.include_host_results(),
                                                                     include_host_results
                                                                 );
-                                                                assert_eq!(
-                                                                    filter.response_format(),
-                                                                    response_format.unwrap_or_default()
-                                                                );
+                                                                assert_eq!(filter.response_format(), expected_format);
                                                             }
                                                         }
                                                     }
@@ -1287,10 +1405,7 @@ mod tests {
             for has_ranges in [false, true] {
                 for has_interface_ids in [false, true] {
                     let result = <(NetworkScannerParams, ScanEventFilter)>::try_from(NetworkScanQueryParams {
-                        targets: has_targets
-                            .then(|| "192.168.1.10".parse().expect("fixture IPv4 address should parse"))
-                            .into_iter()
-                            .collect(),
+                        targets: has_targets.then(|| "192.168.1.10".to_owned()).into_iter().collect(),
                         ranges: has_ranges
                             .then(|| "192.168.1.20-192.168.1.21".to_owned())
                             .into_iter()
