@@ -9,9 +9,7 @@ use network_scanner::planner::{
 use network_scanner::scanner::{
     LimitsConfig, NetworkScanner, NetworkScannerParams, ScannerConfig, ScannerToggles, TargetingConfig, TimingConfig,
 };
-use network_scanner::sources::{
-    LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities,
-};
+use network_scanner::sources::{LinkType, NetworkScanSourceProvider, ScannerSource, ScannerSourceCapabilities};
 use network_scanner::task_utils::{ContextConfig, TaskExecutionContext};
 
 #[derive(Debug)]
