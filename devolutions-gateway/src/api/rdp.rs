@@ -26,6 +26,7 @@ pub async fn handler(
         recordings,
         shutdown_signal,
         credential_store,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
@@ -46,6 +47,7 @@ pub async fn handler(
             recordings.active_recordings,
             source_addr,
             credential_store,
+            agent_tunnel_handle,
         )
         .instrument(span)
     });
@@ -65,6 +67,7 @@ async fn handle_socket(
     active_recordings: Arc<ActiveRecordings>,
     source_addr: SocketAddr,
     credential_store: crate::credential::CredentialStoreHandle,
+    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) {
     let (stream, close_handle) = crate::ws::handle(
         ws,
@@ -82,6 +85,7 @@ async fn handle_socket(
         subscriber_tx,
         &active_recordings,
         &credential_store,
+        agent_tunnel_handle,
     )
     .await;
 

@@ -158,7 +158,7 @@ impl AgentTunnelListener {
         let handle = AgentTunnelHandle {
             registry: Arc::clone(&registry),
             agent_connections: Arc::clone(&agent_connections),
-            ca_manager,
+            ca_manager: Arc::clone(&ca_manager),
             enrollment_token_store,
         };
 
@@ -169,6 +169,11 @@ impl AgentTunnelListener {
         };
 
         Ok((listener, handle))
+    }
+
+    /// Returns the local address the QUIC endpoint is bound to.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.endpoint.local_addr().expect("endpoint has local addr")
     }
 }
 
@@ -202,9 +207,7 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
                     let registry = Arc::clone(&self.registry);
                     let agent_connections = Arc::clone(&self.agent_connections);
 
-                    conn_handles.spawn(
-                        run_agent_connection(registry, agent_connections, incoming),
-                    );
+                    conn_handles.spawn(run_agent_connection(registry, agent_connections, incoming));
                 }
 
                 // Reap completed connection tasks to prevent unbounded growth.
@@ -253,7 +256,7 @@ async fn run_agent_connection(
 
         info!(%agent_id, %agent_name, %peer_addr, "Agent authenticated via mTLS");
 
-        let peer = Arc::new(AgentPeer::new(agent_id, agent_name, fingerprint));
+        let peer = Arc::new(AgentPeer::new(agent_id, agent_name.clone(), fingerprint));
         registry.register(Arc::clone(&peer)).await;
         agent_connections.write().await.insert(agent_id, conn.clone());
 

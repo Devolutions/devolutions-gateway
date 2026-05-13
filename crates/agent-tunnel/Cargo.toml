@@ -8,6 +8,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Exposes `_for_test` helpers (e.g. `AgentPeer::set_last_seen_for_test`) so
+# integration tests in other crates can force specific peer states without
+# wall-clock sleeps. Production builds must not enable this.
+test-utils = []
+
 [dependencies]
 # Internal crates
 agent-tunnel-proto = { path = "../agent-tunnel-proto", features = ["serde"] }

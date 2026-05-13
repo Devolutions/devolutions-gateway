@@ -10,6 +10,8 @@ use serde::Serialize;
 use tokio::sync::RwLock as TokioRwLock;
 use uuid::Uuid;
 
+use crate::routing::RouteTarget;
+
 /// Duration after which an agent is considered offline if no heartbeat has been received.
 pub const AGENT_OFFLINE_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -30,6 +32,33 @@ pub struct RouteAdvertisementState {
     pub received_at: SystemTime,
     /// Last time this route set was refreshed.
     pub updated_at: SystemTime,
+}
+
+impl RouteAdvertisementState {
+    /// Match this route set against a parsed target host.
+    ///
+    /// Returns a specificity score if matched, or `None` if no match.
+    /// IP subnet matches return `usize::MAX` (always highest priority).
+    /// Domain matches return the matched domain length (longer = more specific).
+    pub fn matches_target(&self, target: &RouteTarget) -> Option<usize> {
+        use std::net::IpAddr;
+
+        match target {
+            // Only IPv4 subnets are currently tracked; only match IPv4 target IPs.
+            RouteTarget::Ip(IpAddr::V4(ipv4)) => self
+                .subnets
+                .iter()
+                .any(|subnet| subnet.contains(*ipv4))
+                .then_some(usize::MAX),
+            RouteTarget::Ip(IpAddr::V6(_)) => None,
+            RouteTarget::Hostname(hostname) => self
+                .domains
+                .iter()
+                .filter(|adv| adv.domain.matches_hostname(hostname.as_str()))
+                .map(|adv| adv.domain.as_str().len())
+                .max(),
+        }
+    }
 }
 
 impl Default for RouteAdvertisementState {
@@ -77,6 +106,37 @@ impl AgentPeer {
     pub fn touch(&self) {
         let now_ms = current_time_millis();
         self.last_seen.store(now_ms, Ordering::Release);
+    }
+
+    /// Set `last_seen` to an explicit timestamp (milliseconds since UNIX epoch).
+    ///
+    /// Test-only API — the `_for_test` suffix is the project's signal that
+    /// production code must not call this. Used by integration tests in other
+    /// crates (e.g. the workspace `testsuite`) to force an agent into the
+    /// "offline" state without waiting for the real timeout to elapse;
+    /// production code should use [`touch`](Self::touch) instead. Gated behind
+    /// `test-utils` (and `cfg(test)` for this crate's own unit tests) so
+    /// production builds cannot link against it; cross-crate consumers must
+    /// opt in via `features = ["test-utils"]` on their `agent-tunnel`
+    /// dev-dependency.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub fn set_last_seen_for_test(&self, last_seen_ms: u64) {
+        self.last_seen.store(last_seen_ms, Ordering::Release);
+    }
+
+    /// Overwrite `received_at` on the current route state.
+    ///
+    /// Test-only API. Intended for tests that need to assert ordering by
+    /// arrival time without relying on wall-clock `thread::sleep` — which is
+    /// flaky on platforms with coarse timer resolution (e.g. Windows ~16 ms).
+    /// See [`set_last_seen_for_test`](Self::set_last_seen_for_test) for the
+    /// gating rationale.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub fn set_received_at_for_test(&self, received_at: SystemTime) {
+        let mut state = self.route_state.write();
+        state.received_at = received_at;
     }
 
     /// Returns the last-seen timestamp as milliseconds since UNIX epoch.
@@ -222,6 +282,39 @@ impl AgentRegistry {
     /// Collects information about all registered agents for API responses.
     pub async fn agent_infos(&self) -> Vec<AgentInfo> {
         self.agents.read().await.values().map(AgentInfo::from).collect()
+    }
+
+    /// Find all online agents that can route to the given parsed target host.
+    ///
+    /// For IP targets: matches against advertised subnets.
+    /// For domain targets: uses longest suffix match (more specific domain wins).
+    ///
+    /// Results with equal specificity are sorted by `received_at` descending (most recent first).
+    pub async fn find_agents_for(&self, target: &RouteTarget) -> Vec<Arc<AgentPeer>> {
+        let mut best_specificity: usize = 0;
+        let mut candidates: Vec<(SystemTime, Arc<AgentPeer>)> = Vec::new();
+
+        let agents = self.agents.read().await;
+        for agent in agents.values() {
+            if !agent.is_online(AGENT_OFFLINE_TIMEOUT) {
+                continue;
+            }
+
+            let route_state = agent.route_state();
+
+            if let Some(specificity) = route_state.matches_target(target) {
+                if specificity > best_specificity {
+                    best_specificity = specificity;
+                    candidates.clear();
+                    candidates.push((route_state.received_at, Arc::clone(agent)));
+                } else if specificity == best_specificity {
+                    candidates.push((route_state.received_at, Arc::clone(agent)));
+                }
+            }
+        }
+
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        candidates.into_iter().map(|(_, agent)| agent).collect()
     }
 }
 

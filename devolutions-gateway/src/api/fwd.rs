@@ -15,6 +15,7 @@ use tracing::{Instrument as _, field};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
+use crate::DgwState;
 use crate::config::Conf;
 use crate::extract::{AssociationToken, BridgeToken};
 use crate::http::HttpError;
@@ -22,7 +23,7 @@ use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol, RecordingPolicy};
-use crate::{DgwState, utils};
+use crate::upstream::{self, PreparedUpstream, UpstreamMode};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     use axum::routing::{self, MethodFilter, get};
@@ -54,6 +55,7 @@ async fn fwd_tcp(
         sessions,
         subscriber_tx,
         shutdown_signal,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     AssociationToken(claims): AssociationToken,
@@ -78,6 +80,7 @@ async fn fwd_tcp(
             claims,
             source_addr,
             false,
+            agent_tunnel_handle,
         )
         .instrument(span)
     });
@@ -91,6 +94,7 @@ async fn fwd_tls(
         sessions,
         subscriber_tx,
         shutdown_signal,
+        agent_tunnel_handle,
         ..
     }): State<DgwState>,
     AssociationToken(claims): AssociationToken,
@@ -115,6 +119,7 @@ async fn fwd_tls(
             claims,
             source_addr,
             true,
+            agent_tunnel_handle,
         )
         .instrument(span)
     });
@@ -132,6 +137,7 @@ async fn handle_fwd(
     claims: AssociationTokenClaims,
     source_addr: SocketAddr,
     with_tls: bool,
+    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) {
     let (stream, close_handle) = crate::ws::handle(
         ws,
@@ -153,7 +159,8 @@ async fn handle_fwd(
         .claims(claims)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
-        .with_tls(with_tls)
+        .mode(if with_tls { UpstreamMode::Tls } else { UpstreamMode::Tcp })
+        .agent_tunnel_handle(agent_tunnel_handle)
         .build()
         .run()
         .instrument(span.clone())
@@ -183,7 +190,9 @@ struct Forward<S> {
     client_addr: SocketAddr,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    with_tls: bool,
+    mode: UpstreamMode,
+    #[builder(default)]
+    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -206,32 +215,16 @@ where
             client_addr,
             sessions,
             subscriber_tx,
-            with_tls,
+            mode,
+            agent_tunnel_handle,
         } = self;
 
-        match claims.jet_rec {
-            RecordingPolicy::None | RecordingPolicy::Stream => (),
-            RecordingPolicy::Proxy => {
-                return Err(ForwardError::Internal(anyhow::anyhow!(
-                    "recording policy not supported"
-                )));
-            }
-        }
+        validate_forward_request(&claims)?;
 
-        let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {
-            return Err(ForwardError::Internal(anyhow::anyhow!("connection mode not supported")));
+        let targets = match &claims.jet_cm {
+            ConnectionMode::Fwd { targets, .. } => targets,
+            _ => unreachable!("validated connection mode"),
         };
-
-        let span = tracing::Span::current();
-
-        trace!("Select and connect to target");
-
-        let ((server_stream, server_addr), selected_target) = utils::successive_try(&targets, utils::tcp_connect)
-            .await
-            .map_err(ForwardError::BadGateway)?;
-
-        trace!(%selected_target, "Connected");
-        span.record("target", selected_target.to_string());
 
         // ARD uses MVS codec which doesn't like buffering.
         let buffer_size = if claims.jet_ap == ApplicationProtocol::Known(Protocol::Ard) {
@@ -240,77 +233,79 @@ where
             None
         };
 
-        if with_tls {
-            trace!("Establishing TLS connection with server");
+        let connected = upstream::connect_upstream(
+            targets,
+            claims.jet_agent_id,
+            claims.jet_aid,
+            agent_tunnel_handle.as_deref(),
+        )
+        .await
+        .map_err(ForwardError::BadGateway)?;
 
-            // Establish TLS connection with server.
-            let server_stream =
-                crate::tls::safe_connect(selected_target.host().to_owned(), server_stream, claims.cert_thumb256)
-                    .await
-                    .context("TLS connect")
-                    .map_err(ForwardError::BadGateway)?;
+        let PreparedUpstream {
+            session,
+            server_addr,
+            selected_target,
+        } = upstream::prepare_upstream(connected, mode, claims.cert_thumb256)
+            .await
+            .map_err(ForwardError::BadGateway)?;
 
-            info!("WebSocket-TLS forwarding");
+        tracing::Span::current().record("target", selected_target.to_string());
 
-            let info = SessionInfo::builder()
-                .id(claims.jet_aid)
-                .application_protocol(claims.jet_ap)
-                .details(ConnectionModeDetails::Fwd {
-                    destination_host: selected_target.clone(),
-                })
-                .time_to_live(claims.jet_ttl)
-                .recording_policy(claims.jet_rec)
-                .filtering_policy(claims.jet_flt)
-                .build();
+        let info = SessionInfo::builder()
+            .id(claims.jet_aid)
+            .application_protocol(claims.jet_ap)
+            .details(ConnectionModeDetails::Fwd {
+                destination_host: selected_target,
+            })
+            .time_to_live(claims.jet_ttl)
+            .recording_policy(claims.jet_rec)
+            .filtering_policy(claims.jet_flt)
+            .build();
 
-            Proxy::builder()
-                .conf(conf)
-                .session_info(info)
-                .address_a(client_addr)
-                .transport_a(client_stream)
-                .address_b(server_addr)
-                .transport_b(server_stream)
-                .sessions(sessions)
-                .subscriber_tx(subscriber_tx)
-                .buffer_size(buffer_size)
-                .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
-                .build()
-                .select_dissector_and_forward()
-                .await
-                .context("encountered a failure during plain tls traffic proxying")
-                .map_err(ForwardError::Internal)
-        } else {
-            info!("WebSocket-TCP forwarding");
+        // Keep the per-mode message shape that pre-refactor logs and
+        // integration tests grep for ("WebSocket-TCP forwarding" /
+        // "WebSocket-TLS forwarding"); structured `mode` field is for
+        // newer telemetry.
+        match mode {
+            UpstreamMode::Tcp => info!(mode = "tcp", "WebSocket-TCP forwarding"),
+            UpstreamMode::Tls => info!(mode = "tls", "WebSocket-TLS forwarding"),
+        }
 
-            let info = SessionInfo::builder()
-                .id(claims.jet_aid)
-                .application_protocol(claims.jet_ap)
-                .details(ConnectionModeDetails::Fwd {
-                    destination_host: selected_target.clone(),
-                })
-                .time_to_live(claims.jet_ttl)
-                .recording_policy(claims.jet_rec)
-                .filtering_policy(claims.jet_flt)
-                .build();
+        Proxy::builder()
+            .conf(conf)
+            .session_info(info)
+            .address_a(client_addr)
+            .transport_a(client_stream)
+            .address_b(server_addr)
+            .transport_b(session)
+            .sessions(sessions)
+            .subscriber_tx(subscriber_tx)
+            .buffer_size(buffer_size)
+            .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
+            .build()
+            .select_dissector_and_forward()
+            .await
+            .context("forward websocket traffic")
+            .map_err(ForwardError::Internal)
+    }
+}
 
-            Proxy::builder()
-                .conf(conf)
-                .session_info(info)
-                .address_a(client_addr)
-                .transport_a(client_stream)
-                .address_b(server_addr)
-                .transport_b(server_stream)
-                .sessions(sessions)
-                .subscriber_tx(subscriber_tx)
-                .buffer_size(buffer_size)
-                .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
-                .build()
-                .select_dissector_and_forward()
-                .await
-                .context("encountered a failure during plain tcp traffic proxying")
-                .map_err(ForwardError::Internal)
+fn validate_forward_request(claims: &AssociationTokenClaims) -> Result<(), ForwardError> {
+    match claims.jet_rec {
+        RecordingPolicy::None | RecordingPolicy::Stream => {}
+        RecordingPolicy::Proxy => {
+            return Err(ForwardError::Internal(anyhow::anyhow!(
+                "recording policy not supported"
+            )));
         }
     }
+
+    if !matches!(claims.jet_cm, ConnectionMode::Fwd { .. }) {
+        return Err(ForwardError::Internal(anyhow::anyhow!("connection mode not supported")));
+    }
+
+    Ok(())
 }
 
 async fn fwd_http(

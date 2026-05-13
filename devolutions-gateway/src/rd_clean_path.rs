@@ -20,6 +20,7 @@ use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
+use crate::upstream::{self, ConnectedUpstream, UpstreamLeg};
 
 #[derive(Debug, Error)]
 enum AuthorizationError {
@@ -158,25 +159,24 @@ enum CleanPathError {
     Io(#[from] io::Error),
 }
 
-struct CleanPathResult {
+// Upstream transport (TCP or agent-tunnel) comes from `crate::upstream::UpstreamLeg`,
+// which is also used by fwd.rs and generic_client.rs.
+
+struct CleanPathAuth {
     claims: AssociationTokenClaims,
-    destination: TargetAddr,
-    server_addr: SocketAddr,
-    server_stream: tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
-    x224_rsp: Vec<u8>,
 }
 
-async fn process_cleanpath(
-    cleanpath_pdu: RDCleanPathPdu,
+/// Validate the RDCleanPath PDU token and authorize the session.
+/// Pure validation — no connections established.
+async fn authorize_cleanpath(
+    cleanpath_pdu: &RDCleanPathPdu,
     client_addr: SocketAddr,
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
     active_recordings: &ActiveRecordings,
     sessions: &SessionMessageSender,
-) -> Result<CleanPathResult, CleanPathError> {
-    use crate::utils;
-
+) -> Result<CleanPathAuth, CleanPathError> {
     let token = cleanpath_pdu
         .proxy_auth
         .as_deref()
@@ -207,10 +207,9 @@ async fn process_cleanpath(
     };
 
     let span = tracing::Span::current();
-
     span.record("session_id", claims.jet_aid.to_string());
 
-    // Sanity check.
+    // Sanity check destination in PDU vs token.
     match cleanpath_pdu.destination.as_deref() {
         Some(destination) => match TargetAddr::parse(destination, 3389) {
             Ok(destination) if !destination.eq(targets.first()) => {
@@ -224,14 +223,50 @@ async fn process_cleanpath(
         None => warn!("RDCleanPath PDU is missing the destination field"),
     }
 
+    Ok(CleanPathAuth { claims })
+}
+
+struct ConnectedRdpServer {
+    tls_stream: tokio_rustls::client::TlsStream<UpstreamLeg>,
+    server_addr: SocketAddr,
+    selected_target: TargetAddr,
+    x224_rsp: Vec<u8>,
+}
+
+/// Establish a connection to the RDP server: route (agent/direct) → connect → X224 → TLS.
+///
+/// The routing pipeline (explicit agent → subnet/domain match → direct) is shared with
+/// the WebSocket forwarders in [`crate::upstream`]; here we just do the RDP-specific
+/// PCB + X224 + TLS upgrade on top of whatever leg that returns.
+async fn connect_rdp_server(
+    claims: &AssociationTokenClaims,
+    cleanpath_pdu: RDCleanPathPdu,
+    agent_tunnel_handle: Option<&Arc<agent_tunnel::AgentTunnelHandle>>,
+) -> Result<ConnectedRdpServer, CleanPathError> {
+    let crate::token::ConnectionMode::Fwd { ref targets, .. } = claims.jet_cm else {
+        return anyhow::Error::msg("unexpected connection mode")
+            .pipe(CleanPathError::BadRequest)
+            .pipe(Err);
+    };
+
     trace!(?targets, "Connecting to destination server");
 
-    let ((mut server_stream, server_addr), selected_target) = utils::successive_try(targets, utils::tcp_connect)
-        .await
-        .context("connect to RDP server")?;
+    let ConnectedUpstream {
+        leg: mut server_stream,
+        server_addr,
+        selected_target,
+    } = upstream::connect_upstream(
+        targets,
+        claims.jet_agent_id,
+        claims.jet_aid,
+        agent_tunnel_handle.map(AsRef::as_ref),
+    )
+    .await
+    .context("connect to RDP server")
+    .map_err(CleanPathError::Internal)?;
 
     debug!(%selected_target, "Connected to destination server");
-    span.record("target", selected_target.to_string());
+    tracing::Span::current().record("target", selected_target.to_string());
 
     // Send preconnection blob if applicable.
     if let Some(pcb) = cleanpath_pdu.preconnection_blob {
@@ -245,8 +280,6 @@ async fn process_cleanpath(
         .map_err(CleanPathError::BadRequest)?;
     server_stream.write_all(x224_req.as_bytes()).await?;
 
-    // == Receive server X224 connection response ==
-
     trace!("Receiving X224 response");
 
     let x224_rsp = read_x224_response(&mut server_stream)
@@ -256,20 +289,17 @@ async fn process_cleanpath(
 
     trace!("Establishing TLS connection with server");
 
-    // == Establish TLS connection with server ==
-
-    let server_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
+    let tls_stream = crate::tls::dangerous_connect(selected_target.host().to_owned(), server_stream)
         .await
         .map_err(|source| CleanPathError::TlsHandshake {
             source,
-            target_server: selected_target.to_owned(),
+            target_server: selected_target.clone(),
         })?;
 
-    Ok(CleanPathResult {
-        destination: selected_target.to_owned(),
-        claims,
+    Ok(ConnectedRdpServer {
+        tls_stream,
         server_addr,
-        server_stream,
+        selected_target,
         x224_rsp,
     })
 }
@@ -287,6 +317,7 @@ async fn handle_with_credential_injection(
     active_recordings: &ActiveRecordings,
     cleanpath_pdu: RDCleanPathPdu,
     credential_entry: Arc<CredentialEntry>,
+    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
 
@@ -318,16 +349,9 @@ async fn handle_with_credential_injection(
         )
     };
 
-    // Run normal RDCleanPath flow (this will handle server-side TLS and get certs).
-    let CleanPathResult {
-        claims,
-        destination,
-        server_addr,
-        server_stream,
-        x224_rsp,
-        ..
-    } = process_cleanpath(
-        cleanpath_pdu,
+    // Authorize and connect to the RDP server.
+    let CleanPathAuth { claims } = authorize_cleanpath(
+        &cleanpath_pdu,
         client_addr,
         &conf,
         token_cache,
@@ -336,7 +360,16 @@ async fn handle_with_credential_injection(
         &sessions,
     )
     .await
-    .context("RDCleanPath processing failed")?;
+    .context("RDCleanPath authorization failed")?;
+
+    let ConnectedRdpServer {
+        tls_stream: server_stream,
+        server_addr,
+        selected_target: destination,
+        x224_rsp,
+    } = connect_rdp_server(&claims, cleanpath_pdu, agent_tunnel_handle.as_ref())
+        .await
+        .context("RDCleanPath connection failed")?;
 
     // Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on.
     let gateway_cert_chain_handle = tokio::spawn(crate::tls::get_cert_chain_for_acceptor_cached(
@@ -532,6 +565,7 @@ pub async fn handle(
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
     credential_store: &CredentialStoreHandle,
+    agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     // Special handshake of our RDP extension
 
@@ -569,27 +603,29 @@ pub async fn handle(
             active_recordings,
             cleanpath_pdu,
             entry,
+            agent_tunnel_handle.clone(),
         )
         .await;
     }
 
     trace!("Processing RDCleanPath");
 
-    let CleanPathResult {
-        claims,
-        destination,
-        server_addr,
-        server_stream,
-        x224_rsp,
-    } = match process_cleanpath(
-        cleanpath_pdu,
-        client_addr,
-        &conf,
-        token_cache,
-        jrl,
-        active_recordings,
-        &sessions,
-    )
+    let (auth, connected) = match async {
+        let auth = authorize_cleanpath(
+            &cleanpath_pdu,
+            client_addr,
+            &conf,
+            token_cache,
+            jrl,
+            active_recordings,
+            &sessions,
+        )
+        .await?;
+
+        let connected = connect_rdp_server(&auth.claims, cleanpath_pdu, agent_tunnel_handle.as_ref()).await?;
+
+        Ok::<_, CleanPathError>((auth, connected))
+    }
     .await
     {
         Ok(result) => result,
@@ -601,6 +637,13 @@ pub async fn handle(
                 .pipe(Err)?;
         }
     };
+
+    let ConnectedRdpServer {
+        tls_stream: server_stream,
+        server_addr,
+        selected_target: destination,
+        x224_rsp,
+    } = connected;
 
     // == Send success RDCleanPathPdu response ==
 
@@ -622,13 +665,13 @@ pub async fn handle(
     // == Start actual RDP session ==
 
     let info = SessionInfo::builder()
-        .id(claims.jet_aid)
-        .application_protocol(claims.jet_ap)
+        .id(auth.claims.jet_aid)
+        .application_protocol(auth.claims.jet_ap)
         .details(ConnectionModeDetails::Fwd {
             destination_host: destination.clone(),
         })
-        .time_to_live(claims.jet_ttl)
-        .recording_policy(claims.jet_rec)
+        .time_to_live(auth.claims.jet_ttl)
+        .recording_policy(auth.claims.jet_rec)
         .build();
 
     info!("RDP-TLS forwarding (RDCleanPath)");
@@ -642,7 +685,7 @@ pub async fn handle(
         .transport_b(server_stream)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
-        .disconnect_interest(DisconnectInterest::from_reconnection_policy(claims.jet_reuse))
+        .disconnect_interest(DisconnectInterest::from_reconnection_policy(auth.claims.jet_reuse))
         .build()
         .select_dissector_and_forward()
         .await
