@@ -237,14 +237,6 @@
           "text": "System"
         },
         {
-          "id": "CertificateFindType_Thumbprint",
-          "text": "Fingerabdruck"
-        },
-        {
-          "id": "CertificateFindType_SubjectName",
-          "text": "Antragstellername"
-        },
-        {
           "id": "AuthenticationMode_None",
           "text": "Keine"
         },
@@ -311,6 +303,58 @@
         {
           "id": "ServiceStartMode_Disabled",
           "text": "Deaktiviert"
+        },
+        {
+          "id": "CertificateIssues_None",
+          "text": "Keine Probleme"
+        },
+        {
+          "id": "CertificateIssues_NotYetValid",
+          "text": "Das Zertifikat ist noch nicht gültig"
+        },
+        {
+          "id": "CertificateIssues_Expired",
+          "text": "Das Zertifikat ist abgelaufen"
+        },
+        {
+          "id": "CertificateIssues_ExpiringSoon",
+          "text": "Das Zertifikat läuft bald ab"
+        },
+        {
+          "id": "CertificateIssues_MissingServerAuthEku",
+          "text": "Im Zertifikat fehlt die EKU-Erweiterung Server Authentication"
+        },
+        {
+          "id": "CertificateIssues_MissingSubjectAlternativeName",
+          "text": "Im Zertifikat fehlt die Erweiterung Subject Alternative Name"
+        },
+        {
+          "id": "CertificateChainStatus_Incomplete",
+          "text": "In der Zertifikatsdatei fehlen ein oder mehrere Zwischenzertifikate. Exportieren Sie sie erneut mit den enthaltenen Zwischenzertifikaten, damit Clients das Zertifikat verifizieren können."
+        },
+        {
+          "id": "CertificateChainStatus_SystemStoreRequired",
+          "text": "In der Zertifikatsdatei fehlen ein oder mehrere Zwischenzertifikate. Exportieren Sie sie erneut mit den enthaltenen Zwischenzertifikaten, damit Clients das Zertifikat verifizieren können."
+        },
+        {
+          "id": "CertificateChainStatus_UntrustedRoot",
+          "text": "Das Zertifikat hat als Stamm eine CA, die nicht im Speicher für vertrauenswürdige Stammzertifizierungsstellen des Systems enthalten ist. Wenn es sich um eine private CA handelt, können Clients, bei denen dieser Stamm nicht installiert ist, das Zertifikat nicht verifizieren."
+        },
+        {
+          "id": "CertificateChainStatus_WeakSignature",
+          "text": "Die Zertifikatskette verwendet einen schwachen Signaturalgorithmus (z. B. MD5 oder SHA-1). Moderne TLS-Clients werden sie wahrscheinlich ablehnen."
+        },
+        {
+          "id": "CertificateChainStatus_InvalidSignature",
+          "text": "Ein Zertifikat in der Kette hat eine ungültige Signatur. Die Kette wurde möglicherweise manipuliert oder ist beschädigt."
+        },
+        {
+          "id": "CertificateChainStatus_ExplicitDistrust",
+          "text": "Der Aussteller des Zertifikats wurde vom System ausdrücklich als nicht vertrauenswürdig eingestuft. Stellen Sie das Zertifikat bei einer vertrauenswürdigen CA neu aus."
+        },
+        {
+          "id": "CertificateChainStatus_ValidationFailed",
+          "text": "Die Zertifikatskette konnte nicht validiert werden."
         }
       ],
       "properties": [
@@ -635,10 +679,6 @@
             "text": "Zertifikatspeicher"
           },
           {
-            "id": "SearchBy",
-            "text": "Suchen nach"
-          },
-          {
             "id": "Search",
             "text": "Suchen"
           },
@@ -660,11 +700,55 @@
           },
           {
             "id": "CertificateCouldNotBeVerified",
-            "text": "Zertifikat konnte nicht verifiziert werden"
+            "text": "Windows hat die Vertrauenskette dieses Zertifikats nicht validiert. Dies kann auf einen nicht vertrauenswürdigen Aussteller oder einen anderen Verstoß gegen die Validierungsrichtlinie hinweisen."
           },
           {
             "id": "AnX509CertificateInBinaryOrPemEncoded",
             "text": "Ein X.509-Zertifikat im binären PKCS#12-Format (PFX/P12) oder PEM-kodiert"
+          },
+          {
+            "id": "NoCertificateSelected",
+            "text": "Keine Auswahl"
+          },
+          {
+            "id": "CertificateFileCouldNotBeRead",
+            "text": "Die Zertifikatsdatei konnte nicht gelesen werden ({0})"
+          },
+          {
+            "id": "NoUsableCertificateFoundInFile",
+            "text": "In der Datei wurde kein verwendbares Zertifikat gefunden."
+          },
+          {
+            "id": "CertificateIsCaNotServer",
+            "text": "Das Zertifikat ist ein CA-Zertifikat, kein Serverzertifikat. Stellen Sie sicher, dass Sie die richtige Datei ausgewählt haben."
+          },
+          {
+            "id": "CertificateIsSelfSigned",
+            "text": "Das Zertifikat ist selbstsigniert. Clients werden es nur dann als vertrauenswürdig einstufen, wenn sie dem Zertifikat explizit vertrauen."
+          },
+          {
+            "id": "PrivateKeyPermissionWillBeGranted",
+            "text": "Das Konto Network Service verfügt möglicherweise nicht über die Berechtigung, den privaten Schlüssel des Zertifikats zu lesen. Das Installationsprogramm wird versuchen, den erforderlichen Zugriff zu gewähren."
+          },
+          {
+            "id": "ValidationProducedWarnings",
+            "text": "Die Validierung des ausgewählten Zertifikats hat folgende Warnungen ergeben:"
+          },
+          {
+            "id": "DoYouWantToProceedAnyway",
+            "text": "Möchten Sie trotzdem fortfahren?"
+          },
+          {
+            "id": "SearchResultSingular",
+            "text": "{0} Ergebnis"
+          },
+          {
+            "id": "SearchResultPlural",
+            "text": "{0} Ergebnisse"
+          },
+          {
+            "id": "CertificatesFoundButUnusable",
+            "text": "{0} Zertifikate wurden gefunden, sind aber aus einem oder mehreren der folgenden Gründe unbrauchbar:"
           }
         ],
         "listeners": [

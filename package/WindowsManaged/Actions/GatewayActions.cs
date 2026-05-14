@@ -355,12 +355,47 @@ internal static class GatewayActions
     );
 
     /// <summary>
+    /// Grant NETWORK SERVICE Read permission on the selected system store certificate's private key
+    /// </summary>
+    /// <remarks>
+    /// The Gateway service runs as NETWORK SERVICE and needs Read access on the private key file.
+    /// Best effort: failures are logged but do not fail the install. Only fires when a system-store
+    /// certificate is selected and the gateway is not auto-generating one.
+    /// </remarks>
+    private static readonly ElevatedManagedAction setCertificatePrivateKeyPermissions = new(
+        new Id($"CA.{nameof(setCertificatePrivateKeyPermissions)}"),
+        CustomActions.SetCertificatePrivateKeyPermissions,
+        Return.ignore,
+        When.After, new Step(configureCertificate.Id),
+        new Condition(string.Join(" AND ", new[]
+        {
+            "(NOT Installed OR REINSTALL)",
+            $"({GatewayProperties.configureGateway.Equal(true)})",
+            $"({GatewayProperties.certificateMode.Equal(Constants.CertificateMode.System)})",
+            $"({GatewayProperties.httpListenerScheme.Equal(Constants.HttpsProtocol)})",
+            $"({GatewayProperties.configureNgrok.Equal(false)})",
+        })),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = UseProperties(new IWixProperty[]
+        {
+            GatewayProperties.certificateLocation,
+            GatewayProperties.certificateStore,
+            GatewayProperties.certificateName,
+            GatewayProperties.configureWebApp,
+            GatewayProperties.generateCertificate,
+        }),
+    };
+
+    /// <summary>
     /// Configure the public key using PowerShell
     /// </summary>
     private static readonly ElevatedManagedAction configurePublicKey = BuildConfigureAction(
         $"CA.{nameof(configurePublicKey)}",
         CustomActions.ConfigurePublicKey,
-        When.After, new Step(configureCertificate.Id),
+        When.After, new Step(setCertificatePrivateKeyPermissions.Id),
         new IWixProperty[]
         {
             GatewayProperties.publicKeyFile,
@@ -500,6 +535,7 @@ internal static class GatewayActions
         configureAccessUri,
         configureListeners,
         configureCertificate,
+        setCertificatePrivateKeyPermissions,
         configureNgrokListeners,
         configurePublicKey,
         configureWebApp,

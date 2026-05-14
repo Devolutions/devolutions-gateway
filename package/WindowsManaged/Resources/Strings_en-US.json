@@ -237,14 +237,6 @@
           "text": "System"
         },
         {
-          "id": "CertificateFindType_Thumbprint",
-          "text": "Thumbprint"
-        },
-        {
-          "id": "CertificateFindType_SubjectName",
-          "text": "Subject Name"
-        },
-        {
           "id": "AuthenticationMode_None",
           "text": "None"
         },
@@ -311,6 +303,58 @@
         {
           "id": "ServiceStartMode_Disabled",
           "text": "Disabled"
+        },
+        {
+          "id": "CertificateIssues_None",
+          "text": "No issues"
+        },
+        {
+          "id": "CertificateIssues_NotYetValid",
+          "text": "The certificate is not yet valid"
+        },
+        {
+          "id": "CertificateIssues_Expired",
+          "text": "The certificate is expired"
+        },
+        {
+          "id": "CertificateIssues_ExpiringSoon",
+          "text": "The certificate will expire soon"
+        },
+        {
+          "id": "CertificateIssues_MissingServerAuthEku",
+          "text": "The certificate is missing the Server Authentication EKU extension"
+        },
+        {
+          "id": "CertificateIssues_MissingSubjectAlternativeName",
+          "text": "The certificate is missing the Subject Alternative Name extension"
+        },
+        {
+          "id": "CertificateChainStatus_Incomplete",
+          "text": "The certificate file is missing one or more intermediate certificates. Re-export it with the intermediates included so clients can verify the certificate."
+        },
+        {
+          "id": "CertificateChainStatus_SystemStoreRequired",
+          "text": "The certificate file is missing one or more intermediate certificates. Re-export it with the intermediates included so clients can verify the certificate."
+        },
+        {
+          "id": "CertificateChainStatus_UntrustedRoot",
+          "text": "The certificate is rooted in a CA that is not in the system's Trusted Root store. If this is a private CA, clients without that root installed will fail to verify the certificate."
+        },
+        {
+          "id": "CertificateChainStatus_WeakSignature",
+          "text": "The certificate chain uses a weak signature algorithm (such as MD5 or SHA-1). Modern TLS clients are likely to reject it."
+        },
+        {
+          "id": "CertificateChainStatus_InvalidSignature",
+          "text": "A certificate in the chain has an invalid signature. The chain may have been tampered with or is corrupted."
+        },
+        {
+          "id": "CertificateChainStatus_ExplicitDistrust",
+          "text": "The certificate's issuer has been explicitly distrusted by the system. Re-issue the certificate from a trusted CA."
+        },
+        {
+          "id": "CertificateChainStatus_ValidationFailed",
+          "text": "The certificate chain could not be validated."
         }
       ],
       "properties": [
@@ -635,10 +679,6 @@
             "text": "Certificate Store"
           },
           {
-            "id": "SearchBy",
-            "text": "Search By"
-          },
-          {
             "id": "Search",
             "text": "Search"
           },
@@ -660,11 +700,55 @@
           },
           {
             "id": "CertificateCouldNotBeVerified",
-            "text": "Certificate could not be verified"
+            "text": "Windows did not validate this certificate's trust chain. This may indicate an untrusted issuer or another chain policy violation."
           },
           {
             "id": "AnX509CertificateInBinaryOrPemEncoded",
             "text": "An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded"
+          },
+          {
+            "id": "NoCertificateSelected",
+            "text": "No selection"
+          },
+          {
+            "id": "CertificateFileCouldNotBeRead",
+            "text": "The certificate file could not be read ({0})"
+          },
+          {
+            "id": "NoUsableCertificateFoundInFile",
+            "text": "No usable certificate was found in the file."
+          },
+          {
+            "id": "CertificateIsCaNotServer",
+            "text": "The certificate is a CA certificate, not a server certificate. Verify that you have selected the correct file."
+          },
+          {
+            "id": "CertificateIsSelfSigned",
+            "text": "The certificate is self-signed. Clients will not trust it unless they explicitly trust the certificate."
+          },
+          {
+            "id": "PrivateKeyPermissionWillBeGranted",
+            "text": "The Network Service account may not have permission to read the certificate's private key. The installer will attempt to grant the required access."
+          },
+          {
+            "id": "ValidationProducedWarnings",
+            "text": "Validation of the selected certificate produced the following warnings:"
+          },
+          {
+            "id": "DoYouWantToProceedAnyway",
+            "text": "Do you want to proceed anyway?"
+          },
+          {
+            "id": "SearchResultSingular",
+            "text": "{0} result"
+          },
+          {
+            "id": "SearchResultPlural",
+            "text": "{0} results"
+          },
+          {
+            "id": "CertificatesFoundButUnusable",
+            "text": "{0} certificates were found, but are unusable for one or more of the following reasons:"
           }
         ],
         "listeners": [

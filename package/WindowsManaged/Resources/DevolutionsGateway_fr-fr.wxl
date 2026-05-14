@@ -26,8 +26,19 @@
                     <!-- enums -->
                 <String Id="AuthenticationMode_Custom">Personnalisée</String>
                 <String Id="AuthenticationMode_None">Aucune</String>
-                <String Id="CertificateFindType_SubjectName">Nom du sujet</String>
-                <String Id="CertificateFindType_Thumbprint">Empreinte</String>
+                <String Id="CertificateChainStatus_ExplicitDistrust">L'émetteur du certificat a été explicitement marqué comme non fiable par le système. Réémettez le certificat auprès d'une AC approuvée.</String>
+                <String Id="CertificateChainStatus_Incomplete">Le fichier de certificat ne contient pas un ou plusieurs certificats intermédiaires. Réexportez-le en incluant les certificats intermédiaires pour que les clients puissent vérifier le certificat.</String>
+                <String Id="CertificateChainStatus_InvalidSignature">Un certificat de la chaîne a une signature invalide. La chaîne a peut-être été altérée ou est corrompue.</String>
+                <String Id="CertificateChainStatus_SystemStoreRequired">Le fichier de certificat ne contient pas un ou plusieurs certificats intermédiaires. Réexportez-le en incluant les certificats intermédiaires pour que les clients puissent vérifier le certificat.</String>
+                <String Id="CertificateChainStatus_UntrustedRoot">Le certificat est rattaché à une AC qui ne figure pas dans le magasin Autorités de certification racine de confiance du système. S'il s'agit d'une AC privée, les clients qui n'ont pas cette racine installée ne pourront pas vérifier le certificat.</String>
+                <String Id="CertificateChainStatus_ValidationFailed">La chaîne de certificats n'a pas pu être validée.</String>
+                <String Id="CertificateChainStatus_WeakSignature">La chaîne de certificats utilise un algorithme de signature faible (comme MD5 ou SHA-1). Les clients TLS modernes risquent de la rejeter.</String>
+                <String Id="CertificateIssues_Expired">Le certificat est expiré</String>
+                <String Id="CertificateIssues_ExpiringSoon">Le certificat expirera bientôt</String>
+                <String Id="CertificateIssues_MissingServerAuthEku">Le certificat n'a pas l'extension EKU Server Authentication</String>
+                <String Id="CertificateIssues_MissingSubjectAlternativeName">Le certificat n'a pas l'extension Subject Alternative Name</String>
+                <String Id="CertificateIssues_None">Aucun problème</String>
+                <String Id="CertificateIssues_NotYetValid">Le certificat n'est pas encore valide</String>
                 <String Id="CertificateMode_External">Externe</String>
                 <String Id="CertificateMode_System">Système</String>
                 <String Id="CustomizeMode_Later">Plus tard</String>
@@ -178,23 +189,33 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                     <!-- dialogs.certificate -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">Un certificat X.509 en format binaire PKCS#12 (PFX/P12) ou codé en PEM</String>
                 <String Id="BrowseForACertificateToUse">Parcourir pour un certificat à utiliser</String>
-                <String Id="CertificateCouldNotBeVerified">Le certificat n'a pas pu être vérifié</String>
+                <String Id="CertificateCouldNotBeVerified">Windows n'a pas validé la chaîne de confiance de ce certificat. Cela peut indiquer un émetteur non approuvé ou une autre violation de la politique de validation.</String>
                 <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
                 <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Fichier de clé privée</String>
                 <String Id="CertificateDlgCertPasswordLabel">Mot de passe du certificat</String>
                 <String Id="CertificateDlgDescription">Un certificat est nécessaire pour utiliser HTTPS.</String>
                 <String Id="CertificateDlgTitle">Certificat</String>
+                <String Id="CertificateFileCouldNotBeRead">Le fichier de certificat n'a pas pu être lu ({0})</String>
+                <String Id="CertificateIsCaNotServer">Le certificat est un certificat d'autorité de certification (AC), et non un certificat de serveur. Vérifiez que vous avez sélectionné le bon fichier.</String>
+                <String Id="CertificateIsSelfSigned">Le certificat est auto-signé. Les clients ne lui feront pas confiance à moins qu'ils n'approuvent explicitement le certificat.</String>
+                <String Id="CertificatesFoundButUnusable">{0} certificats ont été trouvés, mais sont inutilisables pour une ou plusieurs des raisons suivantes :</String>
                 <String Id="CertificateSource">Source du certificat</String>
                 <String Id="CertificateStore">Magasin de certificats</String>
+                <String Id="DoYouWantToProceedAnyway">Voulez-vous continuer malgré tout ?</String>
                 <String Id="EncryptedPrivateKeysAreNotSupported">Les clés de chiffrement privées ne sont pas prises en charge</String>
                 <String Id="EnterTextToSearch">Saisir le texte à rechercher</String>
+                <String Id="NoCertificateSelected">Aucune sélection</String>
+                <String Id="NoUsableCertificateFoundInFile">Aucun certificat utilisable n'a été trouvé dans le fichier.</String>
+                <String Id="PrivateKeyPermissionWillBeGranted">Le compte Network Service n'a peut-être pas l'autorisation de lire la clé privée du certificat. Le programme d'installation tentera de lui accorder l'accès requis.</String>
                 <String Id="Search">Rechercher</String>
-                <String Id="SearchBy">Rechercher selon</String>
                 <String Id="SearchForACertificateToUse">Trouver un certificat à utiliser</String>
+                <String Id="SearchResultPlural">{0} résultats</String>
+                <String Id="SearchResultSingular">{0} résultat</String>
                 <String Id="SelectedCertificate">Certificat sélectionné</String>
                 <String Id="SelectTheCertificateToUse">Sélectionner le certificat à utiliser</String>
                 <String Id="StoreLocation">Emplacement du magasin</String>
+                <String Id="ValidationProducedWarnings">La validation du certificat sélectionné a produit les avertissements suivants :</String>
                     <!-- dialogs.listeners -->
                 <String Id="AnHttpListenerDoesNotRequireACert">Un écouteur HTTP ne nécessite pas de certificat.</String>
                 <String Id="AnHttpsListenerRequiresACert">Un écouteur HTTPS nécessite un certificat. Vous serez invité à en configurer un.</String>

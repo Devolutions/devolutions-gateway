@@ -22,8 +22,6 @@ namespace WixSharpSetup.Dialogs
                 components.Dispose();
             }
 
-            //this.SelectedCertificate?.Dispose(); TODO: .net48
-
             base.Dispose(disposing);
         }
 
@@ -41,11 +39,9 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel = new System.Windows.Forms.Panel();
             this.gbSystem = new System.Windows.Forms.GroupBox();
             this.pnlSystem = new System.Windows.Forms.TableLayoutPanel();
-            this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            this.lblResults = new System.Windows.Forms.Label();
             this.lblCertificateDescription = new System.Windows.Forms.Label();
             this.lblSelectedCertificate = new System.Windows.Forms.Label();
-            this.cmbSearchBy = new System.Windows.Forms.ComboBox();
-            this.label9 = new System.Windows.Forms.Label();
             this.cmbStoreLocation = new System.Windows.Forms.ComboBox();
             this.cmbStore = new System.Windows.Forms.ComboBox();
             this.label8 = new System.Windows.Forms.Label();
@@ -54,6 +50,7 @@ namespace WixSharpSetup.Dialogs
             this.txtSearch = new System.Windows.Forms.TextBox();
             this.butSearchCertificate = new System.Windows.Forms.Button();
             this.butViewCertificate = new System.Windows.Forms.Button();
+            this.panel1 = new System.Windows.Forms.Panel();
             this.gbExternal = new System.Windows.Forms.GroupBox();
             this.pnlExternal = new System.Windows.Forms.TableLayoutPanel();
             this.butBrowsePrivateKeyFile = new DevolutionsGateway.Controls.FileBrowseButton();
@@ -80,12 +77,10 @@ namespace WixSharpSetup.Dialogs
             this.cancel = new System.Windows.Forms.Button();
             this.border1 = new System.Windows.Forms.Panel();
             this.ttCertVerify = new System.Windows.Forms.ToolTip(this.components);
-            this.panel1 = new System.Windows.Forms.Panel();
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
             this.gbSystem.SuspendLayout();
             this.pnlSystem.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.gbExternal.SuspendLayout();
             this.pnlExternal.SuspendLayout();
             this.topPanel.SuspendLayout();
@@ -140,11 +135,9 @@ namespace WixSharpSetup.Dialogs
             this.pnlSystem.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.pnlSystem.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 30F));
             this.pnlSystem.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.pnlSystem.Controls.Add(this.pictureBox1, 2, 6);
+            this.pnlSystem.Controls.Add(this.lblResults, 2, 4);
             this.pnlSystem.Controls.Add(this.lblCertificateDescription, 1, 6);
             this.pnlSystem.Controls.Add(this.lblSelectedCertificate, 0, 6);
-            this.pnlSystem.Controls.Add(this.cmbSearchBy, 1, 2);
-            this.pnlSystem.Controls.Add(this.label9, 0, 2);
             this.pnlSystem.Controls.Add(this.cmbStoreLocation, 1, 0);
             this.pnlSystem.Controls.Add(this.cmbStore, 1, 1);
             this.pnlSystem.Controls.Add(this.label8, 0, 3);
@@ -170,26 +163,30 @@ namespace WixSharpSetup.Dialogs
             this.pnlSystem.Size = new System.Drawing.Size(464, 205);
             this.pnlSystem.TabIndex = 9;
             // 
-            // pictureBox1
+            // lblResults
             // 
-            this.pictureBox1.Dock = System.Windows.Forms.DockStyle.Top;
-            this.pictureBox1.Location = new System.Drawing.Point(354, 154);
-            this.pictureBox1.Name = "pictureBox1";
-            this.pictureBox1.Size = new System.Drawing.Size(24, 23);
-            this.pictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.CenterImage;
-            this.pictureBox1.TabIndex = 18;
-            this.pictureBox1.TabStop = false;
-            this.pictureBox1.Visible = false;
+            this.lblResults.AutoSize = true;
+            this.pnlSystem.SetColumnSpan(this.lblResults, 2);
+            this.lblResults.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblResults.Location = new System.Drawing.Point(354, 89);
+            this.lblResults.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.lblResults.Name = "lblResults";
+            this.lblResults.Size = new System.Drawing.Size(107, 21);
+            this.lblResults.TabIndex = 20;
+            this.lblResults.Text = "[Results]";
+            this.lblResults.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.lblResults.Visible = false;
             // 
             // lblCertificateDescription
             // 
             this.lblCertificateDescription.AutoSize = true;
             this.lblCertificateDescription.Dock = System.Windows.Forms.DockStyle.Top;
-            this.lblCertificateDescription.Location = new System.Drawing.Point(153, 154);
+            this.lblCertificateDescription.Location = new System.Drawing.Point(153, 125);
             this.lblCertificateDescription.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.lblCertificateDescription.Name = "lblCertificateDescription";
             this.lblCertificateDescription.Size = new System.Drawing.Size(195, 13);
             this.lblCertificateDescription.TabIndex = 17;
+            this.lblCertificateDescription.Text = "[NoCertificateSelected]";
             this.lblCertificateDescription.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // lblSelectedCertificate
@@ -198,38 +195,13 @@ namespace WixSharpSetup.Dialogs
             this.lblSelectedCertificate.Dock = System.Windows.Forms.DockStyle.Top;
             this.lblSelectedCertificate.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.lblSelectedCertificate.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.lblSelectedCertificate.Location = new System.Drawing.Point(3, 154);
+            this.lblSelectedCertificate.Location = new System.Drawing.Point(3, 125);
             this.lblSelectedCertificate.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.lblSelectedCertificate.Name = "lblSelectedCertificate";
             this.lblSelectedCertificate.Size = new System.Drawing.Size(144, 13);
             this.lblSelectedCertificate.TabIndex = 16;
             this.lblSelectedCertificate.Text = "[SelectedCertificate]";
             this.lblSelectedCertificate.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            this.lblSelectedCertificate.Visible = false;
-            // 
-            // cmbSearchBy
-            // 
-            this.pnlSystem.SetColumnSpan(this.cmbSearchBy, 3);
-            this.cmbSearchBy.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.cmbSearchBy.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbSearchBy.FormattingEnabled = true;
-            this.cmbSearchBy.Location = new System.Drawing.Point(153, 61);
-            this.cmbSearchBy.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.cmbSearchBy.Name = "cmbSearchBy";
-            this.cmbSearchBy.Size = new System.Drawing.Size(308, 21);
-            this.cmbSearchBy.TabIndex = 3;
-            // 
-            // label9
-            // 
-            this.label9.AutoSize = true;
-            this.label9.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label9.Location = new System.Drawing.Point(3, 61);
-            this.label9.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.label9.Name = "label9";
-            this.label9.Size = new System.Drawing.Size(144, 21);
-            this.label9.TabIndex = 13;
-            this.label9.Text = "[SearchBy]";
-            this.label9.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // cmbStoreLocation
             // 
@@ -259,12 +231,12 @@ namespace WixSharpSetup.Dialogs
             // 
             this.label8.AutoSize = true;
             this.label8.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label8.Location = new System.Drawing.Point(3, 90);
+            this.label8.Location = new System.Drawing.Point(3, 61);
             this.label8.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.label8.Name = "label8";
             this.label8.Size = new System.Drawing.Size(144, 20);
             this.label8.TabIndex = 2;
-            this.label8.Text = "[Search]";
+            this.label8.Text = "Subject";
             this.label8.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // label7
@@ -295,7 +267,7 @@ namespace WixSharpSetup.Dialogs
             // 
             this.pnlSystem.SetColumnSpan(this.txtSearch, 3);
             this.txtSearch.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtSearch.Location = new System.Drawing.Point(153, 90);
+            this.txtSearch.Location = new System.Drawing.Point(153, 61);
             this.txtSearch.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtSearch.Name = "txtSearch";
             this.txtSearch.Size = new System.Drawing.Size(308, 20);
@@ -305,7 +277,7 @@ namespace WixSharpSetup.Dialogs
             // butSearchCertificate
             // 
             this.butSearchCertificate.AutoSize = true;
-            this.butSearchCertificate.Location = new System.Drawing.Point(153, 118);
+            this.butSearchCertificate.Location = new System.Drawing.Point(153, 89);
             this.butSearchCertificate.Name = "butSearchCertificate";
             this.butSearchCertificate.Size = new System.Drawing.Size(88, 23);
             this.butSearchCertificate.TabIndex = 5;
@@ -316,21 +288,32 @@ namespace WixSharpSetup.Dialogs
             // butViewCertificate
             // 
             this.butViewCertificate.AutoSize = true;
-            this.butViewCertificate.Location = new System.Drawing.Point(384, 154);
+            this.butViewCertificate.Enabled = false;
+            this.butViewCertificate.Location = new System.Drawing.Point(384, 125);
             this.butViewCertificate.Name = "butViewCertificate";
             this.butViewCertificate.Size = new System.Drawing.Size(77, 23);
             this.butViewCertificate.TabIndex = 6;
             this.butViewCertificate.Text = "[ViewButton]";
             this.butViewCertificate.UseVisualStyleBackColor = true;
-            this.butViewCertificate.Visible = false;
             this.butViewCertificate.Click += new System.EventHandler(this.butViewCertificate_Click);
+            // 
+            // panel1
+            // 
+            this.panel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.pnlSystem.SetColumnSpan(this.panel1, 4);
+            this.panel1.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panel1.ForeColor = System.Drawing.SystemColors.ControlDark;
+            this.panel1.Location = new System.Drawing.Point(3, 118);
+            this.panel1.Name = "panel1";
+            this.panel1.Size = new System.Drawing.Size(458, 1);
+            this.panel1.TabIndex = 19;
             // 
             // gbExternal
             // 
             this.gbExternal.Controls.Add(this.pnlExternal);
             this.gbExternal.Location = new System.Drawing.Point(12, 34);
             this.gbExternal.Name = "gbExternal";
-            this.gbExternal.Size = new System.Drawing.Size(470, 164);
+            this.gbExternal.Size = new System.Drawing.Size(470, 224);
             this.gbExternal.TabIndex = 1;
             this.gbExternal.TabStop = false;
             this.gbExternal.Text = "[BrowseForACertificateToUse]";
@@ -362,7 +345,8 @@ namespace WixSharpSetup.Dialogs
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.Size = new System.Drawing.Size(464, 145);
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+            this.pnlExternal.Size = new System.Drawing.Size(464, 205);
             this.pnlExternal.TabIndex = 8;
             // 
             // butBrowsePrivateKeyFile
@@ -384,6 +368,7 @@ namespace WixSharpSetup.Dialogs
             this.txtPrivateKeyFile.Name = "txtPrivateKeyFile";
             this.txtPrivateKeyFile.Size = new System.Drawing.Size(275, 20);
             this.txtPrivateKeyFile.TabIndex = 3;
+            this.txtPrivateKeyFile.TextChanged += new System.EventHandler(this.txtPrivateKeyFile_TextChanged);
             // 
             // txtCertificatePassword
             // 
@@ -396,6 +381,7 @@ namespace WixSharpSetup.Dialogs
             this.txtCertificatePassword.TabIndex = 2;
             this.txtCertificatePassword.UseSystemPasswordChar = true;
             this.txtCertificatePassword.Visible = false;
+            this.txtCertificatePassword.TextChanged += new System.EventHandler(this.txtCertificatePassword_TextChanged);
             // 
             // lblPrivateKeyFile
             // 
@@ -633,16 +619,6 @@ namespace WixSharpSetup.Dialogs
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
             // 
-            // panel1
-            // 
-            this.panel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.pnlSystem.SetColumnSpan(this.panel1, 4);
-            this.panel1.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panel1.Location = new System.Drawing.Point(3, 147);
-            this.panel1.Name = "panel1";
-            this.panel1.Size = new System.Drawing.Size(458, 1);
-            this.panel1.TabIndex = 19;
-            // 
             // CertificateDialog
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
@@ -659,7 +635,6 @@ namespace WixSharpSetup.Dialogs
             this.gbSystem.ResumeLayout(false);
             this.pnlSystem.ResumeLayout(false);
             this.pnlSystem.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.gbExternal.ResumeLayout(false);
             this.pnlExternal.ResumeLayout(false);
             this.pnlExternal.PerformLayout();
@@ -703,22 +678,20 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.ComboBox cmbStoreLocation;
         private System.Windows.Forms.ComboBox cmbStore;
         private System.Windows.Forms.TextBox txtSearch;
-        private System.Windows.Forms.ComboBox cmbSearchBy;
-        private System.Windows.Forms.Label label9;
         private System.Windows.Forms.Label lblSelectedCertificate;
         private System.Windows.Forms.Button butViewCertificate;
         private System.Windows.Forms.Label lblCertificateDescription;
         private System.Windows.Forms.GroupBox gbSystem;
         private System.Windows.Forms.GroupBox gbExternal;
-        private System.Windows.Forms.Label lblHint;
-        private FileBrowseButton butBrowsePrivateKeyFile;
-        private System.Windows.Forms.TextBox txtPrivateKeyFile;
         private System.Windows.Forms.TextBox txtCertificatePassword;
-        private System.Windows.Forms.Label lblPrivateKeyFile;
         private System.Windows.Forms.Label lblCertificatePassword;
         private System.Windows.Forms.Label lblCertificateFormats;
-        private System.Windows.Forms.PictureBox pictureBox1;
         private System.Windows.Forms.ToolTip ttCertVerify;
         private System.Windows.Forms.Panel panel1;
+        private FileBrowseButton butBrowsePrivateKeyFile;
+        private System.Windows.Forms.TextBox txtPrivateKeyFile;
+        private System.Windows.Forms.Label lblPrivateKeyFile;
+        private System.Windows.Forms.Label lblHint;
+        private System.Windows.Forms.Label lblResults;
     }
 }

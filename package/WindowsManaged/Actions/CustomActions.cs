@@ -28,6 +28,8 @@ using System.Threading.Tasks;
 using WixSharp;
 using static DevolutionsGateway.Actions.WinAPI;
 using File = System.IO.File;
+using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
+using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
 
 namespace DevolutionsGateway.Actions
 {
@@ -1067,6 +1069,80 @@ namespace DevolutionsGateway.Actions
                 session.Log($"failed to set permissions: {e}");
                 return ActionResult.Failure;
             }
+        }
+
+        [CustomAction]
+        public static ActionResult SetCertificatePrivateKeyPermissions(Session session)
+        {
+            try
+            {
+                // Skip when the gateway will auto-generate a certificate — the selected system-store
+                // cert (if any) isn't actually being used in that case.
+                if (session.Get(GatewayProperties.configureWebApp) && session.Get(GatewayProperties.generateCertificate))
+                {
+                    session.Log("certificate is being auto-generated; skipping private key permission grant");
+                    return ActionResult.Success;
+                }
+
+                StoreLocation location = session.Get(GatewayProperties.certificateLocation);
+                StoreName storeName = session.Get(GatewayProperties.certificateStore);
+                string subjectName = session.Get(GatewayProperties.certificateName);
+
+                if (string.IsNullOrWhiteSpace(subjectName))
+                {
+                    session.Log("certificateName is empty; skipping private key permission grant");
+                    return ActionResult.Success;
+                }
+
+                // Use the same selection logic the Gateway service uses at startup. Fresh installs
+                // initialize gateway.json with tls_verify_strict=true (devolutions-gateway/src/config.rs
+                // generate_new), so we apply the strict filter here too.
+                CertificateSelection.Result selection = CertificateSelection.Select(
+                    location, storeName, subjectName, strictMode: true);
+
+                if (selection.Selected == null)
+                {
+                    if (selection.AllFiltered)
+                    {
+                        session.Log($"found {selection.MatchCount} certificate(s) matching subject {subjectName} in {location}\\{storeName}, but all were filtered out by strict-mode prerequisites (issues: {selection.FilteredReasons})");
+                    }
+                    else
+                    {
+                        session.Log($"no certificate matching subject {subjectName} found in {location}\\{storeName}");
+                    }
+                    return ActionResult.Success;
+                }
+
+                try
+                {
+                    X509Certificate2 certificate = selection.Selected;
+                    session.Log($"selected certificate {certificate.Thumbprint} (NotAfter={certificate.NotAfter:o}) for subject {subjectName}");
+
+                    if (PrivateKeyPermissions.HasNetworkServiceReadPermission(certificate))
+                    {
+                        session.Log("NETWORK SERVICE already has Read access to the certificate's private key");
+                        return ActionResult.Success;
+                    }
+
+                    if (PrivateKeyPermissions.TryGrantNetworkServiceReadPermission(certificate, out Exception grantError))
+                    {
+                        session.Log("granted NETWORK SERVICE Read access to the certificate's private key");
+                        return ActionResult.Success;
+                    }
+
+                    session.Log($"failed to grant NETWORK SERVICE Read access to the certificate's private key: {grantError}");
+                }
+                finally
+                {
+                    selection.Selected.Dispose();
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"unexpected error setting certificate private key permissions: {e}");
+            }
+
+            return ActionResult.Success;
         }
 
         [CustomAction]

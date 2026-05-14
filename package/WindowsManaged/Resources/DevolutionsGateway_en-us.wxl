@@ -60,8 +60,19 @@
                     <!-- enums -->
                 <String Id="AuthenticationMode_Custom">Custom</String>
                 <String Id="AuthenticationMode_None">None</String>
-                <String Id="CertificateFindType_SubjectName">Subject Name</String>
-                <String Id="CertificateFindType_Thumbprint">Thumbprint</String>
+                <String Id="CertificateChainStatus_ExplicitDistrust">The certificate's issuer has been explicitly distrusted by the system. Re-issue the certificate from a trusted CA.</String>
+                <String Id="CertificateChainStatus_Incomplete">The certificate file is missing one or more intermediate certificates. Re-export it with the intermediates included so clients can verify the certificate.</String>
+                <String Id="CertificateChainStatus_InvalidSignature">A certificate in the chain has an invalid signature. The chain may have been tampered with or is corrupted.</String>
+                <String Id="CertificateChainStatus_SystemStoreRequired">The certificate file is missing one or more intermediate certificates. Re-export it with the intermediates included so clients can verify the certificate.</String>
+                <String Id="CertificateChainStatus_UntrustedRoot">The certificate is rooted in a CA that is not in the system's Trusted Root store. If this is a private CA, clients without that root installed will fail to verify the certificate.</String>
+                <String Id="CertificateChainStatus_ValidationFailed">The certificate chain could not be validated.</String>
+                <String Id="CertificateChainStatus_WeakSignature">The certificate chain uses a weak signature algorithm (such as MD5 or SHA-1). Modern TLS clients are likely to reject it.</String>
+                <String Id="CertificateIssues_Expired">The certificate is expired</String>
+                <String Id="CertificateIssues_ExpiringSoon">The certificate will expire soon</String>
+                <String Id="CertificateIssues_MissingServerAuthEku">The certificate is missing the Server Authentication EKU extension</String>
+                <String Id="CertificateIssues_MissingSubjectAlternativeName">The certificate is missing the Subject Alternative Name extension</String>
+                <String Id="CertificateIssues_None">No issues</String>
+                <String Id="CertificateIssues_NotYetValid">The certificate is not yet valid</String>
                 <String Id="CertificateMode_External">External</String>
                 <String Id="CertificateMode_System">System</String>
                 <String Id="CustomizeMode_Later">Later</String>
@@ -160,23 +171,33 @@ If it appears minimized then active it from the taskbar.</String>
                     <!-- dialogs.certificate -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
                 <String Id="BrowseForACertificateToUse">Browse for a certificate to use</String>
-                <String Id="CertificateCouldNotBeVerified">Certificate could not be verified</String>
+                <String Id="CertificateCouldNotBeVerified">Windows did not validate this certificate's trust chain. This may indicate an untrusted issuer or another chain policy violation.</String>
                 <String Id="CertificateDlgCertConfigLabel">Certificate Configuration</String>
                 <String Id="CertificateDlgCertFileLabel">Certificate File</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Private Key File</String>
                 <String Id="CertificateDlgCertPasswordLabel">Certificate Password</String>
                 <String Id="CertificateDlgDescription">A certificate is required when using an HTTPS listener.</String>
                 <String Id="CertificateDlgTitle">Certificate</String>
+                <String Id="CertificateFileCouldNotBeRead">The certificate file could not be read ({0})</String>
+                <String Id="CertificateIsCaNotServer">The certificate is a CA certificate, not a server certificate. Verify that you have selected the correct file.</String>
+                <String Id="CertificateIsSelfSigned">The certificate is self-signed. Clients will not trust it unless they explicitly trust the certificate.</String>
+                <String Id="CertificatesFoundButUnusable">{0} certificates were found, but are unusable for one or more of the following reasons:</String>
                 <String Id="CertificateSource">Certificate Source</String>
                 <String Id="CertificateStore">Certificate Store</String>
+                <String Id="DoYouWantToProceedAnyway">Do you want to proceed anyway?</String>
                 <String Id="EncryptedPrivateKeysAreNotSupported">Encrypted private keys are not supported</String>
                 <String Id="EnterTextToSearch">Enter text to search</String>
+                <String Id="NoCertificateSelected">No selection</String>
+                <String Id="NoUsableCertificateFoundInFile">No usable certificate was found in the file.</String>
+                <String Id="PrivateKeyPermissionWillBeGranted">The Network Service account may not have permission to read the certificate's private key. The installer will attempt to grant the required access.</String>
                 <String Id="Search">Search</String>
-                <String Id="SearchBy">Search By</String>
                 <String Id="SearchForACertificateToUse">Search for a certificate to use</String>
+                <String Id="SearchResultPlural">{0} results</String>
+                <String Id="SearchResultSingular">{0} result</String>
                 <String Id="SelectedCertificate">Selected Certificate</String>
                 <String Id="SelectTheCertificateToUse">Select the certificate to use</String>
                 <String Id="StoreLocation">Store Location</String>
+                <String Id="ValidationProducedWarnings">Validation of the selected certificate produced the following warnings:</String>
                     <!-- dialogs.listeners -->
                 <String Id="AnHttpListenerDoesNotRequireACert">An HTTP listener does not require a certificate.</String>
                 <String Id="AnHttpsListenerRequiresACert">An HTTPS listener requires a certificate. You will be prompted to configure one.</String>

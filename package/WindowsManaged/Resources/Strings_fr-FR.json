@@ -105,14 +105,6 @@
           "text": "Système"
         },
         {
-          "id": "CertificateFindType_Thumbprint",
-          "text": "Empreinte"
-        },
-        {
-          "id": "CertificateFindType_SubjectName",
-          "text": "Nom du sujet"
-        },
-        {
           "id": "AuthenticationMode_None",
           "text": "Aucune"
         },
@@ -179,6 +171,58 @@
         {
           "id": "ServiceStartMode_Disabled",
           "text": "Désactivé"
+        },
+        {
+          "id": "CertificateIssues_None",
+          "text": "Aucun problème"
+        },
+        {
+          "id": "CertificateIssues_NotYetValid",
+          "text": "Le certificat n'est pas encore valide"
+        },
+        {
+          "id": "CertificateIssues_Expired",
+          "text": "Le certificat est expiré"
+        },
+        {
+          "id": "CertificateIssues_ExpiringSoon",
+          "text": "Le certificat expirera bientôt"
+        },
+        {
+          "id": "CertificateIssues_MissingServerAuthEku",
+          "text": "Le certificat n'a pas l'extension EKU Server Authentication"
+        },
+        {
+          "id": "CertificateIssues_MissingSubjectAlternativeName",
+          "text": "Le certificat n'a pas l'extension Subject Alternative Name"
+        },
+        {
+          "id": "CertificateChainStatus_Incomplete",
+          "text": "Le fichier de certificat ne contient pas un ou plusieurs certificats intermédiaires. Réexportez-le en incluant les certificats intermédiaires pour que les clients puissent vérifier le certificat."
+        },
+        {
+          "id": "CertificateChainStatus_SystemStoreRequired",
+          "text": "Le fichier de certificat ne contient pas un ou plusieurs certificats intermédiaires. Réexportez-le en incluant les certificats intermédiaires pour que les clients puissent vérifier le certificat."
+        },
+        {
+          "id": "CertificateChainStatus_UntrustedRoot",
+          "text": "Le certificat est rattaché à une AC qui ne figure pas dans le magasin Autorités de certification racine de confiance du système. S'il s'agit d'une AC privée, les clients qui n'ont pas cette racine installée ne pourront pas vérifier le certificat."
+        },
+        {
+          "id": "CertificateChainStatus_WeakSignature",
+          "text": "La chaîne de certificats utilise un algorithme de signature faible (comme MD5 ou SHA-1). Les clients TLS modernes risquent de la rejeter."
+        },
+        {
+          "id": "CertificateChainStatus_InvalidSignature",
+          "text": "Un certificat de la chaîne a une signature invalide. La chaîne a peut-être été altérée ou est corrompue."
+        },
+        {
+          "id": "CertificateChainStatus_ExplicitDistrust",
+          "text": "L'émetteur du certificat a été explicitement marqué comme non fiable par le système. Réémettez le certificat auprès d'une AC approuvée."
+        },
+        {
+          "id": "CertificateChainStatus_ValidationFailed",
+          "text": "La chaîne de certificats n'a pas pu être validée."
         }
       ],
 
@@ -704,10 +748,6 @@
             "text": "Magasin de certificats"
           },
           {
-            "id": "SearchBy",
-            "text": "Rechercher selon"
-          },
-          {
             "id": "Search",
             "text": "Rechercher"
           },
@@ -729,11 +769,55 @@
           },
           {
             "id": "CertificateCouldNotBeVerified",
-            "text": "Le certificat n'a pas pu être vérifié"
+            "text": "Windows n'a pas validé la chaîne de confiance de ce certificat. Cela peut indiquer un émetteur non approuvé ou une autre violation de la politique de validation."
           },
           {
             "id": "AnX509CertificateInBinaryOrPemEncoded",
             "text": "Un certificat X.509 en format binaire PKCS#12 (PFX/P12) ou codé en PEM"
+          },
+          {
+            "id": "NoCertificateSelected",
+            "text": "Aucune sélection"
+          },
+          {
+            "id": "CertificateFileCouldNotBeRead",
+            "text": "Le fichier de certificat n'a pas pu être lu ({0})"
+          },
+          {
+            "id": "NoUsableCertificateFoundInFile",
+            "text": "Aucun certificat utilisable n'a été trouvé dans le fichier."
+          },
+          {
+            "id": "CertificateIsCaNotServer",
+            "text": "Le certificat est un certificat d'autorité de certification (AC), et non un certificat de serveur. Vérifiez que vous avez sélectionné le bon fichier."
+          },
+          {
+            "id": "CertificateIsSelfSigned",
+            "text": "Le certificat est auto-signé. Les clients ne lui feront pas confiance à moins qu'ils n'approuvent explicitement le certificat."
+          },
+          {
+            "id": "PrivateKeyPermissionWillBeGranted",
+            "text": "Le compte Network Service n'a peut-être pas l'autorisation de lire la clé privée du certificat. Le programme d'installation tentera de lui accorder l'accès requis."
+          },
+          {
+            "id": "ValidationProducedWarnings",
+            "text": "La validation du certificat sélectionné a produit les avertissements suivants :"
+          },
+          {
+            "id": "DoYouWantToProceedAnyway",
+            "text": "Voulez-vous continuer malgré tout ?"
+          },
+          {
+            "id": "SearchResultSingular",
+            "text": "{0} résultat"
+          },
+          {
+            "id": "SearchResultPlural",
+            "text": "{0} résultats"
+          },
+          {
+            "id": "CertificatesFoundButUnusable",
+            "text": "{0} certificats ont été trouvés, mais sont inutilisables pour une ou plusieurs des raisons suivantes :"
           }
         ],
         "listeners": [
