@@ -32,12 +32,6 @@ namespace DevolutionsGateway.Properties
             System,
         }
  
-        public enum CertificateFindType 
-        {
-            Thumbprint,
-            SubjectName,
-        }
- 
         public enum CustomizeMode 
         {
             Now,
@@ -385,34 +379,6 @@ namespace DevolutionsGateway.Properties
         }
 
  
-        internal static readonly WixProperty<CertificateFindType> certificateFindType = new()
-        {
-            Id = "P.CertificateFindType",
-            Default = CertificateFindType.Thumbprint,
-            Name = "CertificateFindType",
-            Secure = false,
-            Hidden = false,
-            Public = false,
-            Encode = false,
-        };
-
-        public CertificateFindType CertificateFindType
-        {
-            get
-            {
-                string stringValue = this.FnGetPropValue(certificateFindType.Id);
-                return WixProperties.GetPropertyValue<CertificateFindType>(stringValue);
-            }
-            set 
-            { 
-                if (this.runtimeSession is not null)
-                {
-                    this.runtimeSession.Set(certificateFindType, value); 
-                }
-            }
-        }
-
- 
         internal static readonly WixProperty<String> certificateSearchText = new()
         {
             Id = "P.CertificateSearchText",
@@ -436,34 +402,6 @@ namespace DevolutionsGateway.Properties
                 if (this.runtimeSession is not null)
                 {
                     this.runtimeSession.Set(certificateSearchText, value); 
-                }
-            }
-        }
-
- 
-        internal static readonly WixProperty<String> certificateThumbprint = new()
-        {
-            Id = "P.CertificateThumbprint",
-            Default = "",
-            Name = "CertificateThumbprint",
-            Secure = false,
-            Hidden = true,
-            Public = false,
-            Encode = false,
-        };
-
-        public String CertificateThumbprint
-        {
-            get
-            {
-                string stringValue = this.FnGetPropValue(certificateThumbprint.Id);
-                return WixProperties.GetPropertyValue<String>(stringValue);
-            }
-            set 
-            { 
-                if (this.runtimeSession is not null)
-                {
-                    this.runtimeSession.Set(certificateThumbprint, value); 
                 }
             }
         }
@@ -1571,13 +1509,7 @@ namespace DevolutionsGateway.Properties
             generateCertificate,
  
  
-            certificateFindType,
- 
- 
             certificateSearchText,
- 
- 
-            certificateThumbprint,
  
  
             devolutionsServerUrl,

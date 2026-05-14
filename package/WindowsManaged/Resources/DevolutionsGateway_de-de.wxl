@@ -60,8 +60,19 @@
                     <!-- enums -->
                 <String Id="AuthenticationMode_Custom">Benutzerdefiniert</String>
                 <String Id="AuthenticationMode_None">Keine</String>
-                <String Id="CertificateFindType_SubjectName">Antragstellername</String>
-                <String Id="CertificateFindType_Thumbprint">Fingerabdruck</String>
+                <String Id="CertificateChainStatus_ExplicitDistrust">Der Aussteller des Zertifikats wurde vom System ausdrücklich als nicht vertrauenswürdig eingestuft. Stellen Sie das Zertifikat bei einer vertrauenswürdigen CA neu aus.</String>
+                <String Id="CertificateChainStatus_Incomplete">In der Zertifikatsdatei fehlen ein oder mehrere Zwischenzertifikate. Exportieren Sie sie erneut mit den enthaltenen Zwischenzertifikaten, damit Clients das Zertifikat verifizieren können.</String>
+                <String Id="CertificateChainStatus_InvalidSignature">Ein Zertifikat in der Kette hat eine ungültige Signatur. Die Kette wurde möglicherweise manipuliert oder ist beschädigt.</String>
+                <String Id="CertificateChainStatus_SystemStoreRequired">In der Zertifikatsdatei fehlen ein oder mehrere Zwischenzertifikate. Exportieren Sie sie erneut mit den enthaltenen Zwischenzertifikaten, damit Clients das Zertifikat verifizieren können.</String>
+                <String Id="CertificateChainStatus_UntrustedRoot">Das Zertifikat hat als Stamm eine CA, die nicht im Speicher für vertrauenswürdige Stammzertifizierungsstellen des Systems enthalten ist. Wenn es sich um eine private CA handelt, können Clients, bei denen dieser Stamm nicht installiert ist, das Zertifikat nicht verifizieren.</String>
+                <String Id="CertificateChainStatus_ValidationFailed">Die Zertifikatskette konnte nicht validiert werden.</String>
+                <String Id="CertificateChainStatus_WeakSignature">Die Zertifikatskette verwendet einen schwachen Signaturalgorithmus (z. B. MD5 oder SHA-1). Moderne TLS-Clients werden sie wahrscheinlich ablehnen.</String>
+                <String Id="CertificateIssues_Expired">Das Zertifikat ist abgelaufen</String>
+                <String Id="CertificateIssues_ExpiringSoon">Das Zertifikat läuft bald ab</String>
+                <String Id="CertificateIssues_MissingServerAuthEku">Im Zertifikat fehlt die EKU-Erweiterung Server Authentication</String>
+                <String Id="CertificateIssues_MissingSubjectAlternativeName">Im Zertifikat fehlt die Erweiterung Subject Alternative Name</String>
+                <String Id="CertificateIssues_None">Keine Probleme</String>
+                <String Id="CertificateIssues_NotYetValid">Das Zertifikat ist noch nicht gültig</String>
                 <String Id="CertificateMode_External">Extern</String>
                 <String Id="CertificateMode_System">System</String>
                 <String Id="CustomizeMode_Later">Später</String>
@@ -160,23 +171,33 @@ Wenn sie minimiert erscheint, aktivieren Sie sie über die Taskleiste.</String>
                     <!-- dialogs.certificate -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">Ein X.509-Zertifikat im binären PKCS#12-Format (PFX/P12) oder PEM-kodiert</String>
                 <String Id="BrowseForACertificateToUse">Zu verwendendes Zertifikat durchsuchen</String>
-                <String Id="CertificateCouldNotBeVerified">Zertifikat konnte nicht verifiziert werden</String>
+                <String Id="CertificateCouldNotBeVerified">Windows hat die Vertrauenskette dieses Zertifikats nicht validiert. Dies kann auf einen nicht vertrauenswürdigen Aussteller oder einen anderen Verstoß gegen die Validierungsrichtlinie hinweisen.</String>
                 <String Id="CertificateDlgCertConfigLabel">Zertifikatkonfiguration</String>
                 <String Id="CertificateDlgCertFileLabel">Zertifikatsdatei</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Datei mit privatem Schlüssel</String>
                 <String Id="CertificateDlgCertPasswordLabel">Zertifikatpasswort</String>
                 <String Id="CertificateDlgDescription">Bei Verwendung eines HTTPS-Listeners ist ein Zertifikat erforderlich.</String>
                 <String Id="CertificateDlgTitle">Zertifikat</String>
+                <String Id="CertificateFileCouldNotBeRead">Die Zertifikatsdatei konnte nicht gelesen werden ({0})</String>
+                <String Id="CertificateIsCaNotServer">Das Zertifikat ist ein CA-Zertifikat, kein Serverzertifikat. Stellen Sie sicher, dass Sie die richtige Datei ausgewählt haben.</String>
+                <String Id="CertificateIsSelfSigned">Das Zertifikat ist selbstsigniert. Clients werden es nur dann als vertrauenswürdig einstufen, wenn sie dem Zertifikat explizit vertrauen.</String>
+                <String Id="CertificatesFoundButUnusable">{0} Zertifikate wurden gefunden, sind aber aus einem oder mehreren der folgenden Gründe unbrauchbar:</String>
                 <String Id="CertificateSource">Zertifikatquelle</String>
                 <String Id="CertificateStore">Zertifikatspeicher</String>
+                <String Id="DoYouWantToProceedAnyway">Möchten Sie trotzdem fortfahren?</String>
                 <String Id="EncryptedPrivateKeysAreNotSupported">Verschlüsselte private Schlüssel werden nicht unterstützt</String>
                 <String Id="EnterTextToSearch">Suchtext eingeben</String>
+                <String Id="NoCertificateSelected">Keine Auswahl</String>
+                <String Id="NoUsableCertificateFoundInFile">In der Datei wurde kein verwendbares Zertifikat gefunden.</String>
+                <String Id="PrivateKeyPermissionWillBeGranted">Das Konto Network Service verfügt möglicherweise nicht über die Berechtigung, den privaten Schlüssel des Zertifikats zu lesen. Das Installationsprogramm wird versuchen, den erforderlichen Zugriff zu gewähren.</String>
                 <String Id="Search">Suchen</String>
-                <String Id="SearchBy">Suchen nach</String>
                 <String Id="SearchForACertificateToUse">Zu verwendendes Zertifikat suchen</String>
+                <String Id="SearchResultPlural">{0} Ergebnisse</String>
+                <String Id="SearchResultSingular">{0} Ergebnis</String>
                 <String Id="SelectedCertificate">Ausgewähltes Zertifikat</String>
                 <String Id="SelectTheCertificateToUse">Das zu verwendende Zertifikat auswählen</String>
                 <String Id="StoreLocation">Speicherort</String>
+                <String Id="ValidationProducedWarnings">Die Validierung des ausgewählten Zertifikats hat folgende Warnungen ergeben:</String>
                     <!-- dialogs.listeners -->
                 <String Id="AnHttpListenerDoesNotRequireACert">Ein HTTP-Listener erfordert kein Zertifikat.</String>
                 <String Id="AnHttpsListenerRequiresACert">Ein HTTPS-Listener erfordert ein Zertifikat. Sie werden aufgefordert, eines zu konfigurieren.</String>

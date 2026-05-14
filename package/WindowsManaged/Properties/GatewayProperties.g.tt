@@ -142,12 +142,6 @@ namespace DevolutionsGateway.Properties
             System
         }
 
-        public enum CertificateFindType
-        {
-            Thumbprint,
-            SubjectName
-        }
-
         public enum CustomizeMode
         {
             Now,
@@ -166,7 +160,6 @@ namespace DevolutionsGateway.Properties
     {
         typeof(Statics.AuthenticationMode),
         typeof(Statics.CertificateMode),
-        typeof(Statics.CertificateFindType),
         typeof(Statics.CustomizeMode),
     };
 
@@ -272,9 +265,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<bool>("GenerateCertificate", false),
 
     // UI Helpers
-    new PropertyDefinition<Statics.CertificateFindType>("CertificateFindType", Statics.CertificateFindType.Thumbprint, isPublic: false, secure: false),
     new PropertyDefinition<string>("CertificateSearchText", "", isPublic: false, hidden: true, secure: false),
-    new PropertyDefinition<string>("CertificateThumbprint", "", isPublic: false, hidden: true, secure: false),
 
     new PropertyDefinition<string>("DevolutionsServerUrl", "", isPublic: true, hidden: false, secure: true),
     new PropertyDefinition<string>("DevolutionsServerCertificateExceptions", "", isPublic: true, hidden: false, secure: true, encode: true),

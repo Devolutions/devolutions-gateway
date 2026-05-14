@@ -233,14 +233,6 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string CertificateMode_System = "CertificateMode_System";		
 		/// <summary>
-		/// Thumbprint
-		/// </summary>
-		public const string CertificateFindType_Thumbprint = "CertificateFindType_Thumbprint";		
-		/// <summary>
-		/// Subject Name
-		/// </summary>
-		public const string CertificateFindType_SubjectName = "CertificateFindType_SubjectName";		
-		/// <summary>
 		/// None
 		/// </summary>
 		public const string AuthenticationMode_None = "AuthenticationMode_None";		
@@ -308,6 +300,58 @@ namespace DevolutionsGateway.Resources
 		/// Disabled
 		/// </summary>
 		public const string ServiceStartMode_Disabled = "ServiceStartMode_Disabled";		
+		/// <summary>
+		/// No issues
+		/// </summary>
+		public const string CertificateIssues_None = "CertificateIssues_None";		
+		/// <summary>
+		/// The certificate is not yet valid
+		/// </summary>
+		public const string CertificateIssues_NotYetValid = "CertificateIssues_NotYetValid";		
+		/// <summary>
+		/// The certificate is expired
+		/// </summary>
+		public const string CertificateIssues_Expired = "CertificateIssues_Expired";		
+		/// <summary>
+		/// The certificate will expire soon
+		/// </summary>
+		public const string CertificateIssues_ExpiringSoon = "CertificateIssues_ExpiringSoon";		
+		/// <summary>
+		/// The certificate is missing the Server Authentication EKU extension
+		/// </summary>
+		public const string CertificateIssues_MissingServerAuthEku = "CertificateIssues_MissingServerAuthEku";		
+		/// <summary>
+		/// The certificate is missing the Subject Alternative Name extension
+		/// </summary>
+		public const string CertificateIssues_MissingSubjectAlternativeName = "CertificateIssues_MissingSubjectAlternativeName";		
+		/// <summary>
+		/// The certificate file is missing one or more intermediate certificates. Re-export it with the intermediates included so clients can verify the certificate.
+		/// </summary>
+		public const string CertificateChainStatus_Incomplete = "CertificateChainStatus_Incomplete";		
+		/// <summary>
+		/// The certificate file is missing one or more intermediate certificates. Re-export it with the intermediates included so clients can verify the certificate.
+		/// </summary>
+		public const string CertificateChainStatus_SystemStoreRequired = "CertificateChainStatus_SystemStoreRequired";		
+		/// <summary>
+		/// The certificate is rooted in a CA that is not in the system's Trusted Root store. If this is a private CA, clients without that root installed will fail to verify the certificate.
+		/// </summary>
+		public const string CertificateChainStatus_UntrustedRoot = "CertificateChainStatus_UntrustedRoot";		
+		/// <summary>
+		/// The certificate chain uses a weak signature algorithm (such as MD5 or SHA-1). Modern TLS clients are likely to reject it.
+		/// </summary>
+		public const string CertificateChainStatus_WeakSignature = "CertificateChainStatus_WeakSignature";		
+		/// <summary>
+		/// A certificate in the chain has an invalid signature. The chain may have been tampered with or is corrupted.
+		/// </summary>
+		public const string CertificateChainStatus_InvalidSignature = "CertificateChainStatus_InvalidSignature";		
+		/// <summary>
+		/// The certificate's issuer has been explicitly distrusted by the system. Re-issue the certificate from a trusted CA.
+		/// </summary>
+		public const string CertificateChainStatus_ExplicitDistrust = "CertificateChainStatus_ExplicitDistrust";		
+		/// <summary>
+		/// The certificate chain could not be validated.
+		/// </summary>
+		public const string CertificateChainStatus_ValidationFailed = "CertificateChainStatus_ValidationFailed";		
 		/// <summary>
 		/// Certificate Source
 		/// </summary>
@@ -605,10 +649,6 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string CertificateStore = "CertificateStore";		
 		/// <summary>
-		/// Search By
-		/// </summary>
-		public const string SearchBy = "SearchBy";		
-		/// <summary>
 		/// Search
 		/// </summary>
 		public const string Search = "Search";		
@@ -629,13 +669,57 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string SelectTheCertificateToUse = "SelectTheCertificateToUse";		
 		/// <summary>
-		/// Certificate could not be verified
+		/// Windows did not validate this certificate's trust chain. This may indicate an untrusted issuer or another chain policy violation.
 		/// </summary>
-		public const string CertificateCouldNotBeVerified = "CertificateCouldNotBeVerified";
+		public const string CertificateCouldNotBeVerified = "CertificateCouldNotBeVerified";		
 		/// <summary>
 		/// An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded
 		/// </summary>
 		public const string AnX509CertificateInBinaryOrPemEncoded = "AnX509CertificateInBinaryOrPemEncoded";		
+		/// <summary>
+		/// No selection
+		/// </summary>
+		public const string NoCertificateSelected = "NoCertificateSelected";		
+		/// <summary>
+		/// The certificate file could not be read ({0})
+		/// </summary>
+		public const string CertificateFileCouldNotBeRead = "CertificateFileCouldNotBeRead";		
+		/// <summary>
+		/// No usable certificate was found in the file.
+		/// </summary>
+		public const string NoUsableCertificateFoundInFile = "NoUsableCertificateFoundInFile";		
+		/// <summary>
+		/// The certificate is a CA certificate, not a server certificate. Verify that you have selected the correct file.
+		/// </summary>
+		public const string CertificateIsCaNotServer = "CertificateIsCaNotServer";		
+		/// <summary>
+		/// The certificate is self-signed. Clients will not trust it unless they explicitly trust the certificate.
+		/// </summary>
+		public const string CertificateIsSelfSigned = "CertificateIsSelfSigned";		
+		/// <summary>
+		/// The Network Service account may not have permission to read the certificate's private key. The installer will attempt to grant the required access.
+		/// </summary>
+		public const string PrivateKeyPermissionWillBeGranted = "PrivateKeyPermissionWillBeGranted";		
+		/// <summary>
+		/// Validation of the selected certificate produced the following warnings:
+		/// </summary>
+		public const string ValidationProducedWarnings = "ValidationProducedWarnings";		
+		/// <summary>
+		/// Do you want to proceed anyway?
+		/// </summary>
+		public const string DoYouWantToProceedAnyway = "DoYouWantToProceedAnyway";		
+		/// <summary>
+		/// {0} result
+		/// </summary>
+		public const string SearchResultSingular = "SearchResultSingular";		
+		/// <summary>
+		/// {0} results
+		/// </summary>
+		public const string SearchResultPlural = "SearchResultPlural";		
+		/// <summary>
+		/// {0} certificates were found, but are unusable for one or more of the following reasons:
+		/// </summary>
+		public const string CertificatesFoundButUnusable = "CertificatesFoundButUnusable";		
 		/// <summary>
 		/// Listeners
 		/// </summary>
