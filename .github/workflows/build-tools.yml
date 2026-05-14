@@ -17,7 +17,7 @@ jobs:
           - platform: unknown-linux-gnu
             runner: ubuntu-22.04
           - platform: apple-darwin
-            runner: macos-14
+            runner: macos-15
         exclude:
           - platform: pc-windows-msvc
             arch: aarch64
@@ -97,7 +97,7 @@ jobs:
           - platform: pc-windows-msvc
             runner: windows-2022
           - platform: apple-darwin
-            runner: macos-14
+            runner: macos-15
         exclude:
           - platform: pc-windows-msvc
             arch: aarch64

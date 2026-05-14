@@ -82,7 +82,7 @@ jobs:
           $Platforms += 'macos'
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-14' } 'linux' { 'ubuntu-22.04' } }
+              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-15' } 'linux' { 'ubuntu-22.04' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -324,10 +324,25 @@ jobs:
           rustup target add aarch64-pc-windows-msvc
         shell: pwsh
 
+      # The macos-15 runner image ships `cargo`, `rustc`, etc. in ~/.cargo/bin as
+      # symlinks to Homebrew's `rustup-init`, which is a shell-script wrapper that
+      # only dispatches on the `rustup`/`rustup-init` names (not on `cargo`/`rustc`/
+      # `clippy`). Invoking `cargo` therefore runs `rustup-init` and fails with
+      # "unexpected argument 'build'". The official rustup installer lays down proper
+      # multi-call hard-link shims, so we run it to repair ~/.cargo/bin.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
+
       - name: Configure macOS (intel) runner
         if: ${{ matrix.os == 'macos' && matrix.arch == 'x64' }}
         run: |
-          sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add x86_64-apple-darwin
 
       - name: Build
