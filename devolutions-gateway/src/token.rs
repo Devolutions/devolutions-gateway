@@ -1222,11 +1222,15 @@ fn validate_token_impl(
     Ok(claims)
 }
 
-fn extract_uuid(token: &str, field: &str) -> anyhow::Result<Uuid> {
+fn extract_payload(token: &str) -> anyhow::Result<serde_json::Value> {
     let jws = RawJws::decode(token)
         .context("failed to parse the provided JWS")?
         .discard_signature();
-    let payload = serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")?;
+    serde_json::from_slice::<serde_json::Value>(&jws.payload).context("parse JWS payload")
+}
+
+fn extract_uuid(token: &str, field: &str) -> anyhow::Result<Uuid> {
+    let payload = extract_payload(token)?;
     let uuid = payload.get(field).context("claim is missing from the token")?;
     let uuid = uuid.as_str().context("value is malformed")?;
     let uuid = Uuid::from_str(uuid).context("value is not a valid UUID string")?;
@@ -1240,6 +1244,36 @@ pub fn extract_jti(token: &str) -> anyhow::Result<Uuid> {
 
 pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {
     extract_uuid(token, "jet_aid").context("extract jet_aid")
+}
+
+/// Extract the destination host claim (`dst_hst`) from an association token without verifying its
+/// signature. Returns `None` if the claim is missing.
+///
+/// Used by the credential store to remember the target server's hostname for a credential-injection
+/// session, so that fake-KDC can validate the client's TGS-REQ sname against it (the SPN the client
+/// actually requested is `TERMSRV/<dst_host>`, not Gateway's own hostname).
+pub fn extract_dst_hst(token: &str) -> anyhow::Result<Option<String>> {
+    let payload = extract_payload(token)?;
+    let Some(value) = payload.get("dst_hst") else {
+        return Ok(None);
+    };
+    let dst_hst = value.as_str().context("dst_hst is malformed")?;
+    Ok(Some(dst_hst.to_owned()))
+}
+
+/// Extract alternate destination hosts (`dst_alt`) from an association token without verifying its
+/// signature.
+pub fn extract_dst_alt(token: &str) -> anyhow::Result<Vec<String>> {
+    let payload = extract_payload(token)?;
+    let Some(value) = payload.get("dst_alt") else {
+        return Ok(Vec::new());
+    };
+
+    let dst_alt = value.as_array().context("dst_alt is malformed")?;
+    dst_alt
+        .iter()
+        .map(|value| value.as_str().context("dst_alt entry is malformed").map(str::to_owned))
+        .collect()
 }
 
 #[deprecated = "make sure this is never used without a deliberate action"]
@@ -1722,5 +1756,34 @@ mod serde_impl {
 
             Ok(Self { destination })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine as _;
+
+    use super::*;
+
+    fn unsigned_jws(payload: serde_json::Value) -> String {
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let header = engine.encode(r#"{"alg":"RS256"}"#);
+        let payload = engine.encode(serde_json::to_vec(&payload).expect("payload serializes"));
+        let signature = engine.encode(b"signature");
+        format!("{header}.{payload}.{signature}")
+    }
+
+    #[test]
+    fn extract_dst_alt_returns_alternate_targets() {
+        let token = unsigned_jws(serde_json::json!({
+            "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8",
+            "dst_hst": "primary.example:3389",
+            "dst_alt": ["secondary.example:3389"]
+        }));
+
+        assert_eq!(
+            extract_dst_alt(&token).expect("dst_alt parses"),
+            vec!["secondary.example:3389".to_owned()]
+        );
     }
 }

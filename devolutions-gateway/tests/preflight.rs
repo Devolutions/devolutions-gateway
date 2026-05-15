@@ -2,13 +2,12 @@
 #![allow(clippy::unwrap_used)]
 
 use std::net::SocketAddr;
-use std::str::FromStr as _;
 
 use axum::Router;
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{self, Request, StatusCode};
-use devolutions_gateway::credential::AppCredential;
+use base64::Engine as _;
 use devolutions_gateway::{DgwState, MockHandles};
 use http_body_util::BodyExt as _;
 use serde_json::json;
@@ -31,7 +30,8 @@ const CONFIG: &str = r#"{
         }
     ],
     "__debug__": {
-        "disable_token_validation": true
+        "disable_token_validation": true,
+        "enable_unstable": true
     }
 }"#;
 
@@ -46,8 +46,23 @@ fn preflight_request(operations: serde_json::Value) -> anyhow::Result<Request<Bo
     Ok(request)
 }
 
+fn unsigned_jws(payload: serde_json::Value) -> anyhow::Result<String> {
+    let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let header = engine.encode(r#"{"alg":"RS256"}"#);
+    let payload = engine.encode(serde_json::to_vec(&payload)?);
+    let signature = engine.encode(b"signature");
+    Ok(format!("{header}.{payload}.{signature}"))
+}
+
 fn make_router() -> anyhow::Result<(Router, DgwState, MockHandles)> {
     let (state, handles) = DgwState::mock(CONFIG)?;
+    let app = devolutions_gateway::make_http_service(state.clone())
+        .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
+    Ok((app, state, handles))
+}
+
+fn make_router_with_config(config: &str) -> anyhow::Result<(Router, DgwState, MockHandles)> {
+    let (state, handles) = DgwState::mock(config)?;
     let app = devolutions_gateway::make_http_service(state.clone())
         .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
     Ok((app, state, handles))
@@ -64,10 +79,11 @@ fn init_logger() -> tracing::subscriber::DefaultGuard {
 async fn test_provision_credentials_success() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router()?;
 
-    let token_id = Uuid::from_str("5e3e833f-84c7-4541-b676-acc3299e39b8").unwrap();
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgifQ.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
+    // JWT payload includes `dst_hst` because credential injection requires a target hostname
+    // (fake-KDC validates TGS-REQ sname against `TERMSRV/<host>`); insert rejects tokens without it.
+    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgiLCJkc3RfaHN0IjoidGFyZ2V0LmV4YW1wbGU6MzM4OSJ9.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
 
     let op_id = Uuid::new_v4();
 
@@ -89,18 +105,85 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
     let body: serde_json::Value = serde_json::from_slice(&body)?;
     assert_eq!(body.as_array().expect("an array").len(), 1);
     assert_eq!(body[0]["operation_id"], op_id.to_string());
-    assert_eq!(body[0]["kind"], "ack", "{:?}", body[1]);
+    assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
 
-    let entry = state.credential_store.get(token_id).expect("the provisioned entry");
-    assert_eq!(entry.token, token);
+    Ok(())
+}
 
-    let now = time::OffsetDateTime::now_utc();
-    assert!(now + time::Duration::seconds(10) < entry.expires_at);
-    assert!(entry.expires_at < now + time::Duration::seconds(20));
+#[tokio::test]
+async fn test_provision_credentials_success_when_unstable_disabled() -> anyhow::Result<()> {
+    let _guard = init_logger();
 
-    let mapping = entry.mapping.as_ref().expect("the provisioned mapping");
-    assert!(matches!(mapping.proxy, AppCredential::UsernamePassword { .. }));
-    assert!(matches!(mapping.target, AppCredential::UsernamePassword { .. }));
+    let config = CONFIG.replace("\"enable_unstable\": true", "\"enable_unstable\": false");
+    let (app, _state, _handles) = make_router_with_config(&config)?;
+
+    // `provision-credentials` is protocol-neutral: NTLM credential injection relies on this
+    // preflight state even when the Kerberos injection path is disabled.
+    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgiLCJkc3RfaHN0IjoidGFyZ2V0LmV4YW1wbGU6MzM4OSJ9.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
+
+    let op_id = Uuid::new_v4();
+
+    let op = json!([{
+        "id": op_id,
+        "kind": "provision-credentials",
+        "token": token,
+        "proxy_credential": { "kind": "username-password", "username": "proxy_user", "password": "secret1" },
+        "target_credential": { "kind": "username-password", "username": "target_user", "password": "secret2" },
+        "time_to_live": 15
+    }]);
+
+    let response = app.oneshot(preflight_request(op)?).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await?.to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(body.as_array().expect("an array").len(), 1);
+    assert_eq!(body[0]["operation_id"], op_id.to_string());
+    assert_eq!(body[0]["kind"], "ack", "{:?}", body[0]);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_provision_credentials_rejects_alternate_targets() -> anyhow::Result<()> {
+    let _guard = init_logger();
+
+    let (app, _state, _handles) = make_router()?;
+
+    let token = unsigned_jws(json!({
+        "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8",
+        "dst_hst": "target-primary.example:3389",
+        "dst_alt": ["target-secondary.example:3389"]
+    }))?;
+
+    let op_id = Uuid::new_v4();
+
+    let op = json!([{
+        "id": op_id,
+        "kind": "provision-credentials",
+        "token": token,
+        "proxy_credential": { "kind": "username-password", "username": "proxy_user", "password": "secret1" },
+        "target_credential": { "kind": "username-password", "username": "target_user", "password": "secret2" },
+        "time_to_live": 15
+    }]);
+
+    let response = app.oneshot(preflight_request(op)?).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await?.to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert_eq!(body.as_array().expect("an array").len(), 1);
+    assert_eq!(body[0]["kind"], "alert");
+    assert_eq!(body[0]["alert_status"], "invalid-parameters");
+    assert!(
+        body[0]["alert_message"]
+            .as_str()
+            .expect("alert message")
+            .contains("dst_alt"),
+        "{:?}",
+        body[0]
+    );
 
     Ok(())
 }

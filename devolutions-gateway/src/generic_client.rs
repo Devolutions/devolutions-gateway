@@ -9,6 +9,7 @@ use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
+use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialInjectionKdcSessionStoreHandle};
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -28,6 +29,7 @@ pub struct GenericClient<S> {
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     credential_store: CredentialStoreHandle,
+    kerberos_session_store: CredentialInjectionKdcSessionStoreHandle,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
@@ -52,6 +54,7 @@ where
             subscriber_tx,
             active_recordings,
             credential_store,
+            kerberos_session_store,
             agent_tunnel_handle,
         } = self;
 
@@ -147,35 +150,41 @@ where
                 // If a credential mapping has been pushed, we automatically switch to this mode.
                 // Otherwise, we continue the generic procedure.
                 //
-                // RdpProxy is generic over the server stream, so credential injection now works
+                // RdpProxy is generic over the server stream, so credential injection works
                 // regardless of whether the upstream is direct TCP or tunnelled via an agent.
-                if is_rdp {
-                    let token_id = token::extract_jti(token).context("failed to extract jti claim from token")?;
+                // The credential store is keyed on the association token's JTI, so a direct
+                // lookup by `claims.jti` is the primary path.
+                if is_rdp
+                    && let Some(entry) = credential_store.get(claims.jti)
+                    && entry.injection.is_some()
+                    && let Some(kdc_session) = kerberos_session_store.get(claims.jti)
+                {
+                    anyhow::ensure!(token == entry.token, "token mismatch");
+                    let credential_injection_kdc = CredentialInjectionKdc::from_parts(entry, kdc_session)?;
 
-                    if let Some(entry) = credential_store.get(token_id) {
-                        anyhow::ensure!(token == entry.token, "token mismatch");
+                    info!(
+                        jti = %credential_injection_kdc.jti(),
+                        "RDP-TLS forwarding with credential injection"
+                    );
 
-                        // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
-                        if entry.mapping.is_some() {
-                            return crate::rdp_proxy::RdpProxy::builder()
-                                .conf(conf)
-                                .session_info(info)
-                                .client_addr(client_addr)
-                                .client_stream(client_stream)
-                                .server_addr(server_addr)
-                                .server_stream(server_stream)
-                                .sessions(sessions)
-                                .subscriber_tx(subscriber_tx)
-                                .credential_entry(entry)
-                                .client_stream_leftover_bytes(leftover_bytes)
-                                .server_dns_name(selected_target.host().to_owned())
-                                .disconnect_interest(disconnect_interest)
-                                .build()
-                                .run()
-                                .await
-                                .context("encountered a failure during RDP proxying (credential injection)");
-                        }
-                    }
+                    // NOTE: In the future, we could imagine performing proxy-based recording as well using RdpProxy.
+                    return crate::rdp_proxy::RdpProxy::builder()
+                        .conf(conf)
+                        .session_info(info)
+                        .client_addr(client_addr)
+                        .client_stream(client_stream)
+                        .server_addr(server_addr)
+                        .server_stream(server_stream)
+                        .sessions(sessions)
+                        .subscriber_tx(subscriber_tx)
+                        .credential_injection_kdc(credential_injection_kdc)
+                        .client_stream_leftover_bytes(leftover_bytes)
+                        .server_dns_name(selected_target.host().to_owned())
+                        .disconnect_interest(disconnect_interest)
+                        .build()
+                        .run()
+                        .await
+                        .context("encountered a failure during RDP proxying (credential injection)");
                 }
 
                 info!("Upstream forwarding");

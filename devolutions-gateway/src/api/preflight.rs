@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential::{CredentialStoreHandle, InsertError};
+use crate::credential::CredentialStoreHandle;
+use crate::credential_injection_kdc::CredentialInjectionKdcSessionStoreHandle;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -196,6 +197,7 @@ pub(super) async fn post_preflight(
         conf_handle,
         sessions,
         credential_store,
+        kerberos_session_store,
         ..
     }): State<DgwState>,
     _scope: PreflightScope,
@@ -223,12 +225,21 @@ pub(super) async fn post_preflight(
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
                 let credential_store = credential_store.clone();
+                let kerberos_session_store = kerberos_session_store.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credential_store).await
+                    if let Err(error) = handle_operation(
+                        operation,
+                        &outputs,
+                        &conf,
+                        &sessions,
+                        &credential_store,
+                        &kerberos_session_store,
+                    )
+                    .await
                     {
                         outputs.push(PreflightOutput {
                             operation_id,
@@ -257,6 +268,7 @@ async fn handle_operation(
     conf: &Conf,
     sessions: &SessionMessageSender,
     credential_store: &CredentialStoreHandle,
+    kerberos_session_store: &CredentialInjectionKdcSessionStoreHandle,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -337,17 +349,77 @@ async fn handle_operation(
                 });
             }
 
+            // Token signature isn't validated at the preflight scope (DVLS signs and pushes;
+            // gateway only re-uses what DVLS already verified). We do parse JTI / dst_hst here
+            // because the credential store no longer touches JWT shape — see the contract on
+            // `CredentialStoreHandle::insert`.
+            let jti = crate::token::extract_jti(&token).map_err(|error| {
+                PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
+            })?;
+
+            // For `provision-credentials`: resolve `target_hostname` from `dst_hst` *before*
+            // calling either store, so an invalid target is reported as `invalid-parameters`
+            // at preflight rather than mid-CredSSP. Also derive per-session Kerberos material
+            // from the proxy username; both stores receive their entries paired and keyed by
+            // the same JTI.
+            let injection_payload = if let Some(mapping) = mapping {
+                const DEFAULT_DST_PORT: u16 = 3389;
+                let raw_dst_hst = crate::token::extract_dst_hst(&token)
+                    .map_err(|error| {
+                        PreflightError::new(
+                            PreflightAlertStatus::InvalidParams,
+                            format!("read dst_hst from association token: {error:#}"),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        PreflightError::new(
+                            PreflightAlertStatus::InvalidParams,
+                            "association token has no dst_hst, required for credential injection",
+                        )
+                    })?;
+
+                let dst_alt = crate::token::extract_dst_alt(&token).map_err(|error| {
+                    PreflightError::new(
+                        PreflightAlertStatus::InvalidParams,
+                        format!("read dst_alt from association token: {error:#}"),
+                    )
+                })?;
+                if !dst_alt.is_empty() {
+                    return Err(PreflightError::new(
+                        PreflightAlertStatus::InvalidParams,
+                        "association token dst_alt is not supported for credential injection",
+                    ));
+                }
+
+                let target_hostname = crate::target_addr::TargetAddr::parse(&raw_dst_hst, DEFAULT_DST_PORT)
+                    .map_err(|error| {
+                        PreflightError::new(
+                            PreflightAlertStatus::InvalidParams,
+                            format!("parse dst_hst as target address: {error:#}"),
+                        )
+                    })?
+                    .host()
+                    .to_owned();
+
+                let kdc_session = crate::credential_injection_kdc::derive_credential_injection_kdc_session(
+                    mapping.proxy_username(),
+                    jti,
+                );
+                kerberos_session_store.insert(kdc_session, time_to_live);
+
+                Some((mapping, target_hostname))
+            } else {
+                None
+            };
+
             let previous_entry = credential_store
-                .insert(token, mapping, time_to_live)
+                .insert(jti, token, injection_payload, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
-                .map_err(|e| match e {
-                    InsertError::InvalidToken(_) => {
-                        PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}"))
-                    }
-                    InsertError::Internal(_) => PreflightError::new(
+                .map_err(|_| {
+                    PreflightError::new(
                         PreflightAlertStatus::InternalServerError,
                         "an internal error occurred".to_owned(),
-                    ),
+                    )
                 })?;
 
             if previous_entry.is_some() {
