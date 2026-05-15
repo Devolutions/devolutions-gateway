@@ -159,7 +159,6 @@ async fn handle_tcp_peer(stream: TcpStream, state: DgwState, peer_addr: SocketAd
                 .subscriber_tx(state.subscriber_tx)
                 .active_recordings(state.recordings.active_recordings)
                 .credential_store(state.credential_store)
-                .kerberos_session_store(state.kerberos_session_store)
                 .agent_tunnel_handle(state.agent_tunnel_handle)
                 .build()
                 .serve()

@@ -9,7 +9,7 @@ use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
-use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialInjectionKdcSessionStoreHandle};
+use crate::credential_injection_kdc::CredentialInjectionKdc;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -29,7 +29,6 @@ pub struct GenericClient<S> {
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
     credential_store: CredentialStoreHandle,
-    kerberos_session_store: CredentialInjectionKdcSessionStoreHandle,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
@@ -54,7 +53,6 @@ where
             subscriber_tx,
             active_recordings,
             credential_store,
-            kerberos_session_store,
             agent_tunnel_handle,
         } = self;
 
@@ -156,11 +154,10 @@ where
                 // lookup by `claims.jti` is the primary path.
                 if is_rdp
                     && let Some(entry) = credential_store.get(claims.jti)
-                    && entry.injection.is_some()
-                    && let Some(kdc_session) = kerberos_session_store.get(claims.jti)
+                    && entry.mapping.is_some()
                 {
                     anyhow::ensure!(token == entry.token, "token mismatch");
-                    let credential_injection_kdc = CredentialInjectionKdc::from_parts(entry, kdc_session)?;
+                    let credential_injection_kdc = CredentialInjectionKdc::from_entry(claims.jti, entry)?;
 
                     info!(
                         jti = %credential_injection_kdc.jti(),

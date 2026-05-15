@@ -1249,9 +1249,9 @@ pub fn extract_session_id(token: &str) -> anyhow::Result<Uuid> {
 /// Extract the destination host claim (`dst_hst`) from an association token without verifying its
 /// signature. Returns `None` if the claim is missing.
 ///
-/// Used by the credential store to remember the target server's hostname for a credential-injection
-/// session, so that fake-KDC can validate the client's TGS-REQ sname against it (the SPN the client
-/// actually requested is `TERMSRV/<dst_host>`, not Gateway's own hostname).
+/// Used by the credential-injection KDC to validate the client's TGS-REQ sname against the target
+/// server hostname (the SPN the client actually requested is `TERMSRV/<dst_host>`, not Gateway's own
+/// hostname).
 pub fn extract_dst_hst(token: &str) -> anyhow::Result<Option<String>> {
     let payload = extract_payload(token)?;
     let Some(value) = payload.get("dst_hst") else {

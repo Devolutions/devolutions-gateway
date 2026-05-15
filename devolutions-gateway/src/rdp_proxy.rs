@@ -636,7 +636,7 @@ where
 /// Only handles real-network schemes (`tcp` / `udp`); credential-injection loopback requests
 /// are intercepted by [`CredentialInjectionKdc`] before reaching this function.
 ///
-/// TODO(sspi-rs#NNN): when sspi-rs ships a pluggable KDC dispatcher API, the URL trick for
+/// TODO(sspi-rs#664): when sspi-rs ships a pluggable KDC dispatcher API, the URL trick for
 /// credential injection goes away entirely and this helper can be inlined back into the
 /// CredSSP loops.
 async fn send_network_request(request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {

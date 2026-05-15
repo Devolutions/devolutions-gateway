@@ -26,9 +26,8 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-use crate::credential::{
-    AppCredential, AppCredentialMapping, ArcCredentialEntry, CredentialStoreHandle, InjectionState,
-};
+use crate::credential::{AppCredential, AppCredentialMapping, ArcCredentialEntry, CredentialStoreHandle};
+use crate::target_addr::TargetAddr;
 
 const IN_PROCESS_KDC_HOST: &str = "cred.invalid";
 
@@ -51,8 +50,12 @@ pub(crate) enum CredentialInjectionKdcResolveError {
     MissingCredential { jti: Uuid },
     #[error("credential-injection state is not available for {jti}")]
     NonInjectionCredential { jti: Uuid },
-    #[error("credential-injection Kerberos state is not available for {jti}")]
-    MissingKerberosSession { jti: Uuid },
+    #[error("association token for {jti} is not valid for credential injection")]
+    InvalidAssociationToken {
+        jti: Uuid,
+        #[source]
+        source: anyhow::Error,
+    },
     #[error("credential-injection KDC config could not be initialized for {jti}")]
     BuildKdcConfig {
         jti: Uuid,
@@ -114,29 +117,42 @@ impl fmt::Debug for CredentialInjectionKdc {
 }
 
 impl CredentialInjectionKdc {
-    pub(crate) fn from_parts(
+    pub(crate) fn from_entry(jti: Uuid, credential_entry: ArcCredentialEntry) -> anyhow::Result<Self> {
+        let target_hostname = target_hostname_from_token(&credential_entry.token)?;
+        let mapping = credential_entry
+            .mapping
+            .as_ref()
+            .context("credential entry has no credential-injection mapping")?;
+        let session = Arc::new(derive_credential_injection_kdc_session(
+            app_credential_username(&mapping.proxy),
+            jti,
+        ));
+
+        Self::from_parts(jti, credential_entry, target_hostname, session)
+    }
+
+    fn from_parts(
+        jti: Uuid,
         credential_entry: ArcCredentialEntry,
+        target_hostname: String,
         session: Arc<CredentialInjectionKdcSession>,
     ) -> anyhow::Result<Self> {
-        let InjectionState {
-            mapping,
-            target_hostname,
-        } = credential_entry
-            .injection
+        let mapping = credential_entry
+            .mapping
             .as_ref()
-            .context("credential entry has no credential-injection state")?;
+            .context("credential entry has no credential-injection mapping")?;
         anyhow::ensure!(
-            credential_entry.jti == session.jti,
+            jti == session.jti,
             "credential entry JTI does not match credential-injection KDC session JTI",
         );
 
         let kdc_config = build_kdc_config(&session, &mapping.proxy)?;
 
         Ok(Self {
-            jti: credential_entry.jti,
+            jti,
             raw_token: credential_entry.token.clone(),
             credential_mapping: mapping.clone(),
-            target_hostname: target_hostname.clone(),
+            target_hostname,
             session,
             kdc_config,
         })
@@ -156,17 +172,19 @@ impl CredentialInjectionKdc {
             CredentialInjectionKdcResolveError::MissingCredential { jti }
         })?;
 
-        if credential_entry.injection.is_none() {
+        let Some(mapping) = credential_entry.mapping.as_ref() else {
             warn!(%jti, "KDC token references non-injection credential state");
             return Err(CredentialInjectionKdcResolveError::NonInjectionCredential { jti });
-        }
+        };
 
-        let session = session_store.get(jti).ok_or_else(|| {
-            warn!(%jti, "KDC token references missing credential-injection Kerberos state");
-            CredentialInjectionKdcResolveError::MissingKerberosSession { jti }
-        })?;
+        let target_hostname = target_hostname_from_token(&credential_entry.token)
+            .map_err(|source| CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source })?;
+        let proxy_username = app_credential_username(&mapping.proxy).to_owned();
+        let session = session_store.get_or_insert_with(jti, credential_entry.expires_at, || {
+            derive_credential_injection_kdc_session(&proxy_username, jti)
+        });
 
-        let kdc = Self::from_parts(credential_entry, session)
+        let kdc = Self::from_parts(jti, credential_entry, target_hostname, session)
             .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })?;
 
         Ok(Some(Box::new(kdc)))
@@ -194,8 +212,8 @@ impl CredentialInjectionKdc {
     /// Domainless target credentials cannot acquire Kerberos tickets.
     /// Enabling the Kerberos acceptor for those sessions would make incoming NTLMSSP tokens fail in Kerberos parsing.
     pub(crate) fn client_acceptor_protocol(&self) -> anyhow::Result<CredentialInjectionClientAcceptorProtocol> {
-        let target_username =
-            sspi::Username::parse(self.target_credential().username()).context("invalid target credential username")?;
+        let target_username = sspi::Username::parse(app_credential_username(self.target_credential()))
+            .context("invalid target credential username")?;
 
         if target_username.domain_name().is_some() {
             Ok(CredentialInjectionClientAcceptorProtocol::Kerberos)
@@ -291,6 +309,31 @@ impl CredentialInjectionKdc {
             .context("handle credential-injection KDC message")?;
 
         reply.to_vec().context("encode credential-injection KDC reply")
+    }
+}
+
+fn target_hostname_from_token(token: &str) -> anyhow::Result<String> {
+    const DEFAULT_DST_PORT: u16 = 3389;
+
+    let dst_alt = crate::token::extract_dst_alt(token).context("read dst_alt from association token")?;
+    anyhow::ensure!(
+        dst_alt.is_empty(),
+        "association token dst_alt is not supported for credential injection",
+    );
+
+    let raw_dst_hst = crate::token::extract_dst_hst(token)
+        .context("read dst_hst from association token")?
+        .context("association token has no dst_hst, required for credential injection")?;
+
+    Ok(TargetAddr::parse(&raw_dst_hst, DEFAULT_DST_PORT)
+        .context("parse dst_hst as target address")?
+        .host()
+        .to_owned())
+}
+
+fn app_credential_username(credential: &AppCredential) -> &str {
+    match credential {
+        AppCredential::UsernamePassword { username, password: _ } => username,
     }
 }
 
@@ -453,11 +496,11 @@ fn random_32_bytes() -> Vec<u8> {
     bytes
 }
 
-/// Parallel store of [`CredentialInjectionKdcSession`] entries keyed by association-token JTI.
+/// Lazy store of [`CredentialInjectionKdcSession`] entries keyed by association-token JTI.
 ///
-/// Pairs 1:1 with [`crate::credential::CredentialStoreHandle`]: a credential entry provisioned
-/// with `provision-credentials` has a matching entry here under the same JTI. The two stores
-/// share neither lock nor map so that the credential store stays Kerberos-unaware.
+/// Sessions are created on first KDC-proxy use from the credential entry and its original
+/// association token. The stores share neither lock nor map so that the credential store stays
+/// Kerberos-unaware.
 #[derive(Debug, Clone, Default)]
 pub struct CredentialInjectionKdcSessionStoreHandle(Arc<Mutex<HashMap<Uuid, Entry>>>);
 
@@ -472,6 +515,7 @@ impl CredentialInjectionKdcSessionStoreHandle {
         Self(Arc::new(Mutex::new(HashMap::new())))
     }
 
+    #[cfg(test)]
     pub(crate) fn insert(&self, session: CredentialInjectionKdcSession, time_to_live: time::Duration) {
         let jti = session.jti;
         let entry = Entry {
@@ -481,6 +525,7 @@ impl CredentialInjectionKdcSessionStoreHandle {
         self.0.lock().insert(jti, entry);
     }
 
+    #[cfg(test)]
     pub(crate) fn get(&self, jti: Uuid) -> Option<Arc<CredentialInjectionKdcSession>> {
         // Lookup-time TTL enforcement mirrors `CredentialStoreHandle::get`: the cleanup task is
         // best-effort, and we don't want to hand out Kerberos material whose paired credential
@@ -490,6 +535,30 @@ impl CredentialInjectionKdcSessionStoreHandle {
             .get(&jti)
             .filter(|entry| time::OffsetDateTime::now_utc() < entry.expires_at)
             .map(|entry| Arc::clone(&entry.session))
+    }
+
+    pub(crate) fn get_or_insert_with(
+        &self,
+        jti: Uuid,
+        expires_at: time::OffsetDateTime,
+        make_session: impl FnOnce() -> CredentialInjectionKdcSession,
+    ) -> Arc<CredentialInjectionKdcSession> {
+        let now = time::OffsetDateTime::now_utc();
+        let mut entries = self.0.lock();
+
+        if let Some(entry) = entries.get(&jti).filter(|entry| now < entry.expires_at) {
+            return Arc::clone(&entry.session);
+        }
+
+        let session = Arc::new(make_session());
+        entries.insert(
+            jti,
+            Entry {
+                session: Arc::clone(&session),
+                expires_at,
+            },
+        );
+        session
     }
 }
 
@@ -534,13 +603,12 @@ async fn cleanup_task(handle: CredentialInjectionKdcSessionStoreHandle, mut shut
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
     use ironrdp_connector::sspi::network_client::NetworkProtocol;
     use secrecy::SecretString;
 
     use super::*;
-    use crate::credential::{
-        AppCredentialMapping, CleartextAppCredential, CleartextAppCredentialMapping, CredentialEntry,
-    };
+    use crate::credential::{CleartextAppCredential, CleartextAppCredentialMapping};
 
     fn cleartext_mapping_with_target_username(target_username: &str) -> CleartextAppCredentialMapping {
         CleartextAppCredentialMapping {
@@ -555,19 +623,32 @@ mod tests {
         }
     }
 
+    fn unsigned_jws(payload: serde_json::Value) -> String {
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let header = engine.encode(r#"{"alg":"RS256"}"#);
+        let payload = engine.encode(serde_json::to_vec(&payload).expect("payload serializes"));
+        let signature = engine.encode(b"signature");
+        format!("{header}.{payload}.{signature}")
+    }
+
+    fn association_token(jti: Uuid) -> String {
+        unsigned_jws(serde_json::json!({
+            "jti": jti,
+            "dst_hst": "target.example:3389"
+        }))
+    }
+
     fn dummy_entry_with_target_username(jti: Uuid, target_username: &str) -> ArcCredentialEntry {
-        let mapping: AppCredentialMapping = cleartext_mapping_with_target_username(target_username)
-            .encrypt()
-            .expect("encrypt mapping");
-        Arc::new(CredentialEntry {
-            jti,
-            token: "raw-token".to_owned(),
-            expires_at: time::OffsetDateTime::now_utc() + time::Duration::minutes(5),
-            injection: Some(InjectionState {
-                mapping,
-                target_hostname: "target.example".to_owned(),
-            }),
-        })
+        let store = CredentialStoreHandle::new();
+        store
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username(target_username)),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
+
+        store.get(jti).expect("credential entry is indexed by JTI")
     }
 
     fn dummy_entry(jti: Uuid) -> ArcCredentialEntry {
@@ -577,13 +658,15 @@ mod tests {
     fn dummy_kdc(jti: Uuid) -> CredentialInjectionKdc {
         let entry = dummy_entry(jti);
         let session = Arc::new(derive_credential_injection_kdc_session("proxy@example.invalid", jti));
-        CredentialInjectionKdc::from_parts(entry, session).expect("valid credential-injection KDC")
+        CredentialInjectionKdc::from_parts(jti, entry, "target.example".to_owned(), session)
+            .expect("valid credential-injection KDC")
     }
 
     fn dummy_kdc_with_target_username(jti: Uuid, target_username: &str) -> CredentialInjectionKdc {
         let entry = dummy_entry_with_target_username(jti, target_username);
         let session = Arc::new(derive_credential_injection_kdc_session("proxy@example.invalid", jti));
-        CredentialInjectionKdc::from_parts(entry, session).expect("valid credential-injection KDC")
+        CredentialInjectionKdc::from_parts(jti, entry, "target.example".to_owned(), session)
+            .expect("valid credential-injection KDC")
     }
 
     fn network_request(url: &str) -> NetworkRequest {
@@ -684,7 +767,7 @@ mod tests {
             session_jti,
         ));
 
-        let err = CredentialInjectionKdc::from_parts(entry, session)
+        let err = CredentialInjectionKdc::from_parts(entry_jti, entry, "target.example".to_owned(), session)
             .expect_err("mismatched entry/session JTI must fail closed");
         let msg = format!("{err:#}");
         assert!(
@@ -711,7 +794,7 @@ mod tests {
         let jti = Uuid::new_v4();
 
         credential_store
-            .insert(jti, "raw-token".to_owned(), None, time::Duration::minutes(5))
+            .insert(association_token(jti), None, time::Duration::minutes(5))
             .expect("provision-token entry inserts");
 
         assert!(
