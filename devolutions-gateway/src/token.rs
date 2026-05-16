@@ -26,6 +26,7 @@ pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const RDP_MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
 const BRIDGE_TOKEN_MAX_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 12; // 12 hours
+const CREDENTIAL_INJECTION_DEFAULT_DST_PORT: u16 = 3389;
 
 /// This is the maximum number of reconnections allowed during the reconnection window. If the
 /// reconnection window (e.g.: 30 seconds) is over while the connection is still alive, the counter
@@ -1274,6 +1275,38 @@ pub fn extract_dst_alt(token: &str) -> anyhow::Result<Vec<String>> {
         .iter()
         .map(|value| value.as_str().context("dst_alt entry is malformed").map(str::to_owned))
         .collect()
+}
+
+/// Validate the association-token claims required by credential injection.
+///
+/// This is intentionally a token-layer shape check only.
+/// The credential-injection KDC still lazily extracts the target hostname from the original token
+/// when it builds its per-session state.
+pub fn validate_credential_injection_association_token(token: &str) -> anyhow::Result<Uuid> {
+    let jti = extract_jti(token).context("read jti from association token")?;
+    extract_credential_injection_target_hostname(token)?;
+    Ok(jti)
+}
+
+/// Extract the target hostname used by credential injection from an association token.
+///
+/// `dst_alt` is rejected for now because the Kerberos fake-KDC can validate only one target SPN for
+/// the current credential-injection session.
+pub fn extract_credential_injection_target_hostname(token: &str) -> anyhow::Result<String> {
+    let dst_alt = extract_dst_alt(token).context("read dst_alt from association token")?;
+    anyhow::ensure!(
+        dst_alt.is_empty(),
+        "association token dst_alt is not supported for credential injection",
+    );
+
+    let raw_dst_hst = extract_dst_hst(token)
+        .context("read dst_hst from association token")?
+        .context("association token has no dst_hst, required for credential injection")?;
+
+    Ok(TargetAddr::parse(&raw_dst_hst, CREDENTIAL_INJECTION_DEFAULT_DST_PORT)
+        .context("parse dst_hst as target address")?
+        .host()
+        .to_owned())
 }
 
 #[deprecated = "make sure this is never used without a deliberate action"]

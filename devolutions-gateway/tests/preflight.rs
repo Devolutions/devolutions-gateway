@@ -82,7 +82,7 @@ async fn test_provision_credentials_success() -> anyhow::Result<()> {
     let (app, _state, _handles) = make_router()?;
 
     // JWT payload includes `dst_hst` because credential injection requires a target hostname
-    // (fake-KDC validates TGS-REQ sname against `TERMSRV/<host>`); insert rejects tokens without it.
+    // (fake-KDC validates TGS-REQ sname against `TERMSRV/<host>`); preflight rejects tokens without it.
     let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgiLCJkc3RfaHN0IjoidGFyZ2V0LmV4YW1wbGU6MzM4OSJ9.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
 
     let op_id = Uuid::new_v4();
@@ -181,6 +181,48 @@ async fn test_provision_credentials_rejects_alternate_targets() -> anyhow::Resul
             .as_str()
             .expect("alert message")
             .contains("dst_alt"),
+        "{:?}",
+        body[0]
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_provision_credentials_rejects_missing_target_hostname() -> anyhow::Result<()> {
+    let _guard = init_logger();
+
+    let (app, _state, _handles) = make_router()?;
+
+    let token = unsigned_jws(json!({
+        "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8"
+    }))?;
+
+    let op_id = Uuid::new_v4();
+
+    let op = json!([{
+        "id": op_id,
+        "kind": "provision-credentials",
+        "token": token,
+        "proxy_credential": { "kind": "username-password", "username": "proxy_user", "password": "secret1" },
+        "target_credential": { "kind": "username-password", "username": "target_user", "password": "secret2" },
+        "time_to_live": 15
+    }]);
+
+    let response = app.oneshot(preflight_request(op)?).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await?.to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert_eq!(body.as_array().expect("an array").len(), 1);
+    assert_eq!(body[0]["kind"], "alert");
+    assert_eq!(body[0]["alert_status"], "invalid-parameters");
+    assert!(
+        body[0]["alert_message"]
+            .as_str()
+            .expect("alert message")
+            .contains("dst_hst"),
         "{:?}",
         body[0]
     );

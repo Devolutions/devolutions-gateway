@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::DgwState;
 use crate::config::Conf;
 use crate::credential::{CredentialStoreHandle, InsertError};
+use crate::credential_injection_kdc::CredentialInjectionKdcContextStoreHandle;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -196,6 +197,7 @@ pub(super) async fn post_preflight(
         conf_handle,
         sessions,
         credential_store,
+        credential_injection_context_store,
         ..
     }): State<DgwState>,
     _scope: PreflightScope,
@@ -223,12 +225,21 @@ pub(super) async fn post_preflight(
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
                 let credential_store = credential_store.clone();
+                let credential_injection_context_store = credential_injection_context_store.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credential_store).await
+                    if let Err(error) = handle_operation(
+                        operation,
+                        &outputs,
+                        &conf,
+                        &sessions,
+                        &credential_store,
+                        &credential_injection_context_store,
+                    )
+                    .await
                     {
                         outputs.push(PreflightOutput {
                             operation_id,
@@ -257,6 +268,7 @@ async fn handle_operation(
     conf: &Conf,
     sessions: &SessionMessageSender,
     credential_store: &CredentialStoreHandle,
+    credential_injection_context_store: &CredentialInjectionKdcContextStoreHandle,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -310,6 +322,7 @@ async fn handle_operation(
             });
         }
         OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
+            let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;
             let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
                 let ProvisionTokenParams { token, time_to_live } =
                     from_params(operation.params).map_err(PreflightError::invalid_params)?;
@@ -337,6 +350,27 @@ async fn handle_operation(
                 });
             }
 
+            let credential_injection_jti = if is_provision_credentials {
+                Some(
+                    crate::token::validate_credential_injection_association_token(&token)
+                        .inspect_err(|error| {
+                            warn!(
+                                %operation.id,
+                                error = format!("{error:#}"),
+                                "Credential-injection token is not valid"
+                            )
+                        })
+                        .map_err(|error| {
+                            PreflightError::new(
+                                PreflightAlertStatus::InvalidParams,
+                                format!("invalid credential-injection token: {error:#}"),
+                            )
+                        })?,
+                )
+            } else {
+                None
+            };
+
             let previous_entry = credential_store
                 .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
@@ -349,6 +383,10 @@ async fn handle_operation(
                         "an internal error occurred".to_owned(),
                     ),
                 })?;
+
+            if let Some(jti) = credential_injection_jti {
+                credential_injection_context_store.register_provisioned_credentials(jti, time_to_live);
+            }
 
             if previous_entry.is_some() {
                 outputs.push(PreflightOutput {

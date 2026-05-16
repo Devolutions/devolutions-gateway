@@ -61,7 +61,7 @@ pub struct DgwState {
     pub recordings: recording::RecordingMessageSender,
     pub job_queue_handle: job_queue::JobQueueHandle,
     pub credential_store: credential::CredentialStoreHandle,
-    pub kerberos_session_store: credential_injection_kdc::CredentialInjectionKdcSessionStoreHandle,
+    pub credential_injection_context_store: credential_injection_kdc::CredentialInjectionKdcContextStoreHandle,
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
@@ -90,7 +90,8 @@ impl DgwState {
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let (traffic_audit_handle, traffic_audit_rx) = traffic_audit::TrafficAuditHandle::new();
         let credential_store = credential::CredentialStoreHandle::new();
-        let kerberos_session_store = credential_injection_kdc::CredentialInjectionKdcSessionStoreHandle::new();
+        let credential_injection_context_store =
+            credential_injection_kdc::CredentialInjectionKdcContextStoreHandle::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
@@ -104,7 +105,7 @@ impl DgwState {
             job_queue_handle,
             traffic_audit_handle,
             credential_store,
-            kerberos_session_store,
+            credential_injection_context_store,
             monitoring_state,
             agent_tunnel_handle: None,
         };

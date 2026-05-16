@@ -12,7 +12,7 @@ use tracing::field;
 
 use crate::config::Conf;
 use crate::credential::CredentialStoreHandle;
-use crate::credential_injection_kdc::CredentialInjectionKdc;
+use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialInjectionKdcContextStoreHandle};
 use crate::proxy::Proxy;
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, DisconnectInterest, DisconnectedInfo, SessionInfo, SessionMessageSender};
@@ -522,6 +522,7 @@ pub async fn handle(
     subscriber_tx: SubscriberSender,
     active_recordings: &ActiveRecordings,
     credential_store: &CredentialStoreHandle,
+    credential_injection_context_store: &CredentialInjectionKdcContextStoreHandle,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) -> anyhow::Result<()> {
     // Special handshake of our RDP extension
@@ -541,11 +542,12 @@ pub async fn handle(
     // If a credential mapping has been pushed, we automatically switch to
     // proxy-based credential injection mode. Otherwise, we continue the usual
     // clean path procedure. The credential store is keyed on the association token's JTI.
-    if let Some(credential_injection_kdc) = crate::token::extract_jti(token).ok().and_then(|jti| {
-        let entry = credential_store.get(jti)?;
-        entry.mapping.as_ref()?;
-        CredentialInjectionKdc::from_entry(jti, entry).ok()
-    }) {
+    if let Some(jti) = crate::token::extract_jti(token).ok()
+        && let Some(entry) = credential_store.get(jti)
+        && entry.mapping.is_some()
+    {
+        let credential_injection_kdc =
+            CredentialInjectionKdc::from_entry(jti, entry, credential_injection_context_store)?;
         anyhow::ensure!(token == credential_injection_kdc.raw_token(), "token mismatch");
         debug!(
             jti = %credential_injection_kdc.jti(),
