@@ -482,9 +482,10 @@ pub fn generate_token(
                     jti,
                 },
                 _ => {
-                    return Err("KDC subcommand requires either both --krb-realm and --krb-kdc, \
-                                or only --jet-cred-id (mutually exclusive)"
-                        .into());
+                    return Err(
+                        "KDC subcommand requires either both --krb-realm and --krb-kdc, or only --jet-cred-id (mutually exclusive)"
+                            .into(),
+                    );
                 }
             };
             ("KDC", serde_json::to_value(claims)?)
