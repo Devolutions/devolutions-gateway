@@ -31,7 +31,7 @@ http-client-proxy = { path = "../crates/http-client-proxy" }
 ipnetwork = "0.20"
 parking_lot = "0.12"
 quinn = "0.11"
-rand = "0.8" # FIXME(@CBenoit): maybe we don't need this crate
+rand = "0.10" # FIXME(@CBenoit): maybe we don't need this crate
 rcgen = { version = "0.13", features = ["pem"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
