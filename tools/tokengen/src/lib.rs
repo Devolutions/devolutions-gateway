@@ -99,8 +99,12 @@ pub struct JrecClaims {
 
 #[derive(Clone, Serialize)]
 pub struct KdcClaims<'a> {
-    pub krb_realm: &'a str,
-    pub krb_kdc: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub krb_realm: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub krb_kdc: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_cred_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jet_gw_id: Option<Uuid>,
     pub exp: i64,
@@ -257,8 +261,9 @@ pub enum SubCommandArgs {
         jet_reuse: Option<u32>,
     },
     Kdc {
-        krb_realm: String,
-        krb_kdc: String,
+        krb_realm: Option<String>,
+        krb_kdc: Option<String>,
+        jet_cred_id: Option<Uuid>,
     },
     Jrl {
         revoked_jti_list: Vec<Uuid>,
@@ -452,14 +457,36 @@ pub fn generate_token(
             };
             ("JREC", serde_json::to_value(claims)?)
         }
-        SubCommandArgs::Kdc { krb_realm, krb_kdc } => {
-            let claims = KdcClaims {
-                exp,
-                nbf,
-                krb_realm: &krb_realm,
-                krb_kdc: &krb_kdc,
-                jet_gw_id,
-                jti,
+        SubCommandArgs::Kdc {
+            krb_realm,
+            krb_kdc,
+            jet_cred_id,
+        } => {
+            let claims = match (krb_realm.as_deref(), krb_kdc.as_deref(), jet_cred_id) {
+                (Some(krb_realm), Some(krb_kdc), None) => KdcClaims {
+                    exp,
+                    nbf,
+                    krb_realm: Some(krb_realm),
+                    krb_kdc: Some(krb_kdc),
+                    jet_cred_id: None,
+                    jet_gw_id,
+                    jti,
+                },
+                (None, None, Some(jet_cred_id)) => KdcClaims {
+                    exp,
+                    nbf,
+                    krb_realm: None,
+                    krb_kdc: None,
+                    jet_cred_id: Some(jet_cred_id),
+                    jet_gw_id,
+                    jti,
+                },
+                _ => {
+                    return Err(
+                        "KDC subcommand requires either both --krb-realm and --krb-kdc, or only --jet-cred-id (mutually exclusive)"
+                            .into(),
+                    );
+                }
             };
             ("KDC", serde_json::to_value(claims)?)
         }

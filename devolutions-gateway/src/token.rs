@@ -604,18 +604,36 @@ pub struct JrecTokenClaims {
 
 #[derive(Clone)]
 pub struct KdcTokenClaims {
-    /// Kerberos realm.
-    ///
-    /// E.g.: `ad.it-help.ninja`
-    /// Should be lowercased (actual validation is case-insensitive though).
-    pub krb_realm: SmolStr,
+    /// Where the KDC traffic for this session is routed.
+    pub destination: KdcDestination,
+}
 
-    /// Kerberos KDC address.
+/// Destination for a KDC session token.
+///
+/// Either a real upstream KDC (the typical case, with `krb_realm` + `krb_kdc` on the wire) or
+/// a credential-injection placeholder pointing at the JTI of the access token whose credentials
+/// must be used to forge Kerberos tickets locally (the `jet_cred_id` claim on the wire).
+#[derive(Clone)]
+pub enum KdcDestination {
+    /// Forward to an upstream KDC.
+    Real {
+        /// Kerberos realm.
+        ///
+        /// E.g.: `ad.it-help.ninja`
+        /// Should be lowercased (actual validation is case-insensitive though).
+        krb_realm: SmolStr,
+
+        /// Kerberos KDC address.
+        ///
+        /// E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`
+        /// Default scheme is `tcp`.
+        /// Default port is `88`.
+        krb_kdc: TargetAddr,
+    },
+    /// Serve the request locally using credentials injected at session establishment.
     ///
-    /// E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`
-    /// Default scheme is `tcp`.
-    /// Default port is `88`.
-    pub krb_kdc: TargetAddr,
+    /// `jti` is the JTI of the access token that provisioned the credentials to use.
+    Inject { jti: Uuid },
 }
 
 // ----- jrl claims ----- //
@@ -1389,8 +1407,12 @@ mod serde_impl {
 
     #[derive(Serialize, Deserialize)]
     struct KdcClaimsHelper {
-        krb_realm: SmolStr,
-        krb_kdc: SmolStr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        krb_realm: Option<SmolStr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        krb_kdc: Option<SmolStr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jet_cred_id: Option<Uuid>,
     }
 
     impl ser::Serialize for SessionTtl {
@@ -1637,11 +1659,20 @@ mod serde_impl {
         where
             S: serde::Serializer,
         {
-            KdcClaimsHelper {
-                krb_realm: self.krb_realm.clone(),
-                krb_kdc: SmolStr::new(self.krb_kdc.as_str()),
-            }
-            .serialize(serializer)
+            let helper = match &self.destination {
+                KdcDestination::Real { krb_realm, krb_kdc } => KdcClaimsHelper {
+                    krb_realm: Some(krb_realm.clone()),
+                    krb_kdc: Some(SmolStr::new(krb_kdc.as_str())),
+                    jet_cred_id: None,
+                },
+                KdcDestination::Inject { jti } => KdcClaimsHelper {
+                    krb_realm: None,
+                    krb_kdc: None,
+                    jet_cred_id: Some(*jti),
+                },
+            };
+
+            helper.serialize(serializer)
         }
     }
 
@@ -1654,28 +1685,42 @@ mod serde_impl {
 
             let claims = KdcClaimsHelper::deserialize(deserializer)?;
 
-            // Validate krb_realm value
+            let destination = match (claims.krb_realm, claims.krb_kdc, claims.jet_cred_id) {
+                (Some(krb_realm), Some(krb_kdc), None) => {
+                    // Validate krb_realm value
 
-            if claims.krb_realm.chars().any(char::is_uppercase) {
-                return Err(de::Error::custom("krb_realm field contains uppercases"));
-            }
+                    if krb_realm.chars().any(char::is_uppercase) {
+                        return Err(de::Error::custom("krb_realm field contains uppercases"));
+                    }
 
-            // Validate krb_kdc field
+                    // Validate krb_kdc field
 
-            let krb_kdc = TargetAddr::parse(&claims.krb_kdc, DEFAULT_KDC_PORT).map_err(de::Error::custom)?;
-            match krb_kdc.scheme() {
-                "tcp" | "udp" => { /* supported! */ }
-                unsupported_scheme => {
-                    return Err(de::Error::custom(format!(
-                        "unsupported protocol for KDC proxy: {unsupported_scheme}"
-                    )));
+                    let krb_kdc = TargetAddr::parse(&krb_kdc, DEFAULT_KDC_PORT).map_err(de::Error::custom)?;
+                    match krb_kdc.scheme() {
+                        "tcp" | "udp" => { /* supported! */ }
+                        unsupported_scheme => {
+                            return Err(de::Error::custom(format!(
+                                "unsupported protocol for KDC proxy: {unsupported_scheme}"
+                            )));
+                        }
+                    }
+
+                    KdcDestination::Real { krb_realm, krb_kdc }
                 }
-            }
+                (None, None, Some(jti)) => KdcDestination::Inject { jti },
+                (None, None, None) => {
+                    return Err(de::Error::custom(
+                        "missing KDC destination: expected `krb_realm`+`krb_kdc` or `jet_cred_id`",
+                    ));
+                }
+                _ => {
+                    return Err(de::Error::custom(
+                        "conflicting KDC destination fields: `jet_cred_id` is mutually exclusive with `krb_realm`+`krb_kdc`",
+                    ));
+                }
+            };
 
-            Ok(Self {
-                krb_realm: claims.krb_realm,
-                krb_kdc,
-            })
+            Ok(Self { destination })
         }
     }
 }

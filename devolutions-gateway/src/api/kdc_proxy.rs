@@ -13,7 +13,7 @@ use tokio::net::{TcpStream, UdpSocket};
 use crate::DgwState;
 use crate::http::{HttpError, HttpErrorBuilder};
 use crate::target_addr::TargetAddr;
-use crate::token::AccessTokenClaims;
+use crate::token::{AccessTokenClaims, KdcDestination};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new().route("/{token}", post(kdc_proxy)).with_state(state)
@@ -66,15 +66,24 @@ async fn kdc_proxy(
 
     debug!("Request is for realm (target_domain): {realm}");
 
-    if !claims.krb_realm.eq_ignore_ascii_case(&realm) {
+    let (claims_realm, claims_kdc) = match &claims.destination {
+        KdcDestination::Real { krb_realm, krb_kdc } => (krb_realm, krb_kdc),
+        KdcDestination::Inject { .. } => {
+            // TODO(DGW-378): dispatch credential-injection KDC requests to the in-process
+            // sspi-rs server backed by the credentials provisioned at session establishment.
+            return Err(HttpError::internal().msg("credential injection KDC dispatch is not implemented yet"));
+        }
+    };
+
+    if !claims_realm.eq_ignore_ascii_case(&realm) {
         if conf.debug.disable_token_validation {
             warn!(
-                token_realm = %claims.krb_realm,
+                token_realm = %claims_realm,
                 request_realm = %realm,
                 "**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token"
             );
         } else {
-            let error_message = format!("expected: {}, got: {}", claims.krb_realm, realm);
+            let error_message = format!("expected: {}, got: {}", claims_realm, realm);
 
             return Err(HttpError::bad_request()
                 .with_msg("requested domain is not allowed")
@@ -102,7 +111,7 @@ async fn kdc_proxy(
         warn!("**DEBUG OPTION** KDC address has been overridden with {kdc_addr}");
         kdc_addr
     } else {
-        &claims.krb_kdc
+        claims_kdc
     };
 
     let kdc_reply_message = send_krb_message(kdc_addr, &kdc_proxy_message.kerb_message.0.0).await?;

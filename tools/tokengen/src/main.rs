@@ -122,7 +122,15 @@ fn sign(
             jet_aid,
             jet_reuse,
         },
-        SignSubCommand::Kdc { krb_realm, krb_kdc } => SubCommandArgs::Kdc { krb_realm, krb_kdc },
+        SignSubCommand::Kdc {
+            krb_realm,
+            krb_kdc,
+            jet_cred_id,
+        } => SubCommandArgs::Kdc {
+            krb_realm,
+            krb_kdc,
+            jet_cred_id,
+        },
         SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
     };
@@ -255,9 +263,11 @@ enum SignSubCommand {
     },
     Kdc {
         #[clap(long)]
-        krb_realm: String,
+        krb_realm: Option<String>,
         #[clap(long)]
-        krb_kdc: String,
+        krb_kdc: Option<String>,
+        #[clap(long)]
+        jet_cred_id: Option<Uuid>,
     },
     Jrl {
         #[clap(long)]
