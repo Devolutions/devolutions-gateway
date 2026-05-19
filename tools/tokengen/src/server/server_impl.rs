@@ -212,6 +212,7 @@ pub(crate) async fn kdc_handler(
         SubCommandArgs::Kdc {
             krb_realm: request.krb_realm,
             krb_kdc: request.krb_kdc,
+            jet_cred_id: request.jet_cred_id,
         },
     )
     .await
@@ -339,8 +340,12 @@ pub(crate) struct JrecRequest {
 pub(crate) struct KdcRequest {
     #[serde(flatten)]
     common: CommonRequest,
-    krb_realm: String,
-    krb_kdc: String,
+    #[serde(default)]
+    krb_realm: Option<String>,
+    #[serde(default)]
+    krb_kdc: Option<String>,
+    #[serde(default)]
+    jet_cred_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]

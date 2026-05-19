@@ -18,6 +18,16 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void KdcClaimsForCredentialInjection()
+    {
+        const string EXPECTED = """{"jet_cred_id":"2dd6fb87-5340-4a85-9e96-d383ebef8a41","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = Devolutions.Gateway.Utils.KdcClaims.ForCredentialInjection(gatewayId, Guid.Parse("2dd6fb87-5340-4a85-9e96-d383ebef8a41"));
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void JmuxClaims()
     {
         const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";

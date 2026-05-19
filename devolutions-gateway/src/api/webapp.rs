@@ -386,8 +386,10 @@ pub(crate) async fn sign_session_token(
 
         SessionTokenContentType::Kdc { krb_realm, krb_kdc } => (
             KdcTokenClaims {
-                krb_realm: krb_realm.into(),
-                krb_kdc: krb_kdc.clone(),
+                destination: crate::token::KdcDestination::Real {
+                    krb_realm: krb_realm.into(),
+                    krb_kdc: krb_kdc.clone(),
+                },
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {
