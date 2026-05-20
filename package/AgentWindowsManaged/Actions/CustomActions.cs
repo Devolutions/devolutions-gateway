@@ -3,6 +3,7 @@ using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using Microsoft.Win32;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -316,6 +317,122 @@ namespace DevolutionsAgent.Actions
             session[AgentProperties.featuresToConfigure.Id] = string.Join(",", toEnable);
 
             return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult EnrollAgentTunnel(Session session)
+        {
+            string enrollmentString = session.Property(AgentProperties.AgentTunnelEnrollmentString)?.Trim() ?? string.Empty;
+            string subnetsArg = session.Property(AgentProperties.AgentTunnelAdvertiseSubnets)?.Trim() ?? string.Empty;
+            string domainsArg = session.Property(AgentProperties.AgentTunnelAdvertiseDomains)?.Trim() ?? string.Empty;
+
+            if (enrollmentString.Length == 0)
+            {
+                session.Log("Agent tunnel enrollment string not provided, skipping tunnel setup");
+                return ActionResult.Success;
+            }
+
+            try
+            {
+                // The enrollment string is the DVLS-signed JWT verbatim. The agent's
+                // `up --enrollment-string` parses `jet_gw_url` and `jet_agent_name` from the JWT
+                // claims itself, so we just hand the JWT through. Advertise domains aren't a CLI
+                // flag — agent.json carries them — so we patch that after enrollment succeeds.
+                string installDir = session.Property(AgentProperties.InstallDir);
+                string exePath = Path.Combine(installDir, Includes.EXECUTABLE_NAME);
+
+                string arguments = $"up --enrollment-string \"{enrollmentString}\"";
+                if (subnetsArg.Length != 0) arguments += $" --advertise-subnets \"{subnetsArg}\"";
+
+                string Redact(string s) => s.Replace(enrollmentString, "***");
+                session.Log($"Running enrollment: {exePath} {Redact(arguments)}");
+
+                ProcessStartInfo startInfo = new(exePath, arguments)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    WorkingDirectory = ProgramDataDirectory,
+                };
+
+                using Process process = Process.Start(startInfo);
+                if (!process.WaitForExit(60_000))
+                {
+                    try { process.Kill(); } catch { /* already gone */ }
+                    session.Log("Enrollment process timed out after 60 seconds");
+                    return ActionResult.Failure;
+                }
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+
+                if (!string.IsNullOrEmpty(stdout)) session.Log($"enrollment stdout: {Redact(stdout)}");
+                if (!string.IsNullOrEmpty(stderr)) session.Log($"enrollment stderr: {Redact(stderr)}");
+
+                if (process.ExitCode != 0)
+                {
+                    session.Log($"Enrollment failed with exit code {process.ExitCode}");
+                    return ActionResult.Failure;
+                }
+
+                if (domainsArg.Length != 0)
+                {
+                    WriteAdvertiseDomainsToConfig(session, domainsArg);
+                }
+
+                session.Log("Agent tunnel enrollment completed successfully");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"Agent tunnel enrollment failed: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        private static void WriteAdvertiseDomainsToConfig(Session session, string domainsCsv)
+        {
+            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
+            if (!File.Exists(configPath))
+            {
+                session.Log($"agent.json not found at {configPath}; cannot persist advertise_domains");
+                return;
+            }
+
+            try
+            {
+                string[] domains = domainsCsv
+                    .Split(',')
+                    .Select(d => d.Trim())
+                    .Where(d => !string.IsNullOrEmpty(d))
+                    .ToArray();
+
+                if (domains.Length == 0)
+                {
+                    return;
+                }
+
+                JObject root = JObject.Parse(File.ReadAllText(configPath));
+
+                // ConfFile uses serde rename_all = "PascalCase", so the tunnel section is keyed
+                // "Tunnel" and the field is "AdvertiseDomains".
+                if (root["Tunnel"] is not JObject tunnel)
+                {
+                    session.Log("agent.json has no Tunnel section after enrollment; skipping advertise_domains write");
+                    return;
+                }
+
+                tunnel["AdvertiseDomains"] = new JArray(domains);
+
+                File.WriteAllText(configPath, root.ToString(Formatting.Indented));
+                session.Log($"Wrote {domains.Length} advertise_domains entries to agent.json");
+            }
+            catch (Exception e)
+            {
+                // Don't fail the install over this — the tunnel works fine without domain
+                // advertisements (subnets cover IP routing on their own).
+                session.Log($"Failed to write advertise_domains to agent.json: {e}");
+            }
         }
 
         [CustomAction]

@@ -1,5 +1,6 @@
 ﻿using DevolutionsAgent.Helpers;
 using DevolutionsAgent.Properties;
+using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
 using System;
 using System.Collections.Generic;
@@ -21,6 +22,7 @@ internal static class Wizard
         {
             typeof(WelcomeDialog),
             typeof(FeaturesDialog),
+            typeof(AgentTunnelDialog),
             typeof(InstallDirDialog),
         };
 
@@ -28,7 +30,7 @@ internal static class Wizard
 
         Sequence = dialogs.ToArray();
     }
-    
+
     internal static IEnumerable<Type> Dialogs => Sequence;
 
     internal static int Move(IManagedDialog current, bool forward)
@@ -36,8 +38,25 @@ internal static class Wizard
         Type t = current.GetType();
         int index = Dialogs.FindIndex(t);
 
-        index = forward ? index + 1 : index - 1;
+        // Skip dialogs whose preconditions aren't met (e.g. feature unselected).
+        // Iterating handles both forward and back traversal symmetrically.
+        while (true)
+        {
+            index = forward ? index + 1 : index - 1;
+            if (index < 0 || index >= Sequence.Length) break;
+            if (!ShouldSkip(Sequence[index], current)) break;
+        }
         return index;
+    }
+
+    private static bool ShouldSkip(Type dialogType, IManagedDialog current)
+    {
+        if (dialogType == typeof(AgentTunnelDialog))
+        {
+            string addlocal = (current as WixSharp.UI.Forms.ManagedForm)?.MsiRuntime?.Session?["ADDLOCAL"] ?? string.Empty;
+            return !addlocal.Split(',').Select(s => s.Trim()).Contains(Features.AGENT_TUNNEL_FEATURE.Id);
+        }
+        return false;
     }
 
     internal static int GetNext(IManagedDialog current) => Move(current, true);

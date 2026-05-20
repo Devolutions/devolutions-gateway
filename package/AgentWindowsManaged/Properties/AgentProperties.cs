@@ -16,6 +16,21 @@ namespace DevolutionsAgent.Properties
         /// </summary>
         public static string InstallDir = "INSTALLDIR";
 
+        /// <summary>
+        /// Agent tunnel enrollment string (dgw-enroll:v1:...)
+        /// </summary>
+        public static string AgentTunnelEnrollmentString = "AGENT_TUNNEL_ENROLLMENT_STRING";
+
+        /// <summary>
+        /// Comma-separated subnets to advertise (e.g., "10.10.0.0/24, 192.168.1.0/24")
+        /// </summary>
+        public static string AgentTunnelAdvertiseSubnets = "AGENT_TUNNEL_ADVERTISE_SUBNETS";
+
+        /// <summary>
+        /// Comma-separated DNS domains to advertise (e.g., "corp.example.com, lab.example.com")
+        /// </summary>
+        public static string AgentTunnelAdvertiseDomains = "AGENT_TUNNEL_ADVERTISE_DOMAINS";
+
         public AgentProperties(ISession runtimeSession)
         {
             this.runtimeSession = runtimeSession;

@@ -9,6 +9,8 @@
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
                 <String Id="FeatureSessionDescription">Installs the RDP Extension</String>
                 <String Id="FeatureSessionName">RDP Extension</String>
+                <String Id="FeatureAgentTunnelName">Agent Tunnel</String>
+                <String Id="FeatureAgentTunnelDescription">Configure the agent to connect to a Devolutions Gateway via QUIC tunnel. Requires an enrollment string from Devolutions Server, Hub, or Gateway.</String>
                 <String Id="Language">1033</String>
                 <String Id="ProductDescription">System-wide service for extending Devolutions Gateway functionality.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
@@ -57,4 +59,12 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="VerifyReadyDlgUpdateTitle">Ready to update [ProductName]</String>
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
+                    <!-- dialogs.agentTunnel -->
+                <String Id="AgentTunnelDlgTitle">Agent Tunnel Configuration</String>
+                <String Id="AgentTunnelDlgDescription">Configure connection to a Devolutions Gateway via QUIC tunnel.</String>
+                <String Id="AgentTunnelDlgEnrollmentStringLabel">Enrollment String (paste the JWT from Devolutions Server, Hub, or Gateway):</String>
+                <String Id="AgentTunnelDlgSubnetsLabel">Advertise Subnets:</String>
+                <String Id="AgentTunnelDlgSubnetsHint">Comma-separated CIDR notation, e.g. 10.10.0.0/24, 192.168.1.0/24. Leave blank for auto-detection.</String>
+                <String Id="AgentTunnelDlgDomainsLabel">Advertise Domains:</String>
+                <String Id="AgentTunnelDlgDomainsHint">Comma-separated DNS suffixes the agent can resolve, e.g. corp.example.com, lab.example.com. Leave blank to skip.</String>
                     </WixLocalization>
