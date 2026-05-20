@@ -33,6 +33,11 @@ namespace DevolutionsAgent.Resources
         {
             Id = $"{FEATURE_ID_PREFIX}Session"
         };
+
+        internal static Feature AGENT_TUNNEL_FEATURE = new("!(loc.FeatureAgentTunnelName)", "!(loc.FeatureAgentTunnelDescription)", isEnabled: false, allowChange: true)
+        {
+            Id = $"{FEATURE_ID_PREFIX}Tunnel"
+        };
     }
 
     internal class FeatureList

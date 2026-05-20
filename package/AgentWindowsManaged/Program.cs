@@ -324,6 +324,17 @@ internal class Program
                 Win64 = project.Platform == Platform.x64,
                 RegistryKeyAction = RegistryKeyAction.create,
                 Feature = Features.AGENT_FEATURE,
+            },
+            // Anchors the AGENT_TUNNEL_FEATURE to a real Component so it shows
+            // up in the Feature table and the Custom Setup tree. The value
+            // itself doubles as a diagnostic marker that the feature was
+            // selected at install time.
+            new (RegistryHive.LocalMachine, $"Software\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "TunnelEnabled", "1")
+            {
+                AttributesDefinition = "Type=string",
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.create,
+                Feature = Features.AGENT_TUNNEL_FEATURE,
             }
         };
 

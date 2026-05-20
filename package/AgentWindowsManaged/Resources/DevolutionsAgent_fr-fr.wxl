@@ -3,6 +3,15 @@
         <!-- metadata -->
                 <String Id="FeatureSessionDescription">Installe l'extension RDP</String>
                 <String Id="FeatureSessionName">Extension RDP</String>
+                <String Id="FeatureAgentTunnelName">Tunnel d'agent</String>
+                <String Id="FeatureAgentTunnelDescription">Configurer l'agent pour se connecter à une passerelle Devolutions via un tunnel QUIC. Nécessite une chaîne d'enrôlement depuis Devolutions Server, Hub, ou Gateway.</String>
+                <String Id="AgentTunnelDlgTitle">Configuration du tunnel d'agent</String>
+                <String Id="AgentTunnelDlgDescription">Configurer la connexion à une passerelle Devolutions via un tunnel QUIC.</String>
+                <String Id="AgentTunnelDlgEnrollmentStringLabel">Chaîne d'enrôlement (collez le JWT depuis Devolutions Server, Hub ou Gateway) :</String>
+                <String Id="AgentTunnelDlgSubnetsLabel">Sous-réseaux annoncés :</String>
+                <String Id="AgentTunnelDlgSubnetsHint">Notation CIDR séparée par des virgules, p. ex. 10.10.0.0/24, 192.168.1.0/24. Laissez vide pour la détection automatique.</String>
+                <String Id="AgentTunnelDlgDomainsLabel">Domaines annoncés :</String>
+                <String Id="AgentTunnelDlgDomainsHint">Suffixes DNS séparés par des virgules que l'agent peut résoudre, p. ex. corp.example.com, lab.example.com. Laissez vide pour ignorer.</String>
                 <String Id="Language">1036</String>
                 <String Id="ProductDescription">Service à l’échelle du système pour étendre les fonctionnalités de Devolutions Gateway.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
