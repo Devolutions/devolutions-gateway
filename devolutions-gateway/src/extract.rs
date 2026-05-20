@@ -451,7 +451,7 @@ where
 
 /// Grants read access to agent management endpoints.
 ///
-/// Accepts a scope token with `DiagnosticsRead`, `ConfigWrite`, or `Wildcard` scope.
+/// Accepts a scope token with `AgentRead` or `Wildcard` scope.
 #[derive(Clone, Copy)]
 pub struct AgentManagementReadAccess;
 
@@ -467,21 +467,21 @@ where
             .map_err(HttpError::internal().err())?
             .0;
 
-        // DiagnosticsRead is accepted because DVLS maps its AgentRead scope
-        // to GatewayDiagnosticsRead, which serializes as "gateway.diagnostics.read".
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard | AccessScope::DiagnosticsRead | AccessScope::ConfigWrite => Ok(Self),
-                _ => Err(HttpError::forbidden().msg("invalid scope for agent management read")),
+                AccessScope::Wildcard | AccessScope::AgentRead => Ok(Self),
+                _ => Err(HttpError::forbidden()
+                    .msg("invalid scope for agent management read (require one of: gateway.agent.read, *)")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management read")),
         }
     }
 }
 
-/// Grants write access to agent management endpoints (e.g. enrollment, delete).
+/// Grants write access to agent management endpoints.
 ///
-/// Accepts scope tokens with `ConfigWrite` (or `Wildcard`) scope only.
+/// Accepts scope tokens with `AgentEnroll` or `Wildcard` scope. A dedicated
+/// `AgentDelete` scope will replace `AgentEnroll` here in a follow-up PR.
 #[derive(Clone, Copy)]
 pub struct AgentManagementWriteAccess;
 
@@ -499,8 +499,9 @@ where
 
         match claims {
             AccessTokenClaims::Scope(scope) => match scope.scope {
-                AccessScope::Wildcard | AccessScope::ConfigWrite => Ok(Self),
-                _ => Err(HttpError::forbidden().msg("invalid scope for agent management write")),
+                AccessScope::Wildcard | AccessScope::AgentEnroll => Ok(Self),
+                _ => Err(HttpError::forbidden()
+                    .msg("invalid scope for agent management write (require one of: gateway.agent.enroll, *)")),
             },
             _ => Err(HttpError::forbidden().msg("scope token required for agent management write")),
         }

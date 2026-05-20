@@ -1941,10 +1941,6 @@ pub mod dto {
         /// UDP port for the QUIC listener (default: 4433)
         #[serde(default = "AgentTunnelConf::default_listen_port")]
         pub listen_port: u16,
-        /// Shared secret for agent enrollment.
-        /// If set, agents can enroll by providing this secret as a Bearer token.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub enrollment_secret: Option<String>,
     }
 
     impl AgentTunnelConf {
@@ -1958,7 +1954,6 @@ pub mod dto {
             Self {
                 enabled: false,
                 listen_port: Self::default_listen_port(),
-                enrollment_secret: None,
             }
         }
     }
