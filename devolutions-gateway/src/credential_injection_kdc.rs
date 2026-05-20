@@ -28,6 +28,12 @@ use uuid::Uuid;
 
 use crate::credential::{AppCredential, AppCredentialMapping, ArcCredentialEntry, CredentialStoreHandle};
 
+// The reserved `.invalid` TLD (RFC 6761) lets sspi-rs CredSSP server emit "KDC requests" that
+// never leave the process: `intercept_network_request` recognises this hostname and dispatches
+// the message into the in-process `kdc` server below.
+//
+// TODO(sspi-rs#664): replace this URL-trampoline with a pluggable KDC dispatcher trait once
+// sspi-rs ships the API — see https://github.com/Devolutions/sspi-rs/issues/664.
 const IN_PROCESS_KDC_HOST: &str = "cred.invalid";
 
 pub(crate) struct CredentialInjectionKdc {
