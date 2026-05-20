@@ -60,8 +60,7 @@ pub struct DgwState {
     pub shutdown_signal: devolutions_gateway_task::ShutdownSignal,
     pub recordings: recording::RecordingMessageSender,
     pub job_queue_handle: job_queue::JobQueueHandle,
-    pub credential_store: credential::CredentialStoreHandle,
-    pub credential_injection_context_store: credential_injection_kdc::CredentialInjectionKdcContextStoreHandle,
+    pub credentials: credential_injection_kdc::CredentialService,
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
@@ -89,9 +88,7 @@ impl DgwState {
         let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
         let (job_queue_handle, job_queue_rx) = job_queue::JobQueueHandle::new();
         let (traffic_audit_handle, traffic_audit_rx) = traffic_audit::TrafficAuditHandle::new();
-        let credential_store = credential::CredentialStoreHandle::new();
-        let credential_injection_context_store =
-            credential_injection_kdc::CredentialInjectionKdcContextStoreHandle::new();
+        let credentials = credential_injection_kdc::CredentialService::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
 
         let state = Self {
@@ -104,8 +101,7 @@ impl DgwState {
             recordings: recording_manager_handle,
             job_queue_handle,
             traffic_audit_handle,
-            credential_store,
-            credential_injection_context_store,
+            credentials,
             monitoring_state,
             agent_tunnel_handle: None,
         };

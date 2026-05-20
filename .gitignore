@@ -9,6 +9,7 @@ dist/
 /output/
 /config/
 *.DotSettings
+*.csproj.lscache
 
 # Downloaded build dependencies
 tun2socks.exe

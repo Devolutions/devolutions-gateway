@@ -10,8 +10,8 @@ use tokio::net::{TcpStream, UdpSocket};
 
 use crate::DgwState;
 use crate::credential_injection_kdc::{
-    CredentialInjectionKdc, CredentialInjectionKdcInterception, CredentialInjectionKdcRequest,
-    CredentialInjectionKdcResolveError, kdc_proxy_message_realm,
+    CredentialInjectionKdcInterception, CredentialInjectionKdcRequest, CredentialInjectionKdcResolveError,
+    kdc_proxy_message_realm,
 };
 use crate::extract::KdcToken;
 use crate::http::{HttpError, HttpErrorBuilder};
@@ -25,8 +25,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 async fn kdc_proxy(
     State(DgwState {
         conf_handle,
-        credential_store,
-        credential_injection_context_store,
+        credentials,
         ..
     }): State<DgwState>,
     KdcToken(KdcTokenClaims { destination }): KdcToken,
@@ -47,11 +46,7 @@ async fn kdc_proxy(
         KdcDestination::Inject { jti } => {
             enforce_credential_injection_enabled(jti, conf.debug.enable_unstable)?;
 
-            let resolution =
-                CredentialInjectionKdc::resolve(Some(jti), &credential_store, &credential_injection_context_store)
-                    .map_err(credential_injection_resolve_error)?;
-            let kdc = resolution
-                .ok_or_else(|| HttpError::internal().msg("credential-injection KDC resolution returned no state"))?;
+            let kdc = credentials.kdc_for(jti).map_err(credential_injection_resolve_error)?;
 
             debug!(
                 jti = %kdc.jti(),

@@ -41,16 +41,14 @@ pub(crate) struct CredentialInjectionKdc {
     kdc_config: kdc::config::KerberosServer,
 }
 
-pub(crate) type CredentialInjectionKdcResolution = Option<Box<CredentialInjectionKdc>>;
-
 #[derive(Debug, Error)]
 pub(crate) enum CredentialInjectionKdcResolveError {
     #[error("credential-injection state is not available for {jti}")]
     MissingCredential { jti: Uuid },
+    #[error("credential-injection state for {jti} has expired")]
+    ExpiredCredential { jti: Uuid },
     #[error("credential-injection state is not available for {jti}")]
     NonInjectionCredential { jti: Uuid },
-    #[error("credential-injection context is not available for {jti}")]
-    MissingContext { jti: Uuid },
     #[error("association token for {jti} is not valid for credential injection")]
     InvalidAssociationToken {
         jti: Uuid,
@@ -118,25 +116,6 @@ impl fmt::Debug for CredentialInjectionKdc {
 }
 
 impl CredentialInjectionKdc {
-    pub(crate) fn from_entry(
-        jti: Uuid,
-        credential_entry: ArcCredentialEntry,
-        context_store: &CredentialInjectionKdcContextStoreHandle,
-    ) -> anyhow::Result<Self> {
-        let mapping = credential_entry
-            .mapping
-            .as_ref()
-            .context("credential entry has no credential-injection mapping")?;
-        let proxy_username = app_credential_username(&mapping.proxy).to_owned();
-        let session = context_store
-            .get_or_insert_session(jti, || derive_credential_injection_kdc_session(&proxy_username, jti))
-            .context("credential-injection context is not available")?;
-        let target_hostname = crate::token::extract_credential_injection_target_hostname(&credential_entry.token)
-            .context("extract credential-injection target hostname from association token")?;
-
-        Self::from_parts(jti, credential_entry, target_hostname, session)
-    }
-
     fn from_parts(
         jti: Uuid,
         credential_entry: ArcCredentialEntry,
@@ -162,48 +141,6 @@ impl CredentialInjectionKdc {
             session,
             kdc_config,
         })
-    }
-
-    pub(crate) fn resolve(
-        jet_cred_id: Option<Uuid>,
-        credential_store: &CredentialStoreHandle,
-        context_store: &CredentialInjectionKdcContextStoreHandle,
-    ) -> Result<CredentialInjectionKdcResolution, CredentialInjectionKdcResolveError> {
-        let Some(jti) = jet_cred_id else {
-            return Ok(None);
-        };
-
-        let credential_entry = credential_store.get(jti).ok_or_else(|| {
-            warn!(%jti, "KDC token references missing credential-injection state");
-            CredentialInjectionKdcResolveError::MissingCredential { jti }
-        })?;
-
-        let Some(mapping) = credential_entry.mapping.as_ref() else {
-            warn!(%jti, "KDC token references non-injection credential state");
-            return Err(CredentialInjectionKdcResolveError::NonInjectionCredential { jti });
-        };
-
-        let proxy_username = app_credential_username(&mapping.proxy).to_owned();
-        let session = context_store
-            .get_or_insert_session(jti, || derive_credential_injection_kdc_session(&proxy_username, jti))
-            .ok_or_else(|| {
-                warn!(%jti, "KDC token references missing credential-injection context");
-                CredentialInjectionKdcResolveError::MissingContext { jti }
-            })?;
-        let target_hostname = crate::token::extract_credential_injection_target_hostname(&credential_entry.token)
-            .map_err(|source| {
-                warn!(
-                    %jti,
-                    error = format!("{source:#}"),
-                    "KDC token references invalid credential-injection association token"
-                );
-                CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
-            })?;
-
-        let kdc = Self::from_parts(jti, credential_entry, target_hostname, session)
-            .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })?;
-
-        Ok(Some(Box::new(kdc)))
     }
 
     pub(crate) fn jti(&self) -> Uuid {
@@ -490,59 +427,146 @@ fn random_32_bytes() -> Vec<u8> {
     bytes
 }
 
-/// Store of credential-injection contexts keyed by association-token JTI.
+/// One-stop service for credential storage and credential-injection KDC state.
 ///
-/// Association tokens are validated at `provision-credentials` time, but target hostnames are
-/// extracted lazily from the original token on first CredSSP/KDC use.
-/// Kerberos sessions are also created lazily from the credential entry on first CredSSP/KDC use.
-/// The store is separate from the credential store so that the credential store stays Kerberos-unaware.
-#[derive(Debug, Clone, Default)]
-pub struct CredentialInjectionKdcContextStoreHandle(Arc<Mutex<HashMap<Uuid, Entry>>>);
-
-#[derive(Debug)]
-struct Entry {
-    session: Option<Arc<CredentialInjectionKdcSession>>,
-    expires_at: time::OffsetDateTime,
+/// Wraps the protocol-neutral [`CredentialStoreHandle`] and adds a Kerberos session cache keyed by
+/// association-token JTI. The credential store remains the single source of truth for entry
+/// lifetime; the session cache piggybacks on it (Arc-cloned credentials at lookup time, with stale
+/// sessions evicted on insert-replacement and by a periodic sweep).
+///
+/// All credential reads/writes — provision-credentials, RDP mode detection, KDC dispatch — go
+/// through this service, so callers see one handle instead of coordinating a store and a registry.
+#[derive(Debug, Clone)]
+pub struct CredentialService {
+    credentials: CredentialStoreHandle,
+    sessions: Arc<Mutex<HashMap<Uuid, Arc<CredentialInjectionKdcSession>>>>,
 }
 
-impl CredentialInjectionKdcContextStoreHandle {
+impl Default for CredentialService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CredentialService {
     pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(HashMap::new())))
+        Self {
+            credentials: CredentialStoreHandle::new(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    pub(crate) fn register_provisioned_credentials(&self, jti: Uuid, time_to_live: time::Duration) {
-        let entry = Entry {
-            session: None,
-            expires_at: time::OffsetDateTime::now_utc() + time_to_live,
-        };
-        self.0.lock().insert(jti, entry);
-    }
-
-    fn get_or_insert_session(
+    /// Insert (or replace) a credential entry keyed by the token's JTI.
+    ///
+    /// Any previously-cached Kerberos session for the same JTI is dropped: it was derived from
+    /// the prior provisioning and is no longer valid for the new entry. We invalidate even when
+    /// `CredentialStoreHandle::insert` reports no replacement, because the prior entry may have
+    /// already been evicted by `credential::CleanupTask` while its session cache entry was still
+    /// awaiting the next `sweep_orphans` tick — without an unconditional drop here, a fresh
+    /// provisioning under the same JTI would reuse stale key material.
+    pub fn insert(
         &self,
-        jti: Uuid,
-        make_session: impl FnOnce() -> CredentialInjectionKdcSession,
-    ) -> Option<Arc<CredentialInjectionKdcSession>> {
-        let now = time::OffsetDateTime::now_utc();
-        let mut entries = self.0.lock();
+        token: String,
+        mapping: Option<crate::credential::CleartextAppCredentialMapping>,
+        time_to_live: time::Duration,
+    ) -> Result<Option<ArcCredentialEntry>, crate::credential::InsertError> {
+        // Snapshot the JTI from the new token so we can invalidate the matching session entry
+        // regardless of whether the credential store reports a replacement. `CredentialStore::insert`
+        // re-extracts internally; both calls go through the same code path, so an invalid token
+        // here will surface as the same `InvalidToken` error downstream.
+        let jti = crate::token::extract_jti(&token)
+            .context("failed to extract token ID")
+            .map_err(crate::credential::InsertError::InvalidToken)?;
+        let previous = self.credentials.insert(token, mapping, time_to_live)?;
+        self.sessions.lock().remove(&jti);
+        Ok(previous)
+    }
 
-        let entry = entries.get_mut(&jti).filter(|entry| now < entry.expires_at)?;
+    /// Look up a credential entry by its association-token JTI.
+    pub fn get(&self, jti: Uuid) -> Option<ArcCredentialEntry> {
+        self.credentials.get(jti)
+    }
 
-        let session = match &entry.session {
-            Some(session) => Arc::clone(session),
-            None => {
-                let session = Arc::new(make_session());
-                entry.session = Some(Arc::clone(&session));
-                session
-            }
+    /// Borrow the inner [`CredentialStoreHandle`] for plumbing that genuinely needs the
+    /// protocol-neutral primitive (e.g. wiring the background expiry task).
+    pub fn credential_store(&self) -> &CredentialStoreHandle {
+        &self.credentials
+    }
+
+    /// Resolve the credential-injection KDC bound to the given association-token JTI.
+    ///
+    /// Returns the per-call KDC view; the underlying Kerberos session (krbtgt key, acceptor
+    /// long-term key, acceptor password) is cached so the in-process KDC and the CredSSP acceptor
+    /// see identical key material for the lifetime of the provisioned credentials.
+    pub(crate) fn kdc_for(&self, jti: Uuid) -> Result<CredentialInjectionKdc, CredentialInjectionKdcResolveError> {
+        let credential_entry = self.credentials.get(jti).ok_or_else(|| {
+            warn!(%jti, "KDC token references missing credential-injection state");
+            CredentialInjectionKdcResolveError::MissingCredential { jti }
+        })?;
+
+        // `CredentialStoreHandle::get` does not enforce expiry — entries are evicted asynchronously
+        // by the credential cleanup task. Treat a stale entry as already gone so we never build a
+        // KDC against expired credentials.
+        if time::OffsetDateTime::now_utc() >= credential_entry.expires_at {
+            warn!(%jti, "KDC token references expired credential-injection state");
+            self.sessions.lock().remove(&jti);
+            return Err(CredentialInjectionKdcResolveError::ExpiredCredential { jti });
+        }
+
+        let mapping = credential_entry.mapping.as_ref().ok_or_else(|| {
+            warn!(%jti, "KDC token references non-injection credential state");
+            CredentialInjectionKdcResolveError::NonInjectionCredential { jti }
+        })?;
+
+        let target_hostname = crate::token::extract_credential_injection_target_hostname(&credential_entry.token)
+            .map_err(|source| {
+                warn!(
+                    %jti,
+                    error = format!("{source:#}"),
+                    "KDC token references invalid credential-injection association token"
+                );
+                CredentialInjectionKdcResolveError::InvalidAssociationToken { jti, source }
+            })?;
+
+        let proxy_username = app_credential_username(&mapping.proxy).to_owned();
+        // Atomic get-or-insert: holds the lock long enough to guarantee a single Arc<Session>
+        // wins for this JTI even under concurrent `kdc_for` calls. The derivation is fast (a few
+        // hundred bytes of OsRng) so doing it under the lock is acceptable.
+        let session = {
+            let mut sessions = self.sessions.lock();
+            let session = sessions
+                .entry(jti)
+                .or_insert_with(|| Arc::new(derive_credential_injection_kdc_session(&proxy_username, jti)));
+            Arc::clone(session)
         };
 
-        Some(session)
+        CredentialInjectionKdc::from_parts(jti, credential_entry, target_hostname, session)
+            .map_err(|source| CredentialInjectionKdcResolveError::BuildKdcConfig { jti, source })
+    }
+
+    fn sweep_orphans(&self) {
+        let stale_jtis: Vec<Uuid> = {
+            let sessions = self.sessions.lock();
+            sessions
+                .keys()
+                .copied()
+                .filter(|jti| self.credentials.get(*jti).is_none())
+                .collect()
+        };
+
+        if stale_jtis.is_empty() {
+            return;
+        }
+
+        let mut sessions = self.sessions.lock();
+        for jti in stale_jtis {
+            sessions.remove(&jti);
+        }
     }
 }
 
 pub struct CleanupTask {
-    pub handle: CredentialInjectionKdcContextStoreHandle,
+    pub service: CredentialService,
 }
 
 #[async_trait]
@@ -552,13 +576,13 @@ impl Task for CleanupTask {
     const NAME: &'static str = "credential injection kdc cleanup";
 
     async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
-        cleanup_task(self.handle, shutdown_signal).await;
+        cleanup_task(self.service, shutdown_signal).await;
         Ok(())
     }
 }
 
 #[instrument(skip_all)]
-async fn cleanup_task(handle: CredentialInjectionKdcContextStoreHandle, mut shutdown_signal: ShutdownSignal) {
+async fn cleanup_task(service: CredentialService, mut shutdown_signal: ShutdownSignal) {
     use tokio::time::{Duration, sleep};
 
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 15); // 15 minutes
@@ -573,8 +597,7 @@ async fn cleanup_task(handle: CredentialInjectionKdcContextStoreHandle, mut shut
             }
         }
 
-        let now = time::OffsetDateTime::now_utc();
-        handle.0.lock().retain(|_, entry| now < entry.expires_at);
+        service.sweep_orphans();
     }
 
     debug!("Task terminated");
@@ -671,38 +694,152 @@ mod tests {
     }
 
     #[test]
-    fn store_lookup_filters_expired_entries() {
-        let store = CredentialInjectionKdcContextStoreHandle::new();
+    fn service_kdc_for_rejects_expired_credential_entry() {
+        let service = CredentialService::new();
         let jti = Uuid::new_v4();
 
-        // Negative TTL: entry is born already expired.
-        store.register_provisioned_credentials(jti, time::Duration::seconds(-1));
+        // Negative TTL: entry is born already expired. `CredentialStoreHandle::get` does not
+        // filter on expiry, so the service's own check is what guarantees we never build a KDC
+        // over stale credentials.
+        service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                time::Duration::seconds(-1),
+            )
+            .expect("credential entry inserts");
 
         assert!(
-            store
-                .get_or_insert_session(jti, || derive_credential_injection_kdc_session(
-                    "proxy@example.invalid",
-                    jti
-                ))
-                .is_none(),
-            "expired entry must not be returned"
+            matches!(
+                service.kdc_for(jti),
+                Err(CredentialInjectionKdcResolveError::ExpiredCredential { .. })
+            ),
+            "expired credentials must not yield a KDC"
         );
     }
 
     #[test]
-    fn store_returns_fresh_entry() {
-        let store = CredentialInjectionKdcContextStoreHandle::new();
+    fn service_kdc_for_returns_same_session_under_concurrent_calls() {
+        let service = CredentialService::new();
         let jti = Uuid::new_v4();
 
-        store.register_provisioned_credentials(jti, time::Duration::minutes(5));
+        service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
 
-        let session = store
-            .get_or_insert_session(jti, || {
-                derive_credential_injection_kdc_session("proxy@example.invalid", jti)
-            })
-            .expect("fresh entry returned");
+        let first = service.kdc_for(jti).expect("first call resolves");
+        let second = service.kdc_for(jti).expect("second call resolves");
 
-        assert_eq!(session.realm, "example.invalid");
+        // The Kerberos session is the piece that must be stable across calls; the per-call KDC
+        // view rebuilds the rest. Compare via the long-term acceptor key as a session-identity
+        // probe.
+        let first_key = first.session.acceptor.long_term_key.expose_secret().clone();
+        let second_key = second.session.acceptor.long_term_key.expose_secret().clone();
+        assert_eq!(
+            first_key, second_key,
+            "concurrent kdc_for must share one cached session per JTI"
+        );
+    }
+
+    #[test]
+    fn service_insert_drops_stale_session_even_without_credential_replacement() {
+        let service = CredentialService::new();
+        let jti = Uuid::new_v4();
+
+        // Simulate the race called out by Codex: a previous provisioning's session is still
+        // cached, but the credential entry has already been evicted (e.g. by
+        // `credential::cleanup_task`) and `sweep_orphans` has not run yet. A fresh provisioning
+        // under the same JTI must drop the stale session regardless of whether
+        // `CredentialStoreHandle::insert` reports a replacement, otherwise the next `kdc_for`
+        // would reuse the old key material.
+        let stale_session = Arc::new(derive_credential_injection_kdc_session("proxy@example.invalid", jti));
+        service.sessions.lock().insert(jti, Arc::clone(&stale_session));
+
+        let previous = service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
+        assert!(previous.is_none(), "test precondition: no credential replacement");
+
+        assert!(
+            !service.sessions.lock().contains_key(&jti),
+            "insert must drop stale session even when no credential replacement occurred"
+        );
+    }
+
+    #[test]
+    fn service_insert_replacement_drops_cached_kerberos_material() {
+        let service = CredentialService::new();
+        let jti = Uuid::new_v4();
+
+        service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
+
+        let first = service.kdc_for(jti).expect("first call resolves");
+        let first_key = first.session.acceptor.long_term_key.expose_secret().clone();
+
+        // Re-insert under the same JTI: the cached session for the previous entry must be evicted
+        // automatically, otherwise the new KDC would carry stale key material that the freshly
+        // provisioned credentials no longer match.
+        service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry re-inserts");
+
+        let second = service.kdc_for(jti).expect("second call resolves with fresh session");
+        let second_key = second.session.acceptor.long_term_key.expose_secret().clone();
+
+        assert_ne!(
+            first_key, second_key,
+            "insert-replacement must force a fresh session derivation"
+        );
+    }
+
+    #[test]
+    fn service_sweep_orphans_drops_sessions_with_no_credential_entry() {
+        let service = CredentialService::new();
+        let jti = Uuid::new_v4();
+
+        service
+            .insert(
+                association_token(jti),
+                Some(cleartext_mapping_with_target_username("target")),
+                time::Duration::minutes(5),
+            )
+            .expect("credential entry inserts");
+
+        service.kdc_for(jti).expect("kdc_for populates session cache");
+        assert!(service.sessions.lock().contains_key(&jti), "session cached");
+
+        // Simulate credential store eviction: build a parallel service whose credential store is
+        // empty but whose session cache is shared with the original. A more faithful test would
+        // drive `credential::cleanup_task` to expire the entry, but it sleeps for 15 minutes
+        // between ticks. Swapping the inner store is the deterministic equivalent.
+        let orphaned_service = CredentialService {
+            credentials: CredentialStoreHandle::new(),
+            sessions: Arc::clone(&service.sessions),
+        };
+
+        orphaned_service.sweep_orphans();
+        assert!(
+            !orphaned_service.sessions.lock().contains_key(&jti),
+            "sweep must drop sessions whose JTI is no longer in credential_store"
+        );
     }
 
     #[test]
@@ -736,17 +873,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_with_no_jet_cred_id_forwards_to_real_kdc() {
-        let credential_store = CredentialStoreHandle::new();
-        let context_store = CredentialInjectionKdcContextStoreHandle::new();
-
-        let dispatch = CredentialInjectionKdc::resolve(None, &credential_store, &context_store)
-            .expect("plain KDC token should dispatch");
-
-        assert!(dispatch.is_none());
-    }
-
-    #[test]
     fn from_parts_rejects_mismatched_entry_and_session_jti() {
         let entry_jti = Uuid::new_v4();
         let session_jti = Uuid::new_v4();
@@ -768,75 +894,52 @@ mod tests {
     }
 
     #[test]
-    fn resolve_with_missing_jet_cred_id_fails_closed() {
-        let credential_store = CredentialStoreHandle::new();
-        let context_store = CredentialInjectionKdcContextStoreHandle::new();
+    fn service_kdc_for_rejects_unknown_jti() {
+        let service = CredentialService::new();
 
         assert!(
-            CredentialInjectionKdc::resolve(Some(Uuid::new_v4()), &credential_store, &context_store).is_err(),
+            matches!(
+                service.kdc_for(Uuid::new_v4()),
+                Err(CredentialInjectionKdcResolveError::MissingCredential { .. })
+            ),
             "KDC tokens with jet_cred_id must not fall back to real-KDC forwarding"
         );
     }
 
     #[test]
-    fn resolve_with_non_injection_entry_fails_closed() {
-        let credential_store = CredentialStoreHandle::new();
-        let context_store = CredentialInjectionKdcContextStoreHandle::new();
+    fn service_kdc_for_rejects_non_injection_entry() {
+        let service = CredentialService::new();
         let jti = Uuid::new_v4();
 
-        credential_store
+        service
             .insert(association_token(jti), None, time::Duration::minutes(5))
             .expect("provision-token entry inserts");
 
         assert!(
-            CredentialInjectionKdc::resolve(Some(jti), &credential_store, &context_store).is_err(),
+            matches!(
+                service.kdc_for(jti),
+                Err(CredentialInjectionKdcResolveError::NonInjectionCredential { .. })
+            ),
             "KDC tokens with jet_cred_id must require provision-credentials state"
         );
     }
 
     #[test]
-    fn resolve_lazily_extracts_target_hostname_from_entry_token() {
-        let credential_store = CredentialStoreHandle::new();
-        let context_store = CredentialInjectionKdcContextStoreHandle::new();
+    fn service_kdc_for_lazily_extracts_target_hostname_from_entry_token() {
+        let service = CredentialService::new();
         let jti = Uuid::new_v4();
 
-        credential_store
+        service
             .insert(
                 association_token(jti),
                 Some(cleartext_mapping_with_target_username("target")),
                 time::Duration::minutes(5),
             )
             .expect("credential entry inserts");
-        context_store.register_provisioned_credentials(jti, time::Duration::minutes(5));
 
-        let kdc = CredentialInjectionKdc::resolve(Some(jti), &credential_store, &context_store)
-            .expect("credential-injection KDC resolves")
-            .expect("credential-injection KDC is selected");
+        let kdc = service.kdc_for(jti).expect("credential-injection KDC resolves");
 
         assert_eq!(kdc.target_hostname, "target.example");
-    }
-
-    #[test]
-    fn resolve_with_missing_context_fails_closed() {
-        let credential_store = CredentialStoreHandle::new();
-        let context_store = CredentialInjectionKdcContextStoreHandle::new();
-        let jti = Uuid::new_v4();
-
-        credential_store
-            .insert(
-                association_token(jti),
-                Some(cleartext_mapping_with_target_username("target")),
-                time::Duration::minutes(5),
-            )
-            .expect("credential entry inserts");
-
-        assert!(
-            matches!(
-                CredentialInjectionKdc::resolve(Some(jti), &credential_store, &context_store),
-                Err(CredentialInjectionKdcResolveError::MissingContext { .. })
-            ),
-            "KDC tokens with jet_cred_id must require provision-credentials context"
-        );
     }
 
     #[test]

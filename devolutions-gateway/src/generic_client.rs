@@ -8,8 +8,7 @@ use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
-use crate::credential::CredentialStoreHandle;
-use crate::credential_injection_kdc::{CredentialInjectionKdc, CredentialInjectionKdcContextStoreHandle};
+use crate::credential_injection_kdc::CredentialService;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
@@ -28,8 +27,7 @@ pub struct GenericClient<S> {
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     active_recordings: Arc<ActiveRecordings>,
-    credential_store: CredentialStoreHandle,
-    credential_injection_context_store: CredentialInjectionKdcContextStoreHandle,
+    credentials: CredentialService,
     #[builder(default)]
     agent_tunnel_handle: Option<Arc<AgentTunnelHandle>>,
 }
@@ -53,8 +51,7 @@ where
             sessions,
             subscriber_tx,
             active_recordings,
-            credential_store,
-            credential_injection_context_store,
+            credentials,
             agent_tunnel_handle,
         } = self;
 
@@ -155,12 +152,11 @@ where
                 // The credential store is keyed on the association token's JTI, so a direct
                 // lookup by `claims.jti` is the primary path.
                 if is_rdp
-                    && let Some(entry) = credential_store.get(claims.jti)
+                    && let Some(entry) = credentials.get(claims.jti)
                     && entry.mapping.is_some()
                 {
                     anyhow::ensure!(token == entry.token, "token mismatch");
-                    let credential_injection_kdc =
-                        CredentialInjectionKdc::from_entry(claims.jti, entry, &credential_injection_context_store)?;
+                    let credential_injection_kdc = credentials.kdc_for(claims.jti)?;
 
                     info!(
                         jti = %credential_injection_kdc.jti(),

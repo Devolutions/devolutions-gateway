@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential::{CredentialStoreHandle, InsertError};
-use crate::credential_injection_kdc::CredentialInjectionKdcContextStoreHandle;
+use crate::credential::InsertError;
+use crate::credential_injection_kdc::CredentialService;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -196,8 +196,7 @@ pub(super) async fn post_preflight(
     State(DgwState {
         conf_handle,
         sessions,
-        credential_store,
-        credential_injection_context_store,
+        credentials,
         ..
     }): State<DgwState>,
     _scope: PreflightScope,
@@ -224,23 +223,13 @@ pub(super) async fn post_preflight(
                 let outputs = outputs.clone();
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
-                let credential_store = credential_store.clone();
-                let credential_injection_context_store = credential_injection_context_store.clone();
+                let credentials = credentials.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(
-                        operation,
-                        &outputs,
-                        &conf,
-                        &sessions,
-                        &credential_store,
-                        &credential_injection_context_store,
-                    )
-                    .await
-                    {
+                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credentials).await {
                         outputs.push(PreflightOutput {
                             operation_id,
                             kind: PreflightOutputKind::Alert {
@@ -267,8 +256,7 @@ async fn handle_operation(
     outputs: &Outputs,
     conf: &Conf,
     sessions: &SessionMessageSender,
-    credential_store: &CredentialStoreHandle,
-    credential_injection_context_store: &CredentialInjectionKdcContextStoreHandle,
+    credentials: &CredentialService,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -350,28 +338,27 @@ async fn handle_operation(
                 });
             }
 
-            let credential_injection_jti = if is_provision_credentials {
-                Some(
-                    crate::token::validate_credential_injection_association_token(&token)
-                        .inspect_err(|error| {
-                            warn!(
-                                %operation.id,
-                                error = format!("{error:#}"),
-                                "Credential-injection token is not valid"
-                            )
-                        })
-                        .map_err(|error| {
-                            PreflightError::new(
-                                PreflightAlertStatus::InvalidParams,
-                                format!("invalid credential-injection token: {error:#}"),
-                            )
-                        })?,
-                )
-            } else {
-                None
-            };
+            // Provision-credentials tokens must be valid association tokens with the credential
+            // injection shape (JTI + dst_hst + no dst_alt). Fail-fast at preflight so the request
+            // never reaches the credential store with malformed input.
+            if is_provision_credentials {
+                crate::token::validate_credential_injection_association_token(&token)
+                    .inspect_err(|error| {
+                        warn!(
+                            %operation.id,
+                            error = format!("{error:#}"),
+                            "Credential-injection token is not valid"
+                        )
+                    })
+                    .map_err(|error| {
+                        PreflightError::new(
+                            PreflightAlertStatus::InvalidParams,
+                            format!("invalid credential-injection token: {error:#}"),
+                        )
+                    })?;
+            }
 
-            let previous_entry = credential_store
+            let previous_entry = credentials
                 .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
                 .map_err(|error| match error {
@@ -384,10 +371,8 @@ async fn handle_operation(
                     ),
                 })?;
 
-            if let Some(jti) = credential_injection_jti {
-                credential_injection_context_store.register_provisioned_credentials(jti, time_to_live);
-            }
-
+            // `CredentialService::insert` already drops the cached Kerberos session for a
+            // replaced entry, so no explicit invalidation is needed here.
             if previous_entry.is_some() {
                 outputs.push(PreflightOutput {
                     operation_id: operation.id,
