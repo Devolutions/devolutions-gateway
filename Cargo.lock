@@ -1618,6 +1618,7 @@ dependencies = [
  "axum 0.8.9",
  "axum-extra",
  "backoff",
+ "base64 0.22.1",
  "bitflags 2.11.1",
  "bytes 1.11.1",
  "cadeau",

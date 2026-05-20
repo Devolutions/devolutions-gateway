@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::DgwState;
 use crate::config::Conf;
-use crate::credential::{CredentialStoreHandle, InsertError};
+use crate::credential::InsertError;
+use crate::credential_injection_kdc::CredentialService;
 use crate::extract::PreflightScope;
 use crate::http::HttpError;
 use crate::session::SessionMessageSender;
@@ -195,7 +196,7 @@ pub(super) async fn post_preflight(
     State(DgwState {
         conf_handle,
         sessions,
-        credential_store,
+        credentials,
         ..
     }): State<DgwState>,
     _scope: PreflightScope,
@@ -222,14 +223,13 @@ pub(super) async fn post_preflight(
                 let outputs = outputs.clone();
                 let conf = conf_handle.get_conf();
                 let sessions = sessions.clone();
-                let credential_store = credential_store.clone();
+                let credentials = credentials.clone();
 
                 async move {
                     let operation_id = operation.id;
                     trace!(%operation.id, "Process preflight operation");
 
-                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credential_store).await
-                    {
+                    if let Err(error) = handle_operation(operation, &outputs, &conf, &sessions, &credentials).await {
                         outputs.push(PreflightOutput {
                             operation_id,
                             kind: PreflightOutputKind::Alert {
@@ -256,7 +256,7 @@ async fn handle_operation(
     outputs: &Outputs,
     conf: &Conf,
     sessions: &SessionMessageSender,
-    credential_store: &CredentialStoreHandle,
+    credentials: &CredentialService,
 ) -> Result<(), PreflightError> {
     match operation.kind.as_str() {
         OP_GET_VERSION => outputs.push(PreflightOutput {
@@ -310,6 +310,7 @@ async fn handle_operation(
             });
         }
         OP_PROVISION_TOKEN | OP_PROVISION_CREDENTIALS => {
+            let is_provision_credentials = operation.kind.as_str() == OP_PROVISION_CREDENTIALS;
             let (token, time_to_live, mapping) = if operation.kind.as_str() == OP_PROVISION_TOKEN {
                 let ProvisionTokenParams { token, time_to_live } =
                     from_params(operation.params).map_err(PreflightError::invalid_params)?;
@@ -337,12 +338,32 @@ async fn handle_operation(
                 });
             }
 
-            let previous_entry = credential_store
+            // Provision-credentials tokens must be valid association tokens with the credential
+            // injection shape (JTI + dst_hst + no dst_alt). Fail-fast at preflight so the request
+            // never reaches the credential store with malformed input.
+            if is_provision_credentials {
+                crate::token::validate_credential_injection_association_token(&token)
+                    .inspect_err(|error| {
+                        warn!(
+                            %operation.id,
+                            error = format!("{error:#}"),
+                            "Credential-injection token is not valid"
+                        )
+                    })
+                    .map_err(|error| {
+                        PreflightError::new(
+                            PreflightAlertStatus::InvalidParams,
+                            format!("invalid credential-injection token: {error:#}"),
+                        )
+                    })?;
+            }
+
+            let previous_entry = credentials
                 .insert(token, mapping, time_to_live)
                 .inspect_err(|error| warn!(%operation.id, error = format!("{error:#}"), "Failed to insert credentials"))
-                .map_err(|e| match e {
-                    InsertError::InvalidToken(_) => {
-                        PreflightError::new(PreflightAlertStatus::InvalidParams, format!("{e:#}"))
+                .map_err(|error| match error {
+                    InsertError::InvalidToken(error) => {
+                        PreflightError::new(PreflightAlertStatus::InvalidParams, format!("invalid token: {error:#}"))
                     }
                     InsertError::Internal(_) => PreflightError::new(
                         PreflightAlertStatus::InternalServerError,
@@ -350,6 +371,8 @@ async fn handle_operation(
                     ),
                 })?;
 
+            // `CredentialService::insert` already drops the cached Kerberos session for a
+            // replaced entry, so no explicit invalidation is needed here.
             if previous_entry.is_some() {
                 outputs.push(PreflightOutput {
                     operation_id: operation.id,

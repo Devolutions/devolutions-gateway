@@ -13,7 +13,10 @@ use typed_builder::TypedBuilder;
 
 use crate::api::kdc_proxy::send_krb_message;
 use crate::config::Conf;
-use crate::credential::{AppCredentialMapping, ArcCredentialEntry};
+use crate::credential::AppCredential;
+use crate::credential_injection_kdc::{
+    CredentialInjectionClientAcceptorProtocol, CredentialInjectionKdc, CredentialInjectionKdcInterception,
+};
 use crate::proxy::Proxy;
 use crate::session::{DisconnectInterest, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
@@ -27,7 +30,7 @@ pub struct RdpProxy<C, S> {
     client_addr: SocketAddr,
     server_stream: S,
     server_addr: SocketAddr,
-    credential_entry: ArcCredentialEntry,
+    credential_injection_kdc: CredentialInjectionKdc,
     client_stream_leftover_bytes: bytes::BytesMut,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
@@ -58,7 +61,7 @@ where
         client_addr,
         server_stream,
         server_addr,
-        credential_entry,
+        credential_injection_kdc,
         client_stream_leftover_bytes,
         sessions,
         subscriber_tx,
@@ -68,8 +71,6 @@ where
 
     let tls_conf = conf.credssp_tls.get().context("CredSSP TLS configuration")?;
     let gateway_hostname = conf.hostname.clone();
-
-    let credential_mapping = credential_entry.mapping.as_ref().context("no credential mapping")?;
 
     // -- Retrieve the Gateway TLS public key that must be used for client-proxy CredSSP later on -- //
 
@@ -84,8 +85,12 @@ where
         ironrdp_tokio::MovableTokioFramed::new_with_leftover(client_stream, client_stream_leftover_bytes);
     let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let handshake_result =
-        dual_handshake_until_tls_upgrade(&mut client_framed, &mut server_framed, credential_mapping).await?;
+    let handshake_result = dual_handshake_until_tls_upgrade(
+        &mut client_framed,
+        &mut server_framed,
+        credential_injection_kdc.target_credential(),
+    )
+    .await?;
 
     let client_stream = client_framed.into_inner_no_leftover();
     let server_stream = server_framed.into_inner_no_leftover();
@@ -112,57 +117,16 @@ where
     let mut client_framed = ironrdp_tokio::MovableTokioFramed::new(client_stream);
     let mut server_framed = ironrdp_tokio::MovableTokioFramed::new(server_stream);
 
-    let krb_server_config = if conf.debug.enable_unstable
-        && let Some(crate::config::dto::KerberosConfig {
-            kerberos_server:
-                crate::config::dto::KerberosServer {
-                    max_time_skew,
-                    ticket_decryption_key,
-                    service_user,
-                    ..
-                },
-            kdc_url: _,
-        }) = conf.debug.kerberos.as_ref()
-    {
-        let user = service_user.as_ref().map(|user| {
-            let crate::config::dto::DomainUser {
-                fqdn,
-                password,
-                salt: _,
-            } = user;
+    let krb_server_config = credential_injection_kerberos_server_config(&conf, client_addr, &credential_injection_kdc)?;
 
-            // The username is in the FQDN format. Thus, the domain field can be empty.
-            sspi::CredentialsBuffers::AuthIdentity(sspi::AuthIdentityBuffers::from_utf8(
-                fqdn,
-                "",
-                password.expose_secret(),
-            ))
-        });
-
-        Some(sspi::KerberosServerConfig {
-            kerberos_config: sspi::KerberosConfig {
-                // The sspi-rs can automatically resolve the KDC host via DNS and/or env variable.
-                kdc_url: None,
-                client_computer_name: Some(client_addr.to_string()),
-            },
-            server_properties: sspi::kerberos::ServerProperties::new(
-                &["TERMSRV", &gateway_hostname],
-                user,
-                std::time::Duration::from_secs(*max_time_skew),
-                ticket_decryption_key.clone(),
-            )?,
-        })
-    } else {
-        None
-    };
-
-    let client_credssp_fut = perform_credssp_with_client(
+    let client_credssp_fut = perform_credssp_as_server(
         &mut client_framed,
         client_addr.ip(),
         gateway_public_key,
         handshake_result.client_security_protocol,
-        &credential_mapping.proxy,
+        credential_injection_kdc.proxy_credential(),
         krb_server_config,
+        &credential_injection_kdc,
     );
 
     let krb_client_config = if conf.debug.enable_unstable
@@ -179,12 +143,12 @@ where
         None
     };
 
-    let server_credssp_fut = perform_credssp_with_server(
+    let server_credssp_fut = perform_credssp_as_client(
         &mut server_framed,
         server_dns_name,
         server_public_key,
         handshake_result.server_security_protocol,
-        &credential_mapping.target,
+        credential_injection_kdc.target_credential(),
         krb_client_config,
     );
 
@@ -282,7 +246,7 @@ where
 async fn dual_handshake_until_tls_upgrade<C, S>(
     client_framed: &mut ironrdp_tokio::MovableTokioFramed<C>,
     server_framed: &mut ironrdp_tokio::MovableTokioFramed<S>,
-    mapping: &AppCredentialMapping,
+    target_credential: &AppCredential,
 ) -> anyhow::Result<HandshakeResult>
 where
     C: AsyncWrite + AsyncRead + Unpin + Send,
@@ -311,8 +275,8 @@ where
     };
 
     let connection_request_to_send = nego::ConnectionRequest {
-        nego_data: match &mapping.target {
-            crate::credential::AppCredential::UsernamePassword { username, .. } => {
+        nego_data: match target_credential {
+            AppCredential::UsernamePassword { username, .. } => {
                 Some(nego::NegoRequestData::cookie(username.to_owned()))
             }
         },
@@ -393,13 +357,36 @@ where
     handshake_result
 }
 
+pub(crate) fn credential_injection_kerberos_server_config(
+    conf: &Conf,
+    client_addr: SocketAddr,
+    credential_injection_kdc: &CredentialInjectionKdc,
+) -> anyhow::Result<Option<sspi::KerberosServerConfig>> {
+    if !conf.debug.enable_unstable || conf.debug.kerberos.is_none() {
+        return Ok(None);
+    }
+
+    match credential_injection_kdc.client_acceptor_protocol()? {
+        CredentialInjectionClientAcceptorProtocol::Kerberos => {
+            credential_injection_kdc.server_kerberos_config(client_addr).map(Some)
+        }
+        CredentialInjectionClientAcceptorProtocol::Ntlm => {
+            debug!(
+                jti = %credential_injection_kdc.jti(),
+                "Credential-injection Kerberos acceptor disabled for NTLM target credential"
+            );
+            Ok(None)
+        }
+    }
+}
+
 #[instrument(name = "server_credssp", level = "debug", ret, skip_all)]
-pub(crate) async fn perform_credssp_with_server<S>(
+pub(crate) async fn perform_credssp_as_client<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     server_name: String,
     server_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
-    credentials: &crate::credential::AppCredential,
+    credentials: &AppCredential,
     kerberos_config: Option<ironrdp_connector::credssp::KerberosConfig>,
 ) -> anyhow::Result<()>
 where
@@ -423,7 +410,7 @@ where
         credentials,
         None,
         security_protocol,
-        ironrdp_connector::ServerName::new(server_name),
+        ironrdp_connector::ServerName::new(server_name.clone()),
         server_public_key,
         kerberos_config,
     )?;
@@ -465,18 +452,25 @@ where
 
 async fn resolve_server_generator(
     generator: &mut CredsspServerProcessGenerator<'_>,
+    credential_injection_kdc: &CredentialInjectionKdc,
 ) -> Result<sspi::credssp::ServerState, sspi::credssp::ServerError> {
     let mut state = generator.start();
 
     loop {
         match state {
             GeneratorState::Suspended(request) => {
-                let response = send_network_request(&request)
-                    .await
-                    .map_err(|err| sspi::credssp::ServerError {
-                        ts_request: None,
-                        error: sspi::Error::new(sspi::ErrorKind::InternalError, err),
-                    })?;
+                let response = match credential_injection_kdc.intercept_network_request(&request) {
+                    Ok(CredentialInjectionKdcInterception::Intercepted(response)) => Ok(response),
+                    Ok(CredentialInjectionKdcInterception::NotInjectionRequest) => send_network_request(&request).await,
+                    Ok(CredentialInjectionKdcInterception::NotInjectionRealm(mismatch)) => Err(anyhow::anyhow!(
+                        "kdc request realm does not match credential-injection session realm: {mismatch}"
+                    )),
+                    Err(error) => Err(error),
+                }
+                .map_err(|err| sspi::credssp::ServerError {
+                    ts_request: None,
+                    error: sspi::Error::new(sspi::ErrorKind::InternalError, err),
+                })?;
 
                 state = generator.resume(Ok(response));
             }
@@ -508,13 +502,14 @@ async fn resolve_client_generator(
 }
 
 #[instrument(name = "client_credssp", level = "debug", ret, skip_all)]
-pub(crate) async fn perform_credssp_with_client<S>(
+pub(crate) async fn perform_credssp_as_server<S>(
     framed: &mut ironrdp_tokio::Framed<S>,
     client_addr: IpAddr,
     gateway_public_key: Vec<u8>,
     security_protocol: nego::SecurityProtocol,
-    credentials: &crate::credential::AppCredential,
+    credentials: &AppCredential,
     kerberos_server_config: Option<sspi::KerberosServerConfig>,
+    credential_injection_kdc: &CredentialInjectionKdc,
 ) -> anyhow::Result<()>
 where
     S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -535,6 +530,7 @@ where
         gateway_public_key,
         credentials,
         kerberos_server_config,
+        credential_injection_kdc,
     )
     .await;
 
@@ -560,8 +556,9 @@ where
         buf: &mut ironrdp_pdu::WriteBuf,
         client_computer_name: ironrdp_connector::ServerName,
         public_key: Vec<u8>,
-        credentials: &crate::credential::AppCredential,
+        credentials: &AppCredential,
         kerberos_server_config: Option<sspi::KerberosServerConfig>,
+        credential_injection_kdc: &CredentialInjectionKdc,
     ) -> anyhow::Result<()>
     where
         S: ironrdp_tokio::FramedRead + ironrdp_tokio::FramedWrite,
@@ -603,7 +600,7 @@ where
 
             let result = {
                 let mut generator = sequence.process_ts_request(ts_request);
-                resolve_server_generator(&mut generator).await
+                resolve_server_generator(&mut generator, credential_injection_kdc).await
             }; // drop generator
 
             buf.clear();
@@ -634,14 +631,27 @@ where
     Ok(())
 }
 
+/// Generic Kerberos network-request dispatcher.
+///
+/// Only handles real-network schemes (`tcp` / `udp`); credential-injection loopback requests
+/// are intercepted by [`CredentialInjectionKdc`] before reaching this function.
+///
+/// TODO(sspi-rs#664): when sspi-rs ships a pluggable KDC dispatcher API, the URL trick for
+/// credential injection goes away entirely and this helper can be inlined back into the
+/// CredSSP loops.
 async fn send_network_request(request: &NetworkRequest) -> anyhow::Result<Vec<u8>> {
-    let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
+    match request.url.scheme() {
+        "tcp" | "udp" => {
+            let target_addr = TargetAddr::parse(request.url.as_str(), Some(88))?;
 
-    // TODO(DGW-384): plumb `agent_tunnel_handle` through `RdpProxy` so
-    // CredSSP-originated Kerberos requests can traverse the agent tunnel.
-    // Currently these go direct from the gateway host, bypassing the
-    // routing pipeline used by every other proxy path.
-    send_krb_message(&target_addr, &request.data)
-        .await
-        .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
+            // TODO(DGW-384): plumb `agent_tunnel_handle` through `RdpProxy` so
+            // CredSSP-originated Kerberos requests can traverse the agent tunnel.
+            // Currently these go direct from the gateway host, bypassing the
+            // routing pipeline used by every other proxy path.
+            send_krb_message(&target_addr, &request.data)
+                .await
+                .map_err(|err| anyhow::Error::msg("failed to send KDC message").context(err))
+        }
+        unsupported => anyhow::bail!("unsupported KDC request scheme: {unsupported}"),
+    }
 }

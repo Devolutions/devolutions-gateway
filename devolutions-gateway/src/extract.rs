@@ -1,11 +1,14 @@
+use std::net::SocketAddr;
+
 use axum::Extension;
-use axum::extract::{FromRequest, FromRequestParts, RawQuery, Request};
+use axum::extract::{ConnectInfo, FromRequest, FromRequestParts, Path, RawQuery, Request};
 use axum::http::request::Parts;
 
+use crate::DgwState;
 use crate::http::HttpError;
 use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, JmuxTokenClaims, JrecTokenClaims,
-    JrlTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
+    JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
 };
 
 #[derive(Clone)]
@@ -94,6 +97,46 @@ where
             Ok(Self(claims))
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected JMUX)"))
+        }
+    }
+}
+
+/// Extractor for the KDC proxy route's path-bound token.
+///
+/// `/jet/KdcProxy/{token}` carries the token in the URL path rather than the standard
+/// `Authorization: Bearer` header or `?token=` query parameter, so the global auth middleware
+/// (`middleware/auth.rs`) skips it (see `AUTH_EXCEPTIONS`). This extractor reads the token from
+/// the path, runs it through the same `authenticate()` routine the middleware would, and
+/// unwraps the `Kdc` variant so handlers receive `KdcTokenClaims` directly.
+#[derive(Clone)]
+pub struct KdcToken(pub KdcTokenClaims);
+
+impl FromRequestParts<DgwState> for KdcToken {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &DgwState) -> Result<Self, Self::Rejection> {
+        let Path(token) = Path::<String>::from_request_parts(parts, state)
+            .await
+            .map_err(HttpError::bad_request().with_msg("KDC token missing from path").err())?;
+        let ConnectInfo(source_addr) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
+            .await
+            .map_err(HttpError::internal().with_msg("source address unavailable").err())?;
+
+        let conf = state.conf_handle.get_conf();
+        let claims = crate::middleware::auth::authenticate(
+            source_addr,
+            &token,
+            &conf,
+            &state.token_cache,
+            &state.jrl,
+            &state.recordings.active_recordings,
+            None,
+        )
+        .map_err(HttpError::unauthorized().err())?;
+
+        match claims {
+            AccessTokenClaims::Kdc(claims) => Ok(Self(claims)),
+            _ => Err(HttpError::forbidden().msg("token not allowed (expected KDC token)")),
         }
     }
 }
