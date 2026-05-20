@@ -105,6 +105,7 @@ pub struct AgentTunnelListener {
     endpoint: quinn::Endpoint,
     registry: Arc<AgentRegistry>,
     agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
+    ca_manager: Arc<CaManager>,
 }
 
 impl AgentTunnelListener {
@@ -158,6 +159,7 @@ impl AgentTunnelListener {
             endpoint,
             registry,
             agent_connections,
+            ca_manager,
         };
 
         Ok((listener, handle))
@@ -198,8 +200,9 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
 
                     let registry = Arc::clone(&self.registry);
                     let agent_connections = Arc::clone(&self.agent_connections);
+                    let ca_manager = Arc::clone(&self.ca_manager);
 
-                    conn_handles.spawn(run_agent_connection(registry, agent_connections, incoming));
+                    conn_handles.spawn(run_agent_connection(registry, agent_connections, ca_manager, incoming));
                 }
 
                 // Reap completed connection tasks to prevent unbounded growth.
@@ -220,6 +223,7 @@ impl devolutions_gateway_task::Task for AgentTunnelListener {
 async fn run_agent_connection(
     registry: Arc<AgentRegistry>,
     agent_connections: Arc<RwLock<HashMap<Uuid, quinn::Connection>>>,
+    ca_manager: Arc<CaManager>,
     incoming: quinn::Incoming,
 ) {
     let peer_addr = incoming.remote_address();
@@ -253,7 +257,7 @@ async fn run_agent_connection(
         agent_connections.write().await.insert(agent_id, conn.clone());
 
         // Accept the first bidirectional stream as the control stream.
-        let control_result = run_control_loop(&conn, agent_id, &registry).await;
+        let control_result = run_control_loop(&conn, agent_id, &agent_name, &registry, &ca_manager).await;
 
         // Agent disconnected — clean up.
         info!(%agent_id, "Agent QUIC connection closed");
@@ -269,7 +273,13 @@ async fn run_agent_connection(
     }
 }
 
-async fn run_control_loop(conn: &quinn::Connection, agent_id: Uuid, registry: &AgentRegistry) -> anyhow::Result<()> {
+async fn run_control_loop(
+    conn: &quinn::Connection,
+    agent_id: Uuid,
+    agent_name: &str,
+    registry: &AgentRegistry,
+    ca_manager: &CaManager,
+) -> anyhow::Result<()> {
     let mut ctrl: ControlStream<_, _> = conn.accept_bi().await.context("accept control stream")?.into();
 
     info!(%agent_id, "Control stream accepted");
@@ -290,7 +300,7 @@ async fn run_control_loop(conn: &quinn::Connection, agent_id: Uuid, registry: &A
                     }
                 };
 
-                handle_control_message(registry, agent_id, &mut ctrl, msg).await;
+                handle_control_message(registry, ca_manager, agent_id, agent_name, &mut ctrl, msg).await;
             }
 
             // Detect connection close.
@@ -306,7 +316,9 @@ async fn run_control_loop(conn: &quinn::Connection, agent_id: Uuid, registry: &A
 
 async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::AsyncRead + Unpin>(
     registry: &AgentRegistry,
+    ca_manager: &CaManager,
     agent_id: Uuid,
+    agent_name: &str,
     ctrl: &mut ControlStream<S, R>,
     msg: ControlMessage,
 ) {
@@ -358,8 +370,36 @@ async fn handle_control_message<S: tokio::io::AsyncWrite + Unpin, R: tokio::io::
         ControlMessage::HeartbeatAck { .. } => {
             debug!(%agent_id, "Unexpected HeartbeatAck from agent");
         }
-        ControlMessage::CertRenewalRequest { .. } | ControlMessage::CertRenewalResponse { .. } => {
-            debug!(%agent_id, "Certificate renewal not supported in this build");
+        ControlMessage::CertRenewalRequest { csr_pem, .. } => {
+            info!(%agent_id, "Agent requested certificate renewal");
+
+            // Reuse the agent_id and agent_name authenticated by mTLS — never
+            // trust the CSR's subject. The CA only re-signs the public key the
+            // agent put in its CSR; identity stays whatever the existing cert
+            // already proved during the handshake.
+            let result = match ca_manager.sign_agent_csr(agent_id, agent_name, &csr_pem, None) {
+                Ok(signed) => {
+                    info!(%agent_id, %agent_name, "Renewed agent certificate");
+                    agent_tunnel_proto::CertRenewalResult::Success {
+                        client_cert_pem: signed.client_cert_pem,
+                        gateway_ca_cert_pem: signed.ca_cert_pem,
+                    }
+                }
+                Err(error) => {
+                    warn!(%agent_id, error = %format!("{error:#}"), "Certificate renewal failed");
+                    agent_tunnel_proto::CertRenewalResult::Error {
+                        reason: format!("{error:#}"),
+                    }
+                }
+            };
+
+            let response = ControlMessage::cert_renewal_response(result);
+            let _ = ctrl.send(&response).await.inspect_err(|e| {
+                warn!(%agent_id, error = %e, "Failed to send CertRenewalResponse");
+            });
+        }
+        ControlMessage::CertRenewalResponse { .. } => {
+            debug!(%agent_id, "Unexpected CertRenewalResponse from agent");
         }
     }
 }

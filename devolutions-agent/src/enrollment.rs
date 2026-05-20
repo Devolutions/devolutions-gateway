@@ -245,6 +245,78 @@ fn persist_enrollment_response(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Certificate renewal helpers
+// ---------------------------------------------------------------------------
+
+/// Check whether the PEM-encoded certificate at `cert_path` expires within
+/// `threshold_days`. The agent uses this on every reconnect to decide whether
+/// to ask the gateway for a new certificate before opening real traffic.
+pub fn is_cert_expiring(cert_path: &Utf8Path, threshold_days: u32) -> Result<bool> {
+    use std::io::BufReader;
+
+    let pem_str = std::fs::read_to_string(cert_path).with_context(|| format!("read certificate from {cert_path}"))?;
+    let der = rustls_pemfile::certs(&mut BufReader::new(pem_str.as_bytes()))
+        .next()
+        .context("empty PEM input")?
+        .context("parse certificate PEM")?;
+    let (_, cert) =
+        x509_parser::parse_x509_certificate(&der).map_err(|e| anyhow::anyhow!("parse X.509 certificate: {e}"))?;
+
+    let not_after_epoch = cert.validity().not_after.timestamp();
+    let now_epoch = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .context("system clock before UNIX epoch")?
+            .as_secs(),
+    )
+    .context("unix timestamp exceeds i64::MAX")?;
+
+    let threshold_secs = i64::from(threshold_days) * 86_400;
+    Ok(not_after_epoch - now_epoch <= threshold_secs)
+}
+
+/// Extract the `CommonName` from an existing PEM certificate. The renewal CSR
+/// must reuse the agent's name across renewals — the gateway looks the agent
+/// up in its registry by that name, and the most authoritative source for it
+/// is the cert the gateway itself signed last time.
+pub fn read_agent_name_from_cert(cert_path: &Utf8Path) -> Result<String> {
+    use std::io::BufReader;
+
+    let pem_str = std::fs::read_to_string(cert_path).with_context(|| format!("read certificate from {cert_path}"))?;
+    let der = rustls_pemfile::certs(&mut BufReader::new(pem_str.as_bytes()))
+        .next()
+        .context("empty PEM input")?
+        .context("parse certificate PEM")?;
+    let (_, cert) =
+        x509_parser::parse_x509_certificate(&der).map_err(|e| anyhow::anyhow!("parse X.509 certificate: {e}"))?;
+
+    let cn = cert
+        .subject()
+        .iter_common_name()
+        .next()
+        .context("certificate subject has no Common Name")?
+        .as_str()
+        .context("certificate Common Name is not valid UTF-8")?;
+
+    Ok(cn.to_owned())
+}
+
+/// Build a renewal CSR using the agent's existing private key. Reusing the key
+/// across renewals matches the design that says the private key never leaves
+/// the agent — the gateway only ever sees CSRs.
+pub fn generate_csr_from_existing_key(key_path: &Utf8Path, agent_name: &str) -> Result<String> {
+    let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read private key from {key_path}"))?;
+    let key_pair = rcgen::KeyPair::from_pem(&key_pem).context("parse private key PEM")?;
+
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name.push(rcgen::DnType::CommonName, agent_name);
+
+    let csr = params.serialize_request(&key_pair).context("serialize renewal CSR")?;
+
+    csr.pem().context("encode CSR to PEM")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
